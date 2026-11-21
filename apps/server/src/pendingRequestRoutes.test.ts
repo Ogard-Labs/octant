@@ -8,6 +8,7 @@ import {
 } from "@octant/contracts";
 import {
   decodeWaitingAsk,
+  PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE,
   TurnDecisionReview,
   type WaitingAsk,
 } from "@octant/contracts/pending-requests";
@@ -136,6 +137,25 @@ const codeDecision = decodePendingRequest({
 });
 
 describe("pending request route", () => {
+  it("keeps offer rows readable by old windows and sends the host-run marker only on opt-in", async () => {
+    const offer = decodeWaitingAsk({
+      ...chatSignIn,
+      kind: "service-offer",
+      text: "Generate an image?",
+    });
+    const offerHostRun = "00000000-0000-4000-8000-000000000913";
+    const { route } = fixture({ asks: [offer], offerHostRun });
+    expect(await (await route(request()))?.json()).toMatchObject({
+      asks: [{ ...offer, kind: "image-offer" }],
+    });
+    const upgraded = request();
+    upgraded.headers.set("accept", PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE);
+    expect(await (await route(upgraded))?.json()).toMatchObject({
+      asks: [offer],
+      offerHostRun,
+    });
+  });
+
   it("lists a finished turn's decision for a local window, oldest first among requests", async () => {
     const { route } = fixture({ code: [codeApproval, codeDecision] });
     const response = await route(request());
@@ -187,7 +207,11 @@ describe("pending request route", () => {
     ]);
     expect(body.requests[0]).not.toHaveProperty("answer");
     expect(body.requests[0]).not.toHaveProperty("options");
-    expect(sources.children).toHaveBeenCalledWith({ kind: "local-window", scopeId: windowId });
+    expect(sources.children).toHaveBeenCalledWith({
+      kind: "local-window",
+      scopeId: windowId,
+      principal: expect.objectContaining({ kind: "local-window", windowId: String(windowId) }),
+    });
   });
 
   it("lists the agent's own approval beside the requests it works under, without a way to answer it, and not for a mode that is switched off", async () => {
@@ -232,17 +256,18 @@ describe("pending request route", () => {
     const { route, sources } = fixture({ code: [codeDecision], asks: [toolAsk] });
     const deviceScope = decodeWindowId("22222222-2222-4222-8222-222222222222");
     const remote = new Request("http://127.0.0.1/api/pending-requests");
+    const principal = createRemoteDevicePrincipal({
+      hostId: "11111111-1111-4111-8111-111111111111" as StableHostId,
+      deviceId: "22222222-2222-4222-8222-222222222222" as DeviceId,
+      credentialGeneration: 1,
+      origin: "https://octant.example",
+      protocolVersion: 1,
+      capabilityDigest: "b".repeat(64),
+      sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
+      admittedBy: "host-person",
+    });
     bindPrincipalRouteContext(remote, {
-      principal: createRemoteDevicePrincipal({
-        hostId: "11111111-1111-4111-8111-111111111111" as StableHostId,
-        deviceId: "22222222-2222-4222-8222-222222222222" as DeviceId,
-        credentialGeneration: 1,
-        origin: "https://octant.example",
-        protocolVersion: 1,
-        capabilityDigest: "b".repeat(64),
-        sessionId: "33333333-3333-4333-8333-333333333333" as RemoteSessionId,
-        admittedBy: "host-person",
-      }),
+      principal,
       scopeId: deviceScope,
     });
     const response = await route(remote);
@@ -253,13 +278,18 @@ describe("pending request route", () => {
     // Each source is asked as the device, never as a window of the host.
     expect(sources.work).toHaveBeenCalledWith(deviceScope);
     expect(sources.code).toHaveBeenCalledWith(deviceScope);
-    expect(sources.asks).toHaveBeenCalledWith({
-      kind: "person-paired-device",
-      scopeId: deviceScope,
-    });
+    expect(sources.asks).toHaveBeenCalledWith(
+      {
+        kind: "person-paired-device",
+        scopeId: deviceScope,
+        principal,
+      },
+      true,
+    );
     expect(sources.children).toHaveBeenCalledWith({
       kind: "person-paired-device",
       scopeId: deviceScope,
+      principal,
     });
   });
 
@@ -267,7 +297,14 @@ describe("pending request route", () => {
     const { route, sources } = fixture({ asks: [toolAsk, chatSignIn] });
     const body = await (await route(request()))?.json();
     expect(body.asks).toEqual([chatSignIn, toolAsk]);
-    expect(sources.asks).toHaveBeenCalledWith({ kind: "local-window", scopeId: windowId });
+    expect(sources.asks).toHaveBeenCalledWith(
+      {
+        kind: "local-window",
+        scopeId: windowId,
+        principal: expect.objectContaining({ kind: "local-window", windowId: String(windowId) }),
+      },
+      true,
+    );
     const workOff = fixture({
       asks: [toolAsk, chatSignIn],
       settings: { ...defaultShellSettings(), workEnabled: false },
@@ -410,6 +447,7 @@ function fixture(
     readonly chat?: ReadonlyArray<PendingRequest>;
     readonly children?: ReadonlyArray<PendingRequest>;
     readonly asks?: ReadonlyArray<WaitingAsk>;
+    readonly offerHostRun?: string;
   } = {},
 ) {
   const store = new WindowAuthorityStore();
@@ -418,6 +456,7 @@ function fixture(
   const sources = {
     ...(options.deferrals === undefined ? {} : { deferrals: options.deferrals }),
     ...(options.reviews === undefined ? {} : { reviews: options.reviews }),
+    ...(options.offerHostRun === undefined ? {} : { offerHostRun: options.offerHostRun }),
     readSettings: () => options.settings ?? defaultShellSettings(),
     work: vi.fn(async () => [...(options.work ?? [workApproval])]),
     code: vi.fn(typeof code === "function" ? code : async () => code ?? [codeApproval]),

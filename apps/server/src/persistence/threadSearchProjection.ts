@@ -13,6 +13,8 @@ import {
   decodeCodeOperationEventFrame,
   decodeCodeThreadCreated,
   decodeCodeThreadUpdated,
+  decodeNativeSessionHistoryImported,
+  NATIVE_SESSION_HISTORY_IMPORTED_EVENT,
   decodeWorkThreadRewound,
   decodeWorkTurnAccepted,
   decodeWorkTurnUpdated,
@@ -29,6 +31,8 @@ import type { SqliteConnection, SqliteStatement } from "./sqlitePort";
 import { clipSearchSnippet, escapeLikePattern, parseSearchTerms } from "./transcriptSearchText";
 
 export type ThreadSearchMode = "chat" | "work" | "code";
+/** The turn key a thread's imported provider-session history is filed under. */
+const IMPORTED_SESSION_TURN_KEY = "imported-session-history";
 export type ThreadSearchDocumentField = "title" | "prompt" | "reply" | "tool" | "canvas";
 
 /**
@@ -329,6 +333,36 @@ export class ThreadSearchProjection implements Projection {
       case "code.operation-event-recorded@1":
         applyCodeFrame(connection, statements, index, event);
         return;
+      case NATIVE_SESSION_HISTORY_IMPORTED_EVENT: {
+        // The earlier conversation of the session the thread was started
+        // from, filed as one turn of its own with no anchor: a hit opens the
+        // thread, where the imported messages are shown together. It is
+        // journaled before any turn, so a rewind never reaches it.
+        const imported = decodeNativeSessionHistoryImported(event.payload);
+        if (imported.history.status !== "imported") return;
+        const at = {
+          mode: imported.mode,
+          threadId: imported.threadId,
+          turnKey: IMPORTED_SESSION_TURN_KEY,
+          anchorId: "",
+        } as const;
+        imported.history.messages.forEach((message, position) => {
+          index.putPart(
+            { ...at, field: message.role === "person" ? "prompt" : "reply" },
+            `message:${position}`,
+            position,
+            message.text,
+          );
+          if (message.tools !== undefined)
+            index.putPart(
+              { ...at, field: "tool" },
+              `tools:${position}`,
+              position,
+              message.tools.join("\n"),
+            );
+        });
+        return;
+      }
       default:
         return;
     }
@@ -813,6 +847,8 @@ export interface ThreadSearchMatch {
   readonly field: ThreadSearchDocumentField;
   /** On a `canvas` match, the Canvas's own title, which its document opens with. */
   readonly canvasTitle?: string;
+  /** The match is in the earlier conversation the thread's adoption imported. */
+  readonly imported?: true;
   readonly snippet: string;
   readonly matchRanges: ReadonlyArray<{ readonly start: number; readonly end: number }>;
 }
@@ -908,7 +944,7 @@ export function searchThreads(
           AND turns.thread_id = documents.thread_id
           AND turns.turn_key = documents.turn_key
       )
-      SELECT mode, thread_id, anchor_id, field, body
+      SELECT mode, thread_id, turn_key, anchor_id, field, body
       FROM ranked
       WHERE turn_rank = 1
       ORDER BY
@@ -919,6 +955,7 @@ export function searchThreads(
     .all(...parameters) as ReadonlyArray<{
     readonly mode: ThreadSearchMode;
     readonly thread_id: string;
+    readonly turn_key: string;
     readonly anchor_id: string;
     readonly field: ThreadSearchDocumentField;
     readonly body: string;
@@ -933,6 +970,7 @@ export function searchThreads(
         anchorId: row.anchor_id,
         field: row.field,
         ...(row.field === "canvas" ? { canvasTitle: row.body.split("\n", 1)[0] ?? "" } : {}),
+        ...(row.turn_key === IMPORTED_SESSION_TURN_KEY ? { imported: true as const } : {}),
         snippet: clipped.snippet,
         matchRanges: clipped.matchRanges,
       };

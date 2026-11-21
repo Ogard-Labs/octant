@@ -2,6 +2,7 @@ import { ParseResult } from "effect";
 import {
   decodeBenchmarkSuite,
   decodeBenchmarkSuiteSaveRequest,
+  DEFAULT_BENCHMARK_PASS_THRESHOLD,
   MAX_BENCHMARK_CELLS,
   type BenchmarkCase,
   type BenchmarkCellState,
@@ -10,6 +11,7 @@ import {
   type BenchmarkRegexFlags,
   type BenchmarkRunStatus,
   type BenchmarkSuite,
+  type BenchmarkSuiteKind,
   type BenchmarkSuiteSaveRequest,
   type TurnDiagnosticsReport,
 } from "@octant/contracts";
@@ -439,6 +441,9 @@ export interface SuiteDraft {
   readonly expectedRevision: number | undefined;
   readonly name: string;
   readonly description: string;
+  readonly passPercentage: string;
+  readonly kind: BenchmarkSuiteKind;
+  readonly projectId: string;
   readonly cases: ReadonlyArray<CaseDraft>;
   readonly judge: JudgeDraft;
 }
@@ -483,6 +488,9 @@ export function blankSuiteDraft(): SuiteDraft {
     expectedRevision: undefined,
     name: "",
     description: "",
+    passPercentage: String(DEFAULT_BENCHMARK_PASS_THRESHOLD * 100),
+    kind: "chat",
+    projectId: "",
     cases: [blankCase()],
     judge: { enabled: false, providerInstanceId: "", modelId: "", rubric: "" },
   };
@@ -533,6 +541,9 @@ export function suiteToDraft(suite: BenchmarkSuite): SuiteDraft {
     expectedRevision: suite.revision,
     name: suite.name,
     description: suite.description ?? "",
+    passPercentage: String(suite.passThreshold * 100),
+    kind: suite.kind,
+    projectId: suite.projectId ?? "",
     cases: suite.cases.map((benchmarkCase) => caseToDraft(benchmarkCase, true)),
     judge:
       suite.judge === undefined
@@ -638,6 +649,15 @@ function checkToRaw(
  */
 export function draftToSaveRequest(draft: SuiteDraft): DraftResult {
   if (draft.name.trim() === "") return invalid("The suite needs a name.");
+  const passPercentage = Number(draft.passPercentage);
+  if (
+    draft.passPercentage.trim() === "" ||
+    !Number.isFinite(passPercentage) ||
+    passPercentage < 0 ||
+    passPercentage > 100
+  ) {
+    return invalid("Enter a passing threshold from 0 to 100%.");
+  }
   if (draft.cases.length === 0) return invalid("The suite needs at least one case.");
   const cases: unknown[] = [];
   for (const [caseIndex, candidate] of draft.cases.entries()) {
@@ -691,6 +711,9 @@ export function draftToSaveRequest(draft: SuiteDraft): DraftResult {
           ? {}
           : { expectedRevision: draft.expectedRevision }),
         name: draft.name.trim(),
+        passThreshold: passPercentage / 100,
+        kind: draft.kind,
+        projectId: draft.projectId === "" ? null : draft.projectId,
         ...(draft.description.trim() === "" ? {} : { description: draft.description.trim() }),
         cases,
         ...(draft.judge.enabled

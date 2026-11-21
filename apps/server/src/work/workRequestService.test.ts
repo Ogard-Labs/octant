@@ -22,6 +22,7 @@ import { EventActor } from "@octant/contracts/events";
 import { WorkRequestProjection } from "./workRequestProjection";
 import {
   WorkRequestService,
+  type WorkApprovalNotDeliverable,
   type WorkRequestLevelChangePort,
   type WorkRequestProjectPort,
 } from "./workRequestService";
@@ -62,7 +63,7 @@ function createService(
         readonly sessionId: string;
         readonly requestId: string;
         readonly approved: boolean;
-      }) => Promise<void>;
+      }) => Promise<void | WorkApprovalNotDeliverable>;
       answerUserInput: (input: {
         readonly sessionId: string;
         readonly requestId: string;
@@ -158,6 +159,44 @@ describe("WorkRequestService.record", () => {
     expect(result.request.version).toBe(1);
   });
 
+  it("settles with the journal's own ask and settle stamps for the wait a caller bills", async () => {
+    const { service } = createService();
+    const recorded = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "provider-req-1",
+      detail: approvalDetail,
+    });
+    expect(recorded.status).toBe("ok");
+    if (recorded.status !== "ok") return;
+    const heard: Array<{
+      readonly person: boolean;
+      readonly requestedAt?: string;
+      readonly settledAt?: string;
+    }> = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "provider-req-1" },
+      (settled) => heard.push(settled ?? { person: false }),
+    );
+    await service.resolve({
+      kind: "resolve-work-request",
+      requestId: recorded.request.requestId,
+      expectedVersion: recorded.request.version,
+      resolution: { kind: "approval", approved: true },
+    });
+    expect(heard).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
+    // A listener arriving after the settle reads the same recorded pair.
+    const late: typeof heard = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "provider-req-1" },
+      (settled) => late.push(settled ?? { person: false }),
+    );
+    expect(late).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
+  });
+
   it("settles listeners by provider session and callback identity", async () => {
     const { service } = createService();
     let settled = false;
@@ -194,6 +233,130 @@ describe("WorkRequestService.record", () => {
 
     expect(settled).toBe(true);
     removeListener();
+  });
+
+  it("tells a listener registering after the answer that a person settled, at the recorded instant", async () => {
+    const { service } = createService();
+    const recorded = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "call_quick",
+      detail: approvalDetail,
+    });
+    if (recorded.status !== "ok") throw new Error("setup failed");
+
+    // The person answers before the turn's settle listener ever registers —
+    // the common race between the provider event and the journal's request.
+    await service.resolve({
+      kind: "resolve-work-request",
+      requestId: recorded.request.requestId,
+      expectedVersion: recorded.request.version,
+      resolution: { kind: "approval", approved: true },
+    });
+
+    const heard: Array<{ readonly person?: boolean; readonly settledAt?: string }> = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "call_quick" },
+      (settled) => {
+        heard.push(settled ?? {});
+      },
+    );
+    expect(heard).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
+  });
+
+  it("tells a listener that an expired ask ended person-facing wait at its recorded expiry", () => {
+    const { service } = createService();
+    const recorded = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "call_expiring",
+      detail: approvalDetail,
+    });
+    if (recorded.status !== "ok") throw new Error("setup failed");
+
+    const expired = service.expire(recorded.request.requestId);
+    expect(expired.status).toBe("ok");
+
+    const heard: Array<{ readonly person?: boolean; readonly settledAt?: string }> = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "call_expiring" },
+      (settled) => {
+        heard.push(settled ?? {});
+      },
+    );
+    // The ask stood person-facing until it ran out: the wait is billed, and
+    // it ends where the journal says it ended, not when the listener asked.
+    expect(heard).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
+  });
+
+  it("tells a listener already waiting that an expiry is still person-facing wait", () => {
+    const { service } = createService();
+    const recorded = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "call_expiring_live",
+      detail: approvalDetail,
+    });
+    if (recorded.status !== "ok") throw new Error("setup failed");
+
+    const heard: Array<{ readonly person?: boolean; readonly settledAt?: string }> = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "call_expiring_live" },
+      (settled) => {
+        heard.push(settled ?? {});
+      },
+    );
+    service.expire(recorded.request.requestId);
+    expect(heard).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
+  });
+
+  it("does not bill an automated reviewer's answer as person-facing wait", async () => {
+    const { service } = createService();
+    const recorded = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "call_reviewed",
+      detail: approvalDetail,
+    });
+    if (recorded.status !== "ok") throw new Error("setup failed");
+
+    const heard: Array<{ readonly person?: boolean; readonly settledAt?: string }> = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "call_reviewed" },
+      (settled) => {
+        heard.push(settled ?? {});
+      },
+    );
+    const agent = Schema.decodeUnknownSync(EventActor)({
+      kind: "agent",
+      actorId: ids.actor,
+      providerInstanceId: ids.provider,
+      threadId: String(ids.thread),
+    });
+    await service.resolve(
+      {
+        kind: "resolve-work-request",
+        requestId: recorded.request.requestId,
+        expectedVersion: recorded.request.version,
+        resolution: { kind: "approval", approved: false },
+      },
+      undefined,
+      agent,
+    );
+
+    expect(heard).toEqual([{ person: false, requestedAt: clockNow, settledAt: clockLater }]);
   });
 
   it("keeps a credential-bearing provider callback private while delivering it exactly", async () => {
@@ -1641,6 +1804,86 @@ describe("owner Work approval admission", () => {
       }
     },
   );
+});
+
+describe("an answer the agent cannot take as asked", () => {
+  it("tells the person why, keeps the request pending, and records no approval", async () => {
+    let runtime: WorkRequestRuntime | undefined;
+    const refusal =
+      "The agent only offers Always allow here. Approve it for this session, or deny it.";
+    const answerApproval = vi.fn((input: { readonly approved: boolean }) =>
+      input.approved
+        ? Effect.fail({ category: "unsupported" as const, message: refusal })
+        : Effect.void,
+    );
+    const { service, projection } = createService({
+      providerSessions: {
+        answerApproval: async (input) => {
+          if (runtime === undefined) throw new Error("Runtime unavailable.");
+          return runtime.answerApproval({
+            ...input,
+            sessionId: decodeProviderSessionId(input.sessionId),
+          });
+        },
+      },
+    });
+    runtime = new WorkRequestRuntime({ requests: service, uuid: () => String(ids.request) });
+    const input = {
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      sessionId: ids.session,
+      projectRoot: "/work",
+      connection: {
+        answerApproval,
+        answerUserInput: () => Effect.void,
+        interrupt: () => Effect.void,
+        subscribe: Effect.die("No subscription needed for the deterministic fixture."),
+      },
+    };
+    const release = runtime.register(input);
+    try {
+      await Effect.runPromise(
+        runtime.observe(
+          input,
+          decodeProviderRuntimeEvent({
+            kind: "approval-request",
+            instanceId: ids.provider,
+            sessionId: ids.session,
+            sequence: 1,
+            correlationId: ids.request,
+            occurredAt: clockNow,
+            requestId: "always-only",
+            action: "Edit",
+            description: "Edit a.txt",
+          }),
+        ),
+      );
+      const recorded = projection.lookup(ids.request)?.request;
+      if (recorded === undefined) throw new Error("Missing recorded request.");
+      const answer = (approved: boolean, expectedVersion: WorkRequest["version"]) =>
+        service.resolve({
+          kind: "resolve-work-request",
+          requestId: recorded.requestId,
+          expectedVersion,
+          resolution: { kind: "approval", approved },
+        });
+      expect(await answer(true, recorded.version)).toEqual({
+        status: "failure",
+        failure: { code: "unavailable", message: refusal },
+      });
+      const pending = projection.lookup(ids.request)?.request;
+      if (pending === undefined) throw new Error("Missing pending request.");
+      expect(pending).toMatchObject({ status: "pending" });
+      expect(pending.delivery).toBeUndefined();
+      expect(await answer(false, pending.version)).toMatchObject({
+        status: "ok",
+        request: { status: "resolved", resolution: { kind: "approval", approved: false } },
+      });
+    } finally {
+      release();
+    }
+  });
 });
 
 describe("an agent's ask to plan first or to leave Plan", () => {

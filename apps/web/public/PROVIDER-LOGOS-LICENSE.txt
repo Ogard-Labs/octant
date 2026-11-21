@@ -265,14 +265,17 @@ claiming CC0 or another license.
 Provider names and marks remain trademarks of their respective owners. They are
 shown only to identify the configured provider.
 
-## BFL and Ideogram marks — MIT
+## Antigravity, BFL and Ideogram marks — MIT
 
 Source paths:
 
+- https://github.com/lobehub/lobe-icons/blob/master/packages/static-svg/icons/antigravity.svg
 - https://github.com/lobehub/lobe-icons/blob/master/packages/static-svg/icons/bfl.svg
 - https://github.com/lobehub/lobe-icons/blob/master/packages/static-svg/icons/ideogram.svg
 
-These paths are distributed by the `@lobehub/icons-static-svg@1.94.0` package.
+The BFL and Ideogram paths are distributed by the `@lobehub/icons-static-svg@1.94.0`
+package; the Antigravity path was taken from the same repository's `master`
+branch on 2026-11-20.
 The package README identifies the package as MIT licensed and credits LobeHub.
 
 Copyright © 2023 LobeHub.

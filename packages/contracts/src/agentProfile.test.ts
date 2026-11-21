@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  AGENT_PROFILE_EVENT_NAMES,
   decodeAgentProfile,
   decodeAgentProfileCommand,
   decodeAgentProfileCommandResult,
@@ -141,14 +140,6 @@ describe("agentProfile contracts", () => {
       message: "Profile was modified by another session.",
     });
     expect(result.kind).toBe("profile-command-failed");
-  });
-
-  it("exposes AGENT_PROFILE_EVENT_NAMES with created/updated/removed", () => {
-    expect(AGENT_PROFILE_EVENT_NAMES).toEqual([
-      "agent.profile-created@1",
-      "agent.profile-updated@1",
-      "agent.profile-removed@1",
-    ]);
   });
 
   it("decodes agent.profile-created event payload", () => {

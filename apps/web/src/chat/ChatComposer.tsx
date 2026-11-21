@@ -17,6 +17,7 @@ import {
 } from "react";
 import { Globe2, Slash, SlidersHorizontal, X } from "../ui/icons";
 import type { ChatAttachmentId } from "@octant/contracts/chat";
+import type { ProjectId } from "@octant/contracts";
 import { clipboardHasImage, collectPastedImages } from "./composerImagePaste";
 import {
   ThreadMentionChips,
@@ -113,6 +114,7 @@ export interface ChatComposerModelOption {
 const MODEL_OPTION_DEFAULT_ID = "(provider default)";
 
 export interface ChatComposerProps {
+  readonly benchmarkProjectId?: ProjectId | undefined;
   /** Caller-owned pending text. The component never persists or clears this value itself. */
   readonly draft: string;
   /** Restored caret for this thread. Applied when `caretRestoreKey` changes. */
@@ -839,6 +841,11 @@ export function ChatComposer(props: ChatComposerProps) {
         {props.providerGroups !== undefined && props.onSelectModel !== undefined ? (
           <ComposerModelPicker
             ariaLabel="Provider and model"
+            benchmarkScope={
+              props.benchmarkProjectId === undefined
+                ? undefined
+                : { kind: "chat", projectId: props.benchmarkProjectId }
+            }
             disabled={settingsLocked}
             groups={props.providerGroups}
             onSelect={props.onSelectModel}

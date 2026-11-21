@@ -327,6 +327,99 @@ describe("transcript activity", () => {
     expect(liveTaskProgress([{ activity: settled, running: false }])).toBeUndefined();
   });
 
+  describe("turn timings", () => {
+    const started = "2026-07-21T13:00:12.000Z";
+    const ended = "2026-07-21T13:04:14.000Z";
+
+    it("assigns the journaled reasoning total instead of adding to it", () => {
+      const first = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
+        kind: "reasoning-time",
+        reasoningMs: 12_000,
+      } as CodeOperationEvent);
+      expect(first.reasoningMs).toBe(12_000);
+      const replayed = applyActivityEvent(first, {
+        kind: "reasoning-time",
+        reasoningMs: 12_000,
+      } as CodeOperationEvent);
+      expect(replayed.reasoningMs).toBe(12_000);
+      const grown = applyActivityEvent(replayed, {
+        kind: "reasoning-time",
+        reasoningMs: 20_500,
+      } as CodeOperationEvent);
+      expect(grown.reasoningMs).toBe(20_500);
+    });
+
+    it("times a completed call and keeps the person's wait beside it", () => {
+      const activity = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
+        kind: "tool-activity",
+        toolCallId: "call-1",
+        toolName: "Read",
+        state: "completed",
+        timing: { startedAt: started, endedAt: ended, approvalWaitMs: 240_000 },
+      } as CodeOperationEvent);
+      const row = activity.rows.find((r) => r.kind === "tool");
+      expect(row).toMatchObject({ durationMs: 2_000, waitedMs: 240_000 });
+    });
+
+    it("keeps the first bounded measurement when a restated completion carries none", () => {
+      const activity = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
+        kind: "tool-activity",
+        toolCallId: "call-1",
+        toolName: "Read",
+        state: "completed",
+        timing: { startedAt: started, endedAt: ended, approvalWaitMs: 240_000 },
+      } as CodeOperationEvent);
+      const restated = applyActivityEvent(activity, {
+        kind: "tool-activity",
+        toolCallId: "call-1",
+        toolName: "Read",
+        state: "completed",
+        summary: "Provider restated the completion.",
+      } as CodeOperationEvent);
+      const row = restated.rows.find((r) => r.kind === "tool");
+      expect(row).toMatchObject({
+        summary: "Provider restated the completion.",
+        durationMs: 2_000,
+        waitedMs: 240_000,
+      });
+    });
+
+    it("times a call with no wait as a plain duration", () => {
+      const activity = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
+        kind: "tool-activity",
+        toolCallId: "call-1",
+        toolName: "Read",
+        state: "completed",
+        timing: { startedAt: started, endedAt: ended },
+      } as CodeOperationEvent);
+      const row = activity.rows.find((r) => r.kind === "tool");
+      expect(row).toMatchObject({ durationMs: 242_000 });
+      expect(row && "waitedMs" in row ? row.waitedMs : undefined).toBeUndefined();
+    });
+
+    it("shows no duration for a running call or malformed bounds", () => {
+      const running = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
+        kind: "tool-activity",
+        toolCallId: "call-1",
+        toolName: "Read",
+        state: "started",
+      } as CodeOperationEvent);
+      const runningRow = running.rows.find((r) => r.kind === "tool");
+      expect(
+        runningRow && "durationMs" in runningRow ? runningRow.durationMs : undefined,
+      ).toBeUndefined();
+      const malformed = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
+        kind: "tool-activity",
+        toolCallId: "call-1",
+        toolName: "Read",
+        state: "completed",
+        timing: { startedAt: ended, endedAt: started },
+      } as CodeOperationEvent);
+      const badRow = malformed.rows.find((r) => r.kind === "tool");
+      expect(badRow && "durationMs" in badRow ? badRow.durationMs : undefined).toBeUndefined();
+    });
+  });
+
   it("leaves no panel for a turn that journaled no tasks", () => {
     const toolOnly = applyActivityEvent(EMPTY_TURN_ACTIVITY, tool("completed"));
     expect(liveTaskProgress([{ activity: toolOnly, running: true }])).toBeUndefined();

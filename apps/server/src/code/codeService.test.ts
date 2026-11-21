@@ -4,6 +4,7 @@ import {
   decodeCodeRelativePath,
   decodeAgentProfile,
   decodeProviderObservedState,
+  decodeCodeCheckoutId,
   decodeCodeCheckoutIdentity,
   decodeCodeCommandResult,
   decodeBindingRevisionId,
@@ -38,10 +39,28 @@ import { DeviceId, StableHostId, RemoteSessionId } from "@octant/contracts/remot
 import { CodeProjectAccess } from "../codeProjectAccess";
 import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { lstat } from "node:fs/promises";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import {
+  createCodeExternalEditorRouteHandler,
+  resolveConfinedDesktopFilePath,
+} from "../codeExternalEditorRoutes";
+import { withCodeBoard, withCodeOperationRuntime } from "../wiring/codeRuntime";
+import { pathIsProjectConfined } from "../wiring/providers";
+import { CodeFileListingService } from "./codeFileListingService";
+import { withProjectExtraFolders } from "./codeProjectFolderRoot";
+import { deriveCodeFileId } from "./codeFileIdentity";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { CodeContentStore, type CodeContentStoreOptions } from "./codeContentStore";
@@ -3042,6 +3061,172 @@ describe("CodeService commands", () => {
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("journals a coordinator's done-when condition, preserves it across bounds changes, clears it, and drops it when stopping", async () => {
+    const workerId = "00000000-0000-4000-8000-000000000099" as never;
+    const current = thread({ coordinator: true, messageWake: true });
+    const worker = thread({ id: workerId, coordinatorThreadId: ids.thread });
+    const fixture = serviceFixture({ threads: [current, worker] });
+    const doneWhen = {
+      items: [
+        {
+          kind: "pull-request-merged" as const,
+          repositoryOwner: "Ogard-Labs",
+          repositoryName: "octant",
+          number: 42,
+        },
+        { kind: "thread-done" as const, threadId: workerId },
+      ],
+    };
+    const set = await fixture.service.execute(ids.window, {
+      kind: "set-code-thread-coordinator-done-when",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      doneWhen,
+    });
+    expect(set).toEqual({
+      kind: "thread-updated",
+      thread: expect.objectContaining({
+        coordinatorDoneWhen: doneWhen,
+        version: 2,
+      }),
+    });
+    const stored =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect(stored.coordinatorDoneWhen).toEqual(doneWhen);
+    fixture.persistence.readCodeThread.mockImplementation((id) =>
+      String(id) === String(ids.thread) ? stored : worker,
+    );
+
+    // Preserved across coordinator bounds changes.
+    await fixture.service.execute(ids.window, {
+      kind: "set-code-thread-coordinator-bounds",
+      threadId: ids.thread,
+      expectedVersion: 2,
+      bounds: { rounds: 5 },
+    });
+    const afterBounds =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect(afterBounds.coordinatorDoneWhen).toEqual(doneWhen);
+    fixture.persistence.readCodeThread.mockImplementation((id) =>
+      String(id) === String(ids.thread) ? afterBounds : worker,
+    );
+
+    // Clearing omits the field from the journaled thread record.
+    await fixture.service.execute(ids.window, {
+      kind: "set-code-thread-coordinator-done-when",
+      threadId: ids.thread,
+      expectedVersion: 3,
+    });
+    const cleared =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect("coordinatorDoneWhen" in cleared).toBe(false);
+
+    // Re-setting and then stopping coordinating drops the condition with the role.
+    fixture.persistence.readCodeThread.mockImplementation((id) =>
+      String(id) === String(ids.thread) ? { ...cleared, coordinatorDoneWhen: doneWhen } : worker,
+    );
+    await fixture.service.execute(ids.window, {
+      kind: "set-code-thread-coordinator",
+      threadId: ids.thread,
+      expectedVersion: 4,
+      coordinator: false,
+    });
+    const stopped =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect("coordinatorDoneWhen" in stopped).toBe(false);
+  });
+
+  it("refuses setting or clearing a coordinator done-when condition from a routine scope, on a non-coordinator, or for invalid thread targets", async () => {
+    const otherProjectThreadId = "00000000-0000-4000-8000-000000000098" as never;
+    const coordinatorThread = thread({ coordinator: true, messageWake: true });
+    const otherProjectThread = thread({
+      id: otherProjectThreadId,
+      projectId: "00000000-0000-4000-8000-000000000088" as never,
+    });
+    const fixture = serviceFixture({ threads: [coordinatorThread, otherProjectThread] });
+    fixture.persistence.readCodeThread.mockImplementation((id) =>
+      String(id) === String(ids.thread)
+        ? coordinatorThread
+        : String(id) === String(otherProjectThreadId)
+          ? otherProjectThread
+          : undefined,
+    );
+
+    // Routine host scope and system actors are refused.
+    await expect(
+      fixture.service.execute(ROUTINE_HOST_SCOPE_ID, {
+        kind: "set-code-thread-coordinator-done-when",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    await expect(
+      fixture.service.execute(
+        ids.window,
+        {
+          kind: "set-code-thread-coordinator-done-when",
+          threadId: ids.thread,
+          expectedVersion: 1,
+        },
+        undefined,
+        { actor: { kind: "system", actorId: "octant-local" as never } },
+      ),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+
+    // Waiting on itself, a designated planner, or a thread in another Project is refused.
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator-done-when",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        doneWhen: { items: [{ kind: "thread-done", threadId: ids.thread }] },
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    const plannerThreadId = "00000000-0000-4000-8000-000000000097" as never;
+    const plannerThread = thread({ id: plannerThreadId });
+    const plannerFixture = serviceFixture({
+      threads: [coordinatorThread, plannerThread],
+    });
+    Object.assign(plannerFixture.persistence, {
+      readCodePlannerThreadId: (projectId: unknown) =>
+        String(projectId) === String(ids.project) ? plannerThreadId : undefined,
+    });
+    plannerFixture.persistence.readCodeThread.mockImplementation((id) =>
+      String(id) === String(ids.thread)
+        ? coordinatorThread
+        : String(id) === String(plannerThreadId)
+          ? plannerThread
+          : undefined,
+    );
+    await expect(
+      plannerFixture.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator-done-when",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        doneWhen: { items: [{ kind: "thread-done", threadId: plannerThreadId }] },
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator-done-when",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        doneWhen: { items: [{ kind: "thread-done", threadId: otherProjectThreadId }] },
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+
+    // Non-coordinator thread is refused.
+    const ordinary = serviceFixture({ threads: [thread({})] });
+    await expect(
+      ordinary.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator-done-when",
+        threadId: ids.thread,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
   it("turns a thread's Continue after restart off and back on, keeping its other switches", async () => {
     const fixture = serviceFixture({ project: rememberedFullAccessProject });
     fixture.persistence.readCodeThread.mockReturnValue({ ...thread(), messageWake: true });
@@ -5415,6 +5600,278 @@ describe("CodeService.readFile", () => {
   });
 });
 
+describe("desktop default-app target resolution for browsed Code files", () => {
+  const secret = "desktop-bridge-secret";
+  const metadata = {
+    identity: { device: "7", inode: "8" },
+    byteLength: 8,
+    modifiedNanoseconds: "0",
+    digest: "c".repeat(64),
+  };
+
+  function defaultAppRequest(body: {
+    readonly windowId: string;
+    readonly threadId: string;
+    readonly checkoutId: string;
+    readonly fileId: string;
+  }): Request {
+    return new Request("http://127.0.0.1:13773/api/desktop/code-external-editor-target", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-desktop-secret": secret,
+      },
+      body: JSON.stringify({ ...body, line: 1, column: 1, defaultApplication: true }),
+    });
+  }
+
+  it("lists and opens an untouched binary file and resolves its default-app target across checkout and extra folders while failing closed on escapes", async () => {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), "octant-code-default-app-")));
+    try {
+      const checkoutRoot = join(parent, "repo");
+      const extraFolder = join(parent, "extra-assets");
+      const outsideDir = join(parent, "outside");
+      mkdirSync(join(checkoutRoot, "assets"), { recursive: true });
+      mkdirSync(extraFolder, { recursive: true });
+      mkdirSync(outsideDir, { recursive: true });
+      const binaryBytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x00, 0x00, 0x0d]);
+      const checkoutBinary = join(checkoutRoot, "assets", "logo.png");
+      const extraBinary = join(extraFolder, "diagram.png");
+      const outsideBinary = join(outsideDir, "secret.png");
+      writeFileSync(checkoutBinary, binaryBytes);
+      writeFileSync(extraBinary, binaryBytes);
+      writeFileSync(outsideBinary, binaryBytes);
+
+      let approvedExtraFolders: ReadonlyArray<string> = [extraFolder];
+      let windowAuthorized = true;
+      const listingService = new CodeFileListingService();
+      const fixture = serviceFixture();
+      fixture.access.canAccessProject.mockImplementation(() => windowAuthorized);
+      Object.assign(fixture.files, {
+        list: (request: Parameters<CodeFileListingService["list"]>[0]) =>
+          listingService.list(request),
+      });
+      fixture.files.open.mockResolvedValue({
+        status: "read-only",
+        reason: "binary",
+        metadata,
+      });
+      const resolveWithExtraFolders = withProjectExtraFolders({
+        resolve: async (_scopeId, thread, activeCheckout, relativePath) => ({
+          rootPath: checkoutRoot,
+          rootIdentity: { device: "7", inode: "8" },
+          fileId: deriveCodeFileId(String(thread.id), String(activeCheckout.id), relativePath),
+        }),
+        extraFolders: () => approvedExtraFolders,
+        probePath: decodeCodeRelativePath(".octant-probe"),
+        fileId: (threadId, checkoutId, path) => deriveCodeFileId(threadId, checkoutId, path),
+        statIdentity: async (path) => {
+          const stat = await lstat(path, { bigint: true });
+          if (stat.isSymbolicLink() || !stat.isDirectory()) {
+            throw new Error("Project folder is unavailable.");
+          }
+          return { device: stat.dev.toString(10), inode: stat.ino.toString(10) };
+        },
+      });
+      fixture.roots.resolve = vi.fn(
+        (
+          scopeId: Parameters<typeof resolveWithExtraFolders>[0],
+          activeThread: Parameters<typeof resolveWithExtraFolders>[1],
+          activeCheckout: Parameters<typeof resolveWithExtraFolders>[2],
+          relativePath: Parameters<typeof resolveWithExtraFolders>[3],
+        ) => resolveWithExtraFolders(scopeId, activeThread, activeCheckout, relativePath),
+      ) as unknown as typeof fixture.roots.resolve;
+
+      const decoratedService = withCodeBoard(
+        withCodeOperationRuntime(fixture.service, {} as never),
+        vi.fn() as never,
+      );
+      const handleDesktopTarget = createCodeExternalEditorRouteHandler({
+        desktopBridgeSecret: secret,
+        resolve: async (input) => {
+          const target = await decoratedService.resolveDesktopFileTarget?.(
+            decodeWindowId(input.windowId),
+            {
+              threadId: decodeCodeThreadId(input.threadId),
+              checkoutId: decodeCodeCheckoutId(input.checkoutId),
+              fileId: decodeCodeFileId(input.fileId),
+            },
+          );
+          if (target === undefined) return undefined;
+          const file = await resolveConfinedDesktopFilePath({
+            rootPath: target.rootPath,
+            relativePath: target.relativePath,
+            isConfined: pathIsProjectConfined,
+          });
+          return file === undefined ? undefined : { file };
+        },
+      });
+
+      // 1. List and open an untouched binary file in the checkout (no journaled reference exists),
+      // exercising the production decorator chain (withCodeOperationRuntime + withCodeBoard).
+      expect(decoratedService.listFiles).toBeDefined();
+      if (decoratedService.listFiles === undefined) throw new Error("expected listFiles");
+      const listed = await decoratedService.listFiles(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+      });
+      expect(listed.status).toBe("listed");
+      if (listed.status !== "listed") throw new Error("expected listing");
+      const binaryEntry = listed.listing.entries.find(
+        (entry) => entry.kind === "file" && entry.path === "assets/logo.png",
+      );
+      expect(binaryEntry).toBeDefined();
+      if (binaryEntry?.kind !== "file") throw new Error("expected binary file entry");
+      expect(binaryEntry.availability).toMatchObject({ status: "available" });
+
+      const opened = await decoratedService.openFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: binaryEntry.path,
+      });
+      expect(opened.result).toMatchObject({
+        status: "read-only",
+        reason: "binary",
+        fileId: binaryEntry.fileId,
+      });
+      expect(fixture.persistence.readCodeFileReference()).toBeUndefined();
+
+      const checkoutResponse = await handleDesktopTarget(
+        defaultAppRequest({
+          windowId: String(ids.window),
+          threadId: String(ids.thread),
+          checkoutId: String(checkout.id),
+          fileId: String(opened.result.fileId),
+        }),
+      );
+      expect(checkoutResponse?.status).toBe(200);
+      expect(await checkoutResponse?.json()).toEqual({
+        file: realpathSync(checkoutBinary),
+        line: 1,
+        column: 1,
+      });
+
+      // 2. Unauthorized window is refused even for an already-opened file id.
+      windowAuthorized = false;
+      const unauthorizedResponse = await handleDesktopTarget(
+        defaultAppRequest({
+          windowId: String(ids.window),
+          threadId: String(ids.thread),
+          checkoutId: String(checkout.id),
+          fileId: String(opened.result.fileId),
+        }),
+      );
+      expect(unauthorizedResponse?.status).toBe(404);
+      windowAuthorized = true;
+
+      // 3. Approved extra-folder binary file resolves while approved and fails closed once removed.
+      const extraOpened = await fixture.service.openFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: extraBinary as never,
+      });
+      expect(extraOpened.result).toMatchObject({ status: "read-only", reason: "binary" });
+      const extraResponse = await handleDesktopTarget(
+        defaultAppRequest({
+          windowId: String(ids.window),
+          threadId: String(ids.thread),
+          checkoutId: String(checkout.id),
+          fileId: String(extraOpened.result.fileId),
+        }),
+      );
+      expect(extraResponse?.status).toBe(200);
+      expect(await extraResponse?.json()).toEqual({
+        file: realpathSync(extraBinary),
+        line: 1,
+        column: 1,
+      });
+
+      approvedExtraFolders = [];
+      const revokedExtraResponse = await handleDesktopTarget(
+        defaultAppRequest({
+          windowId: String(ids.window),
+          threadId: String(ids.thread),
+          checkoutId: String(checkout.id),
+          fileId: String(extraOpened.result.fileId),
+        }),
+      );
+      expect(revokedExtraResponse?.status).toBe(404);
+
+      // 4. Out-of-root symlink substitution after open is refused by canonical confinement.
+      unlinkSync(checkoutBinary);
+      symlinkSync(outsideBinary, checkoutBinary);
+      const escapedResponse = await handleDesktopTarget(
+        defaultAppRequest({
+          windowId: String(ids.window),
+          threadId: String(ids.thread),
+          checkoutId: String(checkout.id),
+          fileId: String(opened.result.fileId),
+        }),
+      );
+      expect(escapedResponse?.status).toBe(404);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses default-app resolution for a remote-root checkout", async () => {
+    const serverCheckout = decodeCodeCheckoutIdentity({
+      id: ids.checkout,
+      repositoryId,
+      kind: "remote-root",
+      availability: "available",
+      head: { kind: "none" },
+      observedAt: now,
+    });
+    const server = {
+      list: vi.fn(),
+      open: vi.fn(async () => ({
+        status: "read-only" as const,
+        reason: "binary" as const,
+        metadata,
+      })),
+      read: vi.fn(),
+      save: vi.fn(),
+      discoverTests: vi.fn(),
+    };
+    const fixture = serviceFixture({
+      checkout: serverCheckout,
+      serverCheckout: () => server as never,
+    });
+    const opened = await fixture.service.openFile(ids.window, {
+      threadId: ids.thread,
+      checkoutId: serverCheckout.id,
+      relativePath: decodeCodeRelativePath("assets/logo.png"),
+    });
+    expect(opened.result).toMatchObject({ status: "read-only", reason: "binary" });
+    expect(
+      await fixture.service.resolveDesktopFileTarget(ids.window, {
+        threadId: ids.thread,
+        checkoutId: serverCheckout.id,
+        fileId: opened.result.fileId,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("preserves optional resolveDesktopFileTarget omission through production decorators", () => {
+    const minimalService = {
+      bootstrap: vi.fn(),
+      navigation: vi.fn(),
+      read: vi.fn(),
+      execute: vi.fn(),
+      subscribe: vi.fn(),
+      readContent: vi.fn(),
+      saveFile: vi.fn(),
+      openFile: vi.fn(),
+    } as never;
+    const decorated = withCodeBoard(
+      withCodeOperationRuntime(minimalService, {} as never),
+      vi.fn() as never,
+    );
+    expect(decorated.resolveDesktopFileTarget).toBeUndefined();
+  });
+});
+
 /**
  * A file watch is the one Code read that outlives the request authorizing it,
  * so revoking the window has to reach the stream rather than only the next
@@ -5984,6 +6441,7 @@ function serviceFixture(
     readonly probeProvider?: CodeServiceOptions["probeProvider"];
     readonly content?: CodeContentStoreOptions;
     readonly pullRequests?: CodeServiceOptions["pullRequests"];
+    readonly readLatestFinishedReceipt?: CodeServiceOptions["readLatestFinishedReceipt"];
     readonly gitHistory?: CodeServiceOptions["gitHistory"];
     readonly serverGitHistory?: CodeServiceOptions["serverGitHistory"];
     readonly liveTurns?: CodeServiceOptions["liveTurns"];
@@ -6088,6 +6546,9 @@ function serviceFixture(
   });
   const service = new CodeService({
     ...(options.moveHold === undefined ? {} : { moveHold: options.moveHold }),
+    ...(options.readLatestFinishedReceipt === undefined
+      ? {}
+      : { readLatestFinishedReceipt: options.readLatestFinishedReceipt }),
     persistence: persistence as unknown as CodePersistencePort,
     access,
     checkouts,
@@ -6303,6 +6764,81 @@ describe("completing and snoozing a Code thread", () => {
       failure: { category: "unauthorized", message: "Only a person can mark a Code thread Done." },
     });
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("attaches a fresh finished receipt as completion evidence when marking Code Done, ignores stale ones, and clears it on reopen", async () => {
+    const receiptId = "88888888-8888-4888-8888-888888888888";
+    const receipt = (stale: boolean) =>
+      ({
+        receipt: {
+          receiptId,
+          threadId: String(ids.thread),
+          mode: "code",
+          projectId: ids.project,
+          summary: "Verified all unit tests.",
+          items: [
+            {
+              kind: "check",
+              label: "bun run test",
+              command: "bun run test",
+              status: "proven",
+              exitCode: 0,
+            },
+          ],
+          diff: { status: "observed", changedFiles: 2, insertions: 10, deletions: 2 },
+          recordedAt: now,
+        },
+        status: stale ? "stale" : "proven",
+        stale,
+        provenCount: 1,
+        claimedCount: 0,
+        failedCount: 0,
+        unavailableCount: 0,
+      }) as never;
+
+    const freshFixture = serviceFixture({
+      threads: [thread()],
+      readLatestFinishedReceipt: () => receipt(false),
+    });
+    const freshDone = await freshFixture.service.execute(ids.window, {
+      kind: "mark-code-thread-done",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    expect(freshDone).toMatchObject({
+      kind: "thread-updated",
+      thread: { markedDoneAt: now, completionReceiptId: receiptId, version: 2 },
+    });
+
+    const markedFixture = serviceFixture({
+      threads: [thread({ markedDoneAt: nowAt, completionReceiptId: receiptId as never })],
+    });
+    const reopened = await markedFixture.service.execute(ids.window, {
+      kind: "reopen-code-thread",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    expect(reopened).toMatchObject({ kind: "thread-updated", thread: { version: 2 } });
+    if ("thread" in reopened) {
+      expect(reopened.thread).not.toHaveProperty("completionReceiptId");
+    }
+
+    const staleFixture = serviceFixture({
+      threads: [thread()],
+      readLatestFinishedReceipt: () => receipt(true),
+    });
+    const staleDone = await staleFixture.service.execute(ids.window, {
+      kind: "mark-code-thread-done",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+    expect(staleDone).toMatchObject({
+      kind: "thread-updated",
+      thread: { markedDoneAt: now, version: 2 },
+    });
+    if ("thread" in staleDone) {
+      expect(staleDone.thread).not.toHaveProperty("completionReceiptId");
+    }
   });
 
   it("reopens a completed thread and wakes a snoozed one back into play", async () => {

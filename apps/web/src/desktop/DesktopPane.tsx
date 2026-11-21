@@ -530,15 +530,21 @@ export function DesktopToolbar(props: {
   const hosted = useDockBarControls(items);
   if (hosted !== undefined) return null;
   return (
-    <div aria-label="Desktop controls" className="device-toolbar" role="toolbar">
-      <span className="device-toolbar__device">
-        <span aria-hidden="true" className="device-dot" data-dot={dotFor(state)} />
-        <strong className="device-toolbar__name">{props.title}</strong>
-      </span>
-      <span aria-live="polite" className="device-toolbar__meta">
-        {stateWords(state, props.now())}
-      </span>
-      <span className="device-toolbar__spacer" />
+    <PaneBar
+      className="device-toolbar"
+      lead={
+        <>
+          <span className="device-toolbar__device">
+            <span aria-hidden="true" className="device-dot" data-dot={dotFor(state)} />
+            <strong className="device-toolbar__name">{props.title}</strong>
+          </span>
+          <span aria-live="polite" className="device-toolbar__meta">
+            {stateWords(state, props.now())}
+          </span>
+        </>
+      }
+      toolbarLabel="Desktop controls"
+    >
       {props.leases.length > 1 ? (
         <span aria-label="Desktops" className="desktop-pane__leases" role="group">
           {props.leases.map((each, index) => (
@@ -579,7 +585,7 @@ export function DesktopToolbar(props: {
           <Power aria-hidden="true" size={16} />
         </OctantIconButton>
       ) : null}
-    </div>
+    </PaneBar>
   );
 }
 

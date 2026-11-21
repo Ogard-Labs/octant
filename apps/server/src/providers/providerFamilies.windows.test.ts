@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
 import {
-  WINDOWS_CHAT_PROVIDER_REFUSAL,
+  WINDOWS_KEPT_SANDBOX_REFUSAL,
+  WINDOWS_STRICT_CHAT_REFUSAL,
   WINDOWS_STRICT_REFUSAL,
+  windowsStrictRuntimeRefusal,
 } from "@octant/domain/guardrail-policy";
 import { Effect, Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -29,7 +31,7 @@ const directories: string[] = [];
 
 afterEach(() => {
   for (const directory of directories.splice(0))
-    rmSync(directory, { recursive: true, force: true });
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 function running(pid: number): boolean {
@@ -57,6 +59,7 @@ describe.runIf(process.platform === "win32" && fakeOpenCode !== undefined)(
   "OpenCode on a Windows host",
   () => {
     const startAndStop = async (level: {
+      readonly mode?: "chat" | "code";
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly fullAccessSandbox?: boolean;
       readonly strict?: boolean;
@@ -78,10 +81,11 @@ describe.runIf(process.platform === "win32" && fakeOpenCode !== undefined)(
       );
     };
 
-    it("starts at Full access and below it outside Strict with no sandbox, and stops its whole tree", async () => {
+    it("starts at Full access, below it, and in Chat outside Strict with no sandbox, and stops its whole tree", async () => {
       for (const level of [
         { executionPolicy: "full-access" },
         { executionPolicy: "approval-gated", strict: false },
+        { mode: "chat", executionPolicy: "approval-gated", strict: false },
       ] as const) {
         const started = await startAndStop(level);
         if (Either.isLeft(started)) throw new Error(started.left.message);
@@ -90,14 +94,21 @@ describe.runIf(process.platform === "win32" && fakeOpenCode !== undefined)(
     }, 90_000);
 
     it("refuses Strict and a kept sandbox by name before OpenCode runs", async () => {
-      for (const level of [
-        { executionPolicy: "approval-gated" },
-        { executionPolicy: "full-access", fullAccessSandbox: true, strict: false },
+      for (const [level, message] of [
+        [{ executionPolicy: "approval-gated" }, WINDOWS_STRICT_REFUSAL],
+        [{ executionPolicy: "full-access", strict: true }, windowsStrictRuntimeRefusal("opencode")],
+        [
+          { mode: "chat", executionPolicy: "approval-gated", strict: true },
+          WINDOWS_STRICT_CHAT_REFUSAL,
+        ],
+        [
+          { executionPolicy: "full-access", fullAccessSandbox: true, strict: false },
+          WINDOWS_KEPT_SANDBOX_REFUSAL,
+        ],
       ] as const) {
         const refused = await startAndStop(level);
         expect(Either.isLeft(refused)).toBe(true);
-        if (Either.isLeft(refused))
-          expect(refused.left.message).toMatch(/sandbox Windows doesn't have yet/);
+        if (Either.isLeft(refused)) expect(refused.left.message).toBe(message);
       }
     }, 60_000);
   },
@@ -198,10 +209,11 @@ describe.runIf(process.platform === "win32" && fakeAcpAgent !== undefined)(
       );
     };
 
-    it("starts at Full access and below it outside Strict with no sandbox, answers initialize, and stops its whole tree", async () => {
+    it("starts at Full access, below it, and in Chat outside Strict with no sandbox, answers initialize, and stops its whole tree", async () => {
       for (const level of [
         { mode: "code", executionPolicy: "full-access" },
         { mode: "code", executionPolicy: "approval-gated", strict: false },
+        { mode: "chat", executionPolicy: "approval-gated", strict: false },
       ] as const) {
         const started = await startAndStop(level);
         if (Either.isLeft(started)) throw new Error(started.left.message);
@@ -209,13 +221,18 @@ describe.runIf(process.platform === "win32" && fakeAcpAgent !== undefined)(
       }
     }, 120_000);
 
-    it("refuses Strict, and a Chat thread its own tools would leave with a shell, by name before the agent runs", async () => {
+    it("refuses Strict by name before the agent runs", async () => {
       for (const [level, message] of [
         [{ mode: "code", executionPolicy: "approval-gated" }, WINDOWS_STRICT_REFUSAL],
         [
-          { mode: "chat", executionPolicy: "approval-gated", strict: false },
-          WINDOWS_CHAT_PROVIDER_REFUSAL,
+          { mode: "code", executionPolicy: "full-access", strict: true },
+          windowsStrictRuntimeRefusal("acp-agent"),
         ],
+        [
+          { mode: "chat", executionPolicy: "approval-gated", strict: true },
+          WINDOWS_STRICT_CHAT_REFUSAL,
+        ],
+        [{ mode: "chat", executionPolicy: "approval-gated" }, WINDOWS_STRICT_CHAT_REFUSAL],
       ] as const) {
         const refused = await startAndStop(level);
         expect(Either.isLeft(refused)).toBe(true);

@@ -539,6 +539,14 @@ export const DECISION_REVIEW_USAGE_AGGREGATE_TYPE = "decision-review-usage";
 export const IMAGE_DESCRIPTION_REQUEST_SHAPE = "image-description";
 export const IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE = "image-description-usage";
 
+/**
+ * One second-model pull request review turn. Like a Shield review or second
+ * opinion it has no context plan, and it is recorded under the reviewed Code
+ * thread so the thread's and its Project's spend ceilings count it.
+ */
+export const PULL_REQUEST_REVIEW_REQUEST_SHAPE = "pull-request-review";
+export const PULL_REQUEST_REVIEW_USAGE_AGGREGATE_TYPE = "pull-request-review-usage";
+
 export const UsageReconciliation = Schema.Struct({
   id: UsageReconciliationId,
   planId: Schema.optional(ContextPlanId),
@@ -574,14 +582,18 @@ export const UsageReconciliation = Schema.Struct({
         return false;
       }
       const imageGeneration = reconciliation.requestShape === "image-generation";
-      if (imageGeneration) return reconciliation.imageUnits !== undefined;
+      // An image job has no context plan. One that completed counts its
+      // images; one that failed after its provider answered delivered none,
+      // and carries no units rather than a count of zero.
+      if (imageGeneration) return reconciliation.planId === undefined;
       if (
         reconciliation.requestShape === AGENT_RUN_TURN_REQUEST_SHAPE ||
         reconciliation.requestShape === SHIELD_REVIEW_REQUEST_SHAPE ||
         reconciliation.requestShape === PROVIDER_CLOUD_TURN_REQUEST_SHAPE ||
         reconciliation.requestShape === PERSON_MEMORY_REQUEST_SHAPE ||
         reconciliation.requestShape === DECISION_REVIEW_REQUEST_SHAPE ||
-        reconciliation.requestShape === IMAGE_DESCRIPTION_REQUEST_SHAPE
+        reconciliation.requestShape === IMAGE_DESCRIPTION_REQUEST_SHAPE ||
+        reconciliation.requestShape === PULL_REQUEST_REVIEW_REQUEST_SHAPE
       ) {
         return reconciliation.planId === undefined && reconciliation.imageUnits === undefined;
       }
@@ -936,18 +948,6 @@ export const CONTEXT_COMPACTION_EVENT_NAMES = {
   completed: "context.compaction-completed@1",
   failed: "context.compaction-failed@1",
 } as const;
-
-export const CONTEXT_EVENT_NAMES = [
-  "context.manifest-created@1",
-  "context.overrides-updated@1",
-  "context.plan-created@1",
-  "context.summary-created@1",
-  "context.usage-reconciled@1",
-  "context.capacity-reservation-updated@1",
-  CONTEXT_COMPACTION_EVENT_NAMES.requested,
-  CONTEXT_COMPACTION_EVENT_NAMES.completed,
-  CONTEXT_COMPACTION_EVENT_NAMES.failed,
-] as const;
 
 export const decodeContextManifestId = Schema.decodeUnknownSync(ContextManifestId);
 export const decodeContextPlanId = Schema.decodeUnknownSync(ContextPlanId);

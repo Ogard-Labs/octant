@@ -19,7 +19,7 @@ import {
 } from "./firstRunHandoffModel";
 import { FirstRunModeStep } from "./FirstRunModeStep";
 import { FirstRunModelStep } from "./FirstRunModelStep";
-import { FirstRunProjectStep } from "./FirstRunProjectStep";
+import { FirstRunProjectStep, type FirstRunProviderFolderScan } from "./FirstRunProjectStep";
 import { FirstRunProviderStep } from "./FirstRunProviderStep";
 import { FirstRunReadinessStep } from "./FirstRunReadinessStep";
 import type { FirstRunDiscoveryNotice, FirstRunReadinessSummary } from "./firstRunReadinessModel";
@@ -91,6 +91,8 @@ export interface FirstRunOnboardingProps {
   readonly onSetUpdateChecks?: ((allowed: boolean) => Promise<boolean>) | undefined;
 
   readonly projects: ReadonlyArray<FirstRunHandoffProject>;
+  /** Optional host-side read-only scan of folders local providers already used. */
+  readonly providerFolderScan?: FirstRunProviderFolderScan | undefined;
   /** Open the Project create surface — the same Choose a folder flow the shell uses. */
   readonly onCreateProject: (mode: FirstRunTaskMode) => void;
   /** Open the new-task composer for this Project. It creates no thread by itself. */
@@ -138,6 +140,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   const [chosenProjectId, setChosenProjectId] = useState<ProjectId>();
   const [knownProjects, setKnownProjects] = useState(props.projects);
   const [resolving, setResolving] = useState(false);
+  const [importingProjects, setImportingProjects] = useState(false);
   const unsettledWrites = useRef<Array<Promise<boolean>>>([]);
   const answerLost = useRef(false);
   const [answerRefused, setAnswerRefused] = useState(false);
@@ -272,6 +275,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   }
 
   function goTo(target: FirstRunStepId) {
+    if (importingProjects) return;
     if (step === "mode" && !modeRecorded) recordMode(permissionMode);
     setHandoffOpen(false);
     setStep(target);
@@ -286,6 +290,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   // on without it. Refusing every press silently left Skip setup dead for as
   // long as the host kept refusing, with no way out and no reason given.
   function finish() {
+    if (importingProjects) return;
     if (!handoffOpen) {
       setHandoffOpen(true);
       return;
@@ -301,6 +306,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   }
 
   function skip() {
+    if (importingProjects) return;
     void resolveWith(controller.skip);
   }
 
@@ -365,6 +371,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                   data-progress={
                     descriptor.current ? "current" : descriptor.configured ? "completed" : "pending"
                   }
+                  disabled={importingProjects}
                   onClick={() => goTo(descriptor.id)}
                   type="button"
                   variant={descriptor.current ? "secondary" : "ghost"}
@@ -481,9 +488,13 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
             <FirstRunProjectStep
               mode={mode}
               onChooseFolder={() => openSetup("project")}
+              onImportingChange={setImportingProjects}
               onSelectMode={setSelectedMode}
               onSelectProject={setChosenProjectId}
               projects={projectsForMode(props.projects, mode)}
+              {...(props.providerFolderScan === undefined
+                ? {}
+                : { providerFolderScan: props.providerFolderScan })}
               selectedProjectId={handoff.project?.id}
               workEnabled={props.workEnabled}
             />
@@ -539,7 +550,9 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
           <div className="first-run__buttons">
             {handoffOpen || back !== undefined ? (
               <OctantButton
+                disabled={importingProjects}
                 onClick={() => {
+                  if (importingProjects) return;
                   if (handoffOpen) {
                     setHandoffOpen(false);
                     return;
@@ -552,16 +565,27 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                 Back
               </OctantButton>
             ) : null}
-            <OctantButton disabled={busy || blocked} onClick={skip} type="button" variant="ghost">
+            <OctantButton
+              disabled={busy || blocked || importingProjects}
+              onClick={skip}
+              type="button"
+              variant="ghost"
+            >
               {controller.submitting === "skipped" ? "Skipping…" : "Skip setup"}
             </OctantButton>
             {handoffOpen ? (
-              <OctantButton disabled={busy || blocked} onClick={finish} type="button">
+              <OctantButton
+                disabled={busy || blocked || importingProjects}
+                onClick={finish}
+                type="button"
+              >
                 {controller.submitting === "completed" ? "Saving…" : handoff.primary.label}
               </OctantButton>
             ) : (
               <OctantButton
+                disabled={importingProjects}
                 onClick={() => {
+                  if (importingProjects) return;
                   if (forward !== undefined) {
                     goTo(forward);
                     return;

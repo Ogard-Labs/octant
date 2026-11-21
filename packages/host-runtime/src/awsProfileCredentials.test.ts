@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it, vi } from "vitest";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  AWS_METADATA_UNREACHABLE_MESSAGE,
   resolveAwsProfileCredentials,
   type AwsProfilePorts,
   type AwsSsoMintOutcome,
@@ -15,6 +18,33 @@ const KEY_ID = "AKIAEXAMPLEKEY000001";
 const SECRET = "wJalrXUtnFEMIexampleSECRETkey0000000000";
 const NOW = Date.parse("2026-11-16T12:00:00Z");
 
+const openServers: Server[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    openServers.splice(0).map(
+      (server) =>
+        new Promise<void>((resolve) => {
+          server.close(() => resolve());
+          server.closeAllConnections();
+        }),
+    ),
+  );
+});
+
+async function startLocalServer(
+  handler: (req: IncomingMessage, res: ServerResponse) => void,
+): Promise<string> {
+  const server = createServer(handler);
+  openServers.push(server);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  const address = server.address() as AddressInfo;
+  return `http://127.0.0.1:${address.port}`;
+}
+
 function ports(
   files: Readonly<Record<string, string>>,
   overrides: Partial<AwsProfilePorts> = {},
@@ -25,6 +55,9 @@ function ports(
     mintSsoRoleCredentials: async () => ({ kind: "unavailable" }),
     assumeRole: async () => ({ kind: "unavailable" }),
     assumeRoleWithWebIdentity: async () => ({ kind: "unavailable" }),
+    fetchMetadata: async () => {
+      throw new Error("unreachable");
+    },
     homeDirectory: HOME,
     env: {},
     now: () => NOW,
@@ -134,9 +167,9 @@ describe("reading the person's AWS profile in the broker", () => {
         "[profile malformed]",
         "role_arn = arn:aws:iam::1:role/x",
         "source_profile = base",
-        "[profile metadata]",
+        "[profile unknown-source]",
         "role_arn = arn:aws:iam::123456789012:role/Ops",
-        "credential_source = Ec2InstanceMetadata",
+        "credential_source = SomeUnknownSource",
         "[profile loop-a]",
         "role_arn = arn:aws:iam::123456789012:role/A",
         "source_profile = loop-b",
@@ -149,7 +182,7 @@ describe("reading the person's AWS profile in the broker", () => {
     for (const [name, reason] of [
       ["absent", "profile-missing"],
       ["malformed", "unsupported"],
-      ["metadata", "unsupported"],
+      ["unknown-source", "unsupported"],
       ["loop-a", "unsupported"],
     ] as const) {
       expect(await resolveAwsProfileCredentials(name, ports(files, { assumeRole }))).toEqual({
@@ -287,7 +320,7 @@ describe("a profile that assumes a role", () => {
     );
   });
 
-  it("refuses a role that asks for an MFA code, and names a refusal from the token service", async () => {
+  it("requires an MFA code for an mfa_serial role, passes SerialNumber and TokenCode to STS, and refuses invalid or rejected codes", async () => {
     const files = {
       [`${HOME}/.aws/config`]: [
         "[profile guarded]",
@@ -300,16 +333,278 @@ describe("a profile that assumes a role", () => {
       ].join("\n"),
       [`${HOME}/.aws/credentials`]: `[base]\naws_access_key_id = ${KEY_ID}\naws_secret_access_key = ${SECRET}\n`,
     };
-    const assumeRole = vi.fn(async (): Promise<AwsStsOutcome> => ({ kind: "refused" }));
+    const assumeRole = vi
+      .fn<AwsProfilePorts["assumeRole"]>()
+      .mockResolvedValueOnce(roleAnswer("ASIAMFAROLE000000001"))
+      .mockResolvedValueOnce({ kind: "refused" })
+      .mockResolvedValueOnce({ kind: "refused" });
+
+    // Missing code prompts for MFA before calling STS.
     expect(await resolveAwsProfileCredentials("guarded", ports(files, { assumeRole }))).toEqual({
       kind: "refused",
       reason: "mfa-required",
     });
+    // Malformed code is refused before calling STS.
+    expect(
+      await resolveAwsProfileCredentials("guarded", ports(files, { assumeRole }), {
+        mfaCode: "12ab",
+      }),
+    ).toEqual({
+      kind: "refused",
+      reason: "mfa-invalid",
+    });
     expect(assumeRole).not.toHaveBeenCalled();
+
+    // Valid 6-digit code passes SerialNumber + TokenCode and marks the session ephemeral.
+    expect(
+      await resolveAwsProfileCredentials("guarded", ports(files, { assumeRole }), {
+        mfaCode: "654321",
+      }),
+    ).toEqual({
+      ...roleAnswer("ASIAMFAROLE000000001"),
+      via: "assume-role",
+      mfaSession: true,
+    });
+    expect(assumeRole).toHaveBeenNthCalledWith(1, {
+      region: undefined,
+      roleArn: "arn:aws:iam::123456789012:role/Guarded",
+      roleSessionName: `octant-session-${Math.floor(NOW / 1_000)}`,
+      serialNumber: "arn:aws:iam::123456789012:mfa/person",
+      tokenCode: "654321",
+      source: { accessKeyId: KEY_ID, secretAccessKey: SECRET },
+    });
+
+    // STS rejecting an MFA-backed AssumeRole reports mfa-refused.
+    expect(
+      await resolveAwsProfileCredentials("guarded", ports(files, { assumeRole }), {
+        mfaCode: "000000",
+      }),
+    ).toEqual({
+      kind: "refused",
+      reason: "mfa-refused",
+    });
+
+    // Non-MFA role rejection stays role-refused.
     expect(await resolveAwsProfileCredentials("untrusted", ports(files, { assumeRole }))).toEqual({
       kind: "refused",
       reason: "role-refused",
     });
+  });
+
+  it("assumes a role from EC2 IMDSv2 metadata and times out at 1 s with the exact refusal message when unreachable", async () => {
+    const seen: Array<{ readonly method: string | undefined; readonly url: string | undefined }> =
+      [];
+    const imdsBaseUrl = await startLocalServer((req, res) => {
+      seen.push({ method: req.method, url: req.url });
+      if (req.method === "PUT" && req.url === "/latest/api/token") {
+        expect(req.headers["x-aws-ec2-metadata-token-ttl-seconds"]).toBe("21600");
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("imdsv2-session-token");
+        return;
+      }
+      if (
+        req.method === "GET" &&
+        req.url === "/latest/meta-data/iam/security-credentials/" &&
+        req.headers["x-aws-ec2-metadata-token"] === "imdsv2-session-token"
+      ) {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("BedrockInstanceRole\n");
+        return;
+      }
+      if (
+        req.method === "GET" &&
+        req.url === "/latest/meta-data/iam/security-credentials/BedrockInstanceRole" &&
+        req.headers["x-aws-ec2-metadata-token"] === "imdsv2-session-token"
+      ) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            Code: "Success",
+            AccessKeyId: "ASIAIMDSROLE00000001",
+            SecretAccessKey: "imds-secret-key",
+            Token: "imds-session-token",
+            Expiration: "2026-11-16T13:00:00Z",
+          }),
+        );
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+
+    const files = {
+      [`${HOME}/.aws/config`]: [
+        "[profile ec2-bedrock]",
+        "role_arn = arn:aws:iam::123456789012:role/BedrockInvoke",
+        "credential_source = Ec2InstanceMetadata",
+      ].join("\n"),
+    };
+    const assumeRole = vi.fn(async () => roleAnswer("ASIAEC2ASSUMED000001"));
+    const resolved = await resolveAwsProfileCredentials(
+      "ec2-bedrock",
+      ports(files, {
+        assumeRole,
+        fetchMetadata: globalThis.fetch,
+        metadataEndpoints: { imdsBaseUrl },
+      }),
+    );
+    expect(resolved).toMatchObject({ kind: "credentials", via: "assume-role" });
+    expect(seen).toEqual([
+      { method: "PUT", url: "/latest/api/token" },
+      { method: "GET", url: "/latest/meta-data/iam/security-credentials/" },
+      { method: "GET", url: "/latest/meta-data/iam/security-credentials/BedrockInstanceRole" },
+    ]);
+    expect(assumeRole).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: {
+          accessKeyId: "ASIAIMDSROLE00000001",
+          secretAccessKey: "imds-secret-key",
+          sessionToken: "imds-session-token",
+          expiresAt: NOW + 3_600_000,
+        },
+      }),
+    );
+
+    // Slow IMDS server must abort at 1 s and return the exact refusal message.
+    const slowBaseUrl = await startLocalServer((_req, _res) => {
+      // Intentionally never responds so the 1 s deadline fires.
+    });
+    const started = Date.now();
+    const timedOut = await resolveAwsProfileCredentials(
+      "ec2-bedrock",
+      ports(files, {
+        assumeRole,
+        fetchMetadata: globalThis.fetch,
+        metadataEndpoints: { imdsBaseUrl: slowBaseUrl },
+      }),
+    );
+    const elapsed = Date.now() - started;
+    expect(timedOut).toEqual({
+      kind: "refused",
+      reason: "metadata-unreachable",
+      message: AWS_METADATA_UNREACHABLE_MESSAGE,
+    });
+    expect(timedOut.kind === "refused" && timedOut.message).toBe(
+      "This profile reads credentials from EC2/ECS metadata, which this computer can't reach.",
+    );
+    expect(elapsed).toBeGreaterThanOrEqual(900);
+    expect(elapsed).toBeLessThan(3_000);
+  });
+
+  it("assumes a role from ECS relative and validated full URIs with auth tokens, refuses unsafe HTTP hosts, and times out at 1 s", async () => {
+    const authHeaders: Array<string | undefined> = [];
+    const ecsBaseUrl = await startLocalServer((req, res) => {
+      authHeaders.push(req.headers.authorization);
+      if (req.method === "GET" && (req.url === "/v2/credentials/task" || req.url === "/creds")) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            AccessKeyId: "ASIAECSROLE000000001",
+            SecretAccessKey: "ecs-secret-key",
+            Token: "ecs-session-token",
+            Expiration: "2026-11-16T13:00:00Z",
+          }),
+        );
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+
+    const files = {
+      [`${HOME}/.aws/config`]: [
+        "[profile ecs-bedrock]",
+        "role_arn = arn:aws:iam::123456789012:role/BedrockInvoke",
+        "credential_source = EcsContainer",
+      ].join("\n"),
+      "/var/run/secrets/ecs-token": "file-auth-token\n",
+    };
+    const assumeRole = vi.fn(async () => roleAnswer("ASIAECSASSUMED000001"));
+
+    // Relative URI against the ECS container endpoint.
+    expect(
+      await resolveAwsProfileCredentials(
+        "ecs-bedrock",
+        ports(files, {
+          assumeRole,
+          fetchMetadata: globalThis.fetch,
+          metadataEndpoints: { ecsRelativeBaseUrl: ecsBaseUrl },
+          env: { AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/task" },
+        }),
+      ),
+    ).toMatchObject({ kind: "credentials", via: "assume-role" });
+
+    // Full URI on loopback with inline authorization token.
+    expect(
+      await resolveAwsProfileCredentials(
+        "ecs-bedrock",
+        ports(files, {
+          assumeRole,
+          fetchMetadata: globalThis.fetch,
+          env: {
+            AWS_CONTAINER_CREDENTIALS_FULL_URI: `${ecsBaseUrl}/creds`,
+            AWS_CONTAINER_AUTHORIZATION_TOKEN: "inline-token",
+          },
+        }),
+      ),
+    ).toMatchObject({ kind: "credentials", via: "assume-role" });
+
+    // Token file takes precedence over inline token.
+    expect(
+      await resolveAwsProfileCredentials(
+        "ecs-bedrock",
+        ports(files, {
+          assumeRole,
+          fetchMetadata: globalThis.fetch,
+          env: {
+            AWS_CONTAINER_CREDENTIALS_FULL_URI: `${ecsBaseUrl}/creds`,
+            AWS_CONTAINER_AUTHORIZATION_TOKEN: "inline-token",
+            AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE: "/var/run/secrets/ecs-token",
+          },
+        }),
+      ),
+    ).toMatchObject({ kind: "credentials", via: "assume-role" });
+    expect(authHeaders).toEqual([undefined, "inline-token", "file-auth-token"]);
+
+    // Unsafe plain-HTTP non-loopback / non-ECS-link-local full URIs are refused without fetching.
+    const spyFetch = vi.fn(globalThis.fetch);
+    for (const unsafe of ["http://169.254.169.254/latest/meta-data/", "http://example.com/creds"]) {
+      expect(
+        await resolveAwsProfileCredentials(
+          "ecs-bedrock",
+          ports(files, {
+            assumeRole,
+            fetchMetadata: spyFetch,
+            env: { AWS_CONTAINER_CREDENTIALS_FULL_URI: unsafe },
+          }),
+        ),
+      ).toEqual({
+        kind: "refused",
+        reason: "metadata-unreachable",
+        message: AWS_METADATA_UNREACHABLE_MESSAGE,
+      });
+    }
+    expect(spyFetch).not.toHaveBeenCalled();
+
+    // Slow ECS server times out at 1 s with the exact refusal message.
+    const slowBaseUrl = await startLocalServer((_req, _res) => {});
+    const started = Date.now();
+    const timedOut = await resolveAwsProfileCredentials(
+      "ecs-bedrock",
+      ports(files, {
+        assumeRole,
+        fetchMetadata: globalThis.fetch,
+        env: { AWS_CONTAINER_CREDENTIALS_FULL_URI: `${slowBaseUrl}/creds` },
+      }),
+    );
+    const elapsed = Date.now() - started;
+    expect(timedOut).toEqual({
+      kind: "refused",
+      reason: "metadata-unreachable",
+      message: AWS_METADATA_UNREACHABLE_MESSAGE,
+    });
+    expect(elapsed).toBeGreaterThanOrEqual(900);
+    expect(elapsed).toBeLessThan(3_000);
   });
 });
 
@@ -458,6 +753,103 @@ describe("a cloud grant from the person's own keys", () => {
     const renewed = await sign();
     expect(stsCalls).toHaveLength(2);
     expect(JSON.stringify(renewed)).toContain("ASIAROLE000000000002");
+  });
+
+  it("keeps MFA role session credentials in memory only, never in the credential store, and expires cleanly at session end", async () => {
+    const store = memoryStore();
+    let clock = NOW;
+    const stsBodies: Array<Record<string, string>> = [];
+    const fakeSts: typeof fetch = async (_input, init) => {
+      stsBodies.push(Object.fromEntries(new URLSearchParams(String(init?.body))));
+      const expiration = new Date(clock + 3_600_000).toISOString();
+      return new Response(
+        `<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><AssumeRoleResult><Credentials><AccessKeyId>ASIAMFA0000000000001</AccessKeyId><SecretAccessKey>mfa-role-secret-sentinel</SecretAccessKey><SessionToken>mfa-role-token-sentinel</SessionToken><Expiration>${expiration}</Expiration></Credentials></AssumeRoleResult></AssumeRoleResponse>`,
+        { status: 200, headers: { "content-type": "text/xml" } },
+      );
+    };
+    const files: Record<string, string> = {
+      [`${HOME}/.aws/config`]: [
+        "[profile bedrock-mfa]",
+        "role_arn = arn:aws:iam::123456789012:role/BedrockMfa",
+        "source_profile = base",
+        "mfa_serial = arn:aws:iam::123456789012:mfa/person",
+        "region = us-west-2",
+      ].join("\n"),
+      [`${HOME}/.aws/credentials`]: `[base]\naws_access_key_id = ${KEY_ID}\naws_secret_access_key = ${SECRET}\n`,
+    };
+    const runtime = createCloudIamRuntime({
+      store,
+      fetch: fakeSts,
+      now: () => clock,
+      profiles: {
+        readFile: async (path) => files[path],
+        runCredentialProcess: async () => ({ exitCode: 1, stdout: "" }),
+        homeDirectory: HOME,
+        env: {},
+      },
+    });
+    const { scope } = cloudDescriptor();
+
+    // Without a code, connect asks for MFA without calling STS.
+    expect(
+      await runtime.connect({
+        descriptorId: "amazon-bedrock",
+        source: { kind: "aws-profile", profileName: "bedrock-mfa" },
+        scope,
+        actorId: "00000000-0000-4000-8000-000000000001",
+        termsAcknowledgedAt: new Date(NOW).toISOString(),
+      }),
+    ).toEqual({ kind: "refused", reason: "mfa-required" });
+    expect(stsBodies).toHaveLength(0);
+
+    // With a valid 6-digit code, STS receives SerialNumber and TokenCode.
+    const connected = await runtime.connect({
+      descriptorId: "amazon-bedrock",
+      source: { kind: "aws-profile", profileName: "bedrock-mfa" },
+      scope,
+      actorId: "00000000-0000-4000-8000-000000000001",
+      termsAcknowledgedAt: new Date(NOW).toISOString(),
+      mfaCode: "482913",
+    });
+    expect(connected).toMatchObject({ kind: "signed-in" });
+    if (connected.kind !== "signed-in") throw new Error("not connected");
+    expect(stsBodies).toHaveLength(1);
+    expect(stsBodies[0]).toMatchObject({
+      Action: "AssumeRole",
+      RoleArn: "arn:aws:iam::123456789012:role/BedrockMfa",
+      SerialNumber: "arn:aws:iam::123456789012:mfa/person",
+      TokenCode: "482913",
+    });
+
+    // Neither the assumed credentials nor the MFA code ever enter the credential store.
+    const persisted = store.values.get(connected.credentialRef) ?? "";
+    expect(persisted).not.toContain("ASIAMFA0000000000001");
+    expect(persisted).not.toContain("mfa-role-secret-sentinel");
+    expect(persisted).not.toContain("mfa-role-token-sentinel");
+    expect(persisted).not.toContain("482913");
+
+    const request = {
+      method: "POST",
+      host: MODEL_HOST,
+      path: MODEL_PATH,
+      query: [],
+      headers: { "content-type": "application/json" },
+      payloadHash: "0".repeat(64),
+    };
+    const sign = () =>
+      runtime.sign({ credentialRef: connected.credentialRef, request, renewCredentials: false });
+
+    // Signs throughout the 1-hour session from memory alone.
+    clock = NOW + 59 * 60_000;
+    const signed = await sign();
+    expect(signed).toMatchObject({ kind: "signed" });
+    expect(JSON.stringify(signed)).toContain("ASIAMFA0000000000001");
+    expect(stsBodies).toHaveLength(1);
+
+    // At 1 hour expiry, the in-memory session expires and asks to sign in again.
+    clock = NOW + 60 * 60_000;
+    expect(await sign()).toEqual({ kind: "sign-in-again", reason: "expired" });
+    expect(stsBodies).toHaveLength(1);
   });
 
   it("reads a throttle from the token service as worth retrying and access denied as a refusal", async () => {

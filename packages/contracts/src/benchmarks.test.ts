@@ -56,7 +56,9 @@ const run = {
 
 describe("benchmark contracts", () => {
   it("decodes a valid suite and a run planned from it", () => {
-    expect(decodeBenchmarkSuite(suite)).toEqual(suite);
+    expect(decodeBenchmarkSuite(suite)).toEqual({ ...suite, kind: "chat", passThreshold: 0.8 });
+    const scoped = { ...suite, kind: "code", passThreshold: 0.9, projectId: id(30) };
+    expect(decodeBenchmarkSuite(scoped)).toEqual(scoped);
     expect(decodeBenchmarkRun(run)).toEqual(run);
   });
 

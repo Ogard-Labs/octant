@@ -24,6 +24,7 @@ export const DESKTOP_IPC_CHANNELS = {
   browserSurfacePoint: "octant:browser-surface:point",
   browserSurfaceDetach: "octant:browser-surface:detach",
   browserSurfacePreview: "octant:browser-surface:preview",
+  browserSurfaceTabIcons: "octant:browser-surface:tab-icons",
   browserSurfaceOpenExternal: "octant:browser-surface:open-external",
   browserSurfaceState: "octant:browser-surface:state",
   browserAppShortcut: "octant:browser-surface:app-shortcut",
@@ -46,6 +47,8 @@ export const DESKTOP_IPC_CHANNELS = {
   appUpdateAutomatic: "octant:app-update:automatic",
   backgroundHostState: "octant:background-host:state",
   backgroundHostChange: "octant:background-host:change",
+  keepAwakeStatus: "octant:keep-awake:status",
+  keepAwakeRefresh: "octant:keep-awake:refresh",
   computerUseStatus: "octant:computer-use:status",
   computerUseTest: "octant:computer-use:test",
   computerUsePermissions: "octant:computer-use:permissions",
@@ -83,6 +86,8 @@ export const DESKTOP_IPC_CHANNELS = {
   shutdownMovesOffered: "octant:shutdown:moves-offered",
   shutdownProgress: "octant:shutdown:progress",
   requestQuit: "octant:app:request-quit",
+  filesCloseRequest: "octant:files-close:request",
+  filesCloseReply: "octant:files-close:reply",
   previewHandoff: "octant:preview:handoff",
   requestCodeOperationApproval: "octant:code:request-operation-approval",
   updateCodeOperationApprovalAnchor: "octant:code:update-operation-approval-anchor",
@@ -150,6 +155,50 @@ export const DESKTOP_IPC_CHANNELS = {
   remoteServerPageForgetHost: "octant:remote-server-page:forget-host",
 } as const;
 
+/**
+ * The Files close exchange between a desktop window and its renderer. The
+ * request carries only a request id and a kind — a `check` asks the renderer
+ * whether its unsaved Files drafts allow closing; a `release` frees the lock
+ * an `allow` put on the document. Nothing about a file crosses the bridge.
+ */
+export interface FilesCloseRequestPayload {
+  readonly requestId: number;
+  readonly kind: "check" | "release";
+}
+
+export interface FilesCloseReplyPayload {
+  readonly requestId: number;
+  readonly answer: "checking" | "prompting" | "allow" | "cancel";
+}
+
+/** Decodes the Files close request at the boundary it enters; anything else is refused. */
+export function decodeFilesCloseRequest(value: unknown): FilesCloseRequestPayload | undefined {
+  if (!isRecord(value)) return undefined;
+  const { requestId, kind } = value;
+  if (
+    typeof requestId !== "number" ||
+    !Number.isSafeInteger(requestId) ||
+    requestId < 1 ||
+    (kind !== "check" && kind !== "release")
+  )
+    return undefined;
+  return { requestId, kind };
+}
+
+/** Decodes the renderer's Files close reply; anything else is ignored, never trusted. */
+export function decodeFilesCloseReply(value: unknown): FilesCloseReplyPayload | undefined {
+  if (!isRecord(value)) return undefined;
+  const { requestId, answer } = value;
+  if (
+    typeof requestId !== "number" ||
+    !Number.isSafeInteger(requestId) ||
+    requestId < 1 ||
+    (answer !== "checking" && answer !== "prompting" && answer !== "allow" && answer !== "cancel")
+  )
+    return undefined;
+  return { requestId, answer };
+}
+
 /** The most a renderer may hand the host as a provider credential. */
 export const MAX_PROVIDER_CREDENTIAL_BYTES = 12 * 1_024;
 
@@ -209,12 +258,30 @@ function requireBridgePositiveInteger(value: unknown): number {
  * here keeps a malformed renderer payload from crossing the bridge at all.
  */
 export function decodeCodeExternalEditorRequest(value: unknown): CodeExternalEditorRequest {
-  if (
-    !isRecord(value) ||
-    Object.keys(value).sort().join("\0") !==
-      ["threadId", "checkoutId", "fileId", "line", "column"].sort().join("\0")
-  ) {
+  if (!isRecord(value)) {
     throw new TypeError("Invalid Code external editor request.");
+  }
+  const keys = Object.keys(value).sort().join("\0");
+  const baseKeys = ["threadId", "checkoutId", "fileId", "line", "column"].sort().join("\0");
+  const defaultAppKeys = [
+    "threadId",
+    "checkoutId",
+    "fileId",
+    "line",
+    "column",
+    "defaultApplication",
+  ]
+    .sort()
+    .join("\0");
+  if (keys !== baseKeys && keys !== defaultAppKeys) {
+    throw new TypeError("Invalid Code external editor request.");
+  }
+  let defaultApplication: boolean | undefined;
+  if ("defaultApplication" in value) {
+    if (typeof value.defaultApplication !== "boolean") {
+      throw new TypeError("Invalid Code external editor request.");
+    }
+    defaultApplication = value.defaultApplication;
   }
   return {
     threadId: requireBridgeUuid(value.threadId),
@@ -222,6 +289,7 @@ export function decodeCodeExternalEditorRequest(value: unknown): CodeExternalEdi
     fileId: requireBridgeUuid(value.fileId),
     line: requireBridgePositiveInteger(value.line),
     column: requireBridgePositiveInteger(value.column),
+    ...(defaultApplication === undefined ? {} : { defaultApplication }),
   };
 }
 

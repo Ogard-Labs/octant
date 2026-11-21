@@ -226,6 +226,8 @@ export interface ProviderOAuthCommand {
   readonly attemptId?: string;
   /** Amazon Bedrock: the person's AWS profile, read by the host's broker in place. */
   readonly awsProfile?: string;
+  /** Amazon Bedrock: one-time 6-digit MFA code for a profile role declaring `mfa_serial`. */
+  readonly mfaCode?: string;
   /** Amazon Bedrock: a long-lived key pair, kept by the host's broker alone. */
   readonly accessKeys?: { readonly accessKeyId: string; readonly secretAccessKey: string };
 }

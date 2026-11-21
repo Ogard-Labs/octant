@@ -56,6 +56,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SliderField } from "../settings/SliderField";
 import { DefaultFolderSettings } from "../settings/DefaultFolderSettings";
+import { NextMessageSuggestionsSettings } from "../settings/NextMessageSuggestionsSettings";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -145,6 +146,7 @@ import type { SecretStoresClient } from "@octant/client-runtime/secret-stores-cl
 import type { ProviderToolingClient } from "@octant/client-runtime/provider-tooling-client";
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
+import type { ServerProjectRelayedPreviewOpener } from "../settings/ServerProjectPreviewTunnel";
 import { ServerAccessSettings } from "../settings/ServerProjectsSettings";
 import { RemoteSetupGuide } from "../settings/RemoteSetupGuide";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
@@ -331,6 +333,7 @@ export interface SettingsViewProps {
   readonly codeProjectId?: ProjectId | undefined;
   readonly workProjectId?: ProjectId | undefined;
   readonly onOpenServerProject?: (project: ServerProject) => void;
+  readonly onOpenRelayedServerProjectPreview?: ServerProjectRelayedPreviewOpener;
   /** Creating, joining, and revoking on this host; absent off it. */
   readonly replicaMembershipClient?: ReplicaMembershipClient;
   /** Read-only sync status, used when this client is not on the host. */
@@ -1186,6 +1189,8 @@ function ActiveSectionContent({
         <>
           <ComputerUseSettingsView
             settings={props.settings.computerUse}
+            rememberedApps={props.settings.rememberedComputerUseApps}
+            projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             onSettingsChange={props.onSettingsChange}
             {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
           />
@@ -1242,7 +1247,7 @@ function ActiveSectionContent({
             <SettingsSection title="Stalled turns">
               <div className="setgroup">
                 <SettingRow
-                  description="Ends a turn when its provider sends nothing for this long, from the next turn; a tool call the provider reports as running is not silence, up to the tool-call pause limit."
+                  description="Notices a turn when its provider sends nothing for this long, from the next turn, and ends it under Strict; a tool call the provider reports as running is not silence, up to the tool-call pause limit."
                   focused={focusedSetting === settingId("stalled-turn-limit")}
                   label="Stalled-turn limit"
                   scope="host"
@@ -1588,6 +1593,9 @@ function ActiveSectionContent({
             {...(props.onOpenServerProject === undefined
               ? {}
               : { onOpenServerProject: props.onOpenServerProject })}
+            {...(props.onOpenRelayedServerProjectPreview === undefined
+              ? {}
+              : { onOpenRelayedPreview: props.onOpenRelayedServerProjectPreview })}
             {...(props.projectTerminalClient === undefined
               ? {}
               : { terminalClient: props.projectTerminalClient })}
@@ -2535,6 +2543,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
         <HostResourceSettings
           client={props.agentRunSettingsClient}
           focusedSetting={String(focusedSetting ?? "")}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         />
       )}
       <SettingsSection
@@ -2591,6 +2600,15 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           <BackgroundHostSettings
             bridge={props.hostBridge}
             focused={focusedSetting === settingId("background-host")}
+          />
+        </div>
+      </SettingsSection>
+      <SettingsSection title="Composer">
+        <div className="setgroup">
+          <NextMessageSuggestionsSettings
+            focusedSetting={focusedSetting}
+            onChange={(next) => props.onSettingsChange({ nextMessageSuggestions: next })}
+            value={props.settings.nextMessageSuggestions}
           />
         </div>
       </SettingsSection>

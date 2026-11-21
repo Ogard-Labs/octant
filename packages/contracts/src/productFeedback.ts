@@ -465,12 +465,6 @@ export const PRODUCT_FEEDBACK_EVENT_SCHEMAS = {
   "feedback.note-updated@1": ProductFeedbackUpdated,
 } as const;
 
-export const PRODUCT_FEEDBACK_EVENT_NAMES = Object.freeze(
-  Object.keys(PRODUCT_FEEDBACK_EVENT_SCHEMAS),
-) as ReadonlyArray<keyof typeof PRODUCT_FEEDBACK_EVENT_SCHEMAS>;
-
-export const PRODUCT_FEEDBACK_AGGREGATE_TYPE = "product-feedback-note";
-
 export const decodeProductFeedbackNoteId = Schema.decodeUnknownSync(ProductFeedbackNoteId);
 export const decodeProductFeedbackElement = Schema.decodeUnknownSync(ProductFeedbackElement);
 export const decodeProductFeedbackPointObservation = Schema.decodeUnknownSync(

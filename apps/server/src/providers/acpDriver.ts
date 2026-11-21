@@ -1,5 +1,12 @@
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { compactAcpConversation } from "./acpCompaction";
+import {
+  readAcpSessionPages,
+  makeAcpNativeSessions,
+  acpReplayCollector,
+  type AcpSessionHistoryReader,
+  type AcpSessionLister,
+} from "./acpNativeSessions";
 import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
 import { readAcpFileReview } from "./acpFileReview";
 import { isAbsolute, resolve } from "node:path";
@@ -27,10 +34,15 @@ import {
   type ProviderToolAnswer,
   type ProviderToolDefinition,
   type ProviderApprovalCall,
+  type PermissionPersistence,
   type ProviderTurnInput,
 } from "@octant/contracts";
 import { attachedFileText } from "../attachments/attachedFiles";
-import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
+import type {
+  ProviderConnection,
+  ProviderDriver,
+  ProviderSessionOwnership,
+} from "@octant/provider-sdk/driver";
 import {
   normalizeAcpElicitation,
   answerAcpElicitation,
@@ -38,20 +50,27 @@ import {
 } from "./acpElicitation";
 import { outputStopReason } from "./outputStopReason";
 import {
+  acpReportedUsageState,
+  beginAcpReportedTurn,
   beginAcpUsageTurn,
+  finishAcpReportedTurn,
   finishAcpUsageTurn,
   observeAcpUsage,
+  observeAcpUsageUpdate,
+  observedAcpUsageTurn,
+  type AcpReportedUsageState,
   type AcpUsageState,
 } from "./acpUsage";
 import { ACP_CLIENT_TERMINAL_TOOL_NAMES, ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
 import {
   attachmentMediaTypeToModality,
   rejectUnsupportedChatTurn,
+  renderProviderContextSections,
   renderProviderTurnPrompt,
   textOnlyInputModalities,
   unsupportedChatCapabilities,
 } from "@octant/provider-sdk/chat-conformance";
-import { Effect, Exit, PubSub, Scope, Stream } from "effect";
+import { Cause, Effect, Exit, Option, PubSub, Scope, Stream } from "effect";
 import {
   mapAcpNotification,
   mapAcpPermissionRequest,
@@ -113,7 +132,7 @@ export interface AcpClientPort {
   readonly closeSession: (sessionId: string) => Promise<void>;
   readonly prompt: (
     sessionId: string,
-    prompt: string,
+    prompt: string | ReadonlyArray<string>,
     attachments?: ReadonlyArray<AcpPromptAttachment>,
   ) => Promise<AcpPromptResult>;
   readonly setConfigOption: (
@@ -149,6 +168,18 @@ export interface AcpDriverOptions {
   readonly clock?: () => string;
   readonly correlationId?: () => string;
   readonly requestId?: () => string;
+  /** The person's setting for how long an approval holds. */
+  readonly permissionPersistence?: () => PermissionPersistence;
+  /** Which of the agent's own sessions Octant threads hold, for `importsSessions`. */
+  readonly sessionOwnership?: ProviderSessionOwnership;
+}
+
+function permissionPersistence(options: AcpDriverOptions): PermissionPersistence {
+  try {
+    return options.permissionPersistence?.() ?? "current-session";
+  } catch {
+    return "project-default";
+  }
 }
 
 interface ResumeIdentity {
@@ -161,7 +192,8 @@ interface ResumeIdentity {
 interface PendingApproval {
   readonly kind: "approval";
   readonly providerRequestId: string | number;
-  readonly allowOptionId: string;
+  readonly allowOptionId?: string;
+  readonly allowAlwaysOptionId?: string;
   readonly rejectOptionId: string;
   /** The pending call, for an automatic reviewer; never published. */
   readonly call?: ProviderApprovalCall;
@@ -175,7 +207,10 @@ interface PendingQuestion {
 }
 
 interface AcpRetainedRuntime {
+  /** A pinned profile's reviewed reading of its cumulative usage updates. */
   readonly usage?: AcpUsageState;
+  /** Every other agent's usage, read by ACP's standard schema. */
+  readonly reported?: AcpReportedUsageState;
   readonly source: AcpNewSessionResult;
   readonly scope: Scope.CloseableScope;
   readonly client: AcpClientPort;
@@ -202,6 +237,8 @@ interface SessionState {
   readonly sourceSessionId: string;
   readonly modelId: string;
   readonly executionPolicy: ProviderExecutionPolicy;
+  /** The host answers every approval for one call, as for a helper run. */
+  readonly answersOncePerCall: boolean;
   readonly scope: Scope.CloseableScope;
   readonly client: AcpClientPort;
   readonly context: AcpEventContext;
@@ -290,7 +327,12 @@ function baseCapabilities(
           ? "supported"
           : "unavailable",
     reasoning: "unavailable",
-    usage: claims(profile.usageVersions) ? "supported" : "unsupported",
+    // A profile that pins its usage reading reports it only on those
+    // releases; every other agent's usage is read by ACP's standard schema.
+    usage:
+      profile.usageVersions === undefined || claims(profile.usageVersions)
+        ? "supported"
+        : "unsupported",
     toolActivity: "supported",
     fileChanges: "unavailable",
     diffs: "unavailable",
@@ -433,6 +475,8 @@ interface AcpPromptInputs {
   readonly image: boolean;
   /** `promptCapabilities.embeddedContext`: the agent takes embedded `resource` blocks. */
   readonly embeddedContext: boolean;
+  /** `promptCapabilities.audio`: the agent takes `audio` blocks. */
+  readonly audio: boolean;
 }
 
 /**
@@ -444,14 +488,19 @@ interface AcpPromptInputs {
  */
 function acceptedPromptInputs(initialized: AcpConnection["initialized"]): AcpPromptInputs {
   const prompt = initialized.agentCapabilities.promptCapabilities;
-  return { image: prompt?.image === true, embeddedContext: prompt?.embeddedContext === true };
+  return {
+    image: prompt?.image === true,
+    embeddedContext: prompt?.embeddedContext === true,
+    audio: prompt?.audio === true,
+  };
 }
 
 function promptInputModalities(inputs: AcpPromptInputs): readonly ProviderInputModality[] {
-  if (!inputs.image && !inputs.embeddedContext) return textOnlyInputModalities;
+  if (!inputs.image && !inputs.embeddedContext && !inputs.audio) return textOnlyInputModalities;
   return [
     "text",
     ...(inputs.image ? (["image"] as const) : []),
+    ...(inputs.audio ? (["audio"] as const) : []),
     ...(inputs.embeddedContext ? (["document"] as const) : []),
   ];
 }
@@ -474,6 +523,15 @@ function acpPromptAttachment(
           data: Buffer.from(attachment.bytes).toString("base64"),
         }
       : undefined;
+  }
+  // Audio goes as the `audio` block an agent advertised for it, and otherwise
+  // as an embedded file like any other.
+  if (modality === "audio" && inputs.audio) {
+    return {
+      type: "audio",
+      mimeType: attachment.mediaType,
+      data: Buffer.from(attachment.bytes).toString("base64"),
+    };
   }
   if (!inputs.embeddedContext) return undefined;
   const uri = `attachment:${encodeURIComponent(attachment.attachmentId)}/${encodeURIComponent(attachment.displayName)}`;
@@ -501,7 +559,7 @@ function normalizeModels(
   options: ReadonlyArray<AcpSessionConfigOption>,
   models: AcpSessionModelState | undefined,
   optionsByModel?: ReadonlyMap<string, ReadonlyArray<AcpSessionConfigOption>>,
-  promptInputs: AcpPromptInputs = { image: false, embeddedContext: false },
+  promptInputs: AcpPromptInputs = { image: false, embeddedContext: false, audio: false },
 ) {
   const model = options.find((option) => option.id === "model");
   // The config option and the session's model state are two ACP spellings of
@@ -661,7 +719,9 @@ function normalizeProbe(
       ...pinned,
       ...(atFullAccess === undefined ? {} : { atFullAccess }),
       nativeAttachments:
-        promptInputs.image || promptInputs.embeddedContext ? "supported" : "unsupported",
+        promptInputs.image || promptInputs.embeddedContext || promptInputs.audio
+          ? "supported"
+          : "unsupported",
       resume,
       reasoning,
     },
@@ -908,9 +968,86 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
       return scratch;
     });
 
+  // The agent's own sessions for a folder, read through a readiness-check
+  // process: `session/list` reads the agent's own store, not the folder.
+  const listAgentSessions: AcpSessionLister = (projectRoot) =>
+    Effect.runPromise(
+      Effect.scoped(
+        managedHomeClient.pipe(
+          Effect.flatMap(({ connection, client }) =>
+            Effect.tryPromise({
+              try: async () => {
+                if (
+                  connection.initialized.agentCapabilities.sessionCapabilities?.list === undefined
+                )
+                  return "unsupported" as const;
+                const listed = await readAcpSessionPages((cursor) =>
+                  client.call(
+                    "session/list",
+                    cursor === undefined ? { cwd: projectRoot } : { cwd: projectRoot, cursor },
+                  ),
+                );
+                if (listed === undefined)
+                  throw failure(
+                    "protocol",
+                    `${name} listed its sessions in a shape Octant cannot read.`,
+                  );
+                return listed;
+              },
+              catch: (error) => providerFailure(profile, error),
+            }),
+          ),
+        ),
+      ),
+    );
+  // A session's earlier conversation, read by loading it in a readiness-check
+  // process of its own: `session/load` replays the history as session
+  // updates before it answers (the ACP session setup reference), and the
+  // process closes with the read, so nothing runs a turn in it.
+  const readAgentSessionHistory: AcpSessionHistoryReader = (projectRoot, sessionId) =>
+    Effect.runPromise(
+      Effect.scoped(
+        managedHomeClient.pipe(
+          Effect.flatMap(({ connection, client }) =>
+            Effect.tryPromise({
+              try: async () => {
+                if (connection.initialized.agentCapabilities.loadSession !== true)
+                  return "unsupported" as const;
+                const replay = acpReplayCollector();
+                const stop = client.onNotification((notification) => {
+                  if (notification.params.sessionId === sessionId)
+                    replay.add(notification.params.update);
+                });
+                try {
+                  await client.loadSession(sessionId, projectRoot);
+                } finally {
+                  stop();
+                }
+                return replay.collected();
+              },
+              catch: (error) => providerFailure(profile, error),
+            }),
+          ),
+        ),
+      ),
+    );
+  const sessionOwnership = options.sessionOwnership;
+
   return {
     kind: profile.kind,
     conversationOwnership: "provider",
+    ...(profile.importsSessions === true && sessionOwnership !== undefined
+      ? {
+          nativeSessions: makeAcpNativeSessions({
+            instanceId: options.instanceId,
+            driverKind: profile.kind,
+            displayName: name,
+            heldSessions: () => sessionOwnership.held(profile.kind),
+            listSessions: listAgentSessions,
+            readHistory: readAgentSessionHistory,
+          }),
+        }
+      : {}),
     ...(hasVerifiedFileReview(profile) ? { fileReviewReads: true as const } : {}),
     ...(profile.authentication.kind === "delegated-browser"
       ? {
@@ -1161,6 +1298,14 @@ function makeConnection(
     const offer = (event: ProviderRuntimeEvent) => {
       Effect.runFork(PubSub.publish(queue, event));
     };
+    // A turn's consumer stops reading at its failure, and a failed turn's
+    // reply (if one ever comes) arrives after that, so the usage a pinned
+    // profile's snapshots showed so far is offered before the failure.
+    const offerObservedUsage = (state: SessionState) => {
+      if (state.runtime.usage === undefined) return;
+      const usage = observedAcpUsageTurn(state.runtime.usage);
+      if (usage !== undefined) offer(eventFor(state, factories.clock, usage));
+    };
 
     const requestManagedTool = async (
       state: SessionState | undefined,
@@ -1309,12 +1454,21 @@ function makeConnection(
         observeAcpUsage(state.runtime.usage, notification.params.update);
         return;
       }
+      if (
+        state.runtime.reported !== undefined &&
+        notification.params.sessionId === state.sourceSessionId &&
+        notification.params.update.sessionUpdate === "usage_update"
+      ) {
+        observeAcpUsageUpdate(state.runtime.reported, notification.params.update);
+        return;
+      }
       if (state.compacting) return;
       for (const mapped of mapAcpNotification(state.context, notification)) {
         if (mapped.kind === "event") offer(mapped.event);
         else if (mapped.kind === "protocol-failure") {
           state.completed = false;
           state.context.terminal = true;
+          offerObservedUsage(state);
           offer(
             eventFor(state, factories.clock, {
               kind: "failed",
@@ -1377,6 +1531,7 @@ function makeConnection(
             if (pending.id === requestMessage.id) {
               state.forms.delete(key);
               state.context.terminal = true;
+              offerObservedUsage(state);
               offer(
                 eventFor(state, factories.clock, {
                   kind: "failed",
@@ -1414,6 +1569,7 @@ function makeConnection(
       if (mapped.kind === "protocol-failure") {
         state.completed = false;
         state.context.terminal = true;
+        offerObservedUsage(state);
         offer(eventFor(state, factories.clock, { kind: "failed", failure: mapped.failure }));
         void state.client.respondPermission(requestMessage.id).catch(() => undefined);
         return;
@@ -1430,11 +1586,34 @@ function makeConnection(
           .catch(() => undefined);
         return;
       }
+      // Offered only allow-always, an approval needs an answer that holds for
+      // the session, and a helper run's answers hold for one call. Asking the
+      // person would end in a refusal the run cannot get past, so the request
+      // is denied on arrival and the reason shown on the call.
+      if (
+        mapped.kind === "approval" &&
+        mapped.allowOptionId === undefined &&
+        state.answersOncePerCall
+      ) {
+        void state.client
+          .respondPermission(mapped.providerRequestId, mapped.rejectOptionId)
+          .catch(() => undefined);
+        if (mapped.event.kind === "approval-request" && mapped.event.toolCallId !== undefined)
+          offer(
+            eventFor(state, factories.clock, {
+              kind: "tool-progress",
+              toolCallId: mapped.event.toolCallId,
+              message: `${name} only offers Always allow, which a helper run can't grant; denied.`,
+            }),
+          );
+        return;
+      }
       if (mapped.kind === "question" && profile.userQuestions === "unsupported") {
         void state.client
           .respondPermission(mapped.providerRequestId, mapped.skipOptionId)
           .catch(() => undefined);
         state.context.terminal = true;
+        offerObservedUsage(state);
         offer(
           eventFor(state, factories.clock, {
             kind: "failed",
@@ -1456,6 +1635,7 @@ function makeConnection(
         readonly sessionId: ProviderSessionId;
         readonly modelId: string;
         readonly executionPolicy: ProviderExecutionPolicy;
+        readonly answersOncePerCall?: boolean;
         readonly tools: ReadonlyArray<ProviderToolDefinition>;
         readonly nativeSetup?: ProviderNativeSetup;
       },
@@ -1489,6 +1669,7 @@ function makeConnection(
         ...(profile.unseenChildCalls === undefined
           ? {}
           : { unseenChildCalls: profile.unseenChildCalls }),
+        ...(profile.toleratesStrayUpdates === true ? { toleratesStrayUpdates: true as const } : {}),
       };
       let state!: SessionState;
       const removeNotification = client.onNotification((message) =>
@@ -1504,6 +1685,7 @@ function makeConnection(
         sourceSessionId: source.sessionId,
         modelId: input.modelId,
         executionPolicy: input.executionPolicy,
+        answersOncePerCall: input.answersOncePerCall === true,
         scope,
         client,
         context,
@@ -1552,16 +1734,25 @@ function makeConnection(
     }> => {
       const clientCapabilities = {
         readTextFile: tools.some((tool) => tool.name === ACP_CLIENT_TOOL_NAMES.readTextFile),
-        writeTextFile: tools.some((tool) => tool.name === ACP_CLIENT_TOOL_NAMES.writeTextFile),
+        writeTextFile:
+          profile.withholdsClientWrites !== true &&
+          tools.some((tool) => tool.name === ACP_CLIENT_TOOL_NAMES.writeTextFile),
         terminal: ACP_CLIENT_TERMINAL_TOOL_NAMES.every((name) =>
           tools.some((tool) => tool.name === name),
         ),
       };
       const scope = await Effect.runPromise(Scope.make());
       try {
-        const apiKey = await Effect.runPromise(resolveApiKey(options), { signal });
+        const runOptions = signal === undefined ? undefined : { signal };
+        const apiKeyExit = await Effect.runPromiseExit(resolveApiKey(options), runOptions);
+        if (Exit.isFailure(apiKeyExit)) {
+          throw Option.getOrElse(Cause.failureOption(apiKeyExit.cause), () =>
+            failure("provider-failed", `${name} credentials could not be resolved.`),
+          );
+        }
+        const apiKey = apiKeyExit.value;
         let receipt: Awaited<ReturnType<ProviderRuntimeRegistry["trackProcess"]>> | undefined;
-        const processConnection = await Effect.runPromise(
+        const startedExit = await Effect.runPromiseExit(
           options.process
             .start({
               ...(options.sandboxPolicy === undefined
@@ -1587,8 +1778,14 @@ function makeConnection(
               },
             })
             .pipe(Effect.provideService(Scope.Scope, scope)),
-          { signal },
+          runOptions,
         );
+        if (Exit.isFailure(startedExit)) {
+          throw Option.getOrElse(Cause.failureOption(startedExit.cause), () =>
+            failure("provider-failed", `${name} process failed without a typed failure.`),
+          );
+        }
+        const processConnection = startedExit.value;
         if (receipt === undefined) {
           await options.runtimeRegistry.trackProcess(options.instanceId, processConnection);
         }
@@ -1621,6 +1818,7 @@ function makeConnection(
       readonly sessionId: ProviderSessionId;
       readonly modelId: string;
       readonly executionPolicy: ProviderExecutionPolicy;
+      readonly answersOncePerCall?: boolean;
       readonly fullAccessSandbox?: boolean;
       readonly strict?: boolean;
       readonly modelOptionValues?: ProviderModelOptionValues;
@@ -1863,9 +2061,16 @@ function makeConnection(
               ) === "absent"
                 ? undefined
                 : {};
+            // Every other agent's cumulative cost reported while loading or
+            // resuming is the baseline its first turn grows from, so the state
+            // exists before the session opens and is kept for the session.
+            const reportedUsage: AcpReportedUsageState | undefined =
+              profile.usageVersions === undefined
+                ? acpReportedUsageState(sourceSessionId === undefined ? "new" : "existing")
+                : undefined;
             let usageSessionId = sourceSessionId;
             let usageMismatch = false;
-            if (initialUsage !== undefined) {
+            if (initialUsage !== undefined || reportedUsage !== undefined) {
               removeUsage = client.onNotification((message) => {
                 if (message.params.update.sessionUpdate !== "usage_update") return;
                 usageSessionId ??= message.params.sessionId;
@@ -1873,7 +2078,10 @@ function makeConnection(
                   usageMismatch = true;
                   return;
                 }
-                observeAcpUsage(initialUsage, message.params.update);
+                if (initialUsage !== undefined)
+                  observeAcpUsage(initialUsage, message.params.update);
+                if (reportedUsage !== undefined)
+                  observeAcpUsageUpdate(reportedUsage, message.params.update);
               });
             }
             // Native resume keeps agent context without replaying its growing
@@ -2075,6 +2283,14 @@ function makeConnection(
                 : {
                     usage: usageMismatch || usageSessionId !== source.sessionId ? {} : initialUsage,
                   }),
+              ...(reportedUsage === undefined
+                ? {}
+                : {
+                    reported:
+                      usageMismatch || usageSessionId !== source.sessionId
+                        ? acpReportedUsageState(sourceSessionId === undefined ? "new" : "existing")
+                        : reportedUsage,
+                  }),
               source,
               scope: runtimeScope,
               client,
@@ -2098,7 +2314,16 @@ function makeConnection(
                 const refuse = () => {
                   void close().catch(() => undefined);
                 };
-                const removeNotification = client.onNotification(refuse);
+                // Google Antigravity sends a finished turn's usage and trailing
+                // chunks after its prompt answered; closing on them threw away
+                // the warm process it keeps open precisely to avoid a cold
+                // launch. Its updates are dropped while parked; a request,
+                // which needs an answer no turn is there to give, still closes.
+                const removeNotification = client.onNotification((message) => {
+                  if (profile.toleratesStrayUpdates === true && message.method === "session/update")
+                    return;
+                  refuse();
+                });
                 const removeRequest = client.onRequest(refuse);
                 removeIdle = () => {
                   removeNotification();
@@ -2291,6 +2516,7 @@ function makeConnection(
           sessionId: input.sessionId,
           modelId: identity.modelId,
           executionPolicy: input.executionPolicy,
+          ...(input.answersOncePerCall === true ? { answersOncePerCall: true } : {}),
           ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
           ...(input.strict === false ? { strict: false } : {}),
           sourceSessionId: input.resumeCursor.value,
@@ -2324,7 +2550,8 @@ function makeConnection(
             if (
               input.attachments.length > 0 &&
               !promptInputs.image &&
-              !promptInputs.embeddedContext
+              !promptInputs.embeddedContext &&
+              !promptInputs.audio
             )
               return Effect.fail(failure("unsupported", "Native attachments are unsupported."));
             const attachments: AcpPromptAttachment[] = [];
@@ -2348,6 +2575,16 @@ function makeConnection(
             }).pipe(
               Effect.flatMap(() => {
                 const prompt = renderProviderTurnPrompt(input);
+                // An agent command must open the prompt to run: the command
+                // goes as its own first text block and Octant's context as
+                // the next, instead of the command following the context.
+                const promptBlocks =
+                  profile.commandLeadsPrompt === true &&
+                  input.prompt.trimStart().startsWith("/") &&
+                  input.context !== undefined &&
+                  input.context.length > 0
+                    ? [input.prompt, renderProviderContextSections(input.context)]
+                    : prompt;
                 // An agent with a reviewed inventory runs only a command on
                 // that inventory, and one its session listed once it has
                 // listed any, so an unreviewed command cannot run. It does so
@@ -2395,17 +2632,32 @@ function makeConnection(
                   );
                 }
                 if (state.runtime.usage !== undefined) beginAcpUsageTurn(state.runtime.usage);
+                if (state.runtime.reported !== undefined)
+                  beginAcpReportedTurn(state.runtime.reported);
                 state.promptActive = true;
                 void state.client
-                  .prompt(state.sourceSessionId, prompt, attachments)
+                  .prompt(state.sourceSessionId, promptBlocks, attachments)
                   .then((result) => {
                     state.promptActive = false;
                     void cancelForms(state);
                     if (result.stopReason === "cancelled") cancelPendingTools(state);
+                    // The reply settles the session's cumulative cost even
+                    // when the turn already failed, so the next turn is
+                    // charged only its own share.
+                    const reported =
+                      state.runtime.reported === undefined
+                        ? undefined
+                        : finishAcpReportedTurn(
+                            state.runtime.reported,
+                            result.usage,
+                            profile.turnUsageWithoutTotal,
+                          );
                     if (state.closed || state.context.terminal) return;
                     if (state.runtime.usage !== undefined) {
                       const usage = finishAcpUsageTurn(state.runtime.usage, result.usage);
                       if (usage !== undefined) offer(eventFor(state, factories.clock, usage));
+                    } else if (reported !== undefined) {
+                      offer(eventFor(state, factories.clock, reported));
                     }
                     state.context.terminal = true;
                     if (result.stopReason === "cancelled") {
@@ -2421,6 +2673,20 @@ function makeConnection(
                     ) {
                       const stop = outputStopReason(result.stopReason);
                       state.completed = true;
+                      // A call the agent never finished (a subagent's read)
+                      // is done once its turn is.
+                      if (profile.toleratesStrayUpdates === true)
+                        for (const tool of state.context.tools.values()) {
+                          if (tool.terminal) continue;
+                          tool.terminal = true;
+                          offer(
+                            eventFor(state, factories.clock, {
+                              kind: "tool-success",
+                              toolCallId: tool.toolCallId,
+                              summary: "Tool completed.",
+                            }),
+                          );
+                        }
                       offer(
                         eventFor(state, factories.clock, {
                           kind: "completed",
@@ -2442,7 +2708,12 @@ function makeConnection(
                       offer(
                         eventFor(state, factories.clock, {
                           kind: "failed",
-                          failure: failure("provider-failed", `${name} turn did not complete.`),
+                          failure: failure(
+                            "provider-failed",
+                            result.stopReason === "refusal" && profile.refusalMessage !== undefined
+                              ? profile.refusalMessage
+                              : `${name} turn did not complete.`,
+                          ),
                         }),
                       );
                     }
@@ -2450,8 +2721,11 @@ function makeConnection(
                   .catch((error: unknown) => {
                     state.promptActive = false;
                     void cancelForms(state);
+                    if (state.runtime.reported !== undefined)
+                      finishAcpReportedTurn(state.runtime.reported, undefined);
                     if (state.closed || state.context.terminal) return;
                     state.context.terminal = true;
+                    offerObservedUsage(state);
                     offer(
                       eventFor(state, factories.clock, {
                         kind: "failed",
@@ -2485,11 +2759,12 @@ function makeConnection(
               if (
                 options.sandboxPolicy === undefined &&
                 state.completed &&
-                acpExactReleaseClaim(
-                  profile.retainedSessionVersions,
-                  state.runtime.version,
-                  state.executionPolicy,
-                ) !== "absent" &&
+                (profile.retainsSessions === true ||
+                  acpExactReleaseClaim(
+                    profile.retainedSessionVersions,
+                    state.runtime.version,
+                    state.executionPolicy,
+                  ) !== "absent") &&
                 state.approvals.size === 0 &&
                 state.questions.size === 0 &&
                 state.pendingToolAnswers.size === 0 &&
@@ -2536,8 +2811,8 @@ function makeConnection(
             if (pending === undefined) {
               return Effect.fail(failure("protocol", `${name} approval request is not pending.`));
             }
-            state.approvals.delete(input.requestId);
             if (state.executionPolicy === "plan" && input.approved) {
+              state.approvals.delete(input.requestId);
               return request(() =>
                 state.client.respondPermission(pending.providerRequestId, pending.rejectOptionId),
               ).pipe(
@@ -2548,7 +2823,33 @@ function makeConnection(
                 ),
               );
             }
-            const selected = input.approved ? pending.allowOptionId : pending.rejectOptionId;
+            // An agent that remembers its own allow-always gets it when the
+            // person keeps answers for the session, never for a one-call
+            // answer (an automatic reviewer's, or one on a child's behalf).
+            const remembers =
+              profile.forwardsAllowAlways === true &&
+              input.scope !== "once" &&
+              pending.allowAlwaysOptionId !== undefined &&
+              permissionPersistence(options) === "current-session";
+            const allowOptionId =
+              remembers && pending.allowAlwaysOptionId !== undefined
+                ? pending.allowAlwaysOptionId
+                : pending.allowOptionId;
+            // Offered only allow-always, an approval that does not hold for
+            // the session has no option to choose. Sending the reject instead
+            // would let the host record an approval the agent never got, so
+            // nothing is sent and the request stays pending for a denial or an
+            // approval that holds for the session.
+            const selected = input.approved ? allowOptionId : pending.rejectOptionId;
+            if (selected === undefined) {
+              return Effect.fail(
+                failure(
+                  "unsupported",
+                  `${name} only offers Always allow here. Approve it for this session, or deny it.`,
+                ),
+              );
+            }
+            state.approvals.delete(input.requestId);
             return request(() =>
               state.client.respondPermission(pending.providerRequestId, selected),
             );
@@ -2575,6 +2876,7 @@ function makeConnection(
                 } catch (error) {
                   state.completed = false;
                   state.context.terminal = true;
+                  offerObservedUsage(state);
                   offer(
                     eventFor(state, factories.clock, {
                       kind: "failed",
@@ -2640,7 +2942,10 @@ function rememberPermission(state: SessionState, mapped: AcpMappedPermission): v
     state.approvals.set(mapped.requestId, {
       kind: "approval",
       providerRequestId: mapped.providerRequestId,
-      allowOptionId: mapped.allowOptionId,
+      ...(mapped.allowOptionId === undefined ? {} : { allowOptionId: mapped.allowOptionId }),
+      ...(mapped.allowAlwaysOptionId === undefined
+        ? {}
+        : { allowAlwaysOptionId: mapped.allowAlwaysOptionId }),
       rejectOptionId: mapped.rejectOptionId,
       ...(mapped.call === undefined ? {} : { call: mapped.call }),
     });

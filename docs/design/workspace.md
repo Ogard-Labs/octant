@@ -200,7 +200,12 @@ beside the band's compose button; both run the same action. The command palette
 tooltip) lists, besides threads, the pages the rail and sidebar open (Home,
 Inbox, Agents, Artifacts, Projects, and in Work and Code Board and Automations),
 every Settings page that needs no native capability, New thread, Show or hide
-the sidebar, and the dock tools the thread can open. In the Activity feed the
+the sidebar, and the dock tools the thread can open. The palette also lists
+the focused pane's named bar controls — every button, menu row and view
+option the bar offers, folded or not — and each palette command runs the
+exact callback the bar's own control invokes; state lines and tool-drawn
+controls are not commands, and a disabled control is absent there as it is
+on the bar. In the Activity feed the
 newest group is open, so a feed whose only group is Earlier is never a blank
 column. Group headings in the sidebar are 12px in the meta ink with a 14px
 chevron and the count as a right-aligned number.
@@ -478,9 +483,10 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   most people keep the defaults, and the box for the work came after them. A thread's row menu keeps its everyday actions on top (Pin in pane, Pin, Rename; Mark as read or unread, Mark done, Put away, Snooze; the pull-request destinations) and files the rest under **More**, with Archive last and alone (maintainer request, 2026-11-16). A Code thread's row menu has **Make coordinator**, a submenu
   with the same worker-level choice, or **Stop
   coordinating** on a coordinator (never on a worker); on a coordinator
-  **Coordinator limits…**, which opens the same dialog with the three bounds
-  and Save, without the workers' level, since the host refuses a later change
-  to it; the **Wake when a message
+  **Coordinator limits…**, which opens the same dialog with the three bounds,
+  the coordinator's host-checked **Done when** conditions (view, add, remove,
+  clear), and Save, without the workers' level, since the host refuses a later
+  change to it; the **Wake when a message
   arrives** checkbox, on a worker the **Wake for coordinator** checkbox, and
   the **Continue after restart** checkbox, on until a person turns it off for
   that thread ([Architecture: Persistence](../architecture.md#persistence)).
@@ -508,7 +514,9 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   `coordinatorWorkerListingByProject`). It carries no authority: it never
   changes what a worker may do or who sees its requests, and only a person,
   at a local window, changes it.
-- **Workers panel.** A coordinator's pane header has a **Workers** button
+- **Workers panel.** A coordinator's pane header has a **Done when** button
+  (showing the configured condition count and opening **Coordinator limits**)
+  beside its **Workers** button
   (with the worker count, and a screen-reader note of how many need you) that
   opens a panel beside the transcript, and a sheet over it on a narrow window.
   Sections, in order: **Needs you**, **Working**, **In review** (delivered
@@ -946,7 +954,12 @@ line, Outline, Send selection to agent, Editor settings, Find references in
 checkout, Preview rename, Find quick fixes and **Open in main area** are items of
 one **File actions** menu there, with Monaco's own shortcuts unchanged. Open in
 main area is the only way to open a file as a workspace Code file tab, which
-draws the same actions in a slim header of its own. Tree rows are 28px, 13px
+draws the same actions in a slim header of its own. Binary files and files
+larger than 5 MiB open as a read-only metadata notice; on a local desktop window
+for a local checkout that notice offers **Open in default app** through the
+existing desktop file-open bridge (without requiring a configured external code
+editor), while a paired browser or remote session keeps the plain notice with no
+desktop-open button. Tree rows are 28px, 13px
 text at weight 500 in the primary ink, with 12px of indent per level. A folder is
 a 12px muted chevron (rotated when open) and its name, with no folder icon; a
 file is a 16px glyph by type (code, document, image, file) and its name.
@@ -955,6 +968,20 @@ are drawn in the muted ink. Rows ellipsise long names, mark the selected file
 with the full-row selected fill, take a hover fill on the others, and end a changed file's row with a small dot (warning for modified,
 success for added) read from the host's Git observation; the incomplete-tree
 note is one muted line.
+
+Closing a Files tab, a file opened in the main area, the Files tool, or
+its Code thread asks about every affected unsaved file, even if Files is
+no longer visible. Closing one view of a file that is still open in
+another view does not ask: the buffer stays open there. **Save** uses the
+file's existing revision check; a failed save cannot close the file.
+**Don't save** drops that draft, and **Cancel** leaves the target open.
+Switching threads, hiding the dock and moving a tab do not ask. Desktop
+window close uses the same check for that window. See [Quitting](#quitting)
+for a quit across windows. If a window does not respond to the check, a
+native confirmation offers Cancel or Close anyway; a missing reply never
+approves a close on its own. A window closed anyway stops taking input
+until it closes or the close or quit is cancelled, so it cannot gain
+edits while another window asks.
 
 Unsaved text is kept locally on the client, separately from pane references,
 messages and the host journal. Code recovery keys include the endpoint, checkout
@@ -1177,7 +1204,11 @@ confirmation does not bypass ordinary approvals. Plan may inspect these
 comparisons but cannot mutate. Unsupported binary, rename, conflict or
 unavailable bytes are explicit. After applying, Review rereads the index and
 working tree. Stale selections require a new comparison; captured run and Git
-History views do not offer mutations. The authority, native preflight and writer
+History views do not offer mutations. When a Code thread is in Plan mode, its
+read-only Git, Pull request, Terminal, and Tests panes offer a **Change mode**
+button beside the Plan-mode notice that opens the composer's mode menu so the
+person can choose a mode themselves; nothing switches automatically. The
+authority, native preflight and writer
 rules are in [Architecture: Code](../architecture.md#modes-chat-work-and-code).
 
 Thread utilities live in the Right Utility Dock outside the split tree. The dock
@@ -1193,8 +1224,14 @@ Browser tool and share one tile. The layout is window-local presentation in
 local storage: it grants nothing, starts nothing, and the bottom panel never
 has one. Each tile has one bar, 32px: the tool's name (the Browser's and the Terminal's bar is their row of pages or sessions, one tab each even for a single page, then "+"; a tool alone has no bar, so the same row stands at the top of its body, and the row is never dropped in any layout),
 then the tool's own controls (navigation as words, actions as icons, status as
-text; they fold into a named view menu and then a More menu before the name is
-cut), with an Arrange menu on the bar's context menu (right click, the menu key, Shift+F10 on a control of the bar, or Enter or Space on the bar itself, which is a Tab stop; never a button on the bar: Move left, right, up and down where the caps allow, Move
+text; when they do not fit, each view switch folds into one control naming the
+current view, then every named control — word buttons, view switches, icon
+actions and menu buttons — folds into the one More menu before any state the
+tool reports about itself does; state is the last thing to leave the bar and
+then it is the menu's first rows, whole, with a badge on the More button in
+the worst tone any folded state reports, before the tool's name is cut; a
+control the tool draws itself never folds and only then may take the one
+secondary row under the bar, which nothing else may share), with an Arrange menu on the bar's context menu (right click, the menu key, Shift+F10 on a control of the bar, or Enter or Space on the bar itself, which is a Tab stop; never a button on the bar: Move left, right, up and down where the caps allow, Move
 left of, right of, above or below each other tile where the caps allow it and it changes
 something, Show alone, Hide from view, and for the Browser and Terminal Minimise to card) and Close at its
 trailing edge; a tool that is open but not shown is marked on its button in the thread header's
@@ -1332,24 +1369,36 @@ clearing the imported draft or preparing a truthful replacement, not silently
 retaining the excerpt as trusted plain prose.
 
 Line notes are the lighter way to answer a turn from its change view
-(maintainer decision, 2026-11-14). In Review opened from a turn's changed-file
-row, the line-number button on either side of the diff also opens a note
-anchored to that file, side (new or old) and line; the note may extend through
-a later line on the same side. Notes stay pending in that view, where the
-person edits or removes each one. They are this window's unsent drafts: they
-journal nothing and close with the view. **Send notes** sends them together as
-one ordinary follow-up message in the owning thread through the normal send
-path, so mode, access level, Plan and every host check apply unchanged. The
-message lists each note with its file, side and line or lines, the first
-line's text quoted and cut to 120 characters, then the note. Send waits while
-the thread runs a turn or a pending note is being edited. Notes count as sent
-once the host accepts the message, whatever its turn then does, so a turn that
-waits, stops or fails never invites sending them twice; only a refusal keeps
-them. A line note
-carries no finding reference: its message is plain person text, the same as
-typing the quoted line into the composer, so the outside-content record that a
-correction draft's references take does not apply. Local findings and their
-correction draft stay the path for review that is tracked and resolved.
+(maintainer decision, 2026-11-14) or a pull request from its diff
+(maintainer decision, 2026-11-21). In Review opened from a turn's changed-file
+row, and in a pull request's diff (Review › pull request › Changes and the
+dock's pull-request review), the line-number button on either side of the diff
+opens a note anchored to that file, side (new or old) and line; the note may
+extend through a later line on the same side. Notes stay pending in that view,
+where the person edits or removes each one. They are this window's unsent
+drafts: they journal nothing and close with the view. **Send notes** sends them
+together as one ordinary follow-up message through the normal send path, so
+mode, access level, Plan and every host check apply unchanged. On a pull
+request's diff a small thread picker under **Send notes** chooses which linked
+Code thread receives the message, defaulting to the first linked thread (as
+Auto-fix does); with no thread linked, notes can still be written and **Send
+notes** is disabled with "Link a Code thread to send notes". Sending line notes
+never posts comments or reviews to GitHub, which stays a separate explicit
+action. The message lists each note with its file, side and line or lines, the
+first line's text quoted and cut to 120 characters, then the note. Send waits
+while the thread runs a turn or a pending note is being edited. Notes count as
+sent once the host accepts the message, whatever its turn then does, so a turn
+that waits, stops or fails never invites sending them twice; only a refusal
+keeps them. On a turn's change view, a line note carries no finding reference:
+its message is plain person text, the same as typing the quoted line into the
+composer, so the outside-content record that a correction draft's references
+take does not apply. On a pull request's diff, the host checks the observed
+pull request's author against the signed-in `gh` user before starting the turn:
+when they match, the message is sent as plain person text; when they differ or
+either cannot be read, the host marks the thread as having read outside content
+first (the same mechanism Auto-fix uses) and refuses the send if that mark
+cannot be recorded. Local findings and their correction draft stay the path for
+review that is tracked and resolved.
 
 After a correction, Refresh reads the new comparison and latest recorded checks.
 Checks that lack a comparison binding are labeled as such. An agent reply never
@@ -1387,7 +1436,8 @@ menu holding Close or Reopen pull request. Under it, the state pill with
 "repository #number", the title in the page-title role (26px, 600), one meta
 line (author, age, head → base) and, on Summary, the description as markdown at
 13px with a 720px measure; Summary holds no form. Changes lists commits, changed
-files and the diff. Timeline lists the reviews and comments, newest last, then
+files and the diff (with clickable line numbers and window-local line notes sent
+to a linked Code thread). Timeline lists the reviews and comments, newest last, then
 the labels, review-thread replies, the comment form and the review form
 (Approve, Request changes with a note) at the end. The status column (260px,
 sticky) has small captions in the navigation-group role: Merge status (one
@@ -2105,14 +2155,23 @@ Review tool opens it as before).
 
 Sort offers Recently updated (the default), Least recently updated, Newest,
 Oldest and Repository, and a **Group by repository** check item. Newest and
-Oldest order by creation time, which the snapshot carries beside each
-pull request's last update. Filter offers Status (any, open, draft), Involvement
-(anyone, involving me, review requested, authored by me; only when the
-signed-in GitHub login is known, and answered from the row's author and
-requested reviewers), Review (needs review, changes
-requested, approved), Checks (passing, failing, pending) and **Mine**, which
-keeps the pull requests whose author is the signed-in GitHub account
-(maintainer request, 2026-11-12). Not built yet: today the snapshot carries no
+Oldest order by when the pull request was opened, which the snapshot carries
+beside each pull request's last update, read in the same list read. A row
+without that time (a snapshot from before it was recorded, or a pull request
+known only from a thread) goes last under both, in update order. Filter offers
+Status (any, open, draft), Involvement (anyone, involving me, review requested,
+authored by me; only when the signed-in GitHub login is known, and answered from
+the row's author and requested reviewers), Review (needs review, changes
+requested, approved) and Checks (passing, failing, pending). "Mine", the pull
+requests whose author is the signed-in GitHub account, is the Involvement
+filter's **Authored by me** (maintainer request, 2026-11-12; maintainer
+decision, 2026-11-21). Sort, grouping, the status choice and the
+repositories are remembered in this window's local storage; Involvement, Review
+and Checks last for the visit only, because kept across visits they hid every row
+behind chips that counted the unfiltered list. A filter that is narrowing the
+list marks its button, and an empty list names the choices that are narrowing it
+beside Clear filters.
+
 The **Repository** control is a menu in the list header, at one fixed width, on
 the count's row. It lists every repository the list spans, each with how many
 rows it holds under the other choices, as check items: **All repositories** (the
@@ -2124,13 +2183,6 @@ this window's local storage. Issues share the control's place and look. Grouping
 is a **Group by repository** check item in the Sort menu: each group head is the
 repository's name at 12px in the meta ink with its count at the right edge.
 
-creation time and the author is not compared with the account, so Newest,
-Oldest and Mine are not offered. Sort, grouping, the status choice and the
-repositories are remembered in this window's local storage; Involvement, Review
-and Checks last for the visit only, because kept across visits they hid every row
-behind chips that counted the unfiltered list. A filter that is narrowing the
-list marks its button, and an empty list names the choices that are narrowing it
-beside Clear filters.
 Searching is unchanged and covers the title, author, branches, repository,
 number and linked threads.
 
@@ -2374,7 +2426,7 @@ inline and the rest under More, and entries in the command palette's Actions
 group. More is the header's one menu for this group: it also holds where the
 actions run ("Run in") and the task's Worktrees setup, which used to be text
 controls of their own in the title bar. Where to run is offered only when there
-is an action to run; with none, the header shows no control here (Worktrees setup is also a row of Environment's Changes group, the one place it is always found); the Project overview's Actions section edits them and offers suggestions
+is an action to run; with none, the header shows no control here (Worktrees setup is also an entry of Environment's Branch row, the one place it is always found); the Project overview's Actions section edits them and offers suggestions
 the person confirms. Choosing one previews its actual folder and branch,
 then starts a dedicated run beside the task. A Code thread defaults to its
 active checkout; the Project folder and approved extra folders remain explicit
@@ -2477,7 +2529,7 @@ authenticated, thread-scoped answer routes and one-use request identity.
 Provider-native question formats keep their existing adapter contracts; the
 questionnaire capability uses the provider-neutral app tool boundary.
 
-A Code task's **Worktrees** control (a row of Environment's Changes group, and
+A Code task's **Worktrees** control (an entry of Environment's Branch row, and
 an entry of the header's More menu when the Project has saved actions) opens its Setup tab beside
 that task, including a selector for its child checkouts. It shows the reviewed
 command and relative folder, bounded output, exit result, Retry, Cancel and
@@ -3360,10 +3412,73 @@ handlers; Escape or a press outside closes it and leaves the ceiling as it was.
 Commit or push shows for a checkout with changes or a named branch, and Create
 pull request for a named branch, because the section reads the working tree and
 the branch only, not how far the branch is ahead. Neither shows for an
-unreadable checkout. New task in this Project and Worktrees are the items of a
+unreadable checkout. The items of a
 "…" menu (More for changes) at the right end of the Changes title row, shown
-while the section is open. Routines keeps its row; Follow up later and New
-routine are the two items of one "+" menu (Add a routine) at its right end.
+while the section is open, hold only New task in this Project.
+
+The rows above the section are themselves the actions their facts describe.
+The **Branch row** opens a menu (Branch) with Switch branch…, New task on
+another branch…, and Worktrees. Switch branch… appears only while the host
+reports a readable local Git checkout — a remote root or a plain folder has
+no local HEAD to move, and neither gets it — and waits, greyed with the
+reason, while a turn runs: switching under a running turn would move the
+ground beneath it, so the host also refuses mid-turn. New task on another
+branch… opens the ordinary new-task draft in this Project on the New
+worktree choice with its Where > Start from picker already open and loading
+the checkout's real refs; it is absent without a connected, readable
+Project. The **Project row** opens the same Move to Project dialog the
+sidebar row menu opens — never a second move surface — whenever another
+active Code Project exists, even one the host would refuse: the dialog
+lists every destination and greys the refused ones with the reason — a
+different folder, the thread's working folder being bound to its current
+Project, a remote-root or unavailable checkout, or a provider policy the
+thread's provider or model fails, naming the unknown instead when the
+model is not yet known. Only with no other active Code Project does the
+row state the Project as a fact.
+
+**Switching a thread's branch.** The Switch branch dialog reads the working
+tree as it opens — the status entries and the state token, one observation —
+and lists the checkout's existing local branches beside it (the
+server-authoritative ref list, minus the current branch, remote refs, and
+branches another worktree holds). That one reading is the consent: the
+switch sends `switch-git-branch` with the observed state token, and the
+dirty-checkout choices show the observed entries themselves. A switch is
+the person's act only: no agent path exists. The host verifies the branch
+is an exact local ref, that no other worktree holds it, that the checkout's
+state still matches the token, and that no turn is running or starting. The
+first attempt asks the host to refuse a dirty checkout; only then does the
+dialog offer Commit (which opens the Git pane's own reviewed stage-and-commit
+form — nothing auto-stages or auto-commits), Stash and switch (an explicit
+`git stash push --include-untracked` against the same observed token, never
+a pop, and a failure after the stash reports that the changes stayed in the
+stash), and Cancel, which sends nothing. A checkout that moved since the
+reading refuses the token as stale: the dialog re-reads and re-shows it and
+sends nothing until the person chooses again, so a stash never carries
+changes nobody saw. A detached HEAD can switch onto a named branch the same
+way. On a completed switch the host journals the checkout's new head —
+branch and OID — against the exact checkout identity, so the next
+Environment read and the thread's binding both show the branch the checkout
+actually holds; a managed worktree is never re-observed through its
+Project's root.
+
+**Moving a busy thread.** The Move to Project dialog on a thread whose turn is
+still running offers two choices once a destination is picked: Move after this
+turn, the default, and Stop and move now. The first queues an intent scoped to
+that thread and that turn — the dialog stays open with the queue visible;
+Cancel move, Escape, the backdrop and every other way the dialog goes away
+drop that one queued request and resolve it, never leaving a promise open or
+a move to dispatch silently, and a newer queued request ends the one it
+replaces the same way. A turn that settles and another starting in its place
+ends the intent with a refusal rather than chasing the new turn, and the real
+`move-code-thread` dispatches once, with the thread's version as it stands
+then, so the host's binding, authority, and busy checks decide again. Stop
+and move now interrupts only the turn this window started — it names that
+turn's operation, and when the running turn's identity is not this window's
+to stop, the choice refuses with the reason rather than cancelling whatever
+turn happens to run; the move itself still waits for the stopped turn to
+settle before it dispatches. Routines keeps its row; Follow up later and
+New routine are the two items of one "+" menu (Add a routine) at its right
+end.
 
 **The thread's pull requests.** Under its other rows, a Code thread's Changes
 section lists the pull requests this thread opened or is tied to, newest first,
@@ -3926,6 +4041,13 @@ reach the shell.
 
 ### Quitting
 
+- Explicit Quit — from the app menu, the macOS Dock menu, or the quit
+  shortcut — checks unsaved edits in the Files tools of every open app
+  window before closing any window or starting shutdown. Cancel in any
+  window stops Quit. If a window is already asking about unsaved edits,
+  Quit brings it forward and stops there; the person answers it and quits
+  again. A file already saved stays saved. System shutdown, updater
+  restarts and forced exits do not wait for these decisions.
 - The macOS status menu always offers **Fully quit Octant**. Ordinary Quit and
   Fully quit share one guarded shutdown: refresh current host activity, ask for
   confirmation when provider sessions remain open or the desktop cannot confirm
@@ -3948,7 +4070,6 @@ reach the shell.
   first press quits nothing and shows a short "Press ⌘Q again to quit Octant"
   toast in the focused window; the second enters the guarded shutdown above
   unchanged, including its session confirmation. With no window open, the first
-  press quits directly. Choosing Quit with the pointer (app menu, Dock, status
-  menu's Fully quit), OS shutdown or logout, updater restarts and signals stay
-  immediate. A menu accelerator cannot tell a held key from a tap, so a
+  press quits directly. Choosing Quit with the pointer skips the second-press
+  guard, not the unsaved-edits check. A menu accelerator cannot tell a held key from a tap, so a
   double press stands in for hold-to-quit.

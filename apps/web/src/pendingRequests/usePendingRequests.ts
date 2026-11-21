@@ -29,6 +29,7 @@ export type PendingRequestRead =
       readonly requests: ReadonlyArray<PendingRequest>;
       /** Every other waiting ask; empty from a host that lists none. */
       readonly asks: ReadonlyArray<WaitingAsk>;
+      readonly lostOfferModes: ReadonlySet<WaitingAsk["mode"]>;
       /** Counts completed reads, so a caller can tell a fresh answer from the last one. */
       readonly read: number;
     };
@@ -54,22 +55,40 @@ export function usePendingRequests(
   const [read, setRead] = useState<PendingRequestRead>({ status: "loading" });
   const [nudge, setNudge] = useState(0);
   const queue = useRef<ReadQueue | undefined>(undefined);
+  const observed = useRef<{ run: string; modes: Set<WaitingAsk["mode"]> } | undefined>(undefined);
   const { feedRevision, settings, workspace } = freshness;
   useEffect(() => {
     if (client === undefined) {
+      observed.current = undefined;
       queue.current = undefined;
       setRead({ status: "loading" });
       return;
     }
     const controller = new AbortController();
-    queue.current = createReadQueue(client, controller.signal, (list) =>
+    queue.current = createReadQueue(client, controller.signal, (list) => {
+      const previous = observed.current;
+      const run = list.offerHostRun;
+      const lost =
+        run !== undefined && previous !== undefined && run !== previous.run
+          ? previous.modes
+          : undefined;
+      observed.current =
+        run === undefined
+          ? undefined
+          : {
+              run,
+              modes: new Set(
+                list.asks?.filter((ask) => ask.kind === "service-offer").map((ask) => ask.mode),
+              ),
+            };
       setRead((current) => ({
         status: "ready",
         requests: list.requests,
         asks: list.asks ?? [],
+        lostOfferModes: lost ?? (current.status === "ready" ? current.lostOfferModes : new Set()),
         read: current.status === "ready" ? current.read + 1 : 1,
-      })),
-    );
+      }));
+    });
     return () => {
       controller.abort();
       queue.current = undefined;

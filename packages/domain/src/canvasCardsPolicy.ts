@@ -1,5 +1,4 @@
 import {
-  decodeCanvasCreateDenialCode,
   decodeCanvasCreateReceipt,
   decodeCanvasCreateReceiptId,
   decodeCanvasCreateRequest,
@@ -120,33 +119,6 @@ export function clampCanvasAuthority(input: {
   return authority;
 }
 
-export function canvasCreateDenialReason(input: unknown): CanvasCreateDenialCode | null {
-  let request: CanvasCreateRequest;
-  try {
-    request = decodeOrReject(
-      decodeCanvasCreateRequest,
-      input,
-      "malformed-request",
-      "Canvas create request is malformed.",
-    );
-  } catch (error) {
-    if (error instanceof CanvasCardsPolicyRejected) return error.denialCode;
-    return "malformed-request";
-  }
-  try {
-    assertScopeMatchesMode(request);
-    assertOriginThreadValid(request);
-    clampCanvasAuthority({
-      requestedAuthority: request.requestedAuthority,
-      scope: request.workspace,
-    });
-  } catch (error) {
-    if (error instanceof CanvasCardsPolicyRejected) return error.denialCode;
-    return "malformed-request";
-  }
-  return null;
-}
-
 export function validateCanvasThreadReferenceCard(input: unknown): CanvasThreadReferenceCard {
   const card = decodeOrReject(
     decodeCanvasThreadReferenceCard,
@@ -166,8 +138,6 @@ export function validateCanvasThreadReferenceCard(input: unknown): CanvasThreadR
   }
   return card;
 }
-
-export const validateCanvasCreateDenialCode = decodeCanvasCreateDenialCode;
 
 export interface CanvasCreateActiveContext {
   readonly mode: "chat" | "work" | "code";

@@ -23,6 +23,8 @@ import {
   DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES,
   DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES,
   DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS,
+  DEFAULT_SIBLING_THREAD_READS_PER_TURN,
+  DEFAULT_SIBLING_THREAD_WAITS_PER_TURN,
   DEFAULT_STALLED_TURN_LIMIT_MINUTES,
   DEFAULT_THREAD_MESSAGES_PER_TURN,
   LOCAL_HOST_ID,
@@ -37,7 +39,6 @@ import {
   decodePaneId,
   decodeWorkspaceTabId,
   type EnvironmentCompactIdentity,
-  type EnvironmentPresentation,
   type EnvironmentPresentationByMode,
   type EnvironmentPresentationState,
   type EnvironmentSectionDescriptor,
@@ -48,6 +49,7 @@ import {
   type LayoutNodeId,
   type PaneId,
   type RememberedBrowserTransfer,
+  type RememberedComputerUseApp,
   type ShellSettings,
   type SplitRatio,
   type StowedWorkspaceLayout,
@@ -171,6 +173,22 @@ export function workspaceWelcomeSurface(mode: OctantMode, id: WorkspaceTabId): W
   return { kind: "welcome", id, mode, title: MODE_TITLES[mode] };
 }
 
+/**
+ * Whether replies in this mode predict the person's next message. Absent
+ * settings mean on everywhere, so an install that never opened the setting
+ * keeps the composer's Tab suggestion in every mode.
+ */
+export function nextMessageSuggestionsOn(
+  settings:
+    | { readonly nextMessageSuggestions?: ShellSettings["nextMessageSuggestions"] | undefined }
+    | undefined,
+  mode: OctantMode,
+): boolean {
+  const setting = settings?.nextMessageSuggestions;
+  if (setting === undefined) return true;
+  return setting.enabled && setting.modes.includes(mode);
+}
+
 export function defaultShellSettings(): ShellSettings {
   return {
     chatEnabled: true,
@@ -219,6 +237,8 @@ export function defaultShellSettings(): ShellSettings {
     pullRequestWatchDays: CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_DAYS,
     autoFixAttemptsPerFailure: CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS,
     threadMessagesPerTurn: DEFAULT_THREAD_MESSAGES_PER_TURN,
+    siblingThreadReadsPerTurn: DEFAULT_SIBLING_THREAD_READS_PER_TURN,
+    siblingThreadWaitsPerTurn: DEFAULT_SIBLING_THREAD_WAITS_PER_TURN,
     browserWaitLimitMinutes: DEFAULT_BROWSER_WAIT_LIMIT_MINUTES,
     childRunWaitLimitSeconds: DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS,
     agentRoutinesStartActiveAtFullAccess: false,
@@ -253,6 +273,7 @@ export function defaultShellSettings(): ShellSettings {
     browserHeldDownloadLimit: MAX_BROWSER_HELD_DOWNLOADS,
     browserUploadFileCountLimit: MAX_BROWSER_UPLOAD_FILES,
     rememberedBrowserTransfers: [],
+    rememberedComputerUseApps: [],
     persistentBrowserOwner: false,
     pairedDeviceLifetime: DEFAULT_PAIRED_DEVICE_LIFETIME,
   };
@@ -264,15 +285,6 @@ export function defaultEnvironmentPresentationByMode(): EnvironmentPresentationB
 
 export function defaultEnvironmentPresentationState(): EnvironmentPresentationState {
   return { byTab: [], byMode: defaultEnvironmentPresentationByMode() };
-}
-
-export function resolveEffectivePresentation(
-  state: EnvironmentPresentationState,
-  mode: OctantMode,
-  tabId: WorkspaceTabId,
-): EnvironmentPresentation {
-  const override = state.byTab.find((entry) => entry.tabId === tabId);
-  return override?.presentation ?? state.byMode[mode];
 }
 
 export type EnvironmentPresentationInput = EnvironmentTabPresentation;
@@ -751,6 +763,15 @@ export function replaceShellSettings(
 ): ShellSettings {
   return {
     ...replacement,
+    // An older client replacing the whole document writes order and
+    // visibility but no activity section; dropping the stored choices would
+    // silently reset pins the person made on a newer client.
+    homeCards: {
+      ...replacement.homeCards,
+      ...(replacement.homeCards.activity !== undefined || current.homeCards.activity === undefined
+        ? {}
+        : { activity: current.homeCards.activity }),
+    },
     firstRunOnboarding: resolveFirstRunOnboarding(
       current.firstRunOnboarding,
       replacement.firstRunOnboarding,
@@ -781,6 +802,10 @@ export function replaceShellSettings(
     rememberedBrowserTransfers: resolveRememberedBrowserTransfers(
       current.rememberedBrowserTransfers,
       replacement.rememberedBrowserTransfers,
+    ),
+    rememberedComputerUseApps: resolveRememberedComputerUseApps(
+      current.rememberedComputerUseApps,
+      replacement.rememberedComputerUseApps,
     ),
   };
 }
@@ -845,6 +870,39 @@ function resolveRememberedBrowserTransfers(
       "invalid-settings",
       "Remembered Browser uploads and downloads can only be added by the approval decision.",
     );
+  }
+  return replacement;
+}
+
+function resolveRememberedComputerUseApps(
+  current: ReadonlyArray<RememberedComputerUseApp>,
+  replacement: ReadonlyArray<RememberedComputerUseApp> | undefined,
+): ReadonlyArray<RememberedComputerUseApp> {
+  if (replacement === undefined) return current;
+  const seen = new Set<string>();
+  for (const entry of replacement) {
+    const key = `${String(entry.projectId)}\0${entry.appId}`;
+    if (seen.has(key)) {
+      reject(
+        "invalid-settings",
+        "Remembered Computer use approvals cannot contain duplicate entries.",
+      );
+    }
+    seen.add(key);
+    const stored = current.find(
+      (candidate) =>
+        String(candidate.projectId) === String(entry.projectId) && candidate.appId === entry.appId,
+    );
+    if (
+      stored === undefined ||
+      stored.grantedAt !== entry.grantedAt ||
+      JSON.stringify(stored.grantedBy) !== JSON.stringify(entry.grantedBy)
+    ) {
+      reject(
+        "invalid-settings",
+        "Remembered Computer use approvals can only be added by the approval decision.",
+      );
+    }
   }
   return replacement;
 }

@@ -18,8 +18,6 @@ import type { OwnerApprovalHost } from "./ownerApprovalHost";
 // agent or a routine holds no member key and reaches only the product routes.
 
 import { createHash } from "node:crypto";
-import { decodeOwnerBrowserRequest } from "@octant/contracts/owner-browser";
-import type { OwnerBrowserActor, OwnerBrowserControlService } from "../browser/ownerBrowserControl";
 import {
   CODE_OWNER_UNLOCKED_MERGE_PATHS,
   OWNER_IDENTITY_KEY_HEADER,
@@ -108,9 +106,6 @@ export const HUB_OWNER_ROUTES = {
   signInCheck: `${HUB_OWNER_ROUTE_PREFIX}/sign-in/check`,
   approvalRead: `${HUB_OWNER_ROUTE_PREFIX}/approvals/read`,
   approvalAnswer: `${HUB_OWNER_ROUTE_PREFIX}/approvals/answer`,
-  browserTargets: `${HUB_OWNER_ROUTE_PREFIX}/browser/targets`,
-  browserTakeOver: `${HUB_OWNER_ROUTE_PREFIX}/browser/take-over`,
-  browserControl: `${HUB_OWNER_ROUTE_PREFIX}/browser/control`,
   threadMoveTicket: `${HUB_OWNER_ROUTE_PREFIX}/thread-moves/ticket`,
   // On the source: the moves a window holds for an owner phone, and the phone
   // handing over the ticket the destination issued it.
@@ -132,10 +127,7 @@ const READ_ROUTES: ReadonlySet<string> = new Set([
 /** The routes an unlock can be asked for: every one that changes something. */
 const UNLOCKED_ROUTES: ReadonlySet<string> = new Set(
   Object.values(HUB_OWNER_ROUTES).filter(
-    (route) =>
-      route !== HUB_OWNER_ROUTES.challenge &&
-      route !== HUB_OWNER_ROUTES.browserControl &&
-      !READ_ROUTES.has(route),
+    (route) => route !== HUB_OWNER_ROUTES.challenge && !READ_ROUTES.has(route),
   ),
 );
 
@@ -153,9 +145,6 @@ const EITHER: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.session,
   HUB_OWNER_ROUTES.ownersAdd,
   HUB_OWNER_ROUTES.ownersRemove,
-  HUB_OWNER_ROUTES.browserTargets,
-  HUB_OWNER_ROUTES.browserTakeOver,
-  HUB_OWNER_ROUTES.browserControl,
   HUB_OWNER_ROUTES.threadMoveTicket,
   ...CODE_OWNER_UNLOCKED_MERGE_PATHS,
 ]);
@@ -181,7 +170,6 @@ const OWN_UNLOCK_ROUTES: ReadonlySet<string> = new Set([
   HUB_OWNER_ROUTES.leave,
   HUB_OWNER_ROUTES.credentialReceive,
   HUB_OWNER_ROUTES.credentialCopy,
-  HUB_OWNER_ROUTES.browserTakeOver,
   // A move erases the thread on the source, so it never rides an open session.
   HUB_OWNER_ROUTES.threadMoveTicket,
   // A wake switch lets other threads start turns on this one while nobody is
@@ -230,7 +218,6 @@ export interface HubOwnerRouteOptions {
    * Absent or false, an open administration session covers the answers.
    */
   readonly approvalAnswerNeedsOwnUnlock?: () => boolean;
-  readonly browser?: OwnerBrowserControlService;
   readonly hub: HubService;
   readonly spoke: SpokeLinkService;
   readonly unlock: OwnerUnlockService;
@@ -494,65 +481,6 @@ export function createHubOwnerRouteHandler(
       }
     }
 
-    if (
-      route === HUB_OWNER_ROUTES.browserTargets ||
-      route === HUB_OWNER_ROUTES.browserTakeOver ||
-      route === HUB_OWNER_ROUTES.browserControl
-    ) {
-      if (options.browser === undefined) return refused(409, "unsupported");
-      const command = (() => {
-        try {
-          return decodeOwnerBrowserRequest(JSON.parse(body));
-        } catch {
-          return undefined;
-        }
-      })();
-      if (
-        command === undefined ||
-        (route === HUB_OWNER_ROUTES.browserTargets
-          ? command.kind !== "targets"
-          : route === HUB_OWNER_ROUTES.browserTakeOver
-            ? command.kind !== "take-over"
-            : command.kind === "targets" || command.kind === "take-over")
-      )
-        return refused(400, "invalid");
-      if (
-        command.kind === "take-over" &&
-        String(command.target.hostMemberId) !== String(options.hub.hubMemberId())
-      )
-        return refused(403, "wrong-host");
-      const stamp = ownerListStamp(scope);
-      const actor: OwnerBrowserActor = {
-        principal,
-        name: senderMember.name,
-        freshOwnUnlock: unlockResult?.status === "fresh",
-        unlockDeadline: (options.now ?? Date.now)() + 60_000,
-        current: () => {
-          const latest = scopeFor(route, body);
-          if (
-            "kind" in latest ||
-            ownerListStamp(latest) !== stamp ||
-            latest.inactiveDeviceMemberIds.includes(senderId)
-          )
-            return false;
-          return (
-            authorizeOwnerRequest({
-              host: latest.host,
-              grant: latest.grant,
-              owners: ownerEntries(latest.owners),
-              roster: latest.roster,
-              memberId: senderMember.memberId,
-              identityKeyFingerprint: publicKeyFingerprint(presentedKey),
-              unlock: "not-needed",
-              unlockClass: "own",
-            }).status === "allowed"
-          );
-        },
-      };
-      const result = await options.browser.execute(actor, command, request.signal);
-      return Response.json(result, { headers: NO_STORE });
-    }
-
     try {
       return await act({
         route,
@@ -583,9 +511,6 @@ export function createHubOwnerRouteHandler(
     switch (route) {
       case HUB_OWNER_ROUTES.approvalRead:
       case HUB_OWNER_ROUTES.approvalAnswer:
-      case HUB_OWNER_ROUTES.browserTargets:
-      case HUB_OWNER_ROUTES.browserTakeOver:
-      case HUB_OWNER_ROUTES.browserControl:
         return refused(400, "invalid");
       case HUB_OWNER_ROUTES.challenge: {
         const asked = decodeOwnerChallengeRequest(json());

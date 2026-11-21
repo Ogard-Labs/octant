@@ -106,6 +106,7 @@ import {
   type WorkThreadAdoptedSession,
   decodeThreadWorkingDirectory,
   ProviderNativeSessionId,
+  type ImportedSessionHistory,
 } from "@octant/contracts";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
@@ -118,6 +119,7 @@ import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/
 import type { TurnImage, TurnImagesDescription } from "../harness/imageDescription";
 import type { TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNativeSetup";
+import { readImportedSessionHistory } from "../providers/nativeSessionHistory";
 import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
@@ -403,7 +405,15 @@ export interface WorkTurnServiceDependencies {
   readonly recordAdoptedSession?: (
     thread: WorkThread,
     adopted: WorkThreadAdoptedSession,
+    history: ImportedSessionHistory,
   ) => { readonly status: "recorded" } | { readonly status: "refused"; readonly message: string };
+  /**
+   * The earlier conversation the thread's adoption imported, as journaled;
+   * undefined for a thread adopted before Octant imported any.
+   */
+  readonly readImportedSessionHistory?: (
+    threadId: WorkThreadId,
+  ) => ImportedSessionHistory | undefined;
   /**
    * Stops the thread's session the host kept past its last turn, and every
    * background task in it. Absent, no Work session is kept.
@@ -434,6 +444,7 @@ export interface WorkTurnServiceDependencies {
   readonly conversationInputTransfer?: Pick<ConversationInputTransfer, "prepare">;
   /** Carries a thread's session to another account of the same provider after a move. */
   readonly accountSessionCarrier?: AccountSessionCarrier;
+  readonly platform?: NodeJS.Platform;
   readonly supportsAttachments?: (input: {
     readonly providerInstanceId: WorkThread["providerInstanceId"];
     readonly modelId: WorkThread["modelId"];
@@ -482,7 +493,7 @@ export interface WorkTurnServiceDependencies {
   readonly forgeChanges?: RuntimeForgeChangeObserver;
   readonly onRequestSettled?: (
     input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
-    release: () => void,
+    release: (settled?: { readonly person: boolean; readonly settledAt?: UtcTimestamp }) => void,
   ) => () => void;
   /**
    * The app-managed tools a Work turn may offer its provider. Absent on a host
@@ -694,6 +705,7 @@ export class WorkTurnService {
    */
   readonly #adoptingThreads = new Set<string>();
   readonly #recordAdoptedSession: WorkTurnServiceDependencies["recordAdoptedSession"];
+  readonly #readImportedSessionHistory: WorkTurnServiceDependencies["readImportedSessionHistory"];
   readonly #stopKeptSession: WorkTurnServiceDependencies["stopKeptSession"];
   /**
    * The access each running turn holds, by thread. The native harness checks
@@ -764,11 +776,14 @@ export class WorkTurnService {
   readonly #liveResponses = new Map<string, string>();
   readonly #liveTasks = new Map<string, ThreadTaskProgressList>();
   readonly #liveToolSteps = new Map<string, ThreadToolSteps>();
+  readonly #liveReasoningMs = new Map<string, number>();
 
   readonly #moveHold: ((threadId: string) => boolean) | undefined;
   readonly #wakeupsForThread: WorkTurnServiceDependencies["wakeupsForThread"];
+  readonly #platform: NodeJS.Platform | undefined;
 
   constructor(dependencies: WorkTurnServiceDependencies) {
+    this.#platform = dependencies.platform;
     this.#moveHold = dependencies.moveHold;
     this.#wakeupsForThread = dependencies.wakeupsForThread;
     this.#runningAccess = dependencies.runningAccess ?? new Map();
@@ -795,6 +810,7 @@ export class WorkTurnService {
     this.#resolveStrict = dependencies.resolveStrict;
     this.#forgeChanges = dependencies.forgeChanges;
     this.#recordAdoptedSession = dependencies.recordAdoptedSession;
+    this.#readImportedSessionHistory = dependencies.readImportedSessionHistory;
     this.#stopKeptSession = dependencies.stopKeptSession;
     this.#onRequestSettled = dependencies.onRequestSettled;
     this.#resolveAppManagedTools = dependencies.resolveAppManagedTools;
@@ -1203,7 +1219,9 @@ export class WorkTurnService {
         threadId,
         sessions: [],
         unavailable: target.message,
-        ...(target.adopted === undefined ? {} : { adopted: { nativeSessionId: target.adopted } }),
+        ...(target.adopted === undefined
+          ? {}
+          : { adopted: this.#adoptedWithHistory(threadId, target.adopted) }),
       };
     const listed = await Effect.runPromise(
       Effect.either(
@@ -1292,6 +1310,14 @@ export class WorkTurnService {
           ).pipe(Effect.catchAll(() => Effect.void)),
         );
       try {
+        // Read before the commit checks below, which must not yield. The read
+        // never fails the adoption: a runtime without readable history, or a
+        // read that fails, imports none and says why.
+        const history = await readImportedSessionHistory(target.nativeSessions, {
+          instanceId: target.thread.providerInstanceId,
+          projectRoot: target.projectRoot,
+          nativeSessionId,
+        });
         // The thread must still be empty when the adoption commits. Nothing
         // yields from here to the journal append, so no turn slips in.
         const occupied = this.#conversationRefusal(target.thread);
@@ -1312,18 +1338,22 @@ export class WorkTurnService {
             message:
               "This thread's Project folder changed while it took up the session. Try again.",
           };
-        const recorded = record(target.thread, {
-          nativeSessionId,
-          providerSessionId,
-          resumeCursor: adopted.right,
-          providerInstanceId: target.thread.providerInstanceId,
-          modelId: target.thread.modelId,
-          bindingRevisionId: target.thread.bindingRevisionId,
-          workingDirectory: target.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
-          ...(target.thread.workingFolderId === undefined
-            ? {}
-            : { workingFolderId: target.thread.workingFolderId }),
-        });
+        const recorded = record(
+          target.thread,
+          {
+            nativeSessionId,
+            providerSessionId,
+            resumeCursor: adopted.right,
+            providerInstanceId: target.thread.providerInstanceId,
+            modelId: target.thread.modelId,
+            bindingRevisionId: target.thread.bindingRevisionId,
+            workingDirectory: target.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+            ...(target.thread.workingFolderId === undefined
+              ? {}
+              : { workingFolderId: target.thread.workingFolderId }),
+          },
+          history,
+        );
         if (recorded.status === "refused")
           return { kind: "work-native-session-refused", message: recorded.message };
         committed = true;
@@ -1334,6 +1364,11 @@ export class WorkTurnService {
     } finally {
       this.#adoptingThreads.delete(key);
     }
+  }
+
+  #adoptedWithHistory(threadId: WorkThreadId, nativeSessionId: ProviderNativeSessionId) {
+    const history = this.#readImportedSessionHistory?.(threadId);
+    return { nativeSessionId, ...(history === undefined ? {} : { history }) };
   }
 
   /**
@@ -1478,14 +1513,20 @@ export class WorkTurnService {
     // is journaled or started: on a host without Octant's sandbox a turn below
     // Full access runs with the provider's own approvals, and only Strict and
     // a kept sandbox, which need Octant's sandbox, refuse.
+    const platform = this.#platform ?? process.platform;
+    const providerInstance =
+      thread === undefined
+        ? this.#persistence.readProviderInstance(command.authority.providerInstanceId)
+        : this.#persistence.readProviderInstance(thread.providerInstanceId);
     const sandboxRefusal = hostProviderTurnRefusal({
-      platform: process.platform,
+      platform,
       access: {
         ...workThreadAccessOf(turnAccess),
         ...(thread?.strict === undefined ? {} : { strict: thread.strict }),
         ...(thread?.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
       },
       strict: this.#resolveStrict?.(String(command.threadId)) ?? true,
+      driverKind: providerInstance?.driverKind,
     });
     if (sandboxRefusal !== undefined) throw this.#failure("unavailable", sandboxRefusal);
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
@@ -1782,10 +1823,21 @@ export class WorkTurnService {
       skillContext = resolved.context;
       extensionTools = resolved.tools;
     }
+    // Windows Strict phase 1 withholds Octant-operated host tools before
+    // continuation checks so follow-up turns compare the actual admitted empty
+    // tool catalog against the saved session instead of demanding a handoff.
+    const windowsStrictLocal =
+      server === undefined &&
+      platform === "win32" &&
+      (this.#resolveStrict?.(String(command.threadId)) ?? true);
+    if (windowsStrictLocal && extensionTools !== undefined) {
+      await extensionTools.close?.().catch(() => undefined);
+      extensionTools = undefined;
+    }
     const hostTools =
       server !== undefined
         ? server.tools
-        : thread === undefined
+        : windowsStrictLocal || thread === undefined
           ? undefined
           : this.#resolveAppManagedTools?.({
               thread,
@@ -1795,8 +1847,9 @@ export class WorkTurnService {
               turnId: command.turnId,
               ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
             });
-    const preparedTools =
-      extensionTools === undefined
+    const preparedTools = windowsStrictLocal
+      ? undefined
+      : extensionTools === undefined
         ? hostTools
         : combineAppManagedToolSets(hostTools, extensionTools);
     let toolsLaunched = false;
@@ -2459,6 +2512,7 @@ export class WorkTurnService {
         this.#liveResponses.delete(String(command.requestId));
         this.#liveTasks.delete(String(command.requestId));
         this.#liveToolSteps.delete(String(command.requestId));
+        this.#liveReasoningMs.delete(String(command.requestId));
       });
       this.#inflight.set(String(command.requestId), launch);
       toolsLaunched = true;
@@ -2804,13 +2858,19 @@ export class WorkTurnService {
     const liveStepsHeld = this.#liveToolSteps.get(String(turn.requestId));
     const liveSteps =
       liveStepsHeld === undefined ? undefined : withoutPublishedSnapshots(liveStepsHeld);
+    const liveReasoningMs = this.#liveReasoningMs.get(String(turn.requestId));
     const withSteps =
-      liveSteps === undefined || liveSteps.steps.length === 0
+      (liveSteps === undefined || liveSteps.steps.length === 0) && liveReasoningMs === undefined
         ? turn
         : decodeWorkTurnState({
             ...turn,
-            toolSteps: liveSteps.steps,
-            ...(liveSteps.truncated ? { toolStepsTruncated: true } : {}),
+            ...(liveSteps === undefined || liveSteps.steps.length === 0
+              ? {}
+              : {
+                  toolSteps: liveSteps.steps,
+                  ...(liveSteps.truncated ? { toolStepsTruncated: true } : {}),
+                }),
+            ...(liveReasoningMs === undefined ? {} : { reasoningMs: liveReasoningMs }),
           });
     const live = this.#liveResponses.get(String(turn.requestId));
     if (live === undefined) return withSteps;
@@ -2915,7 +2975,12 @@ export class WorkTurnService {
         ? this.#turnFileObserver?.observe(input.projectRoot, input.extraFolders)
         : undefined;
 
-    const appManagedTools = input.preparedTools;
+    const launchStrict = this.#resolveStrict?.(String(input.command.threadId)) ?? true;
+    const windowsStrict = (this.#platform ?? process.platform) === "win32" && launchStrict;
+    const appManagedTools = windowsStrict ? undefined : input.preparedTools;
+    if (windowsStrict && input.preparedTools !== undefined) {
+      await input.preparedTools.close?.().catch(() => undefined);
+    }
     const toolEffects = this.#nativeHarness?.toolEffects?.({
       threadId: String(input.command.threadId),
       turnId: String(input.command.requestId),
@@ -3044,12 +3109,12 @@ export class WorkTurnService {
     });
     // Read as the turn launches, never carried from an earlier one: the
     // session starts with it, and the turn records what it kept.
-    const launchStrict = this.#resolveStrict?.(String(input.command.threadId)) ?? true;
     const strictKept = strictKeptForLaunch({
       strict: launchStrict,
       driverKind: input.driver.kind,
       executionPolicy: input.access === "full-access" ? "full-access" : "approval-gated",
       fullAccessSandbox: input.fullAccessSandbox,
+      ...(this.#platform === undefined ? {} : { platform: this.#platform }),
     });
     if (strictKept !== undefined) {
       const launching = this.#projection.lookup(input.command.requestId);
@@ -3197,6 +3262,77 @@ export class WorkTurnService {
           if (harnessScope !== undefined) this.#nativeHarness?.clearRetry?.(harnessScope);
           this.#liveUpdates.clearRetry(input.command.threadId, input.command.requestId);
         },
+        onLoopNoticed: (notice) => {
+          const latest = this.#projection.lookup(input.command.requestId);
+          if (latest === undefined) return;
+          try {
+            this.#append(
+              latest.requestId,
+              latest.version,
+              "work.turn-loop-noticed@1",
+              {
+                kind: "turn-loop-noticed",
+                requestId: latest.requestId,
+                threadId: latest.threadId,
+                turnId: latest.turnId,
+                toolName: notice.toolName,
+                count: notice.count,
+                occurredAt: notice.occurredAt,
+              },
+              "system",
+            );
+            this.#liveUpdates.appendLoopNotice(latest.threadId, latest.requestId, notice);
+          } catch {
+            // A failed notice write does not interrupt a running turn.
+          }
+        },
+        onLoopStopped: (notice) => {
+          const latest = this.#projection.lookup(input.command.requestId);
+          if (latest === undefined) return;
+          try {
+            this.#append(
+              latest.requestId,
+              latest.version,
+              "work.turn-loop-stopped@1",
+              {
+                kind: "turn-loop-stopped",
+                requestId: latest.requestId,
+                threadId: latest.threadId,
+                turnId: latest.turnId,
+                toolName: notice.toolName,
+                count: notice.count,
+                occurredAt: notice.occurredAt,
+              },
+              "system",
+            );
+            this.#liveUpdates.appendLoopNotice(latest.threadId, latest.requestId, notice);
+          } catch {
+            // Settlement still runs below.
+          }
+        },
+        onStallNoticed: (notice) => {
+          const latest = this.#projection.lookup(input.command.requestId);
+          if (latest === undefined) return;
+          try {
+            this.#append(
+              latest.requestId,
+              latest.version,
+              "work.turn-stall-noticed@1",
+              {
+                kind: "turn-stall-noticed",
+                requestId: latest.requestId,
+                threadId: latest.threadId,
+                turnId: latest.turnId,
+                idleMs: notice.idleMs,
+                occurredAt: notice.occurredAt,
+              },
+              "system",
+            );
+            this.#liveUpdates.appendStallNotice(latest.threadId, latest.requestId, notice);
+          } catch {
+            // A failed notice write does not interrupt a running turn.
+          }
+        },
         ...(this.#onRequestSettled === undefined
           ? {}
           : { onRequestSettled: this.#onRequestSettled }),
@@ -3318,6 +3454,15 @@ export class WorkTurnService {
             truncated: toolSteps.truncated,
           });
         },
+        onReasoningMs: (reasoningMs) => {
+          if (input.signal.aborted) return;
+          if (reasoningMs === this.#liveReasoningMs.get(String(input.command.requestId))) return;
+          this.#liveReasoningMs.set(String(input.command.requestId), reasoningMs);
+          this.#liveUpdates.appendToolStep(input.command.threadId, input.command.requestId, {
+            truncated: this.#liveToolSteps.get(String(input.command.requestId))?.truncated === true,
+            reasoningMs,
+          });
+        },
       });
       runOutcome = outcome;
       const wroteFiles = observation?.finish();
@@ -3347,7 +3492,12 @@ export class WorkTurnService {
         // person the folder was untouched when it was not. The tool calls it
         // made are recorded the same way, whether or not a file changed.
         const cancelledToolSteps = this.#liveToolSteps.get(String(input.command.requestId));
-        if (wroteFiles !== undefined || cancelledToolSteps !== undefined) {
+        const cancelledReasoningMs = this.#liveReasoningMs.get(String(input.command.requestId));
+        if (
+          wroteFiles !== undefined ||
+          cancelledToolSteps !== undefined ||
+          cancelledReasoningMs !== undefined
+        ) {
           const settledTasks = this.#liveTasks.get(String(input.command.requestId));
           const settledToolSteps = cancelledToolSteps;
           this.#persistUpdate(latest, {
@@ -3356,6 +3506,7 @@ export class WorkTurnService {
             ...(wroteFiles === undefined ? {} : { wroteFiles }),
             ...(settledTasks === undefined ? {} : { tasks: settledTasks }),
             ...(settledToolSteps === undefined ? {} : { toolSteps: settledToolSteps }),
+            ...(cancelledReasoningMs === undefined ? {} : { reasoningMs: cancelledReasoningMs }),
           });
           const settledCancel = this.#projection.lookup(input.command.requestId);
           if (settledCancel !== undefined) {
@@ -3371,6 +3522,7 @@ export class WorkTurnService {
         wroteFiles,
         this.#liveTasks.get(String(input.command.requestId)),
         this.#liveToolSteps.get(String(input.command.requestId)),
+        this.#liveReasoningMs.get(String(input.command.requestId)),
       );
       if (outcome.kind === "completed" && wroteFiles !== undefined) {
         await this.#backfillStatus(
@@ -3858,11 +4010,14 @@ export class WorkTurnService {
     tasks?: ThreadTaskProgressList,
     // Held in process for the same reason as the task list.
     toolSteps?: ThreadToolSteps,
+    // The turn's measured reasoning total, held the same way.
+    reasoningMs?: number,
   ): void {
     const written = wroteFiles === undefined ? {} : { wroteFiles };
     const recordedTasks = {
       ...(tasks === undefined ? {} : { tasks }),
       ...(toolSteps === undefined ? {} : { toolSteps }),
+      ...(reasoningMs === undefined ? {} : { reasoningMs }),
     };
     if (outcome.kind === "completed") {
       this.#persistUpdate(turn, {
@@ -3870,6 +4025,7 @@ export class WorkTurnService {
         response: outcome.response,
         ...written,
         ...recordedTasks,
+        ...(reasoningMs === undefined ? {} : { reasoningMs }),
       });
       return;
     }
@@ -3887,6 +4043,7 @@ export class WorkTurnService {
       ...(turn.response === undefined ? {} : { response: turn.response }),
       ...written,
       ...recordedTasks,
+      ...(reasoningMs === undefined ? {} : { reasoningMs }),
       failure: outcome.failure,
     });
   }
@@ -3900,6 +4057,7 @@ export class WorkTurnService {
       readonly failure?: WorkTurnState["failure"];
       readonly tasks?: ThreadTaskProgressList;
       readonly toolSteps?: ThreadToolSteps;
+      readonly reasoningMs?: number;
       readonly childObservations?: WorkTurnState["childObservations"];
       readonly strictKept?: WorkTurnState["strictKept"];
     },
@@ -3945,6 +4103,7 @@ export class WorkTurnService {
               toolSteps: toolSteps.steps,
               ...(toolSteps.truncated ? { toolStepsTruncated: true } : {}),
             }),
+        ...(update.reasoningMs === undefined ? {} : { reasoningMs: update.reasoningMs }),
         ...(update.strictKept === undefined ? {} : { strictKept: update.strictKept }),
         ...(update.childObservations === undefined
           ? {}
@@ -3960,7 +4119,13 @@ export class WorkTurnService {
   #append(
     requestId: WorkTurnRequestId,
     expectedVersion: number,
-    eventName: "work.turn-accepted@1" | "work.turn-updated@1" | "work.thread-rewound@1",
+    eventName:
+      | "work.turn-accepted@1"
+      | "work.turn-updated@1"
+      | "work.turn-loop-noticed@1"
+      | "work.turn-loop-stopped@1"
+      | "work.turn-stall-noticed@1"
+      | "work.thread-rewound@1",
     payload: unknown,
     // A person's turn is theirs; a turn the host starts on its own (a routine,
     // a usage-limit resume) is the system's, so the journal tells them apart.

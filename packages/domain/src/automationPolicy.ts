@@ -539,8 +539,6 @@ function recurringDueMatchesTrigger(
   return automationScheduledAtMatchesTrigger(trigger, nextDueAt);
 }
 
-export const resolveNextOccurrence = resolveNextAutomationOccurrence;
-
 export interface ReconcileMissedAutomationOccurrencesInput {
   readonly trigger: AutomationTrigger;
   readonly nextDueAt: UtcTimestamp | null;
@@ -634,8 +632,6 @@ export function reconcileMissedAutomationOccurrences(
   return { kind: "reconciled", skipped, claimed, nextDueAt: nextDueAt ?? null };
 }
 
-export const reconcileMissedOccurrences = reconcileMissedAutomationOccurrences;
-
 export interface ScheduledAutomationOccurrenceKeyInput {
   readonly automationId: AutomationId;
   readonly definitionRevision: number;
@@ -679,9 +675,6 @@ export function buildManualAutomationOccurrenceKey(
     return reject("invalid-revision", "Manual occurrence identity is malformed.");
   }
 }
-
-export const buildScheduledOccurrenceKey = buildScheduledAutomationOccurrenceKey;
-export const buildManualOccurrenceKey = buildManualAutomationOccurrenceKey;
 
 const authorityRank: Record<AgentRunAuthority["executionPolicy"], number> = {
   plan: 0,
@@ -781,15 +774,6 @@ export const intersectAuthority = intersectAutomationAuthority;
 
 export function isAutomationMutationAllowed(origin: AutomationOrigin): boolean {
   return origin.kind === "interactive";
-}
-
-export function assertAutomationMutationAllowed(origin: AutomationOrigin): void {
-  if (!isAutomationMutationAllowed(origin)) {
-    reject(
-      "automation-recursion",
-      "Automation-origin execution cannot create, edit, control, or archive an automation.",
-    );
-  }
 }
 
 /** A Work or Code thread's turn that reads or asks about routines, as the host knows it. */
@@ -1236,11 +1220,6 @@ export function validateAutomationDefinition(input: AutomationDefinition): Autom
   }
   return definition;
 }
-
-// Kept as named aliases so callers can describe the policy at either the
-// aggregate or trigger level without creating a second implementation.
-export const validateAutomation = validateAutomationDefinition;
-export const classifyRunNow = classifyAutomationRunNow;
 
 /**
  * How a routine a thread's agent sets up comes to exist. `create-paused`

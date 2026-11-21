@@ -171,6 +171,72 @@ describe("agentRunSettingsRoutes", () => {
     expect(store.current().version).toBe(0);
   });
 
+  it("lets a local window and a person-paired device change keep-awake with journaled old and new values, while refusing hub-introduced and restricted devices", async () => {
+    const { handler, store, token, journal } = createHandler();
+
+    const localChange = await handler(
+      new Request("http://127.0.0.1/api/agent-run-settings", {
+        method: "PUT",
+        headers: {
+          "x-octant-window-capability": token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          creationPosture: "automatic",
+          expectedVersion: 0,
+          resourcePolicy: { ...DEFAULT_HOST_RESOURCE_POLICY, keepAwake: "always" },
+        }),
+      }),
+    );
+    expect(localChange?.status).toBe(200);
+    expect(store.current().resourcePolicy?.keepAwake).toBe("always");
+
+    const pairedChange = await handler(
+      deviceRequest("host-person", "/api/agent-run-settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          creationPosture: "automatic",
+          expectedVersion: 1,
+          resourcePolicy: { ...DEFAULT_HOST_RESOURCE_POLICY, keepAwake: "never" },
+        }),
+      }),
+    );
+    expect(pairedChange?.status).toBe(200);
+    expect(store.current().resourcePolicy?.keepAwake).toBe("never");
+
+    for (const admittedBy of ["hub-roster", undefined] as const) {
+      const refused = await handler(
+        deviceRequest(admittedBy, "/api/agent-run-settings", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            creationPosture: "automatic",
+            expectedVersion: 2,
+            resourcePolicy: { ...DEFAULT_HOST_RESOURCE_POLICY, keepAwake: "on-power" },
+          }),
+        }),
+      );
+      expect(refused?.status).toBe(403);
+    }
+
+    const events = journal.replayAggregateType({
+      aggregateType: "agent-run-settings",
+      afterSequence: 0,
+      limit: 10,
+    });
+    expect(events).toHaveLength(2);
+    expect(events[0]?.payload).toMatchObject({
+      previousKeepAwake: "on-power",
+      resourcePolicy: { keepAwake: "always" },
+    });
+    expect(events[1]?.actor).toEqual({ kind: "remote-device", actorId: deviceId, deviceId });
+    expect(events[1]?.payload).toMatchObject({
+      previousKeepAwake: "always",
+      resourcePolicy: { keepAwake: "never" },
+    });
+  });
+
   it("returns the current settings for an authenticated window", async () => {
     const { handler, token } = createHandler();
     const response = await handler(

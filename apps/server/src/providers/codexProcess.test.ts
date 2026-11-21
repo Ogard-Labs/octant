@@ -2,7 +2,10 @@ import { spawnSync } from "node:child_process";
 import {
   WINDOWS_KEPT_SANDBOX_REFUSAL,
   WINDOWS_SANDBOX_MISSING_REASON,
+  WINDOWS_STRICT_CHAT_REFUSAL,
+  WINDOWS_STRICT_NETWORK_REFUSAL,
   WINDOWS_STRICT_REFUSAL,
+  WINDOWS_STRICT_SHIM_REFUSAL,
 } from "@octant/domain/guardrail-policy";
 import {
   accessSync,
@@ -37,7 +40,9 @@ import {
   type CodexProcessOptions,
 } from "./codexProcess";
 import {
+  buildDenyDefaultSeatbeltProfile,
   makeProcessConfinementLive,
+  ownAccountRoots,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 
@@ -948,6 +953,67 @@ describe("Codex launch confinement", () => {
     expect(captured[1]).not.toHaveProperty("protectedFiles");
   });
 
+  it("grants a Project mentions catalog launch read-only access without widening writes or exempting other providers' credentials", () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "octant-codex-mentions-base-")));
+    const fakeHome = join(base, "home");
+    const codexHome = join(fakeHome, ".codex");
+    const claudeCreds = join(fakeHome, ".claude", ".credentials.json");
+    const openCodeAuth = join(fakeHome, ".local", "share", "opencode", "auth.json");
+    mkdirSync(codexHome, { recursive: true });
+    mkdirSync(join(fakeHome, ".claude"), { recursive: true });
+    mkdirSync(join(fakeHome, ".local", "share", "opencode"), { recursive: true });
+    try {
+      const captured: Array<Parameters<ProcessConfinementPort["prepare"]>[0]> = [];
+      const prepared = prepareCodexLaunch({
+        binaryPath: "/bin/sh",
+        args: ["-c", "true"],
+        authority: { kind: "catalog", readOnlyFolders: [fakeHome] },
+        environment: { HOME: fakeHome, CODEX_HOME: codexHome },
+        confinement: {
+          prepare: (input) => {
+            captured.push(input);
+            return { command: input.executable, args: input.args };
+          },
+        },
+        platform: "darwin",
+      });
+      if (prepared.status === "prepared") prepared.launch.release();
+      expect(captured).toHaveLength(1);
+      const launchInput = captured[0];
+      expect(launchInput).toBeDefined();
+      if (launchInput === undefined) return;
+      expect(launchInput.writeBoundRoot).toBe(false);
+      expect(launchInput.boundRoot).not.toBe(fakeHome);
+      expect(launchInput.extraBoundRoots).toContain(fakeHome);
+      expect(launchInput.privateHomeAllowPaths).toContain(fakeHome);
+      // Must NOT enter readRoots or additionalWriteRoots, which feed own-account exemptions.
+      expect(launchInput.readRoots).not.toContain(fakeHome);
+      expect(launchInput.additionalWriteRoots).not.toContain(fakeHome);
+      const accountRoots = ownAccountRoots(
+        launchInput,
+        launchInput.readRoots ?? [],
+        launchInput.additionalWriteRoots ?? [],
+      );
+      expect(accountRoots).not.toContain(fakeHome);
+      expect(accountRoots).toContain(codexHome);
+
+      const profile = buildDenyDefaultSeatbeltProfile({
+        ...launchInput,
+        homeDirectory: fakeHome,
+        usersDirectory: base,
+      });
+      // Project folder is read-only (denied write) and other providers' credentials stay denied.
+      expect(profile).toContain(`(allow file-read* (subpath "${fakeHome}"))`);
+      expect(profile).toContain(`(deny file-write* (subpath "${fakeHome}"))`);
+      expect(profile).toContain(`(deny file-read* file-write* (subpath "${claudeCreds}"))`);
+      expect(profile).not.toContain(`(allow file-read* (subpath "${claudeCreds}"))`);
+      expect(profile).toContain(`(deny file-read* file-write* (subpath "${openCodeAuth}"))`);
+      expect(profile).not.toContain(`(allow file-read* (subpath "${openCodeAuth}"))`);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
   it("launches Full access as the program itself, with no profile around it", () => {
     const prepared = prepareCodexLaunch({
       binaryPath: "/bin/sh",
@@ -1034,9 +1100,256 @@ describe("Codex launch confinement", () => {
     for (const strict of [true, undefined])
       expect(launch(strict)).toMatchObject({
         status: "refused",
-        failure: { message: WINDOWS_STRICT_REFUSAL },
+        failure: { message: WINDOWS_STRICT_CHAT_REFUSAL },
       });
     expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it("prepares Windows Strict phase 1 confined Codex launches at Full access and refuses shims and proxy-only network without unconfined fallback", () => {
+    const seen: Array<{
+      readonly executable: string;
+      readonly networkEgress: unknown;
+      readonly writeBoundRoot: boolean | undefined;
+      readonly readRoots: ReadonlyArray<string> | undefined;
+      readonly additionalWriteRoots: ReadonlyArray<string> | undefined;
+      readonly explicitReadOnlyRoots: ReadonlyArray<string> | undefined;
+    }> = [];
+    const confinement = {
+      prepare: vi.fn(
+        (input: {
+          readonly executable: string;
+          readonly args: ReadonlyArray<string>;
+          readonly networkEgress: unknown;
+          readonly writeBoundRoot?: boolean;
+          readonly readRoots?: ReadonlyArray<string>;
+          readonly additionalWriteRoots?: ReadonlyArray<string>;
+          readonly explicitReadOnlyRoots?: ReadonlyArray<string>;
+        }) => {
+          seen.push({
+            executable: input.executable,
+            networkEgress: input.networkEgress,
+            writeBoundRoot: input.writeBoundRoot,
+            readRoots: input.readRoots,
+            additionalWriteRoots: input.additionalWriteRoots,
+            explicitReadOnlyRoots: input.explicitReadOnlyRoots,
+          });
+          return {
+            command: "C:\\Program Files\\Octant\\resources\\native\\octant-windows-confine.exe",
+            args: [
+              "--container",
+              "Octant.Confined.0123456789abcdef0123456789abcdef",
+              "--",
+              input.executable,
+              ...input.args,
+            ],
+          };
+        },
+      ),
+    };
+
+    const admitted = prepareCodexLaunch({
+      binaryPath: "C:\\Tools\\Codex\\codex.exe",
+      args: ["app-server"],
+      authority: {
+        kind: "thread",
+        root: "C:\\Work\\repo",
+        mode: "code",
+        executionPolicy: "full-access",
+        strict: true,
+      },
+      environment: { USERPROFILE: "C:\\Users\\Ada", CODEX_HOME: "C:\\Users\\Ada\\.codex" },
+      confinement,
+      platform: "win32",
+    });
+    expect(admitted.status).toBe("prepared");
+    if (admitted.status === "prepared") {
+      expect(admitted.launch.command).toBe(
+        "C:\\Program Files\\Octant\\resources\\native\\octant-windows-confine.exe",
+      );
+      expect(admitted.launch.confined).toBe(true);
+      // Shared CODEX_HOME root, archived_sessions, and shared SQLite state stay
+      // read-only/isolated (`CODEX_SQLITE_HOME` uses launch-private scratch),
+      // while active rollout and log subdirectories stay writable across fresh
+      // follow-up sessions.
+      expect(admitted.launch.environment.CODEX_SQLITE_HOME).toContain("codex-sqlite");
+      admitted.launch.release();
+    }
+    expect(seen).toEqual([
+      {
+        executable: "C:\\Tools\\Codex\\codex.exe",
+        networkEgress: "allow",
+        writeBoundRoot: true,
+        readRoots: ["C:\\Users\\Ada\\.codex"],
+        additionalWriteRoots: ["C:\\Users\\Ada\\.codex\\sessions", "C:\\Users\\Ada\\.codex\\log"],
+        explicitReadOnlyRoots: undefined,
+      },
+    ]);
+    expect(seen[0]?.additionalWriteRoots).not.toContain("C:\\Users\\Ada\\.codex");
+    expect(seen[0]?.additionalWriteRoots).not.toContain(
+      "C:\\Users\\Ada\\.codex\\archived_sessions",
+    );
+    expect(seen[0]?.additionalWriteRoots).not.toContain("C:\\Users\\Ada\\.codex\\sqlite");
+
+    // Confined Windows Strict catalog probe runs with read-only bound root,
+    // read-only CODEX_HOME, zero durable write roots, and scratch SQLite home.
+    const confinedCatalog = prepareCodexLaunch({
+      binaryPath: "C:\\Tools\\Codex\\codex.exe",
+      args: ["app-server"],
+      authority: { kind: "catalog", confinedOnWindows: true },
+      environment: { USERPROFILE: "C:\\Users\\Ada", CODEX_HOME: "C:\\Users\\Ada\\.codex" },
+      confinement,
+      platform: "win32",
+    });
+    expect(confinedCatalog.status).toBe("prepared");
+    if (confinedCatalog.status === "prepared") {
+      expect(confinedCatalog.launch.confined).toBe(true);
+      expect(confinedCatalog.launch.environment.CODEX_SQLITE_HOME).toContain("codex-sqlite");
+      confinedCatalog.launch.release();
+    }
+    expect(seen[1]).toEqual({
+      executable: "C:\\Tools\\Codex\\codex.exe",
+      networkEgress: "allow",
+      writeBoundRoot: false,
+      readRoots: ["C:\\Users\\Ada\\.codex"],
+      additionalWriteRoots: undefined,
+      explicitReadOnlyRoots: undefined,
+    });
+
+    // Command shims refuse before confinement or spawn.
+    const shimRefused = prepareCodexLaunch({
+      binaryPath: "C:\\Tools\\Codex\\codex.cmd",
+      args: ["app-server"],
+      authority: {
+        kind: "thread",
+        root: "C:\\Work\\repo",
+        mode: "work",
+        executionPolicy: "full-access",
+        strict: true,
+      },
+      environment: {},
+      confinement,
+      platform: "win32",
+    });
+    expect(shimRefused).toEqual({
+      status: "refused",
+      failure: { category: "incompatible", message: WINDOWS_STRICT_SHIM_REFUSAL },
+    });
+
+    // Proxy-only network refuses by name rather than falling back to direct network.
+    const proxiedRefused = prepareCodexLaunch({
+      binaryPath: "C:\\Tools\\Codex\\codex.exe",
+      args: ["app-server"],
+      authority: {
+        kind: "thread",
+        root: "C:\\Work\\repo",
+        mode: "code",
+        executionPolicy: "full-access",
+        strict: true,
+      },
+      environment: {},
+      confinement,
+      platform: "win32",
+      network: {
+        endpoint: { kind: "loopback", port: 9000 },
+        environment: { HTTP_PROXY: "http://127.0.0.1:9000" },
+      },
+    });
+    expect(proxiedRefused).toEqual({
+      status: "refused",
+      failure: { category: "incompatible", message: WINDOWS_STRICT_NETWORK_REFUSAL },
+    });
+    // Neither refused call invoked confinement.prepare again.
+    expect(confinement.prepare).toHaveBeenCalledTimes(2);
+  });
+
+  it("admits default %USERPROFILE%\\.codex through the real Windows confinement planner and refuses writable overlaps inside a custom CODEX_HOME", () => {
+    const realWindowsPort = makeProcessConfinementLive({
+      platform: "win32",
+      unverifiedWindowsConfinement: {
+        launcherPath: "C:\\Program Files\\Octant\\resources\\native\\octant-windows-confine.exe",
+        homeDirectory: "C:\\Users\\Ada",
+        launchId: "0123456789abcdef0123456789abcdef",
+        readDirectory: () => [],
+      },
+    });
+    const windowsPlannerPort: ProcessConfinementPort = {
+      prepare: (input) =>
+        realWindowsPort.prepare({
+          ...input,
+          // Replace the host OS scratch path with a Windows path so the real
+          // Windows confinement planner runs identically on macOS/Linux CI.
+          temporaryDirectory: "C:\\Users\\Ada\\AppData\\Local\\Temp\\octant-codex-test",
+        }),
+    };
+
+    const defaultHomePrepared = prepareCodexLaunch({
+      binaryPath: "C:\\Tools\\Codex\\codex.exe",
+      args: ["app-server"],
+      authority: {
+        kind: "thread",
+        root: "C:\\Work\\repo",
+        mode: "code",
+        executionPolicy: "full-access",
+        strict: true,
+      },
+      environment: { USERPROFILE: "C:\\Users\\Ada" },
+      confinement: windowsPlannerPort,
+      platform: "win32",
+    });
+    expect(defaultHomePrepared.status).toBe("prepared");
+    if (defaultHomePrepared.status === "prepared") {
+      expect(defaultHomePrepared.launch.args).toContain("--grant-read");
+      expect(defaultHomePrepared.launch.args).toContain("C:\\Users\\Ada\\.codex");
+      expect(defaultHomePrepared.launch.args).toContain("C:\\Users\\Ada\\.codex\\sessions");
+      expect(defaultHomePrepared.launch.args).toContain("C:\\Users\\Ada\\.codex\\log");
+      expect(defaultHomePrepared.launch.args).not.toContain(
+        "C:\\Users\\Ada\\.codex\\archived_sessions",
+      );
+      expect(defaultHomePrepared.launch.environment.CODEX_SQLITE_HOME).toContain("codex-sqlite");
+      defaultHomePrepared.launch.release();
+    }
+
+    // A writable extra folder inside a custom Codex home (e.g. shared skills)
+    // must be refused so confined turns cannot poison startup authority.
+    const nestedAuthorityRefused = prepareCodexLaunch({
+      binaryPath: "C:\\Tools\\Codex\\codex.exe",
+      args: ["app-server"],
+      authority: {
+        kind: "thread",
+        root: "C:\\Work\\repo",
+        extraFolders: ["C:\\CodexAccounts\\work\\skills"],
+        mode: "code",
+        executionPolicy: "full-access",
+        strict: true,
+      },
+      environment: { USERPROFILE: "C:\\Users\\Ada", CODEX_HOME: "C:\\CodexAccounts\\work" },
+      confinement: windowsPlannerPort,
+      platform: "win32",
+    });
+    expect(nestedAuthorityRefused.status).toBe("refused");
+    if (nestedAuthorityRefused.status === "refused") {
+      expect(nestedAuthorityRefused.failure.message).toMatch(/overlaps CODEX_HOME/);
+    }
+
+    // CODEX_HOME pointing at the user profile root must be refused.
+    const profileHomeRefused = prepareCodexLaunch({
+      binaryPath: "C:\\Tools\\Codex\\codex.exe",
+      args: ["app-server"],
+      authority: {
+        kind: "thread",
+        root: "C:\\Work\\repo",
+        mode: "code",
+        executionPolicy: "full-access",
+        strict: true,
+      },
+      environment: { USERPROFILE: "C:\\Users\\Ada", CODEX_HOME: "C:\\Users\\Ada" },
+      confinement: windowsPlannerPort,
+      platform: "win32",
+    });
+    expect(profileHomeRefused.status).toBe("refused");
+    if (profileHomeRefused.status === "refused") {
+      expect(profileHomeRefused.failure.message).toMatch(/user profile directory/);
+    }
   });
 
   it("reads the Windows catalog unconfined only for a host whose new threads run with no Octant sandbox", () => {

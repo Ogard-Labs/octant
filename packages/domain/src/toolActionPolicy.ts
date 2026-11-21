@@ -2,7 +2,6 @@ import type {
   ToolActionAuthority,
   ToolActionCancellation,
   ToolActionRequest,
-  ToolEvidence,
 } from "@octant/contracts";
 import { sameToolActionAuthority } from "@octant/contracts";
 
@@ -59,14 +58,6 @@ export function authorizeToolAction(
     return { kind: "unauthorized", reason: "extension-mismatch" };
   }
   return { kind: "allowed" };
-}
-
-export function canRecordToolEvidence(request: ToolActionRequest, evidence: ToolEvidence): boolean {
-  return (
-    evidence.actionId === request.actionId &&
-    evidence.correlationId === request.correlationId &&
-    sameToolActionAuthority(evidence.authority, request.authority)
-  );
 }
 
 export function canRequestToolCancellation(

@@ -7,13 +7,11 @@ import {
   type CanvasRedactedProvenance,
   type CanvasStaticExportBlock,
   type CanvasStaticExportDocument,
-  type CanvasStaticExportReceipt,
   type CanvasStaticExportRequest,
   type CanvasStaticExportSourceEntry,
 } from "@octant/contracts/canvas-share";
 import {
   canvasTableRowCells,
-  decodeCanvasVersion,
   type CanvasBarListRow,
   type CanvasChartPoint,
   type CanvasBlock,
@@ -538,91 +536,4 @@ function publicShareSummary(blocks: ReadonlyArray<CanvasStaticExportBlock>): str
   return undefined;
 }
 
-export function buildCanvasStaticExportReceipt(input: {
-  readonly request: unknown;
-  readonly current: unknown;
-  readonly context: CanvasSharePolicyContext;
-}): CanvasStaticExportReceipt {
-  let current: CanvasVersion;
-  try {
-    current = decodeCanvasVersion(input.current);
-  } catch {
-    reject("malformed-request", "Canvas version for export is malformed.");
-  }
-  const request = validateCanvasStaticExportRequest({
-    request: input.request,
-    current,
-    context: input.context,
-  });
-  const exportedAt = input.context.nowIso as UtcTimestamp;
-  const document = buildCanvasStaticExportDocument({
-    request,
-    current,
-    exportedAt,
-  });
-  if (request.note !== undefined) {
-    assertNoSecretShape(request.note, "note");
-  }
-  return {
-    schemaVersion: CANVAS_SHARE_SCHEMA_VERSION,
-    kind: "canvas-static-export-receipt",
-    exportId: request.exportId,
-    canvasId: current.canvasId,
-    versionId: current.versionId,
-    sequence: current.sequence,
-    exportedAt,
-    channel: "static-export",
-    document,
-    consent: request.consent,
-    ...(request.note ? { note: request.note } : {}),
-  };
-}
-
 export const CANVAS_SHARE_THREAT_MODEL_ID = "canvas-share-static-export-v1" as const;
-
-export const CANVAS_SHARE_THREAT_MODEL = {
-  id: CANVAS_SHARE_THREAT_MODEL_ID,
-  title: "Canvas static export threat model",
-  assets: [
-    "Canvas title, blocks, and redacted provenance",
-    "Opaque source references without host paths",
-    "Operator consent receipt",
-  ],
-  nonGoals: [
-    "Authenticated browser snapshots",
-    "Public or anonymous share links",
-    "Cross-host authority or live credential export",
-  ],
-  threats: [
-    {
-      id: "T1",
-      name: "Credential leakage in export payload",
-      mitigation:
-        "Dual consent plus secret-key/value and credential-bearing URL sanitization before document build",
-    },
-    {
-      id: "T2",
-      name: "Path or root disclosure via source manifest",
-      mitigation:
-        "Export only opaqueRef/displayName/kind; drop live source resolution ids from blocks",
-    },
-    {
-      id: "T3",
-      name: "Silent export without operator intent",
-      mitigation:
-        "Require local-user dual consent bound to the authenticated caller on every request",
-    },
-    {
-      id: "T4",
-      name: "Stale or cross-project export",
-      mitigation:
-        "Bind canvasId, versionId, sequence, hostId, and projectId to the authoritative version",
-    },
-    {
-      id: "T5",
-      name: "Sharing disabled bypass",
-      mitigation:
-        "Fail closed when sharingEnabled is false while leaving local Canvas fully usable",
-    },
-  ],
-} as const;

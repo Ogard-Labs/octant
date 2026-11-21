@@ -2617,6 +2617,7 @@ describe("agentRunRoutes", () => {
     });
     expect(resume).toHaveBeenCalledWith(expect.objectContaining({ generation: 2 }), {
       message: "Explain this answer",
+      ownerWindowId: windowId,
     });
     expect((await post({ ...base, message: "duplicate" }))?.status).toBe(409);
     expect(resume).toHaveBeenCalledOnce();

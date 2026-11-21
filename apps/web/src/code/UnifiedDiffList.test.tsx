@@ -55,6 +55,154 @@ describe("UnifiedDiffList", () => {
     expect(number).toHaveClass("h-auto");
   });
 
+  it("renders non-selectable end-of-file newline notices in position so adding and removing a final newline stay distinct", () => {
+    const onSelectLine = vi.fn();
+    const files = parseUnifiedDiff(
+      [
+        "diff --git a/add-eof.txt b/add-eof.txt",
+        "--- a/add-eof.txt",
+        "+++ b/add-eof.txt",
+        "@@ -1 +1 @@",
+        "-hello",
+        "\\ No newline at end of file",
+        "+hello",
+        "diff --git a/remove-eof.txt b/remove-eof.txt",
+        "--- a/remove-eof.txt",
+        "+++ b/remove-eof.txt",
+        "@@ -1 +1 @@",
+        "-hello",
+        "+hello",
+        "\\ No newline at end of file",
+      ].join("\n"),
+    );
+
+    render(<UnifiedDiffList files={files} onSelectLine={onSelectLine} />);
+
+    const addedSection = screen.getByRole("region", { name: "add-eof.txt" });
+    const addedRows = Array.from(addedSection.querySelectorAll("tbody tr"));
+    expect(addedRows.map((row) => row.className)).toEqual([
+      "unified-diff__line",
+      "unified-diff__meta",
+      "unified-diff__line",
+    ]);
+    expect(addedRows[1]).toHaveTextContent("No newline at end of file");
+    expect(addedRows[1]?.getAttribute("data-kind")).toBe("removed");
+    expect(within(addedRows[1] as HTMLElement).queryByRole("button")).not.toBeInTheDocument();
+
+    const removedSection = screen.getByRole("region", { name: "remove-eof.txt" });
+    const removedRows = Array.from(removedSection.querySelectorAll("tbody tr"));
+    expect(removedRows.map((row) => row.className)).toEqual([
+      "unified-diff__line",
+      "unified-diff__line",
+      "unified-diff__meta",
+    ]);
+    expect(removedRows[2]).toHaveTextContent("No newline at end of file");
+    expect(removedRows[2]?.getAttribute("data-kind")).toBe("added");
+    fireEvent.click(removedRows[2] as HTMLElement);
+    expect(onSelectLine).not.toHaveBeenCalled();
+  });
+
+  it("renders creation and deletion mode badges and honest empty-file copy without hiding binary additions", () => {
+    const files = parseUnifiedDiff(
+      [
+        "diff --git a/scripts/empty.sh b/scripts/empty.sh",
+        "new file mode 100755",
+        "index 0000000..e69de29",
+        "diff --git a/obsolete.txt b/obsolete.txt",
+        "deleted file mode 100644",
+        "index e69de29..0000000",
+        "diff --git a/scripts/start.sh b/scripts/start.sh",
+        "new file mode 100755",
+        "index 0000000..abcdef1",
+        "--- /dev/null",
+        "+++ b/scripts/start.sh",
+        "@@ -0,0 +1 @@",
+        "+#!/bin/sh",
+        "diff --git a/assets/new.png b/assets/new.png",
+        "new file mode 100644",
+        "index 0000000..1234567",
+        "Binary files /dev/null and b/assets/new.png differ",
+      ].join("\n"),
+    );
+
+    render(<UnifiedDiffList files={files} onOpenFile={vi.fn()} />);
+
+    const emptyAdded = screen.getByRole("region", { name: "scripts/empty.sh" });
+    expect(within(emptyAdded).getByText("new mode 100755")).toBeVisible();
+    expect(within(emptyAdded).getByText("added")).toBeVisible();
+    expect(within(emptyAdded).getByText("Empty file added.")).toBeVisible();
+
+    const emptyDeleted = screen.getByRole("region", { name: "obsolete.txt" });
+    expect(within(emptyDeleted).getByText("deleted mode 100644")).toBeVisible();
+    expect(within(emptyDeleted).getByText("deleted")).toBeVisible();
+    expect(within(emptyDeleted).getByText("Empty file deleted.")).toBeVisible();
+    expect(within(emptyDeleted).queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
+
+    const executableAdded = screen.getByRole("region", { name: "scripts/start.sh" });
+    expect(within(executableAdded).getByText("new mode 100755")).toBeVisible();
+    expect(within(executableAdded).getByText("added")).toBeVisible();
+    expect(within(executableAdded).getByText("#!/bin/sh")).toBeVisible();
+
+    const binaryAdded = screen.getByRole("region", { name: "assets/new.png" });
+    expect(within(binaryAdded).getByText("new mode 100644")).toBeVisible();
+    expect(within(binaryAdded).getByText("added")).toBeVisible();
+    expect(
+      within(binaryAdded).getByText(
+        "This file changed without a textual diff, so there is nothing to compare.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("renders deleted mode and empty deleted copy for an empty deleted file whose path contains spaces", () => {
+    const files = parseUnifiedDiff(
+      [
+        "diff --git a/my file.txt b/my file.txt",
+        "deleted file mode 100644",
+        "index e69de29..0000000",
+      ].join("\n"),
+    );
+
+    render(<UnifiedDiffList files={files} onOpenFile={vi.fn()} />);
+
+    const deletedSection = screen.getByRole("region", { name: "my file.txt" });
+    expect(within(deletedSection).getByText("deleted mode 100644")).toBeVisible();
+    expect(within(deletedSection).queryByText(/new mode/i)).not.toBeInTheDocument();
+    expect(within(deletedSection).getByText("deleted")).toBeVisible();
+    expect(within(deletedSection).getByText("Empty file deleted.")).toBeVisible();
+    expect(within(deletedSection).queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
+  });
+
+  it("omits Open and Provider checkpoint buttons when a diff file has a non-UTF-8 path", () => {
+    const files = parseUnifiedDiff(
+      [
+        'diff --git "a/file-\\303.txt" "b/file-\\303.txt"',
+        '--- "a/file-\\303.txt"',
+        '+++ "b/file-\\303.txt"',
+        "@@ -1 +1 @@",
+        "-a",
+        "+b",
+        'diff --git "a/file-\\357\\277\\275.txt" "b/file-\\357\\277\\275.txt"',
+        '--- "a/file-\\357\\277\\275.txt"',
+        '+++ "b/file-\\357\\277\\275.txt"',
+        "@@ -1 +1 @@",
+        "-c",
+        "+d",
+      ].join("\n"),
+    );
+
+    render(<UnifiedDiffList files={files} onOpenFile={vi.fn()} onReadProviderFile={vi.fn()} />);
+
+    const invalidSection = screen.getByRole("region", { name: "file-\\303.txt" });
+    expect(within(invalidSection).queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
+    expect(
+      within(invalidSection).queryByRole("button", { name: "Provider checkpoint" }),
+    ).not.toBeInTheDocument();
+
+    const validSection = screen.getByRole("region", { name: "file-\uFFFD.txt" });
+    expect(within(validSection).getByRole("button", { name: "Open" })).toBeVisible();
+    expect(within(validSection).getByRole("button", { name: "Provider checkpoint" })).toBeVisible();
+  });
+
   it("virtualizes large single-file diffs to bounded DOM rows while scrolling", () => {
     const lines = Array.from(
       { length: 600 },

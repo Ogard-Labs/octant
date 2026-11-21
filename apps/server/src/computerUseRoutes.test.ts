@@ -60,6 +60,7 @@ function fixture() {
     stop: vi.fn(async () => ({ ...terminalView, state: "stopped" as const })),
     listForHostPerson: vi.fn(() => [view]),
     inspectForHostPerson: vi.fn(() => view),
+    decideForHostPerson: vi.fn(async () => ({ ...terminalView, state: "completed" as const })),
     stopForHostPerson: vi.fn(async () => ({ ...terminalView, state: "stopped" as const })),
   };
   return {
@@ -130,6 +131,33 @@ describe("computer-use lifecycle routes", () => {
     // The window-scoped lookups are never used for the person's device.
     expect(runtime.list).not.toHaveBeenCalled();
     expect(runtime.stop).not.toHaveBeenCalled();
+  });
+
+  it("admits Project-remembered approval from a person-paired device and refuses hub-introduced or unproved devices", async () => {
+    const { handle, runtime } = fixture();
+    const decision = {
+      ...scope,
+      actionId: view.pendingApproval!.actionId,
+      approvalId: view.pendingApproval!.approvalId,
+      decision: "approved",
+      rememberForProject: true,
+    } satisfies ComputerUseApprovalDecisionRequest;
+
+    const approved = await handle(
+      deviceRequest("/api/computer-use/approvals", decision, "host-person"),
+    );
+    expect(approved?.status).toBe(200);
+    expect(runtime.decideForHostPerson).toHaveBeenCalledWith(decision, {
+      deviceId: String(deviceId),
+    });
+    expect(runtime.decide).not.toHaveBeenCalled();
+
+    for (const admittedBy of ["hub-roster", undefined] as const) {
+      expect(
+        (await handle(deviceRequest("/api/computer-use/approvals", decision, admittedBy)))?.status,
+      ).toBe(403);
+    }
+    expect(runtime.decideForHostPerson).toHaveBeenCalledOnce();
   });
 
   it("refuses to stop computer use for a device the hub's roster introduced, an unproved pairing, or a caller with no session", async () => {

@@ -51,6 +51,8 @@ const configured: VoiceSettings = {
   },
 };
 
+import { createSpeechGates } from "./speechGates";
+
 function setup(
   options: {
     readonly settings?: VoiceSettings;
@@ -72,15 +74,31 @@ function setup(
         mediaType: "audio/mpeg",
       })),
   );
+  const gates = createSpeechGates();
   const handler = createSpeechRouteHandler({
+    gates,
     readVoiceSettings: () => options.settings ?? configured,
     listInstances: () => options.instances ?? [compatible()],
     windowAuthorityStore,
     makeAdapter: () => ({ transcribe, synthesize }),
     now: options.now ?? (() => nowMs),
   });
-  return { handler, transcribe, synthesize };
+  return { handler, transcribe, synthesize, gates };
 }
+
+it("reserves a dictation slot even while an agent is transcribing", async () => {
+  const { handler, gates } = setup();
+  const agent = gates.transcription.tryAcquire("shared");
+  expect(agent).toBeTypeOf("function");
+  expect(gates.transcription.tryAcquire("shared")).toBeNull();
+  const local = gates.transcription.tryAcquire("local");
+  const dictate = () =>
+    handler(request("/api/speech/transcriptions", { method: "POST", body: clip() }));
+  expect((await dictate())?.status).toBe(503);
+  local?.();
+  expect((await dictate())?.status).toBe(200);
+  agent?.();
+});
 
 function request(
   path: string,

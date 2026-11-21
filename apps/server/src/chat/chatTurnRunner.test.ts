@@ -16,6 +16,7 @@ import {
   decodeProviderSessionId,
   type ChatAttempt,
   type ChatThread,
+  type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { Effect, Fiber, Queue, Stream } from "effect";
 import type { ProviderAcquireInput, ProviderDriver } from "@octant/provider-sdk/driver";
@@ -26,6 +27,7 @@ import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { RecordExternalContentIngestion } from "../context/inheritedExternalContentMark";
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { ChatTurnRunner } from "./chatTurnRunner";
+import type { TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { createWebSearchTools } from "./research/webSearchTools";
 
 const now = "2026-07-19T22:00:00.000Z";
@@ -3825,6 +3827,8 @@ describe("ChatTurnRunner", () => {
         readonly result: unknown;
         readonly isError?: boolean;
       }>;
+      readonly clock?: () => string;
+      readonly toolEffects?: TurnToolEffects;
     } = {},
   ) {
     const attempts: Array<ChatAttempt> = [];
@@ -3881,6 +3885,8 @@ describe("ChatTurnRunner", () => {
           estimatedTokens: 100,
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
+          ...(extra.clock === undefined ? {} : { clock: extra.clock }),
+          ...(extra.toolEffects === undefined ? {} : { toolEffects: extra.toolEffects }),
           ...(extra.toolStepLimit === undefined ? {} : { toolStepLimit: extra.toolStepLimit }),
           ...(extra.execute === undefined
             ? {}
@@ -3936,6 +3942,97 @@ describe("ChatTurnRunner", () => {
     expect(attempts.at(-1)?.toolSteps).toHaveLength(2);
   });
 
+  it("journals each call's measured bounds and the reasoning total, once each, from the provider's own stamps", async () => {
+    const { attempts, steps } = await runToolTurn([
+      {
+        kind: "reasoning-delta",
+        text: "Thinking",
+        occurredAt: "2026-08-11T12:00:00.000Z",
+      },
+      {
+        kind: "tool-start",
+        toolCallId: "call-1",
+        toolName: "Web search",
+        occurredAt: "2026-08-11T12:00:02.000Z",
+      },
+      {
+        kind: "tool-start",
+        toolCallId: "call-2",
+        toolName: "Fetch page",
+        occurredAt: "2026-08-11T12:00:03.000Z",
+      },
+      {
+        kind: "tool-success",
+        toolCallId: "call-1",
+        summary: "3 results",
+        occurredAt: "2026-08-11T12:00:05.000Z",
+      },
+      {
+        kind: "tool-failure",
+        toolCallId: "call-2",
+        message: "Timed out",
+        occurredAt: "2026-08-11T12:00:07.000Z",
+      },
+    ]);
+    // The reasoning span closed at the first non-reasoning event: its total
+    // is journaled on the small step frame and on every later whole attempt.
+    expect(attempts.at(-1)?.reasoningMs).toBe(2_000);
+    expect(steps.some(({ step }) => step === undefined)).toBe(true);
+    expect(attempts.at(-1)?.toolSteps).toEqual([
+      {
+        toolCallId: "call-1",
+        toolName: "Web search",
+        state: "completed",
+        summary: "3 results",
+        timing: {
+          startedAt: "2026-08-11T12:00:02.000Z",
+          endedAt: "2026-08-11T12:00:05.000Z",
+        },
+      },
+      {
+        toolCallId: "call-2",
+        toolName: "Fetch page",
+        state: "failed",
+        summary: "Timed out",
+        timing: {
+          startedAt: "2026-08-11T12:00:03.000Z",
+          endedAt: "2026-08-11T12:00:07.000Z",
+        },
+      },
+    ]);
+  });
+
+  it("bills no approval wait: an attempt declines its native asks itself, and unstamped events time nothing", async () => {
+    const { attempts, steps } = await runToolTurn([
+      { kind: "tool-start", toolCallId: "call-1", toolName: "Web search" },
+      {
+        kind: "approval-request",
+        requestId: "ask-1",
+        action: "run",
+        description: "Search the web",
+        toolCallId: "call-1",
+      },
+      { kind: "tool-success", toolCallId: "call-1", summary: "3 results" },
+    ]);
+    // No stamps, no invented bounds: the step ends untimed, and the
+    // auto-denied ask left no person wait to subtract anyway.
+    expect(attempts.at(-1)?.toolSteps).toEqual([
+      { toolCallId: "call-1", toolName: "Web search", state: "completed", summary: "3 results" },
+    ]);
+    expect(attempts.at(-1)?.reasoningMs).toBeUndefined();
+    expect(steps.every(({ step }) => step === undefined || !("timing" in (step as object)))).toBe(
+      true,
+    );
+  });
+
+  it("keeps the reasoning total off attempts whose events carry no trustworthy stamps", async () => {
+    const { attempts } = await runToolTurn([
+      { kind: "reasoning-delta", text: "Thinking" },
+      { kind: "text-delta", text: "Working" },
+    ]);
+    expect(attempts.at(-1)?.reasoningMs).toBeUndefined();
+  });
+
   it("keeps as many tool calls as the person's limit and says once that the attempt called more", async () => {
     const { attempts, steps } = await runToolTurn(
       Array.from({ length: 5 }, (_unused, index) => ({
@@ -3960,6 +4057,9 @@ describe("ChatTurnRunner", () => {
       ],
       {
         driverKind: "openai-compatible",
+        // The recorded call is what makes the execute bounds trustworthy: a
+        // person's wait inside them is measured and subtracted, not guessed.
+        toolEffects: { tools: (set) => set, observe: () => undefined },
         execute: async ({ name }) =>
           name === "read-file"
             ? { result: { text: "hello" } }
@@ -3968,13 +4068,88 @@ describe("ChatTurnRunner", () => {
     );
     expect(steps.map(({ step }) => step)).toEqual([
       { toolCallId: "call-1", toolName: "read-file", state: "started" },
-      { toolCallId: "call-1", toolName: "read-file", state: "completed" },
+      {
+        toolCallId: "call-1",
+        toolName: "read-file",
+        state: "completed",
+        // A call Octant ran itself is timed from its own execute bounds.
+        timing: { startedAt: expect.any(String), endedAt: expect.any(String) },
+      },
       { toolCallId: "call-2", toolName: "run-command", state: "started" },
-      { toolCallId: "call-2", toolName: "run-command", state: "failed" },
+      {
+        toolCallId: "call-2",
+        toolName: "run-command",
+        state: "failed",
+        timing: { startedAt: expect.any(String), endedAt: expect.any(String) },
+      },
     ]);
     expect(attempts.at(-1)?.toolSteps).toEqual([
+      {
+        toolCallId: "call-1",
+        toolName: "read-file",
+        state: "completed",
+        timing: { startedAt: expect.any(String), endedAt: expect.any(String) },
+      },
+      {
+        toolCallId: "call-2",
+        toolName: "run-command",
+        state: "failed",
+        timing: { startedAt: expect.any(String), endedAt: expect.any(String) },
+      },
+    ]);
+  });
+
+  it("times an app tool's own bounds apart from the person's wait inside it, or not at all", async () => {
+    let nowMs = Date.parse("2026-08-11T12:00:00.000Z");
+    // The recorded-call wrapper reports the wait the host measured, exactly
+    // as the tool-effects ledger does when a call asks a person inside it.
+    const toolEffects = {
+      tools: (set: { execute: (call: never) => Promise<unknown> }) => ({
+        ...set,
+        execute: async (call: { onApprovalWait?: (waitMs: number) => void }) => {
+          const result = await set.execute(call as never);
+          call.onApprovalWait?.(240_000);
+          return result;
+        },
+      }),
+      observe: () => undefined,
+    } as const;
+    const { attempts } = await runToolTurn(
+      [{ kind: "tool-request", requestId: "call-1", toolName: "read-file", inputJson: "{}" }],
+      {
+        driverKind: "openai-compatible",
+        clock: () => new Date(nowMs).toISOString(),
+        toolEffects: toolEffects as never,
+        execute: async () => {
+          // Four minutes asking, two seconds doing: the row shows both apart.
+          nowMs += 242_000;
+          return { result: { text: "hello" } };
+        },
+      },
+    );
+    expect(attempts.at(-1)?.toolSteps).toEqual([
+      {
+        toolCallId: "call-1",
+        toolName: "read-file",
+        state: "completed",
+        timing: {
+          startedAt: "2026-08-11T12:00:00.000Z",
+          endedAt: "2026-08-11T12:04:02.000Z",
+          approvalWaitMs: 240_000,
+        },
+      },
+    ]);
+    // With no recorded call the same bounds would hide a wait inside them,
+    // so the step ends untimed.
+    const unrecorded = await runToolTurn(
+      [{ kind: "tool-request", requestId: "call-1", toolName: "read-file", inputJson: "{}" }],
+      {
+        driverKind: "openai-compatible",
+        execute: async () => ({ result: { text: "hello" } }),
+      },
+    );
+    expect(unrecorded.attempts.at(-1)?.toolSteps).toEqual([
       { toolCallId: "call-1", toolName: "read-file", state: "completed" },
-      { toolCallId: "call-2", toolName: "run-command", state: "failed" },
     ]);
   });
 
@@ -5007,6 +5182,365 @@ describe("ChatTurnRunner", () => {
 
       advance(15_000);
       expect((await turn("reply")).last?.outcome).toBe("completed");
+    });
+  });
+
+  describe("loop and stall notices", () => {
+    it("warns on the 3rd identical Octant tool call, notices at the 6th outside Strict without stopping, and completes", async () => {
+      const answered: Array<{
+        readonly requestId: string;
+        readonly resultJson: string;
+        readonly isError: boolean;
+      }> = [];
+      const loopNotices: Array<{
+        readonly kind: string;
+        readonly toolName: string;
+        readonly count: number;
+      }> = [];
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = {
+        subscribe: Effect.succeed(Stream.fromQueue(queue)),
+        start: () => Effect.succeed({ sessionId }),
+        send: () =>
+          Effect.gen(function* () {
+            for (let i = 1; i <= 6; i += 1) {
+              yield* Queue.offer(queue, {
+                instanceId: providerInstanceId,
+                sessionId,
+                sequence: i,
+                correlationId: "82000000-0000-4000-8000-000000000099",
+                occurredAt: "2026-11-19T12:00:00.000Z",
+                kind: "tool-request",
+                requestId: `req-${i}`,
+                toolName: "octant_lookup",
+                inputJson: i % 2 === 0 ? '{"b":2,"a":1}' : '{"a":1,"b":2}',
+              } as ProviderRuntimeEvent);
+            }
+            yield* Queue.offer(queue, {
+              instanceId: providerInstanceId,
+              sessionId,
+              sequence: 7,
+              correlationId: "82000000-0000-4000-8000-000000000099",
+              occurredAt: "2026-11-19T12:00:01.000Z",
+              kind: "text-delta",
+              text: "Finished.",
+            } as ProviderRuntimeEvent);
+            yield* Queue.offer(queue, {
+              instanceId: providerInstanceId,
+              sessionId,
+              sequence: 8,
+              correlationId: "82000000-0000-4000-8000-000000000099",
+              occurredAt: "2026-11-19T12:00:02.000Z",
+              kind: "completed",
+            } as ProviderRuntimeEvent);
+          }),
+        interrupt: vi.fn(() => Effect.void),
+        stop: () => Effect.void,
+        answerApproval: () => Effect.void,
+        answerUserInput: () => Effect.void,
+        answerTool: (answer: {
+          readonly requestId: string;
+          readonly resultJson: string;
+          readonly isError: boolean;
+        }) =>
+          Effect.sync(() => {
+            answered.push(answer);
+          }),
+      };
+      const { scheduler, reservation } = makeScheduler();
+      const runner = new ChatTurnRunner({
+        capacityScheduler: scheduler,
+        contextHarness: makeHarness(),
+        researchRouter: new ResearchRouter({
+          webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        }),
+      });
+      const updates: ChatAttempt[] = [];
+      let executed = 0;
+
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          runner.run({
+            thread: thread(),
+            attempt: attempt(),
+            prompt: "check it",
+            scratchRoot: "/tmp/octant-scratch/thread",
+            driver: {
+              kind: "openai-compatible",
+              acquire: () => Effect.succeed(connection),
+            } as never,
+            providerInstanceId,
+            serviceLimits: serviceLimits(),
+            contextSubject: subject,
+            contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+            requestShape: "chat-turn",
+            varianceReserve: 20,
+            reservationId: reservation,
+            estimatedTokens: 100,
+            researchRoute: researchRoute({ kind: "disabled" }),
+            attachments: [],
+            strict: false,
+            appManagedTools: {
+              definitions: [
+                {
+                  name: "octant_lookup",
+                  description: "Lookup",
+                  inputSchema: {},
+                },
+              ],
+              execute: async () => {
+                executed += 1;
+                return { result: { value: executed }, isError: false };
+              },
+            },
+            persistAttempt: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistAppendedResponse: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistLoopNotice: (_attempt, notice) => {
+              loopNotices.push(notice);
+              return Effect.void;
+            },
+            persistResponse: () =>
+              Effect.succeed({
+                contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                digest: "c".repeat(64),
+                byteLength: 9,
+              }),
+          }),
+        ),
+      );
+
+      expect(exit._tag).toBe("Success");
+      expect(executed).toBe(6);
+      expect(connection.interrupt).not.toHaveBeenCalled();
+      expect(loopNotices).toEqual([
+        expect.objectContaining({
+          kind: "turn-loop-noticed",
+          toolName: "octant_lookup",
+          count: 6,
+        }),
+      ]);
+      // The 3rd call ran and kept its real result while adding one informational sentence.
+      expect(JSON.parse(answered[2]?.resultJson ?? "{}")).toEqual({
+        value: 3,
+        notice: "This tool has been called with the same input three times in a row.",
+      });
+      expect(answered[2]?.isError).toBe(false);
+      // Other calls do not carry the warning.
+      expect(JSON.parse(answered[1]?.resultJson ?? "{}")).toEqual({ value: 2 });
+      expect(JSON.parse(answered[3]?.resultJson ?? "{}")).toEqual({ value: 4 });
+      expect(updates.at(-1)?.outcome).toBe("completed");
+    });
+
+    it("stops the turn and records turn-loop-stopped on the 6th identical call under Strict", async () => {
+      const loopNotices: Array<{
+        readonly kind: string;
+        readonly toolName: string;
+        readonly count: number;
+      }> = [];
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const interrupt = vi.fn(() => Effect.void);
+      const connection = {
+        subscribe: Effect.succeed(Stream.fromQueue(queue)),
+        start: () => Effect.succeed({ sessionId }),
+        send: () =>
+          Effect.gen(function* () {
+            for (let i = 1; i <= 6; i += 1) {
+              yield* Queue.offer(queue, {
+                instanceId: providerInstanceId,
+                sessionId,
+                sequence: i,
+                correlationId: "82000000-0000-4000-8000-000000000099",
+                occurredAt: "2026-11-19T12:00:00.000Z",
+                kind: "tool-request",
+                requestId: `req-${i}`,
+                toolName: "octant_lookup",
+                inputJson: '{"a":1}',
+              } as ProviderRuntimeEvent);
+            }
+          }),
+        interrupt,
+        stop: () => Effect.void,
+        answerApproval: () => Effect.void,
+        answerUserInput: () => Effect.void,
+        answerTool: () => Effect.void,
+      };
+      const { scheduler, reservation } = makeScheduler();
+      const runner = new ChatTurnRunner({
+        capacityScheduler: scheduler,
+        contextHarness: makeHarness(),
+        researchRouter: new ResearchRouter({
+          webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        }),
+      });
+      const updates: ChatAttempt[] = [];
+      let executed = 0;
+
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          runner.run({
+            thread: thread(),
+            attempt: attempt(),
+            prompt: "check it",
+            scratchRoot: "/tmp/octant-scratch/thread",
+            driver: {
+              kind: "openai-compatible",
+              acquire: () => Effect.succeed(connection),
+            } as never,
+            providerInstanceId,
+            serviceLimits: serviceLimits(),
+            contextSubject: subject,
+            contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+            requestShape: "chat-turn",
+            varianceReserve: 20,
+            reservationId: reservation,
+            estimatedTokens: 100,
+            researchRoute: researchRoute({ kind: "disabled" }),
+            attachments: [],
+            strict: true,
+            appManagedTools: {
+              definitions: [{ name: "octant_lookup", description: "Lookup", inputSchema: {} }],
+              execute: async () => {
+                executed += 1;
+                return { result: { value: executed }, isError: false };
+              },
+            },
+            persistAttempt: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistAppendedResponse: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistLoopNotice: (_attempt, notice) => {
+              loopNotices.push(notice);
+              return Effect.void;
+            },
+            persistResponse: () =>
+              Effect.succeed({
+                contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                digest: "c".repeat(64),
+                byteLength: 5,
+              }),
+          }),
+        ),
+      );
+
+      expect(exit._tag).toBe("Failure");
+      expect(executed).toBe(5);
+      expect(interrupt).toHaveBeenCalledWith(sessionId);
+      expect(loopNotices).toEqual([
+        expect.objectContaining({
+          kind: "turn-loop-stopped",
+          toolName: "octant_lookup",
+          count: 6,
+        }),
+      ]);
+      expect(updates.at(-1)?.outcome).toBe("interrupted");
+    });
+
+    it("notices silence past the stalled-turn limit outside Strict without stopping the turn", async () => {
+      const stallNotices: Array<{ readonly kind: string; readonly idleMs: number }> = [];
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const interrupt = vi.fn(() => Effect.void);
+      const connection = {
+        subscribe: Effect.succeed(Stream.fromQueue(queue)),
+        start: () => Effect.succeed({ sessionId }),
+        send: () =>
+          Effect.gen(function* () {
+            // Stay silent past the 20ms limit, then deliver the reply.
+            yield* Effect.sleep(60);
+            yield* Queue.offer(queue, {
+              instanceId: providerInstanceId,
+              sessionId,
+              sequence: 1,
+              correlationId: "82000000-0000-4000-8000-000000000099",
+              occurredAt: "2026-11-19T12:00:01.000Z",
+              kind: "text-delta",
+              text: "Back again.",
+            } as ProviderRuntimeEvent);
+            yield* Queue.offer(queue, {
+              instanceId: providerInstanceId,
+              sessionId,
+              sequence: 2,
+              correlationId: "82000000-0000-4000-8000-000000000099",
+              occurredAt: "2026-11-19T12:00:02.000Z",
+              kind: "completed",
+            } as ProviderRuntimeEvent);
+          }),
+        interrupt,
+        stop: () => Effect.void,
+        answerApproval: () => Effect.void,
+        answerUserInput: () => Effect.void,
+        answerTool: () => Effect.void,
+      };
+      const { scheduler, reservation } = makeScheduler();
+      const runner = new ChatTurnRunner({
+        capacityScheduler: scheduler,
+        contextHarness: makeHarness(),
+        researchRouter: new ResearchRouter({
+          webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        }),
+        stalledTurnLimitMs: () => 20,
+      });
+      const updates: ChatAttempt[] = [];
+
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          runner.run({
+            thread: thread(),
+            attempt: attempt(),
+            prompt: "hello",
+            scratchRoot: "/tmp/octant-scratch/thread",
+            driver: {
+              kind: "openai-compatible",
+              acquire: () => Effect.succeed(connection),
+            } as never,
+            providerInstanceId,
+            serviceLimits: serviceLimits(),
+            contextSubject: subject,
+            contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+            requestShape: "chat-turn",
+            varianceReserve: 20,
+            reservationId: reservation,
+            estimatedTokens: 100,
+            researchRoute: researchRoute({ kind: "disabled" }),
+            attachments: [],
+            strict: false,
+            persistAttempt: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistAppendedResponse: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistStallNotice: (_attempt, notice) => {
+              stallNotices.push(notice);
+              return Effect.void;
+            },
+            persistResponse: () =>
+              Effect.succeed({
+                contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                digest: "c".repeat(64),
+                byteLength: 11,
+              }),
+          }),
+        ),
+      );
+
+      expect(exit._tag).toBe("Success");
+      expect(interrupt).not.toHaveBeenCalled();
+      expect(stallNotices).toEqual([
+        expect.objectContaining({ kind: "turn-stall-noticed", idleMs: 20 }),
+      ]);
+      expect(updates.at(-1)?.outcome).toBe("completed");
     });
   });
 });

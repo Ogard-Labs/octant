@@ -223,12 +223,6 @@ export const THREAD_CHECKPOINT_EVENT_SCHEMAS = {
   "checkpoint.restored@1": ThreadCheckpointRestored,
 } as const;
 
-export const THREAD_CHECKPOINT_EVENT_NAMES = Object.freeze(
-  Object.keys(THREAD_CHECKPOINT_EVENT_SCHEMAS),
-) as ReadonlyArray<keyof typeof THREAD_CHECKPOINT_EVENT_SCHEMAS>;
-
-export const THREAD_CHECKPOINT_AGGREGATE_TYPE = "thread-checkpoint";
-
 export const decodeThreadCheckpointId = Schema.decodeUnknownSync(ThreadCheckpointId);
 export const decodeThreadCheckpointAnchor = Schema.decodeUnknownSync(ThreadCheckpointAnchor);
 export const decodeThreadCheckpoint = Schema.decodeUnknownSync(ThreadCheckpoint);

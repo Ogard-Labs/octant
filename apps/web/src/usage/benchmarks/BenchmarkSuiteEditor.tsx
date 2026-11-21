@@ -1,6 +1,7 @@
 import { OctantCheckbox } from "../../ui/base/OctantCheckbox";
 import { Plus, Trash2 } from "../../ui/icons";
-import { useState, type ReactNode } from "react";
+import { useContext, useState, type ReactNode } from "react";
+import { BenchmarkAdviceContext } from "./BenchmarkAdviceContext";
 import type { BenchmarkRegexFlags } from "@octant/contracts";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
@@ -53,9 +54,16 @@ function Field(props: { readonly label: string; readonly children: ReactNode }) 
  * on what a valid suite is, so a refusal always comes back as a sentence.
  */
 export function BenchmarkSuiteEditor(props: BenchmarkSuiteEditorProps) {
+  const advice = useContext(BenchmarkAdviceContext);
   const [draft, setDraft] = useState(props.initial);
   const [message, setMessage] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState(false);
+  const projectOptions = (advice?.projects ?? [])
+    .filter((project) => project.type === draft.kind)
+    .map((project) => ({ id: String(project.id), label: project.name }));
+  if (draft.projectId !== "" && !projectOptions.some((project) => project.id === draft.projectId)) {
+    projectOptions.push({ id: draft.projectId, label: "Unavailable Project" });
+  }
 
   const updateCase = (key: string, patch: Partial<CaseDraft>) =>
     setDraft((current) => ({
@@ -116,6 +124,40 @@ export function BenchmarkSuiteEditor(props: BenchmarkSuiteEditorProps) {
             onChange={(event) => setDraft({ ...draft, description: event.currentTarget.value })}
             rows={2}
             value={draft.description}
+          />
+        </Field>
+        <Field label="Passing threshold (%)">
+          <OctantInput
+            aria-label="Passing threshold (%)"
+            min={0}
+            max={100}
+            type="number"
+            value={draft.passPercentage}
+            onChange={(event) => setDraft({ ...draft, passPercentage: event.currentTarget.value })}
+          />
+        </Field>
+        <Field label="Suggest in">
+          <OctantSelectField
+            aria-label="Suggestion kind"
+            options={[
+              { id: "chat", label: "Chat" },
+              { id: "work", label: "Work" },
+              { id: "code", label: "Code" },
+            ]}
+            value={draft.kind}
+            onValueChange={(kind) => {
+              if (kind === "chat" || kind === "work" || kind === "code") {
+                setDraft({ ...draft, kind, projectId: "" });
+              }
+            }}
+          />
+        </Field>
+        <Field label="Suggestion Project">
+          <OctantSelectField
+            aria-label="Suggestion Project"
+            options={[{ id: "none", label: "None" }, ...projectOptions]}
+            value={draft.projectId || "none"}
+            onValueChange={(id) => setDraft({ ...draft, projectId: id === "none" ? "" : id })}
           />
         </Field>
       </SurfaceSection>

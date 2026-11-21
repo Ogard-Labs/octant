@@ -79,6 +79,21 @@ export interface ServerConnectionOptions {
   readonly refuses?: (server: ServerAddress) => string | undefined;
 }
 
+/** Shown to a paired device when a server's SSH key requires local confirmation or hardware touch. */
+export const SSH_KEY_CONFIRMATION_MESSAGE =
+  "This server's key needs a confirmation at this computer.";
+
+/**
+ * Whether OpenSSH failed because the person's SSH agent or hardware security key
+ * needs an interactive confirmation or touch at this computer, which cannot be
+ * answered from a paired device under `BatchMode=yes`.
+ */
+export function sshNeedsHostKeyConfirmation(errorText: string): boolean {
+  return /agent refused operation|confirm user presence|user presence|requires? confirmation|confirmation required|touch.*key|sk_sign.*refused/i.test(
+    errorText,
+  );
+}
+
 /** The name a pinned server's keys are recorded under, so its alias never has to be a host pattern. */
 const PINNED_HOST_KEY_ALIAS = "octant-pinned-host";
 
@@ -263,9 +278,22 @@ export class ServerConnection {
   #controlDirectory: string | undefined;
   /** What each pinned file holds now, so an unchanged pin is not rewritten on every call. */
   readonly #pinnedWritten = new Map<string, string>();
+  readonly #connectedListeners = new Set<(server: ServerAddress) => void>();
 
   constructor(options: ServerConnectionOptions) {
     this.#options = options;
+  }
+
+  /**
+   * Notified whenever a regular SSH call reaches the server (`status === "ran"`).
+   * Read-only setup diagnostics (`freshConnection: true`) never trigger this so
+   * diagnostics never mutate server or journal state.
+   */
+  subscribeConnected(listener: (server: ServerAddress) => void): () => void {
+    this.#connectedListeners.add(listener);
+    return () => {
+      this.#connectedListeners.delete(listener);
+    };
   }
 
   /** Why no call may go to this server now, or nothing. */
@@ -457,6 +485,15 @@ export class ServerConnection {
           return;
         }
         finish({ status: "ran", exitCode: code ?? 1, output, truncated, errorOutput: errorText });
+        if (input.freshConnection !== true) {
+          for (const listener of this.#connectedListeners) {
+            try {
+              listener(server);
+            } catch {
+              // A listener failure never disrupts the SSH call that succeeded.
+            }
+          }
+        }
       });
     });
   }

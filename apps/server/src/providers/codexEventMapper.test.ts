@@ -1609,6 +1609,56 @@ describe("mapCodexMessage", () => {
     }
   });
 
+  it("bills an approval to the parent call's own step id", () => {
+    const ctx = context();
+    map(
+      ctx,
+      notification("item/started", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: commandItem,
+        startedAtMs: 10,
+      }),
+    );
+    const [result] = map(ctx, {
+      kind: "request" as const,
+      id: 12,
+      method: "item/commandExecution/requestApproval" as const,
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "provider-command-1",
+        startedAtMs: 11,
+        environmentId: null,
+      },
+    });
+    expect(result).toMatchObject({
+      kind: "approval",
+      approval: {
+        event: { kind: "approval-request", toolCallId: "tool-1" },
+      },
+    });
+  });
+
+  it("omits the call id on an approval for an unknown item", () => {
+    const [result] = map(context(), {
+      kind: "request" as const,
+      id: 13,
+      method: "item/commandExecution/requestApproval" as const,
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "never-seen",
+        startedAtMs: 10,
+        environmentId: null,
+      },
+    });
+    if (result?.kind !== "approval" || result.approval.event.kind !== "approval-request") {
+      throw new Error("expected an approval request");
+    }
+    expect("toolCallId" in result.approval.event).toBe(false);
+  });
+
   it("rejects a duplicate provider approval request ID", () => {
     const ctx = context();
     const message = {
@@ -2076,6 +2126,44 @@ describe("mapCodexMessage", () => {
         },
       },
     ]);
+  });
+
+  it("ignores a usage report that lands after the turn ended instead of failing the turn", () => {
+    const ctx = context();
+    map(
+      ctx,
+      notification("turn/completed", {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed" },
+      }),
+    );
+    const late = (turnId: string) =>
+      map(
+        ctx,
+        notification("thread/tokenUsage/updated", {
+          threadId: "thread-1",
+          turnId,
+          tokenUsage: {
+            total: {
+              totalTokens: 30,
+              inputTokens: 20,
+              cachedInputTokens: 0,
+              outputTokens: 10,
+              reasoningOutputTokens: 0,
+            },
+            last: {
+              totalTokens: 30,
+              inputTokens: 20,
+              cachedInputTokens: 0,
+              outputTokens: 10,
+              reasoningOutputTokens: 0,
+            },
+            modelContextWindow: null,
+          },
+        }),
+      );
+    expect(late("turn-1")).toEqual([{ kind: "ignored" }]);
+    expect(late("turn-2")).toEqual([{ kind: "ignored" }]);
   });
 
   it("ignores unrelated unknown notifications but fails an unknown required transition", () => {

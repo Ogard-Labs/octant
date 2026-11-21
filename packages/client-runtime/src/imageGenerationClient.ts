@@ -1,4 +1,6 @@
 import {
+  MAX_GENERATED_IMAGE_BYTES,
+  THREAD_IMAGE_CHUNK_BYTES,
   type ImageArtifactId,
   type ImageGenerationEnqueueRequest,
   ImageGenerationJobsResponse,
@@ -51,6 +53,57 @@ export class ImageGenerationClientFailure extends Error {
     this.name = "ImageGenerationClientFailure";
     this.status = status;
   }
+}
+
+/** A paired thread can read its results; no composer, cancellation or host file write is exposed. */
+export type ThreadImageResults = Pick<ImageGenerationClient, "list" | "artifact">;
+
+export function createThreadImageResults(
+  options: ImageGenerationClientOptions,
+): ThreadImageResults {
+  return {
+    list: createImageGenerationClient(options).list,
+    async artifact(jobId, attachmentId) {
+      const url = new URL("/api/image/thread-artifact", options.baseUrl);
+      url.searchParams.set("jobId", String(jobId));
+      url.searchParams.set("attachmentId", String(attachmentId));
+      const chunks: Blob[] = [];
+      let total: number | undefined;
+      for (let offset = 0; offset < MAX_GENERATED_IMAGE_BYTES; offset += THREAD_IMAGE_CHUNK_BYTES) {
+        url.searchParams.set("offset", String(offset));
+        const response = await options.fetch(url.toString(), {
+          headers: { "x-octant-window-capability": options.windowCapability },
+        });
+        const range = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(
+          response.headers.get("content-range") ?? "",
+        );
+        const size = Number(range?.[3]);
+        const end = Math.min(offset + THREAD_IMAGE_CHUNK_BYTES, size);
+        if (
+          response.status !== 206 ||
+          size > MAX_GENERATED_IMAGE_BYTES ||
+          end <= offset ||
+          (total !== undefined && size !== total) ||
+          Number(range?.[1]) !== offset ||
+          Number(range?.[2]) !== end - 1
+        )
+          throw new ImageGenerationClientFailure(
+            "The generated image is unavailable.",
+            response.status,
+          );
+        total = size;
+        const chunk = await response.blob();
+        if (chunk.size !== end - offset)
+          throw new ImageGenerationClientFailure(
+            "The generated image is incomplete.",
+            response.status,
+          );
+        chunks.push(chunk);
+        if (end === size) return new Blob(chunks, { type: chunk.type });
+      }
+      throw new ImageGenerationClientFailure("The generated image is too large.", 413);
+    },
+  };
 }
 
 export function createImageGenerationClient(

@@ -31,6 +31,8 @@ import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
 import { readShellSettings } from "./persistence/shellProjection";
 import { openSqlite } from "./persistence/sqlitePort";
 import { retimeDeviceRegistrations } from "./remote/deviceRegistrationLifetime";
+import { createHostPersonScopes } from "./hostPersonScope";
+import { createBrowserRememberCallbacks } from "./wiring/browser";
 import { ConcurrencyConflict, JournalWriteFailed } from "./persistence/journalErrors";
 import type { PersistenceService } from "./persistence/persistenceService";
 import { SHELL_SETTINGS_AGGREGATE_ID } from "./persistence/shellProjection";
@@ -1763,6 +1765,93 @@ describe("ShellService", () => {
     );
   });
 
+  it("replays pre-existing settings without the messaging and Browser wait limits to their defaults and persists updates from a local window", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-shell-strict-limits-"));
+    try {
+      const connection = openSqlite(join(directory, "store.sqlite3"));
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const runtime = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: runtime.events,
+        projections: runtime.projections,
+        clock: () => now,
+      });
+      const system = { kind: "system" as const, actorId: OCTANT_LOCAL_ACTOR_ID };
+      const {
+        threadMessagesPerTurn: _asks,
+        siblingThreadReadsPerTurn: _reads,
+        siblingThreadWaitsPerTurn: _waits,
+        browserWaitLimitMinutes: _waitMinutes,
+        ...predatesLimits
+      } = defaultShellSettings();
+      journal.append({
+        aggregate: { aggregateType: "shell-settings", aggregateId: SHELL_SETTINGS_AGGREGATE_ID },
+        expectedVersion: 0,
+        events: [
+          {
+            eventId: "77777777-7777-4777-8777-000000000091",
+            eventName: "shell.settings-replaced",
+            eventVersion: 1,
+            correlationId: "88888888-8888-4888-8888-000000000091",
+            actor: system,
+            occurredAt: now,
+            payload: { settings: predatesLimits },
+          },
+        ],
+      });
+      const persistence = {
+        journal,
+        readShellSettings: () => readShellSettings(connection),
+        readEnvironmentPresentation: () => undefined,
+        readWindowWorkspace: () => undefined,
+        readWindowWorkspaces: () => [],
+        status: () => ({ state: "current", integrity: "ok" }),
+      } as unknown as PersistenceService;
+      const service = new ShellService({ persistence, uuid: uuidSequence(), clock: () => now });
+      const initial = service.readSettings();
+      expect(initial.version).toBe(1);
+      expect(initial.settings).toMatchObject({
+        threadMessagesPerTurn: 3,
+        siblingThreadReadsPerTurn: 8,
+        siblingThreadWaitsPerTurn: 4,
+        browserWaitLimitMinutes: 10,
+      });
+
+      service.bootstrap(ids.window);
+      const replaced = service.execute({
+        kind: "replace-settings",
+        windowId: ids.window,
+        expectedVersion: initial.version,
+        settings: decodeShellSettings({
+          ...initial.settings,
+          threadMessagesPerTurn: 6,
+          siblingThreadReadsPerTurn: 14,
+          siblingThreadWaitsPerTurn: 7,
+          browserWaitLimitMinutes: 25,
+        }),
+      });
+      expect(replaced).toMatchObject({
+        kind: "settings-replaced",
+        version: 2,
+        settings: {
+          threadMessagesPerTurn: 6,
+          siblingThreadReadsPerTurn: 14,
+          siblingThreadWaitsPerTurn: 7,
+          browserWaitLimitMinutes: 25,
+        },
+      });
+      expect(readShellSettings(connection)?.settings).toMatchObject({
+        threadMessagesPerTurn: 6,
+        siblingThreadReadsPerTurn: 14,
+        siblingThreadWaitsPerTurn: 7,
+        browserWaitLimitMinutes: 25,
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("keeps the paired-device length and every device deadline together when retiming fails part way, so setting it again applies it", () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-shell-pairing-length-"));
     try {
@@ -2097,6 +2186,235 @@ describe("ShellService", () => {
         }),
       ),
     ).toMatchObject({ kind: "settings-replaced", settings: { rememberedBrowserTransfers: [] } });
+  });
+
+  it("refuses remembered Computer use apps added through replace-settings, journals them with actor and timestamp for a window or paired device, and lets Settings forget them", () => {
+    let storedSettings: ReturnType<PersistenceService["readShellSettings"]>;
+    const stub = persistenceStub();
+    const append = vi.fn(
+      (request: {
+        readonly expectedVersion: number;
+        readonly events: ReadonlyArray<{ readonly payload: { readonly settings: unknown } }>;
+      }) => {
+        const result = stub.append(request);
+        const settings = request.events[0]?.payload.settings;
+        if (settings !== undefined) {
+          storedSettings = {
+            settings: settings as ReturnType<typeof defaultShellSettings>,
+            aggregateVersion: result.aggregateVersion as never,
+          };
+        }
+        return result;
+      },
+    );
+    const persistence = {
+      ...stub.persistence,
+      journal: { append, transaction: <A>(body: () => A): A => body() },
+      readShellSettings: () => storedSettings,
+    } as unknown as PersistenceService;
+    const service = new ShellService({
+      persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+    });
+    service.bootstrap(ids.window);
+    const localActor = { kind: "local-user" as const, actorId: OCTANT_LOCAL_ACTOR_ID };
+    const localEntry = {
+      projectId,
+      appId: "com.apple.Preview",
+      grantedBy: localActor,
+      grantedAt: now as never,
+    };
+    const remembered = { ...defaultShellSettings(), rememberedComputerUseApps: [localEntry] };
+
+    expect(() =>
+      service.execute(
+        decodeShellCommand({
+          kind: "replace-settings",
+          windowId: ids.window,
+          expectedVersion: 0,
+          settings: remembered,
+        }),
+      ),
+    ).toThrowError(
+      expect.objectContaining({ failure: expect.objectContaining({ category: "invalid" }) }),
+    );
+    expect(() =>
+      service.rememberComputerUseApp({
+        approver: {
+          kind: "window",
+          windowId: "60000000-0000-4000-8000-0000000000aa" as never,
+        },
+        expectedVersion: 0 as never,
+        projectId,
+        appId: "com.apple.Preview",
+      }),
+    ).toThrowError(
+      expect.objectContaining({ failure: expect.objectContaining({ category: "invalid" }) }),
+    );
+    expect(append).not.toHaveBeenCalled();
+
+    expect(
+      service.rememberComputerUseApp({
+        approver: { kind: "window", windowId: ids.window },
+        expectedVersion: 0 as never,
+        projectId,
+        appId: "com.apple.Preview",
+      }),
+    ).toEqual({ kind: "settings-replaced", settings: remembered, version: 1 });
+    expect(append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            eventName: "shell.settings-replaced",
+            actor: localActor,
+            occurredAt: now,
+            payload: { settings: remembered },
+          }),
+        ],
+      }),
+    );
+
+    const pairedDeviceId = "70000000-0000-4000-8000-0000000000aa" as never;
+    const pairedActor = {
+      kind: "remote-device" as const,
+      actorId: pairedDeviceId,
+      deviceId: pairedDeviceId,
+    };
+    const pairedEntry = {
+      projectId,
+      appId: "com.apple.Safari",
+      grantedBy: pairedActor,
+      grantedAt: now as never,
+    };
+    expect(
+      service.rememberComputerUseApp({
+        approver: { kind: "paired-device", actor: pairedActor },
+        expectedVersion: 1 as never,
+        projectId,
+        appId: "com.apple.Safari",
+      }),
+    ).toEqual({
+      kind: "settings-replaced",
+      settings: {
+        ...defaultShellSettings(),
+        rememberedComputerUseApps: [localEntry, pairedEntry],
+      },
+      version: 2,
+    });
+    expect(append).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            eventName: "shell.settings-replaced",
+            actor: pairedActor,
+            occurredAt: now,
+          }),
+        ],
+      }),
+    );
+
+    expect(
+      service.execute(
+        decodeShellCommand({
+          kind: "replace-settings",
+          windowId: ids.window,
+          expectedVersion: 2,
+          settings: { ...remembered, rememberedComputerUseApps: [localEntry] },
+        }),
+      ),
+    ).toMatchObject({
+      kind: "settings-replaced",
+      settings: { rememberedComputerUseApps: [localEntry] },
+    });
+  });
+
+  it("persists remembered Browser transfers, origins, and profile sites for an unregistered person-paired deviceId with device attribution while refusing hub-introduced devices", () => {
+    const personPairedDeviceId = decodeWindowId("90000000-0000-4000-8000-0000000000d1");
+    const hubIntroducedDeviceId = decodeWindowId("90000000-0000-4000-8000-0000000000d2");
+    let storedSettings = defaultShellSettings();
+    let storedVersion = 0;
+    const appended: Array<{ readonly actor: unknown; readonly settings: unknown }> = [];
+    const { persistence } = persistenceStub();
+    const livePersistence: PersistenceService = {
+      ...persistence,
+      readShellSettings: () => ({
+        settings: storedSettings,
+        aggregateVersion: storedVersion as never,
+        updatedAt: now as never,
+      }),
+      journal: {
+        ...persistence.journal,
+        append: vi.fn((command) => {
+          const event = command.events[0] as {
+            readonly actor: unknown;
+            readonly payload: { readonly settings: typeof storedSettings };
+          };
+          storedSettings = event.payload.settings;
+          storedVersion += 1;
+          appended.push({ actor: event.actor, settings: storedSettings });
+          return { aggregateVersion: storedVersion, events: [] } as never;
+        }),
+      } as unknown as PersistenceService["journal"],
+    };
+    // Never call service.bootstrap(personPairedDeviceId): the device has no desktop shell registration.
+    const service = new ShellService({
+      persistence: livePersistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+    });
+    const hostPersonScopes = createHostPersonScopes({
+      localWindows: () => [],
+      devices: () => [
+        { device_id: String(personPairedDeviceId), state: "active" },
+        { device_id: String(hubIntroducedDeviceId), state: "active" },
+      ],
+      approvedByPerson: (deviceId) => deviceId === String(personPairedDeviceId),
+    });
+    const callbacks = createBrowserRememberCallbacks({
+      persistence: livePersistence,
+      shellService: service,
+      hostPersonScopes,
+    });
+    const transfer = {
+      direction: "download" as const,
+      origin: "https://files.example",
+      workspaceRoot: "/Users/example/Work/Reports",
+      privatePage: true as const,
+    };
+
+    // Hub-introduced device is refused before touching ShellService or the journal.
+    callbacks.rememberBrowserTransfer(hubIntroducedDeviceId, transfer);
+    callbacks.rememberBrowserOrigin(hubIntroducedDeviceId, "https://docs.example");
+    callbacks.rememberBrowserProfileSite(hubIntroducedDeviceId, "https://app.example", {
+      kind: "personal",
+    });
+    expect(appended).toHaveLength(0);
+
+    // Person-paired device persists all three without desktop window registration,
+    // journaled with its remote-device actor.
+    callbacks.rememberBrowserTransfer(personPairedDeviceId, transfer);
+    callbacks.rememberBrowserOrigin(personPairedDeviceId, "https://docs.example");
+    callbacks.rememberBrowserProfileSite(personPairedDeviceId, "https://app.example", {
+      kind: "personal",
+    });
+    expect(storedSettings.rememberedBrowserTransfers).toEqual([transfer]);
+    expect(storedSettings.rememberedBrowserOrigins).toEqual(["https://docs.example"]);
+    expect(storedSettings.rememberedBrowserProfileSites).toEqual([
+      { origin: "https://app.example", profile: { kind: "personal" } },
+    ]);
+    expect(appended).toHaveLength(3);
+    expect(
+      appended.every(
+        (entry) =>
+          JSON.stringify(entry.actor) ===
+          JSON.stringify({
+            kind: "remote-device",
+            actorId: String(personPairedDeviceId),
+            deviceId: String(personPairedDeviceId),
+          }),
+      ),
+    ).toBe(true);
   });
 
   it("keeps reporting a folder stored under Documents after the host default moved", () => {

@@ -130,7 +130,7 @@ describe("ThemeSettingsProvider", () => {
     result.unmount();
   });
 
-  it("publishes density, text smoothing and the custom contrast step for the stylesheets", () => {
+  it("publishes density, text smoothing, timestamp format and the custom contrast step for the stylesheets", () => {
     const result = render(
       <ThemeSettingsProvider
         settings={{
@@ -138,6 +138,7 @@ describe("ThemeSettingsProvider", () => {
           mode: "dark",
           density: "compact",
           fontSmoothing: "off",
+          timestampFormat: "24h",
           darkPresetId: "custom" as never,
           customThemeDark: {
             ground: "#1b1d23",
@@ -153,6 +154,7 @@ describe("ThemeSettingsProvider", () => {
     const root = document.documentElement;
     expect(root.dataset.octantDensity).toBe("compact");
     expect(root.dataset.octantFontSmoothing).toBe("off");
+    expect(root.dataset.octantTimestampFormat).toBe("24h");
     expect(root.style.getPropertyValue("--oct-contrast-scale")).toBe("1.5");
     result.rerender(
       <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark" }}>
@@ -162,16 +164,25 @@ describe("ThemeSettingsProvider", () => {
     expect(root.dataset.octantDensity).toBe("comfortable");
     // Smooth is the default; only a stored "off" turns it off.
     expect(root.dataset.octantFontSmoothing).toBe("on");
+    expect(root.dataset.octantTimestampFormat).toBeUndefined();
     expect(root.style.getPropertyValue("--oct-contrast-scale")).toBe("");
     result.rerender(
       <ThemeSettingsProvider
-        settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark", fontSmoothing: "on" }}
+        settings={{
+          ...DEFAULT_THEME_SETTINGS,
+          mode: "dark",
+          fontSmoothing: "auto",
+          timestampFormat: "12h",
+        }}
       >
         <div>Theme content</div>
       </ThemeSettingsProvider>,
     );
     expect(root.dataset.octantFontSmoothing).toBe("on");
+    expect(root.dataset.octantTimestampFormat).toBe("12h");
     result.unmount();
+    expect(root.dataset.octantFontSmoothing).toBeUndefined();
+    expect(root.dataset.octantTimestampFormat).toBeUndefined();
   });
 
   it("publishes accessibility state on the data-octant-* attributes the stylesheets read", () => {

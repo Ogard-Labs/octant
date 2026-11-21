@@ -31,7 +31,10 @@ import {
   LOCAL_TOOL_HOST_ID,
   THREAD_RETENTION_EVENT_NAMES,
   type CodeOperationId,
+  type CodeThread,
+  type WindowId,
 } from "@octant/contracts";
+import type { NativeHarnessEditDiagnosticsPort } from "../harness/nativeHarnessTools";
 import { Effect } from "effect";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
@@ -47,12 +50,25 @@ import {
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { CodePlannerService } from "../code/codePlannerService";
 import { CodeProjectPullRequestSwitchService } from "../code/codeProjectPullRequestSwitchService";
+import { PullRequestReviewerRegistry } from "../pullRequestReviewers/pullRequestReviewerRegistry";
+import { createPullRequestReviewHostRuntime } from "../pullRequestReviewers/pullRequestReviewHostRuntime";
+import { createPullRequestReviewRouteHandler } from "../pullRequestReviewers/pullRequestReviewRoutes";
+import { PullRequestReviewService } from "../pullRequestReviewers/pullRequestReviewService";
+import {
+  SECOND_MODEL_PULL_REQUEST_REVIEWER_DISPLAY_NAME,
+  SECOND_MODEL_PULL_REQUEST_REVIEWER_ID,
+  createSecondModelPullRequestReviewer,
+} from "../pullRequestReviewers/secondModelPullRequestReviewer";
+import { SECOND_MODEL_PULL_REQUEST_REVIEWER_COMPONENT_ID } from "@octant/plugin-host/first-party-plugins";
+import { isFirstPartyIntegrationEffective } from "../github/githubIntegrationEffective";
 import type { PullRequestWatchPort } from "../code/pullRequestWatchPort";
 import { createGhCommandPort } from "../code/ghPullRequestPort";
 import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
+import type { TranscriptionForTurn } from "../speech/transcriptionTool";
+import { attachedImageSources, workspaceImageSources } from "../image/threadImageSourcePorts";
 import { INHERITED_MARK_REFUSAL } from "../context/inheritedExternalContentMark";
 import {
   createCodeProfileSkillResolver,
@@ -89,6 +105,7 @@ import {
   codeSiblingThreadState,
 } from "../siblingThreads/codeSiblingThreadSource";
 import { CoordinatorService } from "../coordinator/coordinatorService";
+import { createCoordinatorThreadDoneEvaluator } from "../coordinator/coordinatorDoneWhenEvidence";
 import type { ThreadWakeupModePort } from "../wakeups/threadWakeupService";
 import { createCoordinatorWakeJournal } from "../coordinator/coordinatorWakeJournal";
 import { createCoordinatorCountStore } from "../coordinator/coordinatorCountStore";
@@ -104,6 +121,10 @@ import {
 } from "../context/externalContentTaintProjection";
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
+import {
+  createReportFinishedTool,
+  observeFolderFinishedDiff,
+} from "../finishedReceipts/finishedReceiptTools";
 import { isReplayedAndroidEvidence } from "../android/androidToolchainService";
 import {
   clampTurnAccessPosture,
@@ -187,6 +208,9 @@ export function withCodeOperationRuntime(
         }),
     saveFile: (windowId, input, actor) => service.saveFile(windowId, input, actor),
     openFile: (windowId, input) => service.openFile(windowId, input),
+    ...(service.resolveDesktopFileTarget === undefined
+      ? {}
+      : { resolveDesktopFileTarget: service.resolveDesktopFileTarget.bind(service) }),
     ...(service.readGitHistory === undefined
       ? {}
       : { readGitHistory: service.readGitHistory.bind(service) }),
@@ -223,7 +247,7 @@ export function withCodeOperationRuntime(
   };
 }
 
-function withCodeBoard(
+export function withCodeBoard(
   service: CodeRouteService,
   queryBoard: NonNullable<CodeRouteService["queryBoard"]>,
 ): CodeRouteService {
@@ -238,6 +262,9 @@ function withCodeBoard(
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
     saveFile: (windowId, input, actor) => service.saveFile(windowId, input, actor),
     openFile: (windowId, input) => service.openFile(windowId, input),
+    ...(service.resolveDesktopFileTarget === undefined
+      ? {}
+      : { resolveDesktopFileTarget: service.resolveDesktopFileTarget.bind(service) }),
     ...(service.readGitHistory === undefined
       ? {}
       : { readGitHistory: service.readGitHistory.bind(service) }),
@@ -320,10 +347,15 @@ import { serverPullRequestRepository } from "../serverProjects/serverWorktrees";
 export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> & {
   /** Sees images; absent on a host started without one. */
   readonly imageDescriber?: ImageDescriber;
-} & Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
+  readonly transcriptionForTurn: TranscriptionForTurn;
+} & Pick<
+    HarnessStateWiring,
+    "serverAttachmentCleanup" | "serverConnection" | "serverProjectStore"
+  > &
   Pick<HarnessWiring, "shieldServerStore"> &
   Pick<
     AuthorityWiring,
+    | "browserCaptures"
     | "browserModelBindings"
     | "agentRunPersistence"
     | "androidInputGrants"
@@ -339,6 +371,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "personMemoryAccess"
     | "octantInstructions"
     | "isPairedDeviceScope"
+    | "isRestrictedDeviceScope"
     | "windowAuthorityStore"
   > &
   Pick<
@@ -347,11 +380,14 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "agentsManagedToolsFor"
     | "coordinatorWorkersHolder"
     | "externalContentIngestionStore"
+    | "managedWorktreeReceipts"
     | "nativeHarnessRoutingStore"
     | "runtimeOutsideContentMarks"
     | "sideTasks"
+    | "finishedReceipts"
     | "spendCeiling"
     | "threadAwaitsHarnessApproval"
+    | "turnMetrics"
   > &
   Pick<
     IntegrationsWiring,
@@ -366,7 +402,12 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools" | "threadDesktopDestination"> &
   Pick<
     WorkspaceWiring,
-    "codeBoardPlanProgressSource" | "contextHarness" | "keptImageChoices" | "projectService"
+    | "codeBoardPlanProgressSource"
+    | "contextHarness"
+    | "gitObservationPort"
+    | "goalService"
+    | "keptImageChoices"
+    | "projectService"
   > &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<HarnessStateWiring, "onHarnessQuestionAsked" | "onHarnessQuestionSettled"> &
@@ -386,6 +427,8 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "codeTestDiscovery"
     | "isCodeProviderModelAllowed"
     | "onPullRequestSnapshotRefreshed"
+    | "bindPullRequestSwitchReconciler"
+    | "pullRequestLinkService"
     | "projectPullRequestActionService"
     | "projectPullRequestCadence"
     | "projectPullRequestService"
@@ -419,7 +462,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "productFeedbackService"
     | "resolveFeedbackThread"
   > &
-  Pick<CanvasWiring, "canvasAgentToolPort"> &
+  Pick<CanvasWiring, "canvasAgentToolPort" | "threadProjectAssetRoot"> &
   Pick<
     HarnessWiring,
     | "hostShield"
@@ -468,6 +511,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     appleToolchainService,
     bindDeviceApprovals,
     browserAuthority,
+    browserCaptures,
     browserModelBindings,
     bindTerminalBrowserSessions,
     terminalBrowserTools,
@@ -478,6 +522,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     buildCodeService,
     canAccessCodeProject,
     canvasAgentToolPort,
+    threadProjectAssetRoot,
     codeActiveTurns,
     codeApprovalStore,
     codeAttachments,
@@ -514,6 +559,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     onHarnessQuestionSettled,
     onHarnessRecoveryLifted,
     onPullRequestSnapshotRefreshed,
+    bindPullRequestSwitchReconciler,
+    pullRequestLinkService,
     onThreadArchived,
     onWindowRevoked,
     nativeHarnessTranscripts,
@@ -539,12 +586,17 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     selectCodeConversation,
     codeSessionConversation,
     siblingThreadsService,
+    serverAttachmentCleanup,
     serverConnection,
     serverProjectStore,
     shieldServerStore,
     sideTasks,
+    finishedReceipts,
+    gitObservationPort,
+    goalService,
     simulatorInputGrants,
     spendCeiling,
+    turnMetrics,
     threadMentionService,
     threadOutsideContentMarks,
     workRequestRuntime,
@@ -563,6 +615,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     } = {};
     // A host started with its own runtime uses it; otherwise it is built below.
     let codeOperationRuntime: CodeOperationRuntime | undefined = options.codeOperationRuntime;
+    // Built after the operation runtime is: its checkout refresh callback
+    // reads the service lazily, and a switch before it exists observes later.
+    let builtCodeService: CodeService | undefined;
     // A Code session whose runtime keeps background work (a dev server, a
     // watch) outlives its turn; a turn the runtime starts by itself later is
     // opened through the thread's ordinary admission, below.
@@ -621,6 +676,24 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     ): void => {
       codeToolContributors.push(contributor);
     };
+    let codeEditDiagnosticsFactory:
+      | ((input: {
+          readonly windowId: WindowId;
+          readonly thread: CodeThread;
+          readonly harnessRoot: string;
+          readonly mainCheckoutRoot: string;
+        }) => NativeHarnessEditDiagnosticsPort | undefined)
+      | undefined;
+    const registerCodeEditDiagnostics = (
+      factory: (input: {
+        readonly windowId: WindowId;
+        readonly thread: CodeThread;
+        readonly harnessRoot: string;
+        readonly mainCheckoutRoot: string;
+      }) => NativeHarnessEditDiagnosticsPort | undefined,
+    ): void => {
+      codeEditDiagnosticsFactory = factory;
+    };
     // The few sets a server Project's turn is offered beside its server
     // tools: each acts only on this host's records, never on a folder here.
     const serverCodeToolContributors: Array<
@@ -633,7 +706,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     };
     // A routine's turn has nobody at a window to answer the image card, so it
     // is offered the tool only where its Project keeps a choice.
-    contributeCodeTools(({ windowId, thread, readThread, folders }) => {
+    contributeCodeTools(({ windowId, thread, readThread, folders, routineRun }) => {
       const checkoutRoot = folders[0];
       // The journaled level and the running one are both read and the
       // stricter wins, as for the save below.
@@ -642,7 +715,46 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           requested: readThread()?.executionPolicy ?? thread.executionPolicy,
           thread: persistence.readCodeThread(thread.id)?.executionPolicy ?? thread.executionPolicy,
         });
-      return createThreadImageAgentTools({
+      const currentRoot = async () => {
+        const current = persistence.readCodeThread(thread.id);
+        const checkout = await threadProjectAssetRoot({
+          mode: "code",
+          threadId: String(thread.id),
+          projectId: String(thread.projectId),
+        });
+        const project = persistence.readProject(thread.projectId);
+        if (checkout === undefined || current === undefined || project?.type !== "code")
+          return undefined;
+        const selected = approvedWorkingFolderRoot(project, current.workingFolderId, checkout);
+        if (selected === undefined) return undefined;
+        const root = await resolveThreadWorkingDirectory(
+          selected,
+          current.workingDirectory ?? decodeThreadWorkingDirectory("."),
+        ).catch(() => undefined);
+        return root === checkoutRoot ? root : undefined;
+      };
+      const transcription =
+        routineRun !== undefined ||
+        isRoutineHostScope(windowId) ||
+        deps.isRestrictedDeviceScope(windowId) ||
+        checkoutRoot === undefined
+          ? undefined
+          : deps.transcriptionForTurn({
+              windowId,
+              threadKind: "code-thread",
+              scopeId: decodeImageGenerationScopeId(String(thread.id)),
+              toolConstraints: () => readThread()?.toolConstraints ?? thread.toolConstraints ?? [],
+              inPlan: () => thread.executionPolicy === "plan" || level() === "plan",
+              root: currentRoot,
+              allowed: () =>
+                readThread()?.lifecycle === "active" &&
+                (deps.isPairedDeviceScope(windowId)
+                  ? !deps.isRestrictedDeviceScope(windowId) &&
+                    codeProjectAccess.hasActiveCodeProject(thread.projectId)
+                  : deps.windowAuthorityStore.listWindowIds().includes(windowId) &&
+                    canAccessCodeProject(windowId, thread.projectId)),
+            });
+      const images = createThreadImageAgentTools({
         windowId,
         unattended: isRoutineHostScope(windowId),
         threadKind: "code-thread",
@@ -651,6 +763,20 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         kept: keptImageChoices,
         fullAccess: () => level() === "full-access",
         jobs: imageJobService,
+        imageSources: {
+          latestAttachments: () =>
+            codeAttachments === undefined
+              ? []
+              : attachedImageSources(
+                  codeBoardEventStore.latestPersonTurnAttachments(thread.id),
+                  (attachment) => codeAttachments.read(thread.id, attachment),
+                ),
+          ...workspaceImageSources({
+            threadId: decodeBrowserThreadId(String(thread.id)),
+            browserCaptures,
+            root: currentRoot,
+          }),
+        },
         listInstances: () => persistence.readProviderInstances(),
         readImageGenerationCustomSources: () =>
           (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration
@@ -690,6 +816,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             ? "Plan mode cannot generate images. Leave Plan mode to generate one."
             : undefined,
       });
+      return transcription === undefined
+        ? images
+        : combineAppManagedToolSets(images, transcription);
     });
     // Sees images: a thread whose model cannot read images may ask for one
     // to be described, from its own attachments or its own folder.
@@ -733,6 +862,38 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         windowId,
       }),
     );
+    contributeCodeTools(({ windowId, thread, readThread, folders, operationId, askPerson }) => {
+      const readPosture = () =>
+        clampTurnAccessPosture({
+          requested: readThread()?.executionPolicy ?? thread.executionPolicy,
+          thread: persistence.readCodeThread(thread.id)?.executionPolicy ?? thread.executionPolicy,
+        });
+      const folder = folders[0];
+      const shell = nativeHarnessComposition.shellForCode({
+        windowId: String(windowId),
+        threadId: String(thread.id),
+        projectId: String(thread.projectId),
+      });
+      return createReportFinishedTool({
+        mode: "code",
+        threadId: String(thread.id),
+        projectId: String(thread.projectId),
+        ...(operationId === undefined ? {} : { turnId: operationId }),
+        readPosture,
+        toolConstraints: thread.toolConstraints,
+        profileDisplayName: thread.profileDisplayName,
+        ...(folder === undefined ? {} : { folder }),
+        ...(folders.length > 1 ? { extraFolders: folders.slice(1) } : {}),
+        ...(shell === undefined ? {} : { shell }),
+        askPerson,
+        readGoal: () => goalService.read(String(thread.id)).goal ?? undefined,
+        observeDiff: (signal) =>
+          observeFolderFinishedDiff({ folder, git: gitObservationPort, signal }),
+        store: finishedReceipts,
+        uuid: randomUUID,
+        clock: () => new Date().toISOString(),
+      });
+    });
     const {
       androidToolchainRoutes,
       appleToolchainRoutes,
@@ -860,6 +1021,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         }),
       );
       codeOperationRuntime = createCodeOperationRuntime({
+        pullRequestLinks: pullRequestLinkService,
         stalledTurnLimitMs: (turn) =>
           stalledTurnLimitMs(
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),
@@ -875,6 +1037,26 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),
           ),
         moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
+        // A branch switch moves the checkout's journaled head; the service
+        // exists only after this runtime does, so the callback reads it lazily.
+        checkoutObserved: async (checkoutId, head) => {
+          const service = builtCodeService;
+          if (service instanceof CodeService) service.noteCheckoutHead(checkoutId, head);
+          // The only caller is a completed branch switch: a managed worktree
+          // records the verified branch the host just landed it on so cleanup
+          // still recognises the worktree it owns. Its `branchIntent` — the
+          // branch the receipt may delete — never moves with it.
+          if (head.kind === "branch") {
+            const checkout = persistence.readCodeCheckout(checkoutId);
+            if (checkout?.kind === "managed-worktree") {
+              await deps.managedWorktreeReceipts.recordVerifiedBranch(
+                String(checkout.ownershipReceiptId),
+                head.name,
+                head.oid,
+              );
+            }
+          }
+        },
         verifyModelToolsOnFirstUse: deps.verifyModelToolsOnFirstUse,
         prepareWorktree: async (thread, root, current) => {
           const checkout = persistence.readCodeCheckout(thread.checkoutId);
@@ -1072,7 +1254,18 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             projectId: input.thread.projectId,
             ...(input.ask === undefined ? {} : { ask: input.ask }),
           }),
-        nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
+        nativeHarnessTools: (input) => {
+          const editDiagnostics = codeEditDiagnosticsFactory?.({
+            windowId: input.windowId,
+            thread: input.thread,
+            harnessRoot: input.checkoutRoot,
+            mainCheckoutRoot: input.mainCheckoutRoot ?? input.checkoutRoot,
+          });
+          return nativeHarnessComposition.forCode({
+            ...input,
+            ...(editDiagnostics === undefined ? {} : { editDiagnostics }),
+          });
+        },
         holdsServerThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
         transferServerAttachments: (thread, files) => {
           const place = serverThreadOf(serverProjectStore, thread);
@@ -1085,6 +1278,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             server: address?.kind === "address" ? address.server : undefined,
             threadId: String(thread.id),
             files,
+            guard: serverAttachmentCleanup.guardTransfer,
           });
         },
         serverTerminalLogin: (thread) => {
@@ -1367,12 +1561,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             ? "download-needs-this-computer"
             : undefined,
         browserSignIn: {
-          // A routine's or subagent's turn has nobody to sign in, and a paired
-          // device cannot see the page.
+          // A routine's or subagent's turn has nobody to sign in, and a
+          // hub-introduced/restricted device cannot hold the Browser page.
           refusal: (windowId) =>
             browserToolApprovalService.isUnattendedScope(windowId)
               ? "sign-in-needs-a-person"
-              : browserToolApprovalService.isPairedDevice(windowId)
+              : browserToolApprovalService.isRestrictedDevice(windowId)
                 ? "sign-in-needs-this-computer"
                 : undefined,
           request: (input) => browserToolApprovalService.request(input),
@@ -1701,6 +1895,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             },
             recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
             uuid: randomUUID,
+            strict: () => resolveThreadStrict(String(thread.id)),
+            readsPerTurn: () =>
+              (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                .siblingThreadReadsPerTurn,
+            waitsPerTurn: () =>
+              (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                .siblingThreadWaitsPerTurn,
           }),
         isCoordinatorThread: (threadId) => coordinatorService.isCoordinator(threadId),
         coordinatorContext: (threadId) => coordinatorService.contextFor(threadId),
@@ -1734,6 +1935,19 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             port: canvasAgentToolPort,
           }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+        resolvePullRequestLineNotesAuthorship: async ({ projectId, source, signal }) => {
+          const pullRequestAuthor = projectPullRequestService.observedAuthor({
+            projectId,
+            repositoryOwner: source.repositoryOwner,
+            repositoryName: source.repositoryName,
+            number: source.number,
+          });
+          if (pullRequestAuthor === undefined) {
+            return { pullRequestAuthor: undefined, viewerLogin: undefined };
+          }
+          const viewerLogin = await projectPullRequestService.observeViewerLogin(signal);
+          return { pullRequestAuthor, viewerLogin };
+        },
         outsideContentMarks: runtimeOutsideContentMarks,
         forgeChanges: runtimeForgeChanges,
         readThreadExternalContentTaint: (threadId) =>
@@ -1791,11 +2005,21 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         resolvePullRequestTarget: async (threadId) => {
           const thread = persistence.readCodeThread(threadId);
           if (thread === undefined) return undefined;
-          const baseRepository = await serverPullRequestRepository(
-            { store: serverProjectStore, connection: serverConnection },
-            thread,
-          );
-          const owner = baseRepository.split("/")[0];
+          const threadLinks = pullRequestLinkService.listForThread(threadId);
+          const matchingLink =
+            threadLinks.find(
+              (link) =>
+                link.headBranch !== undefined &&
+                link.headBranch === thread.deliveryTarget.branchIntent,
+            ) ?? (threadLinks.length === 1 ? threadLinks[0] : undefined);
+          const baseRepository =
+            matchingLink !== undefined
+              ? `${matchingLink.repositoryOwner}/${matchingLink.repositoryName}`
+              : await serverPullRequestRepository(
+                  { store: serverProjectStore, connection: serverConnection },
+                  thread,
+                );
+          const owner = matchingLink?.headOwner ?? baseRepository.split("/")[0];
           if (owner === undefined || owner.length === 0) return undefined;
           return {
             authorization: "confirmed-delivery-target",
@@ -1863,6 +2087,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       });
     }
     const { codeCompletedThreadSource, codeService } = buildCodeService(codeOperationRuntime);
+    builtCodeService = codeService instanceof CodeService ? codeService : undefined;
     yield* Effect.promise(() => codeOperationRuntime?.reconcile?.() ?? Promise.resolve());
     // A push or pull request step a restart left unknown is settled by looking
     // at the remote now, as the host, rather than when a person next opens
@@ -1928,6 +2153,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       history: {
         read: (threadId) => codeBoardEventStore.summaryForThread(threadId),
       },
+      pullRequestLinks: pullRequestLinkService,
     });
     // Persistent Code follow-up. Follow-up is a durable user
     // obligation independent of unread and runtime status; it reuses the
@@ -1991,6 +2217,51 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       // coordinator service is wired just below.
       rechooseAsBuilder: (coordinatorThreadId, filters) =>
         coordinatorService.rechooseAsBuilder(coordinatorThreadId, filters),
+    });
+    // Merge when ready, Auto-fix, and coordinator done-when checks. The forge
+    // calls run through the host's own `gh`; with none installed every check
+    // answers unavailable.
+    const pullRequestSwitchForge = (() => {
+      if (options.ghExecutable === undefined) return undefined;
+      try {
+        return new GhPullRequestSwitchPort({
+          command: createGhCommandPort({ ghPath: options.ghExecutable }),
+        });
+      } catch {
+        return undefined;
+      }
+    })();
+    const coordinatorDoneWhenAbort = new AbortController();
+    const doneWhenSignal = () =>
+      AbortSignal.any([coordinatorDoneWhenAbort.signal, AbortSignal.timeout(15_000)]);
+    const doneWhenProbePath = decodeCodeRelativePath("package.json");
+    const isCoordinatorDoneWhenThreadDone = createCoordinatorThreadDoneEvaluator({
+      readThread: (threadId) => persistence.readCodeThread(threadId),
+      readCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
+      projectExists: (projectId) => persistence.readProject(projectId) !== undefined,
+      resolveCheckoutRoot: async (thread, checkout, signal) => {
+        const resolved = await roots.resolve(
+          ROUTINE_HOST_SCOPE_ID,
+          thread,
+          checkout,
+          doneWhenProbePath,
+          signal,
+        );
+        return resolved?.rootPath;
+      },
+      git: gitObservationPort,
+      history: { read: (threadId) => codeBoardEventStore.summaryForThread(threadId) },
+      pullRequestLinks: pullRequestLinkService,
+      ...(pullRequestSwitchForge === undefined
+        ? {}
+        : {
+            observePullRequest: (request, signal) =>
+              pullRequestSwitchForge.observe(request, signal, {
+                failures: false,
+                activity: false,
+              }),
+          }),
+      createSignal: doneWhenSignal,
     });
     // Coordinator threads and message wakes (docs/design/coordinator-threads.md):
     // a worker is created through the ordinary Code command path and started,
@@ -2172,6 +2443,19 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       },
       counts: createCoordinatorCountStore(persistence.connection),
       wakes: coordinatorWakes,
+      observePullRequest: async (target, readOptions) => {
+        if (pullRequestSwitchForge === undefined) return { status: "unavailable" };
+        return await pullRequestSwitchForge.observePullRequestCondition(
+          {
+            owner: target.repositoryOwner,
+            name: target.repositoryName,
+            number: target.number,
+          },
+          readOptions,
+          doneWhenSignal(),
+        );
+      },
+      isThreadDone: isCoordinatorDoneWhenThreadDone,
       uuid: randomUUID,
       now: () => Date.now(),
       onError: (message, error) => console.error(`[coordinators] ${message}`, error),
@@ -2186,6 +2470,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
         unsubscribeCoordinator();
+        coordinatorDoneWhenAbort.abort();
         coordinatorService.stop();
       }),
     );
@@ -2349,6 +2634,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             snapshot: () => projectPullRequestService.boardSnapshot(windowId),
           },
           planProgress: codeBoardPlanProgressSource,
+          finishedReceipts: {
+            read: (threadId) => finishedReceipts.boardMark(String(threadId)),
+          },
           outsideContent: {
             read: (threadId) => {
               if (
@@ -2367,18 +2655,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         return board.query(query);
       },
     );
-    // Merge when ready and Auto-fix. The forge calls run through the host's
-    // own `gh`; with none installed every switch answers unavailable.
-    const pullRequestSwitchForge = (() => {
-      if (options.ghExecutable === undefined) return undefined;
-      try {
-        return new GhPullRequestSwitchPort({
-          command: createGhCommandPort({ ghPath: options.ghExecutable }),
-        });
-      } catch {
-        return undefined;
-      }
-    })();
+    // Merge when ready and Auto-fix reuse `pullRequestSwitchForge` created above.
     const pullRequestSwitchService = new CodeProjectPullRequestSwitchService({
       limits: () => {
         const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
@@ -2389,6 +2666,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         };
       },
       authority: projectPullRequestService,
+      pullRequestLinks: pullRequestLinkService,
       forge: pullRequestSwitchForge ?? {
         readAutoMergeSettings: async () => ({ status: "unavailable", reason: "unavailable" }),
         enableAutoMerge: async () => ({ status: "unavailable", reason: "unavailable" }),
@@ -2476,6 +2754,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       uuid: randomUUID,
     });
     pullRequestWatchService = pullRequestSwitchService;
+    bindPullRequestSwitchReconciler(pullRequestSwitchService);
     // Host-local and idle-free: the forge is read only while a switch or a watch is on.
     const pullRequestSwitchAbort = new AbortController();
     const pullRequestSwitchTimer = setInterval(() => {
@@ -2555,10 +2834,14 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     const codeSessionRoutes = createCodeSessionRouteHandler({
       windowAuthorityStore: deps.windowAuthorityStore,
       canOpenThread: (windowId, threadId) => {
-        if (deps.isPairedDeviceScope(windowId)) return false;
+        const device = deps.isPairedDeviceScope(windowId);
+        if (device && deps.isRestrictedDeviceScope(windowId)) return false;
         try {
           const thread = persistence.readCodeThread(threadId);
-          return thread !== undefined && canAccessCodeProject(windowId, thread.projectId);
+          if (thread === undefined) return false;
+          return device
+            ? codeProjectAccess.hasActiveCodeProject(thread.projectId)
+            : canAccessCodeProject(windowId, thread.projectId);
         } catch {
           return false;
         }
@@ -2566,9 +2849,167 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       liveTasks: (threadId) => outlivingCodeSessions.liveTasks(codeSessionKey(threadId)),
       stopLiveTasks: (threadId) => outlivingCodeSessions.stopThread(codeSessionKey(threadId)),
       // A window here or the host's own paired device is the person; the
-      // host acting for a routine is not.
-      isPerson: (windowId) => !isRoutineHostScope(windowId),
+      // host acting for a routine or a hub-introduced device is not.
+      isPerson: (windowId) =>
+        !isRoutineHostScope(windowId) && !deps.isRestrictedDeviceScope(windowId),
       nativeSessions: () => codeOperationRuntime?.nativeSessions,
+    });
+    const pullRequestReviewers = new PullRequestReviewerRegistry();
+    pullRequestReviewers.register({
+      reviewerId: SECOND_MODEL_PULL_REQUEST_REVIEWER_ID,
+      displayName: SECOND_MODEL_PULL_REQUEST_REVIEWER_DISPLAY_NAME,
+      activation: () => {
+        const effective = isFirstPartyIntegrationEffective(
+          extensionApiService.snapshot(),
+          SECOND_MODEL_PULL_REQUEST_REVIEWER_COMPONENT_ID,
+          { missingRow: "effective" },
+        );
+        return { installed: true, trusted: true, enabled: effective };
+      },
+      reviewer: createSecondModelPullRequestReviewer(),
+    });
+    const pullRequestReviewHost = createPullRequestReviewHostRuntime({
+      ghExecutable: options.ghExecutable,
+      providerDataDirectory,
+      connection: persistence.connection,
+      journal: persistence.journal,
+      readProviderInstances: () => persistence.readProviderInstances(),
+      observedProviderState: (instanceId) => providerRuntimeRegistry.observedState(instanceId),
+      isProviderModelAllowed: isCodeProviderModelAllowed,
+      createDriver: (instance) => makeConfiguredProviderDriver(instance, configuredDriverOptions),
+      executeOperation: async (windowId, command) => {
+        const execute = boardRouteCodeService.executeOperation;
+        if (execute === undefined) {
+          throw new Error("Code operation runtime is unavailable.");
+        }
+        return execute(windowId, command);
+      },
+      readOperationEvidence: async (windowId, threadId, operationId, contentId) => {
+        const read = boardRouteCodeService.readOperationContent;
+        if (read === undefined) {
+          throw new Error("Code operation evidence is unavailable.");
+        }
+        const evidence = await read(windowId, threadId, operationId, contentId);
+        return { text: new TextDecoder().decode(evidence.bytes) };
+      },
+      resolveReviewTarget: async (windowId, input, admissionCurrent) => {
+        const resolve = codeOperationRuntime?.resolveReviewTarget;
+        if (resolve === undefined) {
+          throw new Error("Code review target resolver is unavailable.");
+        }
+        return resolve(windowId, input, admissionCurrent);
+      },
+      retainPullRequestDiff: async (windowId, input) => {
+        const retain = codeOperationRuntime?.retainPullRequestDiff;
+        if (retain === undefined) {
+          throw new Error("Code pull request diff retainer is unavailable.");
+        }
+        return retain(windowId, input);
+      },
+      createFinding: async (input, actor) => {
+        const create = codeOperationRuntime?.createReviewFinding;
+        if (create === undefined) {
+          throw new Error("Code review finding writer is unavailable.");
+        }
+        return create(ROUTINE_HOST_SCOPE_ID, input, undefined, actor);
+      },
+      spendCeiling,
+      turnMetrics,
+    });
+    const pullRequestReviewService = new PullRequestReviewService({
+      registry: pullRequestReviewers,
+      journal: persistence.journal,
+      authority: {
+        canAccessProject: (windowId, projectId) => canAccessCodeProject(windowId, projectId),
+        authorizePullRequest: (windowId, target) =>
+          projectPullRequestService.authorizePullRequest(windowId, target),
+      },
+      threads: {
+        readThread: (threadId) => persistence.readCodeThread(threadId),
+        isWorkerTurnActive: (threadId) => {
+          const compacting = contextHarness.compactionRunning(
+            decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
+          );
+          return (
+            compacting ||
+            persistence
+              .readCodeRuntimeWorks(threadId)
+              .some(
+                ({ work }) =>
+                  work.kind === "provider-turn" &&
+                  (work.state === "running" ||
+                    work.state === "waiting" ||
+                    work.state === "ambiguous"),
+              )
+          );
+        },
+        isStrict: (threadId) => resolveThreadStrict(String(threadId)),
+        maxStrictHandBackAttempts: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+            .autoFixAttemptsPerFailure,
+        markOutsideContent: (threadId, contentReference, sourceLabel) => {
+          const marked = externalContentIngestionStore.record({
+            threadId,
+            provenance: { origin: "external-content", sourceLabel },
+            contentReference,
+            correlationId: randomUUID(),
+            authorized: true,
+          });
+          return marked.kind === "recorded" || marked.kind === "already-recorded";
+        },
+        startWorkerTurn: async (threadId, text) => {
+          const thread = persistence.readCodeThread(threadId);
+          const stage = boardRouteCodeService.stageEvidence;
+          const execute = boardRouteCodeService.executeOperation;
+          if (thread === undefined || stage === undefined || execute === undefined) return false;
+          const prompt = await stage(ROUTINE_HOST_SCOPE_ID, threadId, text);
+          const result = await execute(ROUTINE_HOST_SCOPE_ID, {
+            kind: "start-provider-turn",
+            operationId: decodeCodeOperationId(randomUUID()),
+            threadId,
+            checkoutId: thread.checkoutId,
+            sessionId: decodeProviderSessionId(randomUUID()),
+            prompt,
+          });
+          return (
+            result.kind === "provider-turn-state" &&
+            (result.state === "running" ||
+              result.state === "waiting" ||
+              result.state === "completed")
+          );
+        },
+        notifyPerson: async (threadId, reason) => {
+          const view = codeFollowUpService.read(threadId);
+          await codeFollowUpService.observeTrigger({
+            threadId,
+            sourceEventId: randomUUID(),
+            sourceSequence:
+              Math.max(
+                view.followUp?.triggerSequence ?? 0,
+                view.followUp?.acknowledgedThroughSequence ?? 0,
+              ) + 1,
+            reason,
+            origin: "automatic",
+            triggeredAt: new Date().toISOString(),
+          });
+        },
+      },
+      runtime: pullRequestReviewHost.runtime,
+      uuid: randomUUID,
+    });
+    onPullRequestSnapshotRefreshed((rows) => {
+      void pullRequestReviewHost
+        .observeSnapshotRows(pullRequestReviewService, rows)
+        .catch((error: unknown) => console.error("[pull-request-reviews] pass failed", error));
+    });
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        pullRequestReviewService.dispose();
+      }),
+    );
+    const pullRequestReviewRoutes = createPullRequestReviewRouteHandler({
+      service: pullRequestReviewService,
+      windowAuthorityStore: deps.windowAuthorityStore,
     });
     return {
       androidToolchainRoutes,
@@ -2580,10 +3021,14 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeService,
       codeTurnDecisions,
       contributeCodeTools,
+      registerCodeEditDiagnostics,
       contributeServerCodeTools,
       coordinatorService,
       coordinatorWakes,
       codeThreadWakeupPort,
+      pullRequestReviewers,
+      pullRequestReviewRoutes,
+      pullRequestReviewService,
       routeCodeService,
       terminalProcessPort,
     };

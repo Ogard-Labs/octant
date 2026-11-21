@@ -2,7 +2,7 @@ import type { RemoteSetupCheckInput, RemoteSetupCheckResult } from "@octant/cont
 import type { ShieldServer } from "@octant/contracts/shield-servers";
 import { Schema } from "effect";
 import { ServerFolderPath } from "@octant/contracts/server-projects";
-import type { ServerConnection } from "./serverConnection";
+import { sshNeedsHostKeyConfirmation, type ServerConnection } from "./serverConnection";
 
 /** A fixed read-only shell probe; a folder travels as a literal argument, never shell text. */
 const PROBE = 'if [ -n "$1" ]; then cd -- "$1" 2>/dev/null || exit 3; fi; pwd -P';
@@ -21,7 +21,11 @@ export class RemoteSetupChecks {
     this.#options = options;
   }
 
-  async check(input: RemoteSetupCheckInput, signal?: AbortSignal): Promise<RemoteSetupCheckResult> {
+  async check(
+    input: RemoteSetupCheckInput,
+    signal?: AbortSignal,
+    options?: { readonly pairedDevice?: boolean },
+  ): Promise<RemoteSetupCheckResult> {
     const server = this.#options
       .servers()
       .find((entry) => String(entry.serverId) === String(input.serverId));
@@ -66,9 +70,11 @@ export class RemoteSetupChecks {
             ? "changed-identity"
             : /No .*host key is known|not known.*strict|not in.*known_hosts/i.test(error)
               ? "unknown-identity"
-              : /Permission denied|sign_and_send_pubkey|agent refused operation/i.test(error)
-                ? "authentication-refused"
-                : "host-unavailable";
+              : options?.pairedDevice === true && sshNeedsHostKeyConfirmation(error)
+                ? "key-confirmation-required"
+                : /Permission denied|sign_and_send_pubkey|agent refused operation/i.test(error)
+                  ? "authentication-refused"
+                  : "host-unavailable";
         return { status: "disconnected", reason };
       }
       if (call.status !== "ran") return { status: "disconnected", reason: "probe-unavailable" };

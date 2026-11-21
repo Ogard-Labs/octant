@@ -94,6 +94,7 @@ import {
   type AgentRun,
   type Project,
   type WorkThreadAdoptedSession,
+  type ImportedSessionHistory,
   type WorkTurnStreamFrame,
 } from "@octant/contracts";
 import { Effect, Queue, Schema, Stream } from "effect";
@@ -219,6 +220,80 @@ describe("WorkTurnService", () => {
         failure: { category: "unavailable", message: WINDOWS_STRICT_REFUSAL },
       });
       expect(fixture.acquireInputs).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("withholds Octant host tools before continuation checks so Windows Strict Work follow-up turns resume without tools-changed", async () => {
+    const resolveAppManagedTools = vi.fn(() => ({
+      definitions: [
+        {
+          name: "octant_host_tool",
+          description: "Host tool withheld under Windows Strict",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+      execute: async () => ({ result: "ok" }),
+    }));
+    const observedContinuationTools: Array<number> = [];
+    const fixture = serviceFixture({
+      threadAccess: "full-access",
+      resolveStrict: () => true,
+      resolveAppManagedTools,
+      turnRuntime: {
+        run: async (input) => {
+          input.onSessionReady?.({
+            sessionId: input.providerSessionId,
+            resumeCursor: { driverKind: "codex", value: "codex-session-1" },
+          });
+          return { kind: "completed" as const, response: "done" };
+        },
+      },
+      resolveDriver: (_id, fallback) => ({
+        ...fallback,
+        kind: "codex",
+        conversationOwnership: "provider",
+        toolCatalogContinuation: ({ tools }) => {
+          observedContinuationTools.push(tools.length);
+          return tools.length === 0 ? "unchanged" : "handoff-required";
+        },
+      }),
+    });
+    const providerRecord = fixture.persistence.readProviderInstance();
+    if (providerRecord !== undefined) {
+      fixture.persistence.readProviderInstance.mockReturnValue({
+        id: providerRecord.id,
+        displayName: providerRecord.displayName,
+        enabled: providerRecord.enabled,
+        environmentPolicy: providerRecord.environmentPolicy,
+        version: providerRecord.version,
+        createdAt: providerRecord.createdAt,
+        updatedAt: providerRecord.updatedAt,
+        driverKind: "codex",
+        configuration: { kind: "codex-cli", binaryPath: "C:\\Tools\\Codex\\codex.exe" },
+      });
+    }
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      const first = startCommand();
+      await expect(fixture.service.startFirstTurn(ids.window, first)).resolves.toMatchObject({
+        kind: "accepted",
+      });
+      await fixture.waitForIdle();
+
+      const second = {
+        ...first,
+        requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+        turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+        prompt: "Follow-up turn under Windows Strict",
+      };
+      await expect(fixture.service.startFirstTurn(ids.window, second)).resolves.toMatchObject({
+        kind: "accepted",
+      });
+      await fixture.waitForIdle(second.requestId);
+      expect(resolveAppManagedTools).not.toHaveBeenCalled();
+      expect(observedContinuationTools).toEqual([0]);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -2424,6 +2499,54 @@ describe("WorkTurnService", () => {
       ]);
     });
 
+    it("records the adopted session's earlier conversation with the adoption, shows it back, and never sends it to the provider", async () => {
+      let adopted: WorkThreadAdoptedSession | undefined;
+      let imported: ImportedSessionHistory | undefined;
+      const prompts: string[] = [];
+      const fixture = serviceFixture({
+        resolveDriver: (_id, fallback) => ({
+          ...fallback,
+          nativeSessions: {
+            list: () => Effect.succeed([]),
+            adopt: () => Effect.succeed(cursor),
+            history: () =>
+              Effect.succeed({
+                status: "read" as const,
+                messages: [{ role: "person" as const, text: "Collect the vendor quotes" }],
+              }),
+          },
+        }),
+        recordAdoptedSession: (_thread, record, history) => {
+          adopted = record;
+          imported = history;
+          return { status: "recorded" };
+        },
+        readImportedSessionHistory: () => imported,
+        adoptedSession: () => adopted,
+        turnRuntime: {
+          run: async (input) => {
+            prompts.push(JSON.stringify(input));
+            return { kind: "completed", response: "Done" };
+          },
+        },
+      });
+
+      await fixture.service.adoptNativeSession(ids.window, ids.thread, "outside-1");
+
+      expect(imported).toEqual({
+        status: "imported",
+        messages: [{ role: "person", text: "Collect the vendor quotes" }],
+      });
+      expect((await fixture.service.nativeSessions(ids.window, ids.thread)).adopted).toEqual({
+        nativeSessionId: "outside-1",
+        history: imported,
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0]).not.toContain("Collect the vendor quotes");
+    });
+
     it("refuses a message sent while the thread takes up a session, and an adoption once it has a turn", async () => {
       let release: (() => void) | undefined;
       const adopt = vi.fn(() =>
@@ -4602,6 +4725,56 @@ describe("WorkTurnService", () => {
     controller.abort();
   });
 
+  it("restates the turn's reasoning total live and keeps it and a call's bounds through settle", async () => {
+    const gate = deferred<void>();
+    const timing = {
+      startedAt: "2026-08-11T12:00:00.000Z" as UtcTimestamp,
+      endedAt: "2026-08-11T12:00:03.000Z" as UtcTimestamp,
+    } as const;
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          input.onReasoningMs?.(12_000);
+          input.onToolSteps?.({
+            truncated: false,
+            steps: [{ toolCallId: "call-1", toolName: "Read", state: "completed", timing }],
+          });
+          await gate.promise;
+          return { kind: "completed", response: "Done" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    const controller = new AbortController();
+    const stream = fixture.service.subscribe(ids.window, ids.thread, 0, controller.signal);
+    const frames: Array<Record<string, unknown>> = [];
+    for (;;) {
+      const next = await stream.next();
+      if (next.done === true) break;
+      const frame = next.value as Record<string, unknown>;
+      frames.push(frame);
+      if (frame.kind === "turn-tool-step") break;
+    }
+    // The reasoning total rides the step stream; a mid-turn rebuild shows it.
+    expect(frames.some((frame) => frame.reasoningMs === 12_000)).toBe(true);
+    const midTurn = (await fixture.service.transcript(ids.window, ids.thread)).turns[0];
+    expect(midTurn?.reasoningMs).toBe(12_000);
+    gate.resolve();
+    for (;;) {
+      const next = await stream.next();
+      if (next.done === true) break;
+      if ((next.value as { readonly kind: string }).kind === "turn-settled") break;
+    }
+    controller.abort();
+    await fixture.waitForIdle();
+    // The settled, replayed turn shows the same measurements the live feed did.
+    const settledTurn = (await fixture.service.transcript(ids.window, ids.thread)).turns.at(-1);
+    expect(settledTurn?.reasoningMs).toBe(12_000);
+    expect(settledTurn?.toolSteps).toEqual([
+      { toolCallId: "call-1", toolName: "Read", state: "completed", timing },
+    ]);
+  });
+
   it("publishes the turn's tool calls live and journals them with the settled turn", async () => {
     const gate = deferred<void>();
     const fixture = serviceFixture({
@@ -6593,6 +6766,7 @@ function serviceFixture(
     /** Read on every admission and rewind, so a test can freeze the thread for a move. */
     readonly moveHold?: (threadId: string) => boolean;
     readonly recordAdoptedSession?: WorkTurnServiceDependencies["recordAdoptedSession"];
+    readonly readImportedSessionHistory?: WorkTurnServiceDependencies["readImportedSessionHistory"];
     readonly stopKeptSession?: WorkTurnServiceDependencies["stopKeptSession"];
     /** Read on every thread read, so a test can adopt a session between reads. */
     readonly adoptedSession?: () => WorkThreadAdoptedSession | undefined;
@@ -6824,6 +6998,9 @@ function serviceFixture(
     ...(options.recordAdoptedSession === undefined
       ? {}
       : { recordAdoptedSession: options.recordAdoptedSession }),
+    ...(options.readImportedSessionHistory === undefined
+      ? {}
+      : { readImportedSessionHistory: options.readImportedSessionHistory }),
     ...(options.stopKeptSession === undefined ? {} : { stopKeptSession: options.stopKeptSession }),
     ...(options.onTurnCancelled === undefined ? {} : { onTurnCancelled: options.onTurnCancelled }),
     ...(options.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
@@ -7493,5 +7670,67 @@ describe("continuing a Work turn a restart cut off", () => {
 
     expect(recovery.held).toMatchObject([{ reason: "cannot-resume" }]);
     expect(continuations(host)).toHaveLength(0);
+  });
+});
+
+describe("loop stops on a Work thread", () => {
+  it("journals work.turn-loop-stopped@1 under Strict and lets the thread accept the next message straight away", async () => {
+    let call = 0;
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          call += 1;
+          if (call === 1) {
+            input.onLoopStopped?.({
+              kind: "turn-loop-stopped",
+              toolName: "octant_read",
+              count: 6,
+              occurredAt: "2026-10-30T12:00:05.000Z" as never,
+            });
+            return { kind: "cancelled" };
+          }
+          return { kind: "completed", response: "Continuing cleanly." };
+        },
+      },
+    });
+
+    const first = await fixture.service.startFirstTurn(ids.window, startCommand());
+    expect(first.kind).toBe("accepted");
+    await fixture.waitForIdle();
+
+    const appendedNames = fixture.persistence.journal.append.mock.calls.flatMap((args) =>
+      (args[0] as { readonly events: ReadonlyArray<{ readonly eventName: string }> }).events.map(
+        (e) => e.eventName,
+      ),
+    );
+    expect(appendedNames).toContain("work.turn-loop-stopped@1");
+
+    const turnsAfterStop = fixture.projection.listForThread(ids.thread);
+    expect(turnsAfterStop[0]).toMatchObject({
+      status: "cancelled",
+      loopNotice: {
+        kind: "turn-loop-stopped",
+        toolName: "octant_read",
+        count: 6,
+      },
+    });
+
+    // Thread accepts a new message straight away.
+    const nextRequestId = decodeWorkTurnRequestId("84000000-0000-4000-8000-000000000098");
+    const second = await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      requestId: nextRequestId,
+      turnId: "84000000-0000-4000-8000-000000000099",
+      prompt: "Try a different approach",
+    });
+    expect(second.kind).toBe("accepted");
+    await fixture.waitForIdle(nextRequestId);
+
+    const turnsAfterNext = fixture.projection.listForThread(ids.thread);
+    expect(turnsAfterNext).toHaveLength(2);
+    expect(turnsAfterNext[1]).toMatchObject({
+      status: "completed",
+      response: "Continuing cleanly.",
+    });
   });
 });

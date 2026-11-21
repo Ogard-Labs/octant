@@ -211,6 +211,9 @@ export function RemoteShellView(props: RemoteShellViewProps) {
         pairedDevices={pairedDevices}
         projectClient={clients.project}
         providerClient={clients.provider}
+        {...(clients.code.providerCloudSessions === undefined
+          ? {}
+          : { providerCloudSessionClient: clients.code.providerCloudSessions })}
         providerKeys={providerKeys}
         providerOAuth={providerOAuth}
         reachable={reachableSettings}

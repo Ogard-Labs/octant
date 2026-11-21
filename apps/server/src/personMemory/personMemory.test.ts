@@ -4,6 +4,8 @@ import { join } from "node:path";
 import {
   ChatDeleted,
   EventActor,
+  HUB_DELEGATION_RECORDED,
+  HubDelegationRecordedPayload,
   THREAD_RETENTION_EVENT_NAMES,
   ThreadRetentionThreadPurged,
   decodeUtcTimestamp,
@@ -14,6 +16,7 @@ import {
 import { decodePersonMemoryCommand } from "@octant/contracts/person-memory";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
+import { readReceivedDelegationThreadIds } from "../hub/delegationJournal";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
@@ -66,7 +69,8 @@ function harness(threads: FakeThread[]) {
     connection,
     registry: registerPersonMemoryEvents(new EventRegistry())
       .register(THREAD_RETENTION_EVENT_NAMES.threadPurged, 1, ThreadRetentionThreadPurged)
-      .register("chat.deleted@1", 1, ChatDeleted),
+      .register("chat.deleted@1", 1, ChatDeleted)
+      .register(HUB_DELEGATION_RECORDED, 1, HubDelegationRecordedPayload),
     projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
     clock: () => START,
   });
@@ -434,8 +438,9 @@ describe("who person memory reaches", () => {
   const LOCAL = "cccccccc-0000-4000-8000-000000000001" as WindowId;
   const DEVICE = "cccccccc-0000-4000-8000-000000000002" as WindowId;
   const HOST = "cccccccc-0000-4000-8000-000000000003" as WindowId;
+  const HUB_DEVICE = "cccccccc-0000-4000-8000-000000000004" as WindowId;
 
-  it("gives the block and the search tool only to a turn a window on this host started", async () => {
+  it("gives the block and the search tool to a local window, a paired device, a routine, and other host-started turns", async () => {
     const h = harness([
       { id: THREAD_1, completedAt: later, title: "Invoices", personMessages: ["CSV"] },
     ]);
@@ -443,8 +448,7 @@ describe("who person memory reaches", () => {
     await h.sweep.pass();
     const access = createPersonMemoryAccess({
       store: h.store,
-      isPairedDeviceScope: (scope) => scope === DEVICE,
-      isHostScope: (scope) => scope === HOST,
+      isRestrictedDeviceScope: (scope) => scope === HUB_DEVICE,
       projectLabel: () => "Shop",
     });
     const scope = {
@@ -453,21 +457,244 @@ describe("who person memory reaches", () => {
       createdAt: "2026-11-02T00:00:00.000Z",
     };
 
-    expect(access.blockFor({ ...scope, windowId: LOCAL })).toContain("Prefers CSV");
-    for (const windowId of [DEVICE, HOST, undefined]) {
+    const localBlock = access.blockFor({ ...scope, windowId: LOCAL });
+    expect(localBlock).toContain("Prefers CSV");
+    for (const windowId of [LOCAL, DEVICE, HOST]) {
+      expect(access.blockFor({ ...scope, windowId })).toBe(localBlock);
+      const tools = access.toolsFor({ ...scope, windowId });
+      expect(tools?.definitions.map((definition) => definition.name)).toEqual([
+        "octant_past_threads",
+      ]);
+      const answer = await tools?.execute({
+        name: "octant_past_threads",
+        inputJson: JSON.stringify({ query: "invoice" }),
+      });
+      expect(answer?.isError).toBeUndefined();
+      expect(JSON.stringify(answer?.result)).toContain('\\"Invoices\\" (Chat, no Project');
+    }
+
+    for (const windowId of [HUB_DEVICE, undefined]) {
       expect(access.blockFor({ ...scope, windowId })).toBeUndefined();
       expect(access.toolsFor({ ...scope, windowId })).toBeUndefined();
     }
-    const tools = access.toolsFor({ ...scope, windowId: LOCAL });
-    expect(tools?.definitions.map((definition) => definition.name)).toEqual([
+
+    h.store.change(
+      decodePersonMemoryCommand({
+        kind: "change-person-memory-settings",
+        expectedVersion: h.store.view().version,
+        settings: { ...h.store.settings(), enabled: false },
+      }),
+    );
+    for (const windowId of [LOCAL, DEVICE, HOST]) {
+      expect(access.blockFor({ ...scope, windowId })).toBeUndefined();
+      expect(access.toolsFor({ ...scope, windowId })).toBeUndefined();
+    }
+  });
+
+  it("gives a subagent its lead thread's block and search tool, never newer or withheld entries, and neither when tools or memory are off", async () => {
+    const threads: FakeThread[] = [
+      {
+        id: THREAD_1,
+        completedAt: later,
+        projectId: PROJECT_A,
+        title: "Invoices",
+        personMessages: ["CSV"],
+      },
+    ];
+    const h = harness(threads);
+    h.advance(later);
+    await h.sweep.pass();
+
+    const leadCreatedAt = "2026-11-02T00:00:00.000Z";
+    const afterLead = "2026-11-03T00:00:00.000Z";
+    threads.push({
+      id: THREAD_2,
+      completedAt: afterLead,
+      projectId: PROJECT_B,
+      title: "Later work",
+      personMessages: ["Use YAML"],
+    });
+    h.setReply({
+      status: "answered",
+      text: JSON.stringify({
+        summary: "Switched to YAML.",
+        entries: [{ kind: "preference", content: "Prefers YAML over TOML." }],
+      }),
+    });
+    h.advance(afterLead);
+    await h.sweep.pass();
+
+    const access = createPersonMemoryAccess({
+      store: h.store,
+      isRestrictedDeviceScope: (scope) => scope === HUB_DEVICE,
+      projectLabel: (projectId) => (projectId === PROJECT_A ? "Shop" : "Warehouse"),
+    });
+    const lead = {
+      mode: "work" as const,
+      threadId: THREAD_3,
+      projectId: PROJECT_B,
+      createdAt: leadCreatedAt,
+      windowId: LOCAL,
+    };
+
+    const childBlock = access.childBlockFor(lead);
+    expect(childBlock).toBe(access.blockFor(lead));
+    expect(childBlock).toContain("Prefers CSV");
+    // Learned after the lead thread was created: absent from the lead's block and the child's.
+    expect(childBlock).not.toContain("Prefers YAML");
+
+    const childTools = access.childToolsFor(lead, { tools: true });
+    expect(childTools?.definitions.map((definition) => definition.name)).toEqual([
       "octant_past_threads",
     ]);
-    const answer = await tools?.execute({
+    const answer = await childTools?.execute({
       name: "octant_past_threads",
       inputJson: JSON.stringify({ query: "invoice" }),
     });
     expect(answer?.isError).toBeUndefined();
-    expect(JSON.stringify(answer?.result)).toContain('\\"Invoices\\" (Chat, no Project');
+    expect(JSON.stringify(answer?.result)).toContain('\\"Invoices\\" (Chat, Shop');
+
+    // A child with tools disabled gets no search tool.
+    expect(access.childToolsFor(lead, { tools: false })).toBeUndefined();
+
+    // A child delegated from a hub-introduced device or unknown scope gets neither block nor tool.
+    for (const restrictedWindow of [HUB_DEVICE, undefined]) {
+      expect(access.childBlockFor({ ...lead, windowId: restrictedWindow })).toBeUndefined();
+      expect(
+        access.childToolsFor({ ...lead, windowId: restrictedWindow }, { tools: true }),
+      ).toBeUndefined();
+    }
+
+    // If a child's live scope later narrows to a restricted device or disappears, search refuses.
+    let currentOwner: WindowId | undefined = LOCAL;
+    const liveChildTools = access.childToolsFor(lead, { tools: true }, () => currentOwner);
+    currentOwner = HUB_DEVICE;
+    const refusedSearch = await liveChildTools?.execute({
+      name: "octant_past_threads",
+      inputJson: JSON.stringify({ query: "invoice" }),
+    });
+    expect(refusedSearch?.isError).toBe(true);
+
+    // A child whose lead is in a Project kept out of memory gets neither.
+    h.store.change(
+      decodePersonMemoryCommand({
+        kind: "change-person-memory-settings",
+        expectedVersion: h.store.view().version,
+        settings: { ...h.store.settings(), excludedProjectIds: [PROJECT_B] },
+      }),
+    );
+    expect(access.childBlockFor(lead)).toBeUndefined();
+    expect(access.childToolsFor(lead, { tools: true })).toBeUndefined();
+
+    // A child whose lead is marked Leave no trace gets neither.
+    const ordinaryLead = {
+      mode: "work" as const,
+      threadId: THREAD_3,
+      projectId: PROJECT_A,
+      createdAt: leadCreatedAt,
+      windowId: LOCAL,
+    };
+    expect(access.childBlockFor(ordinaryLead)).toContain("Prefers CSV");
+    h.store.change(
+      decodePersonMemoryCommand({
+        kind: "set-thread-leaves-no-trace",
+        mode: "work",
+        threadId: THREAD_3,
+        leavesNoTrace: true,
+      }),
+    );
+    expect(access.childBlockFor(ordinaryLead)).toBeUndefined();
+    expect(access.childToolsFor(ordinaryLead, { tools: true })).toBeUndefined();
+
+    // With memory switched off, a child in a participating lead gets neither.
+    h.store.change(
+      decodePersonMemoryCommand({
+        kind: "change-person-memory-settings",
+        expectedVersion: h.store.view().version,
+        settings: { ...h.store.settings(), enabled: false, excludedProjectIds: [] },
+      }),
+    );
+    const otherLead = {
+      mode: "code" as const,
+      threadId: "aaaaaaaa-0000-4000-8000-000000000004",
+      projectId: PROJECT_A,
+      createdAt: leadCreatedAt,
+      windowId: LOCAL,
+    };
+    expect(access.childBlockFor(otherLead)).toBeUndefined();
+    expect(access.childToolsFor(otherLead, { tools: true })).toBeUndefined();
+  });
+
+  it("withholds person memory from a peer-delegated Work thread and its subagents, including after journal replay", async () => {
+    const h = harness([
+      {
+        id: THREAD_1,
+        completedAt: later,
+        projectId: PROJECT_A,
+        title: "Private payroll",
+        personMessages: ["CSV"],
+      },
+    ]);
+    h.advance(later);
+    await h.sweep.pass();
+
+    const peerThreadId = "aaaaaaaa-0000-4000-8000-000000000099";
+    h.journal.append({
+      aggregate: {
+        aggregateType: "hub-delegation",
+        aggregateId: "77777777-7777-4777-8777-777777777777",
+      },
+      expectedVersion: 0,
+      events: [
+        {
+          eventId: crypto.randomUUID(),
+          eventName: HUB_DELEGATION_RECORDED,
+          eventVersion: 1,
+          correlationId: crypto.randomUUID(),
+          actor,
+          occurredAt: later,
+          payload: {
+            change: "received",
+            actingPrincipal: {
+              kind: "peer",
+              memberId: "66666666-6666-4666-8666-666666666666",
+            },
+            requestId: "55555555-5555-4555-8555-555555555555",
+            memberId: "66666666-6666-4666-8666-666666666666",
+            projectId: PROJECT_B,
+            threadId: peerThreadId,
+          },
+        },
+      ],
+    });
+    const withheld = readReceivedDelegationThreadIds(h.journal);
+    expect(withheld.has(peerThreadId)).toBe(true);
+
+    const access = createPersonMemoryAccess({
+      store: h.store,
+      isRestrictedDeviceScope: (scope) => scope === HUB_DEVICE,
+      isThreadWithheld: (threadId) => withheld.has(threadId),
+      projectLabel: () => "Shop",
+    });
+
+    const peerScope = {
+      mode: "work" as const,
+      threadId: peerThreadId,
+      projectId: PROJECT_B,
+      createdAt: "2026-11-02T00:00:00.000Z",
+      windowId: HOST,
+    };
+    expect(access.blockFor(peerScope)).toBeUndefined();
+    expect(access.toolsFor(peerScope)).toBeUndefined();
+    expect(access.childBlockFor(peerScope)).toBeUndefined();
+    expect(access.childToolsFor(peerScope, { tools: true })).toBeUndefined();
+
+    // An ordinary routine thread under the same host scope still reads person memory.
+    const routineScope = { ...peerScope, threadId: THREAD_3 };
+    expect(access.blockFor(routineScope)).toContain("Prefers CSV");
+    expect(access.toolsFor(routineScope)?.definitions.map((d) => d.name)).toEqual([
+      "octant_past_threads",
+    ]);
   });
 });
 
@@ -497,8 +724,6 @@ describe("benchmark threads and person memory", () => {
     expect(h.prompts.join("\n")).not.toContain("Say hello.");
     const access = createPersonMemoryAccess({
       store: h.store,
-      isPairedDeviceScope: () => false,
-      isHostScope: () => false,
       projectLabel: () => undefined,
     });
     const scope = {

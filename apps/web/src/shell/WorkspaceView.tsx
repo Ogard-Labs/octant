@@ -1,3 +1,4 @@
+import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import type { PreparationTarget } from "../projects/WorktreePreparationDialog";
 import type { SandboxRestrictionsScope } from "@octant/contracts/sandbox-policy";
 import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-restrictions-client";
@@ -102,6 +103,9 @@ import {
 import { TabActivationProvider, type TabActivationRegistry } from "./TabActivation";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import { CodeThreadEnvironment } from "../environment/CodeThreadEnvironment";
+import { observeCodeBranchState, switchCodeBranch } from "../code/switchCodeBranch";
+import { nativeCodeWorkspaceApprovals } from "../code/codeWorkspaceApprovals";
+import type { ThreadMoveRequest } from "../app/shellActions";
 import {
   Component,
   lazy,
@@ -338,6 +342,7 @@ export interface WorkspaceViewProps {
   readonly planClient?: PlanClient;
   readonly usageDashboardClient?: UsageDashboardClient;
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
+  readonly pullRequestReviewClient?: import("@octant/client-runtime").PullRequestReviewClient;
   readonly spendCeilingShown?: boolean;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
   readonly workCreateThreadAvailable?: boolean;
@@ -447,7 +452,10 @@ export interface WorkspaceViewProps {
   }) => void;
   readonly onPreviewResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
   /** Offers each local thread pane's follow-up suggestions over its composer. */
-  readonly followUpSuggestions?: Pick<ComposerOffers, "client" | "sideTaskClient" | "onCreated">;
+  readonly followUpSuggestions?: Pick<
+    ComposerOffers,
+    "client" | "sideTaskClient" | "finishedReceiptClient" | "onCreated"
+  >;
   /** A keyboard path to the edge-drop gesture: split a pane onto a welcome. */
   readonly onSplitPane: (
     paneId: PaneId,
@@ -550,7 +558,15 @@ export interface WorkspaceViewProps {
   /** Session record of which tabs the person activated, opened, or created. */
   readonly tabActivation?: TabActivationRegistry;
   /** Starts a fresh thread in a Project, offered when a checkout is unusable. */
-  readonly onNewThreadInProject?: (projectId: ProjectSummary["id"]) => void;
+  readonly onNewThreadInProject?: (
+    projectId: ProjectSummary["id"],
+    options?: { readonly startFrom?: boolean | undefined },
+  ) => void;
+  /**
+   * Opens the shared Move to Project request for a thread — the same dialog
+   * sidebar rows open, never a second move surface.
+   */
+  readonly onRequestMoveToProject?: (request: ThreadMoveRequest) => void;
   readonly projectClient?: ProjectClient;
   /** Each Project's instructions, shown beside its memory. */
   readonly octantInstructionsClient?: OctantInstructionsClient;
@@ -559,6 +575,7 @@ export interface WorkspaceViewProps {
   readonly previewClient?: PreviewClient;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  readonly serviceOfferClient?: ServiceOfferClient;
   /** Every image profile, custom image sources included, computed once by the shell. */
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly onOpenCanvas?: (entry: CanvasInventoryEntry) => void;
@@ -590,6 +607,15 @@ export interface WorkspaceViewProps {
   readonly draftBranchName?: string;
   /** Present while the Code draft was opened with New coordinator. */
   readonly draftCoordinator?: import("./DraftThreadWorkspace").CoordinatorDraft;
+  /**
+   * A draft opened with "New task on another branch…" starts with its
+   * branch choice open — the same picker "Where > Start from" draws.
+   */
+  /**
+   * A branch-start intent scoped to the draft it was opened for: the draft
+   * named by this Project opens its Where > Start from branch picker once.
+   */
+  readonly draftStartFrom?: { readonly projectId: string } | undefined;
   readonly draftApprovalLabel?: string;
   readonly draftSelectedProviderInstanceId?: import("@octant/contracts/providers").ProviderInstanceId;
   readonly draftSelectedModelId?: import("@octant/contracts/providers").ProviderModelId;
@@ -1108,7 +1134,8 @@ function useStableFollowUpOffers(host: WorkspaceViewProps["followUpSuggestions"]
     if (
       cached !== undefined &&
       cached.client === fresh.client &&
-      cached.sideTaskClient === fresh.sideTaskClient
+      cached.sideTaskClient === fresh.sideTaskClient &&
+      cached.finishedReceiptClient === fresh.finishedReceiptClient
     ) {
       return cached;
     }
@@ -1556,15 +1583,22 @@ function renderCodeTab(
       : codeController.bootstrap?.threads.find(
           (thread) => String(thread.id) === String(tab.threadId),
         );
-  const checkoutAvailability =
+  const activeCheckout =
     activeThread === undefined
       ? undefined
       : codeController.activeView !== undefined &&
           String(codeController.activeView.thread.id) === String(tab.threadId)
-        ? codeController.activeView.checkout.availability
+        ? codeController.activeView.checkout
         : codeController.bootstrap?.checkouts.find(
             (checkout) => String(checkout.id) === String(activeThread.checkoutId),
-          )?.availability;
+          );
+  const checkoutAvailability = activeCheckout?.availability;
+  // The one shared approval route the workspace's own panes record through;
+  // the grant names the exact command the person confirmed.
+  const workspaceGitApproval = nativeCodeWorkspaceApprovals(
+    props.hostBridge,
+    codeController.activeView,
+  )?.git;
   const providerInstanceId = activeThread?.providerInstanceId;
   const autoReview = autoReviewFor({
     providerInstanceId,
@@ -1661,6 +1695,8 @@ function renderCodeTab(
         {...(harnessAutoReviewSupported === undefined ? {} : { harnessAutoReviewSupported })}
         strictDefault={strictDefault}
         {...(autoReview === undefined ? {} : { autoReview })}
+        {...(project === undefined ? {} : { project })}
+        {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
         {...(project?.type === "code" && (project.extraFolders ?? []).length > 0
           ? { projectExtraFolders: project.extraFolders?.map((folder) => folder.canonicalRoot) }
           : {})}
@@ -1668,6 +1704,9 @@ function renderCodeTab(
         {...(props.imageGenerationClient === undefined
           ? {}
           : { imageGenerationClient: props.imageGenerationClient })}
+        {...(props.serviceOfferClient === undefined
+          ? {}
+          : { serviceOfferClient: props.serviceOfferClient })}
         {...(props.imageGenerationProfiles === undefined
           ? {}
           : { imageGenerationProfiles: props.imageGenerationProfiles })}
@@ -1762,6 +1801,68 @@ function renderCodeTab(
             {...(props.onNewThreadInProject === undefined
               ? {}
               : { onNewThreadInProject: props.onNewThreadInProject })}
+            {...(project === undefined || props.onNewThreadInProject === undefined
+              ? {}
+              : {
+                  onNewTaskOnBranch: () =>
+                    props.onNewThreadInProject?.(project.id, { startFrom: true }),
+                })}
+            {...(project === undefined || activeThread === undefined
+              ? {}
+              : {
+                  onObserveBranchState: () =>
+                    observeCodeBranchState(
+                      codeController.client,
+                      () => globalThis.crypto.randomUUID(),
+                      { threadId: tab.threadId, checkoutId: activeThread.checkoutId },
+                    ),
+                  onSwitchBranch: (request) =>
+                    switchCodeBranch(
+                      codeController.client,
+                      () => globalThis.crypto.randomUUID(),
+                      { threadId: tab.threadId, checkoutId: activeThread.checkoutId },
+                      request,
+                      {
+                        executionPolicy: activeThread.executionPolicy,
+                        ...(workspaceGitApproval === undefined
+                          ? {}
+                          : { requestApproval: workspaceGitApproval }),
+                      },
+                    ),
+                })}
+            {...(project === undefined || props.onRequestMoveToProject === undefined
+              ? {}
+              : {
+                  onMoveToProject: () =>
+                    props.onRequestMoveToProject?.({
+                      mode: "code",
+                      threadId: String(tab.threadId),
+                      title: tab.title,
+                      projectId: String(project.id),
+                      ...(activeThread === undefined
+                        ? {}
+                        : {
+                            providerInstanceId: String(activeThread.providerInstanceId),
+                            modelId: String(activeThread.modelId),
+                            ...(activeThread.workingFolderId === undefined
+                              ? {}
+                              : { workingFolderId: String(activeThread.workingFolderId) }),
+                          }),
+                      ...(activeCheckout === undefined
+                        ? {}
+                        : {
+                            checkoutKind: activeCheckout.kind,
+                            checkoutAvailability: activeCheckout.availability,
+                          }),
+                    }),
+                })}
+            checkoutKind={activeCheckout?.kind}
+            projects={props.projects}
+            {...(props.runningThreadIds?.has(String(tab.threadId)) === true ||
+            props.waitingThreadIds?.has(String(tab.threadId)) === true
+              ? { threadBusy: true }
+              : {})}
+            {...(activeThread === undefined ? {} : { threadPolicy: activeThread.executionPolicy })}
             {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
             {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
             {...(props.projectWindowCapability === undefined
@@ -1857,6 +1958,17 @@ function renderCodeTab(
             {...(props.spendCeilingClient === undefined
               ? {}
               : { spendCeilingClient: props.spendCeilingClient })}
+            {...(props.pullRequestReviewClient === undefined
+              ? {}
+              : {
+                  pullRequestReviewClient: props.pullRequestReviewClient,
+                  ...(props.providerController.snapshot === undefined
+                    ? {}
+                    : { providerSnapshot: props.providerController.snapshot }),
+                  ...(activeThread?.providerInstanceId === undefined
+                    ? {}
+                    : { workerProviderInstanceId: activeThread.providerInstanceId }),
+                })}
             {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
             {...(props.onOpenUsageDashboard === undefined
               ? {}
@@ -1918,6 +2030,31 @@ function draftRecentThreads(
   return [];
 }
 
+type StrippedHomeStart = Omit<NonNullable<WorkspaceViewProps["homeStart"]>, "codeActivity">;
+
+// Memoized per source object so a re-render hands the draft and welcome
+// surfaces the same stripped homeStart identity instead of a fresh copy.
+const strippedHomeStarts = new WeakMap<
+  NonNullable<WorkspaceViewProps["homeStart"]>,
+  StrippedHomeStart
+>();
+
+/**
+ * Drops the Code Home activity source from a start model handed to any
+ * surface that is not the Code Home welcome: a new-task draft, a Work draft
+ * or Chat's welcome share the model's cards but never mount the panel.
+ */
+function withoutCodeActivity(
+  homeStart: NonNullable<WorkspaceViewProps["homeStart"]>,
+): NonNullable<WorkspaceViewProps["homeStart"]> {
+  if (homeStart.codeActivity === undefined) return homeStart;
+  const stripped = strippedHomeStarts.get(homeStart);
+  if (stripped !== undefined) return stripped;
+  const { codeActivity: _codeActivity, ...rest } = homeStart;
+  strippedHomeStarts.set(homeStart, rest);
+  return rest;
+}
+
 function renderNonCodeTab(
   tab: WorkspaceTab,
   props: WorkspaceViewProps,
@@ -1930,6 +2067,7 @@ function renderNonCodeTab(
   },
   openProviderSettings: (() => void) | undefined,
   drafts: NewTaskDrafts | undefined,
+  codeHomeWelcome = false,
 ): React.ReactNode {
   // Code's and Work's welcome tab is only a routing placeholder. Keep one
   // start surface so a split or restored fallback never sends the reader
@@ -1954,6 +2092,7 @@ function renderNonCodeTab(
       canvasContext,
       openProviderSettings,
       drafts,
+      mode === "code",
     );
   }
   if (tab.kind === "draft-thread") {
@@ -2016,7 +2155,11 @@ function renderNonCodeTab(
           {...(props.onDraftPendingPromptConsumed === undefined
             ? {}
             : { onPendingPromptConsumed: props.onDraftPendingPromptConsumed })}
-          {...(props.homeStart === undefined ? {} : { homeStart: props.homeStart })}
+          {...(props.homeStart === undefined
+            ? {}
+            : {
+                homeStart: codeHomeWelcome ? props.homeStart : withoutCodeActivity(props.homeStart),
+              })}
           {...(draftProjectId === undefined ? {} : { projectId: draftProjectId })}
           {...(props.onDraftSelectProject === undefined
             ? {}
@@ -2029,6 +2172,11 @@ function renderNonCodeTab(
           {...(props.draftProjectName === undefined ? {} : { projectName: props.draftProjectName })}
           {...(props.draftProjectRoot === undefined ? {} : { projectRoot: props.draftProjectRoot })}
           {...(props.draftBranchName === undefined ? {} : { branchName: props.draftBranchName })}
+          {...(props.draftStartFrom !== undefined &&
+          draftProjectId !== undefined &&
+          props.draftStartFrom.projectId === String(draftProjectId)
+            ? { startFromOpen: true }
+            : {})}
           {...(props.draftCoordinator === undefined || tab.mode !== "code"
             ? {}
             : { coordinator: props.draftCoordinator })}
@@ -2192,6 +2340,9 @@ function renderNonCodeTab(
         {...(props.imageGenerationClient === undefined
           ? {}
           : { imageGenerationClient: props.imageGenerationClient })}
+        {...(props.serviceOfferClient === undefined
+          ? {}
+          : { serviceOfferClient: props.serviceOfferClient })}
         {...(props.imageGenerationProfiles === undefined
           ? {}
           : { imageGenerationProfiles: props.imageGenerationProfiles })}
@@ -2328,6 +2479,9 @@ function renderNonCodeTab(
                 {...(props.imageGenerationClient === undefined
                   ? {}
                   : { imageGenerationClient: props.imageGenerationClient })}
+                {...(props.serviceOfferClient === undefined
+                  ? {}
+                  : { serviceOfferClient: props.serviceOfferClient })}
                 {...(props.imageGenerationProfiles === undefined
                   ? {}
                   : { imageGenerationProfiles: props.imageGenerationProfiles })}
@@ -2552,6 +2706,14 @@ function renderNonCodeTab(
         {...(props.spendCeilingClient === undefined
           ? {}
           : { spendCeilingClient: props.spendCeilingClient })}
+        {...(props.pullRequestReviewClient === undefined
+          ? {}
+          : {
+              pullRequestReviewClient: props.pullRequestReviewClient,
+              ...(props.providerController.snapshot === undefined
+                ? {}
+                : { providerSnapshot: props.providerController.snapshot }),
+            })}
         {...(props.spendCeilingShown === true ? { spendCeilingShown: true } : {})}
         {...(props.onMemoryChanged === undefined ? {} : { onMemoryChanged: props.onMemoryChanged })}
         {...(props.onNewThreadInProject === undefined || project.lifecycle !== "active"
@@ -2856,7 +3018,9 @@ function renderNonCodeTab(
     <NewTaskDraftScopeContext.Provider value={`chat-welcome:${String(paneId)}`}>
       <ChatWelcome
         {...(recentThreads.length === 0 ? {} : { recentThreads })}
-        {...(props.homeStart === undefined ? {} : { homeStart: props.homeStart })}
+        {...(props.homeStart === undefined
+          ? {}
+          : { homeStart: withoutCodeActivity(props.homeStart) })}
         {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
         {...(props.selectedCreateHostId === undefined
           ? {}
@@ -3194,6 +3358,7 @@ function ChatThreadWorkspace(props: {
   readonly projectWindowCapability?: string;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  readonly serviceOfferClient?: ServiceOfferClient;
   /** Every image profile, custom image sources included, computed once by the shell. */
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly onOpenImageSettings?: () => void;
@@ -3297,6 +3462,9 @@ function ChatThreadWorkspace(props: {
         {...(props.imageGenerationClient === undefined
           ? {}
           : { imageGenerationClient: props.imageGenerationClient })}
+        {...(props.serviceOfferClient === undefined
+          ? {}
+          : { serviceOfferClient: props.serviceOfferClient })}
         {...(props.imageGenerationProfiles === undefined
           ? {}
           : { imageGenerationProfiles: props.imageGenerationProfiles })}

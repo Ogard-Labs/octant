@@ -26,6 +26,7 @@ import { ApprovalDeferralSheet } from "../approvals/ApprovalDeferralSheet";
 import { BrowserSurfacePanel } from "../surfaces/BrowserSurfacePanel";
 import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel";
 import { ExtensionToolApprovalCard } from "../surfaces/ExtensionToolApprovalCard";
+import { ServiceOfferCard } from "../surfaces/ServiceOfferCard";
 import { WorkRequestCards } from "../surfaces/WorkRequestCards";
 import { listMobileThreadSurfaces } from "../surfaces/threadSurfacePresentation";
 import {
@@ -578,6 +579,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
           ) : null}
           {!offlineDemo && fullView && activeSurface === "browser" && transport !== undefined ? (
             <BrowserSurfacePanel
+              actsAsHostPerson={standing.actsAsHostPerson}
               mode={selected.mode}
               reach={browserReach}
               threadId={selected.threadId}
@@ -595,6 +597,15 @@ export function ThreadScreen(props: ThreadScreenProps) {
               )}
               {offlineDemo || transport === undefined ? null : (
                 <NativeHarnessSessionPanel threadId={selected.threadId} transport={transport} />
+              )}
+              {offlineDemo || transport === undefined || !standing.actsAsHostPerson ? null : (
+                <ServiceOfferCard
+                  key={`${selected.hostId}:${selected.mode}:${selected.threadId}`}
+                  inProject={selected.projectId !== undefined}
+                  threadId={selected.threadId}
+                  threadKind={`${selected.mode}-thread`}
+                  transport={transport}
+                />
               )}
               {offlineDemo ||
               transport === undefined ||
@@ -717,6 +728,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
               </Pressable>
             </View>
             <BrowserSurfacePanel
+              actsAsHostPerson={standing.actsAsHostPerson}
               compact={{ onExpand: () => setViewFloating(false) }}
               mode={selected.mode}
               reach={browserReach}

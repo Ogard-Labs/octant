@@ -63,6 +63,15 @@ const ACP_ENDPOINTS: Readonly<Record<AcpProviderKind, ReadonlyArray<string>>> = 
   cline: ["cline.bot", ...MODEL_PROVIDERS],
   qwen: ["qwen.ai", "dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com"],
   fx: MODEL_PROVIDERS,
+  // The CLI's Google sign-in, its model service and its sign-in page.
+  antigravity: [
+    "cloudcode-pa.googleapis.com",
+    "daily-cloudcode-pa.googleapis.com",
+    "oauth2.googleapis.com",
+    "www.googleapis.com",
+    "accounts.google.com",
+    "antigravity.google",
+  ],
   // An added agent's own vendor is not known: below Full access it reaches
   // the common model providers, the endpoints its environment names and the
   // Project's own network rules.

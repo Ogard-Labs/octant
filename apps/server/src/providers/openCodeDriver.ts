@@ -9,6 +9,7 @@ import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
 import { readBoundedResponseBody } from "../extensions/boundedResponseBody";
 import { advertisedSlashCommands } from "./providerSlashCommands";
 import { OpenCodeChildSessions } from "./openCodeChildSessions";
+import { OpenCodeRetainedSessions, RememberedOpenCodeEdits } from "./openCodeRetainedSessions";
 import {
   openCodeOwnRulesAllow,
   readOpenCodeOwnSetup,
@@ -141,6 +142,18 @@ export interface OpenCodeClientPort {
       >)
     | undefined;
   /**
+   * A session's messages, oldest first, each with its role and its parts as
+   * OpenCode keeps them. Absent on a runtime whose message route was not
+   * read (OpenCode 2's message shape is not one Octant reads).
+   */
+  readonly sessionMessages?:
+    | ((
+        sessionId: string,
+      ) => Promise<
+        ReadonlyArray<{ readonly role: string; readonly parts: ReadonlyArray<unknown> }>
+      >)
+    | undefined;
+  /**
    * OpenCode's own fork: a new session holding the source's history before
    * `before`, or all of it when `before` is absent. The source is not changed.
    */
@@ -252,6 +265,8 @@ export interface OpenCodeDriverOptions {
    */
   readonly protectedPaths?: () => OpenCodeProtectedPaths;
   readonly idleLeaseMs?: number;
+  /** The host's platform; defaults to the running one. */
+  readonly platform?: NodeJS.Platform;
   readonly clock?: () => string;
   readonly correlationId?: () => string;
   /**
@@ -300,12 +315,14 @@ interface SessionState {
    */
   readonly unreportedEditGrants: string[];
   /**
-   * Files a 2.x approval answered `always` admits for good, shared by every
-   * session of this Project root while the host runs: OpenCode saves the
-   * grant in its own store and makes later matching edits without asking, so
-   * each such change is admitted without spending anything.
+   * Files a 2.x approval answered `always` admits for this native process's
+   * lifetime: OpenCode saves the grant in its own store and makes later
+   * matching edits without asking, so each such change is admitted without
+   * spending anything. The saved grant itself stays in OpenCode's store;
+   * what dies with the process is Octant's admission of it, so no new
+   * generation's sessions inherit it.
    */
-  readonly rememberedEdits: Set<string>;
+  readonly rememberedEdits: RememberedOpenCodeEdits;
   /** 2.x requests Octant itself answered, whose grants it already admitted. */
   readonly answeredRequests: Set<string>;
   readonly questions: Map<
@@ -568,6 +585,12 @@ function openCodeInputModalities(model: Provider["models"][string]): ProviderInp
 export interface OpenCodeToolProof {
   readonly accepted: boolean;
   readonly exclusive: boolean;
+  /**
+   * True when a Windows outside-Strict probe ran a verified release with
+   * Octant's private configuration (no Project config loaded), admitting
+   * app-managed tools without claiming OS confinement.
+   */
+  readonly windowsPrivateConfiguration?: boolean;
 }
 
 function openCodeChatCapabilities(
@@ -581,7 +604,10 @@ function openCodeChatCapabilities(
     )
       ? "supported"
       : "unsupported",
-    appManagedTools: tools.accepted && tools.exclusive ? "supported" : "unsupported",
+    appManagedTools:
+      tools.accepted && (tools.exclusive || tools.windowsPrivateConfiguration === true)
+        ? "supported"
+        : "unsupported",
     // Full access launches this runtime outside the sandbox the exclusivity
     // proof rests on, so even a proved release is mixed there. Reported only
     // when the runtime accepted the declaration: a runtime that rejects it
@@ -599,6 +625,15 @@ function openCodeChatCapabilities(
  * file change is held to the grants the person gave (`failClosedBetaEvent`),
  * so file changes are claimed from the first release read for the event.
  */
+/**
+ * Whether OpenCode 2 can run Chat and Plan turns on this host: macOS and Linux
+ * admit the git stand-in inside their Chat/Plan jails, and Windows runs both
+ * unconfined outside Strict with OpenCode's own permission rules.
+ */
+function openCodeChatPlanAdmitted(platform: NodeJS.Platform): boolean {
+  return openCodeChatPlanJailStartsProcesses(platform) || platform === "win32";
+}
+
 function openCodeBetaCapabilities(
   reported: ProviderCapabilities,
   version: string | undefined,
@@ -621,7 +656,7 @@ function openCodeBetaCapabilities(
     appManagedTools: reported.appManagedTools,
     // On a host whose Chat and Plan jail starts no process the launch refuses
     // both (`openCodeRefusesTurnHere`).
-    ...(openCodeChatPlanJailStartsProcesses(platform)
+    ...(openCodeChatPlanAdmitted(platform)
       ? {}
       : {
           turnModes: {
@@ -1533,6 +1568,14 @@ export function makeOfficialOpenCodeClient(
       }
       return { status: "missing" as const };
     },
+    ...(beta
+      ? {}
+      : {
+          sessionMessages: async (sessionId: string) =>
+            resultData(
+              await client.session.messages({ sessionID: sessionId }, { throwOnError: true }),
+            ).map((message) => ({ role: message.info.role, parts: message.parts })),
+        }),
     forkSession: async (sessionId, before) => {
       if (!beta)
         return resultData(
@@ -1756,27 +1799,18 @@ function keepsFullAccessSandbox(input: {
 
 export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriver {
   const clientFactory = options.clientFactory ?? makeOfficialOpenCodeClient;
+  const platform = options.platform ?? process.platform;
   const clock = options.clock ?? (() => new Date().toISOString());
   const makeCorrelation = options.correlationId ?? (() => crypto.randomUUID());
-  const resumeToolCatalogs = new Map<string, ReadonlyArray<ProviderToolDefinition>>();
-  // OpenCode sessions holding a turn's Octant context that no command ran;
-  // they outlive the connection whose turn failed, so they are kept here.
-  const sessionsHoldingStaleContext = new Set<string>();
-  // What OpenCode remembers from an `always` answer outlives the session and
-  // connection that gave it, so the admission is kept per Project root.
-  const rememberedEditGrants = new Map<string, Set<string>>();
-  const rememberedEditsFor = (projectRoot: string): Set<string> => {
-    const existing = rememberedEditGrants.get(projectRoot);
-    if (existing !== undefined) return existing;
-    const created = new Set<string>();
-    rememberedEditGrants.set(projectRoot, created);
-    return created;
-  };
+  // What outlives a connection or a turn is kept here, bounded: the tool
+  // catalogues a resume may reuse, and the sessions that must never be
+  // resumed because they hold a turn's context no command ran.
+  const retained = new OpenCodeRetainedSessions();
   // A server for a folder outside any thread, for listing, taking up and
   // forking OpenCode's own sessions there: the readiness check's launch,
   // leased per folder so its confinement binds that folder.
   const withSessionClient: OpenCodeSessionClient = async (projectRoot, use) => {
-    const probesTurnJail = !openCodeChatPlanJailStartsProcesses(process.platform);
+    const probesTurnJail = !openCodeChatPlanAdmitted(platform);
     const result = await Effect.runPromise(
       Effect.either(
         Effect.scoped(
@@ -1826,7 +1860,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
             // model prompt and its bridge is closed before the probe scope
             // returns. It runs wherever the launch can reach the bridge (macOS,
             // Linux, and Windows, whose launches have no Octant sandbox).
-            const bridge = appToolBridgeReachesLaunchOn(process.platform)
+            const bridge = appToolBridgeReachesLaunchOn(platform)
               ? yield* Effect.acquireRelease(
                   Effect.tryPromise({
                     try: () =>
@@ -1840,14 +1874,13 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
                 )
               : undefined;
             // Probe under the Chat/Plan jail, not the Code jail, wherever
-            // that jail can start the git stand-in (macOS's single exec,
-            // Linux's read-only capsule that admits processes): it is what
-            // makes a 2.x runtime serve a Git work tree in Chat and Plan, and
-            // attesting under Code confinement would pass even without it.
-            // Elsewhere a 2.x Chat or Plan launch is refused, so the probe
-            // attests the jail turns do run in there: Work and Code at Ask
-            // first, which allows a process.
-            const probesTurnJail = !openCodeChatPlanJailStartsProcesses(process.platform);
+            // Chat and Plan are admitted (macOS's single exec, Linux's
+            // read-only capsule, Windows unconfined): it is what makes a 2.x
+            // runtime serve a Git work tree in Chat and Plan, and attesting
+            // under Code confinement would pass even without it. Elsewhere a
+            // 2.x Chat or Plan launch is refused, so the probe attests the
+            // jail turns do run in there: Work and Code at Ask first.
+            const probesTurnJail = !openCodeChatPlanAdmitted(platform);
             const runtime = yield* acquireRuntime(
               options,
               projectRoot,
@@ -1878,6 +1911,9 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
             const normalized = normalizeOpenCodeProbe(instanceId, health, providers, clock(), {
               accepted: mcpAccepted,
               exclusive: runtime.isolatedConfiguration === true,
+              ...(platform === "win32" && runtime.windowsPrivateConfiguration === true
+                ? { windowsPrivateConfiguration: true }
+                : {}),
             });
             if (runtime.runtime === "beta" && normalized.models.length > 0) {
               // A launch that reports no scratch directory cannot be attested.
@@ -1936,12 +1972,12 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
                 capabilities: openCodeBetaCapabilities(
                   normalized.capabilities,
                   health.version,
-                  process.platform,
+                  platform,
                 ),
               };
             }
             if (
-              !appToolBridgeReachesLaunchOn(process.platform) &&
+              !appToolBridgeReachesLaunchOn(platform) &&
               normalized.models.length > 0 &&
               normalized.capabilities.appManagedTools === "unsupported"
             ) {
@@ -1984,9 +2020,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               mode ?? "code",
               clock,
               makeCorrelation,
-              resumeToolCatalogs,
-              rememberedEditsFor(projectRoot),
-              sessionsHoldingStaleContext,
+              retained,
               readOnlyFolders,
             );
           }),
@@ -2009,6 +2043,8 @@ function acquireRuntime(
     false,
     NO_OWN_PERMISSIONS,
     options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
+    [],
+    options.platform ?? process.platform,
   );
   return options.runtimeRegistry.acquireRuntime(options.instanceId, {
     ...(lease === undefined ? {} : { lease }),
@@ -2092,13 +2128,13 @@ function makeConnection(
   mode: "chat" | "work" | "code",
   clock: () => string,
   makeCorrelation: () => string,
-  resumeToolCatalogs: Map<string, ReadonlyArray<ProviderToolDefinition>>,
-  rememberedEdits: Set<string>,
-  sessionsHoldingStaleContext: Set<string>,
+  retained: OpenCodeRetainedSessions,
   /** The thread's attachments folder, read at every level and written at none. */
   readOnlyFolders: ReadonlyArray<string> = [],
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
+    const platform = options.platform ?? process.platform;
+    const windowsChatDenyAll = mode === "chat" && platform === "win32";
     const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
     const sessionsBySource = new Map<string, SessionState>();
     /**
@@ -2143,6 +2179,11 @@ function makeConnection(
     let subscriptionReady: Promise<void> | undefined;
     let streamFailure: ProviderFailure | undefined;
     let runtimeGeneration = 0;
+    // What OpenCode remembers from an `always` answer lives in its own store
+    // but is admitted here only for the native process that earned it: the
+    // ledger belongs to this connection's running generation, and is retired
+    // the moment that process ends so no later generation inherits a grant.
+    const rememberedEdits = new RememberedOpenCodeEdits();
     let sessionSetupInFlight = false;
     let closing = false;
     let client: OpenCodeClientPort | undefined;
@@ -2174,9 +2215,22 @@ function makeConnection(
     let runtimeKind: "legacy" | "beta" | undefined;
     let runtimeVersion: string | undefined;
     let runtimeIsolated = false;
+    // The running Windows outside-Strict launch uses a verified release with
+    // Octant's private configuration (no Project config loaded), admitting
+    // app-managed tools without claiming OS confinement.
+    let runtimeWindowsPrivateConfig = false;
     // The running launch loads a trusted Project's own OpenCode configuration.
     let runtimeProjectConfig = false;
     let runtimeLoopbackPorts: ReadonlyArray<number> = [];
+
+    const runtimeAdmitsAppTools = (
+      executionPolicy: ProviderExecutionPolicy,
+      strict: boolean,
+    ): boolean =>
+      runtimeIsolated ||
+      (platform === "win32" && !strict && runtimeWindowsPrivateConfig) ||
+      runtimeProjectConfig ||
+      executionPolicy === "full-access";
 
     const offer = (event: ProviderRuntimeEvent) => {
       Effect.runFork(PubSub.publish(events, event));
@@ -2247,6 +2301,7 @@ function makeConnection(
         ? undefined
         : {
             mode,
+            platform,
             projectRoot,
             extraFolders,
             readOnlyFolders,
@@ -2399,12 +2454,10 @@ function makeConnection(
     const samePorts = (left: ReadonlyArray<number>, right: ReadonlyArray<number>): boolean =>
       left.length === right.length && left.every((port, index) => port === right[index]);
     const closeRuntime = async (): Promise<void> => {
-      // A deliberate close retires the runtime generation. The cancelled
-      // process monitor and the aborted event stream belong to the closed
-      // runtime; their callbacks must not record an unexpected exit against
-      // the connection, or the next start on this connection is poisoned by
-      // a failure that was never real. The next runtime subscribes fresh.
+      // A deliberate close is not a runtime failure. Fence off the cancelled
+      // monitor and event stream before releasing the process.
       runtimeGeneration += 1;
+      rememberedEdits.retire();
       const outgoingSubscription = subscriptionAbort;
       subscriptionAbort = new AbortController();
       outgoingSubscription.abort();
@@ -2423,6 +2476,7 @@ function makeConnection(
       runtimeBlockedToolsKey = "[]";
       runtimeVersion = undefined;
       runtimeIsolated = false;
+      runtimeWindowsPrivateConfig = false;
       runtimeProjectConfig = false;
       runtimeLoopbackPorts = [];
       subscriptionReady = undefined;
@@ -2482,13 +2536,18 @@ function makeConnection(
                   executionPolicy,
                   ...(fullAccessSandbox ? { fullAccessSandbox: true } : {}),
                   ...(strict ? {} : { strict: false }),
-                  ...(ownSkills ? { ownSkills: true as const } : {}),
-                  ...(ownSetup === undefined ||
+                  ...(!windowsChatDenyAll && ownSkills ? { ownSkills: true as const } : {}),
+                  ...(windowsChatDenyAll ||
+                  ownSetup === undefined ||
                   (!ownSetup.toolServers && ownSetup.planServers.length === 0)
                     ? {}
                     : { ownToolServers: ownSetup.mcp }),
-                  ...(ownSetup?.projectConfig === true ? { projectConfig: true as const } : {}),
-                  ...(ownSetup === undefined ? {} : { runsAsItself: true as const }),
+                  ...(!windowsChatDenyAll && ownSetup?.projectConfig === true
+                    ? { projectConfig: true as const }
+                    : {}),
+                  ...(!windowsChatDenyAll && ownSetup !== undefined
+                    ? { runsAsItself: true as const }
+                    : {}),
                   betaPermissions: betaSessionPermissionRules(
                     executionPolicy,
                     mode,
@@ -2501,6 +2560,7 @@ function makeConnection(
                       strict,
                     ),
                     readOnlyFolders,
+                    platform,
                   ),
                   ...(readOnlyFolders.length === 0 ? {} : { readOnlyFolders }),
                   ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
@@ -2529,11 +2589,13 @@ function makeConnection(
             runtimeKind = started.runtime ?? "legacy";
             runtimeVersion = started.version;
             runtimeIsolated = started.isolatedConfiguration === true;
+            runtimeWindowsPrivateConfig = started.windowsPrivateConfiguration === true;
             runtimeProjectConfig = ownSetup?.projectConfig === true;
             runtimeLoopbackPorts = loopbackPorts;
             client = nextClient;
             void monitor.exited.then(() => {
               if (closing || generation !== runtimeGeneration) return;
+              rememberedEdits.retire();
               streamFailure = fail("provider-failed", "Provider runtime exited unexpectedly.");
               subscriptionAbort.abort();
               for (const state of sessionsBySource.values()) {
@@ -2565,6 +2627,7 @@ function makeConnection(
     const removeInvalidation = options.runtimeRegistry.onRuntimeInvalidated(
       options.instanceId,
       () => {
+        rememberedEdits.retire();
         for (const state of sessionsBySource.values()) {
           holdForRecovery(state);
         }
@@ -2588,6 +2651,7 @@ function makeConnection(
 
     const failStream = (generation: number) => {
       if (closing || generation !== runtimeGeneration || streamFailure !== undefined) return;
+      rememberedEdits.retire();
       streamFailure = fail("protocol", "Provider event stream ended unexpectedly.");
       for (const state of sessionsBySource.values()) {
         if (state.terminal) continue;
@@ -2677,6 +2741,15 @@ function makeConnection(
             void (async () => {
               try {
                 for await (const event of events) {
+                  if (closing || generation !== runtimeGeneration || subscriptionSignal.aborted)
+                    break;
+                  // A session OpenCode deleted is gone for good: drop its
+                  // remembered catalogue and any tombstone before the event
+                  // can be queued for a session state or routed to a child.
+                  if (event.type === "session.deleted") {
+                    const removed = removedSessionId(event);
+                    if (removed !== undefined) retained.sessionRemoved(removed);
+                  }
                   const sourceId = sourceSessionId(event);
                   if (sourceId === undefined) continue;
                   const child = childSessions.route(event, sourceId, (source) =>
@@ -2891,14 +2964,14 @@ function makeConnection(
             ),
             Effect.flatMap((runtimeClient) => {
               // Below Full access the tools reach only a runtime that proved
-              // nothing else can enter it. At Full access, and in a trusted
-              // Project whose own OpenCode configuration the launch loads,
-              // they are offered beside whatever the runtime inherited.
+              // nothing else can enter it, or on Windows outside Strict a
+              // verified release using Octant's private configuration. At Full
+              // access, and in a trusted Project whose own OpenCode
+              // configuration the launch loads, they are offered beside
+              // whatever the runtime inherited.
               if (
                 state.managedTools !== undefined &&
-                !runtimeIsolated &&
-                !runtimeProjectConfig &&
-                input.executionPolicy !== "full-access"
+                !runtimeAdmitsAppTools(input.executionPolicy, input.strict !== false)
               ) {
                 return Effect.promise(() => releaseManagedTools(state)).pipe(
                   Effect.zipRight(
@@ -2932,6 +3005,7 @@ function makeConnection(
                         state.own,
                         state.protectedPaths,
                         readOnlyFolders,
+                        platform,
                       ),
                       model: splitModelId(input.modelId),
                     }),
@@ -2955,7 +3029,7 @@ function makeConnection(
               state.sourceId = session.id;
               sessionsBySource.set(session.id, state);
               sourceBySession.set(input.sessionId, session.id);
-              resumeToolCatalogs.set(session.id, input.tools ?? []);
+              retained.rememberCatalog(session.id, input.tools ?? []);
               activate(state);
               for (const event of pendingBySource.get(session.id) ?? []) {
                 mapAndOffer(
@@ -3018,7 +3092,7 @@ function makeConnection(
               // Its next run would read a turn's context that no command ran,
               // stale, beside the next turn's own; the thread starts again on
               // a new session instead.
-              if (sessionsHoldingStaleContext.has(input.resumeCursor.value)) {
+              if (retained.refusesResume(input.resumeCursor.value)) {
                 return Effect.fail(fail("stale-resume", OPENCODE_STALE_CONTEXT_MESSAGE));
               }
               if (
@@ -3030,7 +3104,7 @@ function makeConnection(
                 return Effect.fail(fail("protocol", "A provider session is already active."));
               }
               sessionSetupInFlight = true;
-              const tools = input.tools ?? resumeToolCatalogs.get(input.resumeCursor.value) ?? [];
+              const tools = input.tools ?? retained.catalog(input.resumeCursor.value) ?? [];
               const priorSource = sourceBySession.get(input.sessionId);
               const priorState =
                 priorSource === undefined ? undefined : sessionsBySource.get(priorSource);
@@ -3129,7 +3203,7 @@ function makeConnection(
                   state.sourceId = session.id;
                   sessionsBySource.set(session.id, state);
                   sourceBySession.set(input.sessionId, session.id);
-                  resumeToolCatalogs.set(session.id, tools);
+                  retained.rememberCatalog(session.id, tools);
                   activate(state);
                   for (const event of pendingBySource.get(session.id) ?? []) {
                     mapAndOffer(
@@ -3149,7 +3223,19 @@ function makeConnection(
                   });
                 }),
                 Effect.tap(observeSessionCommands),
-                Effect.tapError(() => Effect.promise(() => releaseManagedTools(state))),
+                Effect.tapError((failure) =>
+                  Effect.gen(function* () {
+                    // A stale-resume refusal means the native session is gone
+                    // or no longer what the cursor names, so its remembered
+                    // catalogue goes too. This runs only after the cursor's
+                    // binding was honored, never for a refusal that named
+                    // another task or Project's session.
+                    if (failure.category === "stale-resume") {
+                      retained.forgetCatalog(input.resumeCursor.value);
+                    }
+                    yield* Effect.promise(() => releaseManagedTools(state));
+                  }),
+                ),
                 Effect.ensuring(
                   Effect.sync(() => {
                     sessionSetupInFlight = false;
@@ -3186,16 +3272,16 @@ function makeConnection(
             const reportedCapabilities = {
               ...(observed?.capabilities ?? capabilities),
               // This gates the turn's own tool offer, so a mixed Full access
+              // session or a Windows outside-Strict verified private-config
               // session carries tools here; the probe is what reports mixed.
-              appManagedTools:
-                runtimeIsolated || runtimeProjectConfig || state.executionPolicy === "full-access"
-                  ? ("supported" as const)
-                  : ("unsupported" as const),
+              appManagedTools: runtimeAdmitsAppTools(state.executionPolicy, runtimeStrict)
+                ? ("supported" as const)
+                : ("unsupported" as const),
             };
             const rejected = validateChatTurnInput(
               input,
               runtimeKind === "beta"
-                ? openCodeBetaCapabilities(reportedCapabilities, runtimeVersion, process.platform)
+                ? openCodeBetaCapabilities(reportedCapabilities, runtimeVersion, platform)
                 : reportedCapabilities,
               model,
             );
@@ -3276,7 +3362,7 @@ function makeConnection(
                                 // The context is queued with no run to read it. The
                                 // session is retired and never resumed, so the next
                                 // turn does not carry it stale.
-                                sessionsHoldingStaleContext.add(source);
+                                retained.markStale(source);
                                 retireState(state);
                                 return fail("stale-resume", OPENCODE_STALE_CONTEXT_MESSAGE);
                               },
@@ -3298,6 +3384,7 @@ function makeConnection(
                                 state.own,
                                 state.protectedPaths,
                                 readOnlyFolders,
+                                platform,
                               ),
                             }),
                           );
@@ -3465,9 +3552,9 @@ function makeConnection(
                       // matching edits without asking and settles other
                       // pending requests it covers. It is answered only where
                       // the person let OpenCode run as itself, and its files
-                      // stay admitted for this Project root from then on.
+                      // stay admitted while this native process runs.
                       // A Plan answer approves that one call.
-                      const always =
+                      const wantsAlways =
                         input.approved &&
                         input.scope !== "once" &&
                         state.executionPolicy !== "plan" &&
@@ -3476,13 +3563,25 @@ function makeConnection(
                           runtimeKind,
                           options.permissionPersistence?.() ?? "current-session",
                         );
+                      // The grant is reserved before the reply is sent:
+                      // OpenCode runs the approved edit and announces the
+                      // request settled on its event stream, which can reach
+                      // here before this reply's response. The reservation is
+                      // atomic, so a ledger that cannot hold this request's
+                      // new names (full, or retired with its process) answers
+                      // `once` instead — the grant then covers this approved
+                      // call alone, never half a batch for good. A failed
+                      // reply releases only the names this reservation still
+                      // owns: a name another pending or saved grant shares
+                      // stays admitted.
+                      const settleRemembered =
+                        runtimeKind === "beta" && wantsAlways
+                          ? state.rememberedEdits.reserve(grant)
+                          : undefined;
+                      const always =
+                        wantsAlways && (runtimeKind !== "beta" || settleRemembered !== undefined);
                       state.answeredRequests.add(input.requestId);
                       state.unreportedEditGrants.push(...grant);
-                      const newlyRemembered =
-                        runtimeKind === "beta" && always
-                          ? grant.filter((file) => !state.rememberedEdits.has(file))
-                          : [];
-                      for (const file of newlyRemembered) state.rememberedEdits.add(file);
                       return request(() =>
                         activeClient.replyPermission(
                           state.requestSources.get(input.requestId) ?? source,
@@ -3493,12 +3592,13 @@ function makeConnection(
                         Effect.tapError(() =>
                           Effect.sync(() => {
                             for (const file of grant) spendEditGrant(state, file);
-                            for (const file of newlyRemembered) state.rememberedEdits.delete(file);
+                            settleRemembered?.(false);
                             state.answeredRequests.delete(input.requestId);
                           }),
                         ),
                         Effect.tap(() =>
                           Effect.sync(() => {
+                            settleRemembered?.(true);
                             state.pendingEditGrants.delete(input.requestId);
                             state.approvals.delete(input.requestId);
                             state.requestSources.delete(input.requestId);
@@ -3614,7 +3714,7 @@ function newSessionState(
   makeCorrelation: () => string,
   tools: ReadonlyArray<ProviderToolDefinition>,
   nativeSetup: ProviderNativeSetup | undefined,
-  rememberedEdits: Set<string>,
+  rememberedEdits: RememberedOpenCodeEdits,
   own: OwnPermissions,
   protectedPaths: OpenCodeProtectedPaths,
 ): SessionState {
@@ -3692,6 +3792,7 @@ function failClosedBetaEvent(
   mode: "chat" | "work" | "code",
   projectRoot: string,
   fromQuestionForm: boolean,
+  platform: NodeJS.Platform = process.platform,
 ): ProviderRuntimeEvent {
   // 2.0.22 answers questions only through a form's reply route, so a question
   // that came any other way could never be answered.
@@ -3709,15 +3810,19 @@ function failClosedBetaEvent(
   if (event.kind !== "file-change") {
     return event;
   }
-  const edit = betaPermissionEffect(betaAgentPermissionRules(state.executionPolicy, mode), "edit");
+  const edit = betaPermissionEffect(
+    betaAgentPermissionRules(state.executionPolicy, mode, [], [], NO_PROTECTED_PATHS, platform),
+    "edit",
+  );
   // An edit the posture allows, or one the user already approved, may be
   // reported. Any other file change ran without a grant, so the turn fails.
   if (edit === "allow") return event;
   const file = resolve(projectRoot, event.path);
   // An edit the person's own rules allow for this file ran without asking,
-  // as in OpenCode itself. Plan never takes it: its denial is Octant's.
+  // as in OpenCode itself. Plan and Windows Chat never take it.
   if (
     state.executionPolicy !== "plan" &&
+    !(mode === "chat" && platform === "win32") &&
     openCodeOwnRulesAllow(state.own.rules, "edit", [event.path, file])
   ) {
     return event;
@@ -3750,6 +3855,7 @@ function mapAndOffer(
   retire: (state: SessionState) => void,
   beta?: {
     readonly mode: "chat" | "work" | "code";
+    readonly platform: NodeJS.Platform;
     readonly projectRoot: string;
     readonly extraFolders: ReadonlyArray<string>;
     readonly readOnlyFolders: ReadonlyArray<string>;
@@ -3803,8 +3909,12 @@ function mapAndOffer(
     const reply = textProperty(event.properties, "reply");
     const grant = state.pendingEditGrants.get(settled);
     if (grant !== undefined && !state.answeredRequests.has(settled)) {
-      if (reply === "always") for (const file of grant) state.rememberedEdits.add(file);
-      else if (reply === "once") state.unreportedEditGrants.push(...grant);
+      // The grant is taken whole or not at all. OpenCode already settled
+      // this request, so a batch the ledger cannot still remember keeps the
+      // same one-use admission a `once` answer gives, rather than being lost.
+      if (reply === "once" || (reply === "always" && !state.rememberedEdits.add(grant))) {
+        state.unreportedEditGrants.push(...grant);
+      }
     }
     state.approvals.delete(settled);
     state.pendingEditGrants.delete(settled);
@@ -3839,6 +3949,7 @@ function mapAndOffer(
               },
               state.protectedPaths,
               beta.readOnlyFolders,
+              beta.platform,
             ),
             action,
           );
@@ -3954,6 +4065,7 @@ function mapAndOffer(
         beta.mode,
         beta.projectRoot,
         questionForm !== undefined,
+        beta.platform,
       );
     // OpenCode settles usage once per model step. Consumers keep the latest
     // report as the logical turn's figure, so make each report cumulative
@@ -4136,14 +4248,28 @@ export function openCodeProtectedReadRefusals(
 
 export function permissionRules(
   policy: ProviderExecutionPolicy,
-  _mode: "chat" | "work" | "code",
+  mode: "chat" | "work" | "code",
   managedToolServerName?: string,
   extraFolders: ReadonlyArray<string> = [],
   ownSkills = false,
   own: OwnPermissions = NO_OWN_PERMISSIONS,
   protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
   readOnlyFolders: ReadonlyArray<string> = [],
+  platform: NodeJS.Platform = process.platform,
 ): PermissionRuleset {
+  if (mode === "chat" && platform === "win32") {
+    // On Windows outside Strict, OpenCode runs unconfined in Chat with a
+    // deny-everything permission ruleset of its own, keeping only Octant's
+    // session tool bridge open (still subject to blocked tools).
+    const chatRules: PermissionRuleset = [{ permission: "*", pattern: "*", action: "deny" }];
+    if (managedToolServerName !== undefined) {
+      chatRules.push({ permission: `${managedToolServerName}_*`, pattern: "*", action: "allow" });
+    }
+    for (const rule of blockedToolDenials(own)) {
+      chatRules.push({ permission: rule.action, pattern: rule.resource, action: rule.effect });
+    }
+    return chatRules;
+  }
   let rules: PermissionRuleset;
   if (policy === "full-access") {
     // Full access reaches folders outside the Project, as OpenCode does on
@@ -4268,11 +4394,15 @@ const BETA_SHELL_AND_SUBAGENT_DENY: PermissionV2Ruleset = [
  */
 export function betaAgentPermissionRules(
   policy: ProviderExecutionPolicy,
-  _mode: "chat" | "work" | "code",
+  mode: "chat" | "work" | "code",
   extraFolders: ReadonlyArray<string> = [],
   ownRules: ReadonlyArray<PermissionV2Rule> = [],
   protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
+  platform: NodeJS.Platform = process.platform,
 ): PermissionV2Ruleset {
+  if (mode === "chat" && platform === "win32") {
+    return [{ action: "*", resource: "*", effect: "deny" }];
+  }
   let rules: PermissionV2Ruleset;
   if (policy === "full-access") {
     // Outside folders too, at Full access (maintainer decision, 2026-11-14).
@@ -4403,9 +4533,21 @@ export function betaSessionPermissionRules(
   own: OwnPermissions = NO_OWN_PERMISSIONS,
   protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
   readOnlyFolders: ReadonlyArray<string> = [],
+  platform: NodeJS.Platform = process.platform,
 ): PermissionV2Ruleset {
+  if (mode === "chat" && platform === "win32") {
+    const chatRules: PermissionV2Ruleset = [
+      { action: "*", resource: "*", effect: "deny" },
+      { action: "question", resource: "*", effect: "allow" },
+    ];
+    if (managedToolServerName !== undefined) {
+      chatRules.push({ action: `${managedToolServerName}_*`, resource: "*", effect: "allow" });
+    }
+    chatRules.push(...blockedToolDenials(own));
+    return chatRules;
+  }
   const rules: PermissionV2Ruleset = [
-    ...betaAgentPermissionRules(policy, mode, extraFolders, own.rules, protectedPaths),
+    ...betaAgentPermissionRules(policy, mode, extraFolders, own.rules, protectedPaths, platform),
     ...(own.toolServers
       ? []
       : [
@@ -4620,6 +4762,21 @@ export function openCodeQuestionForm(properties: unknown): OpenCodeQuestionEvent
     });
   }
   return { id, type: "question.v2.asked", properties: { id, sessionID, questions } };
+}
+
+/**
+ * The session a `session.deleted` names. The SDK event carries it as
+ * `properties.info.id`; the 2.0.22 wire shape also carries `sessionID`, read
+ * when the record is absent so either spelling resolves to the same id.
+ */
+function removedSessionId(event: OpenCodeEvent): string | undefined {
+  const properties = event.properties;
+  const info =
+    typeof properties === "object" && properties !== null
+      ? Reflect.get(properties, "info")
+      : undefined;
+  const removed = textProperty(info, "id") || textProperty(properties, "sessionID");
+  return removed === "" ? undefined : removed;
 }
 
 export function sourceSessionId(event: OpenCodeEvent): string | undefined {

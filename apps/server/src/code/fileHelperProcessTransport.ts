@@ -6,12 +6,20 @@ export interface FileHelperChildProcess {
   readonly stdin: {
     write(chunk: Uint8Array, callback?: (error?: Error | null) => void): boolean;
     end(): void;
+    on?(event: "error", listener: (error: Error) => void): unknown;
+    once?(event: "close", listener: () => void): unknown;
+    off?(event: "error", listener: (error: Error) => void): unknown;
   };
   readonly stdout: {
     on(event: "data", listener: (chunk: Uint8Array) => void): unknown;
+    on(event: "error", listener: (error: Error) => void): unknown;
     off(event: "data", listener: (chunk: Uint8Array) => void): unknown;
+    off(event: "error", listener: (error: Error) => void): unknown;
   };
-  readonly stderr?: { resume(): void };
+  readonly stderr?: {
+    resume(): void;
+    on?(event: "error", listener: (error: Error) => void): unknown;
+  };
   on(event: "error" | "close", listener: (...arguments_: unknown[]) => void): unknown;
   off(event: "error" | "close", listener: (...arguments_: unknown[]) => void): unknown;
   kill(signal: NodeJS.Signals): boolean;
@@ -107,13 +115,20 @@ export function createFileHelperProcessTransport(options: {
     closed = true;
     unavailable = true;
     child.stdout.off("data", onData);
+    child.stdout.off("error", onError);
     child.off("error", onError);
     child.off("close", onClose);
     dataListeners.clear();
     notifyExit();
     resolveClosed();
   };
+  // Route stdin/stdout/stderr errors (such as EPIPE on a dead helper) to the
+  // transport's own unavailable/exit path instead of the process error net.
+  child.stdin.on?.("error", onError);
+  child.stdin.once?.("close", () => child.stdin.off?.("error", onError));
   child.stdout.on("data", onData);
+  child.stdout.on("error", onError);
+  child.stderr?.on?.("error", () => undefined);
   child.stderr?.resume();
   child.on("error", onError);
   child.on("close", onClose);

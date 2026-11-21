@@ -1,5 +1,6 @@
 import { Copy, GitBranch, RotateCcw, Square, Volume2 } from "../ui/icons";
 
+import { useTimestampFormat } from "../theme/ThemeSettingsProvider";
 import { OctantIconButton } from "../ui/base/OctantButton";
 import { useReadAloud } from "../voice/useReadAloud";
 import { copyText } from "./TurnActionMenu";
@@ -34,8 +35,9 @@ export interface TurnActionsProps {
  */
 export function TurnActions(props: TurnActionsProps) {
   const readAloud = useReadAloud();
+  const timestampFormat = useTimestampFormat();
   if (!FINISHED_OUTCOMES.has(props.outcome)) return null;
-  const label = turnTimeLabel(props.at);
+  const label = turnTimeLabel(props.at, timestampFormat);
   const text = props.copyValue ?? "";
   return (
     <div className="turn-actions" data-latest={props.latest ? "true" : "false"}>
@@ -93,7 +95,7 @@ export function TurnActions(props: TurnActionsProps) {
         <time
           className="oct-activity-line turn-time"
           dateTime={props.at}
-          title={turnTimeTitle(props.at)}
+          title={turnTimeTitle(props.at, timestampFormat)}
         >
           {label}
         </time>

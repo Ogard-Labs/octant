@@ -221,6 +221,7 @@ describe("database CLI runtime composition", () => {
         { name: "thread-native-setup", lastSequence: 1, lag: 0 },
         { name: "remote-access", lastSequence: 1, lag: 0 },
         { name: "thread-checkpoint", lastSequence: 1, lag: 0 },
+        { name: "activity-history", lastSequence: 1, lag: 0 },
         { name: "product-feedback", lastSequence: 1, lag: 0 },
         { name: "project-terminal", lastSequence: 1, lag: 0 },
         { name: "remote-server-grant", lastSequence: 1, lag: 0 },

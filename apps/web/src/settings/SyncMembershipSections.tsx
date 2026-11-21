@@ -15,6 +15,8 @@ import type {
   ReplicaSyncStatusView,
 } from "@octant/contracts/replica-entry";
 import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
+import { useTimestampFormat } from "../theme/ThemeSettingsProvider";
+import { formatDateTime, type TimestampFormatPreference } from "../theme/timestampFormat";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
@@ -63,6 +65,7 @@ export interface SyncMembershipSectionsProps {
  */
 export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
   const { client, onMembershipChange } = props;
+  const timestampFormat = useTimestampFormat();
   const [view, setView] = useState<ReplicaMembershipView>();
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -372,7 +375,7 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
                   description={
                     request.approvedByThisComputer
                       ? `Approved. ${request.request.origin.displayName} confirms the join on its own screen.`
-                      : `Asked ${formatTime(request.request.requestedAt)}.`
+                      : `Asked ${formatTime(request.request.requestedAt, timestampFormat)}.`
                   }
                   key={String(request.request.origin.instanceId)}
                   label={request.request.origin.displayName}
@@ -1164,6 +1167,7 @@ function SyncStatusSection(props: {
   readonly description?: string;
   readonly standing?: string;
 }) {
+  const timestampFormat = useTimestampFormat();
   const error = props.status.lastError;
   return (
     <SettingsSection
@@ -1187,7 +1191,9 @@ function SyncStatusSection(props: {
           {
             label: "Last error",
             value:
-              error === undefined ? "None" : `${formatTime(error.at)}: ${errorSentence(error)}`,
+              error === undefined
+                ? "None"
+                : `${formatTime(error.at, timestampFormat)}: ${errorSentence(error)}`,
           },
         ]}
       />
@@ -1244,9 +1250,9 @@ function errorSentence(error: NonNullable<ReplicaSyncStatus["lastError"]>): stri
   }
 }
 
-function formatTime(value: string | number): string {
+function formatTime(value: string | number, timestampFormat?: TimestampFormatPreference): string {
   const date = new Date(value);
   return Number.isFinite(date.getTime())
-    ? date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+    ? formatDateTime(date, { dateStyle: "medium", timeStyle: "short" }, timestampFormat)
     : "at an unknown time";
 }

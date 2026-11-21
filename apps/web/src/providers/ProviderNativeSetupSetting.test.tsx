@@ -2,6 +2,7 @@ import type { ProviderCapabilities } from "@octant/contracts";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { HostPlatformContext } from "../platform";
 import { ProviderNativeSetupSetting, ProviderOwnMemorySetting } from "./ProviderNativeSetupSetting";
 
 const codex = {
@@ -145,6 +146,37 @@ describe("Run a key provider as itself", () => {
       screen.getByRole("switch", { name: "Run Codex work as itself" }),
     ).toHaveAccessibleDescription(
       /Not available for Codex yet: its own subagents, web search and fetch, skills/,
+    );
+  });
+
+  it("says honestly on Windows that OpenCode's and an ACP agent's own permission handling applies in Chat outside Strict", () => {
+    const { unmount } = render(
+      <HostPlatformContext.Provider value="win32">
+        <ProviderNativeSetupSetting
+          disabled={false}
+          instance={{ ...codex, displayName: "OpenCode", driverKind: "opencode" }}
+          onChange={vi.fn(async () => true)}
+        />
+      </HostPlatformContext.Provider>,
+    );
+    expect(
+      screen.getByRole("switch", { name: "Run OpenCode as itself" }),
+    ).toHaveAccessibleDescription(
+      /OpenCode’s own permission rules—not Octant—keep its file and shell tools off, and its command templates and plugins run as they do in OpenCode itself/,
+    );
+    unmount();
+
+    render(
+      <HostPlatformContext.Provider value="win32">
+        <ProviderNativeSetupSetting
+          disabled={false}
+          instance={{ ...codex, displayName: "Kilo", driverKind: "kilo" }}
+          onChange={vi.fn(async () => true)}
+        />
+      </HostPlatformContext.Provider>,
+    );
+    expect(screen.getByRole("switch", { name: "Run Kilo as itself" })).toHaveAccessibleDescription(
+      /Kilo’s own permission handling—not Octant confinement—applies/,
     );
   });
 });

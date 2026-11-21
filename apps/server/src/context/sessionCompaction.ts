@@ -43,6 +43,7 @@ import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../sp
 import { WORK_TURN_SAFE_INPUT_TOKENS } from "../work/workTurnContext";
 import {
   ContextHarnessError,
+  contextSourceKey,
   type CompactionSummaryOutcome,
   type ContextHarnessService,
   type ReportedCompactionUsage,
@@ -167,6 +168,15 @@ export interface SessionCompactionThreads {
    * for a kind whose conversation the host never plans.
    */
   readonly conversation?: (threadId: string) => ReadonlyArray<SessionConversationMessage>;
+  /**
+   * Resolves the conversation to summarize when compaction runs, when loading
+   * full turn content (such as attached text files) requires async storage
+   * reads that synchronous availability inspection avoids. Absent, uses
+   * `conversation`.
+   */
+  readonly conversationForCompaction?: (
+    threadId: string,
+  ) => Promise<ReadonlyArray<SessionConversationMessage>>;
   /** The thread's own scratch folder, where its provider sessions start. */
   readonly scratchRoot?: (threadId: string) => Promise<string>;
   /**
@@ -629,6 +639,17 @@ export class SessionCompactionService {
         throw new Error("The host plans no conversation for this thread.");
       }
       const scratchRoot = await threads.scratchRoot(threadId);
+      // Keep the exact sources fixed when the compaction request was journaled,
+      // while enriching their content with async-loaded attachments if provided.
+      let conversation = basis.conversation;
+      if (threads.conversationForCompaction !== undefined) {
+        const allowedSources = new Set(
+          basis.conversation.map((message) => contextSourceKey(message.source)),
+        );
+        conversation = (await threads.conversationForCompaction(threadId)).filter((message) =>
+          allowedSources.has(contextSourceKey(message.source)),
+        );
+      }
       const generate = makeContextSummaryGenerator({
         driver,
         providerInstanceId: thread.providerInstanceId,
@@ -648,7 +669,7 @@ export class SessionCompactionService {
       await harness.compactSession({
         subject: command.subject,
         compactionId: command.compactionId,
-        conversation: basis.conversation,
+        conversation,
         plannedVersion: basis.version,
         generateSummary: async (request): Promise<CompactionSummaryOutcome> => {
           try {

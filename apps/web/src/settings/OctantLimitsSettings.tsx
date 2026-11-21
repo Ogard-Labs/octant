@@ -17,8 +17,12 @@ import {
 import { MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING } from "@octant/contracts/browser-automation";
 import {
   DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS,
+  DEFAULT_SIBLING_THREAD_READS_PER_TURN,
+  DEFAULT_SIBLING_THREAD_WAITS_PER_TURN,
   DEFAULT_THREAD_MESSAGES_PER_TURN,
   MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING,
+  MAX_SIBLING_THREAD_READS_PER_TURN_SETTING,
+  MAX_SIBLING_THREAD_WAITS_PER_TURN_SETTING,
   MAX_THREAD_MESSAGES_PER_TURN_SETTING,
   type ShellSettings,
 } from "@octant/contracts/shell";
@@ -36,6 +40,8 @@ type LimitKey =
   | "pullRequestWatchDays"
   | "autoFixAttemptsPerFailure"
   | "threadMessagesPerTurn"
+  | "siblingThreadReadsPerTurn"
+  | "siblingThreadWaitsPerTurn"
   | "browserWaitLimitMinutes"
   | "childRunWaitLimitSeconds";
 
@@ -83,8 +89,22 @@ const SECTIONS: ReadonlyArray<{ readonly title: string; readonly rows: ReadonlyA
           key: "threadMessagesPerTurn",
           id: "thread-messages-per-turn",
           label: "Thread messages per turn",
-          description: `How many times one turn may ask another thread you mentioned. Default ${DEFAULT_THREAD_MESSAGES_PER_TURN}.`,
+          description: `Applies under Strict only. How many times one turn may ask another thread you mentioned. Default ${DEFAULT_THREAD_MESSAGES_PER_TURN}. Outside Strict there is no limit.`,
           max: MAX_THREAD_MESSAGES_PER_TURN_SETTING,
+        },
+        {
+          key: "siblingThreadReadsPerTurn",
+          id: "sibling-thread-reads-per-turn",
+          label: "Sibling thread reads per turn",
+          description: `Applies under Strict only. How many times one turn may read another open thread in the same Project. Default ${DEFAULT_SIBLING_THREAD_READS_PER_TURN}. Outside Strict there is no limit.`,
+          max: MAX_SIBLING_THREAD_READS_PER_TURN_SETTING,
+        },
+        {
+          key: "siblingThreadWaitsPerTurn",
+          id: "sibling-thread-waits-per-turn",
+          label: "Sibling thread waits per turn",
+          description: `Applies under Strict only. How many times one turn may wait on another open thread in the same Project. Default ${DEFAULT_SIBLING_THREAD_WAITS_PER_TURN}. Outside Strict there is no limit.`,
+          max: MAX_SIBLING_THREAD_WAITS_PER_TURN_SETTING,
         },
       ],
     },
@@ -134,7 +154,7 @@ const SECTIONS: ReadonlyArray<{ readonly title: string; readonly rows: ReadonlyA
           id: "browser-wait-limit",
           label: "Longest Browser wait, in minutes",
           description:
-            "How long an agent's Browser may wait for a page to show something. Default 10. A Claude Code thread still ends any one tool call after eleven minutes.",
+            "Applies under Strict only. How long an agent's Browser may wait for a page to show something. Default 10. Outside Strict there is no wait limit. A Claude Code thread still ends any one tool call after eleven minutes.",
           max: MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING,
         },
         {

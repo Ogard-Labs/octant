@@ -62,6 +62,15 @@ export interface BackgroundHostChange {
   readonly openAtLogin?: boolean;
 }
 
+/**
+ * Live status of the desktop app's prevent-app-suspension assertion.
+ * Active summaries are built strictly from work counts — never thread titles.
+ */
+export type KeepAwakeStatus =
+  | { readonly state: "active"; readonly summary: string }
+  | { readonly state: "idle"; readonly reason: "disabled" | "on-battery" | "no-work" }
+  | { readonly state: "unavailable" };
+
 export type BoundProjectType = "work" | "code";
 export type ProviderCredentialStatus = "stored" | "missing" | "unavailable";
 
@@ -112,6 +121,8 @@ export interface CodeExternalEditorRequest {
   readonly fileId: string;
   readonly line: number;
   readonly column: number;
+  /** Opens the resolved file in the desktop's default application instead of a configured external editor. */
+  readonly defaultApplication?: boolean;
 }
 
 export interface OpenInApplicationDescriptor {
@@ -300,6 +311,34 @@ export interface BrowserSurfaceRequest {
     readonly width: number;
     readonly height: number;
   };
+}
+
+/**
+ * One tab's icon as the owning window reads it for its tab strip. The image is
+ * display-only: it crosses the window's own IPC and never joins a shared
+ * observation, a journal entry, or an agent's tool result.
+ */
+export interface BrowserSurfaceTabIcon {
+  readonly tabId: string;
+  readonly revision: number;
+  readonly active: boolean;
+  /** The changed image; absent while the page has declared none or unchanged. */
+  readonly dataUrl?: string;
+  /**
+   * The context answered without waking: its windows are closed and this is
+   * the icon the tab went to sleep with, so the strip shows it dimmed.
+   */
+  readonly sleeping?: boolean;
+}
+
+/** What the owning window asks for its tabs' icons: what it already holds. */
+export interface BrowserSurfaceTabIconsRequest {
+  readonly contextId: string;
+  readonly threadId: string;
+  readonly known: ReadonlyArray<{
+    readonly tabId: string;
+    readonly revision: number;
+  }>;
 }
 
 export type CanvasPrototypeSurfacePreparation =

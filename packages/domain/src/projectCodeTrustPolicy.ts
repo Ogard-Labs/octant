@@ -141,6 +141,9 @@ export const PROJECT_CODE_ENTRIES: Readonly<
     { path: ".agents", kind: "skills" },
     { path: ".claude/skills", kind: "skills" },
   ],
+  // Antigravity loads a Project's skills as it does on its own, under Strict
+  // too, so Strict has nothing to ask about.
+  antigravity: [],
 };
 
 /** The entries to look for at the Project root; none for a provider that is not a key provider. */

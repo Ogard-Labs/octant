@@ -2,15 +2,24 @@ import {
   decodeProviderCloudRequest,
   decodeProviderCloudResponse,
 } from "@octant/contracts/provider-cloud-sessions";
-import { authenticateRoutePrincipal } from "../principalRouteContext";
-import { WINDOW_CAPABILITY_HEADER } from "../clientPrincipal";
+import { authenticateRoutePrincipal, retainRouteAdmissionCurrent } from "../principalRouteContext";
+import { principalActsAsHostPerson } from "../clientPrincipal";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "../shellRoutes";
 import type { WindowAuthorityStore } from "../windowAuthorityStore";
-import type { ProviderCloudSessionService } from "./providerCloudSessionService";
+import type {
+  ProviderCloudPrincipal,
+  ProviderCloudSessionService,
+} from "./providerCloudSessionService";
 
 export function createProviderCloudSessionRoutes(input: {
   readonly service: Pick<ProviderCloudSessionService, "execute">;
   readonly windowAuthorityStore: WindowAuthorityStore;
+  readonly isPersonPairedDeviceCurrent?: (
+    deviceId: string,
+    credentialGeneration: number,
+    sessionId?: string,
+  ) => boolean;
   readonly allowedRendererHttpOrigin?: string | null;
 }) {
   return async (request: Request): Promise<Response | undefined> => {
@@ -32,26 +41,52 @@ export function createProviderCloudSessionRoutes(input: {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers });
     if (request.method !== "POST") return new Response(null, { status: 405 });
     try {
-      const principal = authenticateRoutePrincipal({
+      const context = authenticateRoutePrincipal({
         request,
         store: input.windowAuthorityStore,
         now: Date.now(),
       });
-      if (principal.principal.kind !== "local-window") return new Response(null, { status: 403 });
+      if (!principalActsAsHostPerson(context.principal)) {
+        return new Response(null, { status: 403 });
+      }
+      const actor = eventActorForPrincipal(context.principal);
+      const caller: ProviderCloudPrincipal =
+        context.principal.kind === "local-window"
+          ? { kind: "local-window", scopeId: context.scopeId }
+          : {
+              kind: "person-paired-device",
+              scopeId: context.scopeId,
+              deviceId: String(context.principal.deviceId),
+              sessionId: String(context.principal.sessionId),
+              credentialGeneration: context.principal.credentialGeneration,
+              actor,
+            };
       // The same window id can be registered again while its body or key unlock
-      // waits. Keep the original capability, not merely a currently live id.
-      const capability = request.headers.get(WINDOW_CAPABILITY_HEADER) ?? "";
+      // waits, and a paired device can be revoked, signed out or re-paired.
+      // Keep the original admission proof current across body reads and unlocks.
+      const admissionCurrent = retainRouteAdmissionCurrent({
+        request,
+        context,
+        store: input.windowAuthorityStore,
+        now: Date.now,
+      });
       const callerIsCurrent = () => {
-        try {
+        if (!admissionCurrent()) return false;
+        if (caller.kind === "person-paired-device") {
           return (
-            !request.signal.aborted &&
-            String(input.windowAuthorityStore.authenticate(capability, Date.now())) ===
-              String(principal.scopeId)
+            input.isPersonPairedDeviceCurrent?.(
+              caller.deviceId,
+              caller.credentialGeneration,
+              caller.sessionId,
+            ) ?? true
           );
-        } catch {
-          return false;
         }
+        return true;
       };
+      const signal =
+        context.abortSignal === undefined
+          ? request.signal
+          : AbortSignal.any([request.signal, context.abortSignal]);
       const reader = request.body?.getReader();
       if (reader === undefined) return new Response(null, { status: 400 });
       let bytes = 0;
@@ -70,12 +105,7 @@ export function createProviderCloudSessionRoutes(input: {
       const command = decodeProviderCloudRequest(JSON.parse(Buffer.concat(parts).toString("utf8")));
       if (request.signal.aborted) return new Response(null, { status: 499 });
       if (!callerIsCurrent()) return new Response(null, { status: 403 });
-      const result = await input.service.execute(
-        principal.scopeId,
-        command,
-        request.signal,
-        callerIsCurrent,
-      );
+      const result = await input.service.execute(caller, command, signal, callerIsCurrent);
       if (!callerIsCurrent()) return new Response(null, { status: 403 });
       return new Response(JSON.stringify(decodeProviderCloudResponse(result)), {
         status: 200,

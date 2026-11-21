@@ -12,6 +12,7 @@ import {
   DEFAULT_WORK_ACCESS,
   WorkSettings as WorkSettingsSchema,
   type ThreadLiveStep,
+  type ThreadFinishedReceipt,
   type AggregateVersion,
   type WorkSettings,
   type WorkThread,
@@ -48,6 +49,7 @@ import {
   MAX_CHAT_TRANSCRIPT_SEARCH_HITS,
   MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
   type WorkTranscriptSearch,
+  type ImportedSessionHistory,
 } from "@octant/contracts";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import {
@@ -56,6 +58,7 @@ import {
 } from "../persistence/transcriptSearchText";
 import { Schema } from "effect";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
+import { selectCompletionReceiptId } from "@octant/domain/finished-receipt-policy";
 import {
   defaultFullAccessSandboxFor,
   fullAccessSandboxSupported,
@@ -146,6 +149,7 @@ import {
 } from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import { nativeSessionHistoryAppend } from "../providers/nativeSessionHistory";
 import { WorkThreadProjection } from "./workThreadProjection";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 
@@ -269,6 +273,8 @@ export interface WorkThreadServiceDependencies {
    */
   readonly recordExternalContentIngestion?: RecordExternalContentIngestion;
   readonly serverProjects?: ServerWorkProjectThreads;
+  /** Reads the thread's latest finished receipt so Done attaches fresh proof. */
+  readonly readLatestFinishedReceipt?: (threadId: string) => ThreadFinishedReceipt | undefined;
 }
 
 /**
@@ -330,9 +336,13 @@ export class WorkThreadService {
   readonly #linearIssueContext?: LinearIssueContextPort;
   readonly #recordExternalContentIngestion: RecordExternalContentIngestion | undefined;
   readonly #serverProjects: ServerWorkProjectThreads | undefined;
+  readonly #readLatestFinishedReceipt:
+    | ((threadId: string) => ThreadFinishedReceipt | undefined)
+    | undefined;
 
   constructor(dependencies: WorkThreadServiceDependencies) {
     this.#moveHold = dependencies.moveHold;
+    this.#readLatestFinishedReceipt = dependencies.readLatestFinishedReceipt;
     this.#persistence = dependencies.persistence;
     this.#projects = dependencies.projects;
     this.#projection = dependencies.projection;
@@ -505,6 +515,7 @@ export class WorkThreadService {
   recordAdoptedSession(
     current: WorkThread,
     adopted: WorkThreadAdoptedSession,
+    history?: ImportedSessionHistory,
   ):
     | { readonly status: "recorded"; readonly thread: WorkThread }
     | { readonly status: "refused"; readonly message: string } {
@@ -532,11 +543,34 @@ export class WorkThreadService {
       version: latest.version + 1,
       updatedAt: decodeTimestamp(this.#clock()),
     });
-    try {
+    // One journal unit: the adoption and the earlier conversation it imports
+    // are recorded together or not at all.
+    const record = () => {
       this.#append(latest.id, latest.version, "work.thread-updated@1", {
         kind: "thread-updated",
         thread: updated,
       });
+      if (history === undefined) return;
+      this.#persistence.journal.append(
+        nativeSessionHistoryAppend({
+          threadId: String(latest.id),
+          mode: "work",
+          providerInstanceId: adopted.providerInstanceId,
+          nativeSessionId: adopted.nativeSessionId,
+          history,
+          eventId: this.#uuid(),
+          correlationId: this.#uuid(),
+          actor: { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
+          occurredAt: this.#clock(),
+        }),
+      );
+    };
+    try {
+      // Called on the journal itself: its transaction reads the journal's own
+      // state, and a detached call threw and dropped the adoption.
+      const journal = this.#persistence.journal;
+      if (journal.transaction === undefined) record();
+      else journal.transaction(record);
     } catch (error) {
       if (error instanceof ConcurrencyConflict)
         return { status: "refused", message: "This thread changed. Try again." };
@@ -1069,7 +1103,11 @@ export class WorkThreadService {
           );
         }
         // No note, no evidence record: an older paired phone decodes the
-        // thread strictly and requires the note inside that record.
+        // thread strictly and requires the note inside that record. A fresh
+        // finished receipt is recorded separately as completionReceiptId.
+        const completionReceiptId = selectCompletionReceiptId(
+          this.#readLatestFinishedReceipt?.(String(current.id)),
+        );
         const confirmed = decodeWorkThread({
           ...current,
           completionConfirmed: true,
@@ -1081,6 +1119,7 @@ export class WorkThreadService {
                   satisfactionEvidence: command.satisfactionEvidence,
                 },
               }),
+          ...(completionReceiptId === undefined ? {} : { completionReceiptId }),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -2596,6 +2635,7 @@ function withoutDoneMark(current: WorkThread): WorkThread {
   const {
     completionConfirmed: _completionConfirmed,
     completionEvidence: _completionEvidence,
+    completionReceiptId: _completionReceiptId,
     ...unmarked
   } = current;
   return unmarked as WorkThread;

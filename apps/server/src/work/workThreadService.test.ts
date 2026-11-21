@@ -1804,7 +1804,7 @@ describe("WorkThreadService", () => {
     expect("thread" in result ? result.thread.fullAccessSandbox : "missing").toBeUndefined();
   });
 
-  it("marks a thread as carrying outside content before journaling the session it adopted, and refuses when it cannot", () => {
+  it("marks a thread as carrying outside content before journaling the session it adopted with its imported history, and refuses when it cannot", () => {
     const adopted = {
       nativeSessionId: "outside-1",
       providerSessionId: "11111111-1111-4111-8111-111111111111" as never,
@@ -1822,9 +1822,26 @@ describe("WorkThreadService", () => {
     }));
     const marked = serviceFixture({ threads: [thread()], recordExternalContentIngestion: record });
 
-    const result = marked.service.recordAdoptedSession(thread(), adopted);
+    const history = {
+      status: "imported" as const,
+      messages: [{ role: "person" as const, text: "Summarize the board notes" }],
+    };
+    const result = marked.service.recordAdoptedSession(thread(), adopted, history);
 
     expect(result).toMatchObject({ status: "recorded", thread: { adoptedSession: adopted } });
+    // The imported history is its own record, never part of the thread snapshot.
+    expect(marked.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregate: { aggregateType: "native-session-history", aggregateId: ids.thread },
+        expectedVersion: 0,
+        events: [
+          expect.objectContaining({
+            eventName: "native-session.history-imported@1",
+            payload: expect.objectContaining({ mode: "work", history }),
+          }),
+        ],
+      }),
+    );
     expect(record).toHaveBeenCalledWith(
       expect.objectContaining({
         threadId: ids.thread,
@@ -1842,6 +1859,76 @@ describe("WorkThreadService", () => {
     });
     expect(refused.service.recordAdoptedSession(thread(), adopted).status).toBe("refused");
     expect(refused.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("commits an adopted provider session and its imported history to a real journal together", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-work-adopt-"));
+    const connection = openSqlite(join(directory, "events.sqlite3"));
+    try {
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const registries = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registries.events,
+        projections: registries.projections,
+        clock: () => now,
+      });
+      journal.append({
+        aggregate: { aggregateType: "work-thread", aggregateId: ids.thread },
+        expectedVersion: 0,
+        events: [
+          {
+            eventId: ids.project,
+            eventName: "work.thread-created@1",
+            eventVersion: 1,
+            correlationId: ids.project,
+            actor: { kind: "system", actorId: ids.project },
+            occurredAt: now,
+            payload: { kind: "thread-created", thread: thread() },
+          },
+        ],
+      });
+      let sequence = 100;
+      const fixture = serviceFixture({
+        threads: [thread()],
+        uuid: () => `72000000-0000-4000-8000-${String(sequence++).padStart(12, "0")}`,
+        recordExternalContentIngestion: () => ({
+          kind: "recorded",
+          taint: { externalContentIngested: true, ingestedSources: ["adopted-provider-session"] },
+        }),
+      });
+      // The service calls the journal it was given; a real one reads its own
+      // private state, so a call detached from it would throw.
+      Object.assign(fixture.persistence, { journal });
+      const adopted = {
+        nativeSessionId: "outside-1",
+        providerSessionId: "11111111-1111-4111-8111-111111111111" as never,
+        resumeCursor: { driverKind: "claude", value: "outside-cursor" } as never,
+        providerInstanceId: ids.provider as never,
+        modelId: "model-a" as never,
+        bindingRevisionId: ids.binding as never,
+        workingDirectory: "." as never,
+      };
+      const history = {
+        status: "imported" as const,
+        messages: [{ role: "person" as const, text: "Summarize the board notes" }],
+      };
+
+      expect(fixture.service.recordAdoptedSession(thread(), adopted, history)).toMatchObject({
+        status: "recorded",
+      });
+      const names = journal
+        .replay(Schema.decodeUnknownSync(ReplayCursor)({ afterSequence: 0, limit: 100 }))
+        .map((event) => event.eventName);
+      expect(names).toEqual([
+        "work.thread-created@1",
+        "work.thread-updated@1",
+        "native-session.history-imported@1",
+      ]);
+    } finally {
+      connection.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("journals a person turning Wake when a message arrives on and off for a Work thread", async () => {
@@ -2112,6 +2199,77 @@ describe("WorkThreadService", () => {
         deliveryTarget: "Draft brief",
       }),
     ).resolves.toMatchObject({ kind: "thread-completion-confirmed", thread: { version: 5 } });
+  });
+
+  it("attaches a fresh finished receipt as completion evidence when marking Work Done, ignores stale ones, and clears it on reopen", async () => {
+    const receiptId = "77777777-7777-4777-8777-777777777777";
+    let stale = false;
+    const fixture = serviceFixture({
+      threads: [thread()],
+      readLatestFinishedReceipt: () =>
+        ({
+          receipt: {
+            receiptId,
+            threadId: String(ids.thread),
+            mode: "work",
+            projectId: ids.project,
+            summary: "Finished drafting brief.",
+            items: [
+              {
+                kind: "check",
+                label: "check-doc",
+                command: "check-doc",
+                status: "proven",
+                exitCode: 0,
+              },
+            ],
+            diff: { status: "unavailable", reason: "No Git diff." },
+            recordedAt: now,
+          },
+          status: stale ? "stale" : "proven",
+          stale,
+          provenCount: 1,
+          claimedCount: 0,
+          failedCount: 0,
+          unavailableCount: 0,
+        }) as never,
+    });
+
+    const freshDone = await fixture.service.execute(ids.window, {
+      kind: "confirm-work-thread-completion",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      deliveryTarget: "Draft brief",
+    });
+    expect(freshDone).toMatchObject({
+      kind: "thread-completion-confirmed",
+      thread: { completionConfirmed: true, completionReceiptId: receiptId, version: 2 },
+    });
+
+    const reopened = await fixture.service.execute(ids.window, {
+      kind: "reopen-work-thread",
+      threadId: ids.thread,
+      expectedVersion: 2,
+    });
+    expect(reopened).toMatchObject({ kind: "thread-updated", thread: { version: 3 } });
+    if ("thread" in reopened) {
+      expect(reopened.thread).not.toHaveProperty("completionReceiptId");
+    }
+
+    stale = true;
+    const staleDone = await fixture.service.execute(ids.window, {
+      kind: "confirm-work-thread-completion",
+      threadId: ids.thread,
+      expectedVersion: 3,
+      deliveryTarget: "Draft brief",
+    });
+    expect(staleDone).toMatchObject({
+      kind: "thread-completion-confirmed",
+      thread: { completionConfirmed: true, version: 4 },
+    });
+    if ("thread" in staleDone) {
+      expect(staleDone.thread).not.toHaveProperty("completionReceiptId");
+    }
   });
 
   it("refuses a routine or anything else acting as the host when it tries to reopen a thread a person marked Done", async () => {
@@ -2427,6 +2585,7 @@ function serviceFixture(
     readonly terminalSessions?: TerminalSessionImportPort;
     readonly turnProjection?: WorkThreadServiceDependencies["turnProjection"];
     readonly isMarked?: WorkThreadServiceDependencies["isMarked"];
+    readonly readLatestFinishedReceipt?: WorkThreadServiceDependencies["readLatestFinishedReceipt"];
     readonly uuid?: () => string;
     readonly serverProjects?: WorkThreadServiceDependencies["serverProjects"];
   } = {},
@@ -2508,6 +2667,9 @@ function serviceFixture(
     turnProjection,
     uuid: options.uuid ?? (() => "72000000-0000-4000-8000-000000000099"),
     ...(options.isMarked === undefined ? {} : { isMarked: options.isMarked }),
+    ...(options.readLatestFinishedReceipt === undefined
+      ? {}
+      : { readLatestFinishedReceipt: options.readLatestFinishedReceipt }),
     clock: () => now,
     workingDirectories,
     onWorkingDirectoryChanged,

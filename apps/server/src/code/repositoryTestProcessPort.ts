@@ -159,6 +159,11 @@ export interface HarnessShellScriptInput {
   readonly environment: Readonly<Record<string, string>>;
   readonly timeoutMs: number;
   /**
+   * Which end of combined output to keep if output exceeds the port's byte
+   * ceiling; defaults to `"first"`.
+   */
+  readonly outputRetention?: "first" | "newest";
+  /**
    * Runs this command on `proxied` network: the OS opens only this launch's
    * egress proxy and the launch carries the proxy variables. A port whose own
    * network is `none` refuses it, so an offline port never gains a route out.
@@ -513,6 +518,7 @@ export class RepositoryTestProcessPort {
       launchInput = {
         ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
         ...(input.beforeLaunch === undefined ? {} : { beforeLaunch: input.beforeLaunch }),
+        ...(input.outputRetention === undefined ? {} : { outputRetention: input.outputRetention }),
         argv: [HARNESS_SHELL, script],
         cwd: input.cwd,
         environment: input.environment,
