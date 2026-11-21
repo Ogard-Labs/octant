@@ -416,6 +416,53 @@ describe("Pi process boundary", () => {
     expect(await profileFor("chat")).not.toContain(notes);
   });
 
+  it("starts Work and Code below Full access outside Strict unwrapped on macOS and Linux, with Pi's approval bridge asking Octant", async () => {
+    for (const platform of ["darwin", "linux"] as const) {
+      const f = fixture();
+      const confinement = makePiConfinementLive({
+        platform,
+        sandboxPath: platform === "darwin" ? f.sandbox : f.bwrap,
+        credentialPath: f.auth,
+        modelsPath: f.models,
+        temporaryDirectory: f.base,
+      });
+      const launchFor = (level: {
+        readonly mode: "chat" | "work" | "code";
+        readonly executionPolicy: ProviderExecutionPolicy;
+        readonly strict?: boolean;
+        readonly fullAccessSandbox?: boolean;
+      }) =>
+        Effect.runPromise(
+          confinement.prepare({
+            binaryPath: f.binary,
+            root: f.root,
+            piHome: f.home,
+            sessionDirectory: join(f.home, "sessions"),
+            sessionId: `${level.mode}-${level.executionPolicy}`,
+            environment: sanitizePiEnvironment({ PATH: "/usr/bin" }, f.home),
+            ...level,
+          }),
+        );
+      for (const mode of ["work", "code"] as const) {
+        for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
+          const open = await launchFor({ mode, executionPolicy, strict: false });
+          expect(open.command).toBe(f.binary);
+          expect(open.environment.OCTANT_PI_APPROVALS).toBe("enabled");
+        }
+      }
+      for (const level of [
+        { mode: "code", executionPolicy: "approval-gated" },
+        { mode: "work", executionPolicy: "auto-accept-edits", strict: true },
+        { mode: "code", executionPolicy: "plan", strict: false },
+        { mode: "chat", executionPolicy: "approval-gated", strict: false },
+        { mode: "code", executionPolicy: "full-access", fullAccessSandbox: true, strict: false },
+      ] as const) {
+        const confined = await launchFor(level);
+        expect(confined.command).not.toBe(f.binary);
+      }
+    }
+  });
+
   it("wraps a Full access launch that keeps the sandbox, with no approvals, and leaves open Full access unwrapped", async () => {
     const f = fixture();
     const confinement = makePiConfinementLive({

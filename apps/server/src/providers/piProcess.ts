@@ -49,7 +49,11 @@ import {
   resolveWindowsProviderProgram,
   windowsUnconfinedLaunch,
 } from "../process/windowsProviderProgram";
-import { windowsProviderLaunch, type WindowsProviderLaunch } from "@octant/domain/guardrail-policy";
+import {
+  providerHoldsLevelWithoutSandbox,
+  windowsProviderLaunch,
+  type WindowsProviderLaunch,
+} from "@octant/domain/guardrail-policy";
 import {
   materializeOsNetworkEgress,
   resolveProviderRuntimeEgressPolicy,
@@ -180,6 +184,33 @@ export interface PiProcessOptions {
   readonly serverAccess?: ProviderServerAccessPort;
   /** The host's platform; defaults to the running one. */
   readonly platform?: NodeJS.Platform;
+}
+
+/**
+ * Whether a macOS or Linux launch runs with no Octant sandbox: open Full
+ * access, or Work and Code outside Strict at a level below it, where Pi's
+ * approval bridge asks Octant before every bash, edit and write call and so
+ * holds the level (`providerHoldsLevelWithoutSandbox`, maintainer decision
+ * 2026-11-21), as on Windows. Chat, Plan, Strict, a kept sandbox and a chosen
+ * sandbox policy stay confined. Pi's read, grep, find and ls never ask, so
+ * unconfined they read outside the Project as at Full access.
+ */
+function piStartsUnconfined(input: {
+  readonly mode: PiSessionMode;
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly fullAccessSandbox?: boolean;
+  readonly strict?: boolean;
+  readonly sandboxPolicy?: SandboxPolicySelection;
+}): boolean {
+  if (input.sandboxPolicy !== undefined || input.fullAccessSandbox === true) return false;
+  return (
+    input.executionPolicy === "full-access" ||
+    providerHoldsLevelWithoutSandbox({
+      mode: input.mode,
+      executionPolicy: input.executionPolicy,
+      strict: input.strict,
+    })
+  );
 }
 
 /** How one Pi launch runs on Windows, from that launch's own authority. */
@@ -908,11 +939,7 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
           }
           return { command: program.command, args: [...program.args], cwd: root, environment };
         }
-        if (
-          wall === "full-access" &&
-          input.sandboxPolicy === undefined &&
-          input.fullAccessSandbox !== true
-        ) {
+        if (piStartsUnconfined(input)) {
           return { command: input.binaryPath, args, cwd: root, environment };
         }
         const temporaryDirectoryPath = yield* temporaryDirectory(
@@ -1164,8 +1191,11 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
             return yield* Effect.fail(failure("incompatible", windows.reason));
           }
           const wall = piWallPolicy(input);
+          // A launch with no Octant wall (Windows, or an unconfined one
+          // elsewhere) has nothing to hold a proxy or a server folder to.
+          const unwalled = windows !== undefined || piStartsUnconfined(input);
           const network =
-            wall === "full-access" || windows !== undefined
+            wall === "full-access" || unwalled
               ? undefined
               : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
                   ...(input.sandboxPolicy === undefined
@@ -1177,18 +1207,17 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
                   loopbackPorts: loopbackPortOf(input.toolBridge),
                   environment: baseEnvironment,
                 });
-          const servers =
-            windows === undefined
-              ? yield* acquireProviderServerAccess(
-                  input.sandboxPolicy?.policy.hostServices === "blocked"
-                    ? undefined
-                    : options.serverAccess,
-                  {
-                    root: input.root,
-                    executionPolicy: wall,
-                  },
-                )
-              : undefined;
+          const servers = !unwalled
+            ? yield* acquireProviderServerAccess(
+                input.sandboxPolicy?.policy.hostServices === "blocked"
+                  ? undefined
+                  : options.serverAccess,
+                {
+                  root: input.root,
+                  executionPolicy: wall,
+                },
+              )
+            : undefined;
           const versionProbe = prepareConfinedVersionProbe({
             binaryPath: input.binaryPath,
             displayName: "Pi",
