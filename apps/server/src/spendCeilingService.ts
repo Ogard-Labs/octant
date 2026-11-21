@@ -60,10 +60,21 @@ export interface SpendCeilingTurnRequest {
   readonly childSubjectIds?: ReadonlyArray<string>;
   /**
    * False for spend that is not a turn of its own, such as a requested context
-   * compaction: its tokens count against the ceilings, but it uses up no turn
-   * and no run time.
+   * compaction or a billed image generation job: its spend counts against the
+   * ceilings, but it uses up no turn and no run time.
    */
   readonly countsAsTurn?: boolean;
+  /**
+   * Estimated monetary spend in whole US cents for callers that reserve money
+   * before dispatch (billed image generation), or `"unknown"` when no rate is
+   * known so an active monetary ceiling fails closed with `unknown-spend`.
+   */
+  readonly estimatedCostUsdCents?: number | "unknown";
+  /**
+   * True for unmeasured non-token operations (such as image providers that do
+   * not report token counts): token ceilings are skipped.
+   */
+  readonly skipTokenCeiling?: boolean;
 }
 
 interface InFlightTurn {
@@ -78,13 +89,17 @@ interface TurnUse {
   readonly runTimeMs: number;
 }
 
+interface LiveReservationScope {
+  readonly scopeKind: "project" | "thread";
+  readonly scopeId: string;
+}
+
 interface LiveReservation {
   readonly reservationId: string;
   readonly reservedTokens: number;
-  readonly scopes: ReadonlyArray<{
-    readonly scopeKind: "project" | "thread";
-    readonly scopeId: string;
-  }>;
+  readonly reservedCostUsdCents: number;
+  readonly tokenScopes: ReadonlyArray<LiveReservationScope>;
+  readonly costScopes: ReadonlyArray<LiveReservationScope>;
 }
 
 export interface SpendCeilingServiceOptions {
@@ -321,13 +336,15 @@ export class SpendCeilingService {
     this.#recordTurn(input.reservationId);
     const live = this.#reservations.get(String(input.reservationId));
     if (live === undefined) return;
-    const settlement = settleSpendCeilingReservation({
-      reservedTokens: live.reservedTokens,
-      ...(input.observedTokens === undefined ? {} : { observedTokens: input.observedTokens }),
-    });
-    if (settlement.kind === "overrun") {
-      for (const scope of live.scopes) {
-        this.#recordOverrun(scope, settlement.reservedTokens, settlement.observedTokens);
+    if (live.reservedTokens > 0) {
+      const settlement = settleSpendCeilingReservation({
+        reservedTokens: live.reservedTokens,
+        ...(input.observedTokens === undefined ? {} : { observedTokens: input.observedTokens }),
+      });
+      if (settlement.kind === "overrun") {
+        for (const scope of live.tokenScopes) {
+          this.#recordOverrun(scope, settlement.reservedTokens, settlement.observedTokens);
+        }
       }
     }
     this.#reservations.delete(String(input.reservationId));
@@ -379,15 +396,38 @@ export class SpendCeilingService {
       ...(request.turnUpperBoundTokens === undefined
         ? {}
         : { turnUpperBoundTokens: request.turnUpperBoundTokens }),
+      ...(request.estimatedCostUsdCents === undefined
+        ? {}
+        : { estimatedCostUsdCents: request.estimatedCostUsdCents }),
+      ...(request.countsAsTurn === undefined ? {} : { countsAsTurn: request.countsAsTurn }),
+      ...(request.skipTokenCeiling === undefined
+        ? {}
+        : { skipTokenCeiling: request.skipTokenCeiling }),
     });
-    if (admission.status !== "admitted" || admission.reservedTokens === 0) return admission;
+    const reservedCostUsdCents =
+      admission.status === "admitted" ? (admission.reservedCostUsdCents ?? 0) : 0;
+    if (
+      admission.status !== "admitted" ||
+      (admission.reservedTokens === 0 && reservedCostUsdCents === 0)
+    ) {
+      return admission;
+    }
     this.#reservations.set(String(request.reservationId), {
       reservationId: String(request.reservationId),
       reservedTokens: admission.reservedTokens,
-      scopes: admission.reservations.map((reservation) => ({
-        scopeKind: reservation.scopeKind,
-        scopeId: reservation.scopeId,
-      })),
+      reservedCostUsdCents,
+      tokenScopes: admission.reservations
+        .filter((reservation) => reservation.reservedTokens > 0)
+        .map((reservation) => ({
+          scopeKind: reservation.scopeKind,
+          scopeId: reservation.scopeId,
+        })),
+      costScopes: admission.reservations
+        .filter((reservation) => (reservation.reservedCostUsdCents ?? 0) > 0)
+        .map((reservation) => ({
+          scopeKind: reservation.scopeKind,
+          scopeId: reservation.scopeId,
+        })),
     });
     return admission;
   }
@@ -440,7 +480,10 @@ export class SpendCeilingService {
           : {
               ceilingUsdCents: costBudgetUsdCents,
               usedUsdCents: facts.usedCostUsdCents,
-              remainingUsdCents: Math.max(0, costBudgetUsdCents - facts.usedCostUsdCents),
+              remainingUsdCents: Math.max(
+                0,
+                costBudgetUsdCents - facts.usedCostUsdCents - (facts.reservedCostUsdCents ?? 0),
+              ),
             };
     const notMeasured =
       tokenBudget === undefined && costBudgetUsdCents === undefined
@@ -472,6 +515,10 @@ export class SpendCeilingService {
       ceiling.policy.costBudgetUsdCents === undefined
         ? undefined
         : this.#costUse(ceiling.scope, childIds, from);
+    const reservedCostUsdCents =
+      ceiling.policy.costBudgetUsdCents === undefined
+        ? undefined
+        : this.#reservedCostFor(ceiling.scope);
     return {
       scopeKind: ceiling.scope.kind,
       scopeId:
@@ -484,6 +531,7 @@ export class SpendCeilingService {
       ...(ceiling.overrun === undefined ? {} : { overrun: ceiling.overrun }),
       ...(used === undefined ? {} : { usedTurns: used.turns, usedRunTimeMs: used.runTimeMs }),
       ...(cost === undefined ? {} : { usedCostUsdCents: cost }),
+      ...(reservedCostUsdCents === undefined ? {} : { reservedCostUsdCents }),
     };
   }
 
@@ -499,7 +547,16 @@ export class SpendCeilingService {
   ): number | undefined {
     const where = ledgerWhere({
       subjects: ledgerSubjects(scope, childIds),
+      ...(scope.kind === "thread"
+        ? {
+            imageJobThread: {
+              threadType: scope.threadType,
+              threadId: String(scope.threadId),
+            },
+          }
+        : {}),
       ...(scope.kind === "project" ? { projectId: String(scope.projectId) } : {}),
+      includeImageJobs: true,
       ...(from === undefined ? {} : { from }),
     });
     if (where === undefined) return undefined;
@@ -681,8 +738,19 @@ export class SpendCeilingService {
     const id = scope.kind === "project" ? String(scope.projectId) : String(scope.threadId);
     let total = 0;
     for (const live of this.#reservations.values()) {
-      if (live.scopes.some((item) => item.scopeKind === scope.kind && item.scopeId === id)) {
+      if (live.tokenScopes.some((item) => item.scopeKind === scope.kind && item.scopeId === id)) {
         total += live.reservedTokens;
+      }
+    }
+    return total;
+  }
+
+  #reservedCostFor(scope: SpendCeilingScope): number {
+    const id = scope.kind === "project" ? String(scope.projectId) : String(scope.threadId);
+    let total = 0;
+    for (const live of this.#reservations.values()) {
+      if (live.costScopes.some((item) => item.scopeKind === scope.kind && item.scopeId === id)) {
+        total += live.reservedCostUsdCents;
       }
     }
     return total;
@@ -823,7 +891,12 @@ interface CostByProvider {
  */
 function ledgerWhere(input: {
   readonly subjects: ReadonlyArray<{ readonly type: string; readonly id: string }>;
+  readonly imageJobThread?: {
+    readonly threadType: SpendCeilingThreadType;
+    readonly threadId: string;
+  };
   readonly projectId?: string;
+  readonly includeImageJobs?: boolean;
   readonly from?: string;
 }): { readonly sql: string; readonly params: ReadonlyArray<string | number> } | undefined {
   const conditions: Array<string> = [];
@@ -835,9 +908,20 @@ function ledgerWhere(input: {
       params.push(subject.type, subject.id);
     }
   }
+  if (input.includeImageJobs === true && input.imageJobThread !== undefined) {
+    conditions.push(`(subject_type = 'image-job' AND subject_id IN (
+      SELECT aggregate_id FROM event_journal
+      WHERE aggregate_type = 'image-job'
+        AND event_name = 'image.job-queued@1'
+        AND json_extract(payload_json, '$.job.threadKind') = ?
+        AND json_extract(payload_json, '$.job.scopeId') = ?
+    ))`);
+    params.push(input.imageJobThread.threadType, input.imageJobThread.threadId);
+  }
   if (input.projectId !== undefined) {
-    conditions.push(usageProjectConditionSql(1));
-    params.push(...usageProjectConditionParams([input.projectId]));
+    const scopeOptions = input.includeImageJobs === true ? { includeImageJobs: true } : {};
+    conditions.push(usageProjectConditionSql(1, scopeOptions));
+    params.push(...usageProjectConditionParams([input.projectId], scopeOptions));
   }
   if (conditions.length === 0) return undefined;
   const clauses = [`(${conditions.join(" OR ")})`];

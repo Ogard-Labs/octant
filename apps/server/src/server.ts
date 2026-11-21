@@ -624,6 +624,7 @@ export function startOctantServer(
       persistence,
       processAuthorityNow,
       processAuthorityTime,
+      spendCeilingService,
       version,
       windowAuthorityStore,
       workThreadProjection,

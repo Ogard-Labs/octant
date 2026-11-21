@@ -20,6 +20,7 @@ import {
   decodeImageJobId,
   decodeProviderInstanceId,
   decodeProviderModelId,
+  decodeSpendCeilingReservationId,
   decodeUsageReconciliationId,
   decodeUtcTimestamp,
   type GeminiImageAspectRatio,
@@ -43,6 +44,9 @@ import {
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModelId,
+  type SpendCeilingRefusal,
+  type SpendCeilingReservationId,
+  type SpendCeilingThreadType,
   type UtcTimestamp,
 } from "@octant/contracts";
 import {
@@ -56,6 +60,7 @@ import {
   assertImageJobExpectedVersion,
   assertImageJobProfileEligible,
   assertImageJobTransitionAllowed,
+  estimateImageGenerationCost,
   isImageJobTerminalStatus,
   isImageProfileDriverKind,
   nextImageJobVersion,
@@ -65,6 +70,7 @@ import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
+import type { SpendCeilingService } from "../spendCeilingService";
 import { bflImageDriver } from "./bflImageAdapter";
 import { geminiImageDriver } from "./geminiImageAdapter";
 import {
@@ -110,11 +116,17 @@ const unavailableImageAdapter: ImageGenerationAdapter = {
 
 export class ImageJobServiceError extends Error {
   override readonly name = "ImageJobServiceError";
-  readonly category: "invalid" | "ineligible" | "conflict";
+  readonly category: "invalid" | "ineligible" | "conflict" | "spend-ceiling";
+  readonly refusal?: SpendCeilingRefusal;
 
-  constructor(category: ImageJobServiceError["category"], message: string) {
+  constructor(
+    category: ImageJobServiceError["category"],
+    message: string,
+    refusal?: SpendCeilingRefusal,
+  ) {
     super(message);
     this.category = category;
+    if (refusal !== undefined) this.refusal = refusal;
   }
 }
 
@@ -150,6 +162,13 @@ export interface ImageJobServiceOptions {
   /** Image driver kinds the plugin activation ladder admits; bundled policy by default. */
   readonly admittedImageDriverKinds?: ReadonlySet<ProviderDriverKind>;
   readonly concurrency?: number;
+  /** Host spend ceilings applied to thread-scoped image generation before dispatch. */
+  readonly spendCeiling?: Pick<SpendCeilingService, "admit" | "settle" | "abandon">;
+  /** Resolves the thread's current Project id so Project ceilings apply alongside thread ceilings. */
+  readonly resolveThreadProjectId?: (input: {
+    readonly threadType: SpendCeilingThreadType;
+    readonly threadId: string;
+  }) => string | undefined;
 }
 
 /**
@@ -173,9 +192,12 @@ export class ImageJobService {
   readonly #imageDrivers: ReadonlyArray<ImageGenerationDriver>;
   readonly #admittedImageDriverKinds: ReadonlySet<ProviderDriverKind>;
   readonly #concurrency: number;
+  readonly #spendCeiling: ImageJobServiceOptions["spendCeiling"];
+  readonly #resolveThreadProjectId: ImageJobServiceOptions["resolveThreadProjectId"];
   readonly #abort = new Map<string, AbortController>();
   readonly #waiters = new Map<string, Deferred<ImageJob>>();
   readonly #terminalPersistenceErrors = new Map<string, Error>();
+  readonly #spendReservations = new Map<string, SpendCeilingReservationId>();
   readonly #pending = new Array<ImageJobId>();
   #running = 0;
   #pumping = false;
@@ -196,6 +218,8 @@ export class ImageJobService {
     this.#admittedImageDriverKinds =
       options.admittedImageDriverKinds ?? admittedBundledImageDriverKinds();
     this.#concurrency = options.concurrency ?? IMAGE_JOB_HOST_CONCURRENCY;
+    this.#spendCeiling = options.spendCeiling;
+    this.#resolveThreadProjectId = options.resolveThreadProjectId;
     if (!Number.isSafeInteger(this.#concurrency) || this.#concurrency < 1) {
       throw new ImageJobServiceError(
         "invalid",
@@ -337,12 +361,50 @@ export class ImageJobService {
       );
     }
 
+    const scopeId = decodeImageGenerationScopeId(input.scopeId);
+    const effectiveOptions = resolveEffectivePricingOptions(instance, input);
+    let reservationId: SpendCeilingReservationId | undefined;
+    if (this.#spendCeiling !== undefined && input.threadKind !== "image-library") {
+      const estimate = estimateImageGenerationCost({
+        driverKind: instance.driverKind,
+        modelId: String(input.modelId),
+        variantCount,
+        ...(effectiveOptions.quality === undefined ? {} : { quality: effectiveOptions.quality }),
+        ...(effectiveOptions.size === undefined ? {} : { size: effectiveOptions.size }),
+        ...(effectiveOptions.resolution === undefined
+          ? {}
+          : { resolution: effectiveOptions.resolution }),
+      });
+      const projectId = this.#resolveThreadProjectId?.({
+        threadType: input.threadKind,
+        threadId: String(scopeId),
+      });
+      const candidateReservationId = decodeSpendCeilingReservationId(this.#uuid());
+      const admission = this.#spendCeiling.admit({
+        reservationId: candidateReservationId,
+        threadId: String(scopeId),
+        threadType: input.threadKind,
+        ...(projectId === undefined ? {} : { projectId }),
+        countsAsTurn: false,
+        skipTokenCeiling: true,
+        estimatedCostUsdCents: estimate.kind === "api-estimate" ? estimate.usdCents : "unknown",
+      });
+      if (admission.status === "refused") {
+        throw new ImageJobServiceError(
+          "spend-ceiling",
+          admission.refusal.message,
+          admission.refusal,
+        );
+      }
+      reservationId = candidateReservationId;
+    }
+
     const now = decodeUtcTimestamp(this.#clock());
     const job = decodeImageJob({
       id: decodeImageJobId(this.#uuid()),
       status: "queued",
       threadKind: input.threadKind,
-      scopeId: decodeImageGenerationScopeId(input.scopeId),
+      scopeId,
       profileInstanceId: decodeProviderInstanceId(input.profileInstanceId),
       modelId: decodeProviderModelId(input.modelId),
       promptHash: hashPrompt(input.prompt),
@@ -354,7 +416,15 @@ export class ImageJobService {
         ? {}
         : { parentArtifactRef: input.parentArtifactRef }),
     });
-    this.#appendQueued(job);
+    if (reservationId !== undefined) {
+      this.#spendReservations.set(String(job.id), reservationId);
+    }
+    try {
+      this.#appendQueued(job);
+    } catch (error) {
+      this.#finishSpendReservation(job.id, "abandon");
+      throw error;
+    }
     this.#pending.push(job.id);
     this.#work.set(String(job.id), {
       prompt: input.prompt,
@@ -462,6 +532,7 @@ export class ImageJobService {
       if (index >= 0) this.#pending.splice(index, 1);
       this.#work.delete(String(job.id));
       const next = this.#transition(job, "cancelled");
+      this.#finishSpendReservation(job.id, "abandon");
       this.#resolve(next);
       return next;
     }
@@ -488,6 +559,7 @@ export class ImageJobService {
           message: IMAGE_JOB_RESTART_INTERRUPTION_MESSAGE,
         },
       });
+      this.#finishSpendReservation(job.id, "abandon");
       this.#resolve(next);
       interrupted.push(next);
     }
@@ -550,7 +622,10 @@ export class ImageJobService {
         const jobId = this.#pending.shift();
         if (jobId === undefined) break;
         const job = this.#projection.getById(jobId);
-        if (job === undefined || job.status !== "queued") continue;
+        if (job === undefined || job.status !== "queued") {
+          this.#finishSpendReservation(jobId, "abandon");
+          continue;
+        }
         this.#running += 1;
         void this.#run(job)
           .catch((error: unknown) => {
@@ -575,6 +650,7 @@ export class ImageJobService {
           message: "The image job was interrupted by restart.",
         },
       });
+      this.#finishSpendReservation(queued.id, "abandon");
       this.#resolve(failed);
       return;
     }
@@ -633,8 +709,15 @@ export class ImageJobService {
         this.#resolve(cancelled);
         return;
       }
+      const effectiveOptions = resolveEffectivePricingOptions(instance, work);
       try {
-        const completed = this.#transition(running, "completed", { artifacts }, result);
+        // Record committed usage in the journal before releasing the spend
+        // reservation so concurrent checks neither miss the charge nor count it twice.
+        const completed = this.#transition(running, "completed", { artifacts }, result, {
+          driverKind: instance.driverKind,
+          ...effectiveOptions,
+        });
+        this.#finishSpendReservation(running.id, "settle");
         this.#resolve(completed);
       } catch (error) {
         await this.#removeArtifacts(running, artifacts);
@@ -651,6 +734,7 @@ export class ImageJobService {
       });
       this.#resolve(failed);
     } finally {
+      this.#finishSpendReservation(running.id, "abandon");
       this.#abort.delete(String(running.id));
       this.#work.delete(String(running.id));
     }
@@ -787,6 +871,12 @@ export class ImageJobService {
         readonly outputQuality?: string;
       };
     },
+    pricingContext?: {
+      readonly driverKind: ProviderDriverKind;
+      readonly quality?: OpenAiImageQuality;
+      readonly size?: OpenAiImageSize;
+      readonly resolution?: GeminiImageResolution;
+    },
   ): ImageJob {
     assertImageJobTransitionAllowed(job.status, toStatus);
     assertImageJobExpectedVersion(job, job.version);
@@ -826,6 +916,7 @@ export class ImageJobService {
             extras.artifacts,
             updatedAt,
             adapterResult,
+            pricingContext,
           ),
         },
         occurredAt: updatedAt,
@@ -850,11 +941,34 @@ export class ImageJobService {
           };
         }
       | undefined,
+    pricingContext:
+      | {
+          readonly driverKind: ProviderDriverKind;
+          readonly quality?: OpenAiImageQuality;
+          readonly size?: OpenAiImageSize;
+          readonly resolution?: GeminiImageResolution;
+        }
+      | undefined,
   ) {
     const inputTokens = adapterResult?.usage?.inputTokens ?? 0;
     const outputTokens = adapterResult?.usage?.outputTokens ?? 0;
     const size = adapterResult?.usage?.size;
     const outputQuality = adapterResult?.usage?.outputQuality;
+    const settledQuality = outputQuality ?? pricingContext?.quality;
+    const settledSize = typeof size === "string" && size.length > 0 ? size : pricingContext?.size;
+    const estimate =
+      pricingContext === undefined
+        ? undefined
+        : estimateImageGenerationCost({
+            driverKind: pricingContext.driverKind,
+            modelId: String(job.modelId),
+            variantCount: artifacts.length,
+            ...(settledQuality === undefined ? {} : { quality: settledQuality }),
+            ...(settledSize === undefined ? {} : { size: settledSize }),
+            ...(pricingContext.resolution === undefined
+              ? {}
+              : { resolution: pricingContext.resolution }),
+          });
     return {
       id: decodeUsageReconciliationId(this.#uuid()),
       providerInstanceId: job.profileInstanceId,
@@ -871,6 +985,14 @@ export class ImageJobService {
       ...(adapterResult?.usage?.inputTokens === undefined &&
       adapterResult?.usage?.outputTokens === undefined
         ? { providerReported: false }
+        : {}),
+      ...(estimate?.kind === "api-estimate"
+        ? {
+            cost: {
+              kind: "api-estimate" as const,
+              usdMicros: estimate.usdMicros,
+            },
+          }
         : {}),
       imageUnits: {
         count: artifacts.length,
@@ -926,6 +1048,7 @@ export class ImageJobService {
 
   #recordUnhandledFailure(job: ImageJob, error: unknown): void {
     void error;
+    this.#finishSpendReservation(job.id, "abandon");
     const current = this.#projection.getById(job.id) ?? job;
     if (isImageJobTerminalStatus(current.status)) {
       this.#resolve(current);
@@ -947,6 +1070,18 @@ export class ImageJobService {
           ? journalError
           : new ImageJobServiceError("conflict", "The image job failed."),
       );
+    }
+  }
+
+  #finishSpendReservation(jobId: ImageJobId, outcome: "settle" | "abandon"): void {
+    const key = String(jobId);
+    const reservationId = this.#spendReservations.get(key);
+    if (reservationId === undefined) return;
+    this.#spendReservations.delete(key);
+    if (outcome === "settle") {
+      this.#spendCeiling?.settle({ reservationId });
+    } else {
+      this.#spendCeiling?.abandon({ reservationId });
     }
   }
 
@@ -1002,6 +1137,35 @@ interface Deferred<T> {
 
 function hashPrompt(prompt: string): string {
   return createHash("sha256").update(prompt).digest("hex");
+}
+
+function resolveEffectivePricingOptions(
+  instance: ProviderInstance,
+  input: {
+    readonly quality?: OpenAiImageQuality;
+    readonly size?: OpenAiImageSize;
+    readonly resolution?: GeminiImageResolution;
+  },
+): {
+  readonly quality?: OpenAiImageQuality;
+  readonly size?: OpenAiImageSize;
+  readonly resolution?: GeminiImageResolution;
+} {
+  if (instance.configuration.kind === "openai-image-http") {
+    const quality = input.quality ?? instance.configuration.quality;
+    const size = input.size ?? instance.configuration.size;
+    return {
+      ...(quality === undefined ? {} : { quality }),
+      ...(size === undefined ? {} : { size }),
+    };
+  }
+  if (instance.configuration.kind === "gemini-native-image-http") {
+    const resolution = input.resolution ?? instance.configuration.resolution;
+    return {
+      ...(resolution === undefined ? {} : { resolution }),
+    };
+  }
+  return {};
 }
 
 /**

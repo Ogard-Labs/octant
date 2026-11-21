@@ -234,6 +234,94 @@ describe("evaluateSpendCeilingAdmission turn and run-time budgets", () => {
     if (result.status !== "refused") return;
     expect(result.refusal.dimension).toBe("tokens");
   });
+
+  it("reserves estimated monetary cost against thread and Project ceilings and refuses when remaining money cannot cover it", () => {
+    const project = projectFacts({
+      policy: { costBudgetUsdCents: 20 },
+      committed: { status: "known", tokens: 0 },
+      usedCostUsdCents: 5,
+      reservedCostUsdCents: 10,
+    });
+    const thread = threadFacts({
+      policy: { costBudgetUsdCents: 12 },
+      committed: { status: "known", tokens: 0 },
+      usedCostUsdCents: 2,
+      reservedCostUsdCents: 0,
+    });
+
+    const admitted = evaluateSpendCeilingAdmission({
+      project,
+      thread,
+      estimatedCostUsdCents: 5,
+      countsAsTurn: false,
+      skipTokenCeiling: true,
+    });
+    expect(admitted).toEqual({
+      status: "admitted",
+      reservedTokens: 0,
+      reservedCostUsdCents: 5,
+      reservations: [
+        { scopeKind: "project", scopeId: projectId, reservedTokens: 0, reservedCostUsdCents: 5 },
+        { scopeKind: "thread", scopeId: threadId, reservedTokens: 0, reservedCostUsdCents: 5 },
+      ],
+    });
+
+    const refused = evaluateSpendCeilingAdmission({
+      project,
+      thread,
+      estimatedCostUsdCents: 6,
+      countsAsTurn: false,
+      skipTokenCeiling: true,
+    });
+    expect(refused.status).toBe("refused");
+    if (refused.status !== "refused") return;
+    expect(refused.refusal).toMatchObject({
+      kind: "exhausted",
+      dimension: "monetary",
+      scopeKind: "project",
+      remainingUsdCents: 5,
+      ceilingUsdCents: 20,
+    });
+  });
+
+  it("fails closed with unknown-spend when an active monetary ceiling receives an unknown image price", () => {
+    const thread = threadFacts({
+      policy: { costBudgetUsdCents: 50 },
+      committed: { status: "known", tokens: 0 },
+      usedCostUsdCents: 0,
+    });
+    const refused = evaluateSpendCeilingAdmission({
+      thread,
+      estimatedCostUsdCents: "unknown",
+      countsAsTurn: false,
+      skipTokenCeiling: true,
+    });
+    expect(refused.status).toBe("refused");
+    if (refused.status !== "refused") return;
+    expect(refused.refusal).toMatchObject({
+      kind: "unknown-spend",
+      dimension: "monetary",
+      scopeKind: "thread",
+      ceilingUsdCents: 50,
+    });
+    expect(refused.refusal.recovery).toEqual(["clear-ceiling", "open-usage", "pause-work"]);
+  });
+
+  it("does not block an unmeasured non-turn image request on token, turn, or run-time ceilings", () => {
+    const thread = threadFacts({
+      policy: { tokenBudget: 1_000, turnBudget: 1, runTimeBudgetSeconds: 60 },
+      committed: { status: "unavailable" },
+      usedTurns: 1,
+      usedRunTimeMs: 60_000,
+    });
+    const admitted = evaluateSpendCeilingAdmission({
+      thread,
+      estimatedCostUsdCents: "unknown",
+      countsAsTurn: false,
+      skipTokenCeiling: true,
+    });
+    expect(admitted).toEqual({ status: "admitted", reservedTokens: 0, reservations: [] });
+  });
 });
 
 describe("settleSpendCeilingReservation", () => {

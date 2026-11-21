@@ -1268,6 +1268,155 @@ describe("SpendCeilingService", () => {
     if (refused.status !== "refused") return;
     expect(refused.refusal).toMatchObject({ dimension: "turns", ceilingTurns: 2 });
   });
+
+  it("reserves monetary cents for concurrent image admissions and releases cleanly on settle or abandon", () => {
+    const { service } = openService();
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "project", projectId: decodeProjectId(ids.project) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 10 },
+      window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    });
+    const first = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      projectId: ids.project,
+      estimatedCostUsdCents: 6,
+      countsAsTurn: false,
+      skipTokenCeiling: true,
+    });
+    expect(first).toMatchObject({ status: "admitted", reservedCostUsdCents: 6 });
+
+    expect(
+      remainingOf(
+        service.snapshot({ principalKind: "local-window", projectId: ids.project }),
+        "project",
+      ),
+    ).toMatchObject({ ceilingUsdCents: 10, usedUsdCents: 0, remainingUsdCents: 4 });
+
+    const second = service.admit({
+      reservationId: ids.reservationB,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      projectId: ids.project,
+      estimatedCostUsdCents: 6,
+      countsAsTurn: false,
+      skipTokenCeiling: true,
+    });
+    expect(second).toMatchObject({
+      status: "refused",
+      refusal: {
+        kind: "exhausted",
+        dimension: "monetary",
+        scopeKind: "project",
+        remainingUsdCents: 4,
+        ceilingUsdCents: 10,
+      },
+    });
+
+    service.abandon({ reservationId: ids.reservationA });
+    const retried = service.admit({
+      reservationId: ids.reservationB,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      projectId: ids.project,
+      estimatedCostUsdCents: 6,
+      countsAsTurn: false,
+      skipTokenCeiling: true,
+    });
+    expect(retried).toMatchObject({ status: "admitted", reservedCostUsdCents: 6 });
+    service.settle({ reservationId: ids.reservationB });
+    expect(
+      remainingOf(
+        service.snapshot({ principalKind: "local-window", projectId: ids.project }),
+        "project",
+      ),
+    ).toMatchObject({ ceilingUsdCents: 10, usedUsdCents: 0, remainingUsdCents: 10 });
+  });
+
+  it("counts settled image-job cost against thread and Project monetary ceilings even when the image provider reports no tokens", () => {
+    const { connection, service } = openService();
+    seedChatThread(connection, ids.thread, ids.project);
+    const jobId = "73000000-0000-4000-8000-0000000000d1";
+    connection
+      .prepare(
+        `INSERT INTO event_journal (
+          event_id, aggregate_type, aggregate_id, aggregate_version, event_name,
+          event_version, correlation_id, actor_kind, actor_id, occurred_at, payload_json
+        ) VALUES (?, 'image-job', ?, 1, 'image.job-queued@1', 1, ?, 'system', ?, ?, ?)`,
+      )
+      .run(
+        crypto.randomUUID(),
+        jobId,
+        crypto.randomUUID(),
+        ids.provider,
+        now,
+        JSON.stringify({ job: { id: jobId, threadKind: "chat-thread", scopeId: ids.thread } }),
+      );
+    insertUsage(connection, {
+      id: "73000000-0000-4000-8000-0000000000d2",
+      subjectType: "image-job",
+      subjectId: jobId,
+      tokens: { input: 0, output: 0 },
+      quality: "unavailable",
+      costUsdMicros: 80_000,
+      costKind: "api-estimate",
+      sequence: 1,
+    });
+
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "thread", threadType: "chat-thread", threadId: ids.thread },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 10 },
+      window: { kind: "lifetime" },
+    });
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "project", projectId: decodeProjectId(ids.project) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 10 },
+      window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    });
+
+    const snapshot = service.snapshot({
+      principalKind: "local-window",
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      projectId: ids.project,
+    });
+    expect(remainingOf(snapshot, "thread")).toMatchObject({
+      ceilingUsdCents: 10,
+      usedUsdCents: 8,
+      remainingUsdCents: 2,
+    });
+    expect(remainingOf(snapshot, "project")).toMatchObject({
+      ceilingUsdCents: 10,
+      usedUsdCents: 8,
+      remainingUsdCents: 2,
+    });
+
+    const refused = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      projectId: ids.project,
+      estimatedCostUsdCents: 4,
+      countsAsTurn: false,
+      skipTokenCeiling: true,
+    });
+    expect(refused).toMatchObject({
+      status: "refused",
+      refusal: {
+        kind: "exhausted",
+        dimension: "monetary",
+        remainingUsdCents: 2,
+        ceilingUsdCents: 10,
+      },
+    });
+  });
 });
 
 describe("notMeasuredProvider", () => {
