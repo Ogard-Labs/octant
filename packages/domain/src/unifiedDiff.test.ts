@@ -369,3 +369,33 @@ it("sets nonUtf8Path from the destination path on renames", () => {
   });
   expect(files[2]?.nonUtf8Path).toBeUndefined();
 });
+
+it("preserves trailing spaces in diff headers delimited by a tab", () => {
+  const patch = [
+    "diff --git a/name  b/name ",
+    "index 1111111..2222222 100644",
+    "--- a/name \t",
+    "+++ b/name \t",
+    "@@ -1 +1 @@",
+    "-old",
+    "+new",
+    "diff --git a/new file  b/new file ",
+    "new file mode 100644",
+    "index 0000000..3333333",
+    "--- /dev/null\t",
+    "+++ b/new file \t2026-01-01 00:00:00 +0000",
+    "@@ -0,0 +1 @@",
+    "+hello",
+  ].join("\n");
+
+  const files = parseUnifiedDiff(patch);
+  expect(files[0]).toMatchObject({
+    path: "name ",
+    change: "modified",
+  });
+  expect(files[0]?.previousPath).toBeUndefined();
+  expect(files[1]).toMatchObject({
+    path: "new file ",
+    change: "created",
+  });
+});

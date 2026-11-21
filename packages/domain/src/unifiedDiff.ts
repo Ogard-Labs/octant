@@ -232,10 +232,23 @@ function unquotePath(path: string, options: { readonly trim?: boolean } = {}): D
   }
 }
 
-function stripPrefix(path: string): DecodedPath {
-  const unquoted = unquotePath(path);
+function stripPrefix(path: string, options?: { readonly trim?: boolean }): DecodedPath {
+  const unquoted = unquotePath(path, options);
   if (unquoted.value === "/dev/null") return unquoted;
   return { value: unquoted.value.replace(/^[abciow]\//, ""), nonUtf8: unquoted.nonUtf8 };
+}
+
+/**
+ * Unified diff `---` / `+++` headers separate the path from an optional
+ * timestamp with a literal tab (Git appends a trailing `\t` for unquoted paths
+ * containing or ending with spaces). Strip only that delimiter so trailing
+ * spaces in the filename itself stay intact.
+ */
+function parsePatchFileHeaderPath(raw: string): DecodedPath {
+  const withoutCr = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+  const tab = withoutCr.indexOf("\t");
+  const withoutDelimiter = tab === -1 ? withoutCr : withoutCr.slice(0, tab);
+  return stripPrefix(withoutDelimiter, { trim: false });
 }
 
 function readQuotedEnd(text: string, start: number): number | undefined {
@@ -255,13 +268,14 @@ function readQuotedEnd(text: string, start: number): number | undefined {
 function parseDiffGitHeader(
   line: string,
 ): { readonly oldPath: DecodedPath; readonly newPath: DecodedPath } | undefined {
-  const rest = line.slice("diff --git ".length);
+  const rawRest = line.slice("diff --git ".length);
+  const rest = rawRest.endsWith("\r") ? rawRest.slice(0, -1) : rawRest;
   if (rest.startsWith('"')) {
     const firstEnd = readQuotedEnd(rest, 0);
     if (firstEnd !== undefined && rest[firstEnd] === " ") {
       return {
-        oldPath: stripPrefix(rest.slice(0, firstEnd)),
-        newPath: stripPrefix(rest.slice(firstEnd + 1)),
+        oldPath: stripPrefix(rest.slice(0, firstEnd), { trim: false }),
+        newPath: stripPrefix(rest.slice(firstEnd + 1), { trim: false }),
       };
     }
   }
@@ -271,8 +285,8 @@ function parseDiffGitHeader(
       const end = readQuotedEnd(rest, search + 1);
       if (end === rest.length) {
         return {
-          oldPath: stripPrefix(rest.slice(0, search)),
-          newPath: stripPrefix(rest.slice(search + 1)),
+          oldPath: stripPrefix(rest.slice(0, search), { trim: false }),
+          newPath: stripPrefix(rest.slice(search + 1), { trim: false }),
         };
       }
       search = rest.indexOf(' "', search + 1);
@@ -475,13 +489,13 @@ export function parseUnifiedDiff(
       }
     }
     if (!accumulator.sawHunk && line.startsWith("--- ")) {
-      const decoded = stripPrefix(line.slice(4));
+      const decoded = parsePatchFileHeaderPath(line.slice(4));
       accumulator.oldPath = decoded.value;
       accumulator.oldPathNonUtf8 = decoded.nonUtf8;
       continue;
     }
     if (!accumulator.sawHunk && line.startsWith("+++ ")) {
-      const decoded = stripPrefix(line.slice(4));
+      const decoded = parsePatchFileHeaderPath(line.slice(4));
       accumulator.newPath = decoded.value;
       accumulator.newPathNonUtf8 = decoded.nonUtf8;
       continue;
