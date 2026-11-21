@@ -1684,11 +1684,22 @@ export function createNativeHarnessConnection(
                 release(state);
                 throw error;
               }
-              if (state.estimatedCostUsd === null && state.latestReportedUsage !== undefined) {
+              // The last report was the last request's alone. A turn of several
+              // requests reports its whole cost once more, as completion does,
+              // so a reader that keeps the latest report (the Code ledger)
+              // records every request; one that sums per-request reports lets
+              // this whole-turn report replace them, so nothing counts twice.
+              if (
+                state.latestReportedUsage !== undefined &&
+                (state.estimatedCostUsd === null || state.steps > 1 || state.compactedThisTurn)
+              ) {
                 emit(state, {
                   kind: "usage",
                   ...state.latestReportedUsage,
-                  estimatedCostUsd: null,
+                  estimatedCostUsd: state.estimatedCostUsd,
+                  ...(state.contextTokens === undefined
+                    ? {}
+                    : { contextTokens: state.contextTokens }),
                 });
               }
               emit(state, { kind: "interrupted", message: "The provider request was cancelled." });
@@ -1800,7 +1811,10 @@ function composeSystem(
   instructions: ReadonlyArray<string>,
   tools: ReadonlyArray<ProviderToolDefinition>,
 ): string | undefined {
-  const guide = nativeHarnessToolGuide(tools.map((tool) => tool.name));
+  // Chat, Work, Code, and child runs already send each offered tool's line as
+  // an instruction; the guide adds only what they did not, so no tool is
+  // described twice.
+  const guide = nativeHarnessToolGuide(tools, instructions);
   const parts = [...instructions, ...(guide === undefined ? [] : [guide])];
   return parts.length === 0 ? undefined : parts.join("\n\n");
 }

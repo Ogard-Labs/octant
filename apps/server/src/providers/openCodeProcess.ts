@@ -54,6 +54,7 @@ import {
 } from "../process/threadEgressPolicy";
 import { secretGuardRefusal } from "../process/secretGuard";
 import { makeBoundedProviderStderr } from "./providerProcessDiagnostic";
+import { awsProfileReadPaths } from "./providerHostEnvironment";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import {
   acquireProviderRuntimeNetwork,
@@ -74,8 +75,14 @@ export interface OpenCodeBinaryProbe {
 export type OpenCodeRuntime = "legacy" | "beta";
 
 export interface OpenCodeServerConnection {
-  /** Attested only when user/project MCP, plugins, and skills cannot enter the process. */
+  /** Attested only when user/project MCP, plugins, and skills cannot enter an OS-confined process. */
   readonly isolatedConfiguration?: true;
+  /**
+   * Attested when a Windows outside-Strict launch runs a verified release with
+   * Octant's private configuration (no Project config loaded), admitting
+   * app-managed tools without claiming OS confinement.
+   */
+  readonly windowsPrivateConfiguration?: true;
   readonly authorization: string;
   readonly pid: number;
   /** Runtime protocol attested by the binary version probe before startup. */
@@ -882,6 +889,7 @@ export function createPrivateOpenCodeProfile(
   ownSkills = false,
   ownToolServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
   projectConfig = false,
+  chatDenyAll = false,
 ): PrivateOpenCodeProfile {
   const root = temporaryDirectory();
   const directories: string[] = [];
@@ -939,15 +947,19 @@ export function createPrivateOpenCodeProfile(
     if (isRecord(scrubbed)) projected = scrubbed;
     // These rules are owned by Octant and override any resolver output. The
     // provider can still read its auth data through XDG_DATA_HOME, while
-    // executable extensions and compatibility tools stay denied.
+    // executable extensions and compatibility tools stay denied. On Windows
+    // Chat outside Strict, OpenCode runs unconfined with a deny-everything
+    // permission ruleset of its own rather than an Octant sandbox.
     const ownedConfig: Record<string, unknown> = {
       ...projected,
-      permission: {
-        ...(ownSkills ? {} : { skill: { "*": "deny" } }),
-        ...(ownToolServers === undefined ? { "*_*": "deny" } : {}),
-      },
+      permission: chatDenyAll
+        ? { "*": "deny" }
+        : {
+            ...(ownSkills ? {} : { skill: { "*": "deny" } }),
+            ...(ownToolServers === undefined ? { "*_*": "deny" } : {}),
+          },
     };
-    if (ownToolServers !== undefined && Object.keys(ownToolServers).length > 0) {
+    if (!chatDenyAll && ownToolServers !== undefined && Object.keys(ownToolServers).length > 0) {
       ownedConfig.mcp = ownToolServers;
     }
     // OpenCode 2 appends configured `permissions` after every agent's
@@ -1316,14 +1328,16 @@ function openCodeWindowsLaunch(
     executionPolicy: input.executionPolicy ?? "approval-gated",
     fullAccessSandbox: input.fullAccessSandbox,
     strict: input.sandboxPolicy === undefined ? input.strict : true,
+    driverKind: "opencode",
   });
 }
 
 /**
- * An OpenCode launch on Windows, which has no Octant sandbox: Full access, or
- * a level below it outside Strict, where OpenCode's own permission rules hold
- * the server (Plan's read-only rules included), starts unconfined; anything
- * else is refused by name. An npm shim is resolved to the program it starts.
+ * An OpenCode launch on Windows, which has no Octant sandbox: Full access, a
+ * level below it outside Strict, or Chat outside Strict (where OpenCode's own
+ * deny-everything permission ruleset keeps its file and shell tools off)
+ * starts unconfined; Strict and a kept sandbox are refused by name. An npm
+ * shim is resolved to the program it starts.
  */
 function prepareWindowsOpenCodeLaunch(
   input: OpenCodeProcessStartInput,
@@ -1392,6 +1406,11 @@ function prepareOpenCodeLaunch(
       if (loopbackPorts.some((port) => !Number.isInteger(port) || port < 1 || port > 65_535)) {
         throw new Error("OpenCode app-managed tool bridge port is invalid.");
       }
+      const openProfile =
+        input.strict === false &&
+        input.fullAccessSandbox !== true &&
+        input.sandboxPolicy === undefined;
+      const awsReadPaths = openProfile ? awsProfileReadPaths(profile.environment) : [];
       const readRoots = existingAbsolutePaths([
         root,
         temporaryDirectory,
@@ -1401,6 +1420,7 @@ function prepareOpenCodeLaunch(
         cacheHome,
         stateHome,
         providerDataDirectory,
+        ...awsReadPaths,
         ...(input.readOnlyFolders ?? []),
       ]);
       const globalClaudeInstructions = openCodeGlobalClaudeInstructionFile(
@@ -1419,6 +1439,7 @@ function prepareOpenCodeLaunch(
         cacheHome,
         stateHome,
         providerDataDirectory,
+        ...awsReadPaths,
         ...(input.readOnlyFolders ?? []),
         // Bubblewrap binds this one file read-only. Seatbelt keeps `~/.claude`
         // denied as a whole and reopens the file by literal rule below: as an
@@ -1762,6 +1783,8 @@ function acquireOpenCodeServer(
           })
         : 0;
     return yield* Effect.async<ManagedOpenCodeServer, ProviderFailure>((resume) => {
+      const windowsChatDenyAll =
+        options.platform === "win32" && input.mode === "chat" && input.purpose !== "probe";
       let profile: PrivateOpenCodeProfile;
       try {
         profile = createPrivateOpenCodeProfile(
@@ -1769,9 +1792,10 @@ function acquireOpenCodeServer(
           options.inheritedEnvironment ?? process.env,
           tmpdir,
           runtime === "beta" ? (input.betaPermissions ?? BETA_DENY_ALL) : undefined,
-          input.ownSkills === true,
-          input.ownToolServers,
-          launchLoadsProjectConfig(input),
+          windowsChatDenyAll ? false : input.ownSkills === true,
+          windowsChatDenyAll ? undefined : input.ownToolServers,
+          windowsChatDenyAll ? false : launchLoadsProjectConfig(input),
+          windowsChatDenyAll,
         );
       } catch {
         resume(
@@ -1964,8 +1988,15 @@ function acquireOpenCodeServer(
                 connection: {
                   authorization,
                   pid: child.pid!,
-                  ...(isolationAttested && launch.command !== input.binaryPath
+                  ...(options.platform !== "win32" &&
+                  isolationAttested &&
+                  launch.command !== input.binaryPath
                     ? { isolatedConfiguration: true as const }
+                    : {}),
+                  ...(options.platform === "win32" &&
+                  isolationAttested &&
+                  (input.purpose === "probe" || input.strict === false)
+                    ? { windowsPrivateConfiguration: true as const }
                     : {}),
                   runtime,
                   version,

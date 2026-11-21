@@ -32,6 +32,9 @@ export interface SettingsContainerProps {
   readonly projectTerminalClient?: ProjectTerminalClient;
   readonly projectActionStoragePrefix?: string;
   readonly onOpenServerProject?: (project: ServerProject) => void;
+  readonly onOpenRelayedServerProjectPreview?: Parameters<
+    typeof ShellSettingsSurface
+  >[0]["onOpenRelayedServerProjectPreview"];
   readonly actions: Pick<
     ShellActions,
     "openChatThread" | "setUsageOpen" | "selectChatThread" | "selectWorkThread" | "selectCodeThread"
@@ -325,6 +328,9 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       {...(props.onOpenServerProject === undefined
         ? {}
         : { onOpenServerProject: props.onOpenServerProject })}
+      {...(props.onOpenRelayedServerProjectPreview === undefined
+        ? {}
+        : { onOpenRelayedServerProjectPreview: props.onOpenRelayedServerProjectPreview })}
       {...(props.projectTerminalClient === undefined
         ? {}
         : { projectTerminalClient: props.projectTerminalClient })}

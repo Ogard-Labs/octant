@@ -24,7 +24,7 @@ import { useProviderRooms } from "../usage/useProviderRooms";
 import { ModelRoleEditor } from "../harness/ModelRoleEditor";
 import { roleSuggestionModels } from "../harness/modelRoleOptions";
 import { RoleSuggestionPreview } from "../harness/RoleSuggestionPreview";
-import { MODEL_ROLES, rolePresentation, slotFromSuggestion } from "../harness/modelRoles";
+import { rolePresentation, slotFromSuggestion, visibleModelRoles } from "../harness/modelRoles";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 
@@ -234,6 +234,8 @@ export function ProjectModelRolesSection(props: ProjectModelRolesSectionProps) {
     });
   };
 
+  const visibleRoles = visibleModelRoles(loaded.host.configuration, loaded.override?.configuration);
+
   return (
     <div className="project-model-roles">
       <p className="oct-meta">
@@ -245,7 +247,7 @@ export function ProjectModelRolesSection(props: ProjectModelRolesSectionProps) {
           {message}
         </p>
       )}
-      {MODEL_ROLES.map((role) => {
+      {visibleRoles.map((role) => {
         const own = projectSlot(role.id);
         const chosen = own !== undefined || choosing.has(role.id);
         return (

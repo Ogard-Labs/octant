@@ -21,6 +21,7 @@ import { RemoteAccessDefaults } from "./RemoteAccessDefaults";
 import { RemoteCoordinatorProposals } from "./RemoteCoordinatorProposals";
 import { RemoteProjectTools } from "./RemoteProjectTools";
 import { RemoteCodeThreadStart, RemoteWorkThreadStart } from "./RemoteThreadStart";
+import { ThreadNativeSetupProvider } from "../providers/ThreadNativeSetupControl";
 import { useProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
@@ -127,6 +128,18 @@ function useRemoteReplyDetail(
 
 function RemoteModeSurface(props: RemoteWorkspaceProps) {
   const providerController = useProviderController({ client: props.clients.provider });
+  // Only a browser the host's own person paired may read or change thread
+  // native setup and Project Codex skills; restricted remote sessions keep none.
+  const threadNativeSetupServices = useMemo(
+    () =>
+      props.actsAsHostPerson !== true || providerController.threadNativeSetup === undefined
+        ? undefined
+        : {
+            instances: providerController.instances,
+            ...providerController.threadNativeSetup,
+          },
+    [props.actsAsHostPerson, providerController.instances, providerController.threadNativeSetup],
+  );
   const providerGroups = useMemo(
     () =>
       buildModelPickerGroups({
@@ -207,7 +220,9 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
   }
   return (
     <>
-      {surface}
+      <ThreadNativeSetupProvider services={threadNativeSetupServices}>
+        {surface}
+      </ThreadNativeSetupProvider>
       {props.actsAsHostPerson === true && props.mode !== "chat" ? (
         <RemoteAccessDefaults
           codeClient={props.clients.code}
@@ -225,6 +240,9 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
           projectBrowserClient={props.clients.projectBrowser}
           projectClient={props.clients.project}
           projectTerminalClient={props.clients.projectTerminal}
+          {...(props.clients.serverProjects === undefined
+            ? {}
+            : { serverProjectsClient: props.clients.serverProjects })}
         />
       ) : null}
       <OctantDialogPresence>
@@ -349,6 +367,7 @@ function RemoteChatSurface(
         <ChatWorkspace
           canvasClient={canvasClient}
           controller={controller}
+          {...serviceOfferProps(props)}
           {...(props.extensionClient === undefined
             ? {}
             : { extensionClient: props.extensionClient })}
@@ -421,6 +440,7 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
       {activeThread === undefined ? null : (
         <WorkThreadWorkspace
           key={String(activeThread.id)}
+          {...serviceOfferProps(props)}
           title={activeThread.title}
           threadId={activeThread.id}
           initialThread={activeThread}
@@ -502,7 +522,9 @@ function RemoteCodeSurface(props: RemoteSurfaceProps) {
             />
           )}
           <CodeThreadWorkspace
+            actsAsHostPerson={props.actsAsHostPerson}
             canvasClient={props.clients.canvas}
+            {...serviceOfferProps(props)}
             onOpenCanvas={props.onOpenCanvas}
             onOpenCanvasInSidebar={props.onOpenCanvas}
             canvasOpenLabel="Open Canvas"
@@ -518,6 +540,18 @@ function RemoteCodeSurface(props: RemoteSurfaceProps) {
       )}
     </RemoteThreadPane>
   );
+}
+
+function serviceOfferProps({ actsAsHostPerson, clients }: RemoteSurfaceProps) {
+  const client = clients.serviceOffers;
+  return !actsAsHostPerson
+    ? {}
+    : {
+        ...(client === undefined ? {} : { serviceOfferClient: client }),
+        ...(clients.imageResults === undefined
+          ? {}
+          : { imageResults: clients.imageResults, imageGenerationProfiles: [] }),
+      };
 }
 
 type RemoteThread = ChatThread | WorkThread | CodeThread;

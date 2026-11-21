@@ -325,18 +325,25 @@ function reportsToolCallContent(state: ClaudeToolState): boolean {
  * path alone: what was written stays out of every event this adapter emits,
  * as it does for the change's diff, and the file itself holds it.
  */
-function recordedInput(
-  content: Extract<ClaudeAssistantContent, { readonly kind: "tool-use" }>,
-): string {
+function recordedInput(content: Extract<ClaudeAssistantContent, { readonly kind: "tool-use" }>): {
+  readonly text: string;
+  readonly partial: boolean;
+} {
   if (content.toolName === "NotebookEdit") {
     const notebook = jsonString(content.input, "notebook_path");
-    return notebook === undefined ? "" : JSON.stringify({ notebook_path: notebook });
+    return {
+      text: notebook === undefined ? "" : JSON.stringify({ notebook_path: notebook }),
+      partial: true,
+    };
   }
   if (content.toolName !== "Edit" && content.toolName !== "Write") {
-    return JSON.stringify(content.input);
+    return { text: JSON.stringify(content.input), partial: false };
   }
   const path = jsonString(content.input, "file_path");
-  return path === undefined ? "" : JSON.stringify({ file_path: path });
+  return {
+    text: path === undefined ? "" : JSON.stringify({ file_path: path }),
+    partial: true,
+  };
 }
 
 /**
@@ -350,6 +357,7 @@ function toolCallContent(
   part: "input" | "output",
   text: string,
   alreadyCut = false,
+  partial = false,
 ): ReadonlyArray<ClaudeMappedMessage> {
   if (text.length === 0) return [];
   const cut = text.length > MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS;
@@ -360,6 +368,7 @@ function toolCallContent(
       part,
       text: cut ? text.slice(0, MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS) : text,
       ...(cut || alreadyCut ? { truncated: true } : {}),
+      ...(partial ? { partial: true } : {}),
     }),
   ];
 }
@@ -716,10 +725,24 @@ function mapToolUse(
   // records a tool it runs itself from the request, so only the runtime's own
   // tools are reported here.
   // Made after the start below, so the events keep the order they are numbered in.
-  const inputContent = () =>
-    authoritativeInput && content.disabled !== true && reportsToolCallContent(resolved.state)
-      ? toolCallContent(context, resolved.state.toolCallId, "input", recordedInput(content))
-      : [];
+  const inputContent = () => {
+    if (
+      !authoritativeInput ||
+      content.disabled === true ||
+      !reportsToolCallContent(resolved.state)
+    ) {
+      return [];
+    }
+    const recorded = recordedInput(content);
+    return toolCallContent(
+      context,
+      resolved.state.toolCallId,
+      "input",
+      recorded.text,
+      false,
+      recorded.partial,
+    );
+  };
   if (!resolved.state.emitsActivity) return [{ kind: "ignored" }];
   if (!resolved.created) {
     // A streamed start carried no input, so a notice that depends on it (a
@@ -946,7 +969,12 @@ function taskListEvents(context: ClaudeEventContext): ReadonlyArray<ClaudeMapped
 export function claudeStoredTaskListEvents(
   context: ClaudeEventContext,
 ): ReadonlyArray<ClaudeMappedMessage> {
-  return context.taskList.takeSeed() ? taskListEvents(context) : [];
+  if (!context.taskList.takeSeed()) return [];
+  // Stored state restated at session start: every event carries this mapping's
+  // stamp, not the instant the work happened, so nothing may be timed by it.
+  return taskListEvents(context).map((mapped) =>
+    mapped.kind === "event" ? { ...mapped, event: { ...mapped.event, synthesized: true } } : mapped,
+  );
 }
 
 function withoutIgnored(
@@ -2083,6 +2111,9 @@ export function mapClaudeToolRequest(
   if (correlated.kind === "failure") return correlated;
   const normalizedRequestId = correlated.requestId;
   const target = approvalTarget(context, request);
+  // The same normalized id the tool's row carries, so the wait is billed to
+  // that call alone; a request whose call never opened a row gets none.
+  const stepId = claudeToolUseStepId(context, request.toolUseId, request.toolName);
   const levelChange = claudeLevelChangeRequest(request);
   if (levelChange !== undefined) {
     return {
@@ -2098,6 +2129,7 @@ export function mapClaudeToolRequest(
           kind: "approval-request",
           requestId: normalizedRequestId,
           action: toolName,
+          ...(stepId === undefined ? {} : { toolCallId: stepId }),
           description:
             levelChange.kind === "enter-plan"
               ? "Claude asks to plan first: the thread moves to Plan, read-only, from its next turn."
@@ -2111,6 +2143,7 @@ export function mapClaudeToolRequest(
     kind: "approval-request",
     requestId: normalizedRequestId,
     action: toolName,
+    ...(stepId === undefined ? {} : { toolCallId: stepId }),
     // A person can only judge a prompt that says what it is for. "Claude
     // requests permission to use Edit." was approved blind every time.
     description:

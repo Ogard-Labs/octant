@@ -94,6 +94,30 @@ describe("CodePullRequestPane", () => {
     expect(screen.queryByRole("button", { name: /create pull request/i })).not.toBeInTheDocument();
   });
 
+  it("offers Change mode beside the Plan-mode notice and opens the mode menu without switching mode", () => {
+    const client = codeClient();
+    const onOpenModeMenu = vi.fn();
+    render(
+      <CodePullRequestPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="plan"
+        onOpenModeMenu={onOpenModeMenu}
+        scope={scope}
+      />,
+    );
+
+    expect(
+      screen.getByText("Plan mode is read-only. Pull request creation is unavailable."),
+    ).toBeVisible();
+    const changeMode = screen.getByRole("button", { name: "Change mode" });
+    expect(changeMode).toBeVisible();
+    fireEvent.click(changeMode);
+    expect(onOpenModeMenu).toHaveBeenCalledOnce();
+    expect(client.executeOperation).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /create pull request/i })).not.toBeInTheDocument();
+  });
+
   it("renders an actionable pull-request command failure", async () => {
     const client = codeClient();
     (client.executeOperation as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("offline"));

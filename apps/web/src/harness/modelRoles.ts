@@ -1,6 +1,8 @@
 import {
   MAX_NATIVE_HARNESS_SLOT_CANDIDATES,
   nativeHarnessSlotCandidateKey,
+  type NativeHarnessJob,
+  type NativeHarnessRoutingConfiguration,
   type NativeHarnessSlot,
   type NativeHarnessSlotCandidate,
   type NativeHarnessSlotId,
@@ -13,16 +15,75 @@ export interface ModelRolePresentation {
   readonly meaning: string;
 }
 
+/** Every job a live server caller resolves through the routing table. */
+export const SERVER_RESOLVED_JOBS: ReadonlyArray<NativeHarnessJob> = [
+  "lead",
+  "researcher",
+  "implementer",
+  "reviewer",
+  "image-understanding",
+  "advisor",
+  "custom",
+];
+
+const SERVER_RESOLVED_JOB_SET: ReadonlySet<NativeHarnessJob> = new Set(SERVER_RESOLVED_JOBS);
+
 /**
- * The roles a person sees, in the order the work gets harder. Each is a slot in
- * the routing table; the CLI and the guide still call them slots.
+ * Built-in slots kept in the wire schema for saved settings, hidden from
+ * Settings when no server-resolved job explicitly binds to them.
  */
-export const MODEL_ROLES: ReadonlyArray<ModelRolePresentation> = [
+export const UNRESOLVED_BUILT_IN_SLOT_IDS: ReadonlySet<string> = new Set(["plan", "smol"]);
+
+const HIDDEN_ROLE_PRESENTATIONS: ReadonlyArray<ModelRolePresentation> = [
   {
     id: "plan",
     label: "Planner",
     meaning: "Plans the work, splits it up and reads what comes back.",
   },
+  {
+    id: "smol",
+    label: "Small jobs",
+    meaning: "Titles, summaries and shortening long threads. A small, fast model is enough.",
+  },
+];
+
+/**
+ * Slot ids targeted by any server-resolved job in the given routing
+ * configurations (host routing and optional Project override).
+ */
+export function activeBoundSlotIds(
+  ...configurations: ReadonlyArray<NativeHarnessRoutingConfiguration | undefined>
+): ReadonlySet<string> {
+  const bound = new Set<string>();
+  for (const configuration of configurations) {
+    if (configuration === undefined) continue;
+    for (const binding of configuration.jobSlots) {
+      if (SERVER_RESOLVED_JOB_SET.has(binding.job)) {
+        bound.add(String(binding.slotId));
+      }
+    }
+  }
+  return bound;
+}
+
+/**
+ * The primary roles to show for the given routing configurations: always the
+ * server-resolved built-in roles, plus any otherwise-hidden built-in slot
+ * (`plan`, `smol`) that a live server-resolved job currently binds to.
+ */
+export function visibleModelRoles(
+  ...configurations: ReadonlyArray<NativeHarnessRoutingConfiguration | undefined>
+): ReadonlyArray<ModelRolePresentation> {
+  const bound = activeBoundSlotIds(...configurations);
+  const extra = HIDDEN_ROLE_PRESENTATIONS.filter((role) => bound.has(role.id));
+  return extra.length === 0 ? MODEL_ROLES : [...MODEL_ROLES, ...extra];
+}
+
+/**
+ * The server-resolved roles a person sees, in the order the work gets harder.
+ * Each is a slot in the routing table; the CLI and the guide still call them slots.
+ */
+export const MODEL_ROLES: ReadonlyArray<ModelRolePresentation> = [
   {
     id: "task",
     label: "Scout",
@@ -51,11 +112,6 @@ export const MODEL_ROLES: ReadonlyArray<ModelRolePresentation> = [
     meaning:
       "Describes an attached image, or one a thread asks about, for a model that cannot read images. Empty, such images are refused. It needs a model that reads images on a connection that takes images from Octant.",
   },
-  {
-    id: "smol",
-    label: "Small jobs",
-    meaning: "Titles, summaries and shortening long threads. A small, fast model is enough.",
-  },
 ];
 
 export const ADVISOR_ROLE: ModelRolePresentation = {
@@ -68,7 +124,12 @@ export const ADVISOR_ROLE: ModelRolePresentation = {
 export function rolePresentation(id: string): ModelRolePresentation {
   return (
     MODEL_ROLES.find((role) => role.id === id) ??
-    (id === ADVISOR_ROLE.id ? ADVISOR_ROLE : { id, label: id, meaning: "A custom role." })
+    (id === ADVISOR_ROLE.id ? ADVISOR_ROLE : undefined) ??
+    HIDDEN_ROLE_PRESENTATIONS.find((role) => role.id === id) ?? {
+      id,
+      label: id,
+      meaning: "A custom role.",
+    }
   );
 }
 
@@ -89,8 +150,19 @@ export function slotWithCandidates(
   candidates: ReadonlyArray<NativeHarnessSlotCandidate>,
 ): NativeHarnessSlot | undefined {
   if (candidates.length === 0) return undefined;
-  const base: NativeHarnessSlot = saved ?? { id: id as NativeHarnessSlotId, candidates };
-  return { ...base, candidates: candidates.slice(0, MAX_NATIVE_HARNESS_SLOT_CANDIDATES) };
+  const nextCandidates = candidates.slice(0, MAX_NATIVE_HARNESS_SLOT_CANDIDATES);
+  const base: NativeHarnessSlot = saved ?? {
+    id: id as NativeHarnessSlotId,
+    candidates: nextCandidates,
+  };
+  if (
+    base.overflowPromotion !== undefined &&
+    hasCandidate(nextCandidates, base.overflowPromotion)
+  ) {
+    const { overflowPromotion: _dropped, ...withoutPromotion } = base;
+    return { ...withoutPromotion, candidates: nextCandidates };
+  }
+  return { ...base, candidates: nextCandidates };
 }
 
 export type RoleFlag = "askBeforeUsing" | "continueOnFallback";

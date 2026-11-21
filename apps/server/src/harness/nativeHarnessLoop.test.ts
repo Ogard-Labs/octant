@@ -17,6 +17,7 @@ import { deriveTurnMetrics, ledgerUsageCost } from "@octant/domain";
 import { Effect, Exit, Fiber, Scope, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Persistence, makePersistenceLive } from "../persistence/persistenceService";
+import { appToolHostLines } from "../providers/appToolHostLines";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { buildUsageDashboard } from "../usageDashboardModel";
@@ -838,8 +839,45 @@ describe("native harness loop", () => {
       ),
     );
     expect(requests[0]?.system).toContain("Be brief.");
-    expect(requests[0]?.system).toContain("octant_browser:");
+    expect(requests[0]?.system).toContain(
+      appToolHostLines([tool("octant_browser")])[0]?.text ?? "missing line",
+    );
     expect(requests[0]?.history).toEqual([{ role: "user", text: "hello" }]);
+  });
+
+  it("describes each offered Octant tool once when its line already came as an instruction", async () => {
+    const { transport, requests } = scriptedTransport([{ text: "ok", toolCalls: [] }]);
+    const offered = [tool("read"), tool("octant_browser"), tool("octant_canvas"), tool("skill")];
+    const lines = appToolHostLines(offered);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const events = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.send({
+            sessionId,
+            prompt: "hello",
+            context: lines.map((line) => ({
+              kind: "instructions" as const,
+              text: line.text,
+              tool: line.tool,
+            })),
+            attachments: [],
+            tools: offered,
+          });
+          yield* Fiber.join(events);
+        }),
+      ),
+    );
+    const system = requests[0]?.system ?? "";
+    expect(lines.map((line) => line.tool)).toEqual(["octant_browser", "octant_canvas"]);
+    for (const line of lines) expect(system.split(line.text)).toHaveLength(2);
+    for (const name of ["octant_browser", "octant_canvas"])
+      expect(system.match(new RegExp(`\\b${name}\\b`, "g"))).toHaveLength(1);
+    expect(system).toMatch(/^- .*\bskill\b/m);
   });
 
   it("puts your, the Project's, and orchestration instructions in the system prompt after Octant's own, and person memory in the message", async () => {
@@ -1416,6 +1454,84 @@ describe("fitting a request to the endpoint", () => {
       });
       if (usage?.kind !== "usage") throw new Error("Expected usage");
       expect(ledgerUsageCost(model, usage)).toBeUndefined();
+    });
+
+    it("reports every request's usage once more when a turn is interrupted while its tools run", async () => {
+      const model = "gpt-5.6-luna" as ProviderModelId;
+      const perRequest = [
+        { inputTokens: 100, outputTokens: 10 },
+        { inputTokens: 200, outputTokens: 20 },
+      ];
+      let sent = 0;
+      const transport: NativeHarnessTransport = {
+        open: async () => ({
+          fits: () => true,
+          send: async (_request, stream) => {
+            const usage = perRequest[sent];
+            sent += 1;
+            if (usage === undefined) throw new Error("The script ran out of responses.");
+            stream.onEvent({ kind: "usage", ...usage });
+            return {
+              text: "",
+              toolCalls: [{ toolCallId: `call-${sent}`, toolName: "read", argumentsJson: "{}" }],
+              usage,
+            };
+          },
+          release: () => undefined,
+        }),
+      };
+      const events = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
+            yield* connection.start({
+              sessionId,
+              modelId: model,
+              executionPolicy: "approval-gated",
+            });
+            const first = yield* sendAndCollect(
+              connection,
+              "look",
+              (event) => event.kind === "tool-request",
+            );
+            const secondStep = yield* Effect.fork(
+              Stream.runCollect(
+                (yield* connection.subscribe).pipe(
+                  Stream.takeUntil((event) => event.kind === "tool-request"),
+                ),
+              ),
+            );
+            const rest = yield* Effect.fork(
+              Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+            );
+            yield* connection.answerTool({
+              sessionId,
+              requestId: "call-1",
+              resultJson: "{}",
+              isError: false,
+            });
+            yield* Fiber.join(secondStep);
+            yield* connection.interrupt(sessionId);
+            return [...first, ...Array.from(yield* Fiber.join(rest))];
+          }),
+        ),
+      );
+
+      expect(events.at(-1)?.kind).toBe("interrupted");
+      const reports = events.filter((event) => event.kind === "usage");
+      const last = reports.at(-1);
+      // The last report covers the whole turn, so a reader that keeps the
+      // latest report (the Code ledger) records both requests, not the second.
+      expect(last).toMatchObject({ inputTokens: 300, outputTokens: 30 });
+      expect(last).not.toHaveProperty("requestStartedAt");
+      if (last?.kind !== "usage") throw new Error("Expected usage");
+      expect(last.estimatedCostUsd).not.toBeNull();
+      // A reader that sums per-request reports and lets a whole-turn report
+      // replace them (Chat and Work) still counts each request once.
+      expect(deriveTurnMetrics({ startedAt: now, endedAt: now, events }).usage).toMatchObject({
+        inputTokens: 300,
+        outputTokens: 30,
+      });
     });
 
     it.each([

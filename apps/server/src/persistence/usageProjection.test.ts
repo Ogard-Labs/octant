@@ -357,6 +357,83 @@ describe("UsageProjection", () => {
     connection.close();
   });
 
+  it("records a Code turn's cache and reasoning tokens from its latest report, as Chat and Work do, through replay", () => {
+    const { connection, journal } = openDatabase();
+    const events = [
+      {
+        kind: "conversation-turn-started",
+        providerInstanceId: ids.provider,
+        modelId: "code-model",
+        sessionId: ids.entry,
+        prompt: { contentId: ids.manifest, digest: "a".repeat(64), byteLength: 5 },
+      },
+      {
+        kind: "usage",
+        inputTokens: 10,
+        outputTokens: 2,
+        cacheReadInputTokens: 4,
+        cacheWriteInputTokens: 1,
+        reasoningTokens: 1,
+      },
+      {
+        kind: "usage",
+        inputTokens: 30,
+        outputTokens: 6,
+        cacheReadInputTokens: 20,
+        cacheWriteInputTokens: 5,
+        reasoningTokens: 3,
+      },
+      { kind: "operation-state", state: "completed" },
+    ];
+    journal.append({
+      aggregate: { aggregateType: "code-operation", aggregateId: ids.usage },
+      expectedVersion: 0,
+      events: events.map((event, index) =>
+        pending("code.operation-event-recorded@1", {
+          threadId: ids.aggregate,
+          operationId: ids.usage,
+          cursor: index + 1,
+          occurredAt: now,
+          event,
+        }),
+      ),
+    });
+    const expected = expect.objectContaining({
+      inputTokens: 30,
+      outputTokens: 6,
+      cacheReadInputTokens: 20,
+      cacheWriteInputTokens: 5,
+      reasoningTokens: 3,
+    });
+    expect(readAllUsageRecords(connection)).toEqual([expected]);
+    const projection = createPhase1RuntimeRegistries().projections.get("code-usage");
+    if (projection === undefined) throw new Error("Usage projection is missing");
+    rebuildProjection({ connection, journal, projection, clock: () => now });
+    expect(readAllUsageRecords(connection)).toEqual([expected]);
+
+    // A later report that names no cache or reasoning figure replaces the
+    // turn's totals, so the turn reads as unreported there, never as zero.
+    journal.append({
+      aggregate: { aggregateType: "code-operation", aggregateId: ids.usage },
+      expectedVersion: events.length,
+      events: [
+        pending("code.operation-event-recorded@1", {
+          threadId: ids.aggregate,
+          operationId: ids.usage,
+          cursor: events.length + 1,
+          occurredAt: now,
+          event: { kind: "usage", inputTokens: 40, outputTokens: 7 },
+        }),
+      ],
+    });
+    const [latest] = readAllUsageRecords(connection);
+    expect(latest).toMatchObject({ inputTokens: 40, outputTokens: 7 });
+    expect(latest?.cacheReadInputTokens).toBeUndefined();
+    expect(latest?.cacheWriteInputTokens).toBeUndefined();
+    expect(latest?.reasoningTokens).toBeUndefined();
+    connection.close();
+  });
+
   it("reproduces each Code turn's journaled cost on rebuild and never prices a report journaled without one", () => {
     const { connection, journal } = openDatabase();
     const turn = (operationId: string, usage: object) =>
@@ -480,6 +557,69 @@ describe("UsageProjection", () => {
         input_tokens: 30,
         cost_usd_micros: 10_000,
       },
+    ];
+    expect(rows()).toEqual(expected);
+    const projection = createPhase1RuntimeRegistries().projections.get("code-usage");
+    if (projection === undefined) throw new Error("Usage projection is missing");
+    rebuildProjection({ connection, journal, projection, clock: () => now });
+    expect(rows()).toEqual(expected);
+    connection.close();
+  });
+
+  it("records whether a Code turn ran at Full access, only for turns started after the ledger began recording it", () => {
+    const { connection, journal } = openDatabase();
+    const turn = (operationId: string, executionPolicy?: string) =>
+      journal.append({
+        aggregate: { aggregateType: "code-operation", aggregateId: operationId },
+        expectedVersion: 0,
+        events: [
+          {
+            kind: "conversation-turn-started",
+            providerInstanceId: ids.provider,
+            modelId: "acp-agent",
+            sessionId: ids.entry,
+            prompt: { contentId: ids.manifest, digest: "a".repeat(64), byteLength: 5 },
+            ...(executionPolicy === undefined ? {} : { executionPolicy }),
+          },
+          { kind: "operation-state", state: "completed" },
+        ].map((event, index) =>
+          pending("code.operation-event-recorded@1", {
+            threadId: ids.aggregate,
+            operationId,
+            cursor: index + 1,
+            occurredAt: now,
+            event,
+          }),
+        ),
+      });
+    // Journaled and projected before this build, which had no level to
+    // write; the migration then places the boundary after it.
+    turn(ids.usage, "full-access");
+    connection.prepare("UPDATE usage_record_projection SET ran_at_full_access = NULL").run();
+    connection.prepare("UPDATE usage_turn_level_boundary SET global_sequence = ?").run(
+      (
+        connection.prepare("SELECT MAX(global_sequence) AS sequence FROM event_journal").get() as {
+          readonly sequence: number;
+        }
+      ).sequence,
+    );
+    turn(ids.usage2, "full-access");
+    turn(ids.usage3, "approval-gated");
+    // A turn whose start recorded no level is read as before too.
+    turn(ids.checkout);
+
+    const rows = () =>
+      connection
+        .prepare(
+          `SELECT reconciliation_id, ran_at_full_access
+          FROM usage_record_projection ORDER BY last_sequence`,
+        )
+        .all();
+    const expected = [
+      { reconciliation_id: ids.usage, ran_at_full_access: null },
+      { reconciliation_id: ids.usage2, ran_at_full_access: 1 },
+      { reconciliation_id: ids.usage3, ran_at_full_access: 0 },
+      { reconciliation_id: ids.checkout, ran_at_full_access: null },
     ];
     expect(rows()).toEqual(expected);
     const projection = createPhase1RuntimeRegistries().projections.get("code-usage");

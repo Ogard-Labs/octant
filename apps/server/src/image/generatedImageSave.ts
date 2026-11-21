@@ -1,8 +1,45 @@
-import type { ImageGenerationSaveResult } from "@octant/contracts";
+import {
+  decodeCodeRelativePath,
+  type CodeThreadView,
+  type ImageGenerationSaveResult,
+  type WindowId,
+} from "@octant/contracts";
 import { canonicalizeWorkRelativePath } from "@octant/domain";
+import type { CodeFileRootAuthorityPort } from "../code/codeService";
 import { writeConfinedWorkFile } from "../work/workConfinedWrite";
 import { liveWorkFilesystem, type WorkFilesystemPort } from "../work/workFilesystemPort";
 import { WorkResolutionService } from "../work/workResolutionService";
+
+export async function saveGeneratedCodeImage(
+  input: {
+    readonly windowId: WindowId;
+    readonly view: CodeThreadView;
+    readonly relativePath: string;
+    readonly bytes: Uint8Array;
+  },
+  roots: CodeFileRootAuthorityPort,
+): Promise<ImageGenerationSaveResult> {
+  const { thread, checkout } = input.view;
+  if (thread.executionPolicy === "plan") {
+    return { status: "refused", reason: "Plan mode cannot save images." };
+  }
+  let relativePath;
+  try {
+    relativePath = decodeCodeRelativePath(canonicalizeWorkRelativePath(input.relativePath));
+  } catch {
+    return { status: "refused", reason: "The save path is outside the checkout." };
+  }
+  const root = await roots.resolve(input.windowId, thread, checkout, relativePath);
+  if (root?.current === undefined) {
+    return { status: "refused", reason: "The Code checkout is unavailable." };
+  }
+  return await saveGeneratedImageUnder({
+    root: root.rootPath,
+    relativePath,
+    bytes: input.bytes,
+    current: root.current,
+  });
+}
 
 /**
  * Writes a generated image as a new file under `root`, through the Work
@@ -16,6 +53,7 @@ export async function saveGeneratedImageUnder(
     readonly root: string;
     readonly relativePath: string;
     readonly bytes: Uint8Array;
+    readonly current?: () => boolean;
   },
   filesystem: WorkFilesystemPort = liveWorkFilesystem,
 ): Promise<ImageGenerationSaveResult> {
@@ -31,6 +69,9 @@ export async function saveGeneratedImageUnder(
     });
     if (resolution.status !== "resolved-for-create") {
       return { status: "refused", reason: "The save path is outside the Project." };
+    }
+    if (input.current?.() === false) {
+      return { status: "refused", reason: "The save folder is unavailable." };
     }
     const written = await writeConfinedWorkFile({
       filesystem,

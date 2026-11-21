@@ -144,6 +144,7 @@ export class ProviderRuntimeRegistry {
   readonly #invalidationListeners = new Map<ProviderInstanceId, Set<() => void>>();
   readonly #updatingByExecutable = new Map<string, ReadonlySet<string>>();
   readonly #executableByInstance = new Map<string, string>();
+  readonly #busyMessageByExecutable = new Map<string, string>();
 
   constructor(options: ProviderRuntimeRegistryOptions = {}) {
     this.#receiptDirectory = options.receiptDirectory;
@@ -269,7 +270,7 @@ export class ProviderRuntimeRegistry {
       throw new Error("Provider active session count must be a non-negative integer.");
     }
     if (count > 0 && this.executableUpdateInProgress(instanceId)) {
-      throw new ProviderExecutableUpdateRejected("Stop the CLI update before starting a session.");
+      throw new ProviderExecutableUpdateRejected(this.#executableUpdateBusyMessage(instanceId));
     }
     if (count === 0) this.#activeSessionsByInstance.delete(instanceId);
     else this.#activeSessionsByInstance.set(instanceId, count);
@@ -313,7 +314,7 @@ export class ProviderRuntimeRegistry {
         status: "refused",
         failure: {
           category: "unavailable",
-          message: "Stop the CLI update before starting a session.",
+          message: this.#executableUpdateBusyMessage(instanceId),
         },
       };
     }
@@ -349,27 +350,36 @@ export class ProviderRuntimeRegistry {
   claimExecutableUpdate(
     executableKey: string,
     instanceIds: ReadonlyArray<ProviderInstanceId>,
+    options?: {
+      readonly activeSessionMessage?: string;
+      readonly busyMessage?: string;
+    },
   ): void {
     if (this.#updatingByExecutable.has(executableKey)) {
       throw new ProviderExecutableUpdateRejected(
-        "A CLI update is already running for this executable.",
+        options?.busyMessage ?? "A CLI update is already running for this executable.",
       );
     }
     for (const instanceId of instanceIds) {
       if (this.activeSessionCount(instanceId) !== 0 || this.#hasLeasedNativeSession(instanceId)) {
         throw new ProviderRuntimeInvalidationRejected(
-          "Stop active sessions before updating this provider CLI.",
+          options?.activeSessionMessage ??
+            "Stop active sessions before updating this provider CLI.",
         );
       }
     }
     const claimed = new Set(instanceIds.map((instanceId) => String(instanceId)));
     this.#updatingByExecutable.set(executableKey, claimed);
+    if (options?.busyMessage !== undefined) {
+      this.#busyMessageByExecutable.set(executableKey, options.busyMessage);
+    }
     for (const instanceId of claimed) this.#executableByInstance.set(instanceId, executableKey);
   }
 
   releaseExecutableUpdate(executableKey: string): void {
     const claimed = this.#updatingByExecutable.get(executableKey);
     this.#updatingByExecutable.delete(executableKey);
+    this.#busyMessageByExecutable.delete(executableKey);
     if (claimed === undefined) return;
     for (const instanceId of claimed) {
       if (this.#executableByInstance.get(instanceId) === executableKey) {
@@ -382,6 +392,14 @@ export class ProviderRuntimeRegistry {
     return this.#executableByInstance.has(String(instanceId));
   }
 
+  #executableUpdateBusyMessage(instanceId: ProviderInstanceId): string {
+    const key = this.#executableByInstance.get(String(instanceId));
+    return (
+      (key === undefined ? undefined : this.#busyMessageByExecutable.get(key)) ??
+      "Stop the CLI update before starting a session."
+    );
+  }
+
   acquireRuntime<T>(
     instanceId: ProviderInstanceId,
     options: ProviderRuntimeAcquireOptions<T>,
@@ -392,7 +410,7 @@ export class ProviderRuntimeRegistry {
         if (this.executableUpdateInProgress(instanceId)) {
           throw {
             category: "unavailable",
-            message: "Stop the CLI update before starting a session.",
+            message: this.#executableUpdateBusyMessage(instanceId),
           } satisfies ProviderFailure;
         }
         const startedAt = performance.now();

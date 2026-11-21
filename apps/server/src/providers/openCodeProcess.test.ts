@@ -20,9 +20,10 @@ import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts
 import { Effect, Either, Fiber } from "effect";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
-  WINDOWS_CHAT_PROVIDER_REFUSAL,
   WINDOWS_KEPT_SANDBOX_REFUSAL,
+  WINDOWS_STRICT_CHAT_REFUSAL,
   WINDOWS_STRICT_REFUSAL,
+  windowsStrictRuntimeRefusal,
 } from "@octant/domain/guardrail-policy";
 import {
   captureOpenCodeRuntimeConfig,
@@ -844,10 +845,18 @@ describe("OpenCodeProcessPort", () => {
     for (const [launch, message] of [
       [{ mode: "code", executionPolicy: "approval-gated" }, WINDOWS_STRICT_REFUSAL],
       [
+        { mode: "code", executionPolicy: "full-access", strict: true },
+        windowsStrictRuntimeRefusal("opencode"),
+      ],
+      [
         { mode: "code", executionPolicy: "full-access", fullAccessSandbox: true, strict: false },
         WINDOWS_KEPT_SANDBOX_REFUSAL,
       ],
-      [{ mode: "chat", executionPolicy: "plan", strict: false }, WINDOWS_CHAT_PROVIDER_REFUSAL],
+      [
+        { mode: "chat", executionPolicy: "approval-gated", strict: true },
+        WINDOWS_STRICT_CHAT_REFUSAL,
+      ],
+      [{ mode: "chat", executionPolicy: "plan" }, WINDOWS_STRICT_CHAT_REFUSAL],
     ] as const) {
       const prepare = vi.fn((input: { executable: string; args: ReadonlyArray<string> }) => ({
         command: input.executable,
@@ -868,6 +877,78 @@ describe("OpenCodeProcessPort", () => {
       expect(refused).toMatchObject({ category: "incompatible", message });
       expect(prepare).not.toHaveBeenCalled();
     }
+  });
+
+  it("writes a deny-everything Chat permission configuration for OpenCode on Windows outside Strict", () => {
+    const profile = createPrivateOpenCodeProfile(
+      projectOpenCodeRuntimeConfig({}),
+      {},
+      tmpdir,
+      [{ action: "*", resource: "*", effect: "deny" }],
+      true,
+      { docs: { type: "local", command: ["node", "docs.js"] } },
+      true,
+      true,
+    );
+    try {
+      const configPath = profile.environment.OPENCODE_CONFIG;
+      expect(configPath).toBeDefined();
+      const written = JSON.parse(readFileSync(configPath ?? "", "utf8")) as Record<string, unknown>;
+      expect(written.permission).toEqual({ "*": "deny" });
+      expect(written.permissions).toEqual([{ action: "*", resource: "*", effect: "deny" }]);
+      expect(written.mcp).toBeUndefined();
+    } finally {
+      profile.cleanup();
+    }
+  });
+
+  it("starts OpenCode Chat on Windows outside Strict unconfined with a deny-everything permission ruleset and separates private-config attestation from OS confinement", async () => {
+    const unverified = probeWrapper("v2-ready");
+    const verified = probeWrapper("isolation-supported");
+    const prepare = vi.fn((input: { executable: string; args: ReadonlyArray<string> }) => ({
+      command: input.executable,
+      args: input.args,
+    }));
+    const unverifiedStarted = await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement: { prepare },
+          platform: "win32",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+        }).start({
+          binaryPath: unverified.binaryPath,
+          cwd: unverified.root,
+          mode: "chat",
+          executionPolicy: "approval-gated",
+          strict: false,
+        }),
+      ),
+    );
+    expect(unverifiedStarted.runtime).toBe("beta");
+    expect(unverifiedStarted.isolatedConfiguration).toBeUndefined();
+    expect(unverifiedStarted.windowsPrivateConfiguration).toBeUndefined();
+
+    const verifiedStarted = await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement: { prepare },
+          platform: "win32",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+        }).start({
+          binaryPath: verified.binaryPath,
+          cwd: verified.root,
+          mode: "chat",
+          executionPolicy: "approval-gated",
+          strict: false,
+        }),
+      ),
+    );
+    expect(verifiedStarted.runtime).toBe("legacy");
+    expect(verifiedStarted.isolatedConfiguration).toBeUndefined();
+    expect(verifiedStarted.windowsPrivateConfiguration).toBe(true);
+    expect(prepare).not.toHaveBeenCalled();
   });
 
   it("refuses a 2.x Chat or Plan launch before anything starts where the jail can start no process", async () => {

@@ -1,4 +1,4 @@
-import type { OwnerUnlockNotGiven } from "@octant/client-runtime";
+import type { OwnerUnlockNotGiven, PullRequestReviewClient } from "@octant/client-runtime";
 import {
   type CodeProjectPullRequestActionContext,
   type CodeProjectPullRequestActionOutcome,
@@ -11,6 +11,7 @@ import {
   type CodeProjectPullRequestSwitchOutcome,
   type CodeProjectPullRequestSwitchesView,
   type CodeThreadId,
+  type PullRequestReviewTarget,
 } from "@octant/contracts";
 import { Activity, GitBranch, MessageSquare, RefreshCw } from "../ui/icons";
 import { useEffect, useRef, useState } from "react";
@@ -34,6 +35,8 @@ import {
   safeGithubUrl,
 } from "./ProjectPullRequestSupport";
 import { ProjectPullRequestPage } from "./ProjectPullRequestPage";
+import { PullRequestDiffWithNotes } from "./ProjectPullRequestDiff";
+import type { CodeLineNotesSendResult } from "./CodeLineNotes";
 import {
   ProjectPullRequestActions,
   type ProjectPullRequestPersonAction,
@@ -70,6 +73,12 @@ export interface ProjectPullRequestReviewPaneProps {
     enabled: boolean,
     threadId: CodeThreadId,
   ) => Promise<CodeProjectPullRequestSwitchOutcome | OwnerUnlockNotGiven>;
+  readonly onSendLineNotes?: (
+    threadId: CodeThreadId,
+    message: string,
+  ) => Promise<CodeLineNotesSendResult>;
+  readonly pullRequestReviewClient?: PullRequestReviewClient;
+  readonly pullRequestTarget?: PullRequestReviewTarget;
   /**
    * "page" is the destination's reading pane (tabs, a status column); the
    * default is the dock's one column. Both hold the same actions and refusals.
@@ -345,6 +354,12 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
             ? {}
             : { onMergeWhenReady: props.onMergeWhenReady })}
           {...(props.onAutoFix === undefined ? {} : { onAutoFix: props.onAutoFix })}
+          {...(props.pullRequestReviewClient === undefined
+            ? {}
+            : { pullRequestReviewClient: props.pullRequestReviewClient })}
+          {...(props.pullRequestTarget === undefined
+            ? {}
+            : { pullRequestTarget: props.pullRequestTarget })}
         />
       )}
 
@@ -473,18 +488,15 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
           <h2>Diff</h2>
           {stale("diff") ? <StaleTag section="diff" /> : null}
         </header>
-        {detail.diffTruncated ? (
-          <p className="code-pr-review__notice" role="note">
-            This diff is truncated and is not complete.
-          </p>
-        ) : null}
-        {detail.diff.length === 0 ? (
-          <p role="status">No diff observed.</p>
-        ) : (
-          <div className="code-pr-review__diff">
-            <CodeBlock code={detail.diff} language="diff" />
-          </div>
-        )}
+        <PullRequestDiffWithNotes
+          diff={detail.diff}
+          diffTruncated={detail.diffTruncated}
+          linkedThreads={props.linkedThreads}
+          noticeClassName="code-pr-review__notice"
+          {...(props.onSendLineNotes === undefined
+            ? {}
+            : { onSendLineNotes: props.onSendLineNotes })}
+        />
       </section>
 
       <PullRequestConversation

@@ -3,8 +3,10 @@ import { AnyAttachmentMediaType, NATIVE_IMAGE_ATTACHMENT_MEDIA_TYPES } from "./a
 import { Option, Schema } from "effect";
 import { AgentProfileId } from "./agentProfile";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
+import { FinishedReceiptId } from "./finishedReceipt";
 import { ThreadRestFields } from "./threadRest";
 import { ThreadLiveTurnFields } from "./threadLiveTurn";
+import { GithubRepositoryName, GithubRepositoryOwner } from "./githubCatalogue";
 import { GithubIssueContextRequest } from "./githubIssueContext";
 import { TerminalSessionImportRequest } from "./terminalSessions";
 import { LinearIssueContextRequest } from "./linearIssueContext";
@@ -57,6 +59,55 @@ export type CodeGitOperationId = typeof CodeGitOperationId.Type;
 export const CodeReviewFindingId = brandedUuid("CodeReviewFindingId");
 export type CodeReviewFindingId = typeof CodeReviewFindingId.Type;
 export const ManagedRootGrantId = brandedUuid("ManagedRootGrantId");
+
+/** Maximum host-checked "done when" conditions on one coordinator thread. */
+export const MAX_COORDINATOR_DONE_WHEN_ITEMS = 16;
+
+export const CoordinatorDoneWhenPullRequest = Schema.Struct({
+  kind: Schema.Literal("pull-request-merged", "pull-request-checks-green"),
+  repositoryOwner: GithubRepositoryOwner,
+  repositoryName: GithubRepositoryName,
+  number: PositiveInt,
+}).annotations(strict);
+export type CoordinatorDoneWhenPullRequest = typeof CoordinatorDoneWhenPullRequest.Type;
+
+export const CoordinatorDoneWhenThread = Schema.Struct({
+  kind: Schema.Literal("thread-done"),
+  threadId: CodeThreadId,
+}).annotations(strict);
+export type CoordinatorDoneWhenThread = typeof CoordinatorDoneWhenThread.Type;
+
+/**
+ * One host-checked condition a person sets on a coordinator thread
+ * (docs/design/coordinator-threads.md). Closed set: a pull request merged,
+ * a pull request's required checks green, or a Code thread Done.
+ */
+export const CoordinatorDoneWhenItem = Schema.Union(
+  CoordinatorDoneWhenPullRequest,
+  CoordinatorDoneWhenThread,
+);
+export type CoordinatorDoneWhenItem = typeof CoordinatorDoneWhenItem.Type;
+
+const doneWhenItemKey = (item: CoordinatorDoneWhenItem): string =>
+  item.kind === "thread-done"
+    ? `${item.kind}:${String(item.threadId)}`
+    : `${item.kind}:${item.repositoryOwner.toLowerCase()}/${item.repositoryName.toLowerCase()}#${String(item.number)}`;
+
+/**
+ * A coordinator's host-checked "done when" condition as a person set it.
+ * All listed items must hold for the condition to be satisfied.
+ */
+export const CoordinatorDoneWhen = Schema.Struct({
+  items: Schema.Array(CoordinatorDoneWhenItem).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(MAX_COORDINATOR_DONE_WHEN_ITEMS),
+    Schema.filter((items) => new Set(items.map(doneWhenItemKey)).size === items.length, {
+      message: () => "Duplicate done-when items are not permitted.",
+    }),
+  ),
+}).annotations(strict);
+export type CoordinatorDoneWhen = typeof CoordinatorDoneWhen.Type;
+export const decodeCoordinatorDoneWhen = Schema.decodeUnknownSync(CoordinatorDoneWhen);
 export type ManagedRootGrantId = typeof ManagedRootGrantId.Type;
 export const WorktreeReceiptId = brandedUuid("WorktreeReceiptId");
 export type WorktreeReceiptId = typeof WorktreeReceiptId.Type;
@@ -357,6 +408,12 @@ export const CodeThread = Schema.Struct({
    */
   coordinatorBounds: Schema.optional(CoordinatorBounds),
   /**
+   * A coordinator's host-checked "done when" condition as a person set it.
+   * Absent on ordinary threads, cleared coordinators, and threads journaled
+   * before done-when conditions existed.
+   */
+  coordinatorDoneWhen: Schema.optional(CoordinatorDoneWhen),
+  /**
    * The level a person fixed for this coordinator's workers when making it.
    * Absent, a worker starts at the level named, never above the coordinator's.
    */
@@ -398,6 +455,8 @@ export const CodeThread = Schema.Struct({
    * the journal. Absent on every thread nobody marked.
    */
   markedDoneAt: Schema.optional(UtcTimestamp),
+  /** Fresh finished receipt recorded as completion evidence when a person marked the thread Done. */
+  completionReceiptId: Schema.optional(FinishedReceiptId),
   lifecycle: CodeThreadLifecycle,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
@@ -915,6 +974,16 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("set-code-thread-coordinator-bounds"),
     ...CodeThreadCommandFields,
     bounds: CoordinatorBounds,
+  }).annotations(strict),
+  /**
+   * A coordinator's host-checked "done when" condition; only a person at a
+   * local window or person-paired device may set or clear it. Leaving
+   * `doneWhen` out clears the condition.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("set-code-thread-coordinator-done-when"),
+    ...CodeThreadCommandFields,
+    doneWhen: Schema.optional(CoordinatorDoneWhen),
   }).annotations(strict),
   /** The Wake when a message arrives switch; only a person at a local window. */
   Schema.Struct({

@@ -184,6 +184,20 @@ export const ACP_AGENT_PROFILES = {
     signInGuidance: "Add a Vercel AI Gateway API key for fx, then check the connection again.",
     bundledPluginSerial: 0x14,
   },
+  antigravity: {
+    name: "Google Antigravity",
+    executable: "agy",
+    versionProbeArgs: ["--version"],
+    // The official CLI signs in with the person's own Google account and
+    // keeps that sign-in itself; Octant runs the unmodified binary and never
+    // reads, copies or replaces it.
+    authentication: [],
+    authenticationNote: "Uses your own Google account sign-in from the Antigravity CLI.",
+    signInGuidance:
+      "Run agy (or agy acp --login) in your terminal and sign in with your Google account, then check the connection again.",
+    // 0x1b is taken: copilot's 0x11 seed normalizes to the `1b` digest.
+    bundledPluginSerial: 0x1c,
+  },
 } as const satisfies Readonly<Record<string, AcpAgentProfileDescriptor>>;
 
 export type AcpAgentKind = keyof typeof ACP_AGENT_PROFILES;

@@ -28,6 +28,7 @@ import {
   type DeliveryPullRequestEvidence,
   type DeliveryTargetEvidence,
 } from "@octant/domain/delivery-target-policy";
+import { splitRepositoryName, type PullRequestLinkReader } from "./pullRequestLinkService";
 
 /**
  * A non-archived Code thread plus whether its bound Project projection is
@@ -121,6 +122,13 @@ export interface CodeThreadMetadataServiceDependencies {
    * journaled results only — board queries never call GitHub.
    */
   readonly github?: CodeGithubMetadataSource;
+  /**
+   * Authoritative pull-request link identity reader. Supplies canonical
+   * repository display fields and rename-aware repository matching so a
+   * renamed repository preserves `matchesDeliveryBranch` and updated display
+   * coordinates on board metadata.
+   */
+  readonly pullRequestLinks?: Pick<PullRequestLinkReader, "resolveLink" | "areSameRepository">;
 }
 
 type PreviousProjection =
@@ -132,11 +140,15 @@ export class CodeThreadMetadataService {
   readonly #history: CodeThreadOperationHistorySource;
   readonly #git: CodeGitWorktreeSource;
   readonly #github: CodeGithubMetadataSource | undefined;
+  readonly #pullRequestLinks:
+    | Pick<PullRequestLinkReader, "resolveLink" | "areSameRepository">
+    | undefined;
 
   constructor(dependencies: CodeThreadMetadataServiceDependencies) {
     this.#history = dependencies.history;
     this.#git = dependencies.git;
     this.#github = dependencies.github;
+    this.#pullRequestLinks = dependencies.pullRequestLinks;
   }
 
   /**
@@ -179,7 +191,13 @@ export class CodeThreadMetadataService {
 
     const githubFreshness: CodeMetadataFreshness =
       github.status === "observed" ? (github.freshness ?? "fresh") : "stale";
-    const linkedPullRequest = buildLinkedPullRequest(github, deliveryTarget, previous);
+    const linkedPullRequest = buildLinkedPullRequest(
+      github,
+      deliveryTarget,
+      previous,
+      thread.projectId,
+      this.#pullRequestLinks,
+    );
     const checks = buildCheckState(github, previous);
     const reviewState = buildReviewState(github, previous);
 
@@ -381,22 +399,44 @@ function buildLinkedPullRequest(
   github: CodeGithubMetadataObservation,
   deliveryTarget: CodeDeliveryTarget,
   previous: CodeThreadOperationalMetadata | undefined,
+  projectId: CodeThread["projectId"],
+  pullRequestLinks: Pick<PullRequestLinkReader, "resolveLink" | "areSameRepository"> | undefined,
 ): CodeThreadLinkedPullRequest {
   if (github.status === "observed") {
     const freshness = github.freshness ?? "fresh";
     if (github.pullRequest === null) return { kind: "none", freshness };
     const pr = github.pullRequest;
+    const prRepo = splitRepositoryName(pr.baseRepository);
+    const link =
+      prRepo === undefined
+        ? undefined
+        : pullRequestLinks?.resolveLink({
+            projectId,
+            repositoryOwner: prRepo.owner,
+            repositoryName: prRepo.name,
+            number: pr.number,
+          });
+    const baseRepository =
+      link === undefined ? pr.baseRepository : `${link.repositoryOwner}/${link.repositoryName}`;
+    const url = link?.url ?? pr.url;
+    const canonicalRepo = splitRepositoryName(baseRepository);
+    const targetRepo = splitRepositoryName(deliveryTarget.proposedBaseRepository);
+    const sameRepo =
+      baseRepository === deliveryTarget.proposedBaseRepository ||
+      (canonicalRepo !== undefined &&
+        targetRepo !== undefined &&
+        pullRequestLinks?.areSameRepository(projectId, canonicalRepo, targetRepo) === true);
     return {
       kind: "linked",
       freshness,
       number: pr.number,
-      url: pr.url,
-      baseRepository: pr.baseRepository,
+      url,
+      baseRepository,
       baseBranch: pr.baseBranch,
       headBranch: pr.headBranch,
       state: pr.state,
       matchesDeliveryBranch:
-        pr.baseRepository === deliveryTarget.proposedBaseRepository &&
+        sameRepo &&
         pr.baseBranch === deliveryTarget.proposedBaseBranch &&
         pr.headBranch === deliveryTarget.branchIntent,
     };

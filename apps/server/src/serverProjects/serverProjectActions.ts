@@ -22,7 +22,12 @@ import {
   projectActionSuggestionsFromSources,
 } from "../code/projectActionSuggestions";
 import { ServerFileSystem, RESOLVE_INSIDE, withProtectedPaths } from "./serverFiles";
-import { serverRemoteCommand, type ServerConnection } from "./serverConnection";
+import {
+  SSH_KEY_CONFIRMATION_MESSAGE,
+  serverRemoteCommand,
+  sshNeedsHostKeyConfirmation,
+  type ServerConnection,
+} from "./serverConnection";
 import { serverCodeCheckout } from "./serverProjectThreads";
 import { serverWorkBindingRevisionId } from "./serverWorkThreads";
 import type { ServerProjectStore } from "./serverProjectStore";
@@ -137,7 +142,7 @@ export function createServerProjectActions(options: {
         manager,
       });
     },
-    placeServerAction: async (windowId, command) => {
+    placeServerAction: async (windowId, command, deviceBinding) => {
       const project = options.store.project(String(command.projectId));
       const server = options.store.serverOf(String(command.projectId));
       if (project === undefined || server === undefined)
@@ -178,6 +183,13 @@ export function createServerProjectActions(options: {
         timeoutMs: 20000,
         maxOutputBytes: 8192,
       });
+      if (
+        call.status === "unreachable" &&
+        deviceBinding !== undefined &&
+        sshNeedsHostKeyConfirmation(call.errorOutput ?? call.message)
+      ) {
+        return refused(SSH_KEY_CONFIRMATION_MESSAGE);
+      }
       if (call.status !== "ran" || call.exitCode !== 0 || call.truncated)
         return refused(
           "The action folder on the server could not be checked; nothing was read locally.",
@@ -210,6 +222,15 @@ export function createServerProjectActions(options: {
             identity,
             head,
             branch,
+            ...(deviceBinding === undefined
+              ? {}
+              : {
+                  device: {
+                    deviceId: deviceBinding.deviceId,
+                    sessionId: deviceBinding.sessionId,
+                    credentialGeneration: deviceBinding.credentialGeneration,
+                  },
+                }),
             task:
               task === undefined
                 ? undefined

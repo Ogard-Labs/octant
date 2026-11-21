@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ThreadToolStep } from "@octant/contracts";
+import type { ThreadToolStep, UtcTimestamp } from "@octant/contracts";
 import {
   alwaysVisibleActivityRows,
   groupActivityRows,
@@ -108,6 +108,51 @@ describe("turn activity", () => {
       { kind: "review", id: "shield:approval-1", summary: "cat .env", decision },
     ]);
   });
+});
+
+it("times a Chat or Work row from the step's own recorded bounds", () => {
+  const activity = toolStepsActivity(
+    [
+      {
+        toolCallId: "call-1",
+        toolName: "Write",
+        state: "completed",
+        timing: {
+          startedAt: "2026-08-11T12:00:00.000Z" as UtcTimestamp,
+          endedAt: "2026-08-11T12:00:08.000Z" as UtcTimestamp,
+          approvalWaitMs: 4_000,
+        },
+      },
+      { toolCallId: "call-2", toolName: "Read", state: "running" },
+    ],
+    false,
+  );
+  expect(activity?.rows[0]).toMatchObject({
+    kind: "tool",
+    durationMs: 4_000,
+    waitedMs: 4_000,
+  });
+  // A running call never displays a final duration.
+  const running = activity?.rows[1];
+  expect(running).toMatchObject({ kind: "tool", state: "running" });
+  if (running?.kind === "tool") {
+    expect(running.durationMs).toBeUndefined();
+  }
+});
+
+it("restates the attempt's reasoning total as the turn's measured span", () => {
+  const activity = toolStepsActivity(
+    [{ toolCallId: "call-1", toolName: "Read", state: "completed" }],
+    false,
+    12_000,
+  );
+  expect(activity?.reasoningMs).toBe(12_000);
+});
+
+it("emits a timing-only activity when a turn reasoned without tools, and nothing for a bare turn", () => {
+  const activity = toolStepsActivity(undefined, undefined, 12_000);
+  expect(activity).toEqual({ rows: [], reasoning: "", reasoningMs: 12_000 });
+  expect(toolStepsActivity(undefined, undefined)).toBeUndefined();
 });
 
 describe("looks grouped into one row", () => {

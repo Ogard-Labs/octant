@@ -62,6 +62,7 @@ import {
   claudeWithheldTools,
   CLAUDE_LEVEL_CHANGE_REFUSAL,
   CLAUDE_WAKEUP_UNAVAILABLE,
+  claudeSessionMessages,
   makeClaudeDriver,
 } from "./claudeDriver";
 import type { ClaudeResumeIdentity, ClaudeResumeIdentityPort } from "./claudeDriver";
@@ -265,6 +266,7 @@ function harness(
     readonly platform?: NodeJS.Platform;
     readonly maxTrackedToolUses?: number;
     readonly runtimeTurnsPerTurn?: () => number;
+    readonly hostStrict?: () => boolean;
     readonly gitIdentity?: (checkoutRoot: string) => Promise<{ name?: string; email?: string }>;
     readonly makeEnvironmentScope?: (
       authentication: ClaudeAuthentication,
@@ -408,6 +410,7 @@ function harness(
       ...(options.runtimeTurnsPerTurn === undefined
         ? {}
         : { runtimeTurnsPerTurn: options.runtimeTurnsPerTurn }),
+      ...(options.hostStrict === undefined ? {} : { hostStrict: options.hostStrict }),
       ...(options.configDirectory === undefined
         ? {}
         : { configDirectory: options.configDirectory }),
@@ -6135,6 +6138,38 @@ describe("Claude session lifecycle", () => {
     expect(f.queries[0]?.close).toHaveBeenCalledOnce();
   });
 
+  it("allows Claude Code on Bedrock outside Strict for both probe and session start while keeping Strict refusal intact", async () => {
+    const f = harness("subscription", "current-session", {
+      hostStrict: () => false,
+    });
+    f.setOpenQuery((input) => {
+      const query = new FakeQuery("bedrock-session", undefined, input.model, {
+        ready: true,
+        apiProvider: "bedrock",
+      });
+      query.accountInfo.mockReturnValue(Effect.succeed({ ready: true, apiProvider: "bedrock" }));
+      f.queries.push(query);
+      return Effect.acquireRelease(Effect.succeed(query), (value) => value.close());
+    });
+
+    const probed = await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+    expect(probed).toMatchObject({ readiness: "ready", detectedVersion: "2.1.211" });
+
+    const acquired = await acquire(f.driver);
+    const openStart = await Effect.runPromise(
+      Effect.exit(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          strict: false,
+        }),
+      ),
+    );
+    expect(openStart._tag).toBe("Success");
+    await acquired.close();
+  });
+
   it("aborts a held identity write without allowing late post-close mutation", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);
@@ -10086,5 +10121,34 @@ describe("Claude artifacts outside Strict", () => {
       publishes: false,
     });
     expect(claudeArtifactCall({ type_url: "not a url" })).toEqual({ publishes: true });
+  });
+});
+
+describe("Claude native session history", () => {
+  it("imports the person's text and the agent's replies with their tool calls named, and leaves tool results and thinking out", () => {
+    expect(
+      claudeSessionMessages([
+        { type: "user", message: { role: "user", content: "Add a retry" } },
+        {
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [
+              { type: "thinking", thinking: "plan" },
+              { type: "text", text: "Adding it." },
+              { type: "tool_use", id: "t1", name: "Edit", input: {} },
+            ],
+          },
+        },
+        {
+          type: "user",
+          message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1" }] },
+        },
+        { type: "system", message: { content: "compacted" } },
+      ]),
+    ).toEqual([
+      { role: "person", text: "Add a retry" },
+      { role: "agent", text: "Adding it.", tools: ["Edit"] },
+    ]);
   });
 });

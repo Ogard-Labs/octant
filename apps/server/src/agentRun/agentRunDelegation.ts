@@ -450,7 +450,9 @@ export async function startAgentRunDelegation(
   if (selected === undefined) return { status: "refused", reason: "delegate-routing-unavailable" };
   let run: AgentRun = accepted.run;
   if (run.lifecycleStatus === "queued" && run.recoveryReason === undefined) {
-    const started = options.orchestration.start(run.id, run.version, admission.liveAuthority);
+    const started = options.orchestration.start(run.id, run.version, admission.liveAuthority, {
+      ownerWindowId: options.windowId,
+    });
     if (started.kind === "run-command-failed")
       return { status: "refused", reason: started.reason, message: started.message };
     run = started.run;
@@ -671,6 +673,7 @@ export async function followUpAgentRunDelegation(
       parent.liveAuthority,
       {
         message: request.message,
+        ownerWindowId: options.windowId,
         resolveLiveAuthority: () => {
           if (
             options.admission.settings.current().creationPosture !== "automatic" ||

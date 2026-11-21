@@ -49,7 +49,6 @@ import {
   createOpenCodeProvider,
   changeOutsideHarnessEndpointConfiguration,
   createOutsideHarnessEndpointProvider,
-  effectiveProviderAuthority,
   rebindOutsideHarnessEndpointDriver,
   isOutsideDriverQuarantined,
   quarantineOutsideHarnessEndpointDriver,
@@ -3087,32 +3086,6 @@ describe("provider defaults and authority", () => {
         [],
       ),
     ).toEqual({ permissionPersistence: "current-session", version: 2 });
-  });
-
-  it.each([
-    ["plan", "full-access", "plan"],
-    ["approval-gated", "full-access", "approval-gated"],
-    ["full-access", "full-access", "full-access"],
-  ] as const)("clamps requested authority", (allowed, requested, expected) => {
-    expect(effectiveProviderAuthority({ allowed, requested })).toBe(expected);
-  });
-
-  it("keeps provider-neutral authority ordering unchanged for Claude", () => {
-    const claude = claudeProvider();
-
-    expect(
-      effectiveProviderAuthority({
-        allowed: "approval-gated",
-        requested: "full-access",
-        enabled: claude.enabled,
-      }),
-    ).toBe("approval-gated");
-  });
-
-  it("denies authority for a disabled provider instance", () => {
-    expect(() =>
-      effectiveProviderAuthority({ allowed: "full-access", requested: "plan", enabled: false }),
-    ).toThrow("Enable this provider before starting a session.");
   });
 
   it("uses typed policy rejections", () => {

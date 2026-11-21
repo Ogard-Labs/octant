@@ -15,12 +15,6 @@ import type { OwnerApprovalAnswer } from "@octant/contracts/owner-approvals";
 // passkey signs one challenge per prompt, so a confirmation asks it twice.
 
 import {
-  decodeOwnerBrowserRequest,
-  decodeOwnerBrowserResponse,
-  MAX_OWNER_BROWSER_FRAME_BYTES,
-} from "@octant/contracts/owner-browser";
-import type { OwnerBrowserClient } from "./ownerBrowser";
-import {
   OWNER_IDENTITY_KEY_HEADER,
   OWNER_SESSION_HEADER,
   OWNER_UNLOCK_HEADER,
@@ -70,9 +64,6 @@ const OWNER_ROUTES = {
   provisionDismiss: "/api/hub/owner/provision/dismiss",
   approvalRead: "/api/hub/owner/approvals/read",
   approvalAnswer: "/api/hub/owner/approvals/answer",
-  browserTargets: "/api/hub/owner/browser/targets",
-  browserTakeOver: "/api/hub/owner/browser/take-over",
-  browserControl: "/api/hub/owner/browser/control",
   threadMoveTicket: "/api/hub/owner/thread-moves/ticket",
   threadMoveConfirmations: "/api/hub/owner/thread-moves/confirmations",
   threadMoveConfirm: "/api/hub/owner/thread-moves/confirm",
@@ -294,7 +285,7 @@ const stringField = (value: unknown, key: string): string | undefined => {
 
 export function createOwnerClient(
   options: OwnerClientOptions,
-): OwnerClient & OwnerAdministrationClient & OwnerBrowserClient & OwnerThreadMoveClient {
+): OwnerClient & OwnerAdministrationClient & OwnerThreadMoveClient {
   const { target, identity, unlock } = options;
   const now = options.now ?? Date.now;
 
@@ -334,12 +325,7 @@ export function createOwnerClient(
         ...(input.method === "POST" ? { body: input.body } : {}),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
-      const json: unknown =
-        input.path === OWNER_ROUTES.browserTargets ||
-        input.path === OWNER_ROUTES.browserTakeOver ||
-        input.path === OWNER_ROUTES.browserControl
-          ? await readOwnerBrowserAnswer(response)
-          : await response.json().catch(() => undefined);
+      const json: unknown = await response.json().catch(() => undefined);
       return { ok: response.ok, json };
     } catch {
       return undefined;
@@ -518,54 +504,6 @@ export function createOwnerClient(
     });
 
   return {
-    browser: async (input, signal) => {
-      const command = decodeOwnerBrowserRequest(input);
-      const body = JSON.stringify(command);
-      if (signal?.aborted) return { status: "unreachable" };
-      if (command.kind === "targets" || command.kind === "take-over") {
-        const result =
-          command.kind === "targets"
-            ? await administration(OWNER_ROUTES.browserTargets, body, signal)
-            : await unlocked(async (signer) => {
-                const proved = await prove(OWNER_ROUTES.browserTakeOver, body, signer);
-                if (proved.status !== "signed") return proved;
-                if (signal?.aborted) return { status: "unreachable" };
-                const answer = await send({
-                  method: "POST",
-                  path: OWNER_ROUTES.browserTakeOver,
-                  body,
-                  proof: proved.proof,
-                  ...(signal === undefined ? {} : { signal }),
-                });
-                return answer === undefined
-                  ? { status: "unreachable" }
-                  : !answer.ok
-                    ? refusal(answer)
-                    : { status: "done", body: answer.json };
-              });
-        if (signal?.aborted) return { status: "unreachable" };
-        if (result.status === "not-unlocked" || result.status === "unreachable") return result;
-        if (result.status === "refused") return { status: "refused", reason: "unauthorized" };
-        try {
-          return decodeOwnerBrowserResponse(result.body);
-        } catch {
-          return { status: "refused", reason: "unavailable" };
-        }
-      }
-      const answer = await send({
-        method: "POST",
-        path: OWNER_ROUTES.browserControl,
-        body,
-        ...(signal === undefined ? {} : { signal }),
-      });
-      if (answer === undefined) return { status: "unreachable" };
-      if (!answer.ok) return { status: "refused", reason: "unauthorized" };
-      try {
-        return decodeOwnerBrowserResponse(answer.json);
-      } catch {
-        return { status: "refused", reason: "unavailable" };
-      }
-    },
     async alerts() {
       const answer = await send({ method: "GET", path: OWNER_ROUTES.alerts, body: "" });
       if (answer === undefined) return { status: "unreachable" };
@@ -696,32 +634,6 @@ export function createOwnerClient(
         );
       }),
   };
-}
-
-async function readOwnerBrowserAnswer(response: Response): Promise<unknown> {
-  const maximum = Math.ceil((MAX_OWNER_BROWSER_FRAME_BYTES * 4) / 3) + 8192;
-  if (response.body === null) return undefined;
-  const reader = response.body.getReader();
-  let bytes = 0,
-    text = "";
-  const decoder = new TextDecoder();
-  try {
-    for (;;) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      bytes += chunk.value.byteLength;
-      if (bytes > maximum) {
-        await reader.cancel();
-        return undefined;
-      }
-      text += decoder.decode(chunk.value, { stream: true });
-    }
-    return JSON.parse(text + decoder.decode());
-  } catch {
-    return undefined;
-  } finally {
-    reader.releaseLock();
-  }
 }
 
 /** Refusals that mean the host no longer holds the session this device presented. */

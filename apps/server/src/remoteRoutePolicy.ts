@@ -8,6 +8,7 @@ import {
   HUB_WAKE_MAX_SPOKES,
   HUB_WAKE_MAX_TIMES_PER_SPOKE,
   MAX_CODE_ATTACHMENT_BYTES,
+  THREAD_IMAGE_CHUNK_BYTES,
   MAX_WORK_ATTACHMENT_BYTES,
   OWNER_IDENTITY_KEY_HEADER,
   OWNER_SESSION_HEADER,
@@ -16,6 +17,9 @@ import {
   REMOTE_SERVER_PROXY_RELAYED,
   REMOTE_SERVER_PROXY_RELAYED_HEADER,
   SHELL_SETTINGS_PATH,
+  SERVICE_OFFERS_DECIDE_PATH,
+  SERVICE_OFFERS_PATH,
+  SERVICE_OFFER_DECISION_MAX_BYTES,
   WORK_ATTACHMENT_MEDIA_TYPES,
 } from "@octant/contracts";
 import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
@@ -91,11 +95,8 @@ const LOCAL_ONLY_PREFIXES = [
   // The whole host's export: bulk data with no bound of its own for a remote
   // caller. Every other host-control route is forwarded below.
   "/api/host-control/export",
-  "/api/replica-store",
-  "/api/replica-membership",
   // Linking a store and pointing a key at it are acts at this machine.
   "/api/secret-stores",
-  "/api/provider-cloud",
 ] as const;
 
 /**
@@ -902,6 +903,29 @@ const DEFAULT_AUTHENTICATED_SERVICE_ROUTES: readonly RemoteRouteDefinition[] = [
 ];
 
 const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
+  { kind: "exact" as const, path: "/api/image/jobs", methods: ["GET"] as const, allowQuery: true },
+  {
+    kind: "exact" as const,
+    path: "/api/image/thread-artifact",
+    methods: ["GET"] as const,
+    allowQuery: true,
+    maxResponseBytes: THREAD_IMAGE_CHUNK_BYTES,
+  },
+  {
+    kind: "exact" as const,
+    path: SERVICE_OFFERS_PATH,
+    methods: ["GET"] as const,
+    allowQuery: true,
+    maxResponseBytes: 512 * 1_024,
+  },
+  {
+    kind: "exact" as const,
+    path: SERVICE_OFFERS_DECIDE_PATH,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: SERVICE_OFFER_DECISION_MAX_BYTES,
+    maxResponseBytes: 4_096,
+  },
   {
     kind: "prefix" as const,
     path: "/api/native-harness/sessions/",
@@ -1027,6 +1051,7 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   // cancelling, or purging a run are forwarded with the person-paired device
   // routes; the route refuses them for any other device session.
   ...[
+    "/api/benchmarks/advice",
     "/api/benchmarks/suites/list",
     "/api/benchmarks/runs/list",
     "/api/benchmarks/runs/read",
@@ -1039,6 +1064,15 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     path,
     methods: ["POST"] as const,
   })),
+  // One-time connector OAuth callback relay for a person-paired device:
+  // JSON-only, tightly bounded, never in the restricted device catalogue.
+  {
+    kind: "exact" as const,
+    path: "/api/extensions/mcp-sign-in/relay",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 8_192,
+  },
   // The person's own reads and lists, for a device that person paired: every
   // approval and question their scope can answer and putting one off, the
   // fleet read, provider limits and an asked-for refresh, and the protected
@@ -1202,16 +1236,60 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     path: "/api/usage/diagnostics",
     methods: ["POST"] as const,
   },
-  // The catalog of Projects bound to a folder on a server, and a server's
-  // load, read by a device the host's own person paired. Changing the catalog
-  // is not forwarded: its journaled records name only a local window.
-  ...["/api/server-projects", "/api/server-projects/resources"].map((path) => ({
+  // Server Projects (read, bind, rename, remove, saved actions, Developer
+  // tools), server load, setup checks, relayed previews, cloud machines and
+  // provider cloud jobs, for a device the host's own person paired. Hub-introduced
+  // devices and agent grants are held to the remote action catalogue (none of
+  // these is catalogued) and refused again inside each route.
+  {
     kind: "exact" as const,
-    path,
+    path: "/api/server-projects",
+    methods: ["GET", "POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 64 * 1_024,
+    namesProjectInQuery: true as const,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/server-projects/resources",
     methods: ["GET"] as const,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
     namesProjectInQuery: true as const,
-  })),
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/server-project-preview",
+    methods: ["GET", "POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 4_096,
+    namesProjectInQuery: true as const,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/remote-setup-check",
+    methods: ["POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 4_096,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/cloud-machines",
+    methods: ["GET", "POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 64 * 1_024,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/provider-cloud",
+    methods: ["POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 131_072,
+  },
   // Scanning the host for installed provider commands and connecting what
   // the scan found, for a device the host's own person paired; the route
   // refuses every other.
@@ -1309,6 +1387,150 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     methods: ["GET"] as const,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
   },
+  // Artifact replica store settings and membership, for a device the host's
+  // own person paired; each route refuses every other device session itself.
+  {
+    kind: "exact" as const,
+    path: "/api/replica-store/settings",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/replica-store/commands",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16_384,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/replica-membership/state",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/replica-membership/commands",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 262_144,
+  },
+  // Shield server registry (`Settings › Permissions › Servers`), read and
+  // changed by a device the host's own person paired; the route refuses a
+  // change from every other device session and journals the device as actor.
+  {
+    kind: "exact" as const,
+    path: "/api/shield/servers",
+    methods: ["GET", "POST"] as const,
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 64 * 1_024,
+  },
+  // Routine notification preferences, delivery reads, and phone push gateway
+  // settings. Restricted devices stay read-only via the action catalogue; a
+  // person-paired device changes them as a local window does.
+  {
+    kind: "exact" as const,
+    path: "/api/automation-notifications",
+    methods: ["GET", "PUT"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/automation-notifications/status",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/automation-notifications/deliveries",
+    methods: ["GET"] as const,
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/push-notifications/gateway",
+    methods: ["GET", "PUT"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 8_192,
+  },
+  // Artifact library, tags, Claude page snapshots/copies, mirror, and synced
+  // artifacts. Restricted devices reach only `/api/artifacts/library` under
+  // `project.overview.read`; person-paired devices reach all of them.
+  ...[
+    "/api/artifacts/library",
+    "/api/artifacts/tag",
+    "/api/artifacts/claude-snapshot",
+    "/api/artifacts/claude-copy",
+    "/api/artifacts/synced",
+  ].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+  })),
+  {
+    kind: "exact" as const,
+    path: "/api/artifacts/mirror",
+    methods: ["GET", "POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+  },
+  // Thread exports and Chat/Work tool-call records. Restricted devices may
+  // export without captures or tool records and are refused tool-call records;
+  // person-paired devices read both as a local window does.
+  ...["/api/threads/export", "/api/threads/tool-call-records"].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 16 * 1_024,
+  })),
+  // Provider tooling management, for a device the host's own person paired.
+  ...[
+    "/api/provider-tooling/list",
+    "/api/provider-tooling/plan",
+    "/api/provider-tooling/cancel",
+    "/api/provider-tooling/apply",
+  ].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 64 * 1_024,
+  })),
+  // Kept provider sessions and background live tasks in Code and Work, for a
+  // device the host's own person paired; each route refuses restricted devices.
+  ...[
+    "/api/code-live-tasks",
+    "/api/code-native-sessions",
+    "/api/work-live-tasks",
+    "/api/work-native-sessions",
+  ].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["GET"] as const,
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  })),
+  ...[
+    "/api/code-live-tasks/stop",
+    "/api/code-native-sessions/adopt",
+    "/api/work-live-tasks/stop",
+    "/api/work-native-sessions/adopt",
+  ].map((path) => ({
+    kind: "exact" as const,
+    path,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 4_096,
+  })),
   ...["/api/agent-grants", "/api/agent-grants/threads"].map((path) => ({
     kind: "exact" as const,
     path,
@@ -1332,6 +1554,34 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 64 * 1_024,
   },
+  // Paired-device Browser remote control: one long-lived NDJSON frame/status
+  // stream and a bounded 10 MiB file-chooser upload. Matched before the
+  // `/api/browser/` prefix so the stream is not truncated by the default 8 MiB
+  // JSON response cap and file uploads fit the 10 MiB attachment budget.
+  {
+    kind: "exact" as const,
+    path: "/api/browser/remote-control/stream",
+    methods: ["POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 4_096,
+    streamsNdjson: true as const,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/browser/remote-control/file",
+    methods: ["POST"] as const,
+    allowedRequestHeaders: [
+      ...REMOTE_REQUEST_HEADERS,
+      "x-octant-browser-lease-id",
+      "x-octant-browser-chooser-id",
+      "x-octant-browser-file-name",
+    ] as const,
+    allowedContentTypes: REMOTE_CONTENT_TYPES,
+    acceptsAnyAttachmentType: true as const,
+    maxBodyBytes: REMOTE_ATTACHMENT_UPLOAD_MAX_BODY_BYTES,
+    uploadsAttachment: true as const,
+  },
   ...[
     "/api/agent-profiles",
     "/api/apple/",
@@ -1353,7 +1603,6 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     "/api/projects/",
     "/api/spend-ceilings",
     "/api/theme/",
-    "/api/validation/",
     "/api/zen",
   ].map((path) => ({
     kind: "prefix" as const,
@@ -1378,6 +1627,7 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     ...("acceptsAnyAttachmentType" in match
       ? { acceptsAnyAttachmentType: match.acceptsAnyAttachmentType }
       : {}),
+    ...("streamsNdjson" in match ? { streamsNdjson: match.streamsNdjson } : {}),
     // An exact route takes a query only when it says so: one naming a Project
     // there, or one that declares `allowQuery` because its own handler reads
     // and bounds the query (the load read's `?detail=vitals`, search's
@@ -1440,6 +1690,8 @@ export interface RemoteRouteDefinition {
    * sends natively.
    */
   readonly acceptsAnyAttachmentType?: true;
+  /** Long-lived NDJSON frame/status stream bounded per-frame by its route, not total bytes. */
+  readonly streamsNdjson?: true;
 }
 
 export type RemoteRouteResponse = Response | undefined;
@@ -1735,6 +1987,22 @@ export function createRemoteRouteHandler(
       // The dev server's own response: its headers stand and its body streams
       // uncapped, holding this request's slot until it ends.
       return withAdmissionRelease(response, release);
+    }
+    if (
+      decision.route?.streamsNdjson === true &&
+      response.headers.get("content-type")?.split(";", 1)[0]?.trim() === "application/x-ndjson"
+    ) {
+      const headers = new Headers(response.headers);
+      for (const [name, value] of decision.headers) headers.set(name, value);
+      headers.delete("content-length");
+      return withAdmissionRelease(
+        new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        }),
+        release,
+      );
     }
     return limitResponse(response, decision.headers, decision.maxResponseBytes, release);
   }

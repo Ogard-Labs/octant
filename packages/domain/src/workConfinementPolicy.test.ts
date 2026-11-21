@@ -18,7 +18,6 @@ import {
   WorkConfinementRejected,
   detectMovedRoot,
   detectRevokedRoot,
-  resolveWorkCapabilities,
 } from "./workConfinementPolicy";
 
 const sha = decodeContentSha256("0000000000000000000000000000000000000000000000000000000000000000");
@@ -275,35 +274,6 @@ describe("classifyWorkFidelity", () => {
     const fidelity = classifyWorkFidelity("xlsx", false);
     expect(fidelity.level).toBe("limited");
     expect(fidelity.notice).toBeDefined();
-  });
-});
-
-describe("resolveWorkCapabilities", () => {
-  it("preserves all base capabilities in full posture", () => {
-    expect(resolveWorkCapabilities({ posture: "full", base: fullCapabilities })).toEqual(
-      fullCapabilities,
-    );
-  });
-
-  it("preserves read and version capabilities in approval-gated posture but reports mutation capabilities for approval", () => {
-    const resolved = resolveWorkCapabilities({
-      posture: "approval-gated",
-      base: fullCapabilities,
-    });
-    expect(resolved.canRead).toBe(true);
-    expect(resolved.canVersion).toBe(true);
-    expect(resolved.canCreate).toBe(true);
-    expect(resolved.canMutate).toBe(true);
-    expect(resolved.canExport).toBe(true);
-  });
-
-  it("never reports a capability the base format does not support", () => {
-    const resolved = resolveWorkCapabilities({
-      posture: "full",
-      base: { ...fullCapabilities, canRoundTrip: false, canExport: false },
-    });
-    expect(resolved.canRoundTrip).toBe(false);
-    expect(resolved.canExport).toBe(false);
   });
 });
 

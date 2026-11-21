@@ -21,18 +21,26 @@ import {
   decodeCodeProjectFilePath,
   decodeCodeRelativePath,
   decodeCodeThread,
+  decodeWindowId,
   type CodeCheckoutIdentity,
   type CodeFileId,
   type CodeThread,
   type WindowId,
 } from "@octant/contracts";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { decodeCodeLanguageReadRequest } from "@octant/contracts/code-language";
 import { decodeSandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import type {
   CodeLanguageDocumentResult,
   CodeLanguageReadResult,
 } from "@octant/contracts/code-language";
-import type { LanguageServerHostPlatform, PrincipalKind } from "@octant/domain";
+import {
+  contextKeyForProject,
+  defaultWindowWorkspace,
+  type LanguageServerHostPlatform,
+  type PrincipalKind,
+} from "@octant/domain";
+import { CodeProjectAccess } from "../codeProjectAccess";
 import {
   makeProcessConfinementLive,
   type ProcessConfinementPort,
@@ -176,6 +184,9 @@ function harness(input: {
   readonly egress?: LanguageServerEgress;
   readonly threadTainted?: CodeLanguageServiceOptions["threadTainted"];
   readonly threadStrict?: CodeLanguageServiceOptions["threadStrict"];
+  readonly canAccessProject?: CodeLanguageServiceOptions["authority"]["canAccessProject"];
+  readonly canAccessProjectLive?: CodeLanguageServiceOptions["authority"]["canAccessProjectLive"];
+  readonly effectiveThread?: CodeLanguageServiceOptions["authority"]["effectiveThread"];
   readonly processes?: Pick<
     NonNullable<ConstructorParameters<typeof LanguageServerProcessPort>[0]>,
     "platform" | "stopWindowsTree"
@@ -210,8 +221,11 @@ function harness(input: {
         String(thread.checkoutId) === String(state.checkout.id)
           ? input.checkout
           : state.folders.get(String(thread.id)),
-      canAccessProject: () => state.reach,
-      effectiveThread: (_scope, thread) => thread,
+      canAccessProject: input.canAccessProject ?? (() => state.reach),
+      ...(input.canAccessProjectLive === undefined
+        ? {}
+        : { canAccessProjectLive: input.canAccessProjectLive }),
+      effectiveThread: input.effectiveThread ?? ((_scope, thread) => thread),
       resolveRoot: withProjectExtraFolders({
         resolve: (_scope, thread, checkout, relativePath) => ({
           fileId: deriveCodeFileId(String(thread.id), String(checkout.id), relativePath),
@@ -830,7 +844,7 @@ describe("Code language service authority", () => {
       });
     });
 
-    it("runs the Project's own copy only as approved repository tooling: refused in Plan, to a paired device, to an agent, and without an approval", async () => {
+    it("runs the Project's own copy as repository tooling: refused in Plan, to another device, and below Full access without approval", async () => {
       let approved = false;
       const { test, paths, prepared, ownRoots, setting, egressStarts } = toolchain({
         approved: () => approved,
@@ -838,7 +852,7 @@ describe("Code language service authority", () => {
       setting.on = true;
       expect(await test.open("b.ts")).toEqual({ status: "refused", reason: "plan-read-only" });
 
-      test.state.thread = codeThread({ executionPolicy: "full-access" });
+      test.state.thread = codeThread({ executionPolicy: "approval-gated" });
       test.state.threads = [test.state.thread];
       expect(await test.open("b.ts")).toEqual({ status: "refused", reason: "approval-required" });
       approved = true;
@@ -867,6 +881,25 @@ describe("Code language service authority", () => {
         allowProcessFork: true,
         readRoots: [paths.checkout],
       });
+    });
+
+    it("starts the Project's own copy without approval at Full access", async () => {
+      const { test, paths, ownRoots, setting, egressStarts } = toolchain({
+        approved: () => false,
+      });
+      setting.on = true;
+      test.state.thread = codeThread({ executionPolicy: "full-access" });
+      test.state.threads = [test.state.thread];
+      expect(await test.open("b.ts", { principal: "remote-device" })).toEqual({
+        status: "refused",
+        reason: "local-host-required",
+      });
+      expect(test.launches()).toBe(0);
+
+      expect((await test.open("b.ts")).status).toBe("synced");
+      expect(test.launches()).toBe(1);
+      expect(ownRoots).toEqual([paths.checkout]);
+      expect(egressStarts()).toBe(1);
     });
 
     it("stops the bundled copy's server when the setting turns on, and the Project's when it turns off", async () => {
@@ -1137,7 +1170,7 @@ describe("Code language service reads for an agent", () => {
     });
   });
 
-  it("never starts a server that runs repository tooling, and reads through one only while the person's approved server runs", async () => {
+  it("below Full access never starts a server that runs repository tooling, and reads through one only while the person's approved server runs", async () => {
     let approved = true;
     const { test, log, paths } = fake(
       { launchClass: "repo-tooling" },
@@ -1153,7 +1186,7 @@ describe("Code language service reads for an agent", () => {
         },
       },
     );
-    test.state.thread = codeThread({ executionPolicy: "full-access" });
+    test.state.thread = codeThread({ executionPolicy: "approval-gated" });
     test.state.threads = [test.state.thread];
     const refused = { status: "refused", reason: "local-host-required" };
     expect(await test.agent("b.ts")).toEqual(refused);
@@ -1163,8 +1196,9 @@ describe("Code language service reads for an agent", () => {
         projectId: test.state.thread.projectId,
         posture,
       });
-    // Nothing an agent could read through runs yet, so the tool is not offered.
-    expect(offered("full-access")).toBe(false);
+    // Below Full access, nothing an agent could read through runs yet, so the tool is not offered.
+    expect(offered("approval-gated")).toBe(false);
+    expect(offered("auto-accept-edits")).toBe(false);
 
     // The person at the machine opens a file, so the approved server runs.
     // The agent now reads through it, marked as the repository tooling's
@@ -1184,7 +1218,7 @@ describe("Code language service reads for an agent", () => {
     const opened = () =>
       logged(log).filter((entry) => entry.method === "textDocument/didOpen").length;
     expect(opened()).toBe(2);
-    expect(offered("full-access")).toBe(true);
+    expect(offered("approval-gated")).toBe(true);
     expect(offered("plan")).toBe(false);
 
     // Plan refuses the class even while the server runs for another thread.
@@ -1195,7 +1229,7 @@ describe("Code language service reads for an agent", () => {
     // An approval that no longer covers the server ends the agent's reads
     // before the server itself is stopped, and once it stops the agent does
     // not bring it back.
-    test.state.thread = codeThread({ executionPolicy: "full-access" });
+    test.state.thread = codeThread({ executionPolicy: "approval-gated" });
     test.state.threads = [test.state.thread];
     approved = false;
     expect(await test.agent("b.ts")).toEqual({ status: "refused", reason: "approval-required" });
@@ -1206,7 +1240,155 @@ describe("Code language service reads for an agent", () => {
     expect(opened()).toBe(2);
   });
 
-  it("does not restart a crashed repository-tooling server for an agent's read", async () => {
+  it("at Full access starts a repository-tooling server without approval for the agent, respects the effective turn posture, and stops it once Full access ends", async () => {
+    let effectivePosture: CodeThread["executionPolicy"] = "full-access";
+    const paths = workspace();
+    const log = join(paths.root, "server.log");
+    const test = harness({
+      ...paths,
+      component: { ...fakeComponent("normal", log), launchClass: "repo-tooling" },
+      confinement: passthrough,
+      approvals: { holds: () => false, record: () => "recorded" },
+      effectiveThread: (_scope, thread) =>
+        decodeCodeThread({ ...thread, executionPolicy: effectivePosture }),
+      egress: {
+        start: async () => ({
+          status: "listening",
+          endpoint: { kind: "loopback", port: 9 },
+          token: "language-server-egress",
+          close: async () => undefined,
+        }),
+      },
+    });
+    // Stored below Full access, effective posture is Full access (e.g. a window session grant).
+    test.state.thread = codeThread({ executionPolicy: "approval-gated" });
+    test.state.threads = [test.state.thread];
+
+    expect(
+      test.service.servesAgentsIn([paths.checkout], {
+        projectId: test.state.thread.projectId,
+        posture: "full-access",
+        threadId: test.state.thread.id,
+      }),
+    ).toBe(true);
+    expect(await test.agent("b.ts")).toMatchObject({
+      status: "diagnostics",
+      repositoryTooling: true,
+    });
+    expect(test.launches()).toBe(1);
+    // An unapproved server running for a Full-access thread stays alive on sweep,
+    // and is not offered to a turn below Full access while no approval is on record.
+    await test.service.sweep();
+    expect(
+      test.service.servesAgentsIn([paths.checkout], {
+        projectId: test.state.thread.projectId,
+        posture: "approval-gated",
+        threadId: test.state.thread.id,
+      }),
+    ).toBe(false);
+    expect(await test.agent("a.ts", { line: 0, character: 16 })).toMatchObject({
+      status: "definition",
+      repositoryTooling: true,
+    });
+    expect(test.launches()).toBe(1);
+
+    // A thread stored at Full access whose active turn is narrowed below Full
+    // access cannot use or keep alive an unapproved server.
+    test.state.thread = codeThread({ executionPolicy: "full-access" });
+    test.state.threads = [test.state.thread];
+    effectivePosture = "approval-gated";
+    expect(await test.agent("b.ts")).toEqual({ status: "refused", reason: "approval-required" });
+    await test.service.sweep();
+    expect(await test.open("b.ts")).toEqual({ status: "refused", reason: "approval-required" });
+    effectivePosture = "plan";
+    expect(await test.agent("b.ts")).toEqual({ status: "refused", reason: "plan-read-only" });
+    expect(test.launches()).toBe(1);
+  });
+
+  it("keeps a live Full-access window's unapproved server across another window's request sweep, and retires it once that window closes", async () => {
+    const windowA = scopeId;
+    const windowB = decodeWindowId("10000000-0000-4000-8000-000000000002");
+    const paths = workspace();
+    const log = join(paths.root, "server.log");
+    const thread = codeThread({ executionPolicy: "full-access" });
+    const liveWindows = new Set<string>([String(windowA), String(windowB)]);
+    const workspaceFor = (id: WindowId) => ({
+      ...defaultWindowWorkspace(id),
+      contextByMode: {
+        ...defaultWindowWorkspace(id).contextByMode,
+        code: contextKeyForProject("code", LOCAL_HOST_ID, thread.projectId, paths.checkout),
+      },
+    });
+    const access = new CodeProjectAccess({
+      readWorkspace: (id) =>
+        String(id) === String(windowA) || String(id) === String(windowB)
+          ? workspaceFor(id)
+          : undefined,
+      hasActiveCodeProject: (projectId) => String(projectId) === String(thread.projectId),
+      isWindowLive: (id) => liveWindows.has(String(id)),
+    });
+    const test = harness({
+      ...paths,
+      component: { ...fakeComponent("normal", log), launchClass: "repo-tooling" },
+      confinement: passthrough,
+      approvals: { holds: () => false, record: () => "recorded" },
+      canAccessProject: (id, projectId) => access.canAccessProject(id, projectId),
+      canAccessProjectLive: (id, projectId) =>
+        access.standingAuthority(projectId, () => access.canAccessProject(id, projectId)),
+      egress: {
+        start: async () => ({
+          status: "listening",
+          endpoint: { kind: "loopback", port: 9 },
+          token: "language-server-egress",
+          close: async () => undefined,
+        }),
+      },
+    });
+    test.state.thread = thread;
+    test.state.threads = [thread];
+
+    const windowAContext = {
+      principal: { kind: "local-window" as const, windowId: windowA, capabilityGeneration: 1 },
+      scopeId: windowA,
+    };
+    const windowBContext = {
+      principal: { kind: "local-window" as const, windowId: windowB, capabilityGeneration: 1 },
+      scopeId: windowB,
+    };
+
+    const fileId = await access.run(windowAContext, async () =>
+      syncedFileId(await test.open("b.ts")),
+    );
+    expect(test.launches()).toBe(1);
+
+    // Window B committing a Code event triggers sweep inside Window B's
+    // AsyncLocalStorage request context; Window A's live Full-access server
+    // must remain running and keep its scope.
+    await access.run(windowBContext, async () => {
+      expect(access.canAccessProject(windowA, thread.projectId)).toBe(false);
+      await test.service.sweep();
+    });
+    await access.run(windowAContext, async () => {
+      expect((await test.diagnostics(fileId)).status).toBe("diagnostics");
+    });
+    expect(test.launches()).toBe(1);
+
+    // Once Window A closes, its persisted workspace remains behind, so plain
+    // canAccessProject outside a request context would still answer true;
+    // sweep must check liveness and retire the unapproved server.
+    liveWindows.delete(String(windowA));
+    expect(access.canAccessProject(windowA, thread.projectId)).toBe(true);
+    await test.service.sweep();
+    liveWindows.add(String(windowA));
+    await access.run(windowAContext, async () => {
+      expect(await test.diagnostics(fileId)).toEqual({
+        status: "refused",
+        reason: "file-outside-thread",
+      });
+    });
+  });
+
+  it("does not restart a crashed repository-tooling server for an agent's read, even at Full access", async () => {
     const { test } = fake(
       { launchClass: "repo-tooling", args: [fakeServer, "crash-on-read", "/dev/null"] },
       {
@@ -1221,7 +1403,7 @@ describe("Code language service reads for an agent", () => {
         },
       },
     );
-    test.state.thread = codeThread({ executionPolicy: "full-access" });
+    test.state.thread = codeThread({ executionPolicy: "approval-gated" });
     test.state.threads = [test.state.thread];
     const fileId = syncedFileId(await test.open("a.ts"));
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -1233,6 +1415,9 @@ describe("Code language service reads for an agent", () => {
       status: "refused",
       reason: "local-host-required",
     });
+    test.state.thread = codeThread({ executionPolicy: "full-access" });
+    test.state.threads = [test.state.thread];
+    expect(await test.agent("b.ts")).toEqual({ status: "unavailable", reason: "crashed" });
     expect(test.launches()).toBe(3);
   });
 

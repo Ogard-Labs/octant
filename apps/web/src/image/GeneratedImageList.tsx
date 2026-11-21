@@ -7,7 +7,10 @@ import type {
   ImageJob,
   ImageJobThreadKind,
 } from "@octant/contracts";
-import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import type {
+  ImageGenerationClient,
+  ThreadImageResults,
+} from "@octant/client-runtime/image-generation-client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import { samePollingData } from "../polling/samePollingData";
@@ -18,7 +21,7 @@ import type { ImageGenerationDraft } from "./ImageGenerationSheet";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 
 export interface GeneratedImageListProps {
-  readonly client: ImageGenerationClient;
+  readonly client: ImageGenerationClient | ThreadImageResults;
   readonly threadKind: ImageJobThreadKind;
   readonly scopeId: ImageGenerationScopeId;
   readonly profiles: ReadonlyArray<ImageGenerationProfileView>;
@@ -36,7 +39,7 @@ const NO_JOBS: ReadonlyArray<ImageJob> = [];
  * job queued or finished, fast while one is in flight, and slowly otherwise.
  */
 export function useGeneratedImageJobs(input: {
-  readonly client: ImageGenerationClient | undefined;
+  readonly client: ThreadImageResults | undefined;
   readonly threadKind: ImageJobThreadKind;
   readonly scopeId: ImageGenerationScopeId | undefined;
 }): { readonly jobs: ReadonlyArray<ImageJob>; readonly refresh: () => void } {
@@ -137,6 +140,7 @@ export function GeneratedImageJobs(
   },
 ) {
   const workspace = useWorkspaceContentView();
+  const generator = "enqueue" in props.client ? props.client : undefined;
   const [revise, setRevise] = useState<
     { readonly job: ImageJob; readonly artifact: ImageArtifactRecord } | undefined
   >(undefined);
@@ -147,8 +151,8 @@ export function GeneratedImageJobs(
 
   async function submitRevision(draft: ImageGenerationDraft) {
     const parent = revise?.artifact;
-    if (parent === undefined) return;
-    await props.client.enqueue({
+    if (parent === undefined || generator === undefined) return;
+    await generator.enqueue({
       threadKind: props.threadKind,
       scopeId: props.scopeId,
       profileInstanceId: draft.profile.instanceId,
@@ -200,39 +204,43 @@ export function GeneratedImageJobs(
                 job={job}
                 key={String(artifact.attachmentId)}
                 profiles={props.profiles}
-                {...(props.canSaveToProject === undefined
+                {...(!("save" in props.client) || props.canSaveToProject === undefined
                   ? {}
                   : { canSaveToProject: props.canSaveToProject })}
                 {...(props.onAttach === undefined ? {} : { onAttach: props.onAttach })}
                 {...(props.onSaveToProject === undefined
                   ? {}
                   : { onSaveToProject: props.onSaveToProject })}
-                onRevise={(nextJob, nextArtifact) => {
-                  if (workspace === undefined) {
-                    setRevise({ job: nextJob, artifact: nextArtifact });
-                    return;
-                  }
-                  workspace.open(
-                    `image-generation:${props.threadKind}:${props.scopeId}:${nextArtifact.attachmentId}`,
-                    "Revise image",
-                    (close) => (
-                      <ImageGenerationContent
-                        client={props.client}
-                        profiles={props.profiles}
-                        scopeId={props.scopeId}
-                        threadKind={props.threadKind}
-                        parentArtifactRef={{
-                          attachmentId: nextArtifact.attachmentId,
-                          hash: nextArtifact.hash,
-                          size: nextArtifact.size,
-                          mime: nextArtifact.mime,
-                        }}
-                        onCloseWorkspace={close}
-                        onEnqueued={props.onEnqueued}
-                      />
-                    ),
-                  );
-                }}
+                {...(generator === undefined
+                  ? {}
+                  : {
+                      onRevise: (nextJob: ImageJob, nextArtifact: ImageArtifactRecord) => {
+                        if (workspace === undefined) {
+                          setRevise({ job: nextJob, artifact: nextArtifact });
+                          return;
+                        }
+                        workspace.open(
+                          `image-generation:${props.threadKind}:${props.scopeId}:${nextArtifact.attachmentId}`,
+                          "Revise image",
+                          (close) => (
+                            <ImageGenerationContent
+                              client={generator}
+                              profiles={props.profiles}
+                              scopeId={props.scopeId}
+                              threadKind={props.threadKind}
+                              parentArtifactRef={{
+                                attachmentId: nextArtifact.attachmentId,
+                                hash: nextArtifact.hash,
+                                size: nextArtifact.size,
+                                mime: nextArtifact.mime,
+                              }}
+                              onCloseWorkspace={close}
+                              onEnqueued={props.onEnqueued}
+                            />
+                          ),
+                        );
+                      },
+                    })}
               />
             ))
           )}

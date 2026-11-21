@@ -1688,10 +1688,10 @@ The spend-cap rules:
   shows the month's spend against it. Lowering the cap below what runs ends
   no lease.
 - **Agents cannot raise the cap.** Only a person reads or changes it, at a local
-  window or, not built yet, a paired device (today `spend-cap-local-only` for
-  anyone but a local window). No agent tool reaches it, and the lease service
-  refuses an agent and the system actor before journaling anything, and today a
-  paired device too.
+  window or on a device the host's own person paired (journaled as that device;
+  hub-introduced and restricted devices stay refused with
+  `spend-cap-local-only`; paired UI follow-up remains). No agent tool reaches it, and the lease service
+  refuses an agent, the system actor, and a hub-introduced device before journaling anything.
 - **Journaled without secrets.** A change is `desktop.spend-cap-changed@1`
   (the previous and new cap, as the person), and a refusal the cap made is
   `desktop.billed-lease-refused@1` (owner, provider, placement, reason, month,

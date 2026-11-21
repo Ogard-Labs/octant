@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { UtcTimestamp } from "./events";
 import { ShieldDecision } from "./shield";
 import { ToolOutsideContentMark } from "./shieldWatcherMark";
 import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
@@ -16,6 +17,21 @@ const boundedNonEmptyText = (maximumBytes: number) =>
 // published page defined there.
 export const ThreadToolStepState = Schema.Literal("started", "running", "completed", "failed");
 export type ThreadToolStepState = typeof ThreadToolStepState.Type;
+
+/**
+ * One completed tool call's timing: the provider's own start and terminal
+ * stamps, minus the person-facing approval wait clipped to that span. Absent
+ * when the bounds are missing, malformed, out of order, or distorted by a
+ * wait that could not be attributed — never an invented duration. Shared by
+ * every mode: a Code turn's tool event and a Chat or Work step carry the
+ * same record.
+ */
+export const ThreadCallTiming = Schema.Struct({
+  startedAt: UtcTimestamp,
+  endedAt: UtcTimestamp,
+  approvalWaitMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+}).annotations(strict);
+export type ThreadCallTiming = typeof ThreadCallTiming.Type;
 
 /**
  * One tool call a Chat or Work turn made: its id, its name, how it stands, and
@@ -39,6 +55,8 @@ export const ThreadToolStep = Schema.Struct({
   outsideContent: Schema.optional(ToolOutsideContentMark),
   /** The routine the call set up, when it was the call that created one. */
   routine: Schema.optional(ThreadRoutineReceipt),
+  /** Present only on a terminal state of a call whose bounds were trusted. */
+  timing: Schema.optional(ThreadCallTiming),
 }).annotations(strict);
 export type ThreadToolStep = typeof ThreadToolStep.Type;
 

@@ -22,6 +22,7 @@ import {
   decodeImageGenerationScopeId,
   decodeProviderSessionId,
   decodeThreadMessageQueueScope,
+  decodeThreadWorkingDirectory,
   decodeWindowId,
   decodeWorkThreadId,
   decodeWorkTurnId,
@@ -38,6 +39,7 @@ import {
 } from "@octant/contracts";
 import { Effect } from "effect";
 import { OutlivingSessions, type RuntimeTurnStarter } from "../providers/outlivingSessions";
+import { readJournaledSessionHistory } from "../providers/nativeSessionHistory";
 import { createWorkSessionRouteHandler } from "../work/workSessionRoutes";
 import { stopKeptSessionsOfChangedWorkThreads } from "../work/workKeptSessions";
 import { codeThreadTurns } from "../code/codeForkPoint";
@@ -101,6 +103,10 @@ import {
   offeringTurnStanding,
 } from "../sideTasks/sideTaskThreads";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
+import {
+  createReportFinishedTool,
+  observeFolderFinishedDiff,
+} from "../finishedReceipts/finishedReceiptTools";
 import { createWorkThreadMentionDirectory } from "../chat/threadMentionService";
 import { createThreadsTools } from "../siblingThreads/siblingThreadTools";
 import { workSiblingThreadSource } from "../siblingThreads/workSiblingThreadSource";
@@ -124,6 +130,8 @@ import {
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
+import { attachedImageSources, workspaceImageSources } from "../image/threadImageSourcePorts";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { describeTurnImages, type ImageDescriber } from "../harness/imageDescription";
 import { lookToolForThread } from "../image/lookTool";
 import { providerTakesFileNatively, supportsConversationInput } from "./conversationInputs";
@@ -186,13 +194,16 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "managedWorktreeReceipts"
     | "runtimeOutsideContentMarks"
     | "sideTasks"
+    | "finishedReceipts"
     | "spendCeiling"
     | "threadAwaitsHarnessApproval"
   > &
   Pick<
     HarnessStateWiring,
     | "threadAwaitsHarnessQuestion"
+    | "nativeHarnessApprovals"
     | "nativeHarnessSessions"
+    | "serverAttachmentCleanup"
     | "serverConnection"
     | "serverProjectStore"
   > &
@@ -216,6 +227,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     WorkspaceWiring,
     | "authorizeWorkThreadForWindow"
     | "contextHarness"
+    | "gitObservationPort"
     | "goalService"
     | "keptImageChoices"
     | "projectMemoryAccess"
@@ -332,6 +344,7 @@ export function wireWork(deps: WorkDependencies) {
     managedWorktreeReceipts,
     terminalSessionImports,
     nativeHarnessComposition,
+    serverAttachmentCleanup,
     serverConnection,
     serverProjectStore,
     shieldServerStore,
@@ -356,6 +369,9 @@ export function wireWork(deps: WorkDependencies) {
     sideTaskHost,
     routineProposalService,
     sideTasks,
+    finishedReceipts,
+    gitObservationPort,
+    nativeHarnessApprovals,
     siblingThreadsService,
     agentMessageService,
     spendCeiling,
@@ -474,6 +490,7 @@ export function wireWork(deps: WorkDependencies) {
     };
     const workThreadService = new WorkThreadService({
       moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "work", threadId }),
+      readLatestFinishedReceipt: (threadId) => finishedReceipts.latest(threadId),
       persistence,
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       projects: projectService,
@@ -590,8 +607,10 @@ export function wireWork(deps: WorkDependencies) {
         agentMessageService.confirmDelivered(messageIds),
       // A Work thread started from a provider session begun outside Octant
       // is journaled on the thread, marked as carrying outside content first.
-      recordAdoptedSession: (thread, adopted) =>
-        workThreadService.recordAdoptedSession(thread, adopted),
+      recordAdoptedSession: (thread, adopted, history) =>
+        workThreadService.recordAdoptedSession(thread, adopted, history),
+      readImportedSessionHistory: (threadId) =>
+        readJournaledSessionHistory(persistence.journal, String(threadId), "work"),
       // A compaction stops the session kept past the thread's last turn.
       stopKeptSession: (threadId) => outlivingWorkSessions.stopThread(workSessionKey(threadId)),
       turnRuntime: new WorkTurnRuntime({
@@ -663,6 +682,7 @@ export function wireWork(deps: WorkDependencies) {
               connection: serverConnection,
               composition: nativeHarnessComposition,
               record: (record) => shieldServerStore.recordServerCommand(record),
+              guardTransfer: serverAttachmentCleanup.guardTransfer,
             },
             { thread },
           );
@@ -821,6 +841,13 @@ export function wireWork(deps: WorkDependencies) {
               profileDisplayName: "the bound profile",
               // Plan reads its siblings and sends them nothing.
               readPosture: () => runningLevel().posture,
+              strict: () => resolveThreadStrict(String(input.thread.id)),
+              readsPerTurn: () =>
+                (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                  .siblingThreadReadsPerTurn,
+              waitsPerTurn: () =>
+                (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                  .siblingThreadWaitsPerTurn,
             });
         const routineTools = !browserSupported ? undefined : routineToolsForWorkTurn(input);
         const agentsTools = !browserSupported
@@ -872,6 +899,37 @@ export function wireWork(deps: WorkDependencies) {
               fullAccess: () =>
                 runningWorkTurns.get(String(input.thread.id))?.access === "full-access",
               jobs: imageJobService,
+              imageSources: {
+                latestAttachments: () =>
+                  attachedImageSources(
+                    workTurnProjection
+                      .listForThread(input.thread.id)
+                      .findLast((turn) => turn.delivery === undefined)?.attachments ?? [],
+                    (attachment) => workAttachments.read(input.thread.id, attachment),
+                  ),
+                ...workspaceImageSources({
+                  threadId: decodeBrowserThreadId(String(input.thread.id)),
+                  browserCaptures,
+                  root: async () => {
+                    const thread = workThreadProjection.read(input.thread.id);
+                    if (thread?.lifecycle !== "active") return undefined;
+                    const project = persistence.readProject(thread.projectId);
+                    if (
+                      project?.type !== "work" ||
+                      project.lifecycle !== "active" ||
+                      project.bindingHistory.at(-1)?.revisionId !== thread.bindingRevisionId
+                    )
+                      return undefined;
+                    const selected = approvedWorkingFolderRoot(project, thread.workingFolderId);
+                    if (selected === undefined) return undefined;
+                    const root = await resolveThreadWorkingDirectory(
+                      selected,
+                      thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+                    ).catch(() => undefined);
+                    return root === input.projectRoot ? root : undefined;
+                  },
+                }),
+              },
               listInstances: () => persistence.readProviderInstances(),
               readImageGenerationCustomSources: () =>
                 (persistence.readShellSettings()?.settings ?? defaultShellSettings())
@@ -968,9 +1026,61 @@ export function wireWork(deps: WorkDependencies) {
               fullAccess: () =>
                 runningWorkTurns.get(String(input.thread.id))?.access === "full-access",
             });
+        const folder = input.projectRoot.length > 0 ? input.projectRoot : undefined;
+        const readWorkFinishedPosture = () => {
+          const running = runningWorkTurns.get(String(input.thread.id))?.access;
+          return workTurnToolLevel(running ?? input.thread.access).posture;
+        };
+        const workFinishedShell = nativeHarnessComposition?.shellForWork({
+          threadId: String(input.thread.id),
+          projectId: String(input.thread.projectId),
+        });
+        const reportFinishedTools = !browserSupported
+          ? undefined
+          : createReportFinishedTool({
+              mode: "work",
+              threadId: String(input.thread.id),
+              projectId: String(input.thread.projectId),
+              turnId: String(input.turnId),
+              readPosture: readWorkFinishedPosture,
+              ...(folder === undefined ? {} : { folder }),
+              ...(input.extraFolders === undefined || input.extraFolders.length === 0
+                ? {}
+                : { extraFolders: input.extraFolders }),
+              ...(workFinishedShell === undefined ? {} : { shell: workFinishedShell }),
+              ...(input.routineRun !== undefined || isRoutineHostScope(input.windowId)
+                ? {}
+                : {
+                    askPerson: async (summary, signal) => {
+                      const outcome = await nativeHarnessApprovals.ask({
+                        threadId: String(input.thread.id),
+                        mode: "work",
+                        projectId: input.thread.projectId,
+                        lead: {
+                          hostId: LOCAL_HOST_ID,
+                          providerInstanceId: input.thread.providerInstanceId,
+                          modelId: input.thread.modelId,
+                        },
+                        toolName: "provider-action",
+                        summary,
+                        approvalClass: "shell-commands",
+                        singleUse: true,
+                        signal,
+                      });
+                      return outcome === "too-many-waiting" ? ("denied" as const) : outcome;
+                    },
+                  }),
+              readGoal: () => goalService.read(String(input.thread.id)).goal ?? undefined,
+              observeDiff: (signal) =>
+                observeFolderFinishedDiff({ folder, git: gitObservationPort, signal }),
+              store: finishedReceipts,
+              uuid: randomUUID,
+              clock: () => new Date().toISOString(),
+            });
         if (
           pastThreads === undefined &&
           projectMemoryTools === undefined &&
+          reportFinishedTools === undefined &&
           native === undefined &&
           browser === undefined &&
           sideTaskTools === undefined &&
@@ -996,6 +1106,7 @@ export function wireWork(deps: WorkDependencies) {
           lookTools,
           pastThreads,
           projectMemoryTools,
+          reportFinishedTools,
         );
       },
       nativeHarness: nativeHarnessHooks,
@@ -1966,17 +2077,21 @@ export function wireWork(deps: WorkDependencies) {
     const workSessionRoutes = createWorkSessionRouteHandler({
       windowAuthorityStore,
       canOpenThread: (windowId, threadId) => {
-        if (isPairedDeviceScope(windowId)) return false;
+        const device = isPairedDeviceScope(windowId);
+        if (device && isRestrictedDeviceScope(windowId)) return false;
         try {
           const thread = workThreadProjection.read(threadId);
-          return thread !== undefined && windowHoldsProject(windowId, thread.projectId, "work");
+          if (thread === undefined) return false;
+          return device
+            ? persistence.readProject(thread.projectId)?.type === "work"
+            : windowHoldsProject(windowId, thread.projectId, "work");
         } catch {
           return false;
         }
       },
       liveTasks: (threadId) => outlivingWorkSessions.liveTasks(workSessionKey(threadId)),
       stopLiveTasks: (threadId) => outlivingWorkSessions.stopThread(workSessionKey(threadId)),
-      isPerson: (windowId) => !isRoutineHostScope(windowId),
+      isPerson: (windowId) => !isRoutineHostScope(windowId) && !isRestrictedDeviceScope(windowId),
       nativeSessions: (windowId, threadId) => workTurnService.nativeSessions(windowId, threadId),
       adoptNativeSession: (windowId, threadId, nativeSessionId) =>
         workTurnService.adoptNativeSession(windowId, threadId, nativeSessionId),

@@ -142,7 +142,7 @@ export function HomeCustomize(props: HomeCustomizeProps) {
       <div className="home-customize__footer">
         <OctantButton
           disabled={isDefaultHomeCardCustomization(props.customization)}
-          onClick={() => props.onChange({ order: [], visibility: [] })}
+          onClick={() => props.onChange({ ...props.customization, order: [], visibility: [] })}
           size="sm"
           type="button"
           variant="secondary"

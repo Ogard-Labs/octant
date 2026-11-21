@@ -4,6 +4,8 @@ import {
   type CloudMachinesCommandResult,
   type CloudMachinesRefusalReason,
 } from "@octant/contracts/cloud-machines";
+import { principalActsAsHostPerson } from "../clientPrincipal";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateRoutePrincipal, boundPrincipalIsRestricted } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -84,15 +86,34 @@ export function createCloudMachineRouteHandler(dependencies: CloudMachineRouteDe
         now: now(),
         ...(body === undefined ? {} : { body }),
       });
-      principal = context.principal.kind === "local-window" ? "local-window" : "remote-device";
+      principal =
+        context.principal.kind === "local-window"
+          ? { kind: "local-window", windowId: String(context.principal.windowId) }
+          : principalActsAsHostPerson(context.principal)
+            ? {
+                kind: "person-paired-device",
+                deviceId: String(context.principal.deviceId),
+                sessionId: String(context.principal.sessionId),
+                credentialGeneration: context.principal.credentialGeneration,
+                actor: eventActorForPrincipal(context.principal),
+              }
+            : "remote-device";
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return json({ error: "Cloud machine request is unauthorized." }, 401, origin);
       }
       return json({ error: "Cloud machine request is invalid." }, 400, origin);
     }
-    if (boundPrincipalIsRestricted(request)) {
-      return json({ error: "Cloud machines are reached only at this computer." }, 403, origin);
+    if (boundPrincipalIsRestricted(request) || principal === "remote-device") {
+      return json(
+        {
+          kind: "cloud-machines-refused",
+          reason: "needs-person",
+          message: MESSAGES["needs-person"],
+        } satisfies CloudMachinesCommandResult,
+        403,
+        origin,
+      );
     }
     if (request.method === "GET") {
       return json({ view: dependencies.service.view() }, 200, origin);

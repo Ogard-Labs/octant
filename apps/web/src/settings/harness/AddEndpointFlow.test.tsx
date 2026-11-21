@@ -921,7 +921,7 @@ describe("Add endpoint, step by step", () => {
     });
     await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(await screen.findByRole("combobox", { name: "Planner" }));
+    await user.click(await screen.findByRole("combobox", { name: "Hard problems" }));
     await user.click(await screen.findByRole("option", { name: "good-model" }));
     await user.click(screen.getByRole("button", { name: "Finish" }));
 

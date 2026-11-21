@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  WORK_THREAD_EVENT_NAMES,
   decodeWorkThread,
   decodeWorkThreadBootstrap,
   decodeWorkThreadNavigation,
@@ -322,8 +321,6 @@ describe("work thread contracts", () => {
       throw new Error(`expected thread-created, got failure ${result.category}`);
     }
     expect(result.kind).toBe("thread-created");
-    expect(WORK_THREAD_EVENT_NAMES).toContain("work.thread-created@1");
-    expect(WORK_THREAD_EVENT_NAMES).toContain("work.thread-updated@1");
   });
 
   it("decodes work-thread workspace tab and rejects wrong mode", () => {

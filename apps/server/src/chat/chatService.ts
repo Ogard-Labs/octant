@@ -35,6 +35,8 @@ import {
   WEB_SEARCH_TOOL_DEFINITION,
   CONTEXT_COMPACTION_EVENT_NAMES,
   type ThreadToolStep,
+  type TurnLoopNotice,
+  type TurnStallNotice,
   CorrelationId,
   EventId,
   UtcTimestamp,
@@ -279,7 +281,11 @@ import type { ReviewedModelManifest } from "../providers/reviewedModelManifest";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { createDiagnosticsFailureIncidentEvent } from "../diagnosticsExportService";
 import { ChatAttachmentStore } from "./chatAttachmentStore";
-import { chatAttachedFiles } from "./chatAttachedFiles";
+import {
+  chatAttachedFiles,
+  chatHistoryAttachedTexts,
+  MAX_CHAT_ATTACHED_TEXT_CHARACTERS,
+} from "./chatAttachedFiles";
 import { ChatScratchStore } from "./chatScratchStore";
 import { ChatTurnRunner, type AppManagedToolSet } from "./chatTurnRunner";
 import { createWebSearchTools } from "./research/webSearchTools";
@@ -377,6 +383,9 @@ const CHAT_EVENT_NAMES = new Set([
   "chat.attempt-updated@1",
   "chat.attempt-response-appended@1",
   "chat.attempt-tool-step@1",
+  "chat.turn-loop-noticed@1",
+  "chat.turn-loop-stopped@1",
+  "chat.turn-stall-noticed@1",
   "chat.turn-route-decided@1",
   "chat.attachment-updated@1",
   "chat.citation-recorded@1",
@@ -5089,6 +5098,8 @@ export class ChatService {
             }));
       let inputReceipt: ConversationInputReceipt | undefined;
       let inputsCurrent: (() => boolean) | undefined;
+      let transferredAttachmentIds: ReadonlySet<string> | undefined;
+      let excludePriorAttachmentTexts = false;
       const inputOnlyBlocks: ProviderContextBlock[] = [];
       const inputPurpose =
         inputHandoff?.record.reason ??
@@ -5135,6 +5146,20 @@ export class ChatService {
           inputsCurrent = prepared.inputsCurrent;
           attachments = [...attachments, ...prepared.attachments];
           inputReceipt = prepared.receipt;
+          if (prepared.receipt.policy === "text-only") {
+            excludePriorAttachmentTexts = true;
+          } else {
+            transferredAttachmentIds = new Set(
+              prepared.manifest.items
+                .filter(
+                  (item) =>
+                    item.status === "included" &&
+                    item.input.source.mode === "chat" &&
+                    item.input.source.threadId === String(thread.id),
+                )
+                .map((item) => item.input.source.attachmentId),
+            );
+          }
           if (handoff === undefined)
             inputOnlyBlocks.push(conversationInputReceiptBlock(prepared.manifest));
           else
@@ -5228,6 +5253,19 @@ export class ChatService {
         windowId: executionContext?.windowId,
       });
       const instructionBlocks = this.#octantInstructionBlocks?.({ thread }) ?? [];
+      const priorTurnAttachedTexts =
+        nativeConversation || excludePriorAttachmentTexts
+          ? undefined
+          : await this.#priorTurnAttachedTexts(thread, threadView, {
+              currentContentId: currentRef.contentId,
+              maxCharacters: Math.max(
+                0,
+                MAX_CHAT_ATTACHED_TEXT_CHARACTERS - attachedFiles.characters,
+              ),
+              ...(transferredAttachmentIds === undefined
+                ? {}
+                : { skipAttachmentIds: transferredAttachmentIds }),
+            });
       const planWith = (sideChatContext: string | undefined) =>
         this.#planContext(
           thread,
@@ -5254,6 +5292,7 @@ export class ChatService {
           appToolHostLines(tools?.definitions),
           personMemoryText,
           instructionBlocks,
+          priorTurnAttachedTexts,
         );
       let context = planWith(sideChatSourceContext);
       // A plan that leaves earlier conversation out to fit cannot be met by the
@@ -6124,6 +6163,125 @@ export class ChatService {
   }
 
   /**
+   * Text blocks for prior turns' finalized text and document attachments when
+   * the host rebuilds a Chat conversation's history.
+   *
+   * Reads only finalized attachments owned by this thread through the confined,
+   * digest-verified attachment store, bounded to the remaining character cap
+   * with the newest turns prioritized first. Missing, purged, binary, or
+   * unreadable attachments degrade cleanly instead of blocking later turns, and
+   * an earlier explicit `text-only` continuation boundary stops older turns'
+   * attachments from re-entering rebuilt history.
+   */
+  async #priorTurnAttachedTexts(
+    thread: ChatThread,
+    view: ChatThreadView | undefined,
+    options: {
+      readonly currentContentId?: ChatContentReference["contentId"];
+      readonly maxCharacters: number;
+      readonly skipAttachmentIds?: ReadonlySet<string>;
+    },
+  ): Promise<ReadonlyMap<string, ReadonlyArray<string>>> {
+    if (view === undefined || options.maxCharacters <= 0) return new Map();
+    const activeTurns = activeChatTurns(view.turns);
+    if (activeTurns.length === 0) return new Map();
+    const currentTurn =
+      options.currentContentId === undefined
+        ? undefined
+        : activeTurns.find(
+            (turn) => String(turn.userMessageRef.contentId) === String(options.currentContentId),
+          );
+    const priorTurns =
+      currentTurn === undefined
+        ? activeTurns
+        : activeTurns.filter((turn) => turn.sequence < currentTurn.sequence);
+    if (priorTurns.length === 0) return new Map();
+
+    // Already-compacted turns are elided in `#planContext` because a reusable
+    // summary stands for them; skipping them here avoids reading their files
+    // and keeps the character budget for uncompacted turns.
+    const subject = decodeContextSubjectRef({
+      aggregateType: "chat-thread",
+      aggregateId: String(thread.id),
+    });
+    const compacted = this.#contextHarness.compactedConversation(subject);
+    const reusableSummaryIds = reusableContextSummaryIds(
+      compacted.summarizedSourceKeys,
+      new Set(
+        activeTurns.flatMap((turn) => [
+          contextSourceKey({
+            kind: "message",
+            referenceId: String(turn.userMessageRef.contentId),
+          }),
+          ...turn.attempts.map((attempt) =>
+            contextSourceKey({ kind: "message", referenceId: `attempt:${attempt.id}` }),
+          ),
+        ]),
+      ),
+    );
+
+    // An explicit `text-only` continuation excluded attachments from earlier
+    // turns; keep attachments from that turn onward and stop before older ones.
+    const eligibleReverse: ChatTurn[] = [];
+    for (let index = priorTurns.length - 1; index >= 0; index -= 1) {
+      const turn = priorTurns[index];
+      if (turn === undefined) continue;
+      const userSummaryId = compacted.summarizedSourceKeys.get(
+        contextSourceKey({
+          kind: "message",
+          referenceId: String(turn.userMessageRef.contentId),
+        }),
+      );
+      if (userSummaryId === undefined || !reusableSummaryIds.has(String(userSummaryId))) {
+        eligibleReverse.push(turn);
+      }
+      const effectiveAttempt = chatTurnAnsweredAttempt(turn) ?? turn.attempts.at(-1);
+      if (effectiveAttempt?.inputReceipt?.policy === "text-only") break;
+    }
+    const eligibleTurns = eligibleReverse.reverse();
+    if (!eligibleTurns.some((turn) => turn.attachmentIds.length > 0)) return new Map();
+
+    const attachmentsById = new Map(
+      view.attachments
+        .filter(
+          (attachment) =>
+            String(attachment.threadId) === String(thread.id) &&
+            attachment.status === "finalized" &&
+            !attachment.mediaType.startsWith("image/") &&
+            !options.skipAttachmentIds?.has(String(attachment.id)),
+        )
+        .map((attachment) => [String(attachment.id), attachment]),
+    );
+    if (attachmentsById.size === 0) return new Map();
+
+    const turnInputs = eligibleTurns.flatMap((turn) => {
+      if (turn.attachmentIds.length === 0) return [];
+      const attachments = turn.attachmentIds.flatMap((attachmentId) => {
+        const metadata = attachmentsById.get(String(attachmentId));
+        if (metadata === undefined) return [];
+        return [
+          {
+            attachmentId: String(metadata.id),
+            displayName: metadata.displayName,
+            mediaType: metadata.mediaType,
+            readBytes: () =>
+              this.#attachmentStore.read({
+                chatThreadId: thread.id,
+                chatAttachmentId: metadata.id,
+                displayName: metadata.displayName,
+                size: metadata.byteLength,
+                hash: metadata.digest,
+                finalizedAt: metadata.createdAt,
+              }),
+          },
+        ];
+      });
+      return attachments.length === 0 ? [] : [{ turnId: String(turn.id), attachments }];
+    });
+    return chatHistoryAttachedTexts(turnInputs, { maxCharacters: options.maxCharacters });
+  }
+
+  /**
    * An endpoint that verifies tools per model keeps its provider-level
    * appManagedTools flag "unsupported", so one verified model never unlocks
    * the others, and lists each model a person verified in
@@ -6326,6 +6484,8 @@ export class ChatService {
     personMemoryText?: string,
     /** The person's instructions for Octant, after Octant's own and before person memory. */
     instructionBlocks: ReadonlyArray<OctantInstructionsBlock> = [],
+    /** Framed text blocks for earlier turns' text/document attachments, keyed by turn id. */
+    priorTurnAttachedTexts?: ReadonlyMap<string, ReadonlyArray<string>>,
   ): ChatTurnContextPlan {
     const providerInstanceId = decodeProviderInstanceId(thread.providerInstanceId);
     const subject = decodeContextSubjectRef({
@@ -6422,16 +6582,18 @@ export class ChatService {
       );
     const transcriptEntries = selectedTurns.flatMap((turn) => {
       const stored = requireContent(turn.userMessageRef);
-      // An image Sees images described was read as its words, so the
-      // history carries them with the person's message.
+      // An image Sees images described was read as its words, and a text or
+      // document file went with the message as its text, so a rebuilt history
+      // carries both ahead of the person's message.
       const describedWords = describedWordsOf(turn, contentById);
-      const user =
-        describedWords.length === 0
-          ? stored
-          : { ...stored, body: [...describedWords, stored.body].join("\n\n") };
-      const userSource = { kind: "message", referenceId: String(user.contentId) } as const;
-      const userTokens = Math.max(16, Math.ceil(user.body.length / 4));
-      const compactedUser = compactedEntry(userSource, user.body, userTokens);
+      const attachedTexts = priorTurnAttachedTexts?.get(String(turn.id)) ?? [];
+      const userText =
+        describedWords.length === 0 && attachedTexts.length === 0
+          ? stored.body
+          : [...describedWords, ...attachedTexts, stored.body].join("\n\n");
+      const userSource = { kind: "message", referenceId: String(stored.contentId) } as const;
+      const userTokens = Math.max(16, Math.ceil(userText.length / 4));
+      const compactedUser = compactedEntry(userSource, stored.body, userTokens);
       const entries =
         compactedUser !== undefined
           ? [compactedUser]
@@ -6440,12 +6602,12 @@ export class ChatService {
                 this.#contextEntry(
                   thread,
                   "conversation",
-                  user.body,
+                  stored.body,
                   userTokens,
                   "compressible",
                   userSource,
                 ),
-                { kind: "user-message", text: user.body },
+                { kind: "user-message", text: userText },
               ),
             ];
       // Admitted before the text is read, sized, or costed, so an abandoned
@@ -6974,7 +7136,55 @@ export class ChatService {
             attemptId: attempt.id,
             ...(step === undefined ? {} : { toolStep: step }),
             ...(attempt.toolStepsTruncated === true ? { toolStepsTruncated: true } : {}),
+            ...(attempt.reasoningMs === undefined ? {} : { reasoningMs: attempt.reasoningMs }),
             updatedAt: attempt.updatedAt,
+          }),
+        ],
+      });
+    };
+    const persistLoopNotice = async (attempt: ChatAttempt, notice: TurnLoopNotice) => {
+      journalAppendedBatch();
+      const eventName =
+        notice.kind === "turn-loop-stopped"
+          ? ("chat.turn-loop-stopped@1" as const)
+          : ("chat.turn-loop-noticed@1" as const);
+      this.#persistence.journal.append({
+        aggregate: { aggregateType: "chat-thread", aggregateId: input.thread.id },
+        expectedVersion: readAggregateVersion(
+          this.#persistence.connection,
+          "chat-thread",
+          input.thread.id,
+        ),
+        events: [
+          this.#pending(eventName, {
+            kind: notice.kind,
+            threadId: attempt.threadId,
+            turnId: attempt.turnId,
+            attemptId: attempt.id,
+            toolName: notice.toolName,
+            count: notice.count,
+            occurredAt: notice.occurredAt,
+          }),
+        ],
+      });
+    };
+    const persistStallNotice = async (attempt: ChatAttempt, notice: TurnStallNotice) => {
+      journalAppendedBatch();
+      this.#persistence.journal.append({
+        aggregate: { aggregateType: "chat-thread", aggregateId: input.thread.id },
+        expectedVersion: readAggregateVersion(
+          this.#persistence.connection,
+          "chat-thread",
+          input.thread.id,
+        ),
+        events: [
+          this.#pending("chat.turn-stall-noticed@1", {
+            kind: "turn-stall-noticed",
+            threadId: attempt.threadId,
+            turnId: attempt.turnId,
+            attemptId: attempt.id,
+            idleMs: notice.idleMs,
+            occurredAt: notice.occurredAt,
           }),
         ],
       });
@@ -7152,6 +7362,24 @@ export class ChatService {
               persistToolStep: (attempt, step) =>
                 Effect.tryPromise({
                   try: () => persistToolStep(attempt, step),
+                  catch: () =>
+                    decodeChatFailure({
+                      category: "unavailable",
+                      message: "Chat attempt persistence failed.",
+                    }),
+                }),
+              persistLoopNotice: (attempt, notice) =>
+                Effect.tryPromise({
+                  try: () => persistLoopNotice(attempt, notice),
+                  catch: () =>
+                    decodeChatFailure({
+                      category: "unavailable",
+                      message: "Chat attempt persistence failed.",
+                    }),
+                }),
+              persistStallNotice: (attempt, notice) =>
+                Effect.tryPromise({
+                  try: () => persistStallNotice(attempt, notice),
                   catch: () =>
                     decodeChatFailure({
                       category: "unavailable",
@@ -7821,13 +8049,40 @@ export class ChatService {
   sessionCompactionConversation(threadId: ChatThreadId): ReadonlyArray<SessionConversationMessage> {
     const view = this.#persistence.readChatThreadView(threadId);
     if (view === undefined) return [];
+    return this.#buildCompactionConversation(view);
+  }
+
+  /**
+   * The conversation a requested compaction summarizes, enriched with the same
+   * bounded, digest-verified, policy-filtered text of finalized text and
+   * document attachments that a host-rebuilt turn carries, so the summary sees
+   * those files before their turns are replaced by the summary.
+   */
+  async sessionCompactionConversationWithAttachments(
+    threadId: ChatThreadId,
+  ): Promise<ReadonlyArray<SessionConversationMessage>> {
+    const thread = this.#persistence.readChatThread(threadId);
+    const view = this.#persistence.readChatThreadView(threadId);
+    if (thread === undefined || view === undefined) return [];
+    const attachedTextsByTurnId = await this.#priorTurnAttachedTexts(thread, view, {
+      maxCharacters: MAX_CHAT_ATTACHED_TEXT_CHARACTERS,
+    });
+    return this.#buildCompactionConversation(view, attachedTextsByTurnId);
+  }
+
+  #buildCompactionConversation(
+    view: ChatThreadView,
+    attachedTextsByTurnId?: ReadonlyMap<string, ReadonlyArray<string>>,
+  ): ReadonlyArray<SessionConversationMessage> {
     const contentById = new Map(view.contents.map((content) => [content.contentId, content]));
     return activeChatTurns(view.turns).flatMap((turn) => {
       const exchangeKey = String(turn.id);
       const user = contentById.get(turn.userMessageRef.contentId);
       // As the turn's context entry sources it: the words Sees images wrote
-      // for the turn's images, then the person's message.
+      // for the turn's images, any framed text/document attachments, then the
+      // person's message.
       const describedWords = describedWordsOf(turn, contentById);
+      const attachedTexts = attachedTextsByTurnId?.get(String(turn.id)) ?? [];
       const messages: Array<SessionConversationMessage> =
         user === undefined
           ? []
@@ -7836,7 +8091,7 @@ export class ChatService {
                 source: { kind: "message", referenceId: String(user.contentId) },
                 role: "user",
                 exchangeKey,
-                content: [...describedWords, user.body].join("\n\n"),
+                content: [...describedWords, ...attachedTexts, user.body].join("\n\n"),
               },
             ];
       const attempt = chatTurnAnsweredAttempt(turn);

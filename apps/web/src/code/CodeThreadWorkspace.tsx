@@ -1,3 +1,4 @@
+import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
 import {
@@ -47,6 +48,7 @@ import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadAccountControl } from "../providers/ThreadAccountControl";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -63,13 +65,16 @@ import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
-import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import type {
+  ImageGenerationClient,
+  ThreadImageResults,
+} from "@octant/client-runtime/image-generation-client";
 import type { ImageArtifactRecord, ImageGenerationProfileView, ImageJob } from "@octant/contracts";
 import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageJobs, useGeneratedImageJobs } from "../image/GeneratedImageList";
 import { ImageGenerationAction } from "../image/ImageGenerationAction";
-import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt";
+import { ServiceOfferPrompt } from "../offers/ServiceOfferPrompt";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import { ThreadWakeups } from "../wakeups/ThreadWakeups";
@@ -158,7 +163,9 @@ import {
   turnWorkedFor,
   type TurnHeaderOutcome,
 } from "../transcript/TurnHeader";
+import { TurnLoopStallNotice } from "../transcript/TurnLoopStallNotice";
 import { SideTaskInline } from "../followUps/SideTaskCards";
+import { FinishedReceiptInline } from "../finishedReceipts/FinishedReceiptCard";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
@@ -191,7 +198,9 @@ import {
   PermissionModePicker,
   runningTurnKeepsNarrowerMode,
   threadKeepsFullAccessSandbox,
+  threadProviderDriverKind,
 } from "./PermissionModePicker";
+import { useRegisterComposerModeMenu } from "./composerModeMenu";
 import { ThreadGuardrailLevel } from "./GuardrailLevelIndicator";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useProjectTrustNotice } from "../providers/ProjectTrustNotice";
@@ -207,8 +216,8 @@ import {
 } from "../composer/useComposerSlashCommands";
 import {
   ComposerAtTypeahead,
-  composerProviderMentions,
   useComposerAtMenu,
+  useThreadProviderMentions,
 } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
 
@@ -240,9 +249,12 @@ export interface CodeThreadWorkspaceProps {
   readonly onTurnRevealed?: () => void;
   /**
    * Set where a paired device shows the thread: it has no window on the host
-   * to take dropped files with, and is not offered provider cloud sessions.
+   * to take dropped files with. Provider cloud sessions are offered when the
+   * paired device acts as the host's own person (`actsAsHostPerson`).
    */
   readonly pairedDevice?: boolean;
+  /** Whether the paired device acts as the host's own person. */
+  readonly actsAsHostPerson?: boolean;
   readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   /**
@@ -258,6 +270,8 @@ export interface CodeThreadWorkspaceProps {
   readonly threadId: CodeThreadId;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  readonly imageResults?: ThreadImageResults;
+  readonly serviceOfferClient?: ServiceOfferClient;
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   /** Lists and reads the thread's kept Browser screenshots. */
   readonly browserAutomationClient?: BrowserAutomationClient;
@@ -657,6 +671,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
   const [queuePreparing, setQueuePreparing] = useState(false);
   const queuePreparingRef = useRef(false);
+  const [modeMenuOpener, setModeMenuOpener] = useState<(() => void) | undefined>();
+  const registerModeMenuOpener = useCallback((open: (() => void) | undefined) => {
+    setModeMenuOpener(() => open);
+  }, []);
+  useRegisterComposerModeMenu(String(props.threadId), modeMenuOpener);
 
   const composerReady = view !== undefined && props.controller.status !== "disconnected";
   useLayoutEffect(() => {
@@ -723,8 +742,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
   const pathMentionListId = `code-path-mentions-${String(props.threadId)}`;
   const pathMentionOpen = pathMentions.open && !mention.open;
+  const providerMentions = useThreadProviderMentions(props.providerGroups, {
+    kind: "thread",
+    mode: "code",
+    threadId: String(props.threadId),
+    projectId: view?.thread.projectId,
+    providerInstanceId: view?.thread.providerInstanceId,
+    executionPolicy: view?.thread.executionPolicy,
+  });
   const atMenu = useComposerAtMenu({
-    provider: composerProviderMentions(props.providerGroups, view?.thread.providerInstanceId),
+    provider: providerMentions,
     textarea: () => textareaRef.current,
     draft,
     onDraftChange: (next) => {
@@ -789,7 +816,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // The transcript draws each image after the reply that made it; the list
   // below the transcript shows the rest.
   const threadImages = useGeneratedImageJobs({
-    client: view === undefined ? undefined : props.imageGenerationClient,
+    client: view === undefined ? undefined : (props.imageGenerationClient ?? props.imageResults),
     threadKind: "code-thread",
     scopeId: decodeImageGenerationScopeId(String(props.threadId)),
   });
@@ -1096,7 +1123,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     (job) => String(job.createdAt),
     (job) => String(job.id),
   );
-  const imageClient = props.imageGenerationClient;
+  const imageClient = props.imageGenerationClient ?? props.imageResults;
   const imageProfiles = props.imageGenerationProfiles;
   const saveGeneratedImage = (job: ImageJob, artifact: ImageArtifactRecord) => {
     setImageSaveMessage(undefined);
@@ -2229,6 +2256,22 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                   })}
                               {...(message.at === undefined ? {} : { at: message.at })}
                             />
+                            <TurnLoopStallNotice
+                              {...(message.loopNotice === undefined
+                                ? {}
+                                : { loopNotice: message.loopNotice })}
+                              {...(message.stallNotice === undefined
+                                ? {}
+                                : { stallNotice: message.stallNotice })}
+                              running={
+                                message.status === "incomplete" &&
+                                props.controller.turnStatus === "running"
+                              }
+                              onStop={() => {
+                                forceStop.requestStop();
+                                void props.controller.cancelTurn();
+                              }}
+                            />
                             {activity?.retrying === undefined ? null : (
                               <HarnessRetryStatus
                                 events={[
@@ -2440,18 +2483,25 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       steered={message.steeredResults}
                     />
                     {message.role === "assistant" && message.operationId !== undefined ? (
-                      <SideTaskInline
-                        last={message === lastReply}
-                        loadedTurnIds={loadedOperationIds}
-                        // The host refuses a fork through an operation that is still
-                        // incomplete or waiting, whichever reply it is.
-                        running={
-                          message.status === undefined ||
-                          message.status === "incomplete" ||
-                          message.status === "waiting"
-                        }
-                        turnId={String(message.operationId)}
-                      />
+                      <>
+                        <FinishedReceiptInline
+                          last={message === lastReply}
+                          loadedTurnIds={loadedOperationIds}
+                          turnId={String(message.operationId)}
+                        />
+                        <SideTaskInline
+                          last={message === lastReply}
+                          loadedTurnIds={loadedOperationIds}
+                          // The host refuses a fork through an operation that is still
+                          // incomplete or waiting, whichever reply it is.
+                          running={
+                            message.status === undefined ||
+                            message.status === "incomplete" ||
+                            message.status === "waiting"
+                          }
+                          turnId={String(message.operationId)}
+                        />
+                      </>
                     ) : null}
                     {continuedOnFallback?.afterId === message.id ? (
                       <OctantSeparatorWithLabel aria-label="Continued on the fallback">
@@ -2500,11 +2550,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
         <InlineThreadPlan {...(changedFiles === undefined ? {} : { changedFiles })} />
         {!displayReady ||
-        props.imageGenerationClient === undefined ||
+        imageClient === undefined ||
         props.imageGenerationProfiles === undefined ? null : (
           <GeneratedImageJobs
             canSaveToProject
-            client={props.imageGenerationClient}
+            client={imageClient}
             jobs={threadImages.jobs.filter((job) => !imagePlacement.placed.has(String(job.id)))}
             onAttach={(file) => attachments.attach([file])}
             onEnqueued={threadImages.refresh}
@@ -2587,9 +2637,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           turnActive={busy}
         />
         {props.coordinatorProposals}
-        <ImageGenerationOfferPrompt
+        <ServiceOfferPrompt
           className="thread-column"
-          client={props.imageGenerationClient}
+          client={props.serviceOfferClient}
           keptIn="project"
           profiles={props.imageGenerationProfiles ?? []}
           scopeId={decodeImageGenerationScopeId(String(props.threadId))}
@@ -2695,7 +2745,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 windowCapability={props.windowCapability}
               />
               {!displayReady ||
-              props.pairedDevice === true ||
+              (props.pairedDevice === true && props.actsAsHostPerson !== true) ||
               codeClient?.providerCloudSessions === undefined ? null : (
                 <ProviderCloudSessions
                   client={codeClient.providerCloudSessions}
@@ -2992,6 +3042,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   autoReview={props.autoReview}
                   disabled={accessChanging}
                   onChange={(next) => void changeMode(next)}
+                  onRegisterOpener={registerModeMenuOpener}
                   {...(profileName === undefined ? {} : { profileName })}
                   warningScope={{ projectId: String(thread.projectId) }}
                   value={permissionModeOf(thread)}
@@ -3006,6 +3057,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     providerGroups,
                     thread.providerInstanceId,
                   )}
+                  driverKind={threadProviderDriverKind(providerGroups, thread.providerInstanceId)}
                   appliesFromNextMessage={runningTurnKeepsNarrowerMode({
                     turnRunning:
                       props.controller.turnStatus === "running" ||
@@ -3022,6 +3074,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               <>
                 <ComposerModelPicker
                   threadId={String(thread.id)}
+                  benchmarkScope={{ kind: "code", projectId: thread.projectId }}
                   ariaLabel="Provider and model"
                   disabled={busy}
                   groups={threadModelGroups}

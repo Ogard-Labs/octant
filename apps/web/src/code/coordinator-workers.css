@@ -1,5 +1,11 @@
 /* Workers panel: beside the coordinator's transcript, a sheet over it on a
    narrow window. */
+.coordinator-header-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
 .coordinator-workers-toggle {
   gap: var(--oct-space-1);
 }

@@ -1,4 +1,4 @@
-import { DEFAULT_AVATAR_ACCENT, type UserProfile } from "@octant/contracts/user-profile";
+import type { UserProfile } from "@octant/contracts/user-profile";
 
 /**
  * The letters an initials avatar shows.
@@ -69,21 +69,4 @@ export function canImportGravatar(profile: Pick<UserProfile, "email">): boolean 
  */
 export function isNamed(profile: Pick<UserProfile, "displayName">): boolean {
   return profile.displayName !== undefined && profile.displayName.trim().length > 0;
-}
-
-/**
- * Whether first-run has been told anything worth keeping about the person.
- *
- * Used to describe the profile step honestly in a summary. Only the name gates
- * first run; the rest of a profile stays optional.
- */
-export function isProfileConfigured(profile: UserProfile): boolean {
-  return (
-    profile.displayName !== undefined ||
-    profile.email !== undefined ||
-    profile.avatar.kind === "image" ||
-    // A colour is the one field that always holds a value, so only a change
-    // from the shipped one separates a choice from a default nobody looked at.
-    profile.accent !== DEFAULT_AVATAR_ACCENT
-  );
 }

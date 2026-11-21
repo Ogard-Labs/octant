@@ -8,6 +8,7 @@ import type {
   ProviderInstanceId,
   ProjectId,
   ProviderAuthenticationAttempt,
+  ProviderMention,
   ProviderModelId,
   ProviderModelOptionValues,
   ProviderNativeSetup,
@@ -25,6 +26,7 @@ import type {
 import type { Effect, Scope, Stream } from "effect";
 import type { ProviderContextFactsSource, ProviderLocalUsageHistorySource } from "./contextFacts";
 import type { CloudSessionDriver } from "./cloudSessions";
+import type { ProviderProjectFolderDiscoveryPort } from "./projectFolderDiscovery";
 
 export type {
   ProviderAttachmentInput,
@@ -193,6 +195,15 @@ export interface ProviderSessionStart {
    * never lets the runtime switch its own mode.
    */
   readonly levelChanges?: boolean;
+  /**
+   * Every approval this session's host answers holds for that one call only,
+   * as a helper run's do. A driver refuses on arrival a request it could only
+   * approve for longer (an agent offering `allow_always` with no
+   * `allow_once`), answering the runtime's reject and asking no one, since no
+   * answer the host can give would approve it. Absent, such a request is
+   * asked as usual.
+   */
+  readonly answersOncePerCall?: boolean;
 }
 
 /** One background task a session's runtime still runs, as the person may see it. */
@@ -330,6 +341,8 @@ export interface ProviderSessionResume {
   readonly outlivesTurn?: boolean;
   /** As on {@link ProviderSessionStart}; restated on every resume. */
   readonly levelChanges?: boolean;
+  /** As on {@link ProviderSessionStart}; restated on every resume. */
+  readonly answersOncePerCall?: boolean;
 }
 
 /**
@@ -408,6 +421,33 @@ export interface ProviderNativeSession {
 }
 
 /**
+ * One earlier message of a runtime's own session, normalized: the person's
+ * words or the agent's reply, with the tools the agent called named (a tool's
+ * name or the runtime's short title for the call), never their input or
+ * output. A message that is only tool calls has empty text.
+ */
+export interface ProviderNativeSessionMessage {
+  readonly role: "person" | "agent";
+  readonly text: string;
+  readonly tools?: ReadonlyArray<string>;
+}
+
+/**
+ * A runtime's own session's earlier conversation, oldest first, as the runtime
+ * stores it. `omitted` counts earlier messages the driver did not read (a read
+ * it bounds itself). `unsupported` means this runtime, or this release of it,
+ * keeps no history the driver can read; the host then imports none and says
+ * so rather than guessing.
+ */
+export type ProviderNativeSessionHistory =
+  | {
+      readonly status: "read";
+      readonly messages: ReadonlyArray<ProviderNativeSessionMessage>;
+      readonly omitted?: number;
+    }
+  | { readonly status: "unsupported" };
+
+/**
  * The runtime's own sessions a thread may be started from. `list` names the
  * sessions of the instance's account in one folder, newest first, leaving out
  * any an Octant thread already holds. `adopt` records that an Octant session
@@ -427,6 +467,18 @@ export interface ProviderNativeSessions {
     readonly nativeSessionId: string;
     readonly modelId: ProviderModelId;
   }) => Effect.Effect<ProviderResumeCursor, ProviderFailure>;
+  /**
+   * Reads the earlier conversation of a session this instance just adopted,
+   * so the host can journal it as the thread's imported history. Read-only:
+   * it never resumes, loads for writing, or changes the session. The host
+   * bounds what it keeps and never sends it back to the runtime, which
+   * already holds it. Absent, the runtime offers no readable history.
+   */
+  readonly history?: (input: {
+    readonly instanceId: ProviderInstanceId;
+    readonly projectRoot: string;
+    readonly nativeSessionId: string;
+  }) => Effect.Effect<ProviderNativeSessionHistory, ProviderFailure>;
   /**
    * Withdraws an adoption the host could not record (the thread changed
    * before it committed): removes the record `adopt` wrote for that Octant
@@ -496,6 +548,8 @@ export interface ProviderDriver {
   readonly contextFacts?: ProviderContextFactsSource;
   /** Optional read-only local history reader owned by the configured driver. */
   readonly localUsageHistory?: ProviderLocalUsageHistorySource;
+  /** Optional read-only first-run folder discovery owned by the provider adapter. */
+  readonly projectFolderDiscovery?: ProviderProjectFolderDiscoveryPort;
   /**
    * The name of the runtime's own tool that publishes a document to the
    * person's account with the model's provider, when a thread in this mode
@@ -512,6 +566,18 @@ export interface ProviderDriver {
   readonly probe: (
     input: ProviderProbeInput,
   ) => Effect.Effect<ProviderProbeResult, ProviderFailure, Scope.Scope>;
+  /**
+   * The provider's own skills and plugins available for a thread in one
+   * folder, for the composer's `@` menu. `nativeSetup` is what the thread's
+   * launch actually loads: a driver lists a Project's skills only when
+   * `nativeSetup?.skills === true` and omits them otherwise. Absent, the menu
+   * offers only the account-level `mentions` the driver's `probe` reported.
+   */
+  readonly listMentions?: (input: {
+    readonly instanceId: ProviderInstanceId;
+    readonly projectRoot?: string;
+    readonly nativeSetup?: ProviderNativeSetup;
+  }) => Effect.Effect<ReadonlyArray<ProviderMention>, ProviderFailure>;
   /**
    * Optional per-model tool-capability verification. Used by drivers whose
    * Connection Check is non-generating (the direct-endpoint profiles) so a

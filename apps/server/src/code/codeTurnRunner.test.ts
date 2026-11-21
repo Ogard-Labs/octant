@@ -259,6 +259,79 @@ describe("CodeTurnRunner", () => {
     ]);
   });
 
+  it("stamps a host-run tool's end at the host's finish, not the request's stamp", async () => {
+    const finish = "2026-07-21T00:00:09.000Z";
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "tool-request",
+            requestId: "host-call",
+            toolName: "octant_browser",
+            inputJson: "{}",
+            occurredAt: now,
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const observed: CodeTurnEvent[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            clock: () => finish,
+            appManagedTools: {
+              definitions: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+              execute: async () => ({ result: { ok: true } }),
+            },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+          }),
+        ),
+      ),
+    );
+    const request = observed.find(
+      (next) => next.category === "tool" && next.status === "app-managed-request",
+    );
+    const completed = observed.find(
+      (next) => next.category === "tool" && next.status === "completed",
+    );
+    expect(request?.occurredAt).toBe(now);
+    expect(completed?.occurredAt).toBe(finish);
+  });
+
+  it("forwards the provider's call identity on an approval request", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "approval-request",
+            requestId: "approval-1",
+            toolCallId: "call-9",
+            action: "Bash",
+            description: "Run tests",
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const observed: CodeTurnEvent[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+          }),
+        ),
+      ),
+    );
+    expect(observed).toContainEqual(
+      expect.objectContaining({ category: "approval", toolCallId: "call-9" }),
+    );
+  });
+
   it("cancels a pending app tool when its transport request expires without answering a stale call", async () => {
     const request = new AbortController();
     const connection = fakeConnection({
@@ -364,6 +437,114 @@ describe("CodeTurnRunner", () => {
       expect(observed.some((next) => next.category === "approval")).toBe(false);
     },
   );
+
+  it("bounds a recorded host-run call by its measured execute interval, closing before the answer's delivery and after subtracting the person wait", async () => {
+    const at = (ms: number) => new Date(Date.parse(now) + ms).toISOString();
+    // A clock the test moves: the execute interval is measured at 242
+    // seconds — 240 of them the recorded call spent waiting on the person —
+    // and the answer's own delivery takes another ten that must never join
+    // the measured interval.
+    let nowMs = 0;
+    let answerSent = false;
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "tool-request",
+            requestId: "waited-call",
+            toolName: "octant_browser",
+            inputJson: "{}",
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+      answerTool: vi.fn(() =>
+        Effect.promise(async () => {
+          nowMs += 10_000;
+          answerSent = true;
+        }),
+      ),
+    });
+    const observed: CodeTurnEvent[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            clock: () => at(nowMs),
+            appManagedTools: {
+              definitions: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+              execute: async () => ({ result: { ok: true } }),
+            },
+            toolEffects: {
+              tools: (set) => ({
+                ...set,
+                execute: (call) => {
+                  // The recorded call measured the wait inside its own run.
+                  nowMs += 242_000;
+                  call.onApprovalWait?.(240_000);
+                  return set.execute(call);
+                },
+              }),
+              observe: () => undefined,
+            },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+          }),
+        ),
+      ),
+    );
+    expect(answerSent).toBe(true);
+    expect(observed).toContainEqual(
+      expect.objectContaining({
+        category: "tool",
+        status: "completed",
+        requestId: "waited-call",
+        callTiming: {
+          startedAt: at(0),
+          endedAt: at(242_000),
+          approvalWaitMs: 240_000,
+        },
+      }),
+    );
+  });
+
+  it("offers no call bounds for a host-run call nobody recorded", async () => {
+    const at = (ms: number) => new Date(Date.parse(now) + ms).toISOString();
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({
+            kind: "tool-request",
+            requestId: "unrecorded-call",
+            toolName: "octant_browser",
+            inputJson: "{}",
+          }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const observed: CodeTurnEvent[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            clock: () => at(0),
+            appManagedTools: {
+              definitions: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+              execute: async () => ({ result: { ok: true } }),
+            },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+          }),
+        ),
+      ),
+    );
+    const completed = observed.find(
+      (next) => next.category === "tool" && next.status === "completed",
+    );
+    expect(completed).toBeDefined();
+    expect(completed?.callTiming).toBeUndefined();
+  });
 
   it("records the routine an app-managed call created on that call's tool event", async () => {
     const connection = fakeConnection({
@@ -546,6 +727,46 @@ describe("CodeTurnRunner", () => {
         status: "provider-claimed-success",
       }),
     );
+  });
+
+  it("carries each call's name onto its own progress frames, across overlapping calls", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({ kind: "tool-start", toolCallId: "call-1", toolName: "Bash" }),
+          event({ kind: "tool-start", toolCallId: "call-2", toolName: "Read" }),
+          event({ kind: "tool-progress", toolCallId: "call-1", message: "running" }),
+          event({ kind: "tool-progress", toolCallId: "call-2", message: "reading" }),
+          event({ kind: "tool-progress", toolCallId: "call-unseen", message: "working" }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const outcomes: CodeTurnOutcome[] = [];
+    const observed: CodeTurnEvent[] = [];
+
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+          }),
+        ),
+      ),
+    );
+
+    expect(outcomes).toEqual(["completed"]);
+    const progress = observed.filter((entry) => entry.providerKind === "tool-progress");
+    // Each interleaved frame is attributed to its own call, never to a bare
+    // "provider-tool", and a call the turn never saw starts goes unnamed.
+    expect(progress).toEqual([
+      expect.objectContaining({ toolCallId: "call-1", toolName: "Bash" }),
+      expect.objectContaining({ toolCallId: "call-2", toolName: "Read" }),
+      expect.objectContaining({ toolCallId: "call-unseen" }),
+    ]);
+    expect(progress[2]?.toolName).toBeUndefined();
   });
 
   it("finishes a turn the runtime compacted midway without recording the compaction as a turn event", async () => {
@@ -1776,6 +1997,7 @@ describe("CodeTurnRunner", () => {
             outputTokens: 20,
             cacheReadInputTokens: 7,
             cacheWriteInputTokens: 2,
+            reasoningTokens: 4,
           }),
           event({
             kind: "child-agent-activity",
@@ -1827,6 +2049,7 @@ describe("CodeTurnRunner", () => {
     expect(observed.find((entry) => entry.category === "usage")).toMatchObject({
       cacheReadInputTokens: 7,
       cacheWriteInputTokens: 2,
+      reasoningTokens: 4,
     });
     expect(observed.find((entry) => entry.category === "question")?.options).toEqual(["A", "B"]);
     expect(
@@ -2620,6 +2843,322 @@ describe("CodeTurnRunner", () => {
             failure: { category: "provider-failed", message: "Provider stopped." },
           },
         },
+      ]);
+    });
+  });
+
+  describe("loop and stall notices", () => {
+    it("warns at the 3rd identical Octant tool call and notices a 6-call loop outside Strict without stopping", async () => {
+      const answered: Array<{
+        readonly requestId: string;
+        readonly resultJson: string;
+        readonly isError: boolean;
+      }> = [];
+      const loopNotices: Array<{
+        readonly kind: string;
+        readonly toolName: string;
+        readonly count: number;
+      }> = [];
+      const events: ProviderRuntimeEvent[] = [
+        ...Array.from({ length: 6 }, (_, index) =>
+          event({
+            kind: "tool-request",
+            sequence: index + 1,
+            requestId: `code-req-${index + 1}`,
+            toolName: "octant_inspect",
+            inputJson: index % 2 === 0 ? '{"a":1,"b":2}' : '{"b":2,"a":1}',
+          }),
+        ),
+        event({ kind: "text-delta", sequence: 7, text: "All done." }),
+        event({ kind: "completed", sequence: 8 }),
+      ];
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(Stream.fromIterable(events)),
+        answerTool: vi.fn((answer) =>
+          Effect.sync(() => {
+            answered.push(answer);
+          }),
+        ),
+      });
+      const outcomes: CodeTurnOutcome[] = [];
+      let runs = 0;
+
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              strict: false,
+              provider: { acquire: () => Effect.succeed(connection) },
+              persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+              onLoopNotice: (notice) => Effect.sync(() => loopNotices.push(notice)),
+              appManagedTools: {
+                definitions: [{ name: "octant_inspect", description: "Inspect", inputSchema: {} }],
+                execute: async () => {
+                  runs += 1;
+                  return { result: { run: runs }, isError: false };
+                },
+              },
+            }),
+          ),
+        ),
+      );
+
+      expect(exit._tag).toBe("Success");
+      expect(runs).toBe(6);
+      expect(connection.interrupt).not.toHaveBeenCalled();
+      expect(outcomes.at(-1)).toBe("completed");
+      expect(loopNotices).toEqual([
+        expect.objectContaining({
+          kind: "turn-loop-noticed",
+          toolName: "octant_inspect",
+          count: 6,
+        }),
+      ]);
+      expect(JSON.parse(answered[2]?.resultJson ?? "{}")).toEqual({
+        run: 3,
+        notice: "This tool has been called with the same input three times in a row.",
+      });
+    });
+
+    it("stops a Code turn under Strict on 6 consecutive identical provider tool calls with inputs", async () => {
+      const loopNotices: Array<{
+        readonly kind: string;
+        readonly toolName: string;
+        readonly count: number;
+      }> = [];
+      const events: ProviderRuntimeEvent[] = Array.from({ length: 6 }, (_, index) => [
+        event({
+          kind: "tool-start",
+          sequence: index * 3 + 1,
+          toolCallId: `read-${index + 1}`,
+          toolName: "Read",
+        }),
+        event({
+          kind: "tool-call-content",
+          sequence: index * 3 + 2,
+          toolCallId: `read-${index + 1}`,
+          part: "input",
+          text:
+            index % 2 === 0
+              ? '{"file_path":"src/index.ts","limit":50}'
+              : '{"limit":50,"file_path":"src/index.ts"}',
+        }),
+        event({
+          kind: "tool-success",
+          sequence: index * 3 + 3,
+          toolCallId: `read-${index + 1}`,
+          summary: "Read file.",
+        }),
+      ]).flat();
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(Stream.fromIterable(events)),
+      });
+      const outcomes: CodeTurnOutcome[] = [];
+
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              strict: true,
+              provider: { acquire: () => Effect.succeed(connection) },
+              persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+              onLoopNotice: (notice) => Effect.sync(() => loopNotices.push(notice)),
+            }),
+          ),
+        ),
+      );
+
+      expect(exit._tag).toBe("Failure");
+      expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
+      expect(outcomes.at(-1)).toBe("interrupted");
+      expect(loopNotices).toEqual([
+        expect.objectContaining({
+          kind: "turn-loop-stopped",
+          toolName: "Read",
+          count: 6,
+        }),
+      ]);
+    });
+
+    it("does not stop a Strict Code turn when a Claude task-list update runs between five Reads and a sixth Read", async () => {
+      const loopNotices: Array<{
+        readonly kind: string;
+        readonly toolName: string;
+        readonly count: number;
+      }> = [];
+      const readCall = (
+        index: number,
+        sequenceStart: number,
+      ): ReadonlyArray<ProviderRuntimeEvent> => [
+        event({
+          kind: "tool-start",
+          sequence: sequenceStart,
+          toolCallId: `read-${index}`,
+          toolName: "Read",
+        }),
+        event({
+          kind: "tool-call-content",
+          sequence: sequenceStart + 1,
+          toolCallId: `read-${index}`,
+          part: "input",
+          text: '{"file_path":"src/index.ts"}',
+        }),
+        event({
+          kind: "tool-success",
+          sequence: sequenceStart + 2,
+          toolCallId: `read-${index}`,
+          summary: "Read file.",
+        }),
+      ];
+      const events: ProviderRuntimeEvent[] = [
+        ...Array.from({ length: 5 }, (_, index) => readCall(index + 1, index * 3 + 1)).flat(),
+        event({
+          kind: "task-progress",
+          sequence: 16,
+          taskId: "task-1",
+          status: "in-progress",
+          summary: "Check index.ts",
+        }),
+        event({
+          kind: "task-list",
+          sequence: 17,
+          taskIds: ["task-1"],
+        }),
+        ...readCall(6, 18),
+        event({ kind: "text-delta", sequence: 21, text: "Checked." }),
+        event({ kind: "completed", sequence: 22 }),
+      ];
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(Stream.fromIterable(events)),
+      });
+      const outcomes: CodeTurnOutcome[] = [];
+
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              strict: true,
+              provider: { acquire: () => Effect.succeed(connection) },
+              persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+              onLoopNotice: (notice) => Effect.sync(() => loopNotices.push(notice)),
+            }),
+          ),
+        ),
+      );
+
+      expect(exit._tag).toBe("Success");
+      expect(connection.interrupt).not.toHaveBeenCalled();
+      expect(outcomes.at(-1)).toBe("completed");
+      expect(loopNotices).toEqual([]);
+    });
+
+    it("still stops a Strict Code turn when a standalone background task-progress notification arrives between five Reads and a sixth Read", async () => {
+      const loopNotices: Array<{
+        readonly kind: string;
+        readonly toolName: string;
+        readonly count: number;
+      }> = [];
+      const readCall = (
+        index: number,
+        sequenceStart: number,
+      ): ReadonlyArray<ProviderRuntimeEvent> => [
+        event({
+          kind: "tool-start",
+          sequence: sequenceStart,
+          toolCallId: `read-${index}`,
+          toolName: "Read",
+        }),
+        event({
+          kind: "tool-call-content",
+          sequence: sequenceStart + 1,
+          toolCallId: `read-${index}`,
+          part: "input",
+          text: '{"file_path":"src/index.ts"}',
+        }),
+        event({
+          kind: "tool-success",
+          sequence: sequenceStart + 2,
+          toolCallId: `read-${index}`,
+          summary: "Read file.",
+        }),
+      ];
+      const events: ProviderRuntimeEvent[] = [
+        ...Array.from({ length: 5 }, (_, index) => readCall(index + 1, index * 3 + 1)).flat(),
+        event({
+          kind: "task-progress",
+          sequence: 16,
+          taskId: "bg-task-1",
+          status: "in-progress",
+          summary: "Background build still running",
+        }),
+        ...readCall(6, 17),
+      ];
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(Stream.fromIterable(events)),
+      });
+      const outcomes: CodeTurnOutcome[] = [];
+
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              strict: true,
+              provider: { acquire: () => Effect.succeed(connection) },
+              persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+              onLoopNotice: (notice) => Effect.sync(() => loopNotices.push(notice)),
+            }),
+          ),
+        ),
+      );
+
+      expect(exit._tag).toBe("Failure");
+      expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
+      expect(outcomes.at(-1)).toBe("interrupted");
+      expect(loopNotices).toEqual([
+        expect.objectContaining({
+          kind: "turn-loop-stopped",
+          toolName: "Read",
+          count: 6,
+        }),
+      ]);
+    });
+
+    it("notices provider silence past the stalled-turn limit outside Strict without stopping the Code turn", async () => {
+      const stallNotices: Array<{ readonly kind: string; readonly idleMs: number }> = [];
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(Stream.fromQueue(queue)),
+        send: vi.fn(() =>
+          Effect.gen(function* () {
+            yield* Effect.sleep(60);
+            yield* Queue.offer(
+              queue,
+              event({ kind: "text-delta", sequence: 1, text: "Late reply." }),
+            );
+            yield* Queue.offer(queue, event({ kind: "completed", sequence: 2 }));
+          }),
+        ),
+      });
+      const outcomes: CodeTurnOutcome[] = [];
+
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          new CodeTurnRunner({ stalledTurnLimitMs: () => 20 }).run(
+            input({
+              strict: false,
+              provider: { acquire: () => Effect.succeed(connection) },
+              persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+              onStallNotice: (notice) => Effect.sync(() => stallNotices.push(notice)),
+            }),
+          ),
+        ),
+      );
+
+      expect(exit._tag).toBe("Success");
+      expect(connection.interrupt).not.toHaveBeenCalled();
+      expect(outcomes.at(-1)).toBe("completed");
+      expect(stallNotices).toEqual([
+        expect.objectContaining({ kind: "turn-stall-noticed", idleMs: 20 }),
       ]);
     });
   });

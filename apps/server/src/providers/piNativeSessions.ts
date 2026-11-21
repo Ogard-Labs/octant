@@ -37,7 +37,11 @@ import {
   type ProviderInstanceId,
   type ProviderResumeCursor,
 } from "@octant/contracts";
-import type { ProviderDriver, ProviderNativeSession } from "@octant/provider-sdk/driver";
+import type {
+  ProviderDriver,
+  ProviderNativeSession,
+  ProviderNativeSessionMessage,
+} from "@octant/provider-sdk/driver";
 import { Effect } from "effect";
 
 /** How many of the person's sessions in a folder a thread is offered to start from. */
@@ -188,6 +192,82 @@ function personSessionFile(
   return { path, name: path.slice(folder.length + 1), header: read.header, size: read.size };
 }
 
+function record(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : undefined;
+}
+
+/**
+ * One Pi `message` entry as an imported message: a user message's text, or an
+ * assistant message's text with its `toolCall` parts named. Tool results,
+ * thinking, images and every other entry type are left out.
+ */
+function piMessage(
+  entry: Readonly<Record<string, unknown>>,
+): ProviderNativeSessionMessage | undefined {
+  if (entry.type !== "message") return undefined;
+  const message = record(entry.message);
+  const role = message?.role;
+  if (role !== "user" && role !== "assistant") return undefined;
+  const content = message?.content;
+  const texts: string[] = [];
+  const tools: string[] = [];
+  if (typeof content === "string") texts.push(content);
+  else if (Array.isArray(content))
+    for (const candidate of content) {
+      const part = record(candidate);
+      if (part?.type === "text" && typeof part.text === "string") texts.push(part.text);
+      else if (role === "assistant" && part?.type === "toolCall" && typeof part.name === "string")
+        tools.push(part.name);
+    }
+  return {
+    role: role === "user" ? "person" : "agent",
+    text: texts.join("\n"),
+    ...(tools.length === 0 ? {} : { tools }),
+  };
+}
+
+/**
+ * The messages on a Pi session's current branch, oldest first. Pi files each
+ * entry with its `id` and `parentId`, and the branch the session resumes is
+ * the chain from its last entry back to the root (Pi's session file format
+ * reference); a file whose entries carry no parent ids is read in order.
+ */
+export function piSessionMessages(contents: string): ReadonlyArray<ProviderNativeSessionMessage> {
+  const entries: Array<Readonly<Record<string, unknown>>> = [];
+  for (const line of contents.split("\n").slice(1)) {
+    if (line.trim().length === 0) continue;
+    try {
+      const entry = record(JSON.parse(line));
+      if (entry !== undefined) entries.push(entry);
+    } catch {
+      // A torn last line is Pi's to repair; it holds no message.
+    }
+  }
+  let branch: ReadonlyArray<Readonly<Record<string, unknown>>> = entries;
+  const last = entries.at(-1);
+  if (entries.some((entry) => typeof entry.parentId === "string") && last !== undefined) {
+    const byId = new Map<string, Readonly<Record<string, unknown>>>();
+    for (const entry of entries) if (typeof entry.id === "string") byId.set(entry.id, entry);
+    const chain: Array<Readonly<Record<string, unknown>>> = [];
+    const seen = new Set<string>();
+    let current: Readonly<Record<string, unknown>> | undefined = last;
+    while (current !== undefined) {
+      chain.unshift(current);
+      const parent: unknown = current.parentId;
+      if (typeof parent !== "string" || seen.has(parent)) break;
+      seen.add(parent);
+      current = byId.get(parent);
+    }
+    branch = chain;
+  }
+  return branch.flatMap((entry) => {
+    const message = piMessage(entry);
+    return message === undefined ? [] : [message];
+  });
+}
+
 /**
  * Adoptions of one Pi session waiting their turn. The check that no Octant
  * thread holds the session and the copy that then claims it are one step, so
@@ -330,6 +410,28 @@ export function makePiNativeSessions(options: {
             ? (error as ProviderFailure)
             : failure("unavailable", "The Pi session could not be taken up."),
       }),
+    // The person's own file, which adopting copied and never writes: read
+    // only, under the same size bound as the copy.
+    history: (input) =>
+      wrongInstance(input.instanceId)
+        ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
+        : Effect.try({
+            try: () => {
+              if (!SESSION_ID.test(input.nativeSessionId)) return { status: "read", messages: [] };
+              const source = personSessionFile(
+                personDirectory,
+                input.projectRoot,
+                input.nativeSessionId,
+              );
+              if (source === undefined || source.size > MAX_ADOPTED_SESSION_BYTES)
+                throw new Error("unreadable");
+              return {
+                status: "read" as const,
+                messages: piSessionMessages(readFileSync(source.path, "utf8")),
+              };
+            },
+            catch: () => failure("unavailable", "The Pi session's messages could not be read."),
+          }),
     // Taken in turn with adoptions of the same session, so a release never
     // removes a copy a later adoption wrote.
     release: (input) =>

@@ -3,9 +3,10 @@ import type { McpServerSignInView } from "@octant/contracts/extension-rpc";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { McpClientSetupControl } from "./McpClientSetupControl";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 
 export interface McpServerSignInControlProps {
-  readonly client: Pick<ExtensionClient, "mcpServerSignIn">;
+  readonly client: Pick<ExtensionClient, "mcpServerSignIn" | "relayMcpServerSignIn">;
   readonly extensionId: string;
   readonly componentId: string;
   readonly disabled: boolean;
@@ -34,6 +35,9 @@ export interface McpServerSignInControlProps {
 export function McpServerSignInControl(props: McpServerSignInControlProps) {
   const [view, setView] = useState<McpServerSignInView>();
   const [busy, setBusy] = useState(false);
+  const [relayInput, setRelayInput] = useState("");
+  const [relayError, setRelayError] = useState<string | undefined>();
+  const [pollNonce, setPollNonce] = useState(0);
   const { client, extensionId, componentId } = props;
   const target = { extensionId: extensionId as never, componentId: componentId as never };
   const polling = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -46,11 +50,16 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
         clearTimeout(polling.current);
         polling.current = undefined;
         setBusy(true);
+        setRelayError(undefined);
       }
       try {
         const next = await client.mcpServerSignIn(request);
         if (generation !== requestGeneration.current) return undefined;
         setView(next);
+        if (next.kind !== "awaiting-consent") {
+          setRelayInput("");
+          setRelayError(undefined);
+        }
         return next;
       } catch {
         if (generation !== requestGeneration.current) return undefined;
@@ -74,6 +83,7 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
           if (
             request.kind === "sign-out" &&
             (current?.kind === "awaiting-consent" ||
+              current?.kind === "awaiting-device-code" ||
               current?.kind === "cancel-pending" ||
               current?.kind === "status-unavailable")
           )
@@ -94,6 +104,36 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
       }
     },
     [client],
+  );
+
+  const submitRelay = useCallback(
+    async (attemptId: string) => {
+      const callbackUrl = relayInput.trim();
+      if (callbackUrl.length === 0 || client.relayMcpServerSignIn === undefined) return;
+      const generation = ++requestGeneration.current;
+      clearTimeout(polling.current);
+      polling.current = undefined;
+      setBusy(true);
+      setRelayInput("");
+      setRelayError(undefined);
+      try {
+        const result = await client.relayMcpServerSignIn({ attemptId, callbackUrl });
+        if (generation !== requestGeneration.current) return;
+        if (result.kind === "retry") {
+          setRelayError(result.message);
+          setPollNonce((count) => count + 1);
+          return;
+        }
+        setView(result);
+      } catch {
+        if (generation !== requestGeneration.current) return;
+        setRelayError("Could not send that callback address. Try again or cancel sign-in.");
+        setPollNonce((count) => count + 1);
+      } finally {
+        if (generation === requestGeneration.current) setBusy(false);
+      }
+    },
+    [client, relayInput],
   );
 
   useEffect(() => {
@@ -133,7 +173,7 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
   }, [view]);
 
   useEffect(() => {
-    if (view?.kind !== "awaiting-consent") return;
+    if (view?.kind !== "awaiting-consent" && view?.kind !== "awaiting-device-code") return;
     const attemptId = view.attemptId;
     const scheduledGeneration = requestGeneration.current;
     polling.current = setTimeout(() => {
@@ -141,7 +181,7 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
       void ask({ kind: "poll", ...target, attemptId }, false);
     }, props.pollIntervalMs ?? 2_000);
     return () => clearTimeout(polling.current);
-  }, [view, ask, props.pollIntervalMs]);
+  }, [view, pollNonce, ask, props.pollIntervalMs]);
 
   if (
     view === undefined ||
@@ -239,16 +279,56 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
       </div>
     );
   }
+  if (view.kind === "awaiting-device-code") {
+    return (
+      <div className="mcp-sign-in">
+        <span className="mcp-sign-in__account mcp-sign-in__state" role="status">
+          <span>
+            Confirm this code at {view.issuerHost}:{" "}
+            <code className="mcp-sign-in__code">{view.userCode}</code>
+          </span>
+          <a
+            href={view.verificationUriComplete ?? view.verificationUri}
+            rel="noreferrer"
+            target="_blank"
+          >
+            Open verification page ({view.verificationUri})
+          </a>
+        </span>
+        <OctantButton
+          disabled={props.disabled || busy}
+          onClick={() => void ask({ kind: "sign-out", ...target })}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          Cancel sign-in
+        </OctantButton>
+      </div>
+    );
+  }
   if (
     view.kind === "awaiting-consent" ||
     view.kind === "cancel-pending" ||
     view.kind === "status-unavailable"
   ) {
+    const showRelay =
+      view.kind === "awaiting-consent" &&
+      view.relayable === true &&
+      client.relayMcpServerSignIn !== undefined;
     return (
       <div className="mcp-sign-in">
         <span className="mcp-sign-in__state" role="status">
           {view.kind !== "awaiting-consent" ? (
             view.message
+          ) : showRelay ? (
+            <>
+              Open the sign-in page, then copy the localhost callback address your browser lands on
+              and paste it below.{" "}
+              <a href={view.authorizationUrl} rel="noreferrer" target="_blank">
+                Open the sign-in page
+              </a>
+            </>
           ) : (
             <>
               Finish signing in in your browser.{" "}
@@ -258,6 +338,35 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
             </>
           )}
         </span>
+        {showRelay ? (
+          <div className="mcp-sign-in__relay">
+            <OctantInput
+              aria-label="Callback address"
+              autoComplete="off"
+              className="mcp-sign-in__relay-input"
+              disabled={props.disabled || busy}
+              onChange={(event) => setRelayInput(event.target.value)}
+              placeholder="http://127.0.0.1:.../oauth/callback?code=..."
+              spellCheck={false}
+              type="url"
+              value={relayInput}
+            />
+            <OctantButton
+              disabled={props.disabled || busy || relayInput.trim().length === 0}
+              onClick={() => void submitRelay(view.attemptId)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Finish sign-in
+            </OctantButton>
+            {relayError === undefined ? null : (
+              <span className="mcp-sign-in__relay-error" role="status">
+                {relayError}
+              </span>
+            )}
+          </div>
+        ) : null}
         {view.kind === "status-unavailable" ? (
           <OctantButton
             disabled={props.disabled || busy}

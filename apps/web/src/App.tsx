@@ -28,6 +28,7 @@ import {
   NewTaskDraftsContext,
 } from "./composer/useNewTaskPrompt";
 import { StreamRepliesContext } from "./transcript/AssistantMessageBody";
+import { NextMessageSuggestionsContext } from "./followUps/FollowUpSuggestionChips";
 import {
   REPLY_DETAIL_DESCRIPTIONS,
   REPLY_DETAIL_LABELS,
@@ -45,6 +46,7 @@ import {
 import { useReplyDetailShortcut } from "./shell/useReplyDetailShortcut";
 import { replyDetailThreadInFront } from "./transcript/replyDetailTarget";
 import { ImageJobChangeRevisionContext } from "./image/ImageJobChangeRevision";
+import { CanvasChoiceAnswersChangeRevisionContext } from "./canvas/CanvasChoiceAnswersChangeRevision";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
@@ -98,7 +100,7 @@ import { useHomeStart } from "./app/homeStart";
 import { ReaderPagesContainer } from "./app/ReaderPagesContainer";
 import { SettingsContainer } from "./app/SettingsContainer";
 import { OctantSheet } from "./ui/base/OctantSheet";
-import type { ShellActions } from "./app/shellActions";
+import type { ShellActions, ThreadMoveRequest } from "./app/shellActions";
 import { SidebarContainer } from "./app/SidebarContainer";
 import { ThreadPaneContainer } from "./app/ThreadPaneContainer";
 import { useStableActions } from "./app/useStableActions";
@@ -158,6 +160,7 @@ import type {
   ProviderInstance,
   VoiceSettings,
 } from "@octant/contracts";
+
 import type {
   CodeBoardQuery,
   CodeProjectPullRequestDetailObserved,
@@ -214,6 +217,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import "./styles.css";
@@ -226,6 +230,7 @@ import { threadMoveClientForBridge } from "./environment/threadMove/threadMoveCl
 // The shared component/material layer loads last so its assignments win.
 import "./styles/components.css";
 import { countSidebarTiles } from "./shell/sidebarTileCounts";
+import { createFocusedDockTool } from "./shell/dockBarControls";
 import { WorkKindChoiceContext, type WorkKindChoice } from "./shell/WorkKindSwitch";
 import {
   enabledWorkKinds,
@@ -408,7 +413,9 @@ import { decodeStableHostId } from "@octant/contracts/remote-access";
 import { TodoListHostSettingsContext } from "./todos/TodoListHostSettings";
 import { TodoQuickAddDialog, useNewTodoShortcut } from "./todos/TodoQuickAddDialog";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
+import { coordinatorDoneWhenEqual } from "@octant/domain";
 import { CoordinatorBoundsDialog } from "./projects/CoordinatorBoundsDialog";
+import { MoveThreadToProjectDialog } from "./projects/MoveThreadToProjectDialog";
 import {
   ProjectActionRunDialog,
   type ProjectActionTarget,
@@ -425,6 +432,7 @@ import {
 } from "./projects/serverProjectEntries";
 import { useProviderController } from "./providers/useProviderController";
 import { ModelToolVerificationContext } from "./providers/ModelToolVerificationContext";
+import { BenchmarkAdviceContext } from "./usage/benchmarks/BenchmarkAdviceContext";
 import { useDiscoveryController } from "./providers/useDiscoveryController";
 import { useProviderBootstrap } from "./providers/useProviderBootstrap";
 import { useArchivedChatThreadSearch } from "./chat/useArchivedChatThreadSearch";
@@ -550,6 +558,9 @@ import { useContextController } from "./context/useContextController";
 import { useSessionCompaction } from "./context/useSessionCompaction";
 import type { ComposerCompaction } from "./context/composerContextMeterScope";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
+import { confirmFilesClose, filesCloseScope } from "./code/filesCloseGuard";
+import { FilesClosePrompt } from "./code/FilesClosePrompt";
+import { useDesktopFilesClose } from "./code/useDesktopFilesClose";
 import { createCodeReadCursorStore, useCodeController } from "./code/useCodeController";
 import { useContinueCards } from "./code/useContinueCards";
 import { coordinatorTitleByWorker } from "./code/codeBoardGrouping";
@@ -882,6 +893,8 @@ function LaunchedShell(
   // is released for as long as the host reports full screen.
   const hostFullScreen = useHostFullScreen(props.hostBridge);
   useRendererOverlayReport(props.hostBridge);
+  // The desktop asks about unsaved Files drafts before this window closes.
+  useDesktopFilesClose(props.hostBridge);
   const hostReservesTitlebarInset =
     props.hostBridge?.windowChrome === "hidden-inset" && !hostFullScreen;
   useLayoutEffect(() => {
@@ -1201,6 +1214,12 @@ function LaunchedShell(
   // in, and the person sends it like any new thread.
   const [pendingDraftPrompt, setPendingDraftPrompt] = useState<string>();
   const [pendingDraftBranch, setPendingDraftBranch] = useState<string>();
+  const [draftStartFrom, setDraftStartFrom] = useState<{ readonly projectId: string } | undefined>(
+    undefined,
+  );
+  // The Move to Project request the sidebar's dialog answers; the Code
+  // Environment asks through the same action rather than a second surface.
+  const [moveRequest, setMoveRequest] = useState<ThreadMoveRequest | undefined>(undefined);
   // New coordinator opens an ordinary Code draft in its Project; the thread it
   // creates becomes a coordinator before its first message is sent. It holds
   // only for that Project, so choosing another one in the draft drops it.
@@ -1743,7 +1762,7 @@ function LaunchedShell(
             destination.kind === "center"
           )
             return;
-          void controller.closeContentTab(fromTab.paneId, fromTab.tabId);
+          controller.forgetMovedContentTab(fromTab.paneId, fromTab.tabId);
         });
     },
   });
@@ -1876,6 +1895,7 @@ function LaunchedShell(
     workRequestClient,
     workThreadClient,
     workTurnClient,
+    finishedReceiptClient,
   } = launchedClients;
   const machineChanges = useMachineChangeFeed(machineChangeClient);
   // Which bundled plugins (GitHub, the board) the person has switched on,
@@ -2413,6 +2433,50 @@ function LaunchedShell(
         },
         service,
         mode,
+      );
+    };
+  }, [runningServicesRemoteHost, remoteServerLiveOpener, federation, pairedComputerFetch]);
+  const openRelayedServerProjectPreview = useMemo(() => {
+    const host = runningServicesRemoteHost;
+    const opener = remoteServerLiveOpener;
+    const registry = federation?.registry;
+    const deviceKeyStore = federation?.deviceKeyStore;
+    if (host === undefined || host.status !== "ready" || opener === undefined) return undefined;
+    if (registry === undefined || deviceKeyStore === undefined) return undefined;
+    return async (view: {
+      readonly projectId: string;
+      readonly remotePort: number;
+      readonly grantId?: string | undefined;
+    }): Promise<RemoteOpenOutcome> => {
+      if (view.grantId === undefined) {
+        return { kind: "refused", message: "That preview has no relay grant." };
+      }
+      const credential = (await registry.get(host.hostId))?.credential;
+      const connection = host.bridge.connection();
+      if (credential === undefined || connection === undefined) {
+        return {
+          kind: "refused",
+          message: `Can't reach ${host.hostName}. Check that it's on and on the same network.`,
+        };
+      }
+      const deviceKey = createPairingDeviceKeyAdapter(deviceKeyStore, credential.keyId);
+      return opener.openServerProjectPreview(
+        {
+          hostId: host.hostId,
+          hostName: host.hostName,
+          origin: host.origin,
+          issueSession: () => connection.issueServerProxySession(),
+          sign: (payload) => deviceKey.sign(payload),
+          ...(pairedComputerFetch === undefined || !isRemotePairingOrigin(host.origin)
+            ? {}
+            : { fetch: pairedComputerFetch }),
+        },
+        {
+          projectId: view.projectId,
+          remotePort: view.remotePort,
+          grantId: view.grantId,
+        },
+        "octant-browser",
       );
     };
   }, [runningServicesRemoteHost, remoteServerLiveOpener, federation, pairedComputerFetch]);
@@ -3999,6 +4063,35 @@ function LaunchedShell(
       lifecycle: project.lifecycle,
     }),
   );
+  const firstRunHostStrict =
+    codeController.bootstrap?.settings.defaultStrict === true ||
+    workSettings.settings?.defaultStrict === true;
+  const firstRunProviderFolderScan = useMemo(() => {
+    if (
+      projectController.client.scanProviderFolders === undefined ||
+      projectController.client.importProviderFolders === undefined
+    ) {
+      return undefined;
+    }
+    return {
+      strict: firstRunHostStrict,
+      scan: (signal?: AbortSignal) =>
+        projectController.scanProviderFolders(signal) ??
+        Promise.resolve({ status: "hidden" as const, reason: "strict" as const }),
+      importFolders: async (
+        folderIds: Parameters<typeof projectController.importProviderFolders>[0],
+      ) =>
+        (await projectController.importProviderFolders(folderIds)) ?? {
+          status: "completed" as const,
+          results: [],
+        },
+    };
+  }, [
+    firstRunHostStrict,
+    projectController.client,
+    projectController.importProviderFolders,
+    projectController.scanProviderFolders,
+  ]);
 
   const codeProviderGroups = useMemo(
     () =>
@@ -4725,6 +4818,26 @@ function LaunchedShell(
   function resizeDockTileColumn(columnIndex: number, shares: ReadonlyArray<number>) {
     changeDockTiles((state) => resizeUtilityTileColumn(state, columnIndex, shares));
   }
+  /**
+   * Close a dock or bottom-panel tool tab, asking the Files close coordinator
+   * first when the tool is a Files tool with drafts to lose. Callers that
+   * move the tool (to the bottom panel, back beside the thread, or to the
+   * shelf) close directly: the tool keeps running and nothing is asked.
+   */
+  function closeToolTab(surface: RightUtilityDockSurfaceId | undefined, close: () => void) {
+    if (surface !== "files" || dockThread === undefined || dockThreadKey === undefined) {
+      close();
+      return;
+    }
+    const asked = dockThreadKey;
+    void confirmFilesClose(filesCloseScope(dockThreadHostId, dockThread.threadId)).then(
+      (proceed) => {
+        // Focus may have moved the dock to another thread while the person
+        // answered; that thread's tabs were never asked about.
+        if (proceed && dockThreadKeyRef.current === asked) close();
+      },
+    );
+  }
   function closeDockTab(tabId: string) {
     const closedTab = dockState.tabs.find((tab) => tab.id === tabId);
     changeDockTiles((state) => closeUtilityTabState(state, tabId));
@@ -5006,7 +5119,9 @@ function LaunchedShell(
         changeDockTiles((state) => showUtilityTabStacked(state, press.tabId));
         return;
       case "close":
-        for (const tabId of press.tabIds) closeDockTab(tabId);
+        closeToolTab(surface, () => {
+          for (const tabId of press.tabIds) closeDockTab(tabId);
+        });
         return;
       case "minimise":
         // The tool keeps running, now as a card on the shelf.
@@ -5019,9 +5134,11 @@ function LaunchedShell(
       case "close-bottom":
         // The panel's own close sends focus to its toggle; this press came
         // from the tool's button, which keeps it.
-        closeBottomPanelTab(surface, false);
-        queueMicrotask(() => {
-          if (opener.isConnected) opener.focus();
+        closeToolTab(surface, () => {
+          closeBottomPanelTab(surface, false);
+          queueMicrotask(() => {
+            if (opener.isConnected) opener.focus();
+          });
         });
         return;
       case "select-bottom":
@@ -5084,7 +5201,9 @@ function LaunchedShell(
     }
     if (tabId === undefined) return;
     if (value === "close") {
-      for (const id of surface === "browser" ? button.tabIds : [tabId]) closeDockTab(id);
+      closeToolTab(surface, () => {
+        for (const id of surface === "browser" ? button.tabIds : [tabId]) closeDockTab(id);
+      });
       return;
     }
     if (value === "to-bottom") openBottomTool(surface);
@@ -5492,8 +5611,9 @@ function LaunchedShell(
         work: workThreadClient,
         workTurns: workTurnClient,
         chat: chatClient,
+        finishedReceipts: finishedReceiptClient,
       }),
-    [chatClient, codeClient, workThreadClient, workTurnClient],
+    [chatClient, codeClient, finishedReceiptClient, workThreadClient, workTurnClient],
   );
   const workingNowProviders = useMemo(
     () =>
@@ -5720,7 +5840,17 @@ function LaunchedShell(
       markCodeFollowUp: codeController.markFollowUp,
       markCodeThreadRead: codeController.markThreadRead,
       mergeProjectPullRequest,
-      moveCodeThread: codeController.moveThread,
+      moveCodeThread: (threadId, projectId, options) => {
+        // A follow-up started through the thread's own slot is scoped in
+        // that slot's controller — only it names the exact running operation
+        // a Stop and move may end. The window controller stays the route for
+        // a first turn it owns; its own scoped-turn check refuses a stop it
+        // cannot name, so a successor or an unscoped turn is never cancelled
+        // by accident.
+        const slot = codeThreadControllers.get(threadId);
+        return (slot ?? codeController).moveThread(threadId, projectId, options);
+      },
+      requestMoveToProject: setMoveRequest,
       moveProject: projectController.move,
       noteCanvasReferences,
       noteHandedOffDocument,
@@ -5728,6 +5858,7 @@ function LaunchedShell(
       openAgentsCenter,
       openArchive,
       openArchivedThread,
+      openThreadRecord,
       openArtifactLibrary,
       openAutomationCenter,
       openRoutine,
@@ -5826,6 +5957,7 @@ function LaunchedShell(
       selectWorkThread,
       sendBackChatTurn: chatController.sendBackTurn,
       sendBackCodeTurn: codeController.sendBackTurn,
+      sendPullRequestLineNotes: codeController.sendPullRequestLineNotes,
       setAgentsCenterOpen,
       setArchiveOpen,
       setArtifactLibraryOpen,
@@ -5971,6 +6103,7 @@ function LaunchedShell(
     needsYouThreadProviders,
     needsYouAskClients,
     now: snoozeClockNow.getTime(),
+    onOpenExternal: rootLinkActions.openExternal,
     openRunningServiceLive,
     pendingRequestClient,
     remoteRunningServicesClient,
@@ -6294,6 +6427,30 @@ function LaunchedShell(
     if (shown !== undefined && String(shown.id) === String(place.tabId)) return true;
     return controller.activateContentTab(place.paneId, place.tabId);
   }
+
+  // The focused pane publishes its bar's controls here so the palette's tool
+  // commands invoke the same registered callbacks the bar itself does.
+  const focusedDockTool = useMemo(() => createFocusedDockTool(), []);
+  const focusedToolSource = useSyncExternalStore(
+    focusedDockTool.subscribe,
+    focusedDockTool.get,
+    focusedDockTool.get,
+  );
+  // Only a Code Project's extra folders are listed by the Files tool; a Work
+  // Project's own Files listing already walks them. Hooks live above the
+  // status early returns, so this stays computed here and keeps a stable
+  // reference while the Project list and selection are unchanged.
+  const activeProjectExtraFolders = useMemo(() => {
+    const project = projectController.projects.find(
+      (candidate) =>
+        candidate.type === "code" &&
+        candidate.lifecycle === "active" &&
+        candidate.id === activeProjectId,
+    );
+    return project?.type === "code"
+      ? (project.extraFolders ?? []).map((folder) => folder.canonicalRoot)
+      : NO_PROJECT_EXTRA_FOLDERS;
+  }, [projectController.projects, activeProjectId]);
 
   if (controller.status === "loading") {
     return (
@@ -6662,6 +6819,27 @@ function LaunchedShell(
     );
   }
 
+  // A record row names a thread that may sit outside live navigation (an
+  // activity record can outlast it): live navigation gets the select path,
+  // anything else reopens through the archive path.
+  function openThreadRecord(entry: ArchivedThreadEntry) {
+    const navigation =
+      entry.mode === "chat"
+        ? chatController.status === "ready"
+          ? chatController.navigation
+          : []
+        : entry.mode === "work"
+          ? workNavigation.navigation
+          : codeController.navigation;
+    if (navigation.some((candidate) => String(candidate.threadId) === entry.threadId)) {
+      if (entry.mode === "chat") selectChatThread(entry.threadId);
+      else if (entry.mode === "work") selectWorkThread(entry.threadId);
+      else selectCodeThread(entry.threadId);
+      return;
+    }
+    openArchivedThread(entry);
+  }
+
   // The Project Overview sits below surfaces this file does not own, so the
   // active mode's thread navigation reaches it through a provider rather than
   // through props. It carries the same list the sidebar nests, so neither can
@@ -6803,29 +6981,51 @@ function LaunchedShell(
     setPendingDraftCoordinatorChoices({});
   }
 
-  async function openDraftInProject(projectId: ProjectId) {
+  async function openDraftInProject(
+    projectId: ProjectId,
+    options?: { readonly startFrom?: boolean | undefined },
+  ) {
     const serverProject = serverCodeProjectFor(serverCodeProjects.projects, projectId);
     if (serverProject !== undefined) {
-      await openDraftInKnownProject(serverProject.projectId, "code", serverProject.name);
+      await openDraftInKnownProject(
+        serverProject.projectId,
+        "code",
+        serverProject.name,
+        options?.startFrom,
+      );
       return;
     }
     const serverWorkProject = serverCodeProjectFor(serverCodeProjects.workProjects, projectId);
     if (serverWorkProject !== undefined) {
-      await openDraftInKnownProject(serverWorkProject.projectId, "work", serverWorkProject.name);
+      await openDraftInKnownProject(
+        serverWorkProject.projectId,
+        "work",
+        serverWorkProject.name,
+        options?.startFrom,
+      );
       return;
     }
     const project = projectController.allProjects.find((candidate) => candidate.id === projectId);
     if (project === undefined || project.lifecycle !== "active") return;
-    await openDraftInKnownProject(project.id, project.type, project.name);
+    await openDraftInKnownProject(project.id, project.type, project.name, options?.startFrom);
   }
 
   // Used right after creation, when the Project is not yet in this render's
   // snapshot; the dialog already knows the mode and name.
-  async function openDraftInKnownProject(projectId: ProjectId, mode: OctantMode, _name: string) {
+  async function openDraftInKnownProject(
+    projectId: ProjectId,
+    mode: OctantMode,
+    _name: string,
+    startFrom?: boolean,
+  ) {
     // The draft carries its Project itself. Opening the Project first put its
     // overview on screen for a frame before the draft replaced it, which read
     // as an old page flashing past every time a task was started from a row.
     closeWorkspaceReaders();
+    // The branch-start intent belongs to exactly this draft: keyed to the
+    // Project it was opened for and cleared for every other way a draft
+    // opens, so a later same-Project draft does not inherit it.
+    setDraftStartFrom(startFrom === true ? { projectId: String(projectId) } : undefined);
     // A new draft starts clean: a prompt seeded by an earlier PR-review
     // handoff must not reappear as this draft's text.
     setDraftError(undefined);
@@ -6839,6 +7039,7 @@ function LaunchedShell(
   // sticky default for every later draft opened from the sidebar.
   function openDraftInActiveProject(mode: "work" | "code") {
     closeWorkspaceReaders();
+    setDraftStartFrom(undefined);
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
     resetNewTaskDraft(mode);
@@ -8259,12 +8460,6 @@ function LaunchedShell(
         ? undefined
         : { id: serverActionsProject.projectId, name: serverActionsProject.name }
       : { id: actionsProject.id, name: actionsProject.name };
-  // Only a Code Project's extra folders are listed by the Files tool; a Work
-  // Project's own Files listing already walks them.
-  const activeProjectExtraFolders =
-    actionsProject?.type === "code"
-      ? (actionsProject.extraFolders ?? []).map((folder) => folder.canonicalRoot)
-      : NO_PROJECT_EXTRA_FOLDERS;
   const octantCommands = buildOctantCommands({
     activeMode,
     modes: enabledModes(controller.settings),
@@ -8302,6 +8497,7 @@ function LaunchedShell(
           true,
         ) === undefined,
     ),
+    ...(focusedToolSource === undefined ? {} : { focusedToolCommands: focusedToolSource }),
     onOpenDockTool: (tool) => {
       const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === tool.id);
       if (surface !== undefined) openDockTab(surface.id);
@@ -8433,6 +8629,9 @@ function LaunchedShell(
         controller.closeSettings();
         void openDraftInKnownProject(project.id, project.mode ?? "code", project.name);
       }}
+      {...(openRelayedServerProjectPreview === undefined
+        ? {}
+        : { onOpenRelayedServerProjectPreview: openRelayedServerProjectPreview })}
       projectTerminalClient={projectTerminalClient}
       projectActionStoragePrefix={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:server-settings`}
       actions={actions}
@@ -8778,6 +8977,7 @@ function LaunchedShell(
                   machineChanges={machineChanges}
                   navigation={navigationModel}
                   {...(pendingDraftBranch === undefined ? {} : { pendingDraftBranch })}
+                  {...(draftStartFrom === undefined ? {} : { draftStartFrom })}
                   {...(pendingDraftCoordinator === undefined ? {} : { pendingDraftCoordinator })}
                   pendingDraftCoordinatorChoices={pendingDraftCoordinatorChoices}
                   {...(pendingDraftPrompt === undefined ? {} : { pendingDraftPrompt })}
@@ -8826,6 +9026,7 @@ function LaunchedShell(
               />
               <TabActivationProvider registry={dockTabActivation}>
                 <DockContainer
+                  focusedTool={focusedDockTool}
                   actions={actions}
                   splitPrimaryMinimum={dockSplitPrimaryMinimum}
                   {...(activeBottomSurface === undefined ? {} : { activeBottomSurface })}
@@ -8869,6 +9070,7 @@ function LaunchedShell(
                   dockTabs={dockTabs}
                   {...(dockThread === undefined ? {} : { dockThread })}
                   {...(dockThreadHost === undefined ? {} : { dockThreadHost })}
+                  {...(dockThreadHostId === undefined ? {} : { dockThreadHostId })}
                   dockThreadOnThisComputer={dockThreadHostId === String(LOCAL_HOST_ID)}
                   {...(dockThreadKey === undefined ? {} : { dockThreadKey })}
                   {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
@@ -8878,6 +9080,8 @@ function LaunchedShell(
                     ? {}
                     : { overviewThread: dockOverviewThread })}
                   projectNames={workingNowProjectNames}
+                  projectClient={projectController.client}
+                  projects={projectController.allProjects}
                   projectPullRequestReviewOpen={projectPullRequestReviewOpen}
                   {...(toolsPresented ? { providerController } : {})}
                   {...(requestedAgentReview === undefined ? {} : { requestedAgentReview })}
@@ -9080,6 +9284,9 @@ function LaunchedShell(
               workSettings.status === "unsupported" ? rawDraftSelection : firstRunWorkModel,
             codeModel: rawDraftSelection,
             projects: firstRunProjects,
+            ...(firstRunProviderFolderScan === undefined
+              ? {}
+              : { providerFolderScan: firstRunProviderFolderScan }),
             onCreateProject: (mode) => openProjectCreate(mode),
             onStartThread: ({ mode, projectId }) => {
               const project = firstRunProjects.find(
@@ -9107,25 +9314,140 @@ function LaunchedShell(
         hostBridge={props.hostBridge}
         onOpenHubSettings={() => void controller.openSettings({ section: "remote-access" })}
       />
+      <OctantDialogPresence>
+        <FilesClosePrompt />
+      </OctantDialogPresence>
+      <OctantDialogPresence>
+        {moveRequest === undefined ? null : (
+          // The one Move to Project dialog lives above the shell frame so it
+          // stays mounted and reachable wherever the asking surface is —
+          // including when the sidebar that used to host it is hidden.
+          <MoveThreadToProjectDialog
+            {...(moveRequest.busy === true ||
+            (moveRequest.mode === "code" &&
+              navigationModel.codeSidebarThreads.some(
+                (thread) =>
+                  String(thread.threadId) === moveRequest.threadId &&
+                  (thread.activity === "working" || thread.activity === "attention"),
+              ))
+              ? { busy: true }
+              : {})}
+            currentProjectId={moveRequest.projectId}
+            mode={moveRequest.mode}
+            onClose={() => setMoveRequest(undefined)}
+            {...(() => {
+              const moveProvider = providerController.instances.find(
+                (instance) => String(instance.id) === moveRequest.providerInstanceId,
+              );
+              const moveModel =
+                moveProvider === undefined || moveRequest.modelId === undefined
+                  ? undefined
+                  : providerController.observedByInstance
+                      .get(moveProvider.id)
+                      ?.models.find((listed) => String(listed.id) === moveRequest.modelId);
+              return {
+                ...(moveProvider === undefined ? {} : { threadProvider: moveProvider }),
+                ...(moveModel === undefined ? {} : { threadModel: moveModel }),
+                ...(moveRequest.workingFolderId === undefined
+                  ? {}
+                  : { threadWorkingFolderId: moveRequest.workingFolderId }),
+                ...(moveRequest.checkoutKind === undefined
+                  ? {}
+                  : { threadCheckoutKind: moveRequest.checkoutKind }),
+                ...(moveRequest.checkoutAvailability === undefined
+                  ? {}
+                  : { threadCheckoutAvailability: moveRequest.checkoutAvailability }),
+              };
+            })()}
+            onMove={async (projectId: string, when?: "after-turn" | "stop-now") =>
+              moveRequest.mode === "code"
+                ? actions.moveCodeThread(
+                    decodeCodeThreadId(moveRequest.threadId),
+                    decodeProjectId(projectId),
+                    { when },
+                  )
+                : actions.tryWorkRestCommand(moveRequest.threadId, (expectedVersion) => ({
+                    kind: "move-work-thread",
+                    threadId: decodeWorkThreadId(moveRequest.threadId),
+                    expectedVersion,
+                    projectId: decodeProjectId(projectId),
+                  }))
+            }
+            projects={projectController.allProjects}
+            threadTitle={moveRequest.title}
+          />
+        )}
+      </OctantDialogPresence>
       {(() => {
         const coordinator = codeController.bootstrap?.threads.find(
           (thread) => String(thread.id) === String(coordinatorBoundsThreadId),
         );
         // A thread that stopped coordinating, or left the list, has no limits to change.
         if (coordinator === undefined || coordinator.coordinator !== true) return null;
+        const project = projectController.allProjects.find(
+          (candidate) => String(candidate.id) === String(coordinator.projectId),
+        );
+        const defaultRepository =
+          project?.type !== "code" || project.connectedRepository === undefined
+            ? undefined
+            : `${project.connectedRepository.owner}/${project.connectedRepository.repository}`;
+        const plannerThreadIds = new Set(
+          (codeController.bootstrap?.plannerThreadIds ?? []).map(String),
+        );
+        const doneWhenThreads = (codeController.bootstrap?.threads ?? [])
+          .filter(
+            (candidate) =>
+              String(candidate.projectId) === String(coordinator.projectId) &&
+              candidate.lifecycle === "active" &&
+              candidate.coordinator !== true &&
+              !(
+                candidate.coordinatorThreadId === undefined &&
+                plannerThreadIds.has(String(candidate.id))
+              ) &&
+              String(candidate.id) !== String(coordinator.id),
+          )
+          .map((candidate) => ({ id: candidate.id, title: candidate.title }));
         return (
           <CoordinatorBoundsDialog
             bounds={coordinator.coordinatorBounds}
+            doneWhen={{
+              value: coordinator.coordinatorDoneWhen,
+              threads: doneWhenThreads,
+              defaultRepository,
+              onSave: (bounds, nextDoneWhen) => {
+                setCoordinatorBoundsThreadId(undefined);
+                const boundsChanged =
+                  coordinator.coordinatorBounds?.wakesPerHour !== bounds.wakesPerHour ||
+                  coordinator.coordinatorBounds?.rounds !== bounds.rounds ||
+                  coordinator.coordinatorBounds?.startsPerHour !== bounds.startsPerHour;
+                const doneWhenChanged = !coordinatorDoneWhenEqual(
+                  coordinator.coordinatorDoneWhen,
+                  nextDoneWhen,
+                );
+                void (async () => {
+                  if (boundsChanged) {
+                    const outcome = await codeController.setThreadCoordinatorBounds(
+                      coordinator.id,
+                      bounds,
+                    );
+                    if (outcome.status === "refused") {
+                      setThreadExportNotice(outcome.message);
+                      return;
+                    }
+                  }
+                  if (doneWhenChanged) {
+                    const outcome = await codeController.setThreadCoordinatorDoneWhen(
+                      coordinator.id,
+                      nextDoneWhen,
+                    );
+                    if (outcome.status === "refused") setThreadExportNotice(outcome.message);
+                  }
+                })();
+              },
+            }}
             key={String(coordinator.id)}
             onClose={() => setCoordinatorBoundsThreadId(undefined)}
-            onSave={(bounds) => {
-              setCoordinatorBoundsThreadId(undefined);
-              void codeController
-                .setThreadCoordinatorBounds(coordinator.id, bounds)
-                .then((outcome) => {
-                  if (outcome.status === "refused") setThreadExportNotice(outcome.message);
-                });
-            }}
+            onSave={() => setCoordinatorBoundsThreadId(undefined)}
             title={coordinator.title}
           />
         );
@@ -9227,260 +9549,285 @@ function LaunchedShell(
           <FirstPartyPluginsEffectiveContext.Provider value={firstPartyPluginsEffective}>
             <PluginContributionsProvider grounds={pluginGrounds} themes={pluginThemes}>
               <ImageJobChangeRevisionContext.Provider value={machineChanges.imageJobs}>
-                <ThreadActivityRevisionsContext.Provider value={threadActivityRevisions}>
-                  <SpeechCapabilityProvider
-                    client={speechClient}
-                    instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
-                    settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
-                  >
-                    <TodoListHostSettingsContext.Provider value={todoListHostSettings}>
-                      <OctantCommandProvider commands={octantCommands}>
-                        <OctantDialogPresence>
-                          {remoteTodo === undefined ? null : (
-                            <OctantDialog
-                              label={
-                                remoteTodo.destination?.project.name ?? "Thread on paired computer"
-                              }
-                              open
-                              onClose={() => setRemoteTodo(undefined)}
-                            >
-                              {remoteTodoSlot?.bridge === undefined ? (
-                                <p>Pair with this computer to open its thread.</p>
-                              ) : (
-                                <RemoteTodoDraft
-                                  key={`${remoteTodo.hostId}:${remoteTodo.todo?.id ?? remoteTodo.thread?.threadId}`}
-                                  bridge={remoteTodoSlot.bridge}
-                                  hostId={remoteTodo.hostId}
-                                  hostName={remoteTodoSlot.displayName}
-                                  connected={remoteTodoSlot.state.kind === "ready"}
-                                  {...(remoteTodo.destination === undefined
-                                    ? {}
-                                    : { project: remoteTodo.destination.project })}
-                                  {...(remoteTodo.todo === undefined
-                                    ? {}
-                                    : { todo: remoteTodo.todo })}
-                                  {...(remoteTodo.thread === undefined
-                                    ? {}
-                                    : { thread: remoteTodo.thread })}
-                                  onCreated={async (link) => {
-                                    if (remoteTodo.todo !== undefined)
-                                      await recordTodoLink(String(remoteTodo.todo.id), link);
-                                  }}
-                                  onClose={() => setRemoteTodo(undefined)}
-                                />
-                              )}
-                            </OctantDialog>
-                          )}
-                          {todoQuickAddOpen ? (
-                            <TodoQuickAddDialog
-                              list={todoList}
-                              {...(todoThisHostId === undefined
-                                ? {}
-                                : { thisHostId: todoThisHostId })}
-                              onClose={() => setTodoQuickAddOpen(false)}
-                              open
-                              projects={todoProjects}
-                            />
-                          ) : null}
-                          {projectActionRun === undefined ? null : (
-                            <ProjectActionRunDialog
-                              key={JSON.stringify(projectActionRun.target)}
-                              client={projectTerminalClient}
-                              target={projectActionRun.target}
-                              storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
-                              open={projectActionRun.open}
-                              onClose={() =>
-                                setProjectActionRun((current) =>
-                                  current === undefined ? undefined : { ...current, open: false },
+                <CanvasChoiceAnswersChangeRevisionContext.Provider
+                  value={machineChanges.canvasChoiceAnswers}
+                >
+                  <ThreadActivityRevisionsContext.Provider value={threadActivityRevisions}>
+                    <SpeechCapabilityProvider
+                      client={speechClient}
+                      instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
+                      settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
+                    >
+                      <TodoListHostSettingsContext.Provider value={todoListHostSettings}>
+                        <OctantCommandProvider commands={octantCommands}>
+                          <OctantDialogPresence>
+                            {remoteTodo === undefined ? null : (
+                              <OctantDialog
+                                label={
+                                  remoteTodo.destination?.project.name ??
+                                  "Thread on paired computer"
+                                }
+                                open
+                                onClose={() => setRemoteTodo(undefined)}
+                              >
+                                {remoteTodoSlot?.bridge === undefined ? (
+                                  <p>Pair with this computer to open its thread.</p>
+                                ) : (
+                                  <RemoteTodoDraft
+                                    key={`${remoteTodo.hostId}:${remoteTodo.todo?.id ?? remoteTodo.thread?.threadId}`}
+                                    bridge={remoteTodoSlot.bridge}
+                                    hostId={remoteTodo.hostId}
+                                    hostName={remoteTodoSlot.displayName}
+                                    connected={remoteTodoSlot.state.kind === "ready"}
+                                    {...(remoteTodo.destination === undefined
+                                      ? {}
+                                      : { project: remoteTodo.destination.project })}
+                                    {...(remoteTodo.todo === undefined
+                                      ? {}
+                                      : { todo: remoteTodo.todo })}
+                                    {...(remoteTodo.thread === undefined
+                                      ? {}
+                                      : { thread: remoteTodo.thread })}
+                                    onCreated={async (link) => {
+                                      if (remoteTodo.todo !== undefined)
+                                        await recordTodoLink(String(remoteTodo.todo.id), link);
+                                    }}
+                                    onClose={() => setRemoteTodo(undefined)}
+                                  />
+                                )}
+                              </OctantDialog>
+                            )}
+                            {todoQuickAddOpen ? (
+                              <TodoQuickAddDialog
+                                list={todoList}
+                                {...(todoThisHostId === undefined
+                                  ? {}
+                                  : { thisHostId: todoThisHostId })}
+                                onClose={() => setTodoQuickAddOpen(false)}
+                                open
+                                projects={todoProjects}
+                              />
+                            ) : null}
+                            {projectActionRun === undefined ? null : (
+                              <ProjectActionRunDialog
+                                key={JSON.stringify(projectActionRun.target)}
+                                client={projectTerminalClient}
+                                target={projectActionRun.target}
+                                storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
+                                open={projectActionRun.open}
+                                onClose={() =>
+                                  setProjectActionRun((current) =>
+                                    current === undefined ? undefined : { ...current, open: false },
+                                  )
+                                }
+                                {...(zen.enabled &&
+                                !serverCodeProjects.workProjects.some(
+                                  (project) =>
+                                    project.projectId === projectActionRun.target.projectId,
                                 )
-                              }
-                              {...(zen.enabled &&
-                              !serverCodeProjects.workProjects.some(
-                                (project) =>
-                                  project.projectId === projectActionRun.target.projectId,
-                              )
+                                  ? {
+                                      onOpenTerminal: (
+                                        terminalId: ReturnType<typeof decodeCodeTerminalId>,
+                                      ) => {
+                                        void (async () => {
+                                          if (!zen.active) await zen.enterZen();
+                                          await zen.pinProjectTerminal({
+                                            projectId: projectActionRun.target.projectId,
+                                            terminalId,
+                                          });
+                                        })();
+                                      },
+                                    }
+                                  : {})}
+                              />
+                            )}
+                          </OctantDialogPresence>
+
+                          <OctantDialogPresence>
+                            {preparationTarget === undefined ? null : (
+                              <WorktreePreparationDialog
+                                key={JSON.stringify(preparationTarget)}
+                                client={projectTerminalClient}
+                                runs={agentRunClient}
+                                target={preparationTarget}
+                                onClose={() => setPreparationTarget(undefined)}
+                              />
+                            )}
+                          </OctantDialogPresence>
+                          {actionsProject === undefined ? null : (
+                            <ProjectActionButtons
+                              actions={activeProjectActions}
+                              {...(activeMode === "code" &&
+                              activeCodeThreadView !== undefined &&
+                              activeCodeThreadView.checkout.kind !== "remote-root" &&
+                              String(activeCodeThreadView.thread.projectId) ===
+                                String(actionsProject.id)
                                 ? {
-                                    onOpenTerminal: (
-                                      terminalId: ReturnType<typeof decodeCodeTerminalId>,
-                                    ) => {
-                                      void (async () => {
-                                        if (!zen.active) await zen.enterZen();
-                                        await zen.pinProjectTerminal({
-                                          projectId: projectActionRun.target.projectId,
-                                          terminalId,
-                                        });
-                                      })();
+                                    onSetup: () => {
+                                      const view = activeCodeThreadView;
+                                      setPreparationTarget({
+                                        projectId: actionsProject.id,
+                                        thread: {
+                                          threadId: view.thread.id,
+                                          checkoutId: view.checkout.id,
+                                          ...(view.checkout.head.kind === "none"
+                                            ? {}
+                                            : { head: view.checkout.head.oid }),
+                                        },
+                                      });
                                     },
                                   }
                                 : {})}
+                              {...(activeMode === "code" &&
+                              activeCodeThreadView !== undefined &&
+                              String(activeCodeThreadView.thread.projectId) ===
+                                String(actionsProject.id)
+                                ? { defaultFolderLabel: "Active checkout" }
+                                : {})}
+                              {...(actionsProject.type === "code"
+                                ? {
+                                    mainFolder: actionsProject.binding.canonicalRoot,
+                                    extraFolders: (actionsProject.extraFolders ?? []).map(
+                                      (folder) => folder.canonicalRoot,
+                                    ),
+                                  }
+                                : {})}
+                              onRun={(action, folder) =>
+                                void runProjectAction(actionsProject.id, action, folder)
+                              }
                             />
                           )}
-                        </OctantDialogPresence>
-
-                        <OctantDialogPresence>
-                          {preparationTarget === undefined ? null : (
-                            <WorktreePreparationDialog
-                              key={JSON.stringify(preparationTarget)}
-                              client={projectTerminalClient}
-                              runs={agentRunClient}
-                              target={preparationTarget}
-                              onClose={() => setPreparationTarget(undefined)}
+                          {serverActionsProject === undefined ? null : (
+                            <ProjectActionButtons
+                              actions={serverActionsProject.actions ?? NO_PROJECT_ACTIONS}
+                              {...(serverActionsProject.folder === undefined
+                                ? {}
+                                : { mainFolder: serverActionsProject.folder })}
+                              defaultFolderLabel={
+                                activeMode === "work" ? "Task folder" : "Active server checkout"
+                              }
+                              onRun={(action, folder) =>
+                                void runProjectAction(
+                                  serverActionsProject.projectId,
+                                  action,
+                                  folder,
+                                )
+                              }
                             />
                           )}
-                        </OctantDialogPresence>
-                        {actionsProject === undefined ? null : (
-                          <ProjectActionButtons
-                            actions={activeProjectActions}
-                            {...(activeMode === "code" &&
-                            activeCodeThreadView !== undefined &&
-                            activeCodeThreadView.checkout.kind !== "remote-root" &&
-                            String(activeCodeThreadView.thread.projectId) ===
-                              String(actionsProject.id)
-                              ? {
-                                  onSetup: () => {
-                                    const view = activeCodeThreadView;
-                                    setPreparationTarget({
-                                      projectId: actionsProject.id,
-                                      thread: {
-                                        threadId: view.thread.id,
-                                        checkoutId: view.checkout.id,
-                                        ...(view.checkout.head.kind === "none"
-                                          ? {}
-                                          : { head: view.checkout.head.oid }),
-                                      },
-                                    });
-                                  },
-                                }
-                              : {})}
-                            {...(activeMode === "code" &&
-                            activeCodeThreadView !== undefined &&
-                            String(activeCodeThreadView.thread.projectId) ===
-                              String(actionsProject.id)
-                              ? { defaultFolderLabel: "Active checkout" }
-                              : {})}
-                            {...(actionsProject.type === "code"
-                              ? {
-                                  mainFolder: actionsProject.binding.canonicalRoot,
-                                  extraFolders: (actionsProject.extraFolders ?? []).map(
-                                    (folder) => folder.canonicalRoot,
-                                  ),
-                                }
-                              : {})}
-                            onRun={(action, folder) =>
-                              void runProjectAction(actionsProject.id, action, folder)
-                            }
-                          />
-                        )}
-                        {serverActionsProject === undefined ? null : (
-                          <ProjectActionButtons
-                            actions={serverActionsProject.actions ?? NO_PROJECT_ACTIONS}
-                            {...(serverActionsProject.folder === undefined
-                              ? {}
-                              : { mainFolder: serverActionsProject.folder })}
-                            defaultFolderLabel={
-                              activeMode === "work" ? "Task folder" : "Active server checkout"
-                            }
-                            onRun={(action, folder) =>
-                              void runProjectAction(serverActionsProject.projectId, action, folder)
-                            }
-                          />
-                        )}
-                        <NeedsYouProvider source={needsYouSource}>
-                          {/* Held here rather than with any Code pane: a thread's controller has to
+                          <NeedsYouProvider source={needsYouSource}>
+                            {/* Held here rather than with any Code pane: a thread's controller has to
         outlive the surfaces reading it, so closing a diff tab never tears down
         the turn that thread is running. */}
-                          <CodeThreadControllerSlots
-                            client={codeClient}
-                            navigationBootstrap={codeController.bootstrap}
-                            readCursorStore={codeReadCursorStore}
-                            registry={codeThreadControllers}
-                            threadIds={openCodeThreadIds}
-                          />
-                          <TrackerReferenceProvider ports={trackerReferencePorts}>
-                            <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
-                              <SidebarThreadTabsContext.Provider value={sidebarThreadTabs}>
-                                <ProjectIconProvider
-                                  serverUrl={props.launch.serverUrl}
-                                  windowCapability={props.projectWindowCapability}
-                                >
-                                  <ProjectIconPrefetch projectIds={projectIconIds} />
-                                  <StableProjectThreadsProvider value={projectThreadsAccess}>
-                                    <NewTaskDraftsContext.Provider value={newTaskDrafts}>
-                                      <StreamRepliesContext.Provider
-                                        value={controller.settings?.streamReplies !== false}
-                                      >
-                                        <ReplyDetailSourceContext.Provider
-                                          value={replyDetailSource}
+                            <CodeThreadControllerSlots
+                              client={codeClient}
+                              navigationBootstrap={codeController.bootstrap}
+                              readCursorStore={codeReadCursorStore}
+                              registry={codeThreadControllers}
+                              threadIds={openCodeThreadIds}
+                            />
+                            <TrackerReferenceProvider ports={trackerReferencePorts}>
+                              <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
+                                <SidebarThreadTabsContext.Provider value={sidebarThreadTabs}>
+                                  <ProjectIconProvider
+                                    serverUrl={props.launch.serverUrl}
+                                    windowCapability={props.projectWindowCapability}
+                                  >
+                                    <ProjectIconPrefetch projectIds={projectIconIds} />
+                                    <StableProjectThreadsProvider value={projectThreadsAccess}>
+                                      <NewTaskDraftsContext.Provider value={newTaskDrafts}>
+                                        <StreamRepliesContext.Provider
+                                          value={controller.settings?.streamReplies !== false}
                                         >
-                                          <ReplyDetailContext.Provider
-                                            value={replyDetailSource.reading.defaultLevel}
+                                          <NextMessageSuggestionsContext.Provider
+                                            value={controller.settings?.nextMessageSuggestions}
                                           >
-                                            {/* The floor for every rendered link: panes that can host a
+                                            <ReplyDetailSourceContext.Provider
+                                              value={replyDetailSource}
+                                            >
+                                              <ReplyDetailContext.Provider
+                                                value={replyDetailSource.reading.defaultLevel}
+                                              >
+                                                {/* The floor for every rendered link: panes that can host a
                     Browser layer their in-app open over this, and surfaces that
                     never can — dock tools, dialogs, Chat — still get the
                     external open and copy rather than a dead anchor. */}
-                                            <MarkdownLinkActionsContext.Provider
-                                              value={rootLinkActions}
-                                            >
-                                              <WorkKindChoiceContext.Provider
-                                                value={workKindChoice}
-                                              >
-                                                <ModelToolVerificationContext.Provider
-                                                  value={providerController.verifyModelTools}
+                                                <MarkdownLinkActionsContext.Provider
+                                                  value={rootLinkActions}
                                                 >
-                                                  <HostFederationStackContext.Provider
-                                                    value={federation}
+                                                  <WorkKindChoiceContext.Provider
+                                                    value={workKindChoice}
                                                   >
-                                                    <PlanUsageProvider
-                                                      client={
-                                                        launchedClients.providerUsageLimitsClient
-                                                      }
-                                                      instances={providerController.instances}
+                                                    <ModelToolVerificationContext.Provider
+                                                      value={providerController.verifyModelTools}
                                                     >
-                                                      <HostPlatformContext.Provider
-                                                        value={hostPlatform}
+                                                      <HostFederationStackContext.Provider
+                                                        value={federation}
                                                       >
-                                                        <ServerCodeProjectsContext.Provider
-                                                          value={serverCodeProjects}
+                                                        <PlanUsageProvider
+                                                          client={
+                                                            launchedClients.providerUsageLimitsClient
+                                                          }
+                                                          instances={providerController.instances}
                                                         >
-                                                          <CodeDebugWindowProvider
-                                                            origin={
-                                                              new URL(props.launch.serverUrl).origin
-                                                            }
-                                                            windowId={String(props.launch.windowId)}
+                                                          <HostPlatformContext.Provider
+                                                            value={hostPlatform}
                                                           >
-                                                            <QuestionnaireDraftsProvider
-                                                              serverUrl={props.launch.serverUrl}
-                                                              windowId={props.launch.windowId}
+                                                            <ServerCodeProjectsContext.Provider
+                                                              value={serverCodeProjects}
                                                             >
-                                                              <PaneDockToolsContext.Provider
-                                                                value={paneDockTools}
+                                                              <CodeDebugWindowProvider
+                                                                origin={
+                                                                  new URL(props.launch.serverUrl)
+                                                                    .origin
+                                                                }
+                                                                windowId={String(
+                                                                  props.launch.windowId,
+                                                                )}
                                                               >
-                                                                {shell}
-                                                              </PaneDockToolsContext.Provider>
-                                                            </QuestionnaireDraftsProvider>
-                                                          </CodeDebugWindowProvider>
-                                                        </ServerCodeProjectsContext.Provider>
-                                                      </HostPlatformContext.Provider>
-                                                    </PlanUsageProvider>
-                                                  </HostFederationStackContext.Provider>
-                                                </ModelToolVerificationContext.Provider>
-                                              </WorkKindChoiceContext.Provider>
-                                            </MarkdownLinkActionsContext.Provider>
-                                          </ReplyDetailContext.Provider>
-                                        </ReplyDetailSourceContext.Provider>
-                                      </StreamRepliesContext.Provider>
-                                    </NewTaskDraftsContext.Provider>
-                                  </StableProjectThreadsProvider>
-                                </ProjectIconProvider>
-                              </SidebarThreadTabsContext.Provider>
-                            </SidebarThreadDragContext.Provider>
-                          </TrackerReferenceProvider>
-                        </NeedsYouProvider>
-                      </OctantCommandProvider>
-                    </TodoListHostSettingsContext.Provider>
-                  </SpeechCapabilityProvider>
-                </ThreadActivityRevisionsContext.Provider>
+                                                                <QuestionnaireDraftsProvider
+                                                                  serverUrl={props.launch.serverUrl}
+                                                                  windowId={props.launch.windowId}
+                                                                >
+                                                                  <PaneDockToolsContext.Provider
+                                                                    value={paneDockTools}
+                                                                  >
+                                                                    <BenchmarkAdviceContext.Provider
+                                                                      value={{
+                                                                        client:
+                                                                          launchedClients.benchmarksClient,
+                                                                        projects:
+                                                                          projectController.allProjects,
+                                                                      }}
+                                                                    >
+                                                                      {shell}
+                                                                    </BenchmarkAdviceContext.Provider>
+                                                                  </PaneDockToolsContext.Provider>
+                                                                </QuestionnaireDraftsProvider>
+                                                              </CodeDebugWindowProvider>
+                                                            </ServerCodeProjectsContext.Provider>
+                                                          </HostPlatformContext.Provider>
+                                                        </PlanUsageProvider>
+                                                      </HostFederationStackContext.Provider>
+                                                    </ModelToolVerificationContext.Provider>
+                                                  </WorkKindChoiceContext.Provider>
+                                                </MarkdownLinkActionsContext.Provider>
+                                              </ReplyDetailContext.Provider>
+                                            </ReplyDetailSourceContext.Provider>
+                                          </NextMessageSuggestionsContext.Provider>
+                                        </StreamRepliesContext.Provider>
+                                      </NewTaskDraftsContext.Provider>
+                                    </StableProjectThreadsProvider>
+                                  </ProjectIconProvider>
+                                </SidebarThreadTabsContext.Provider>
+                              </SidebarThreadDragContext.Provider>
+                            </TrackerReferenceProvider>
+                          </NeedsYouProvider>
+                        </OctantCommandProvider>
+                      </TodoListHostSettingsContext.Provider>
+                    </SpeechCapabilityProvider>
+                  </ThreadActivityRevisionsContext.Provider>
+                </CanvasChoiceAnswersChangeRevisionContext.Provider>
               </ImageJobChangeRevisionContext.Provider>
             </PluginContributionsProvider>
           </FirstPartyPluginsEffectiveContext.Provider>

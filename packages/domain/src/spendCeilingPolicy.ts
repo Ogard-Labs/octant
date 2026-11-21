@@ -52,16 +52,34 @@ export interface SpendCeilingScopeFacts {
    * treating unpriced usage as free.
    */
   readonly usedCostUsdCents?: number;
+  /**
+   * Exact settled US-dollar spend in integer micro-dollars (1 cent = 10,000 micros).
+   * Used for exact monetary comparisons so fractional cents cannot slip past a ceiling.
+   */
+  readonly usedCostUsdMicros?: number;
+  /**
+   * In-flight US-dollar reservations in the window, in whole cents (for display
+   * and callers that only specify cents).
+   */
+  readonly reservedCostUsdCents?: number;
+  /**
+   * Exact in-flight US-dollar reservations in integer micro-dollars.
+   */
+  readonly reservedCostUsdMicros?: number;
 }
 
 export type SpendCeilingAdmission =
   | {
       readonly status: "admitted";
       readonly reservedTokens: number;
+      readonly reservedCostUsdCents?: number;
+      readonly reservedCostUsdMicros?: number;
       readonly reservations: ReadonlyArray<{
         readonly scopeKind: "project" | "thread";
         readonly scopeId: string;
         readonly reservedTokens: number;
+        readonly reservedCostUsdCents?: number;
+        readonly reservedCostUsdMicros?: number;
       }>;
     }
   | { readonly status: "refused"; readonly refusal: SpendCeilingRefusal };
@@ -145,6 +163,8 @@ interface RefusalInput {
   readonly ceilingRunTimeSeconds?: number;
   readonly remainingUsdCents?: number;
   readonly ceilingUsdCents?: number;
+  readonly neededUsdCents?: number;
+  readonly unknownRequestCost?: boolean;
 }
 
 function refusalMessage(input: RefusalInput): string {
@@ -165,7 +185,17 @@ function refusalMessage(input: RefusalInput): string {
   if (input.dimension === "monetary") {
     if (input.kind === "unknown-spend") {
       const wait = input.scopeKind === "project" ? ", wait for this window to end" : "";
+      if (input.unknownRequestCost === true) {
+        return `This ${who}'s money ceiling cannot admit this request because Octant has no price rate for the model or options. Clear the ceiling and set it again without a money budget${wait}, open Usage for this ${who}, or pause work.`;
+      }
       return `This ${who}'s money ceiling cannot be checked because some of its usage in this window has no price: the provider reported no cost and Octant has no rate for the model, or the provider reported no usage. Clear the ceiling and set it again without a money budget${wait}, open Usage for this ${who}, or pause work.`;
+    }
+    if (
+      input.remainingUsdCents !== undefined &&
+      input.remainingUsdCents > 0 &&
+      input.neededUsdCents !== undefined
+    ) {
+      return `This ${who}'s money ceiling has ${formatSpendCeilingUsd(input.remainingUsdCents)} remaining of ${formatSpendCeilingUsd(input.ceilingUsdCents ?? 0)}. This request needs ${formatSpendCeilingUsd(input.neededUsdCents)}. ${recovery}`;
     }
     return `This ${who}'s money ceiling of ${formatSpendCeilingUsd(input.ceilingUsdCents ?? 0)} is used up for this window. ${recovery}`;
   }
@@ -229,10 +259,40 @@ function configuredTurnBound(scopes: ReadonlyArray<SpendCeilingScopeFacts>): num
   return Math.min(...bounds);
 }
 
-function refuseTurnsOrRunTime(facts: SpendCeilingScopeFacts): SpendCeilingRefusal | undefined {
+const USD_MICROS_PER_CENT = 10_000;
+
+function resolveRequestedCostMicros(input: {
+  readonly estimatedCostUsdMicros?: number | "unknown";
+  readonly estimatedCostUsdCents?: number | "unknown";
+}): number | "unknown" | undefined {
+  if (input.estimatedCostUsdMicros === "unknown" || input.estimatedCostUsdCents === "unknown") {
+    return "unknown";
+  }
+  if (input.estimatedCostUsdMicros !== undefined) {
+    return Number.isSafeInteger(input.estimatedCostUsdMicros) && input.estimatedCostUsdMicros > 0
+      ? input.estimatedCostUsdMicros
+      : "unknown";
+  }
+  if (input.estimatedCostUsdCents !== undefined) {
+    if (!Number.isSafeInteger(input.estimatedCostUsdCents) || input.estimatedCostUsdCents <= 0) {
+      return "unknown";
+    }
+    const micros = input.estimatedCostUsdCents * USD_MICROS_PER_CENT;
+    return Number.isSafeInteger(micros) && micros > 0 ? micros : "unknown";
+  }
+  return undefined;
+}
+
+function refuseTurnsRunTimeOrMoney(
+  facts: SpendCeilingScopeFacts,
+  options: {
+    readonly skipTurnAndRunTimeCeiling: boolean;
+    readonly requestedCostUsdMicros?: number | "unknown";
+  },
+): SpendCeilingRefusal | undefined {
   const { turnBudget, runTimeBudgetSeconds } = facts.policy;
   const where = { scopeKind: facts.scopeKind, scopeId: facts.scopeId } as const;
-  if (turnBudget !== undefined) {
+  if (!options.skipTurnAndRunTimeCeiling && turnBudget !== undefined) {
     if (facts.usedTurns === undefined) {
       return makeRefusal({
         ...where,
@@ -251,7 +311,7 @@ function refuseTurnsOrRunTime(facts: SpendCeilingScopeFacts): SpendCeilingRefusa
       });
     }
   }
-  if (runTimeBudgetSeconds !== undefined) {
+  if (!options.skipTurnAndRunTimeCeiling && runTimeBudgetSeconds !== undefined) {
     if (facts.usedRunTimeMs === undefined) {
       return makeRefusal({
         ...where,
@@ -272,7 +332,21 @@ function refuseTurnsOrRunTime(facts: SpendCeilingScopeFacts): SpendCeilingRefusa
   }
   const costBudgetUsdCents = facts.policy.costBudgetUsdCents;
   if (costBudgetUsdCents !== undefined) {
-    if (facts.usedCostUsdCents === undefined) {
+    if (options.requestedCostUsdMicros === "unknown") {
+      return makeRefusal({
+        ...where,
+        kind: "unknown-spend",
+        dimension: "monetary",
+        ceilingUsdCents: costBudgetUsdCents,
+        unknownRequestCost: true,
+      });
+    }
+    const settledMicros =
+      facts.usedCostUsdMicros ??
+      (facts.usedCostUsdCents === undefined
+        ? undefined
+        : facts.usedCostUsdCents * USD_MICROS_PER_CENT);
+    if (settledMicros === undefined || !Number.isSafeInteger(settledMicros) || settledMicros < 0) {
       return makeRefusal({
         ...where,
         kind: "unknown-spend",
@@ -280,7 +354,23 @@ function refuseTurnsOrRunTime(facts: SpendCeilingScopeFacts): SpendCeilingRefusa
         ceilingUsdCents: costBudgetUsdCents,
       });
     }
-    if (facts.usedCostUsdCents >= costBudgetUsdCents) {
+    const reservedMicros =
+      facts.reservedCostUsdMicros ?? (facts.reservedCostUsdCents ?? 0) * USD_MICROS_PER_CENT;
+    const budgetMicros = costBudgetUsdCents * USD_MICROS_PER_CENT;
+    const effectiveUsedMicros = settledMicros + reservedMicros;
+    const remainingMicros = Math.max(0, budgetMicros - effectiveUsedMicros);
+    if (options.requestedCostUsdMicros !== undefined) {
+      if (remainingMicros < options.requestedCostUsdMicros) {
+        return makeRefusal({
+          ...where,
+          kind: "exhausted",
+          dimension: "monetary",
+          remainingUsdCents: Math.floor(remainingMicros / USD_MICROS_PER_CENT),
+          ceilingUsdCents: costBudgetUsdCents,
+          neededUsdCents: Math.ceil(options.requestedCostUsdMicros / USD_MICROS_PER_CENT),
+        });
+      }
+    } else if (effectiveUsedMicros >= budgetMicros) {
       return makeRefusal({
         ...where,
         kind: "exhausted",
@@ -299,12 +389,19 @@ function refuseTurnsOrRunTime(facts: SpendCeilingScopeFacts): SpendCeilingRefusa
  * concurrent admits cannot both take the same remaining capacity. Turn and
  * run-time budgets count in-flight turns, so a turn is admitted while any turn
  * and any run time remains; a turn already running is never cut off when the
- * run-time budget runs out, the next admission refuses instead.
+ * run-time budget runs out, the next admission refuses instead. When
+ * `estimatedCostUsdMicros` or `estimatedCostUsdCents` is supplied (for billed
+ * image generation), monetary ceilings reserve that exact micro-dollar estimate
+ * before dispatch and fail closed when the request has no known price rate.
  */
 export function evaluateSpendCeilingAdmission(input: {
   readonly project?: SpendCeilingScopeFacts;
   readonly thread?: SpendCeilingScopeFacts;
   readonly turnUpperBoundTokens?: number;
+  readonly estimatedCostUsdMicros?: number | "unknown";
+  readonly estimatedCostUsdCents?: number | "unknown";
+  readonly skipTurnAndRunTimeCeiling?: boolean;
+  readonly skipTokenCeiling?: boolean;
 }): SpendCeilingAdmission {
   const scopes = [input.project, input.thread].filter(
     (facts): facts is SpendCeilingScopeFacts => facts !== undefined,
@@ -313,100 +410,139 @@ export function evaluateSpendCeilingAdmission(input: {
     return { status: "admitted", reservedTokens: 0, reservations: [] };
   }
 
+  const skipTurnAndRunTimeCeiling = input.skipTurnAndRunTimeCeiling === true;
+  const skipTokenCeiling = input.skipTokenCeiling === true;
+  const requestedCostUsdMicros = resolveRequestedCostMicros(input);
+
+  if (!skipTokenCeiling) {
+    for (const facts of scopes) {
+      if (facts.overrun !== undefined) {
+        const overrunTokens = Math.max(
+          1,
+          facts.overrun.observedTokens - facts.overrun.reservedTokens,
+        );
+        return {
+          status: "refused",
+          refusal: makeRefusal({
+            kind: "overrun",
+            dimension: "tokens",
+            scopeKind: facts.scopeKind,
+            scopeId: facts.scopeId,
+            overrunTokens,
+            ...(facts.policy.tokenBudget === undefined
+              ? {}
+              : { ceilingTokens: facts.policy.tokenBudget }),
+          }),
+        };
+      }
+    }
+  }
+
   for (const facts of scopes) {
-    if (facts.overrun !== undefined) {
-      const overrunTokens = Math.max(
-        1,
-        facts.overrun.observedTokens - facts.overrun.reservedTokens,
-      );
+    const refusal = refuseTurnsRunTimeOrMoney(facts, {
+      skipTurnAndRunTimeCeiling,
+      ...(requestedCostUsdMicros === undefined ? {} : { requestedCostUsdMicros }),
+    });
+    if (refusal !== undefined) return { status: "refused", refusal };
+  }
+
+  const costScopes =
+    typeof requestedCostUsdMicros === "number"
+      ? scopes.filter((facts) => facts.policy.costBudgetUsdCents !== undefined)
+      : [];
+  const reservedCostUsdMicros =
+    costScopes.length > 0 && typeof requestedCostUsdMicros === "number"
+      ? requestedCostUsdMicros
+      : 0;
+  const reservedCostUsdCents =
+    reservedCostUsdMicros > 0 ? Math.ceil(reservedCostUsdMicros / USD_MICROS_PER_CENT) : 0;
+
+  const tokenScopes = skipTokenCeiling
+    ? []
+    : scopes.filter((facts) => facts.policy.tokenBudget !== undefined);
+
+  let reservedTokens = 0;
+  if (tokenScopes.length > 0) {
+    const bound =
+      input.turnUpperBoundTokens !== undefined &&
+      Number.isSafeInteger(input.turnUpperBoundTokens) &&
+      input.turnUpperBoundTokens > 0
+        ? input.turnUpperBoundTokens
+        : configuredTurnBound(tokenScopes);
+
+    if (bound === undefined || !Number.isSafeInteger(bound) || bound <= 0) {
+      const facts = tokenScopes[0];
       return {
         status: "refused",
         refusal: makeRefusal({
-          kind: "overrun",
+          kind: "missing-turn-bound",
           dimension: "tokens",
-          scopeKind: facts.scopeKind,
-          scopeId: facts.scopeId,
-          overrunTokens,
-          ...(facts.policy.tokenBudget === undefined
+          scopeKind: facts?.scopeKind ?? "thread",
+          scopeId: facts?.scopeId ?? "",
+          ...(facts?.policy.tokenBudget === undefined
             ? {}
             : { ceilingTokens: facts.policy.tokenBudget }),
         }),
       };
     }
+
+    for (const facts of tokenScopes) {
+      const tokenBudget = facts.policy.tokenBudget ?? 0;
+      if (facts.committed.status !== "known") {
+        return {
+          status: "refused",
+          refusal: makeRefusal({
+            kind: "unknown-spend",
+            dimension: "tokens",
+            scopeKind: facts.scopeKind,
+            scopeId: facts.scopeId,
+            ceilingTokens: tokenBudget,
+          }),
+        };
+      }
+      const remaining = remainingTokens(facts, tokenBudget);
+      if (remaining === undefined || remaining < bound) {
+        return {
+          status: "refused",
+          refusal: makeRefusal({
+            kind: "exhausted",
+            dimension: "tokens",
+            scopeKind: facts.scopeKind,
+            scopeId: facts.scopeId,
+            remainingTokens: remaining ?? 0,
+            ceilingTokens: tokenBudget,
+            neededTokens: bound,
+          }),
+        };
+      }
+    }
+    reservedTokens = bound;
   }
 
+  const reservations: Array<{
+    readonly scopeKind: "project" | "thread";
+    readonly scopeId: string;
+    readonly reservedTokens: number;
+    readonly reservedCostUsdCents?: number;
+    readonly reservedCostUsdMicros?: number;
+  }> = [];
   for (const facts of scopes) {
-    const refusal = refuseTurnsOrRunTime(facts);
-    if (refusal !== undefined) return { status: "refused", refusal };
-  }
-
-  const tokenScopes = scopes.filter((facts) => facts.policy.tokenBudget !== undefined);
-  if (tokenScopes.length === 0) {
-    return { status: "admitted", reservedTokens: 0, reservations: [] };
-  }
-
-  const bound =
-    input.turnUpperBoundTokens !== undefined &&
-    Number.isSafeInteger(input.turnUpperBoundTokens) &&
-    input.turnUpperBoundTokens > 0
-      ? input.turnUpperBoundTokens
-      : configuredTurnBound(tokenScopes);
-
-  if (bound === undefined || !Number.isSafeInteger(bound) || bound <= 0) {
-    const facts = tokenScopes[0];
-    return {
-      status: "refused",
-      refusal: makeRefusal({
-        kind: "missing-turn-bound",
-        dimension: "tokens",
-        scopeKind: facts?.scopeKind ?? "thread",
-        scopeId: facts?.scopeId ?? "",
-        ...(facts?.policy.tokenBudget === undefined
-          ? {}
-          : { ceilingTokens: facts.policy.tokenBudget }),
-      }),
-    };
-  }
-
-  for (const facts of tokenScopes) {
-    const tokenBudget = facts.policy.tokenBudget ?? 0;
-    if (facts.committed.status !== "known") {
-      return {
-        status: "refused",
-        refusal: makeRefusal({
-          kind: "unknown-spend",
-          dimension: "tokens",
-          scopeKind: facts.scopeKind,
-          scopeId: facts.scopeId,
-          ceilingTokens: tokenBudget,
-        }),
-      };
-    }
-    const remaining = remainingTokens(facts, tokenBudget);
-    if (remaining === undefined || remaining < bound) {
-      return {
-        status: "refused",
-        refusal: makeRefusal({
-          kind: "exhausted",
-          dimension: "tokens",
-          scopeKind: facts.scopeKind,
-          scopeId: facts.scopeId,
-          remainingTokens: remaining ?? 0,
-          ceilingTokens: tokenBudget,
-          neededTokens: bound,
-        }),
-      };
-    }
+    const hasToken = reservedTokens > 0 && facts.policy.tokenBudget !== undefined;
+    const hasCost = reservedCostUsdMicros > 0 && facts.policy.costBudgetUsdCents !== undefined;
+    if (!hasToken && !hasCost) continue;
+    reservations.push({
+      scopeKind: facts.scopeKind,
+      scopeId: facts.scopeId,
+      reservedTokens: hasToken ? reservedTokens : 0,
+      ...(hasCost ? { reservedCostUsdCents, reservedCostUsdMicros } : {}),
+    });
   }
 
   return {
     status: "admitted",
-    reservedTokens: bound,
-    reservations: tokenScopes.map((facts) => ({
-      scopeKind: facts.scopeKind,
-      scopeId: facts.scopeId,
-      reservedTokens: bound,
-    })),
+    reservedTokens,
+    ...(reservedCostUsdMicros > 0 ? { reservedCostUsdCents, reservedCostUsdMicros } : {}),
+    reservations,
   };
 }
 

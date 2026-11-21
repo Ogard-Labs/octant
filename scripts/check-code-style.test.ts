@@ -56,6 +56,61 @@ describe("code-style check", () => {
     ).toEqual([{ rule: "window-lead-read", file: "apps/server/src/someRoute.ts", line: 1 }]);
   });
 
+  it("refuses ad-hoc uncaughtException and unhandledRejection registrations outside the shared net module", () => {
+    const source = [
+      'process.on("uncaughtException", () => undefined);',
+      "process.once('unhandledRejection', () => undefined);",
+      "process.addListener(`uncaughtExceptionMonitor`, () => undefined);",
+      "process.setUncaughtExceptionCaptureCallback(() => undefined);",
+      'process["on"]("uncaughtException", () => undefined);',
+      "process?.['prependOnceListener'](/* inline */ 'unhandledRejection', () => undefined);",
+      'process.on(/* event */ "uncaughtException", () => undefined);',
+      'process["setUncaughtExceptionCaptureCallback"](() => undefined);',
+      'process["on"]?.("unhandledRejection", () => undefined);',
+      'process.on?.("uncaughtException", () => undefined);',
+      "process.once(\n  // line comment before event\n  'unhandledRejection', () => undefined);",
+      'server.on(/* event */ "close", cleanup);',
+      'const reason = /* fallback */ "uncaughtException";',
+      'const isRejectionRecord = record.exitReason === "unhandledRejection";',
+      'const label = "uncaughtException";',
+    ].join("\n");
+    expect(
+      findTextFindings({
+        "apps/server/src/someService.ts": source,
+        "packages/host-runtime/src/processErrorNet.ts": source,
+      }),
+    ).toEqual([
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 1 },
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 2 },
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 3 },
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 4 },
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 5 },
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 6 },
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 7 },
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 8 },
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 9 },
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 10 },
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 11 },
+    ]);
+    const findings = [
+      { rule: "process-error-listener", file: "apps/server/src/someService.ts", line: 1 },
+    ] as const;
+    expect(serializeBaseline(findings)).toBe("{}\n");
+    expect(
+      compareWithBaseline(findings, {
+        "process-error-listener": { "apps/server/src/someService.ts": 1 },
+      }),
+    ).toEqual([
+      {
+        kind: "exceeded",
+        rule: "process-error-listener",
+        file: "apps/server/src/someService.ts",
+        recorded: 0,
+        current: 1,
+      },
+    ]);
+  });
+
   it("keeps only the oxlint findings this check owns", () => {
     expect(
       findOxlintFindings({

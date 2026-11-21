@@ -309,7 +309,7 @@ function AvailableDiff(
   const tracked = new Map(
     props.snapshot.status
       .filter((entry) => entry.index !== "?" && entry.worktree !== "?")
-      .map((entry) => [String(entry.path), entry.path] as const),
+      .map((entry) => [String(entry.path), entry] as const),
   );
   const mayDiscard =
     policy !== undefined &&
@@ -418,7 +418,17 @@ function AvailableDiff(
     !files.some((file) => file.path === selectedPath);
   const selected =
     files.find((file) => file.path === selectedPath) ?? (selectionMissing ? undefined : files[0]);
-  const trackedPath = selected === undefined ? undefined : tracked.get(selected.path);
+  const trackedEntry =
+    selected === undefined ||
+    selected.nonUtf8Path === true ||
+    (selected.nonUtf8PreviousPath === true && selected.copied !== true)
+      ? undefined
+      : tracked.get(selected.path);
+  const trackedPath =
+    trackedEntry === undefined ||
+    (selected?.nonUtf8PreviousPath === true && trackedEntry.index === "R")
+      ? undefined
+      : trackedEntry.path;
   const changedCount = files.length > 0 ? files.length : props.snapshot.changedPaths.length;
   const totals =
     content.kind === "ready"
@@ -768,7 +778,9 @@ function AvailableDiff(
           <div className="code-diff-pane__detail">
             <div className="code-diff-pane__detail-header">
               <h2>{selected.path}</h2>
-              {props.diff.state === "available" && providerReadsAvailable ? (
+              {props.diff.state === "available" &&
+              providerReadsAvailable &&
+              selected.nonUtf8Path !== true ? (
                 <OctantButton
                   size="sm"
                   variant="outline"
@@ -781,7 +793,9 @@ function AvailableDiff(
               {selected.previousPath === undefined ? null : (
                 <p className="code-diff-pane__renamed-from">Renamed from {selected.previousPath}</p>
               )}
-              {props.onOpenFile === undefined || selected.change === "deleted" ? null : (
+              {props.onOpenFile === undefined ||
+              selected.change === "deleted" ||
+              selected.nonUtf8Path === true ? null : (
                 <OctantButton
                   size="sm"
                   variant="outline"

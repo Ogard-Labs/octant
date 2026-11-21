@@ -3,13 +3,8 @@ import {
   decodeToolActionAuthority,
   decodeToolActionCancellation,
   decodeToolActionRequest,
-  decodeToolEvidence,
 } from "@octant/contracts";
-import {
-  authorizeToolAction,
-  canRecordToolEvidence,
-  canRequestToolCancellation,
-} from "./toolActionPolicy";
+import { authorizeToolAction, canRequestToolCancellation } from "./toolActionPolicy";
 
 const authority = decodeToolActionAuthority({
   hostId: "11111111-1111-4111-8111-111111111111",
@@ -58,27 +53,7 @@ describe("tool action authority", () => {
 });
 
 describe("tool action correlation", () => {
-  it("accepts evidence and cancellation only when action, correlation, and authority all match", () => {
-    const evidence = decodeToolEvidence({
-      evidenceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-      actionId: request.actionId,
-      correlationId: request.correlationId,
-      authority,
-      kind: "validation-report",
-      reference: "evidence-1",
-      origin: "tool-result",
-    });
-    expect(canRecordToolEvidence(request, evidence)).toBe(true);
-    expect(
-      canRecordToolEvidence(
-        request,
-        decodeToolEvidence({
-          ...evidence,
-          correlationId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-        }),
-      ),
-    ).toBe(false);
-
+  it("accepts cancellation only when action, correlation, and authority all match", () => {
     expect(
       canRequestToolCancellation(
         request,

@@ -1,6 +1,32 @@
+import { lstat, realpath } from "node:fs/promises";
+import { resolve } from "node:path";
 import type { CodeCheckoutIdentity, CodeFileReference, CodeThread } from "@octant/contracts";
 import { admitDesktopBroker, admitsWindow } from "./desktopBrokerAdmission";
 import type { WindowAuthorityStore } from "./windowAuthorityStore";
+
+/**
+ * Resolves a candidate file inside an authorized root to its canonical host
+ * path, failing closed if traversal, a symlink, or a non-file target escapes
+ * the root.
+ */
+export async function resolveConfinedDesktopFilePath(input: {
+  readonly rootPath: string;
+  readonly relativePath: string;
+  readonly isConfined: (root: string, candidate: string) => boolean;
+}): Promise<string | undefined> {
+  try {
+    const canonicalRoot = await realpath(input.rootPath);
+    const candidate = resolve(canonicalRoot, input.relativePath);
+    if (!input.isConfined(canonicalRoot, candidate)) return undefined;
+    const file = await realpath(candidate);
+    if (!input.isConfined(canonicalRoot, file)) return undefined;
+    const metadata = await lstat(file);
+    if (!metadata.isFile()) return undefined;
+    return file;
+  } catch {
+    return undefined;
+  }
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -9,6 +35,7 @@ interface TargetRequest {
   readonly threadId: string;
   readonly checkoutId: string;
   readonly fileId: string;
+  readonly defaultApplication?: boolean;
 }
 
 interface CheckoutTargetRequest {
@@ -57,7 +84,10 @@ export function createCodeExternalEditorRouteHandler(options: {
   readonly resolve: (input: TargetRequest) => Promise<
     | {
         readonly file: string;
-        readonly editor: { readonly executable: string; readonly arguments: ReadonlyArray<string> };
+        readonly editor?: {
+          readonly executable: string;
+          readonly arguments: ReadonlyArray<string>;
+        };
       }
     | undefined
   >;
@@ -88,8 +118,20 @@ export function createCodeExternalEditorRouteHandler(options: {
     }
     if (
       !record(body) ||
-      !exact(body, ["windowId", "threadId", "checkoutId", "fileId", "line", "column"])
+      (!exact(body, ["windowId", "threadId", "checkoutId", "fileId", "line", "column"]) &&
+        !exact(body, [
+          "windowId",
+          "threadId",
+          "checkoutId",
+          "fileId",
+          "line",
+          "column",
+          "defaultApplication",
+        ]))
     ) {
+      return failure("invalid", 400);
+    }
+    if ("defaultApplication" in body && typeof body.defaultApplication !== "boolean") {
       return failure("invalid", 400);
     }
     for (const key of ["windowId", "threadId", "checkoutId", "fileId"] as const) {
@@ -98,10 +140,12 @@ export function createCodeExternalEditorRouteHandler(options: {
     if (!admitsWindow(admission, body.windowId)) return failure("unauthorized", 401);
     if (!positive(body.line) || !positive(body.column)) return failure("invalid", 400);
 
+    const defaultApplication =
+      "defaultApplication" in body ? (body.defaultApplication as boolean) : undefined;
     let target:
       | {
           readonly file: string;
-          readonly editor: {
+          readonly editor?: {
             readonly executable: string;
             readonly arguments: ReadonlyArray<string>;
           };
@@ -113,12 +157,23 @@ export function createCodeExternalEditorRouteHandler(options: {
         threadId: body.threadId as string,
         checkoutId: body.checkoutId as string,
         fileId: body.fileId as string,
+        ...(defaultApplication === undefined ? {} : { defaultApplication }),
       });
     } catch {
       return failure("unavailable", 503);
     }
     if (target === undefined) return failure("unavailable", 404);
-    return Response.json({ ...target, line: body.line, column: body.column });
+    if (defaultApplication !== true && target.editor === undefined) {
+      return failure("unavailable", 404);
+    }
+    return Response.json({
+      file: target.file,
+      ...(defaultApplication === true || target.editor === undefined
+        ? {}
+        : { editor: target.editor }),
+      line: body.line,
+      column: body.column,
+    });
   };
 }
 

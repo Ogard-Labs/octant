@@ -161,6 +161,33 @@ describe("Code language agent tools", () => {
     });
   });
 
+  it("offers octant_code at Full access with that turn posture so repository tooling can start without approval", async () => {
+    const thread = codeThread({ executionPolicy: "full-access" });
+    const answer: CodeLanguageAgentReadResult = {
+      status: "diagnostics",
+      threadId: thread.id,
+      checkoutId: thread.checkoutId,
+      fileId: "50000000-0000-4000-8000-000000000001" as never,
+      diagnostics: [],
+      truncated: false,
+      repositoryTooling: true,
+    };
+    const full = tools({ thread, answer });
+    expect(full.offered?.definitions.map((definition) => definition.name)).toEqual([
+      CODE_LANGUAGE_TOOL_NAME,
+    ]);
+    expect(full.servesAgentsIn).toHaveBeenCalledWith(["/checkout"], {
+      projectId: thread.projectId,
+      posture: "full-access",
+      threadId: thread.id,
+    });
+    await expect(full.call({ operation: "diagnostics", path: "src/b.ts" })).resolves.toEqual({
+      result: { path: "src/b.ts", diagnostics: [], truncated: false },
+      isError: false,
+      outsideContent: { labels: [] },
+    });
+  });
+
   it("marks an answer a repository-tooling server computed as outside content, and withholds one it cannot mark", async () => {
     const thread = codeThread({ executionPolicy: "approval-gated" });
     const answer: CodeLanguageAgentReadResult = {

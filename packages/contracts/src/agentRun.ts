@@ -980,13 +980,6 @@ export const AgentRunConversationStreamFrame = Schema.Struct({
 }).annotations(strict);
 export type AgentRunConversationStreamFrame = typeof AgentRunConversationStreamFrame.Type;
 
-export const AGENT_RUN_EVENT_NAMES = [
-  "agent.run-requested@1",
-  "agent.run-status-changed@1",
-  "agent.run-result-acknowledged@1",
-] as const;
-export type AgentRunEventName = (typeof AGENT_RUN_EVENT_NAMES)[number];
-
 export const decodeAgentRunId = Schema.decodeUnknownSync(AgentRunId);
 export const decodeAgentRunRequestId = Schema.decodeUnknownSync(AgentRunRequestId);
 export const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(AgentRunParentThreadId);

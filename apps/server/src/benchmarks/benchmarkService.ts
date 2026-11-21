@@ -1,11 +1,14 @@
 import type { EventActor } from "@octant/contracts";
 import {
+  DEFAULT_BENCHMARK_PASS_THRESHOLD,
   MAX_BENCHMARK_CELLS,
   decodeBenchmarkCellId,
   decodeBenchmarkRun,
   decodeBenchmarkRunId,
   decodeBenchmarkSuite,
   decodeUtcTimestamp,
+  type BenchmarkAdviceRequest,
+  type BenchmarkAdviceResponse,
   type BenchmarkCellMetrics,
   type BenchmarkCellRateRequest,
   type BenchmarkRating,
@@ -35,6 +38,7 @@ import {
   benchmarkLeaderboard,
   benchmarkOverhead,
   planBenchmarkCells,
+  rankModelsForSuite,
   summarizeBenchmarkRun,
 } from "@octant/domain";
 import type { BenchmarkEventStore } from "./benchmarkEventStore";
@@ -119,6 +123,37 @@ export class BenchmarkService {
     return this.#options.projection.suites();
   }
 
+  advice(request: BenchmarkAdviceRequest, now: number): BenchmarkAdviceResponse {
+    const { projection, turnMetrics, contenderAvailable } = this.#options;
+    const suites = projection
+      .suites()
+      .filter((suite) =>
+        "suiteId" in request
+          ? String(suite.suiteId) === String(request.suiteId)
+          : suite.projectId !== undefined &&
+            String(suite.projectId) === String(request.projectId) &&
+            suite.kind === request.kind,
+      );
+    if (suites.length === 0) return { suites: [] };
+    const runs = projection.runs();
+    return {
+      suites: suites.map((suite) => ({
+        suiteId: suite.suiteId,
+        name: suite.name,
+        models: rankModelsForSuite(
+          runs.filter((run) => String(run.suiteId) === String(suite.suiteId)),
+          suite.passThreshold,
+          (cell) => {
+            const record =
+              cell.threadId === undefined ? undefined : turnMetrics.forThread(cell.threadId).at(-1);
+            return record === undefined ? undefined : benchmarkCellMetrics(record);
+          },
+          now,
+        ).filter((model) => contenderAvailable(model.providerInstanceId, model.modelId)),
+      })),
+    };
+  }
+
   /**
    * On each change, `actor` is who asked, as the route resolved it from the
    * authenticated principal: a paired device's change is journaled as that
@@ -140,12 +175,17 @@ export class BenchmarkService {
       );
     }
     const now = decodeUtcTimestamp(clock());
+    const projectId = request.projectId === undefined ? existing?.projectId : request.projectId;
     const suite = decodeBenchmarkSuite({
       suiteId: request.suiteId,
       revision: (existing?.revision ?? 0) + 1,
       name: request.name,
       ...(request.description === undefined ? {} : { description: request.description }),
       cases: request.cases,
+      passThreshold:
+        request.passThreshold ?? existing?.passThreshold ?? DEFAULT_BENCHMARK_PASS_THRESHOLD,
+      kind: request.kind ?? existing?.kind ?? "chat",
+      ...(projectId === undefined || projectId === null ? {} : { projectId }),
       ...(request.judge === undefined ? {} : { judge: request.judge }),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,

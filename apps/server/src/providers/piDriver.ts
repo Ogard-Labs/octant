@@ -622,9 +622,21 @@ function makeConnection(
         : Effect.succeed(state);
     };
 
+    /**
+     * What a turn that ends without settling already spent: the requests Pi
+     * finished before the process went away or broke its protocol were billed
+     * all the same. Only whole counts are reported; one request that reported
+     * none would make the sum understate the turn, so it stays unreported.
+     */
+    const reportSpentUsage = (state: SessionState) => {
+      if (state.promptActive && state.usage !== undefined && !state.usageIncomplete)
+        emit(state, state.usage);
+    };
+
     const protocolFailure = (state: SessionState, message: string) => {
       if (state.terminal) return;
       state.terminal = true;
+      reportSpentUsage(state);
       emit(state, { kind: "failed", failure: failure("protocol", message) });
     };
 
@@ -860,6 +872,7 @@ function makeConnection(
           requestId,
           action: toolName,
           description: `Allow Pi ${toolName} for this session?`,
+          toolCallId,
         });
         return;
       }
@@ -1186,6 +1199,7 @@ function makeConnection(
                 if (state.closed) return;
                 if (!state.terminal) {
                   state.terminal = true;
+                  reportSpentUsage(state);
                   emit(state, {
                     kind: "failed",
                     failure: failure("interrupted", "Pi process disconnected."),

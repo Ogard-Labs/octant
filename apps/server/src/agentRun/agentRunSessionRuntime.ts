@@ -58,6 +58,7 @@ import {
   RUNTIME_OUTSIDE_CONTENT_REFUSAL,
   type RuntimeOutsideContentMarking,
 } from "../context/runtimeOutsideContentMark";
+import { appToolHostLines } from "../providers/appToolHostLines";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import type { AgentRunSessionRecord, AgentRunSessionStatePort } from "./agentRunSessionStore";
@@ -310,6 +311,14 @@ export interface AgentRunSessionRuntimeOptions {
     readonly usage?: TurnUsage;
   }) => void;
   readonly context: AgentRunContextSnapshotPort;
+  /**
+   * The lead thread's person-memory block, or `undefined` when the lead does
+   * not take part or has nothing to say. Sent once on a fresh start and never
+   * duplicated on a continuation that already holds it. `ownerWindowId` carries
+   * the caller's verified scope during retry/resume before the execution map is
+   * rebound.
+   */
+  readonly personMemoryBlock?: (run: AgentRun, ownerWindowId?: string) => string | undefined;
   readonly inputsCurrent?: (manifest: ConversationInputManifest) => boolean;
   readonly prepareInputs?: (input: {
     readonly run: AgentRun;
@@ -383,6 +392,7 @@ export interface AgentRunSessionRuntimeOptions {
     readonly run: AgentRun;
     readonly authority: AgentRunAuthority;
     readonly projectRoot: string;
+    readonly ownerWindowId?: string;
   }) => AppManagedToolSet | undefined;
   /**
    * The run's record of tool calls about to take effect
@@ -547,7 +557,11 @@ export function createAgentRunSessionRuntime(
     return previous;
   };
 
-  const prepareSession = (run: AgentRun, continuation?: { readonly message?: string }) => {
+  const prepareSession = (
+    run: AgentRun,
+    continuation?: { readonly message?: string },
+    ownerWindowId?: string,
+  ) => {
     if (sessions.has(run.id))
       throw new AgentRunSessionError(
         "provider-unavailable",
@@ -578,9 +592,16 @@ export function createAgentRunSessionRuntime(
       );
     }
 
+    const personMemoryText =
+      continuation !== undefined || resolvedContext.some((block) => block.kind === "person-memory")
+        ? undefined
+        : options.personMemoryBlock?.(run, ownerWindowId);
     const source =
       run.workspaceReceipt.kind === "code-worktree" ? run.workspaceReceipt.source : undefined;
     const context: ReadonlyArray<ProviderContextBlock> = [
+      ...(personMemoryText === undefined
+        ? []
+        : [{ kind: "person-memory" as const, text: personMemoryText }]),
       ...resolvedContext,
       ...(source === undefined
         ? []
@@ -592,7 +613,12 @@ export function createAgentRunSessionRuntime(
           ]),
     ];
 
-    const appManagedTools = options.appManagedTools?.({ run, authority, projectRoot });
+    const appManagedTools = options.appManagedTools?.({
+      run,
+      authority,
+      projectRoot,
+      ...(ownerWindowId === undefined ? {} : { ownerWindowId }),
+    });
     if (appManagedTools !== undefined && appManagedTools.definitions.length > 0) {
       const transport = options.appManagedToolTransport?.({
         providerInstanceId: target.providerInstanceId,
@@ -758,6 +784,7 @@ export function createAgentRunSessionRuntime(
       spendReservationId,
       providerSessionId,
       record,
+      ownerWindowId,
       claim: () => {
         if (owned)
           throw new AgentRunSessionError(
@@ -793,6 +820,7 @@ export function createAgentRunSessionRuntime(
       reservationId,
       spendReservationId,
       providerSessionId,
+      ownerWindowId,
     } = prepared;
     let record = prepared.record;
     let reviewCapture: AgentRunReviewCaptureLease | undefined;
@@ -804,7 +832,12 @@ export function createAgentRunSessionRuntime(
           "provider-unavailable",
           "This child already owns a live session.",
         );
-      appManagedTools = options.appManagedTools?.({ run, authority, projectRoot });
+      appManagedTools = options.appManagedTools?.({
+        run,
+        authority,
+        projectRoot,
+        ...(ownerWindowId === undefined ? {} : { ownerWindowId }),
+      });
       toolEffects = options.toolEffects?.(run);
       options.capacityScheduler.markRunning(reservationId);
       prepared.claim();
@@ -1043,7 +1076,19 @@ export function createAgentRunSessionRuntime(
             driver,
             authority,
             projectRoot,
-            context: continuation === undefined ? context : [],
+            // A child is told when to use each Octant tool it is offered, as a
+            // lead is; a follow-up continues a session that already has them.
+            context:
+              continuation === undefined
+                ? [
+                    ...context,
+                    ...appToolHostLines(appManagedTools?.definitions).map((line) => ({
+                      kind: "instructions" as const,
+                      text: line.text,
+                      tool: line.tool,
+                    })),
+                  ]
+                : [],
             ...(continuation !== undefined || run.routingReceipt.admittedInputCount === undefined
               ? {}
               : {
@@ -1268,22 +1313,24 @@ export function createAgentRunSessionRuntime(
         };
       }
     },
-    prepareStart: (run) => {
-      const prepared = prepareSession(run);
+    prepareStart: (run, input) => {
+      const prepared = prepareSession(run, undefined, input?.ownerWindowId);
       return {
         start: (started) => startSession(started, undefined, prepared),
         release: prepared.release,
       };
     },
     prepareResume: (run, input) => {
-      const prepared = prepareSession(run, input ?? {});
+      const prepared = prepareSession(run, input ?? {}, input?.ownerWindowId);
       return {
         start: (started) => startSession(started, input ?? {}, prepared),
         release: prepared.release,
       };
     },
-    start: (run) => startSession(run),
-    resume: (run, input) => startSession(run, input ?? {}),
+    start: (run, input) =>
+      startSession(run, undefined, prepareSession(run, undefined, input?.ownerWindowId)),
+    resume: (run, input) =>
+      startSession(run, input ?? {}, prepareSession(run, input ?? {}, input?.ownerWindowId)),
     steer: async ({ runId, message }) => {
       const live = sessions.get(runId);
       if (
@@ -1889,6 +1936,8 @@ function runSessionTurn(
             // The clamped run authority is what reaches the provider. Nothing here
             // may widen it, and no parent-thread policy is consulted.
             executionPolicy: input.authority.executionPolicy,
+            // Every approval a helper gets holds for that one call.
+            answersOncePerCall: true,
             ...(sandboxPolicy === undefined ? {} : { fullAccessSandbox: true }),
             tools: input.appManagedTools?.definitions ?? [],
           })
@@ -1900,6 +1949,7 @@ function runSessionTurn(
               ? {}
               : { modelOptionValues: input.modelOptionValues }),
             executionPolicy: input.authority.executionPolicy,
+            answersOncePerCall: true,
             ...(sandboxPolicy === undefined ? {} : { fullAccessSandbox: true }),
             tools: input.appManagedTools?.definitions ?? [],
           });

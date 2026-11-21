@@ -604,6 +604,91 @@ describe("reconcileCodeRestart", () => {
       connection.close();
     }
   });
+
+  it("replays older thread journals without coordinator done-when cleanly alongside newer updates that set and clear it", () => {
+    const { connection, journal, projection } = openStore();
+    try {
+      // Older journal entries contain no coordinatorDoneWhen field.
+      appendFixture(journal);
+      const before = readCodeThreads(connection);
+      expect(before).toHaveLength(1);
+      expect(before[0]?.coordinatorDoneWhen).toBeUndefined();
+
+      const doneWhen = {
+        items: [
+          {
+            kind: "pull-request-merged" as const,
+            repositoryOwner: "Ogard-Labs",
+            repositoryName: "octant",
+            number: 42,
+          },
+          {
+            kind: "pull-request-checks-green" as const,
+            repositoryOwner: "Ogard-Labs",
+            repositoryName: "octant",
+            number: 42,
+          },
+        ],
+      };
+      const base = before[0];
+      if (base === undefined) throw new Error("expected projected thread");
+
+      journal.append({
+        aggregate: { aggregateType: "code-thread", aggregateId: ids.thread },
+        expectedVersion: 2,
+        events: [
+          {
+            eventId: "81000000-0000-4000-8000-000000000201",
+            eventName: "code.thread-updated@1",
+            eventVersion: 1,
+            correlationId: ids.correlation,
+            actor: { kind: "local-user", actorId: ids.actor },
+            occurredAt: now,
+            payload: {
+              kind: "thread-updated",
+              thread: {
+                ...base,
+                coordinator: true,
+                coordinatorDoneWhen: doneWhen,
+                version: 3,
+              },
+            },
+          },
+        ],
+      });
+      expect(readCodeThreads(connection)[0]?.coordinatorDoneWhen).toEqual(doneWhen);
+
+      // Full rebuild from journal replays both old frames and the new condition.
+      rebuildProjection({ connection, journal, projection, clock: () => now });
+      expect(readCodeThreads(connection)[0]?.coordinatorDoneWhen).toEqual(doneWhen);
+
+      // Clearing the condition replays back to absent.
+      const { coordinatorDoneWhen: _cleared, ...withoutCondition } =
+        readCodeThreads(connection)[0] ?? base;
+      journal.append({
+        aggregate: { aggregateType: "code-thread", aggregateId: ids.thread },
+        expectedVersion: 3,
+        events: [
+          {
+            eventId: "81000000-0000-4000-8000-000000000202",
+            eventName: "code.thread-updated@1",
+            eventVersion: 1,
+            correlationId: ids.correlation,
+            actor: { kind: "local-user", actorId: ids.actor },
+            occurredAt: now,
+            payload: {
+              kind: "thread-updated",
+              thread: { ...withoutCondition, version: 4 },
+            },
+          },
+        ],
+      });
+      rebuildProjection({ connection, journal, projection, clock: () => now });
+      expect(readCodeThreads(connection)[0]?.coordinatorDoneWhen).toBeUndefined();
+    } finally {
+      connection.close();
+    }
+  });
 });
 
 function openStore() {

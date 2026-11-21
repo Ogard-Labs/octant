@@ -1,6 +1,6 @@
 import { OwnerApprovalId } from "@octant/contracts/owner-approvals";
 import { strictKeptForLaunch } from "../strictResolution";
-import type { StalledTurnScope } from "../providers/turnBudget";
+import { sanitizeLoopNoticeToolName, type StalledTurnScope } from "../providers/turnBudget";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import type { DesignSystemTurnContext } from "../designSystems/designSystemContext";
 import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecovery";
@@ -118,6 +118,7 @@ import type {
 import type { Journal } from "../persistence/journal";
 import type { OutlivingSessions } from "../providers/outlivingSessions";
 import { createGhPullRequestPort } from "./ghPullRequestActionPort";
+import type { PullRequestLinkReader, PullRequestLinkRecorder } from "./pullRequestLinkService";
 import { createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
 import { GitMutationPort } from "./gitMutationPort";
 import {
@@ -165,6 +166,8 @@ import {
   projectExtraFoldersInstructions,
   turnBlocksInPlaceRestore,
   unsupportedModelOptionValues,
+  createTurnActivityTiming,
+  type TurnActivityTimingTracker,
 } from "@octant/domain";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import { WORK_TURN_SAFE_INPUT_TOKENS } from "../work/workTurnContext";
@@ -258,7 +261,11 @@ import {
 } from "./codeAppManagedTools";
 import type { CodePlannerToolPort } from "./codePlannerTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
-import type { TurnToolEffects } from "../toolEffects/toolEffectLedger";
+import {
+  executingToolCallId,
+  whileApprovalWaited,
+  type TurnToolEffects,
+} from "../toolEffects/toolEffectLedger";
 import { heldTurnContext } from "../providers/heldTurnContext";
 import {
   PROVIDER_CONTEXT_RESTATED,
@@ -271,6 +278,11 @@ import {
 } from "../canvas/canvasDeliveryInstructions";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
 import { appToolHostLines } from "../providers/appToolHostLines";
+import {
+  nativeSessionHistoryAppend,
+  readImportedSessionHistory,
+  readJournaledSessionHistory,
+} from "../providers/nativeSessionHistory";
 import { STOP_CONFIRMATION_MS } from "../stopConfirmation";
 
 type Awaitable<T> = T | Promise<T>;
@@ -347,6 +359,7 @@ function defaultAcpTerminalConfinement(): CodeAcpTerminalConfinement {
 
 export interface CodeOperationRuntimeOptions {
   readonly prepareWorktree?: CodeOperationServiceOptions["prepareWorktree"];
+  readonly checkoutObserved?: CodeOperationServiceOptions["checkoutObserved"];
   /** How long a Stop waits for the runtime to confirm it; defaults to {@link STOP_CONFIRMATION_MS}. */
   readonly stopConfirmationMs?: number;
   /**
@@ -519,6 +532,7 @@ export interface CodeOperationRuntimeOptions {
   ) => Promise<Pick<ProviderProbeResult, "readiness" | "models">>;
   readonly ghExecutable?: string;
   readonly pullRequestPort?: CodeOperationPullRequestPort;
+  readonly pullRequestLinks?: PullRequestLinkRecorder & Partial<PullRequestLinkReader>;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
   readonly terminalProcessPort?: Pick<TerminalProcessPort, "start"> & {
     readonly reconcile?: () => Promise<void>;
@@ -701,6 +715,7 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly readThread: () => CodeThread | undefined;
     readonly folders: ReadonlyArray<string>;
+    readonly operationId?: string;
     /** The routine run this turn was started for, from the dispatcher only. */
     readonly routineRun?: AutomationRunReference;
     /**
@@ -730,6 +745,8 @@ export interface CodeOperationRuntimeOptions {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
   }) => AppManagedToolSet | undefined;
+  /** Host platform override for tests; defaults to `process.platform`. */
+  readonly platform?: NodeJS.Platform;
   /**
    * The agent-run tool set for this thread: the model petitions the server's
    * own run admission for a child run, scoped to this thread as the parent.
@@ -748,6 +765,8 @@ export interface CodeOperationRuntimeOptions {
   readonly nativeHarnessTools?: (input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
+    /** The main checkout root when `checkoutRoot` is a selected subdirectory or extra folder. */
+    readonly mainCheckoutRoot?: string;
     readonly extraFolders?: ReadonlyArray<string>;
     readonly windowId: WindowId;
     /** The turn's resolved credential values, which a journal read redacts. */
@@ -921,6 +940,7 @@ export interface CodeOperationRuntimeOptions {
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
   readonly resolveSideChatReturns?: CodeOperationServiceOptions["resolveSideChatReturns"];
+  readonly resolvePullRequestLineNotesAuthorship?: CodeOperationServiceOptions["resolvePullRequestLineNotesAuthorship"];
   /** Reads the `@file` mentions a turn names against this thread's bound root. */
   readonly resolveFileMentionContext?: CodeOperationServiceOptions["resolveFileMentionContext"];
   /** Takes the notes the user pointed at the running product into the next turn. */
@@ -1036,6 +1056,9 @@ export interface CodeOperationRuntime {
     threadId: CodeThreadId,
     checkoutId: import("@octant/contracts").CodeCheckoutId,
   ): Promise<import("@octant/contracts").CodeRepositoryTestStatus>;
+  createReviewFinding?: ReviewFindingService["create"];
+  resolveReviewTarget?: CodeOperationService["resolveReviewTarget"];
+  retainPullRequestDiff?: CodeOperationService["retainPullRequestDiff"];
   conversation(
     windowId: WindowId,
     threadId: CodeThreadId,
@@ -1497,7 +1520,10 @@ export function createCodeOperationRuntime(
   const readRuntimeWorks = options.persistence.readCodeRuntimeWorks;
   const service = new CodeOperationService({
     authority: authorityForTurn,
+    ...(options.platform === undefined ? {} : { platform: options.platform }),
     threadStrict: (thread: CodeThread) => options.resolveStrict?.(thread.id) ?? true,
+    providerDriverKind: async (thread: CodeThread) =>
+      (await options.resolveProviderDriver(thread))?.kind,
     ...(readRuntimeWorks === undefined
       ? {}
       : {
@@ -1584,6 +1610,9 @@ export function createCodeOperationRuntime(
     },
     ...(approvalValidator === undefined ? {} : { approvals: approvalValidator }),
     ...(options.prepareWorktree === undefined ? {} : { prepareWorktree: options.prepareWorktree }),
+    ...(options.checkoutObserved === undefined
+      ? {}
+      : { checkoutObserved: options.checkoutObserved }),
     terminals: terminal,
     ...(options.terminalBrowserGrants === undefined
       ? {}
@@ -1640,28 +1669,47 @@ export function createCodeOperationRuntime(
     ...(options.supportsSessionRollback === undefined
       ? {}
       : {
-          supportsSessionRollback: async (thread, lastKeptTurn) => {
+          supportsSessionRollback: async (thread, lastKeptTurn, providerRoot) => {
             if (options.supportsSessionRollback?.(thread) !== true) return false;
             if (lastKeptTurn === undefined) return true;
             // A runtime that copies its own session cuts only at the anchor
-            // the last kept turn journaled; without one the rewind sends the
-            // text handoff, so the preview must not promise a copy. The
-            // harness's transcript copy needs no anchor.
+            // the last kept turn journaled, and only for the same folder and
+            // mode; otherwise the rewind sends the text handoff, so the
+            // preview must not promise a copy. The harness's transcript copy
+            // needs no anchor.
             const driver = await Promise.resolve(options.resolveProviderDriver(thread)).catch(
               () => undefined,
             );
             if (driver?.forkSession === undefined) return true;
             const anchor = options.nativeTurnAnchor?.(thread.id, String(lastKeptTurn));
-            return (
-              anchor !== undefined &&
-              String(anchor.providerInstanceId) === String(thread.providerInstanceId)
-            );
+            if (
+              anchor === undefined ||
+              anchor.anchor.trim().length === 0 ||
+              String(anchor.providerInstanceId) !== String(thread.providerInstanceId)
+            )
+              return false;
+            const binding = anchor.resumeCursor.binding;
+            if (binding !== undefined) {
+              if (
+                String(binding.instanceId) !== String(thread.providerInstanceId) ||
+                binding.mode !== "code" ||
+                (providerRoot !== undefined && binding.projectRoot !== providerRoot)
+              )
+                return false;
+            }
+            return true;
           },
         }),
+    ...(options.pullRequestLinks === undefined
+      ? {}
+      : { pullRequestLinks: options.pullRequestLinks }),
     events,
     ...(options.resolveSideChatReturns === undefined
       ? {}
       : { resolveSideChatReturns: options.resolveSideChatReturns }),
+    ...(options.resolvePullRequestLineNotesAuthorship === undefined
+      ? {}
+      : { resolvePullRequestLineNotesAuthorship: options.resolvePullRequestLineNotesAuthorship }),
     ...(options.resolveThreadMentionContext === undefined
       ? {}
       : { resolveThreadMentionContext: options.resolveThreadMentionContext }),
@@ -1747,6 +1795,17 @@ export function createCodeOperationRuntime(
    * synchronously so a caller can act on the answer before another turn is
    * admitted.
    */
+  const adoptedWithHistory = (threadId: CodeThreadId, nativeSessionId: string) => {
+    const history = readJournaledSessionHistory(
+      options.persistence.journal,
+      String(threadId),
+      "code",
+    );
+    return {
+      nativeSessionId: decodeCodeNativeSessionId(nativeSessionId),
+      ...(history === undefined ? {} : { history }),
+    };
+  };
   const conversationRefusal = (
     thread: CodeThread,
   ): { readonly message: string; readonly adopted?: string } | undefined => {
@@ -2090,7 +2149,7 @@ export function createCodeOperationRuntime(
           command.kind === "start-provider-turn"
             ? undefined
             : hostSandboxRefusal({
-                platform: process.platform,
+                platform: options.platform ?? process.platform,
                 ...operationAccess(windowId, command),
               });
         if (sandboxRefusal !== undefined)
@@ -2408,7 +2467,7 @@ export function createCodeOperationRuntime(
             unavailable: target.message,
             ...(target.adopted === undefined
               ? {}
-              : { adopted: { nativeSessionId: target.adopted } }),
+              : { adopted: adoptedWithHistory(threadId, target.adopted) }),
           };
         const listed = await Effect.runPromise(
           Effect.either(
@@ -2472,6 +2531,14 @@ export function createCodeOperationRuntime(
           // back, or the session could never be offered or adopted again.
           let committed = false;
           try {
+            // Read before the commit checks below, which must not yield. The
+            // read never fails the adoption: a runtime without readable
+            // history, or a read that fails, imports none and says why.
+            const history = await readImportedSessionHistory(target.nativeSessions, {
+              instanceId: target.thread.providerInstanceId,
+              projectRoot: target.projectRoot,
+              nativeSessionId,
+            });
             // The thread must still be empty when the adoption commits. Nothing
             // yields from here to the journal appends, so no turn slips in.
             const occupied = conversationRefusal(target.thread);
@@ -2539,6 +2606,21 @@ export function createCodeOperationRuntime(
                   resumeCursor: cursor,
                 },
               });
+              // The session's earlier conversation, as the thread's own record:
+              // never prompt context, since the provider already holds it.
+              options.persistence.journal.append(
+                nativeSessionHistoryAppend({
+                  threadId: String(thread.id),
+                  mode: "code",
+                  providerInstanceId: thread.providerInstanceId,
+                  nativeSessionId,
+                  history,
+                  eventId: options.uuid(),
+                  correlationId: options.uuid(),
+                  actor: options.actor,
+                  occurredAt: options.clock(),
+                }),
+              );
             });
             committed = true;
             return { kind: "code-native-session-adopted", threadId, nativeSessionId };
@@ -2563,6 +2645,11 @@ export function createCodeOperationRuntime(
       service.subscribe(windowId, threadId, operationId, afterCursor, limit),
     readRepositoryTestStatus: (windowId, threadId, checkoutId) =>
       service.readRepositoryTestStatus(windowId, threadId, checkoutId),
+    createReviewFinding: (windowId, input, admissionCurrent, actor) =>
+      reviewFindings.create(windowId, input, admissionCurrent, actor),
+    resolveReviewTarget: (windowId, input, admissionCurrent) =>
+      service.resolveReviewTarget(windowId, input, admissionCurrent),
+    retainPullRequestDiff: (windowId, input) => service.retainPullRequestDiff(windowId, input),
     conversation: async (windowId, threadId, afterCursor, limit) => {
       const thread = options.persistence.readCodeThread(threadId);
       if (thread === undefined || thread.id !== threadId) {
@@ -3000,6 +3087,15 @@ function approvalPrompt(
         message = "Allow Code commit operation?";
         effectDetail = `${command.message}\n\n${command.stagedSummary.map(({ path }) => path).join("\n")}`;
         break;
+      case "switch-git-branch":
+        message = "Switch this checkout's branch?";
+        effectDetail = [
+          `Target branch: ${command.branch}`,
+          command.dirty === "stash"
+            ? "Uncommitted changes are stashed first."
+            : "Refused if the checkout has uncommitted changes.",
+        ].join("\n");
+        break;
       case "push-git":
         message = "Allow Code push operation?";
         effectDetail = [
@@ -3266,6 +3362,11 @@ interface ActiveTurn {
       readonly finish: (outcome: "approved" | "denied" | "cancelled" | "expired") => void;
     }
   >;
+  /**
+   * This turn's reasoning spans, call bounds, and person waits, fed provider
+   * stamps before deltas buffer so chunk flushes never become timestamps.
+   */
+  readonly turnTiming: TurnActivityTimingTracker;
   readonly browserGrantKeys: Set<string>;
   readonly browserProfileContexts: Set<string>;
   readonly questions: Set<string>;
@@ -4198,16 +4299,57 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return refuseRevokedAdmission();
     }
     // Feedback stays pending through every preparation refusal. Consuming it
-    // here does not yield between the final admission check and owning the turn.
-    let feedback: ReturnType<NonNullable<typeof input.takeProductFeedback>> | undefined;
-    try {
-      feedback = input.takeProductFeedback?.(MAX_PROVIDER_ATTACHMENTS - originalInputCount);
-    } catch {
+    // here does not yield between the final admission check and owning the turn;
+    // any pull-request outside-content mark returns a value inside the same
+    // delivery transaction so a feedback refusal never taints the thread and a
+    // provenance refusal rolls back pending feedback notes without throwing.
+    const recordOutsideContent = input.recordOutsideContent;
+    let outsideContentRecorded = false;
+    let feedback:
+      | Extract<
+          ReturnType<NonNullable<typeof input.takeProductFeedback>>,
+          { readonly status: "taken" }
+        >["delivery"]
+      | undefined;
+    if (input.takeProductFeedback !== undefined) {
+      const taken = input.takeProductFeedback(
+        MAX_PROVIDER_ATTACHMENTS - originalInputCount,
+        recordOutsideContent === undefined
+          ? undefined
+          : () => {
+              if (!recordOutsideContent()) return { status: "refused" };
+              outsideContentRecorded = true;
+              return { status: "accepted" };
+            },
+      );
+      if (taken.status === "claim-refused") {
+        await serverTools?.close?.().catch(() => undefined);
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return {
+          ...failStart(
+            "Could not record outside-content provenance for pull-request line notes. Nothing was sent.",
+          ),
+          admission: "refused" as const,
+        };
+      }
+      if (taken.status === "feedback-changed") {
+        await serverTools?.close?.().catch(() => undefined);
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return {
+          ...failStart(
+            "Product-note delivery changed while preparing the message. Refresh notes before sending again.",
+          ),
+          admission: "refused" as const,
+        };
+      }
+      feedback = taken.delivery;
+    }
+    if (recordOutsideContent !== undefined && !outsideContentRecorded && !recordOutsideContent()) {
       await serverTools?.close?.().catch(() => undefined);
       await input.extensionTools?.close?.().catch(() => undefined);
       return {
         ...failStart(
-          "Product-note delivery changed while preparing the message. Refresh notes before sending again.",
+          "Could not record outside-content provenance for pull-request line notes. Nothing was sent.",
         ),
         admission: "refused" as const,
       };
@@ -4297,6 +4439,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       levelChanges: new Map(),
       approvalPostures: new Map(),
       toolApprovals: new Map(),
+      turnTiming: createTurnActivityTiming(),
       browserGrantKeys: new Set(),
       browserProfileContexts: new Set(),
       questions: new Set(),
@@ -4825,6 +4968,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    * as the runtime wrote it.
    */
   async #reviewProviderApproval(active: ActiveTurn, event: CodeTurnEvent): Promise<void> {
+    // The ask is a reasoning boundary at its own stamp however it ends —
+    // Shield's review after this answers nothing the person waited on, but
+    // must not stretch thinking into the wait it took.
+    this.#observeTurnTiming(active, event);
     const shield = this.#options.shield;
     const requestId = event.requestId;
     if (requestId === undefined || active.connection === undefined) {
@@ -5207,44 +5354,61 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (signal?.aborted || active.abort.signal.aborted || active.toolApprovals.size >= 4)
       return Promise.resolve("cancelled");
     const approvalId = CodeApprovalId.make(this.#options.uuid());
-    return new Promise((resolve) => {
-      const finish = (outcome: "approved" | "denied" | "cancelled" | "expired") => {
-        if (!active.toolApprovals.delete(String(approvalId))) return;
-        active.approvalPostures.delete(String(approvalId));
-        signal?.removeEventListener("abort", abort);
-        active.abort.signal.removeEventListener("abort", abort);
-        // An answer journals its own operation result; abandonment journals
-        // nothing.
-        if (outcome === "cancelled" || outcome === "expired") {
-          this.#options.onPendingRequestWithdrawn?.();
-        }
-        resolve(outcome);
-      };
-      // No timer: the ask is a question, holding no secret and no native
-      // resource, so it waits until the person answers, the call or the turn
-      // stops, or the thread is archived (`withdrawThreadAsks`).
-      const abort = () => finish("cancelled");
-      active.toolApprovals.set(String(approvalId), {
-        ...(origin === undefined ? {} : { origin }),
-        finish,
-      });
-      active.approvalPostures.set(String(approvalId), this.#approvalPosture(active));
-      signal?.addEventListener("abort", abort, { once: true });
-      active.abort.signal.addEventListener("abort", abort, { once: true });
-      try {
-        const frame = this.#appendTurnEvent(active, {
-          event: {
-            kind: "approval-requested",
-            approvalId,
-            action: "provider-tool",
-            summary,
-          },
-        });
-        active.cursor = frame.cursor;
-      } catch {
-        finish("cancelled");
-      }
-    });
+    // A host ask raised inside a recorded call's execution bills the person's
+    // wait to that call's measured interval — timing only, so no ask changes
+    // what the call's record says ran. Outside a recorded call the journaled
+    // approval events bound the wait on the turn tracker instead.
+    return whileApprovalWaited(
+      () =>
+        new Promise((resolve) => {
+          const finish = (outcome: "approved" | "denied" | "cancelled" | "expired") => {
+            if (!active.toolApprovals.delete(String(approvalId))) return;
+            active.approvalPostures.delete(String(approvalId));
+            signal?.removeEventListener("abort", abort);
+            active.abort.signal.removeEventListener("abort", abort);
+            // An answer journals its own operation result; abandonment journals
+            // nothing.
+            if (outcome === "cancelled" || outcome === "expired") {
+              // The ask is gone without an answer: its wait ends here, at the
+              // withdraw, so calls it overlapped subtract a bounded stretch.
+              active.turnTiming.approvalAnswered({
+                approvalId: String(approvalId),
+                occurredAt: this.#options.clock(),
+              });
+              this.#options.onPendingRequestWithdrawn?.();
+            }
+            resolve(outcome);
+          };
+          // No timer: the ask is a question, holding no secret and no native
+          // resource, so it waits until the person answers, the call or the turn
+          // stops, or the thread is archived (`withdrawThreadAsks`).
+          const abort = () => finish("cancelled");
+          active.toolApprovals.set(String(approvalId), {
+            ...(origin === undefined ? {} : { origin }),
+            finish,
+          });
+          active.approvalPostures.set(String(approvalId), this.#approvalPosture(active));
+          signal?.addEventListener("abort", abort, { once: true });
+          active.abort.signal.addEventListener("abort", abort, { once: true });
+          try {
+            // The recorded call asking, when the ask rose inside one's execution:
+            // its wait is billed to that call alone.
+            const callingTool = executingToolCallId();
+            const frame = this.#appendTurnEvent(active, {
+              event: {
+                kind: "approval-requested",
+                approvalId,
+                action: "provider-tool",
+                summary,
+                ...(callingTool === undefined ? {} : { toolCallId: callingTool }),
+              },
+            });
+            active.cursor = frame.cursor;
+          } catch {
+            finish("cancelled");
+          }
+        }),
+    );
   }
 
   withdrawThreadAsks(threadId: string): void {
@@ -5354,6 +5518,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           });
     const toolApproval = active?.toolApprovals.get(input.approvalId);
     const levelChange = active?.levelChanges.get(input.approvalId);
+
     if (active !== undefined && providerRequestId !== undefined && levelChange !== undefined)
       return this.#answerLevelChange(active, input, providerRequestId, levelChange);
     if (
@@ -5388,6 +5553,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     });
     if (active !== undefined && toolApproval !== undefined) {
       if (input.decision === "approved" && turnPosture === "plan") return refusedInPlan;
+      // The person's wait ends at the accepted answer, before the call it
+      // held is released to act on it. This tracker note is ephemeral; the
+      // journaled row below is the delivery receipt.
+      active.turnTiming.approvalAnswered({
+        approvalId: input.approvalId,
+        occurredAt: this.#options.clock(),
+      });
       toolApproval.finish(input.decision === "approved" ? "approved" : "denied");
       if (ownerCurrent === undefined)
         this.#recordApprovalAnswered(active, input.approvalId, input.decision);
@@ -5405,11 +5577,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const once =
       ownerCurrent !== undefined ||
       active.thread.permissionPersistence !== input.thread.permissionPersistence;
+    const askedUnder = active.approvalPostures.get(input.approvalId);
     if (ownerCurrent === undefined) {
       active.approvals.delete(input.approvalId);
       active.approvalPostures.delete(input.approvalId);
     }
-    await Effect.runPromise(
+    const refused = await Effect.runPromise(
       Effect.suspend(() => {
         if (ownerCurrent !== undefined && !ownerCurrent())
           return Effect.die(new Error("Owner approval target changed before delivery."));
@@ -5417,14 +5590,38 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           active.approvals.delete(input.approvalId);
           active.approvalPostures.delete(input.approvalId);
         }
+        // The person's wait ends at the accepted answer, not whenever the
+        // provider finishes taking it. This tracker note is ephemeral; the
+        // `approval-answered` row journaled after delivery is the receipt.
+        active.turnTiming.approvalAnswered({
+          approvalId: input.approvalId,
+          occurredAt: this.#options.clock(),
+        });
         return connection.answerApproval({
           sessionId: active.sessionId as never,
           requestId: providerRequestId,
           approved: input.decision === "approved",
           ...(once ? { scope: "once" as const } : {}),
         });
-      }),
+      }).pipe(
+        Effect.as(undefined),
+        Effect.catchIf(
+          (failure) => failure.category === "unsupported",
+          (failure) => Effect.succeed(failure),
+        ),
+      ),
     );
+    // A runtime that cannot take the answer as asked (an agent offering only
+    // an allow that would outlast a one-call approval) heard nothing and still
+    // waits, so the ask stays open for a denial and nothing is journaled.
+    if (refused !== undefined) {
+      active.approvals.set(input.approvalId, providerRequestId);
+      if (askedUnder !== undefined) active.approvalPostures.set(input.approvalId, askedUnder);
+      // The person is waiting again, so the time from their refused answer
+      // until their next one is their wait, not the call's run time.
+      active.turnTiming.approvalReopened({ approvalId: input.approvalId });
+      return turnState("failed", { category: "failed", message: refused.message });
+    }
     // An owner's answer journals `owner-approval-settled` instead.
     if (ownerCurrent === undefined)
       this.#recordApprovalAnswered(active, input.approvalId, input.decision);
@@ -5700,10 +5897,28 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return true;
   }
 
+  /**
+   * Journals that the person asked to stop this turn, so the `interrupted`
+   * that follows reads as their cancellation and not a cut-off. A lost marker
+   * must never hold back the Stop itself.
+   */
+  #journalTurnStopRequested(active: ActiveTurn, requestedBy: "person" | undefined): void {
+    if (requestedBy !== "person") return;
+    try {
+      const frame = this.#appendTurnEvent(active, {
+        event: { kind: "conversation-turn-stop-requested" },
+      });
+      active.cursor = frame.cursor;
+    } catch {
+      // Best effort only: the person's Stop still proceeds.
+    }
+  }
+
   async forceStop(input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
     readonly turnOperationId: CodeOperationId;
+    readonly stopRequestedBy?: "person";
   }) {
     const active = this.#owned(input.thread, input.checkoutRoot);
     if (
@@ -5717,6 +5932,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         message:
           "Only this host's exact stopped attempt on a supported runtime can be force-stopped.",
       });
+    this.#journalTurnStopRequested(active, input.stopRequestedBy);
     const connection = active.connection;
     const kill = connection.forceStop;
     if (kill === undefined) return turnState("failed");
@@ -5759,6 +5975,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         category: "failed",
         message: "That turn has already ended, so Stop left the turn running now alone.",
       });
+    this.#journalTurnStopRequested(active, input.stopRequestedBy);
     const lostText = this.#flushBeforeStop(active);
     if (lostText !== undefined) {
       active.interruptMessage =
@@ -5838,6 +6055,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   #appManagedTools(active: ActiveTurn): AppManagedToolSet | undefined {
+    // Windows Strict phase 1 withholds Octant-operated host tools (file reads/
+    // writes, thread terminals, checks, language/debug, browser/device/host
+    // tools) from advertised capabilities so the confined runtime uses only its
+    // own in-container tools.
+    if (
+      (this.#options.platform ?? process.platform) === "win32" &&
+      this.#strict(active.thread.id)
+    ) {
+      return undefined;
+    }
     if (active.serverTools !== undefined) {
       // The server tools and the few sets that touch only this host's
       // records: every other set reads or acts on a folder or a device of
@@ -6059,6 +6286,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           thread: active.thread,
           readThread: () => this.#effectiveThread(active.windowId, active.thread.id),
           folders: [active.providerRoot, ...active.extraFolders],
+          operationId: String(active.operationId),
           ...(active.routineRun === undefined ? {} : { routineRun: active.routineRun }),
           askPerson: (summary, signal) => {
             const bounded = boundProviderSummary(summary);
@@ -6092,6 +6320,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#options.nativeHarnessTools?.({
           thread: active.thread,
           checkoutRoot: active.providerRoot,
+          mainCheckoutRoot: active.checkoutRoot,
           ...(active.extraFolders.length === 0 ? {} : { extraFolders: active.extraFolders }),
           windowId: active.windowId,
           secrets: active.secrets,
@@ -6292,6 +6521,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       driverKind: active.driver.kind,
       executionPolicy: active.thread.executionPolicy,
       fullAccessSandbox: active.thread.fullAccessSandbox,
+      platform: this.#options.platform ?? process.platform,
     });
     const contextAccount: CodeTurnContextAccount = {
       carried: active.carriedSentContext,
@@ -6554,9 +6784,43 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             }),
           ...(appManagedTools === undefined ? {} : { appManagedTools }),
           ...(toolEffects === undefined ? {} : { toolEffects }),
+          // The host's clock bounds any measured execute interval, never a
+          // wall-clock default the runtime's own timestamps do not share.
+          clock: this.#options.clock,
           ...(active.onContextDelivered === undefined
             ? {}
             : { onPromptSent: active.onContextDelivered }),
+          onLoopNotice: (notice) =>
+            Effect.sync(() => {
+              const toolName = sanitizeLoopNoticeToolName(notice.toolName, (value) =>
+                sanitizeProviderText(value, active.checkoutRoot, active.secrets),
+              );
+              const frame = this.#appendTurnEvent(active, {
+                event:
+                  notice.kind === "turn-loop-stopped"
+                    ? {
+                        kind: "turn-loop-stopped",
+                        toolName,
+                        count: notice.count,
+                      }
+                    : {
+                        kind: "turn-loop-noticed",
+                        toolName,
+                        count: notice.count,
+                      },
+              });
+              active.cursor = frame.cursor;
+            }),
+          onStallNotice: (notice) =>
+            Effect.sync(() => {
+              const frame = this.#appendTurnEvent(active, {
+                event: {
+                  kind: "turn-stall-noticed",
+                  idleMs: notice.idleMs,
+                },
+              });
+              active.cursor = frame.cursor;
+            }),
           persistEvent: (event) =>
             // The provider's own completion, interruption, or failure is
             // journaled as the turn's terminal state, ahead of the outcome
@@ -6774,7 +7038,28 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     );
   }
 
+  /**
+   * Lets one provider event bound the turn's reasoning total, journaling the
+   * new cumulative figure when a span just closed. Called once per event at
+   * the earliest point the event is seen — ahead of any async review — so a
+   * span ends at the event's own stamp, never at a later write.
+   */
+  #observeTurnTiming(active: ActiveTurn, event: CodeTurnEvent): void {
+    const reasoningMs = active.turnTiming.observeEvent({
+      isReasoning: event.category === "reasoning",
+      occurredAt: event.occurredAt,
+      provenance: event.synthesized === true ? "synthesized" : "live",
+    });
+    if (reasoningMs !== undefined) {
+      const timingFrame = this.#appendTurnEvent(active, {
+        event: { kind: "reasoning-time", reasoningMs },
+      });
+      active.cursor = timingFrame.cursor;
+    }
+  }
+
   #persistNormalized(active: ActiveTurn, event: CodeTurnEvent): void {
+    this.#observeTurnTiming(active, event);
     if (event.category === "message" || event.category === "reasoning") {
       this.#bufferDelta(active, event.category, event.text ?? " ");
       return;
@@ -6786,6 +7071,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       this.#options.uuid,
     );
     if (operationEvent === undefined) return;
+    const provenance = event.synthesized === true ? "synthesized" : "live";
+    if (
+      operationEvent.kind === "tool-activity" &&
+      (event.status === "started" || event.status === "app-managed-request")
+    ) {
+      active.turnTiming.callStarted({
+        toolCallId: operationEvent.toolCallId,
+        occurredAt: event.occurredAt,
+        provenance,
+      });
+    }
     if (operationEvent.kind === "approval-requested") {
       active.approvalPostures.set(String(operationEvent.approvalId), this.#approvalPosture(active));
     }
@@ -6802,7 +7098,27 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             ...optionalFailure(evidenceCapacityFailure(lostText.error)),
           }
         : operationEvent;
-    const frame = this.#appendTurnEvent(active, { event: journaled });
+    const timed: CodeOperationEvent =
+      journaled.kind === "tool-activity" &&
+      (journaled.state === "completed" || journaled.state === "failed")
+        ? (() => {
+            const timing = active.turnTiming.callEnded({
+              toolCallId: journaled.toolCallId,
+              occurredAt: event.occurredAt,
+              provenance,
+            });
+            // An app-managed call's honest interval is only the one the host
+            // measured around `execute`: its request stamp predates the run
+            // and the answer's delivery follows it, so a stamp-derived bound
+            // would bill provider round-trip as the call's work. `callEnded`
+            // still ran to release the call, so a duplicate provider
+            // completion cannot measure it either.
+            if (journaled.timing !== undefined || event.providerKind === "tool-request")
+              return journaled;
+            return timing === undefined ? journaled : { ...journaled, timing };
+          })()
+        : journaled;
+    const frame = this.#appendTurnEvent(active, { event: timed });
     active.cursor = frame.cursor;
     if (journaled.kind === "operation-state") {
       active.lastPersistedState = journaled.state;
@@ -6927,13 +7243,54 @@ class RuntimeTurnController implements CodeOperationTurnPort {
 
   /** The one way a turn's events reach the journal, behind any open burst. */
   #appendTurnEvent(active: ActiveTurn, input: { readonly event: CodeOperationEvent }) {
+    // Only an instant the host itself observed bounds a reasoning span at
+    // write time: a person-facing ask or answer, and a terminal or forced
+    // stop. Normalized provider events already closed it at their own stamp —
+    // or poisoned it when the stamp could not be trusted, which a write here
+    // must never resurrect.
+    const observedBoundary =
+      input.event.kind === "operation-state" ||
+      input.event.kind === "approval-requested" ||
+      input.event.kind === "approval-answered" ||
+      input.event.kind === "owner-approval-settled" ||
+      input.event.kind === "input-requested";
+    if (observedBoundary) {
+      const closed = active.turnTiming.closeReasoningAt(this.#options.clock());
+      if (closed !== undefined) {
+        const timingFrame = this.#appendTurnEvent(active, {
+          event: { kind: "reasoning-time", reasoningMs: closed },
+        });
+        active.cursor = timingFrame.cursor;
+      }
+    }
     this.#flushDelta(active);
-    return this.#events.append({
+    const frame = this.#events.append({
       threadId: active.thread.id,
       operationId: active.operationId,
       expectedCursor: active.cursor,
       event: input.event,
     });
+    // Ask and answer are person-facing instants: their frame stamps are the
+    // wait's bounds. An automated review journals neither kind, so it can
+    // never land inside a call's subtracted interval.
+    if (input.event.kind === "approval-requested") {
+      active.turnTiming.approvalAsked({
+        approvalId: String(input.event.approvalId),
+        occurredAt: frame.occurredAt,
+        ...(input.event.toolCallId === undefined ? {} : { toolCallId: input.event.toolCallId }),
+      });
+    } else if (
+      input.event.kind === "approval-answered" ||
+      // An owner's answer settles the same ask: the person's wait ends at
+      // this frame whichever route it came by.
+      input.event.kind === "owner-approval-settled"
+    ) {
+      active.turnTiming.approvalAnswered({
+        approvalId: String(input.event.approvalId),
+        occurredAt: frame.occurredAt,
+      });
+    }
+    return frame;
   }
 
   /**
@@ -7516,6 +7873,7 @@ function normalizedOperationEvent(
       summary:
         boundProviderSummary(event.text ?? "Provider approval requested.") ??
         "Provider approval requested.",
+      ...(event.toolCallId === undefined ? {} : { toolCallId: event.toolCallId }),
     };
   }
   // The provider's own reviewer answered a call itself. It is journaled under
@@ -7607,6 +7965,7 @@ function normalizedOperationEvent(
       ...(event.cacheWriteInputTokens === undefined
         ? {}
         : { cacheWriteInputTokens: event.cacheWriteInputTokens }),
+      ...(event.reasoningTokens === undefined ? {} : { reasoningTokens: event.reasoningTokens }),
 
       ...(event.contextWindow === undefined ? {} : { contextWindow: event.contextWindow }),
       ...(event.contextTokens === undefined ? {} : { contextTokens: event.contextTokens }),
@@ -7675,6 +8034,10 @@ function normalizedOperationEvent(
       ...(event.status === "completed" && event.routine !== undefined
         ? { routine: event.routine }
         : {}),
+      // An app-managed call that ended carries the bounds the host measured
+      // around its execute call; a provider-ended call has none and keeps
+      // the stamp-derived interval.
+      ...(event.callTiming === undefined ? {} : { timing: event.callTiming }),
     };
   }
   if (
@@ -7928,12 +8291,17 @@ const decodeCodeGitOperationId = Schema.decodeUnknownSync(CodeGitOperationId);
 function codeOperationGitPort(git: GitService): CodeOperationGitPort {
   return {
     remoteHead: (input, signal) => git.remoteHead(input, signal),
-    observe: async ({ checkoutRoot, maxDiffBytes, ignoreWhitespace }) =>
+    observe: async ({ checkoutRoot, maxDiffBytes, ignoreWhitespace, untrackedFiles }) =>
       mapGitObservation(
         await git.observe(
           checkoutRoot,
           undefined,
-          ignoreWhitespace === true ? { ignoreWhitespace: true } : undefined,
+          ignoreWhitespace === true || untrackedFiles === "all"
+            ? {
+                ...(ignoreWhitespace === true ? { ignoreWhitespace: true } : {}),
+                ...(untrackedFiles === "all" ? { untrackedFiles: "all" as const } : {}),
+              }
+            : undefined,
         ),
         maxDiffBytes,
       ),
@@ -7966,6 +8334,7 @@ function codeOperationGitPort(git: GitService): CodeOperationGitPort {
         })),
       }),
     push: (input) => git.push(input),
+    switchBranch: (input) => git.switchBranch(input),
     unstage: (input) => git.unstage(input),
     checkpoint: (input) => git.checkpoint(input),
     restoreCheckpoint: (input) => git.restoreCheckpoint(input),

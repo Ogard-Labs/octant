@@ -3,6 +3,7 @@ import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { PairedDeviceAdministrationClient } from "@octant/client-runtime/paired-device-administration-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProviderClient } from "@octant/client-runtime/provider-client";
+import type { ProviderCloudSessionClient } from "@octant/client-runtime/provider-cloud-session-client";
 import type { RemoteShellSurfaceKind } from "@octant/client-runtime";
 import type { AgentAccessCommand } from "@octant/contracts";
 import { useEffect, useMemo, useState } from "react";
@@ -51,6 +52,8 @@ export interface RemoteHostSettingsProps {
   readonly providerOAuth: (
     command: ProviderOAuthCommand,
   ) => Promise<ProviderOAuthCommandResult | undefined>;
+  /** Opts supported endpoints in or out of provider cloud jobs over the session. */
+  readonly providerCloudSessionClient?: ProviderCloudSessionClient;
 }
 
 /**
@@ -97,6 +100,9 @@ export function RemoteHostSettings(props: RemoteHostSettingsProps) {
           client={props.providerClient}
           keyHost={props.reachable.has("provider-credentials") ? props.providerKeys : undefined}
           providerOAuth={props.providerOAuth}
+          {...(props.providerCloudSessionClient === undefined
+            ? {}
+            : { providerCloudSessionClient: props.providerCloudSessionClient })}
         />
       ) : null}
     </section>
@@ -107,6 +113,7 @@ function RemoteProviderSettings(props: {
   readonly client: ProviderClient;
   readonly keyHost: ProviderKeyHost | undefined;
   readonly providerOAuth: RemoteHostSettingsProps["providerOAuth"];
+  readonly providerCloudSessionClient?: ProviderCloudSessionClient;
 }) {
   const controller = useProviderController({
     client: props.client,
@@ -118,6 +125,9 @@ function RemoteProviderSettings(props: {
       // Scanning the host for installed CLIs is a route the host keeps local.
       discovery={null}
       onProviderOAuth={props.providerOAuth}
+      {...(props.providerCloudSessionClient === undefined
+        ? {}
+        : { providerCloudSessionClient: props.providerCloudSessionClient })}
     />
   );
 }

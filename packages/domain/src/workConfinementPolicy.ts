@@ -280,22 +280,6 @@ export function classifyWorkFidelity(
   return { level: "full" };
 }
 
-/**
- * Resolve the effective, visible capability set for a Work format under
- * the active posture. Work has no read-only plan posture; both `full` and
- * `approval-gated` preserve the format-derived capabilities because approval
- * is enforced per-mutation by `classifyMutationAuthority`, not by hiding
- * capabilities. The function never reports a capability the base format does
- * not support.
- */
-export function resolveWorkCapabilities(input: {
-  readonly posture: WorkMutationPosture;
-  readonly base: WorkCapabilityFlags;
-}): WorkCapabilityFlags {
-  void input.posture;
-  return input.base;
-}
-
 function mutationKindSupported(kind: WorkMutationKind, flags: WorkCapabilityFlags): boolean {
   switch (kind) {
     case "create":

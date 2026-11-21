@@ -27,8 +27,6 @@ export const RetentionWindow = Schema.Union(
 );
 export type RetentionWindow = typeof RetentionWindow.Type;
 
-export const DEFAULT_RETENTION_WINDOW: RetentionWindow = { kind: "forever" };
-
 export const RetentionScope = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("host") }).annotations(strict),
   Schema.Struct({
