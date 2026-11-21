@@ -218,8 +218,8 @@ checks never change registry/configuration or journal state.
   starts, so a login shell's greeting never reaches the caller, and the call
   sets `StdinNull=no` so a person's ssh config cannot hand the program EOF.
   Because the program replaces the shell, its exit status is reported as it
-  is: a stream's 255 may be the program's own or ssh's, and a caller tells
-  them apart by whether the program answered at all. Nothing is forwarded, and no secret goes in the command line,
+  is: a stream's 255 may be the program's own or ssh's, and the status alone
+  cannot tell them apart, even after the program has answered. Nothing is forwarded, and no secret goes in the command line,
   which the server's process list shows. Built; Codex's app-server and Claude
   Code run over it ([Providers running on the server](#providers-running-on-the-server)).
 - **Fail closed.** When a call cannot reach the server (the connection drops,
@@ -309,7 +309,8 @@ app-server --listen stdio://` after `codex --version` there; for Claude Code,
     started and left behind is not recorded.
   - Strict refuses it, naming why: Octant's own sandbox cannot run on a
     server, and Octant claims no sandbox there. A Claude Code thread that keeps
-    Octant's sandbox at Full access is refused the same way.
+    Octant's sandbox at Full access, and Codex at Full access with its opt-in
+    sandbox, are refused the same way rather than run unconfined.
   - Claude Code there reads nothing of this host's Claude account: not its
     environment or account folder, not its instruction files (Claude Code
     reads the server's own; where a setting source is off, such as a Project
