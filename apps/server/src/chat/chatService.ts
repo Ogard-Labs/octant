@@ -2581,12 +2581,6 @@ export class ChatService {
    * coordination depth; a person's send carries their window and neither.
    */
   #refuseUnattendedTurn(threadId: string, context: ChatServiceExecutionContext | undefined): void {
-    const unattended =
-      context?.windowId === undefined ||
-      isRoutineHostScope(context.windowId) ||
-      (context.coordinationDepth ?? 0) > 0 ||
-      context.limitRecovery === true;
-    if (!unattended) return;
     let thread: ChatThread | undefined;
     try {
       thread = this.#persistence.readChatThread(decodeChatThreadId(threadId));
@@ -2594,9 +2588,26 @@ export class ChatService {
       // An id that does not decode is refused by the command's own handler.
       return;
     }
-    if (thread === undefined) return;
+    if (thread !== undefined) this.#refuseUnattendedOn(thread.providerInstanceId, context);
+  }
+
+  /**
+   * The same refusal for the provider a turn actually resolved to: a model
+   * pool or the Chat provider fallback can route a turn to a provider other
+   * than the thread's own, and a retry or resume runs on its attempt's.
+   */
+  #refuseUnattendedOn(
+    providerInstanceId: string,
+    context: ChatServiceExecutionContext | undefined,
+  ): void {
+    const unattended =
+      context?.windowId === undefined ||
+      isRoutineHostScope(context.windowId) ||
+      (context.coordinationDepth ?? 0) > 0 ||
+      context.limitRecovery === true;
+    if (!unattended) return;
     const refusal = personalSignInRefusals(
-      this.#persistence.readProviderInstance(decodeProviderInstanceId(thread.providerInstanceId))
+      this.#persistence.readProviderInstance(decodeProviderInstanceId(providerInstanceId))
         ?.driverKind ?? "",
     )?.refusesUnattendedRuns;
     if (refusal !== undefined)
@@ -4976,6 +4987,9 @@ export class ChatService {
   ): Promise<PreparedChatTurn> {
     const settings = this.#requireChatSettings();
     const routed = await this.#resolveTurnProvider(requestedThread, settings, extensionPhase);
+    // Every send, retry, resume and delivery is prepared here, before its
+    // turn or attempt is journaled, so this reads the provider it would run on.
+    this.#refuseUnattendedOn(routed.providerInstanceId, executionContext);
     const thread = routed.thread;
     const providerInstanceId = routed.providerInstanceId;
     const driver = routed.driver;

@@ -3005,10 +3005,26 @@ that declaration, never by the profile id:
   the thread, a peer's delegated task, a
   benchmark cell, and one Chat thread messaging another. A person's own send
   carries their window (a queued message keeps the window that queued it), so
-  it, and steering their own turn, still run. Each shows: "Google doesn't
+  it, and steering their own turn, still run. Fan-out a person starts (the
+  linked threads one prompt creates, a side task's send) carries the person's
+  window and counts as their own send. Each refusal shows: "Google doesn't
   support unattended runs of Google Antigravity on a personal Google sign-in,
   so Octant did not start this run. Choose a provider that uses a Gemini API
   key, such as Gemini CLI with an API key."
+- **The provider a turn resolves to.** The check reads the provider a turn
+  would actually run on, not only the thread's own. In Chat a model pool or
+  the Chat provider fallback can route a turn onto Antigravity from a thread
+  on another provider, and a retry or resume runs on its attempt's provider,
+  so every Chat send, retry, resume and child-result delivery is checked
+  again on its resolved provider when it is prepared, before its turn or
+  attempt is journaled. A person's own send routed there by a pool or
+  fallback they set up still runs. Work and Code have no pool or provider
+  fallback: a turn runs on the thread's own provider, and a coordinator's
+  continue-on-fallback move changes that provider before it starts its host
+  turn, which admission then refuses. A helper's resolved provider (its role
+  slot, its fallback or its pool route, as `effectiveAgentRunExecutionTarget`
+  reads the routing receipt) is the one checked when the child starts or
+  resumes.
 - **Helper runs** (`refusesHelperRuns`). Antigravity is never a helper
   target: the target list names it unavailable as `helper-runs-refused`, so an
   explicit target, a role slot and a follow-up on it are refused, and a child
@@ -3043,7 +3059,7 @@ that declaration, never by the profile id:
   turned on, and never started if it was added earlier: "Google Antigravity
   runs only as its built-in provider, which keeps it to the use its vendor
   supports on a personal sign-in. Add Google Antigravity in Settings ›
-  Providers instead." The registry entry stays listed so the person finds
+  Providers & Models instead." The registry entry stays listed so the person finds
   that pointer.
 - **Every sign-in.** The limits bind every `antigravity` instance whatever
   sign-in the CLI has cached: Octant cannot verify which method the cached

@@ -282,7 +282,7 @@ describe("adding any ACP agent", () => {
 });
 
 const ANTIGRAVITY_ADDED_REFUSAL =
-  "Google Antigravity runs only as its built-in provider, which keeps it to the use its vendor supports on a personal sign-in. Add Google Antigravity in Settings › Providers instead.";
+  "Google Antigravity runs only as its built-in provider, which keeps it to the use its vendor supports on a personal sign-in. Add Google Antigravity in Settings › Providers & Models instead.";
 
 function addedAgent(trusted: boolean): AddedAcpAgentProviderInstance {
   const instance = decodeProviderInstance({

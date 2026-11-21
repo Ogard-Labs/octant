@@ -1435,6 +1435,52 @@ function providerSearchComposition(tainted: ReadonlySet<string>) {
 }
 
 describe("ChatService", () => {
+  it("sends no turn nobody sent that would fall back onto Google Antigravity, and takes the person's own", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000012");
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const { service } = openFixture({
+      probe: probeFixture({ models: [] }),
+      probeFor: (providerInstanceId) =>
+        providerInstanceId === fallbackProvider
+          ? probeFixture({ instanceId: decodeProviderInstanceId(fallbackProvider) })
+          : undefined,
+      driverKindFor: (providerInstanceId) =>
+        providerInstanceId === fallbackProvider ? "antigravity" : "openai-compatible",
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Fallback onto Antigravity",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const send = (context: Parameters<typeof service.execute>[1]) =>
+      service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Keep going.",
+        },
+        context,
+      );
+
+    // The thread's own provider is not Antigravity; the turn would run there
+    // only through the fallback, which is what the check reads.
+    await expect(send(undefined)).rejects.toMatchObject({
+      failure: { category: "unauthorized", message: ANTIGRAVITY_UNATTENDED_REFUSAL },
+    });
+    expect(service.read(created.thread.id).turns).toHaveLength(0);
+
+    await expect(send({ windowId: window })).resolves.toMatchObject({ kind: "turn-created" });
+    expect(service.read(created.thread.id).turns[0]?.attempts[0]?.providerInstanceId).toBe(
+      fallbackProvider,
+    );
+  });
+
   it("sends no turn nobody sent on a thread running on Google Antigravity, and takes the person's own", async () => {
     const window = decodeWindowId("84000000-0000-4000-8000-000000000011");
     const { service, fakeDriver } = openFixture({ driverKindFor: () => "antigravity" });

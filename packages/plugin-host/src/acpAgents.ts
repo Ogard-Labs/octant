@@ -200,7 +200,7 @@ export function addedAcpAgentLimitedProfile(
 /** What the person is told when an added agent is a limited profile's agent. */
 export function addedAcpAgentLimitedProfileRefusal(kind: AcpAgentKind): string {
   const { name } = acpAgentProfile(kind);
-  return `${name} runs only as its built-in provider, which keeps it to the use its vendor supports on a personal sign-in. Add ${name} in Settings › Providers instead.`;
+  return `${name} runs only as its built-in provider, which keeps it to the use its vendor supports on a personal sign-in. Add ${name} in Settings › Providers & Models instead.`;
 }
 
 /**
