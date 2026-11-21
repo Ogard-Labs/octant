@@ -449,7 +449,18 @@ when it signs in with one, with quiet Change and Remove, and **Show key** for
 such a server. Show key opens a line under the row: "Add this line to
 `~/.ssh/authorized_keys` for <user> on <alias>.", the public key in the code
 font, wrapping, and a quiet Copy that reads Copied once it has; a refusal
-shows there in the alert role. The form is Alias, User, Profile, Sign in with
+shows there in the alert role. An account server's row also offers **Make
+this an Octant computer**, which opens one dialog naming the server: it
+states what Octant read over SSH and will do there (server and `uname -sm`,
+version and signature check, install location, user service, the boot
+command with a quiet Copy, a **Listens on** select of the server's private
+addresses, and the hub it joins), with **Install and join** and Cancel; once
+confirmed it lists the six steps (Copy the build, Verify it on the server,
+Install, Start the service, Turn on the listener, Join the hub), each with
+Waiting, Running…, Done, Failed with what to fix, or Not run. A refusal shows
+in the alert role, with **Open the private network guide** for a server with
+no private address
+([Hub and spokes](hub-and-spokes.md#adding-a-computer-over-ssh)). The form is Alias, User, Profile, Sign in with
 (Your SSH agent, the default, or A key Octant keeps), Deploy commands (one per
 line, shown for Operate and Admin), and Runbook path. A refusal from the host shows inline in the alert role.
 Below it, **Projects on your servers** lists each server Project as its

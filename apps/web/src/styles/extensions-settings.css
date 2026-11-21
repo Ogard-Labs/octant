@@ -1050,3 +1050,102 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* Make this an Octant computer: the facts stated before anything runs, then each step. */
+.member-install__dialog {
+  --octant-dialog-width: 560px;
+  display: grid;
+  gap: var(--oct-space-3);
+}
+
+.member-install__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--oct-space-2) var(--oct-space-3);
+  margin: 0;
+  font-size: var(--oct-text-sm);
+}
+
+.member-install__facts dt {
+  color: var(--oct-meta);
+}
+
+.member-install__facts dd {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+  margin: 0;
+  color: var(--oct-fg);
+  overflow-wrap: anywhere;
+}
+
+.member-install__note {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.member-install__boot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.member-install__boot > :first-child {
+  grid-column: 1 / -1;
+}
+
+.member-install__command {
+  min-width: 0;
+  padding: var(--oct-space-1) var(--oct-space-2);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-sm);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.member-install__steps {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--oct-text-sm);
+}
+
+.member-install__steps li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--oct-space-1) var(--oct-space-3);
+}
+
+.member-install__step-state {
+  color: var(--oct-meta);
+}
+
+.member-install__steps li[data-state="succeeded"] .member-install__step-state {
+  color: var(--oct-success-fg);
+}
+
+.member-install__steps li[data-state="failed"] .member-install__step-state {
+  color: var(--oct-danger-fg);
+}
+
+.member-install__step-message {
+  grid-column: 1 / -1;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-xs);
+}
+
+.member-install__actions {
+  display: flex;
+  gap: var(--oct-space-2);
+}
+
+@media (max-width: 520px) {
+  .member-install__facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

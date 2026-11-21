@@ -566,7 +566,15 @@ signature is missing, unreadable, or not made by a key trusted for the ring it
 names, before anything is staged, and check the staged copy again;
 `--self-built` installs a build the person made themselves without one,
 because an unsigned build proves nothing about who produced it. The server's
-own start-up check and the build's self-inspection need no signature.
+own start-up check and the build's self-inspection need no signature. A host
+can install a build on one of the person's registered servers over SSH
+([Hub and spokes: adding a computer over SSH](design/hub-and-spokes.md#adding-a-computer-over-ssh)):
+it checks the signed release build placed in its data folder's
+`headless-builds` folder with the same code, copies it with its digest
+checked, and runs that build's own `octant server install` into the login's
+state folder, which checks the signature again; it never passes
+`--self-built`, never runs sudo, and does not download the build itself yet.
+Update and Remove over SSH are not built.
 An installed CLI starts that server under the same runtime with
 `OCTANT_ARTIFACT_ROOT` and `OCTANT_ARTIFACT_VERSION` set. The server verifies
 every listed file before it opens the store, and reports that version on
@@ -19595,7 +19603,19 @@ Project's list is journaled whole as `shield-servers.project-servers-set@1`
 under the Project's id, and `shield-servers.project-override-cleared@1`
 returns the Project to the account list. Startup replays them; only a person,
 at a local window or a paired device (not built yet for the device), changes them (`GET`/`POST /api/shield/servers`, with
-`?projectId=` for a Project's list). The Judge, the confined path below, the
+`?projectId=` for a Project's list). An account server's row also offers
+**Make this an Octant computer** (`POST /api/shield/servers/member-install`,
+for a window or a device the host's own person paired): the signed headless
+build installed over the server's SSH connection after one confirmation and
+joined to this computer's hub
+([Hub and spokes: adding a computer over SSH](design/hub-and-spokes.md#adding-a-computer-over-ssh)).
+Its request and each step's outcome are journaled on the `shield-servers`
+aggregate under the server's own id, as
+`shield-servers.member-install-requested@1` (build version and ring, target,
+listen address and port) and `shield-servers.member-install-step@1` (step,
+outcome, and a closed failure reason), with the person or their paired device
+as the actor and never a join code, ticket, comparison code or key; startup
+replays neither into the registry. The Judge, the confined path below, the
 record, and the notes all read the thread's Project's list. An alias is unique without regard to case, as ssh
 matches `Host` patterns, and a runbook inside a key or credential folder is
 refused. The rules are pure policy in `packages/domain/src/shieldServerPolicy.ts`,

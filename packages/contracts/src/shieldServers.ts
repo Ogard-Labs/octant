@@ -23,6 +23,8 @@ export const SHIELD_SERVERS_EVENT_NAMES = {
   serverRemoved: "shield-servers.server-removed@1",
   projectServersSet: "shield-servers.project-servers-set@1",
   projectOverrideCleared: "shield-servers.project-override-cleared@1",
+  memberInstallRequested: "shield-servers.member-install-requested@1",
+  memberInstallStepRecorded: "shield-servers.member-install-step@1",
 } as const;
 
 /** Remote commands are journaled per thread, on the thread's own aggregate id. */
@@ -251,6 +253,186 @@ export const ShieldServersCommandResult = Schema.Union(
   }).annotations(strict),
 );
 export type ShieldServersCommandResult = typeof ShieldServersCommandResult.Type;
+
+/**
+ * Making a registered server an Octant computer: the signed headless build
+ * installed over SSH after the person confirms, started as a user service of
+ * the login, listening on a private address, and joined to this computer's
+ * hub. Canonical: docs/design/hub-and-spokes.md § Adding a computer over SSH.
+ */
+export const MemberInstallTarget = Schema.Literal("darwin-arm64", "linux-x64", "linux-arm64");
+export type MemberInstallTarget = typeof MemberInstallTarget.Type;
+
+/** The steps in the order they run; a failed step stops every step after it. */
+export const MEMBER_INSTALL_STEPS = [
+  "copy",
+  "verify",
+  "install",
+  "start",
+  "listen",
+  "join",
+] as const;
+export const MemberInstallStep = Schema.Literal(...MEMBER_INSTALL_STEPS);
+export type MemberInstallStep = typeof MemberInstallStep.Type;
+
+/** Why a step failed, as a closed list: the journal never holds a server's own words. */
+export const MemberInstallFailure = Schema.Literal(
+  "server-unreachable",
+  "digest-mismatch",
+  "build-mismatch",
+  "command-failed",
+  "join-code-unavailable",
+  "comparison-mismatch",
+  "timed-out",
+);
+export type MemberInstallFailure = typeof MemberInstallFailure.Type;
+
+const MemberInstallReleaseRing = Schema.Literal("stable", "preview", "candidate");
+const MemberInstallVersion = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(64));
+const MemberInstallAddress = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(253));
+const MemberInstallPort = Schema.Int.pipe(Schema.between(1, 65_535));
+
+/**
+ * The person confirmed the sheet. Journaled before anything runs on the
+ * server, with the person or their paired device as the event's actor. It
+ * names the build and the address, never a join code, ticket, or key.
+ */
+export const MemberInstallRequestedPayload = Schema.Struct({
+  installId: AggregateId,
+  serverId: AggregateId,
+  target: MemberInstallTarget,
+  artifactVersion: MemberInstallVersion,
+  ring: MemberInstallReleaseRing,
+  listenAddress: MemberInstallAddress,
+  listenPort: MemberInstallPort,
+  joins: Schema.Literal("hub"),
+}).annotations(strict);
+export type MemberInstallRequestedPayload = typeof MemberInstallRequestedPayload.Type;
+
+/** How one step ended, journaled as it ends, with the same actor as the request. */
+export const MemberInstallStepRecordedPayload = Schema.Struct({
+  installId: AggregateId,
+  serverId: AggregateId,
+  step: MemberInstallStep,
+  outcome: Schema.Literal("succeeded", "failed"),
+  failure: Schema.optional(MemberInstallFailure),
+}).annotations(strict);
+export type MemberInstallStepRecordedPayload = typeof MemberInstallStepRecordedPayload.Type;
+
+/** A private address the server reported, which the person may pick to listen on. */
+export const MemberInstallAddressOption = Schema.Struct({
+  address: MemberInstallAddress,
+  network: Schema.Literal("tailscale", "lan-private"),
+}).annotations(strict);
+export type MemberInstallAddressOption = typeof MemberInstallAddressOption.Type;
+
+/** What the sheet states before anything runs, every fact read now. */
+export const MemberInstallPlan = Schema.Struct({
+  planId: AggregateId,
+  serverId: AggregateId,
+  alias: ShieldServerAlias,
+  user: ShieldServerUser,
+  /** `uname -sm` as the server answered it over SSH. */
+  system: Schema.String.pipe(Schema.maxLength(128)),
+  target: MemberInstallTarget,
+  artifactVersion: MemberInstallVersion,
+  ring: MemberInstallReleaseRing,
+  /** The ring's release signature and every file's digest checked on this computer. */
+  signature: Schema.Literal("verified"),
+  /** The login's own data folder; nothing outside it, and no sudo. */
+  installRoot: Schema.String.pipe(Schema.minLength(2), Schema.maxLength(1_024)),
+  service: Schema.Literal("systemd-user", "launchd-agent"),
+  /** Whether the server already starts the login's services with no one logged in. */
+  startsAtBoot: Schema.Boolean,
+  /** The one administrator command for starting at boot, for the person to run; absent when none applies. */
+  bootCommand: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
+  addresses: Schema.Array(MemberInstallAddressOption).pipe(Schema.minItems(1), Schema.maxItems(16)),
+  listenPort: MemberInstallPort,
+  joins: Schema.Struct({
+    kind: Schema.Literal("hub"),
+    hubName: Schema.String.pipe(Schema.maxLength(128)),
+  }).annotations(strict),
+}).annotations(strict);
+export type MemberInstallPlan = typeof MemberInstallPlan.Type;
+
+export const MemberInstallStepState = Schema.Struct({
+  step: MemberInstallStep,
+  state: Schema.Literal("waiting", "running", "succeeded", "failed", "not-run"),
+  /** What to fix, for a failed step. Shown in the sheet; never journaled. */
+  message: Schema.optional(Schema.String.pipe(Schema.maxLength(1_024))),
+}).annotations(strict);
+export type MemberInstallStepState = typeof MemberInstallStepState.Type;
+
+export const MemberInstallProgress = Schema.Struct({
+  installId: AggregateId,
+  serverId: AggregateId,
+  state: Schema.Literal("running", "joined", "failed"),
+  steps: Schema.Array(MemberInstallStepState).pipe(Schema.maxItems(MEMBER_INSTALL_STEPS.length)),
+}).annotations(strict);
+export type MemberInstallProgress = typeof MemberInstallProgress.Type;
+
+export const MemberInstallCommand = Schema.Union(
+  /** Reads the server and this computer's build, and states the plan; changes nothing. */
+  Schema.Struct({
+    kind: Schema.Literal("prepare-member-install"),
+    serverId: AggregateId,
+  }).annotations(strict),
+  /** The person's one confirmation: it runs the plan and approves that one hub join. */
+  Schema.Struct({
+    kind: Schema.Literal("confirm-member-install"),
+    planId: AggregateId,
+    listenAddress: MemberInstallAddress,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("read-member-install"),
+    installId: AggregateId,
+  }).annotations(strict),
+);
+export type MemberInstallCommand = typeof MemberInstallCommand.Type;
+
+export const MemberInstallRefusalReason = Schema.Literal(
+  "not-the-person",
+  "server-not-found",
+  "server-unreachable",
+  "unsupported-system",
+  "no-private-address",
+  "no-build",
+  "build-unverified",
+  "no-hub",
+  "not-the-hub",
+  "hub-unavailable",
+  "plan-expired",
+  "address-not-offered",
+  "install-not-found",
+  "already-installing",
+  "unavailable",
+);
+export type MemberInstallRefusalReason = typeof MemberInstallRefusalReason.Type;
+
+export const MemberInstallResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("member-install-plan"),
+    plan: MemberInstallPlan,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("member-install-progress"),
+    progress: MemberInstallProgress,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("member-install-refused"),
+    reason: MemberInstallRefusalReason,
+    message: Schema.String,
+  }).annotations(strict),
+);
+export type MemberInstallResult = typeof MemberInstallResult.Type;
+
+export const decodeMemberInstallCommand = Schema.decodeUnknownSync(MemberInstallCommand);
+export const decodeMemberInstallRequestedPayload = Schema.decodeUnknownSync(
+  MemberInstallRequestedPayload,
+);
+export const decodeMemberInstallStepRecordedPayload = Schema.decodeUnknownSync(
+  MemberInstallStepRecordedPayload,
+);
 
 export const decodeShieldServersCommand = Schema.decodeUnknownSync(ShieldServersCommand);
 export const decodeShieldServersView = Schema.decodeUnknownSync(ShieldServersView);

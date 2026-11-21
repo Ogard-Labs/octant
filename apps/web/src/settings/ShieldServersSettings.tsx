@@ -14,6 +14,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { MEMBER_INSTALL_ACTION, MemberInstallSheet } from "./MemberInstallSheet";
 import {
   SettingsCompactRow,
   SettingsDisclosure,
@@ -25,10 +26,15 @@ import {
 
 export interface ShieldServersSettingsProps {
   /** Absent off this computer: the registry is host authority. */
-  readonly client: Pick<ShieldServersClient, "read" | "command"> | undefined;
+  readonly client:
+    | (Pick<ShieldServersClient, "read" | "command"> &
+        Partial<Pick<ShieldServersClient, "memberInstall">>)
+    | undefined;
   readonly focusedSetting?: string | undefined;
   /** Project names by id, for the picker; the host's own ids. */
   readonly projectNames: ReadonlyMap<string, string>;
+  /** Opens the guide to putting a computer on Tailscale or a private network. */
+  readonly onOpenPrivateNetworkGuide?: (() => void) | undefined;
 }
 
 export const SHIELD_SERVERS_INTRO =
@@ -255,6 +261,8 @@ interface ServerEditorProps {
   readonly onChange: (server: ShieldServer, fields: ShieldServerFields) => Promise<boolean>;
   readonly onRemove: (server: ShieldServer) => Promise<boolean>;
   readonly onShowKey: (server: ShieldServer) => Promise<KeyShown>;
+  /** Opens Make this an Octant computer for a server; the account list offers it. */
+  readonly onMakeComputer?: ((server: ShieldServer) => void) | undefined;
 }
 
 /**
@@ -309,6 +317,18 @@ function ServerEditor(props: ServerEditorProps) {
                       }`
                 }
               >
+                {props.onMakeComputer === undefined ? null : (
+                  <OctantButton
+                    aria-label={`${MEMBER_INSTALL_ACTION}: ${server.alias}`}
+                    disabled={props.busy}
+                    onClick={() => props.onMakeComputer?.(server)}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    {MEMBER_INSTALL_ACTION}
+                  </OctantButton>
+                )}
                 {server.signIn === "octant-key" ? (
                   <OctantButton
                     aria-label={`Show the key for ${server.alias}${suffix}`}
@@ -474,6 +494,9 @@ export function ShieldServersSettings(props: ShieldServersSettingsProps) {
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem | undefined>(undefined);
+  /** The server whose Make this an Octant computer sheet is open. */
+  const [installing, setInstalling] = useState<ShieldServer | undefined>(undefined);
+  const memberInstall = client?.memberInstall;
 
   const focused = props.focusedSetting?.startsWith("shield-servers") === true;
   // The panel is drawn only once the registry has been read. A link followed
@@ -657,10 +680,19 @@ export function ShieldServersSettings(props: ShieldServersSettingsProps) {
           onRemove={(server) =>
             send({ kind: "remove-server", serverId: server.serverId }, "account")
           }
+          onMakeComputer={memberInstall === undefined ? undefined : setInstalling}
           onShowKey={showKey}
           problem={problemFor("account")}
           servers={view.servers}
         />
+        {installing === undefined || memberInstall === undefined ? null : (
+          <MemberInstallSheet
+            client={{ memberInstall }}
+            onClose={() => setInstalling(undefined)}
+            onOpenPrivateNetworkGuide={props.onOpenPrivateNetworkGuide}
+            server={installing}
+          />
+        )}
       </SettingsPanel>
       <SettingsPanel
         collapse={{

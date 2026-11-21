@@ -558,6 +558,110 @@ member are the ones it gave other members on itself.
 - Every join, grant change, leave, and removal is journaled on the host where
   it happened, with its principal.
 
+### Adding a computer over SSH
+
+Decided 2026-11-19 ([decision H26](#decisions)): a person turns one of their
+registered SSH servers into a full Octant computer from Settings, without
+visiting it. Octant installs the signed headless build over SSH after the
+person confirms, starts it as a user service, turns on its private listener,
+and joins it to the hub. Built for a hub, in slice 18 below; what is not built
+is listed at the end.
+
+**Who may.** In Settings › Permissions › Servers a registered server's row
+offers **Make this an Octant computer**. The host decides on its own route
+(`/api/shield/servers/member-install`): a window on this computer, or a device
+its own person paired, journaled as that device. A device the hub's roster
+introduced, a device whose pairing the journal does not prove, an agent grant
+and a routine are refused before anything is read.
+
+**One sheet, before anything runs.** Preparing reads the server over its own
+SSH connection (the person's SSH config and agent, the registry's pinned host
+keys when it has them) and changes nothing anywhere. The sheet states:
+
+- the server, its login, and the system read with `uname -sm` (darwin-arm64,
+  linux-x64 or linux-arm64; anything else, Windows included, is refused with
+  a sentence);
+- the exact Octant version and ring, and that its release signature and every
+  file's digest were checked on this computer, with the code
+  `octant server install` runs;
+- the install location, `install` in the login's own state folder (the
+  headless CLI's default), and that Octant never uses sudo;
+- that it runs as a user service of that login (a systemd user service, or a
+  launchd agent on a Mac);
+- for Linux, unless the login already lingers, the one administrator command
+  for starting at boot with no one logged in, `sudo loginctl enable-linger
+<login>`, for the person to copy and run themselves ([decision
+  H13](#decisions)); until then the service runs while the login has a
+  session;
+- the private addresses the server reported, Tailscale first, to pick the one
+  it listens on (port 8443, the listener's own certificate). A server with no
+  Tailscale or private network address is refused with a sentence and a link
+  to the private network guide;
+- that it joins this computer's hub, and that confirming also approves that
+  one join.
+
+**Where the build comes from.** Octant downloads no build itself yet: the
+newest `octant-<version>-<target>.tar.gz` in the `headless-builds` folder of
+this computer's Octant data folder is used, as the release publishes it. A
+build that is unsigned, signed by a key not trusted for its ring, or whose
+files differ from its manifest is refused before a byte is sent; it is
+checked again when the person confirms, and a build changed since the sheet
+was read is refused.
+
+**The steps.** The person's one confirmation journals the request, then runs
+copy, verify, install, start, listen and join over the same connection. Each
+step shows its outcome; a failed step names what to fix, and nothing runs
+after it.
+
+1. **Copy.** The build goes to a private work folder in the login's state
+   folder on standard input, and the server prints its SHA-256, which must be
+   the digest checked here.
+2. **Verify.** The server unpacks it, and the manifest and signature it holds
+   must be the very files checked here.
+3. **Install.** The build's own `octant server install --artifact …
+--install-root …` installs it, checking its signature again first; Octant
+   never passes `--self-built` here.
+4. **Start.** `octant server enable`, then `octant server start`, from the
+   installed copy.
+5. **Listen.** `octant listener enable --hostname <picked address> --port
+8443`.
+6. **Join.** The hub mints a join code for one ticket, which goes to the
+   server on standard input, never in a command line on this host and never
+   in the journal. The server runs `octant hub join <code> --items
+roster,introduce,owners` (the default hub grant) in the background, and
+   Octant reads the comparison code it prints over the SSH connection. The
+   hub approves that ticket only when the comparison code it derives for the
+   waiting claim matches; a claim whose code differs is denied and the step
+   fails ([decision H26](#decisions)). The step succeeds when the server's
+   join finishes.
+
+**Journal.** The request (`shield-servers.member-install-requested@1`) and
+each step's outcome (`shield-servers.member-install-step@1`, with a closed
+failure reason) are journaled on the server's own id in the server registry,
+with the person or their paired device as the actor. They name the build, the
+target and the address, never a join code, ticket, comparison code or key,
+and no credential is copied to the server.
+
+**Not built yet.**
+
+- Downloading the build from its ring: today the person places the signed
+  release build in the folder named above.
+- Joining a hub from a computer that is only a member: the ticket is approved
+  on the hub, and the owner routes offer no pairing approval, so a member's
+  window refuses with a sentence and the person uses the hub's window.
+- Pairing the server with this computer when there is no hub: the paired
+  computer's claim lives in the desktop app, not in the server, so a computer
+  with no hub role refuses with a sentence.
+- Starting a Mac at boot with no login; the sheet says so.
+- Update (drain, swap and roll back after a failed handshake) and Remove
+  Octant.
+
+Rationale: the SSH login is the person on that machine, so the install needs
+no new credential and copies none; the comparison code read over that pinned
+connection is what lets the confirmation also approve the join without a
+second trip to the hub, and a code that does not match means another party
+claimed the ticket.
+
 ### What the hub may do on a spoke
 
 The hub grant is a closed list. Each item is off unless the table says it is
@@ -2476,6 +2580,15 @@ choice to the design, the design's recommendation was taken.
 | H21 | What happens to the source's copy?                                          | It is erased through the ordinary thread purge once the destination commits, and its tombstone points to the destination                                                                                                                                                                                                                                                                                                                                                         |
 | H22 | Is a move limited in size?                                                  | No. Attachments, original inputs, captures, owned Canvases, and a Code thread's whole branch and uncommitted work travel whatever their size; ignored files never do                                                                                                                                                                                                                                                                                                             |
 | H23 | What happens when a move cannot finish?                                     | There is no file export. A Code thread hands over: everything is committed to its branch with a generated note, pushed when there is a remote, and continued from that branch on another computer. Chat and Work threads stay where they are, and every failed move shows an explicit error with its reason                                                                                                                                                                      |
+| H26 | May a computer be added as a member over SSH without visiting it?           | Yes, as an option: the person's window, or a device they paired, runs the signed headless installer over SSH after the person confirms, as a user service with no sudo, then the computer joins with a join code passed in the same session. The same confirmation approves that one join, bound to the comparison code read over SSH. The request and each step are journaled with the actor. Updates drain, swap and roll back after a failed handshake (2026-11-19)           |
+
+On 2026-11-19 the maintainer settled H26 and its terms: the release workflows
+sign and publish the headless builds, which carry their own Bun; Octant never
+runs sudo, and starting at boot with no login is one administrator command
+the person copies and runs; the request and each step are new events on the
+server registry, with the actor and without secrets; and the install sheet's
+button also approves the hub join for that one ticket, bound to the comparison
+code read over SSH. See [Adding a computer over SSH](#adding-a-computer-over-ssh).
 
 On 2026-11-07 the maintainer added messaging between members: an agent on one
 computer must be able to message a running thread on another when that thread
@@ -3422,6 +3535,18 @@ a numbered slice. Built, with these narrower readings:
     progress stays current. Sizes are read per destination, the head's and
     each member a row names, and each destination's total and estimate show
     at the rate to that member, with one basis line each.
+
+Slice 18, **Add a computer over SSH** ([decision H26](#decisions); see
+[Adding a computer over SSH](#adding-a-computer-over-ssh)): the signed
+headless build installed over SSH after the person confirms, the join code
+passed in the same session and the join approved for its one ticket when the
+comparison code read over SSH matches, then updates that drain, swap and roll
+back. Built for a hub: Make this an Octant computer on a registered server's
+row, the sheet, the six steps, and their journal events. Not built: the
+download from the ring, a join made from a member's window, pairing with no
+hub, Update and Remove. Verification: server tests against a stand-in `ssh`
+that runs the remote command in `sh` with a stand-in signed build, and a
+component test of the sheet; a real machine is a maintainer gate.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.
