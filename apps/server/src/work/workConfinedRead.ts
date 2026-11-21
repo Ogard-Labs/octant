@@ -7,6 +7,7 @@ export interface WorkConfinedReadRequest {
   /** The object confinement resolved, so the read can prove it read that object. */
   readonly expected: WorkFileIdentity;
   readonly maximumBytes: number;
+  readonly unchangedSince?: bigint;
 }
 
 /**
@@ -49,8 +50,15 @@ export async function readConfinedWorkFile(
       return undefined;
     }
     if (opened.size > request.maximumBytes) return undefined;
+    if (request.unchangedSince !== undefined && opened.changedAt !== request.unchangedSince)
+      return undefined;
     const bytes = await file.read(opened.size + 1);
     if (bytes.byteLength !== opened.size) return undefined;
+    if (
+      request.unchangedSince !== undefined &&
+      (await file.stat()).changedAt !== request.unchangedSince
+    )
+      return undefined;
     return bytes;
   } catch {
     return undefined;

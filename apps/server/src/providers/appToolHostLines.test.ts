@@ -27,6 +27,7 @@ describe("appToolHostLines", () => {
     expect(line?.tool).toBe("octant_create_image");
     expect(line?.text).toMatch(/instead of drawing it as SVG/);
     expect(line?.text).toMatch(/confirm/);
+    expect(line?.text).toMatch(/restyle photos or screenshots, use references/);
     expect(appToolHostLines(offered("octant_browser")).map((entry) => entry.tool)).not.toContain(
       "octant_create_image",
     );

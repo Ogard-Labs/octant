@@ -70,8 +70,11 @@ function OfferCard(props: {
   const inFlight = useRef(false);
   const [settled, setSettled] = useState(false);
   const [note, setNote] = useState<string>();
+  const references = offer.kind === "generate" ? offer.references : undefined;
   const choices =
-    offer.kind === "generate" ? imageOfferModelChoices(props.profiles ?? [], offer.suggested) : [];
+    offer.kind === "generate"
+      ? imageOfferModelChoices(props.profiles ?? [], offer.suggested, references !== undefined)
+      : [];
   const choice = choices.find((candidate) => candidate.id === selected) ?? choices[0];
   const unavailable = props.stale || busy;
 
@@ -113,7 +116,8 @@ function OfferCard(props: {
         decision: "generate",
         profileInstanceId: choice.profileInstanceId,
         modelId: choice.modelId,
-        rememberForThread: remember,
+        rememberForThread: references === undefined && remember,
+        ...(references === undefined ? {} : { referenceImagesConfirmed: true }),
       });
     }
   };
@@ -134,6 +138,17 @@ function OfferCard(props: {
             {offer.variantCount} {offer.variantCount === 1 ? "image" : "images"} · Uses the selected
             provider
           </Text>
+          {references === undefined ? null : (
+            <>
+              <Text style={text}>These images will be sent to the selected image provider:</Text>
+              {references.map((reference, index) => (
+                <Text key={index} style={text}>
+                  {reference.label}
+                  {reference.signedIn === true ? " (signed-in page)" : ""}
+                </Text>
+              ))}
+            </>
+          )}
           <Pressable
             accessibilityRole="button"
             disabled={unavailable}
@@ -144,15 +159,17 @@ function OfferCard(props: {
               {choice?.label ?? "Choose an image model"}
             </Text>
           </Pressable>
-          <View style={styles.remember}>
-            <Text style={[text, styles.rememberLabel]}>{rememberLabel}</Text>
-            <Switch
-              accessibilityLabel={rememberLabel}
-              disabled={unavailable}
-              onValueChange={setRemember}
-              value={remember}
-            />
-          </View>
+          {references === undefined ? (
+            <View style={styles.remember}>
+              <Text style={[text, styles.rememberLabel]}>{rememberLabel}</Text>
+              <Switch
+                accessibilityLabel={rememberLabel}
+                disabled={unavailable}
+                onValueChange={setRemember}
+                value={remember}
+              />
+            </View>
+          ) : null}
           <ModelPickerSheet
             visible={selecting}
             onClose={() => setSelecting(false)}
@@ -166,6 +183,7 @@ function OfferCard(props: {
         </>
       )}
       <ApprovalDecisionButtons
+        allowDisabled={offer.kind === "generate" && choice === undefined}
         allowLabel={offer.kind === "save" ? "Save" : "Generate"}
         busy={unavailable}
         denyLabel={offer.kind === "save" ? "Don't save" : "Cancel"}

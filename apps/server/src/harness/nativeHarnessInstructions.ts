@@ -104,7 +104,7 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
     "ask the language server about a saved file: its errors, where a name is defined, where it is used",
   octant_computer: "operate macOS apps on the user's desktop",
   octant_create_image:
-    "generate a picture with an image model instead of drawing it as SVG; the person picks the model and confirms first",
+    "generate a picture with an image model instead of drawing it as SVG, or restyle a photo or screenshot using reference images; references always need confirmation",
   octant_credential:
     "have the person authorize a credential for a registered operation or saved command; not a command runner",
   octant_debug:

@@ -796,6 +796,7 @@ export function startOctantServer(
       replicaArtifactSync,
       resolveCanvasWorkspace,
       snapshotCanvas,
+      threadProjectAssetRoot,
     } = wireCanvas({
       claudePublishes: makeClaudeLibraryPublishes({
         workThreads: () =>
@@ -991,8 +992,10 @@ export function startOctantServer(
       buildCodeService,
       appleToolchainService,
       browserAuthority,
+      browserCaptures,
       canAccessCodeProject,
       canvasAgentToolPort,
+      threadProjectAssetRoot,
       codeActiveTurns,
       codeApprovalStore,
       codeAttachments,

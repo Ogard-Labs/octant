@@ -37,7 +37,7 @@ const ROUTING_LINES: ReadonlyArray<AppToolHostLine> = [
   },
   {
     tool: "octant_create_image",
-    text: "Call octant_create_image when the person asks for a picture (photo, illustration, rendered scene) instead of drawing it as SVG or HTML; they pick the model and confirm first. Keep SVG for logos, icons, and diagrams.",
+    text: "Use octant_create_image when the person asks for a picture instead of drawing it as SVG or HTML. To restyle photos or screenshots, use references, which always need confirmation. Keep SVG for logos, icons, and diagrams.",
   },
   {
     tool: "octant_agents",
