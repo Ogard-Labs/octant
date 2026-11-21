@@ -2490,7 +2490,9 @@ by ACP's standard usage, and its probe declares `usage: "supported"`
   describes), then cache inside input and thought inside output, then each
   mixed nesting. Octant's input is all input, cached or not, kept also as
   cache reads and writes, and its output counts thinking, with
-  `thoughtTokens` kept as its reasoning part (`reasoningTokens`). A reply whose
+  `thoughtTokens` kept as its reasoning part (`reasoningTokens`), as every
+  provider's usage reads it: a spend reservation settles at input plus
+  output and never adds reasoning a second time. A reply whose
   parts fit no reading, or with no total (the schema requires one) and no
   reviewed rule for that (`turnUsageWithoutTotal`), reports nothing.
 - **Context.** A `usage_update`'s `used` of `size` during the turn becomes
