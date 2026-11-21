@@ -2833,6 +2833,19 @@ CREATE INDEX validation_evidence_authority_idx
       ) STRICT;
     `,
   },
+  {
+    version: 111,
+    name: "drop_code_turn_full_access_from_usage",
+    // The spend ceiling no longer reads an unreported Code turn by the level
+    // it ran at, so nothing reads the column or the boundary version 109 added
+    // for it. The column's only constraint is its own CHECK and no index,
+    // view, or trigger names it, so SQLite drops it in place; every other
+    // column of a projected row is kept, and a rebuild writes the same rows.
+    sql: `
+      ALTER TABLE usage_record_projection DROP COLUMN ran_at_full_access;
+      DROP TABLE usage_turn_level_boundary;
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {
