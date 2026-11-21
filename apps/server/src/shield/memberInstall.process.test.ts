@@ -80,7 +80,9 @@ case "$1 $2" in
   "server start") echo "ready" ;;
   "listener enable") echo "listening on $4:$6" ;;
   "hub join")
-    printf '%s\\n' "$3" > "$HOME/join-code-received"
+    # The real CLI reads the code from standard input when given a dash.
+    if [ "$3" = "-" ]; then IFS= read -r code; else code=$3; fi
+    printf '%s\\n' "$code" > "$HOME/join-code-received"
     echo "Hub Test hub"
     echo "Comparison code ${COMPARISON_CODE}"
     echo "Approve on the hub only if the comparison code matches. Waiting for approval..."
@@ -423,8 +425,10 @@ describe("making a registered server an Octant computer over SSH", () => {
       "server enable",
       "server start",
       "listener enable --hostname 100.101.102.103 --port 8443",
-      `hub join ${JOIN_CODE} --items roster,introduce,owners`,
+      // The code reaches the CLI on standard input, never as an argument.
+      "hub join - --items roster,introduce,owners",
     ]);
+    expect(setup.server.calls()).not.toContain(JOIN_CODE);
     expect(existsSync(join(root, "current", "bin", "octant"))).toBe(true);
     expect(readFileSync(join(setup.server.home, "join-code-received"), "utf8").trim()).toBe(
       JOIN_CODE,

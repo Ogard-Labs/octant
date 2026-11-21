@@ -154,7 +154,9 @@ const LISTEN_SCRIPT = `"$1" listener enable --hostname "$2" --port "$3"`;
 
 /**
  * `$1` work folder, `$2` the installed CLI, `$3` grant items, the join code on
- * standard input so it is never part of the command this host's ssh is given.
+ * standard input so it is never part of the command this host's ssh is given,
+ * nor of any process's arguments on the server: the shell's own `printf`
+ * hands it to `octant hub join -` on standard input.
  * The join runs on in the background, writing what it prints to a private log,
  * because it waits for this computer to approve it.
  */
@@ -162,7 +164,7 @@ const JOIN_START_SCRIPT = `umask 077
 IFS= read -r code || exit 3
 log="$1/join.log"
 rm -f -- "$log"
-nohup sh -c '"$0" hub join "$1" --items "$2"; printf "\\nexit=%s\\n" "$?"' "$2" "$code" "$3" >"$log" 2>&1 </dev/null &
+printf '%s\\n' "$code" | nohup sh -c '"$0" hub join - --items "$1"; printf "\\nexit=%s\\n" "$?"' "$2" "$3" >"$log" 2>&1 &
 exit 0`;
 
 const JOIN_READ_SCRIPT = `cat -- "$1/join.log" 2>/dev/null; exit 0`;

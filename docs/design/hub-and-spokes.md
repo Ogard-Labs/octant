@@ -626,9 +626,12 @@ after it.
 5. **Listen.** `octant listener enable --hostname <picked address> --port
 8443`.
 6. **Join.** The hub mints a join code for one ticket, which goes to the
-   server on standard input, never in a command line on this host and never
-   in the journal. The server runs `octant hub join <code> --items
-roster,introduce,owners` (the default hub grant) in the background, and
+   server on standard input, never in a command line on this host or on the
+   server and never in the journal. The server runs `octant hub join -
+--items roster,introduce,owners` (the default hub grant) in the
+   background, the shell's own `printf` handing it the code on standard
+   input (`octant hub join -` reads the code from there, so the server's
+   process list never shows it), and
    Octant reads the comparison code it prints over the SSH connection. The
    hub approves that ticket only when the comparison code it derives for the
    waiting claim matches; a claim whose code differs is denied and the step
