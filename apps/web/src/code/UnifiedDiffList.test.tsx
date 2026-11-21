@@ -153,6 +153,25 @@ describe("UnifiedDiffList", () => {
     ).toBeVisible();
   });
 
+  it("renders deleted mode and empty deleted copy for an empty deleted file whose path contains spaces", () => {
+    const files = parseUnifiedDiff(
+      [
+        "diff --git a/my file.txt b/my file.txt",
+        "deleted file mode 100644",
+        "index e69de29..0000000",
+      ].join("\n"),
+    );
+
+    render(<UnifiedDiffList files={files} onOpenFile={vi.fn()} />);
+
+    const deletedSection = screen.getByRole("region", { name: "my file.txt" });
+    expect(within(deletedSection).getByText("deleted mode 100644")).toBeVisible();
+    expect(within(deletedSection).queryByText(/new mode/i)).not.toBeInTheDocument();
+    expect(within(deletedSection).getByText("deleted")).toBeVisible();
+    expect(within(deletedSection).getByText("Empty file deleted.")).toBeVisible();
+    expect(within(deletedSection).queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
+  });
+
   it("virtualizes large single-file diffs to bounded DOM rows while scrolling", () => {
     const lines = Array.from(
       { length: 600 },

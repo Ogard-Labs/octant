@@ -189,3 +189,63 @@ it("preserves creation and deletion modes for empty, executable, and binary file
   });
   expect(files[3]?.emptyFile).toBeUndefined();
 });
+
+it("decodes Git C-quoted UTF-8 octal and escape sequences in diff paths", () => {
+  const patch = [
+    'diff --git "a/caf\\303\\251.txt" "b/caf\\303\\251.txt"',
+    '--- "a/caf\\303\\251.txt"',
+    '+++ "b/caf\\303\\251.txt"',
+    "@@ -1 +1 @@",
+    "-old",
+    "+new",
+    'diff --git "a/dir/\\"quote\\"\\tname.txt" "b/dir/\\"quote\\"\\tname.txt"',
+    '--- "a/dir/\\"quote\\"\\tname.txt"',
+    '+++ "b/dir/\\"quote\\"\\tname.txt"',
+    "@@ -1 +1 @@",
+    "-a",
+    "+b",
+    "diff --git a/plain\\keep.txt b/plain\\keep.txt",
+    "--- a/plain\\keep.txt",
+    "+++ b/plain\\keep.txt",
+    "@@ -1 +1 @@",
+    "-x",
+    "+y",
+  ].join("\n");
+
+  const files = parseUnifiedDiff(patch);
+  expect(files[0]?.path).toBe("café.txt");
+  expect(files[0]?.previousPath).toBeUndefined();
+  expect(files[0]?.change).toBe("modified");
+  expect(files[1]?.path).toBe('dir/"quote"\tname.txt');
+  expect(files[1]?.previousPath).toBeUndefined();
+  expect(files[2]?.path).toBe("plain\\keep.txt");
+});
+
+it("preserves unquoted paths with spaces for empty deleted and added files", () => {
+  const patch = [
+    "diff --git a/my file.txt b/my file.txt",
+    "deleted file mode 100644",
+    "index e69de29..0000000",
+    "diff --git a/another empty file.sh b/another empty file.sh",
+    "new file mode 100755",
+    "index 0000000..e69de29",
+  ].join("\n");
+
+  const files = parseUnifiedDiff(patch);
+  expect(files[0]).toMatchObject({
+    path: "my file.txt",
+    change: "deleted",
+    fileMode: "100644",
+    binary: true,
+    emptyFile: true,
+  });
+  expect(files[0]?.previousPath).toBeUndefined();
+  expect(files[1]).toMatchObject({
+    path: "another empty file.sh",
+    change: "created",
+    fileMode: "100755",
+    binary: true,
+    emptyFile: true,
+  });
+  expect(files[1]?.previousPath).toBeUndefined();
+});

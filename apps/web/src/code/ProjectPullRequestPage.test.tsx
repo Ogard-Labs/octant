@@ -531,4 +531,38 @@ describe("the pull-request reading pane", () => {
       ),
     ).toBeVisible();
   });
+
+  it("anchors pull request line notes to decoded UTF-8 paths when git quotes the diff header", async () => {
+    const user = userEvent.setup();
+    const sendNotes = vi.fn(async (_threadId: string, _message: string) => ({
+      status: "sent" as const,
+    }));
+    const quotedDiff = [
+      'diff --git "a/caf\\303\\251.txt" "b/caf\\303\\251.txt"',
+      '--- "a/caf\\303\\251.txt"',
+      '+++ "b/caf\\303\\251.txt"',
+      "@@ -1 +1 @@",
+      "-old line",
+      "+new line",
+    ].join("\n");
+    const view = detailView("Updates café copy.", {
+      diff: quotedDiff,
+      linkedThreads: [linkedThreadOne],
+    });
+    renderPage({
+      load: async () => view,
+      refresh: async () => view,
+      onSendLineNotes: sendNotes,
+    });
+
+    await user.click(await screen.findByRole("tab", { name: /Changes/ }));
+    await user.click(screen.getByRole("button", { name: "Comment on café.txt modified line 1" }));
+    const notes = screen.getByRole("region", { name: "Line notes" });
+    await user.type(within(notes).getByLabelText("Note"), "Check accent");
+    await user.click(within(notes).getByRole("button", { name: "Add note" }));
+    await user.click(within(notes).getByRole("button", { name: "Send 1 note" }));
+
+    expect(sendNotes).toHaveBeenCalledTimes(1);
+    expect(sendNotes.mock.calls[0]?.[1]).toContain("café.txt, new line 1");
+  });
 });

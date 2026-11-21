@@ -148,16 +148,128 @@ function newAccumulator(): FileAccumulator {
   };
 }
 
+const UTF8_ENCODER = new TextEncoder();
+const UTF8_DECODER = new TextDecoder("utf-8");
+
+const C_ESCAPES: Readonly<Record<string, number>> = {
+  a: 0x07,
+  b: 0x08,
+  t: 0x09,
+  n: 0x0a,
+  v: 0x0b,
+  f: 0x0c,
+  r: 0x0d,
+  '"': 0x22,
+  "\\": 0x5c,
+};
+
 function unquote(path: string): string {
   const trimmed = path.trim();
   if (!trimmed.startsWith('"') || !trimmed.endsWith('"') || trimmed.length < 2) return trimmed;
-  return trimmed.slice(1, -1).replace(/\\(.)/g, "$1");
+  const inner = trimmed.slice(1, -1);
+  const bytes: number[] = [];
+  let cursor = 0;
+  while (cursor < inner.length) {
+    const slash = inner.indexOf("\\", cursor);
+    if (slash === -1) {
+      for (const byte of UTF8_ENCODER.encode(inner.slice(cursor))) bytes.push(byte);
+      break;
+    }
+    if (slash > cursor) {
+      for (const byte of UTF8_ENCODER.encode(inner.slice(cursor, slash))) bytes.push(byte);
+    }
+    const next = inner[slash + 1];
+    if (next === undefined) {
+      bytes.push(0x5c);
+      break;
+    }
+    const octal = /^[0-7]{1,3}/.exec(inner.slice(slash + 1));
+    if (octal !== null) {
+      bytes.push(Number.parseInt(octal[0], 8) & 0xff);
+      cursor = slash + 1 + octal[0].length;
+      continue;
+    }
+    const mapped = C_ESCAPES[next];
+    if (mapped !== undefined) {
+      bytes.push(mapped);
+      cursor = slash + 2;
+      continue;
+    }
+    for (const byte of UTF8_ENCODER.encode(next)) bytes.push(byte);
+    cursor = slash + 2;
+  }
+  return UTF8_DECODER.decode(new Uint8Array(bytes));
 }
 
 function stripPrefix(path: string): string {
   const unquoted = unquote(path);
   if (unquoted === "/dev/null") return unquoted;
   return unquoted.replace(/^[abciow]\//, "");
+}
+
+function readQuotedEnd(text: string, start: number): number | undefined {
+  if (text[start] !== '"') return undefined;
+  let index = start + 1;
+  while (index < text.length) {
+    if (text[index] === "\\") {
+      index += 2;
+      continue;
+    }
+    if (text[index] === '"') return index + 1;
+    index += 1;
+  }
+  return undefined;
+}
+
+function parseDiffGitHeader(
+  line: string,
+): { readonly oldPath: string; readonly newPath: string } | undefined {
+  const rest = line.slice("diff --git ".length);
+  if (rest.startsWith('"')) {
+    const firstEnd = readQuotedEnd(rest, 0);
+    if (firstEnd !== undefined && rest[firstEnd] === " ") {
+      return {
+        oldPath: stripPrefix(rest.slice(0, firstEnd)),
+        newPath: stripPrefix(rest.slice(firstEnd + 1)),
+      };
+    }
+  }
+  if (rest.endsWith('"')) {
+    let search = rest.indexOf(' "');
+    while (search !== -1) {
+      const end = readQuotedEnd(rest, search + 1);
+      if (end === rest.length) {
+        return {
+          oldPath: stripPrefix(rest.slice(0, search)),
+          newPath: stripPrefix(rest.slice(search + 1)),
+        };
+      }
+      search = rest.indexOf(' "', search + 1);
+    }
+  }
+  // Unquoted paths with spaces cannot be split on whitespace directly, but
+  // non-renamed `diff --git a/<X> b/<X>` headers are exactly symmetric around
+  // the middle space.
+  if ((rest.length - 1) % 2 === 0) {
+    const mid = (rest.length - 1) / 2;
+    if (rest[mid] === " ") {
+      const left = rest.slice(0, mid);
+      const right = rest.slice(mid + 1);
+      if (
+        /^[abciow]\//.test(left) &&
+        /^[abciow]\//.test(right) &&
+        left.slice(2) === right.slice(2)
+      ) {
+        const path = left.slice(2);
+        return { oldPath: path, newPath: path };
+      }
+    }
+  }
+  const paths = /^(.+?) (\S+)$/.exec(rest);
+  if (paths?.[1] !== undefined && paths[2] !== undefined) {
+    return { oldPath: stripPrefix(paths[1]), newPath: stripPrefix(paths[2]) };
+  }
+  return undefined;
 }
 
 function finish(accumulator: FileAccumulator, index: number): ParsedDiffFile | undefined {
@@ -240,10 +352,10 @@ export function parseUnifiedDiff(
         accumulator.source = { start, end: diff.length, headerEnd: diff.length };
       // `diff --git a/x b/y` is the only reliable path source for a file whose
       // hunks are absent, such as a binary or pure-mode change.
-      const paths = /^diff --git (.+?) (\S+)$/.exec(line);
-      if (paths?.[1] !== undefined && paths[2] !== undefined) {
-        accumulator.oldPath = stripPrefix(paths[1]);
-        accumulator.newPath = stripPrefix(paths[2]);
+      const paths = parseDiffGitHeader(line);
+      if (paths !== undefined) {
+        accumulator.oldPath = paths.oldPath;
+        accumulator.newPath = paths.newPath;
       }
       continue;
     }

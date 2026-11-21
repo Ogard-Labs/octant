@@ -494,12 +494,10 @@ function renderFileSection(input: {
           <span className="unified-diff__mode">
             mode {file.modeChange.oldMode} → {file.modeChange.newMode}
           </span>
-        ) : file.fileMode !== undefined ? (
-          <span className="unified-diff__mode">
-            {file.change === "deleted"
-              ? `deleted mode ${file.fileMode}`
-              : `new mode ${file.fileMode}`}
-          </span>
+        ) : file.fileMode !== undefined && file.change === "deleted" ? (
+          <span className="unified-diff__mode">deleted mode {file.fileMode}</span>
+        ) : file.fileMode !== undefined && file.change === "created" ? (
+          <span className="unified-diff__mode">new mode {file.fileMode}</span>
         ) : null}
         <span className="unified-diff__change">{CHANGE_LABELS[file.change]}</span>
         {input.onReadProviderFile === undefined ? null : (
