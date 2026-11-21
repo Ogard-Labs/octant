@@ -32,6 +32,12 @@ const SESSION_INVALIDATION_BATCH_SIZE = 256;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
 
+/**
+ * Why a hub-introduced device's open sessions ended: the member's grant to its
+ * hub stopped ticking Act. The device stays registered.
+ */
+export const HUB_ACT_WITHDRAWN_REASON = "hub-act-withdrawn";
+
 export type RemoteCredentialLifecycleErrorCategory = "invalid" | "not-found" | "conflict";
 
 export class RemoteCredentialLifecycleError extends Error {
@@ -513,6 +519,47 @@ export class RemoteCredentialLifecycleService {
         }
         return [row];
       },
+    });
+  }
+
+  /**
+   * Ends every open session of one device and keeps its registration, so the
+   * device may open a new session later and is held to the rules then in force.
+   * A device with no open session is left alone and nothing is journaled.
+   */
+  endDeviceSessions(input: {
+    readonly commandId: string;
+    readonly hostId: StableHostId;
+    readonly deviceId: string;
+    readonly reasonCode: string;
+  }): RemoteCredentialOperationReceipt | undefined {
+    assertUuid(input.commandId, "command");
+    assertUuid(input.deviceId, "device");
+    if (this.#selectActiveSessionsForCancellation(input.hostId, input.deviceId).length === 0) {
+      return undefined;
+    }
+    return this.#sessionScopeMutate({
+      commandId: input.commandId,
+      hostId: input.hostId,
+      deviceId: input.deviceId,
+      reasonCode: input.reasonCode,
+      operationKind: "end-device-sessions",
+      operationDigest: digestOperation({
+        deviceId: input.deviceId,
+        reasonCode: input.reasonCode,
+      }),
+      selectSessions: (connection) =>
+        connection
+          .prepare(
+            `SELECT session_id_digest, device_id, credential_generation
+             FROM remote_session_store
+             WHERE host_id = ? AND device_id = ? AND state = 'active'`,
+          )
+          .all(input.hostId, input.deviceId) as ReadonlyArray<{
+          readonly session_id_digest: string;
+          readonly device_id: string;
+          readonly credential_generation: number;
+        }>,
     });
   }
 

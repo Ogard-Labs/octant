@@ -12,7 +12,10 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import {
   decodeConfirmNewMembersRequest,
   decodeHubAcceptNewHubRequest,
+  HubMemberId,
   decodeHubGrant,
+  decodeHubWindowGuestRequest,
+  type HubWindowComputers,
   decodeHubMemberReference,
   decodeHubPromoteRequest,
   decodeHubAutoApplyRequest,
@@ -39,11 +42,13 @@ import {
   decodeOwnerApprovalAnswerUnlockRequest,
   type AuditActingPrincipal,
 } from "@octant/contracts";
+import { Schema } from "effect";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { DirectPushService } from "./directPushService";
 import type { FailoverService } from "./failoverService";
 import type { HubService } from "./hubService";
+import { windowComputersFrom } from "./memberOrigin";
 import type { PairedMergeUnlockService } from "./pairedMergeUnlock";
 import type { OwnerApprovalAnswerUnlock } from "./ownerApprovalAnswerUnlock";
 import type { ProvisionService } from "./provisionService";
@@ -59,6 +64,7 @@ import type { WakeService } from "./wakeService";
 
 const DEFAULT_BODY_LIMIT = 64 * 1_024;
 const WINDOW_PRINCIPAL: AuditActingPrincipal = { kind: "local-window" };
+const decodeHubMemberId = Schema.decodeUnknownSync(HubMemberId);
 
 export const HUB_ADMINISTRATION_ROUTES = {
   status: "/api/desktop/hub/status",
@@ -69,6 +75,12 @@ export const HUB_ADMINISTRATION_ROUTES = {
   join: "/api/desktop/hub/join",
   joinFinish: "/api/desktop/hub/join/finish",
   grant: "/api/desktop/hub/grant",
+  /**
+   * This host's desktop window asks to be listed as a guest of the hub (by the
+   * hub itself, or through this spoke's signed request), and reads the members
+   * it may then reach directly.
+   */
+  windowGuest: "/api/desktop/hub/window-guest",
   leave: "/api/desktop/hub/leave",
   /** A window adds owner devices to this host's owner list: the hub's, or a spoke's after the person confirmed them by name and fingerprint. */
   ownersAdd: "/api/desktop/hub/owners/add",
@@ -304,6 +316,30 @@ export function createHubAdministrationRouteHandler(
           return outcome(
             options.spoke.setGrant(decodeHubGrant(parseJson(request, body.text)), WINDOW_PRINCIPAL),
           );
+        }
+        case HUB_ADMINISTRATION_ROUTES.windowGuest: {
+          const asked = decodeHubWindowGuestRequest(parseJson(request, body.text));
+          if (!options.hub.status().enabled) {
+            return Response.json(await options.spoke.introduceWindow(asked), {
+              headers: { "cache-control": "no-store" },
+            });
+          }
+          const hubMemberId = options.hub.hubMemberId();
+          const introduced = await options.hub.introduceWindowGuest(
+            { ...asked, introducedBy: hubMemberId },
+            WINDOW_PRINCIPAL,
+          );
+          const roster = options.hub.status().roster;
+          const answer: HubWindowComputers = {
+            membership: "member",
+            introduction: introduced.status,
+            hubMemberId: decodeHubMemberId(hubMemberId),
+            members:
+              roster === undefined
+                ? []
+                : windowComputersFrom({ roster, selfMemberId: hubMemberId }),
+          };
+          return Response.json(answer, { headers: { "cache-control": "no-store" } });
         }
         case HUB_ADMINISTRATION_ROUTES.leave: {
           requireNoBody(body.text);

@@ -1,9 +1,15 @@
 import { BrowserFlowRuns } from "./browser/browserFlowRuns";
 import { decodeBrowserFlow, decodeBrowserThreadId } from "@octant/contracts";
-import type { BrowserAutomationSnapshot, ToolActionAuthority, WindowId } from "@octant/contracts";
+import type {
+  BrowserAutomationSnapshot,
+  HubGrant,
+  ToolActionAuthority,
+  WindowId,
+} from "@octant/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createBrowserAutomationRouteHandler } from "./browserAutomationRoutes";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
+import { hubActScopeFromSpokeLink } from "./hub/hubActScope";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -456,6 +462,81 @@ describe("browser automation routes", () => {
       approvalId: "90000000-0000-4000-8000-000000000001",
       decision: "approved",
     });
+  });
+
+  it("a hub-introduced device answers a Code or Work thread's Browser prompt only in a Project the member's Act item names", async () => {
+    const codeApproval = "90000000-0000-4000-8000-000000000011";
+    const chatApproval = "90000000-0000-4000-8000-000000000012";
+    const approvals = {
+      list: vi.fn(
+        () =>
+          [
+            {
+              approvalId: codeApproval,
+              threadId,
+              mode: "code",
+              origin: "https://example.com",
+              requestedAt: "2026-09-09T10:00:00.000Z",
+            },
+            {
+              approvalId: chatApproval,
+              threadId,
+              mode: "chat",
+              origin: "https://example.com",
+              requestedAt: "2026-09-09T10:00:00.000Z",
+            },
+          ] as never,
+      ),
+      decide: vi.fn(() => true),
+    };
+    const namedProject = "90000000-0000-4000-8000-000000000013";
+    const grant: { current: HubGrant } = {
+      current: { items: ["roster", "introduce", "act"], actProjects: [] },
+    };
+    const approvalHandler = createBrowserAutomationRouteHandler({
+      service: service as never,
+      authority: { canAccessWindow: () => true, resolve: () => authority },
+      approvals,
+      windowAuthorityStore: store,
+      maxRequestBodySize: 64_000,
+      hubActScope: () =>
+        hubActScopeFromSpokeLink({
+          status: () => ({ membership: "member", grant: grant.current }) as never,
+        }),
+      codeOrWorkThreadProjectId: () => namedProject,
+    });
+    const decide = (approvalId: string) => {
+      const request = new Request("http://127.0.0.1/api/browser/approvals", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "decide", approvalId, decision: "approved" }),
+      });
+      bindPrincipalRouteContext(request, {
+        principal: createRemoteDevicePrincipal({
+          deviceId: "90000000-0000-4000-8000-000000000014" as never,
+          hostId: "local" as never,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "a1000000-0000-4000-8000-000000000015" as never,
+          admittedBy: "hub-roster",
+        }),
+        scopeId: windowId,
+      });
+      return approvalHandler(request);
+    };
+
+    const unnamed = await decide(codeApproval);
+    expect(unnamed?.status).toBe(403);
+    expect(await unnamed?.json()).toMatchObject({
+      message: "This computer's Act item for its hub does not name this Project.",
+    });
+    // Chat is not held to the Act item.
+    expect((await decide(chatApproval))?.status).toBe(200);
+    grant.current = { items: ["roster", "introduce", "act"], actProjects: [namedProject as never] };
+    expect((await decide(codeApproval))?.status).toBe(200);
+    expect(approvals.decide).toHaveBeenCalledTimes(2);
   });
 
   it("dispatches a strict create command under the authenticated window", async () => {

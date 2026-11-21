@@ -42,6 +42,13 @@ export interface ClientHostRegistration {
    * bridge authority instead of a remote device key and therefore has no handle.
    */
   readonly credential?: ClientHostCredentialHandle;
+  /**
+   * `hub` for a member of this window's hub that admitted this device because
+   * the hub introduced it, not because its own person paired it. That member
+   * holds the device to its Act item; the window lists it until the roster
+   * drops it. Absent for a computer paired directly.
+   */
+  readonly through?: "hub";
   readonly lastKnownCapabilities?: ReadonlyArray<string>;
   readonly cacheMetadata?: {
     readonly lastReadyAt?: string;
@@ -137,6 +144,7 @@ function parseStored(raw: string): ClientHostRegistration[] {
       return {
         ...base,
         origin: record.origin,
+        ...(kind === "remote" && record.through === "hub" ? { through: "hub" as const } : {}),
         ...(Array.isArray(record.lastKnownCapabilities)
           ? {
               lastKnownCapabilities: record.lastKnownCapabilities.filter(
@@ -339,6 +347,7 @@ export function createClientHostRegistry(storage: ClientHostRegistryStorage): Cl
         displayName: patch.displayName ?? current.displayName,
         enabled: patch.enabled ?? current.enabled,
         ...(current.origin !== undefined ? { origin: current.origin } : {}),
+        ...(current.through === undefined ? {} : { through: current.through }),
         ...(patch.lastKnownCapabilities !== undefined
           ? { lastKnownCapabilities: patch.lastKnownCapabilities }
           : current.lastKnownCapabilities !== undefined

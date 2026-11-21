@@ -19,6 +19,8 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
+import type { HubGrant } from "@octant/contracts";
+import { hubActScopeFromSpokeLink, type HubActScopePort } from "../hub/hubActScope";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { registerNativeHarnessEvents } from "./nativeHarnessEvents";
@@ -565,7 +567,13 @@ describe("a paired device answering its own managed child's request", () => {
   const runId = "00000000-0000-4000-8000-000000000633";
   const approvalId = "00000000-0000-4000-8000-000000000644";
   const questionId = "00000000-0000-4000-8000-000000000655";
-  function fixture() {
+  function fixture(
+    extra: {
+      readonly mode?: "chat" | "work" | "code";
+      readonly hubActScope?: () => HubActScopePort | undefined;
+      readonly threadProjectId?: (threadId: string) => string | undefined;
+    } = {},
+  ) {
     let current = true;
     const approval = { id: approvalId, status: "pending", source: { runId } };
     const question = { id: questionId, status: "pending", source: { runId } };
@@ -581,7 +589,11 @@ describe("a paired device answering its own managed child's request", () => {
       windowAuthorityStore: new WindowAuthorityStore(),
       store: {
         read: () => ({
-          session: { status: "running", detail: "private-parent-state" },
+          session: {
+            status: "running",
+            detail: "private-parent-state",
+            ...(extra.mode === undefined ? {} : { mode: extra.mode }),
+          },
           turns: [{ result: "private-tool-result" }],
           tasks: [{ title: "private-parent-task" }],
           steering: [{ text: "private-steering" }],
@@ -600,6 +612,8 @@ describe("a paired device answering its own managed child's request", () => {
         input.deviceId === deviceId,
       decideApproval,
       answerQuestion,
+      ...(extra.hubActScope === undefined ? {} : { hubActScope: extra.hubActScope }),
+      ...(extra.threadProjectId === undefined ? {} : { threadProjectId: extra.threadProjectId }),
     });
     const send = (action = "", body?: unknown, device = deviceId) => {
       const request = new Request(
@@ -651,6 +665,35 @@ describe("a paired device answering its own managed child's request", () => {
       answer: "Strict",
       actor: { kind: "remote-device", actorId: deviceId, deviceId },
     });
+  });
+  it("a hub-introduced device answers its child's approval and question only in a Project the member's Act item names", async () => {
+    const namedProject = "00000000-0000-4000-8000-000000000666";
+    const grant: { current: HubGrant } = {
+      current: { items: ["roster", "introduce", "act"], actProjects: [] },
+    };
+    const scope = hubActScopeFromSpokeLink({
+      status: () => ({ membership: "member", grant: grant.current }) as never,
+    });
+    const { send, decideApproval, answerQuestion } = fixture({
+      mode: "code",
+      hubActScope: () => scope,
+      threadProjectId: () => namedProject,
+    });
+
+    const unnamed = await send("approvals", { approvalId, decision: "approve" });
+    expect(unnamed?.status).toBe(403);
+    expect(await unnamed?.json()).toEqual({
+      error: "This computer's Act item for its hub does not name this Project.",
+    });
+    expect((await send("questions", { questionId, answer: "Strict" }))?.status).toBe(403);
+    expect(decideApproval).not.toHaveBeenCalled();
+    expect(answerQuestion).not.toHaveBeenCalled();
+
+    grant.current = { items: ["roster", "introduce", "act"], actProjects: [namedProject as never] };
+    expect((await send("approvals", { approvalId, decision: "approve" }))?.status).toBe(200);
+    expect((await send("questions", { questionId, answer: "Strict" }))?.status).toBe(200);
+    expect(decideApproval).toHaveBeenCalledOnce();
+    expect(answerQuestion).toHaveBeenCalledOnce();
   });
   it("refuses another device, remembered answers, revoked authority and session commands", async () => {
     const { send, decideApproval } = fixture();

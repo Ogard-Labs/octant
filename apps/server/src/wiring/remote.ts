@@ -158,6 +158,7 @@ import type { ThreadMoveStatePort } from "../hub/threadMoveStateStore";
 import type { ChatService } from "../chat/chatService";
 import { OwnerUnlockService } from "../hub/ownerUnlock";
 import { PairedMergeUnlockService } from "../hub/pairedMergeUnlock";
+import { hubActScopeFromSpokeLink, type HubActScopeSlot } from "../hub/hubActScope";
 import { OwnerApprovalAnswerUnlock } from "../hub/ownerApprovalAnswerUnlock";
 import { createHubMembershipJournal } from "../hub/hubMembershipJournal";
 import { FailoverService } from "../hub/failoverService";
@@ -218,6 +219,7 @@ import type { WorkWiring } from "./work";
 import type { CanvasWiring } from "./canvas";
 import type { AutomationWiring } from "./automation";
 import type { RoutesWiring } from "./routes";
+import { HUB_ACT_WITHDRAWN_REASON } from "../remoteCredentialLifecycleService";
 
 /** How often a hub member looks for the hub; the failover time itself is the hub's setting in the roster. */
 const FAILOVER_LOOK_MS = 15_000;
@@ -293,8 +295,10 @@ export type RemoteDependencies = {
     | "languageServerApprovals"
     | "pairedMergeUnlockSlot"
     | "remoteServerGrants"
-  > &
-  Pick<
+  > & {
+    /** Where the member's Act item is bound for the routes built before the hub side. */
+    readonly hubActScopeSlot: HubActScopeSlot;
+  } & Pick<
     WorkWiring,
     | "threadExportService"
     | "threadHandOffProvider"
@@ -367,6 +371,7 @@ export function wireRemote(deps: RemoteDependencies) {
     octantInstructions,
     hubPushHandoffSlot,
     pairedMergeUnlockSlot,
+    hubActScopeSlot,
     nativeHarnessSessions,
     serverAttachmentCleanup,
     remoteDelegationHolder,
@@ -707,6 +712,9 @@ export function wireRemote(deps: RemoteDependencies) {
           administration.revokeDevice({ deviceId });
         },
         deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
+        endActSessions: (deviceIds) => {
+          gateway.endDeviceSessions(deviceIds, HUB_ACT_WITHDRAWN_REASON);
+        },
       };
     },
     record: recordHubMembership,
@@ -934,6 +942,7 @@ export function wireRemote(deps: RemoteDependencies) {
     record: recordHubMembership,
   });
   pairedMergeUnlockSlot.bind(pairedMergeUnlock);
+  hubActScopeSlot.bind(hubActScopeFromSpokeLink(spokeLinkService));
   const ownerApprovalAnswerUnlock = new OwnerApprovalAnswerUnlock({
     state: hubStateStore,
     record: recordHubMembership,

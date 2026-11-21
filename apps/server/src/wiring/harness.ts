@@ -1,5 +1,6 @@
 import { configureSandboxNetworkSnapshot } from "../process/sandboxRuntimePolicy";
 import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
+import type { HubActScopeSlot } from "../hub/hubActScope";
 import { activeSandboxPolicy, configureSandboxToolNetwork } from "../process/sandboxRuntimePolicy";
 import { RemoteSetupChecks } from "../serverProjects/remoteSetupChecks";
 import { createRemoteSetupCheckRoutes } from "../serverProjects/remoteSetupCheckRoutes";
@@ -192,10 +193,14 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "workTurnProjection"
   > &
   Pick<AgentRunsWiring, "spendCeiling"> &
-  Pick<WorkspaceWiring, "projectService">;
+  Pick<WorkspaceWiring, "projectService"> & {
+    /** The member's Act item for its hub, bound by the hub side after this is built. */
+    readonly hubActScopeSlot: HubActScopeSlot;
+  };
 
 export function wireHarness(deps: HarnessDependencies) {
   const {
+    hubActScopeSlot,
     resolveThreadStrict,
     safeNetworkStore,
     agentRunInteractions,
@@ -763,6 +768,8 @@ export function wireHarness(deps: HarnessDependencies) {
   };
   const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
     mayAnswerChildFromDevice: agentRunInteractions.mayAnswerFromDevice,
+    hubActScope: hubActScopeSlot.current,
+    threadProjectId,
     windowAuthorityStore,
     store: {
       read: (threadId) => {

@@ -56,6 +56,12 @@ export const HubMemberRecord = Schema.Struct({
   deviceId: Schema.optional(Schema.UUID),
   /** Absent for a guest, which runs no listener the hub could reach. */
   listenerOrigin: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(300))),
+  /**
+   * For a guest that is a desktop window of a member: that member (the hub's
+   * own id for a window on the hub). The guest leaves the roster with it, and
+   * a member has one such guest at a time.
+   */
+  introducedBy: Schema.optional(HubMemberId),
 }).annotations(strict);
 export type HubMemberRecord = typeof HubMemberRecord.Type;
 

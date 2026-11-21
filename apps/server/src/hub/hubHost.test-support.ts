@@ -82,6 +82,7 @@ import {
   type ThreadMoveSourceHost,
 } from "./threadMoveService";
 import { createThreadMoveStateStore } from "./threadMoveStateStore";
+import { HUB_ACT_WITHDRAWN_REASON } from "../remoteCredentialLifecycleService";
 
 /** What a test host's services did for applied offers. */
 export interface ProvisionedByOffer {
@@ -429,6 +430,9 @@ export async function startHubTestHost(input: {
           administration.revokeDevice({ deviceId });
         },
         deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
+        endActSessions: (deviceIds) => {
+          current.endDeviceSessions(deviceIds, HUB_ACT_WITHDRAWN_REASON);
+        },
       };
     },
     record: (change) => {

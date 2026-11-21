@@ -39,6 +39,21 @@ export function isAgentGrantSession(principal: ClientPrincipal): boolean {
   return principal.kind === "remote-device" && principal.origin === AGENT_ACCESS_ORIGIN;
 }
 
+/**
+ * Whether the principal is a device only the hub introduced: a device session
+ * this host's own person did not pair and that is no agent grant's. While this
+ * host is in a hub, such a device acts only within the member's Act item. A
+ * session that carries no pairing proof counts, so an unproved pairing is held
+ * to the item too.
+ */
+export function principalIsHubIntroduced(principal: ClientPrincipal): boolean {
+  return (
+    principal.kind === "remote-device" &&
+    !principalActsAsHostPerson(principal) &&
+    !isAgentGrantSession(principal)
+  );
+}
+
 export type ClientPrincipalErrorCategory = "invalid" | "unauthorized" | "conflict" | "unavailable";
 
 export class ClientPrincipalError extends Error {

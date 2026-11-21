@@ -1,5 +1,6 @@
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { codeOrWorkThreadProjectId, type HubActScopeSlot } from "../hub/hubActScope";
 import { appToolThreadLevel, browserAgentAvailability, browserToolTransport } from "@octant/domain";
 import {
   createBrowserAppManagedTools,
@@ -103,10 +104,14 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
     | "workThreadProjection"
     | "workTurnProjection"
   > &
-  Pick<FoundationsWiring, "browserAuthority">;
+  Pick<FoundationsWiring, "browserAuthority"> & {
+    /** The member's Act item for its hub, bound by the hub side after this is built. */
+    readonly hubActScopeSlot: HubActScopeSlot;
+  };
 
 export function wireContext(deps: ContextDependencies) {
   const {
+    hubActScopeSlot,
     agentMessageProjection,
     onWindowRevoked,
     browserAuthority,
@@ -1013,6 +1018,11 @@ export function wireContext(deps: ContextDependencies) {
     approvals: browserToolApprovalService,
     windowAuthorityStore,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+    hubActScope: hubActScopeSlot.current,
+    codeOrWorkThreadProjectId: codeOrWorkThreadProjectId({
+      readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+      readWorkThread: (threadId) => workThreadProjection.read(threadId),
+    }),
   });
   const agentMessageRoutes = createAgentMessageRouteHandler({
     windowAuthorityStore,

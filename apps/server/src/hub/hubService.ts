@@ -174,6 +174,14 @@ export type PromoteOutcome =
         | "listener-has-no-pin";
     };
 
+export type WindowGuestOutcome =
+  | { readonly status: "introduced"; readonly sequence: number }
+  | { readonly status: "unchanged" }
+  | {
+      readonly status: "refused";
+      readonly kind: "hub-role-off" | "not-a-member" | "already-member" | "key-invalid";
+    };
+
 /** The most removals the hub remembers for merging a standby's changes back. */
 const MAX_REMEMBERED_REMOVALS = 256;
 
@@ -644,6 +652,103 @@ export class HubService {
     };
   }
 
+  /**
+   * Lists a member's desktop window as a guest, so every member that ticked
+   * Introduce lets that window ask it, directly, for a device of its own, as a
+   * phone that joined the hub does. The window generated the key and holds it;
+   * only the public key comes here. `introducedBy` is the member whose window it
+   * is: this hub for its own window (a person at this hub's window), or a spoke
+   * whose signed request the caller verified. The guest leaves the roster with
+   * that member, and a newer window guest of the same member replaces the
+   * older one, so a window that lost its key does not leave a stale guest
+   * behind.
+   */
+  async introduceWindowGuest(
+    input: {
+      readonly memberId: HubMemberId;
+      readonly devicePublicKey: string;
+      readonly introducedBy: string;
+    },
+    principal: AuditActingPrincipal,
+  ): Promise<WindowGuestOutcome> {
+    const current = this.#options.state.load();
+    const hub = current.hub;
+    if (hub?.enabled !== true || hub.roster === undefined) {
+      return { status: "refused", kind: "hub-role-off" };
+    }
+    const roster = hub.roster.roster;
+    const introducer = roster.members.find(
+      (member) => String(member.memberId) === input.introducedBy,
+    );
+    // A guest's window is not a member's window: only the hub and its spokes
+    // run a window that can ask.
+    if (introducer === undefined || introducer.role === "guest") {
+      return { status: "refused", kind: "not-a-member" };
+    }
+    if (!isUnlockPublicKey(input.devicePublicKey))
+      return { status: "refused", kind: "key-invalid" };
+    const fingerprint = publicKeyFingerprint(input.devicePublicKey);
+    const listed = roster.members.find(
+      (member) => String(member.memberId) === String(input.memberId),
+    );
+    if (listed !== undefined) {
+      const record = hub.members.find(
+        (member) => String(member.memberId) === String(input.memberId),
+      );
+      return listed.role === "guest" &&
+        listed.identityKeyFingerprint === fingerprint &&
+        String(record?.introducedBy) === input.introducedBy
+        ? { status: "unchanged" }
+        : { status: "refused", kind: "already-member" };
+    }
+    const replaced = new Set(
+      hub.members
+        .filter((member) => String(member.introducedBy) === input.introducedBy)
+        .map((member) => String(member.memberId)),
+    );
+    const member: RosterMember = {
+      memberId: input.memberId,
+      // The roster states what the hub knows: whose window this is.
+      name: `${introducer.name} window`.slice(0, 128).trimEnd(),
+      role: "guest",
+      identityKeyFingerprint: fingerprint,
+      listenerPin: NO_LISTENER_PIN,
+      privateNames: [],
+      addresses: [],
+      owner: false,
+    };
+    const signed = this.#sign({
+      ...roster,
+      sequence: roster.sequence + 1,
+      members: [...roster.members.filter((entry) => !replaced.has(String(entry.memberId))), member],
+    });
+    this.#options.state.save({
+      ...current,
+      hub: {
+        ...hub,
+        roster: signed,
+        members: [
+          ...hub.members.filter((entry) => !replaced.has(String(entry.memberId))),
+          {
+            memberId: input.memberId,
+            identityPublicKey: input.devicePublicKey,
+            introducedBy: decodeMemberId(input.introducedBy),
+          },
+        ],
+      },
+    });
+    this.#options.record({
+      change: "member-added",
+      actingPrincipal: principal,
+      memberId: input.memberId,
+      sequence: signed.roster.sequence,
+    });
+    // Sent before answering, so a window that asks a spoke for its device next
+    // finds itself on the roster that spoke holds.
+    await this.#publish(signed, hub, roster.members, []);
+    return { status: "introduced", sequence: signed.roster.sequence };
+  }
+
   /** Remove runs on the hub: it revokes the member's device and drops it from the next roster. */
   async removeMember(
     input: { readonly memberId: string },
@@ -967,7 +1072,14 @@ export class HubService {
     if (entry === undefined) return { status: "refused", kind: "not-a-member" };
     if (entry.role === "hub") return { status: "refused", kind: "cannot-remove-the-hub" };
     this.#revokeMemberDevice(record?.deviceId);
-    const members = roster.members.filter((member) => String(member.memberId) !== memberId);
+    // The member's desktop window was listed as a guest because of it, and goes with it.
+    const leaving = new Set([
+      memberId,
+      ...hub.members
+        .filter((member) => String(member.introducedBy) === memberId)
+        .map((member) => String(member.memberId)),
+    ]);
+    const members = roster.members.filter((member) => !leaving.has(String(member.memberId)));
     const signed = this.#sign({
       ...roster,
       sequence: roster.sequence + 1,
@@ -979,7 +1091,7 @@ export class HubService {
       hub: {
         ...hub,
         roster: signed,
-        members: hub.members.filter((member) => String(member.memberId) !== memberId),
+        members: hub.members.filter((member) => !leaving.has(String(member.memberId))),
         // What the hub held to wake the member goes with it, hardware address included.
         ...(hub.wake === undefined
           ? {}

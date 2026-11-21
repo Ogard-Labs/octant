@@ -57,7 +57,11 @@ export interface HubSettingsSectionProps {
   readonly ownerUnlock?: Pick<OwnerUnlockBridge, "ownerUnlockMakeKey" | "ownerUnlockForgetKey">;
   /** Reads the clock so a test can freeze a code's time left. */
   readonly now?: () => number;
+  /** This computer's Projects by id, for the Projects the Act item names. */
+  readonly projectNames?: ReadonlyMap<string, string>;
 }
+
+const NO_PROJECTS: ReadonlyMap<string, string> = new Map();
 
 const GRANT_ITEM_COPY: Readonly<Record<HubGrantItem, { label: string; line: string }>> = {
   roster: { label: "Roster", line: "The hub's signed list of members." },
@@ -439,7 +443,13 @@ const JOIN_POLL_MS = 2_000;
 /** How often the hub re-reads its pairing requests while a code is live. */
 const PENDING_POLL_MS = 3_000;
 
-export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettingsSectionProps) {
+export function HubSettingsSection({
+  hub,
+  pairing,
+  ownerUnlock,
+  now,
+  projectNames = NO_PROJECTS,
+}: HubSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
   /** The public half of the unlock key made for the join in progress; the private half never leaves the Secure Enclave. */
   const unlockPublicKey = useRef<string | undefined>(undefined);
@@ -486,6 +496,8 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
   const [joinCode, setJoinCode] = useState("");
   const [join, setJoin] = useState<JoinState>({ phase: "idle" });
   const [draft, setDraft] = useState<ReadonlyArray<HubGrantItem>>([]);
+  /** The Projects the Act item names, as edited; absent while the list shows the saved one. */
+  const [actDraft, setActDraft] = useState<ReadonlyArray<string>>();
   const ownerId = useId();
   const codeId = useId();
   const removeOpener = useRef<HTMLButtonElement>(null);
@@ -998,12 +1010,13 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
     const reply = await act(
       "grant",
       // Projects may be named only while Act is ticked.
-      { items, actProjects: items.includes("act") ? current.actProjects : [] },
+      { items, actProjects: items.includes("act") ? (actDraft ?? current.actProjects) : [] },
       "changed",
       "Octant could not change the hub grant.",
     );
     if (reply !== undefined) {
       setJoin({ phase: "idle" });
+      setActDraft(undefined);
       setMessage("The hub grant is saved.");
     }
     await refresh();
@@ -1224,6 +1237,42 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
       HUB_GRANT_ITEMS.filter((each) => (each === item ? on : items.includes(each))),
     );
 
+  // Which Projects a device the hub introduced may start threads in, read by
+  // this computer at each start. A Project no longer here stays listed by id
+  // so unticking it is still possible.
+  const actProjectsEditor = (named: ReadonlyArray<string>) => {
+    const rows = [
+      ...[...projectNames.entries()].map(([projectId, name]) => ({ projectId, name })),
+      ...named
+        .filter((projectId) => !projectNames.has(projectId))
+        .map((projectId) => ({ projectId, name: projectId })),
+    ];
+    return (
+      <fieldset className="settings-panel__stack">
+        <legend>Projects a device the hub introduced may start threads in</legend>
+        {rows.length === 0 ? (
+          <p className="settings-section-line">This computer has no Projects yet.</p>
+        ) : (
+          rows.map((row) => (
+            <label className="check" key={row.projectId}>
+              <OctantCheckbox
+                checked={named.includes(row.projectId)}
+                onChange={(event) =>
+                  setActDraft(
+                    event.target.checked
+                      ? [...named.filter((each) => each !== row.projectId), row.projectId]
+                      : named.filter((each) => each !== row.projectId),
+                  )
+                }
+              />
+              <span>{row.name}</span>
+            </label>
+          ))
+        )}
+      </fieldset>
+    );
+  };
+
   const grantEditor = (current: Grant, actionLabel: string) => (
     <fieldset className="settings-panel__stack">
       <legend>What the hub may do here</legend>
@@ -1238,6 +1287,7 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
           </span>
         </label>
       ))}
+      {draft.includes("act") ? actProjectsEditor(actDraft ?? current.actProjects) : null}
       <p className="settings-section-line">
         This computer keeps its files, sign-ins, sandbox, and every approval whatever you tick. Only
         you can change this list.

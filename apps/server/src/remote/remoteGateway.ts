@@ -258,6 +258,11 @@ export interface RemoteGateway {
    * caller has checked the roster, Introduce, and the key's proof.
    */
   readonly admitIntroducedDevice: PairingDeviceLifecycleService["admitIntroducedDevice"];
+  /**
+   * Ends the open sessions of these devices and keeps their registrations, with
+   * the reason journaled on each ended session. A device with none is skipped.
+   */
+  readonly endDeviceSessions: (deviceIds: ReadonlyArray<string>, reasonCode: string) => void;
 }
 
 /**
@@ -335,6 +340,7 @@ interface GatewayServices {
   readonly approvedPairingDevice: RemoteGateway["approvedPairingDevice"];
   readonly pairedDeviceKeyFingerprint: RemoteGateway["pairedDeviceKeyFingerprint"];
   readonly admitIntroducedDevice: RemoteGateway["admitIntroducedDevice"];
+  readonly endDeviceSessions: RemoteGateway["endDeviceSessions"];
 }
 
 interface RemoteCredentialInvalidationResult {
@@ -502,6 +508,8 @@ export function createRemoteGateway(options: RemoteGatewayOptions): RemoteGatewa
     pairedDeviceKeyFingerprint: (deviceId) =>
       generation.services.pairedDeviceKeyFingerprint(deviceId),
     admitIntroducedDevice: (input) => generation.services.admitIntroducedDevice(input),
+    endDeviceSessions: (deviceIds, reasonCode) =>
+      generation.services.endDeviceSessions(deviceIds, reasonCode),
   };
 }
 
@@ -965,6 +973,16 @@ function assembleServices(
     pairedDeviceKeyFingerprint: (deviceId) =>
       lifecycle.listDevices().find((device) => device.deviceId === deviceId)?.deviceKeyFingerprint,
     admitIntroducedDevice: (input) => lifecycle.admitIntroducedDevice(input),
+    endDeviceSessions: (deviceIds, reasonCode) => {
+      for (const deviceId of deviceIds) {
+        credentialLifecycle.endDeviceSessions({
+          commandId: uuid(),
+          hostId: identity.hostId,
+          deviceId,
+          reasonCode,
+        });
+      }
+    },
   };
 }
 

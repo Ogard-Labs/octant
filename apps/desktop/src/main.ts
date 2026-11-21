@@ -3727,20 +3727,21 @@ function installIpcHandlers(): void {
     },
     onRequestQuit: requestInteractiveQuit,
   });
+  const hubAdministrationRuntimeFor = (event: unknown): HubAdministrationControlRuntime => {
+    const context = ownedWindowContext(event as IpcMainInvokeEvent);
+    if (activeServerUrl === undefined) {
+      throw new HubAdministrationControlFailure("Octant hub controls are unavailable.");
+    }
+    return {
+      serverUrl: activeServerUrl,
+      desktopBridgeSecret,
+      windowCapability: context.capability,
+      fetch: globalThis.fetch,
+    };
+  };
   installHubAdministrationIpcHandlers({
     handle: (channel, handler) => ipcMain.handle(channel, handler),
-    runtimeFor: (event) => {
-      const context = ownedWindowContext(event as IpcMainInvokeEvent);
-      if (activeServerUrl === undefined) {
-        throw new HubAdministrationControlFailure("Octant hub controls are unavailable.");
-      }
-      return {
-        serverUrl: activeServerUrl,
-        desktopBridgeSecret,
-        windowCapability: context.capability,
-        fetch: globalThis.fetch,
-      };
-    },
+    runtimeFor: hubAdministrationRuntimeFor,
     openExternal: (url) => shell.openExternal(url),
   });
   installAgentAccessIpcHandlers({
@@ -3784,6 +3785,7 @@ function installIpcHandlers(): void {
     pins: pairedComputerPins,
     serverPages: { forgetListener: (origin) => remoteServerPages().forgetListener(origin) },
     webBuildVersion: app.getVersion(),
+    hubAdministration: hubAdministrationRuntimeFor,
   });
   installNativeMenuIpcHandlers({
     handle: (channel, handler) => ipcMain.handle(channel, handler),

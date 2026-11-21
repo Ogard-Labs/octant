@@ -162,6 +162,7 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   pairedComputerForget: "octant-only",
   pairedComputerSettle: "octant-only",
   pairedComputerRequest: "octant-only",
+  pairedComputerIntroduceToHub: "octant-only",
   remoteServerPageOpen: "octant-only",
   remoteServerPageSign: "octant-only",
   remoteServerPageSigned: "octant-only",
