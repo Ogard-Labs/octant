@@ -806,6 +806,25 @@ describe("SettingsView", () => {
     });
   });
 
+  it("leaves provider telemetry to each provider and keeps self-update off by default, and saves either switch the person turns", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings({
+      providerController: providerControllerFixture(),
+      discoveryController: discoveryControllerFixture(),
+      initialDeepLink: { section: "providers" },
+    });
+    const telemetry = await screen.findByRole("switch", {
+      name: "Let providers send their own telemetry",
+    });
+    const selfUpdate = screen.getByRole("switch", { name: "Let providers update themselves" });
+    expect(telemetry).toBeChecked();
+    expect(selfUpdate).not.toBeChecked();
+    await user.click(telemetry);
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ providerTelemetry: false });
+    await user.click(selfUpdate);
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ providerSelfUpdate: true });
+  });
+
   it("lists the provider catalog on Providers & Models and opens a driver's setup without another scan", async () => {
     const providerController = providerControllerFixture();
     const discoveryController = discoveryControllerFixture();

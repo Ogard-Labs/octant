@@ -274,6 +274,42 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
     expect(JSON.stringify(environment)).not.toContain("must-not-cross");
   });
 
+  it("outside Strict keeps its telemetry guards when the person turned provider telemetry off and drops its self-update guards when the person lets providers update themselves", () => {
+    const environment = sanitizeAcpEnvironment(
+      profile,
+      { PATH: "/usr/bin" },
+      {
+        managedHome: "/private/tmp/octant-acp-home",
+        strict: false,
+        ownChannels: { telemetry: false, selfUpdate: true },
+      },
+    );
+    for (const name of profile.process.channelGuards ?? []) {
+      expect(environment[name]).toBe(profile.process.guards[name]);
+    }
+    for (const name of profile.process.selfUpdateGuards ?? []) {
+      expect(environment[name]).toBeUndefined();
+    }
+  });
+
+  it("under Strict keeps every telemetry and self-update guard whatever the person's switches say", () => {
+    const environment = sanitizeAcpEnvironment(
+      profile,
+      { PATH: "/usr/bin" },
+      {
+        managedHome: "/private/tmp/octant-acp-home",
+        strict: true,
+        ownChannels: { telemetry: true, selfUpdate: true },
+      },
+    );
+    for (const name of [
+      ...(profile.process.channelGuards ?? []),
+      ...(profile.process.selfUpdateGuards ?? []),
+    ]) {
+      expect(environment[name]).toBe(profile.process.guards[name]);
+    }
+  });
+
   it("forces feature denial and strips inherited credentials and executable authority", () => {
     const environment = sanitizeAcpEnvironment(
       profile,
@@ -2443,6 +2479,23 @@ describe("ACP agents launch without Octant's sandbox in Work and Code outside St
       expect(launch.args).toEqual(["acp", "--process-per-session", "--disable-telemetry"]);
     },
   );
+
+  it("passes its own telemetry switch only while the launch keeps telemetry closed", () => {
+    expect(
+      antigravity.process.args({
+        root: "/tmp/project",
+        managedHome: "/tmp/managed",
+        ownChannels: { telemetry: false, selfUpdate: false },
+      }),
+    ).toEqual(["acp", "--process-per-session", "--disable-telemetry"]);
+    expect(
+      antigravity.process.args({
+        root: "/tmp/project",
+        managedHome: "/tmp/managed",
+        ownChannels: { telemetry: true, selfUpdate: false },
+      }),
+    ).toEqual(["acp", "--process-per-session"]);
+  });
 
   it.each([
     ["under Strict", { mode: "code", executionPolicy: "approval-gated" }],

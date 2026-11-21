@@ -160,6 +160,26 @@ describe("Pi process boundary", () => {
     expect(strict).not.toHaveProperty("GH_TOKEN");
   });
 
+  it("outside Strict keeps Pi's telemetry guard when the person turned provider telemetry off and drops its release check when the person lets providers update themselves", () => {
+    const host = { PATH: "/usr/bin" };
+    const closed = sanitizePiEnvironment(host, "/managed", "enabled", "openai", false, {
+      telemetry: false,
+      selfUpdate: false,
+    });
+    expect(closed).toMatchObject({ PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1" });
+    const updating = sanitizePiEnvironment(host, "/managed", "enabled", "openai", false, {
+      telemetry: true,
+      selfUpdate: true,
+    });
+    expect(updating).not.toHaveProperty("PI_SKIP_VERSION_CHECK");
+    expect(updating).not.toHaveProperty("PI_TELEMETRY");
+    const strict = sanitizePiEnvironment(host, "/managed", "enabled", "openai", true, {
+      telemetry: true,
+      selfUpdate: true,
+    });
+    expect(strict).toMatchObject({ PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1" });
+  });
+
   it("gives a discovery run, or a provider with no host variable, no provider credential", () => {
     const host = {
       PATH: "/usr/bin",

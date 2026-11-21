@@ -7247,9 +7247,9 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   extensions register asking by the thread's level on Pi 1.1.0 and later;
   a Project's own `.pi` resources stay out ([detail](design/provider-runtimes.md#pi); maintainer
   decision, 2026-11-14). Turning a native feature on never turns on a provider's own
-  memory, telemetry, or self-update: telemetry and self-update stay off by their own
-  switches ([Security and authority](#security-and-authority)), because they
-  send data the person did not choose to send, and the provider's own memory
+  memory, telemetry, or self-update: telemetry and self-update follow the
+  person's two provider switches ([Security and authority](#security-and-authority)),
+  which Strict overrides, and the provider's own memory
   follows its own per-account setting, on by default in Work and Code
   outside Plan ([Modes](#modes-chat-work-and-code)).
 
@@ -15373,8 +15373,20 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     and marketplace installs follow the person's own provider settings.
     Self-update stays off, because Octant installs and updates provider
     CLIs itself. Strict turns every channel off, as today. Octant itself
-    still sends nothing. Built for Claude Code, Pi, Mistral Vibe, Grok Build
-    and Kimi Code; Codex and OpenCode set no channel guard of Octant's.
+    still sends nothing. Built for Claude Code, Pi, Mistral Vibe, Grok Build,
+    Kilo, Google Antigravity and Kimi Code; Codex and OpenCode set no
+    telemetry guard of Octant's.
+  - **Provider telemetry and self-update switches.** Two host switches in
+    Settings › Providers & Models replace the hard line that kept both off
+    (maintainer decision, 2026-11-21): **Let providers send their own
+    telemetry**, on by default (the rule above), and **Let providers update
+    themselves**, off by default. Telemetry off sets the provider's telemetry
+    guards on every launch outside Strict; self-update on leaves its
+    self-update guards out. Strict keeps both kinds set whatever the switches
+    say, the version read always keeps them, a host's own opt-out always
+    wins, and Octant's own **Update CLI** is unaffected. Each switch is read
+    at every session start and resume. Which guard each runtime takes is in
+    [Provider runtimes](design/provider-runtimes.md#provider-channel-switches).
   - **Codex sign-ins.** Codex may use Amazon Bedrock through an AWS profile
     or exported credentials. Strict refuses them, as today (built: only a
     Strict session's lease refuses such a sign-in, with a sentence naming
@@ -16813,7 +16825,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   The version read keeps the guard. A Plan or Chat launch goes without it on
   the same setting, its memory read-only
   ([Plan and Chat tool parity](#security-and-authority)).
-  Telemetry and self-update stay off. The runtime's release-note,
+  Under Strict telemetry and self-update stay off; outside it they follow the
+  person's provider switches (below). The runtime's release-note,
   PR-badge, and availability checks are therefore its own traffic to
   Anthropic under the person's account; they carry no Project content.
   Feature-flag fetching stays off: Anthropic's environment-variable reference
@@ -16857,15 +16870,22 @@ approval-gated` command that undoes it. The terminal shows no one-time
   which account a turn runs as, so no host Anthropic key or token crosses,
   Octant's account directory is applied, an API-key account gets its
   broker key, and a gateway account gets its own address and broker token
-  in place of any host `ANTHROPIC_BASE_URL`. It sets only the self-update, auto-memory and built-in-agents
-  switches (`OPEN_CLAUDE_LAUNCH_GUARDS`); telemetry, error reports, `/bug`,
-  `/feedback`, the survey and marketplace auto-install follow the person's
-  own Claude Code settings, and the Claude artifacts switch below lifts
-  nothing, because nothing of Octant's sits on telemetry there. Pi's
-  telemetry and the ACP agents' channel guards (Mistral Vibe, Grok Build,
-  Kimi Code; `channelGuards`) follow the person's own settings the same way,
-  and those launches get the host's environment on the same terms. OpenCode
-  already launches with the host's environment and sets no channel guard.
+  in place of any host `ANTHROPIC_BASE_URL`. It sets the auto-memory and
+  built-in-agents switches, the self-update switch unless the person lets
+  providers update themselves, and the telemetry, error-report, `/bug`,
+  `/feedback` and survey switches only while the person keeps provider
+  telemetry off (`openClaudeLaunchGuards`); otherwise those follow the
+  person's own Claude Code settings, as marketplace auto-install always
+  does, and the Claude artifacts switch below lifts nothing, because nothing
+  of Octant's sits on telemetry there. With provider telemetry off it lifts
+  only `DISABLE_TELEMETRY`, as under Strict, and the host's own opt-out is
+  kept as `DO_NOT_TRACK=1`. Pi's telemetry and the ACP agents' telemetry
+  guards (Mistral Vibe, Grok Build, Kilo, Kimi Code; `channelGuards`, and
+  Google Antigravity's `--disable-telemetry`) follow the same switch, their
+  self-update guards (`selfUpdateGuards`, Pi's release check) the other, and
+  those launches get the host's environment on the same terms. OpenCode
+  already launches with the host's environment and sets no telemetry guard;
+  its updater guard follows the self-update switch.
   **Claude artifacts (a person-authorized external publish and an opt-in
   telemetry exception).** The one place a Claude launch sends Project content
   to Anthropic other than as inference, and the one place it sends the

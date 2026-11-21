@@ -436,6 +436,28 @@ describe("probeOpenCodeBinary", () => {
     }
   });
 
+  it("lifts only the updater switch when the person lets providers update themselves", () => {
+    const root = fixtureRoot();
+    const updating = createPrivateOpenCodeProfile(
+      { content: "{}" },
+      { HOME: root },
+      () => root,
+      undefined,
+      false,
+      undefined,
+      false,
+      false,
+      true,
+    );
+    try {
+      expect(updating.environment).not.toHaveProperty("OPENCODE_DISABLE_AUTOUPDATE");
+      expect(updating.environment.OPENCODE_DISABLE_MODELS_FETCH).toBe("1");
+      expect(updating.environment.OPENCODE_DISABLE_PROJECT_CONFIG).toBe("1");
+    } finally {
+      updating.cleanup();
+    }
+  });
+
   it("lets OpenCode read CLAUDE.md as it does on its own, while its .claude skills stay off until the person allows them", () => {
     const root = fixtureRoot();
     const launches = [

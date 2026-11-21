@@ -41,8 +41,10 @@ import { attachedFileText } from "../attachments/attachedFiles";
 import type {
   ProviderConnection,
   ProviderDriver,
+  ProviderOwnChannels,
   ProviderSessionOwnership,
 } from "@octant/provider-sdk/driver";
+import { launchOwnChannels } from "./providerOwnChannels";
 import {
   normalizeAcpElicitation,
   answerAcpElicitation,
@@ -1644,6 +1646,7 @@ function makeConnection(
       executionPolicy: ProviderExecutionPolicy,
       fullAccessSandbox: boolean,
       strict: boolean,
+      ownChannels: ProviderOwnChannels | undefined,
       loopbackPorts: ReadonlyArray<number> = [],
       tools: ReadonlyArray<ProviderToolDefinition> = [],
       nativeSetup?: ProviderNativeSetup,
@@ -1689,6 +1692,7 @@ function makeConnection(
               executionPolicy,
               ...(fullAccessSandbox ? { fullAccessSandbox: true } : {}),
               ...(strict ? {} : { strict: false }),
+              ...(strict || ownChannels === undefined ? {} : { ownChannels }),
               ...(apiKey === undefined ? {} : { apiKey }),
               ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
               ...(nativeSetup === undefined ? {} : { nativeSetup }),
@@ -1742,6 +1746,7 @@ function makeConnection(
       readonly answersOncePerCall?: boolean;
       readonly fullAccessSandbox?: boolean;
       readonly strict?: boolean;
+      readonly ownChannels?: ProviderOwnChannels;
       readonly modelOptionValues?: ProviderModelOptionValues;
       readonly autoApprove?: boolean;
       readonly nativeSetup?: ProviderNativeSetup;
@@ -1838,6 +1843,8 @@ function makeConnection(
             // process starts, so a Strict process never serves a session that
             // is not, nor the reverse.
             input.strict !== false,
+            // Its telemetry and self-update guards are fixed at start too.
+            launchOwnChannels(input.strict !== false, input.ownChannels),
             // The agent's own reviewer is the session's mode and the person's
             // setup is its launch's guards and filesystem denies; a retained
             // process opened under either other value is never taken up.
@@ -1916,6 +1923,7 @@ function makeConnection(
               input.executionPolicy,
               input.executionPolicy === "full-access" && input.fullAccessSandbox === true,
               input.strict !== false,
+              input.ownChannels,
               managedTools?.bridge.port === undefined ? [] : [managedTools.bridge.port],
               input.tools,
               input.nativeSetup,
@@ -2419,6 +2427,7 @@ function makeConnection(
           ...(input.answersOncePerCall === true ? { answersOncePerCall: true } : {}),
           ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
           ...(input.strict === false ? { strict: false } : {}),
+          ...(input.ownChannels === undefined ? {} : { ownChannels: input.ownChannels }),
           sourceSessionId: input.resumeCursor.value,
           ...(input.current === undefined ? {} : { current: input.current }),
           ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
