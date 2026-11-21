@@ -7,6 +7,7 @@ import {
 } from "@octant/contracts";
 import {
   CodeThreadMetadataService,
+  MAX_CODE_THREAD_KNOWN_PULL_REQUESTS,
   pullRequestIdentitiesFromHistory,
   type CodeGitWorktreeObservation,
   type CodeGithubMetadataObservation,
@@ -146,32 +147,58 @@ export function createCoordinatorThreadDoneEvaluator(
           return { status: "unavailable" };
         }
         if (ports.observePullRequest === undefined) return { status: "unavailable" };
-        const links = ports.pullRequestLinks.listForThread(threadId);
-        const latestLink = links[0];
-        let target:
-          | {
-              readonly owner: string;
-              readonly name: string;
-              readonly number: number;
-              readonly url?: string;
-            }
-          | undefined;
-        if (latestLink !== undefined) {
-          target = {
-            owner: latestLink.repositoryOwner,
-            name: latestLink.repositoryName,
-            number: latestLink.number,
-            ...(latestLink.url === undefined ? {} : { url: latestLink.url }),
-          };
-        } else {
-          const history = await ports.history.read(threadId);
-          const historical = pullRequestIdentitiesFromHistory(history)[0];
-          const repo = splitRepositoryName(deliveryTarget.proposedBaseRepository);
-          if (historical !== undefined && repo !== undefined) {
-            target = { owner: repo.owner, name: repo.name, number: historical.number };
+        const thread = ports.readThread(threadId);
+        const targetRepo = splitRepositoryName(deliveryTarget.proposedBaseRepository);
+        const candidates: Array<{
+          readonly owner: string;
+          readonly name: string;
+          readonly number: number;
+          readonly url?: string;
+        }> = [];
+        const seen = new Set<string>();
+        const pushCandidate = (candidate: {
+          readonly owner: string;
+          readonly name: string;
+          readonly number: number;
+          readonly url?: string;
+        }) => {
+          const key = `${candidate.owner.toLowerCase()}/${candidate.name.toLowerCase()}#${String(candidate.number)}`;
+          if (seen.has(key) || candidates.length >= MAX_CODE_THREAD_KNOWN_PULL_REQUESTS) return;
+          seen.add(key);
+          candidates.push(candidate);
+        };
+        // `listForThread` returns links in registry insertion order; sort newest
+        // first so a replacement PR opened after a closed PR is checked first.
+        const activeLinks = ports.pullRequestLinks
+          .listForThread(threadId)
+          .filter(
+            (link) =>
+              link.status === "active" &&
+              (thread === undefined || String(link.projectId) === String(thread.projectId)),
+          )
+          .toSorted(
+            (left, right) =>
+              right.createdOrder - left.createdOrder || right.linkedAt.localeCompare(left.linkedAt),
+          );
+        for (const link of activeLinks) {
+          pushCandidate({
+            owner: link.repositoryOwner,
+            name: link.repositoryName,
+            number: link.number,
+            ...(link.url === undefined ? {} : { url: link.url }),
+          });
+        }
+        const history = await ports.history.read(threadId);
+        if (targetRepo !== undefined) {
+          for (const historical of pullRequestIdentitiesFromHistory(history)) {
+            pushCandidate({
+              owner: targetRepo.owner,
+              name: targetRepo.name,
+              number: historical.number,
+            });
           }
         }
-        if (target === undefined) {
+        if (candidates.length === 0) {
           return {
             status: "observed",
             freshness: "fresh",
@@ -180,25 +207,80 @@ export function createCoordinatorThreadDoneEvaluator(
             review: "unknown",
           };
         }
-        const observed = await ports
-          .observePullRequest(
-            { owner: target.owner, name: target.name, number: target.number },
-            ports.createSignal(),
-          )
-          .catch(() => ({ status: "unavailable" as const }));
-        if (observed.status !== "observed") return { status: "unavailable" };
-        const baseRepository = observed.baseRepository ?? `${target.owner}/${target.name}`;
-        return {
-          status: "observed",
-          freshness: "fresh",
-          pullRequest: {
-            number: target.number,
-            url: target.url ?? `https://github.com/${baseRepository}/pull/${String(target.number)}`,
+        type ObservedPullRequestCandidate = NonNullable<
+          Extract<CodeGithubMetadataObservation, { readonly status: "observed" }>["pullRequest"]
+        >;
+        const stateRank = (state: ObservedPullRequestCandidate["state"]): number =>
+          state === "merged" ? 3 : state === "open" ? 2 : 1;
+        const matchesDelivery = (pr: ObservedPullRequestCandidate): boolean => {
+          const prRepo = splitRepositoryName(pr.baseRepository);
+          const sameRepo =
+            pr.baseRepository === deliveryTarget.proposedBaseRepository ||
+            (thread !== undefined &&
+              prRepo !== undefined &&
+              targetRepo !== undefined &&
+              ports.pullRequestLinks.areSameRepository(thread.projectId, prRepo, targetRepo));
+          return (
+            sameRepo &&
+            pr.baseBranch === deliveryTarget.proposedBaseBranch &&
+            pr.headBranch === deliveryTarget.branchIntent
+          );
+        };
+        const satisfiesTarget = (pr: ObservedPullRequestCandidate): boolean => {
+          if (!matchesDelivery(pr)) return false;
+          return deliveryTarget.outcomeKind === "merged-pr"
+            ? pr.state === "merged"
+            : pr.state === "merged" || pr.state === "open";
+        };
+        let best:
+          | { readonly pr: ObservedPullRequestCandidate; readonly matches: boolean }
+          | undefined;
+        let sawUnavailable = false;
+        for (const candidate of candidates) {
+          const observed = await ports
+            .observePullRequest(
+              { owner: candidate.owner, name: candidate.name, number: candidate.number },
+              ports.createSignal(),
+            )
+            .catch(() => ({ status: "unavailable" as const }));
+          if (observed.status !== "observed") {
+            sawUnavailable = true;
+            continue;
+          }
+          const baseRepository = observed.baseRepository ?? `${candidate.owner}/${candidate.name}`;
+          const pr: ObservedPullRequestCandidate = {
+            number: candidate.number,
+            url:
+              candidate.url ??
+              `https://github.com/${baseRepository}/pull/${String(candidate.number)}`,
             baseRepository,
             baseBranch: observed.baseBranch,
             headBranch: observed.headBranch,
             state: observed.state,
-          },
+          };
+          if (satisfiesTarget(pr)) {
+            return {
+              status: "observed",
+              freshness: "fresh",
+              pullRequest: pr,
+              checks: "unknown",
+              review: "unknown",
+            };
+          }
+          const matches = matchesDelivery(pr);
+          if (
+            best === undefined ||
+            (matches && !best.matches) ||
+            (matches === best.matches && stateRank(pr.state) > stateRank(best.pr.state))
+          ) {
+            best = { pr, matches };
+          }
+        }
+        if (sawUnavailable) return { status: "unavailable" };
+        return {
+          status: "observed",
+          freshness: "fresh",
+          pullRequest: best?.pr ?? null,
           checks: "unknown",
           review: "unknown",
         };

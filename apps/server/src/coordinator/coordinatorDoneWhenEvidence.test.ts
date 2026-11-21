@@ -201,4 +201,64 @@ describe("objective thread Done evaluation for coordinator done-when checks", ()
     expect(await manualEvaluator(manualThread)).toBe(true);
     expect(observeGit).not.toHaveBeenCalled();
   });
+
+  it("checks a replacement pull request when an older closed pull request sits first in the link registry", async () => {
+    const prThread = threadWith("merged-pr");
+    const closedLink = {
+      linkId: "80000000-0000-4000-8000-000000000011" as never,
+      projectId: prThread.projectId,
+      status: "active" as const,
+      host: "github.com" as const,
+      repositoryOwner: "Ogard-Labs",
+      repositoryName: "octant",
+      number: 41,
+      url: "https://github.com/Ogard-Labs/octant/pull/41",
+      headBranch: "feature/work",
+      baseBranch: "main",
+      threadIds: [prThread.id],
+      linkedAt: "2026-11-21T11:00:00.000Z",
+      createdOrder: 1,
+      displayOrder: 1,
+      updatedAt: "2026-11-21T11:00:00.000Z",
+    };
+    const mergedLink = {
+      ...closedLink,
+      linkId: "80000000-0000-4000-8000-000000000012" as never,
+      number: 42,
+      url: "https://github.com/Ogard-Labs/octant/pull/42",
+      linkedAt: "2026-11-21T11:30:00.000Z",
+      createdOrder: 2,
+      displayOrder: 2,
+      updatedAt: "2026-11-21T11:30:00.000Z",
+    };
+    const observePullRequest = vi.fn(async (req: { readonly number: number }) => ({
+      status: "observed" as const,
+      state: req.number === 42 ? ("merged" as const) : ("closed" as const),
+      headSha: "b".repeat(40),
+      headBranch: "feature/work",
+      baseBranch: "main",
+      autoMergeEnabled: false,
+      waitingOn: [],
+      failures: [],
+      baseRepository: "Ogard-Labs/octant",
+    }));
+    const evaluator = createCoordinatorThreadDoneEvaluator(
+      basePorts(prThread, {
+        pullRequestLinks: {
+          // Insertion order: older closed PR #41 first, replacement merged PR #42 second.
+          listForThread: () => [closedLink, mergedLink],
+          resolveLink: (query) =>
+            query.number === 42 ? mergedLink : query.number === 41 ? closedLink : undefined,
+          areSameRepository: () => true,
+        },
+        observePullRequest,
+      }),
+    );
+
+    expect(await evaluator(prThread)).toBe(true);
+    expect(observePullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ number: 42 }),
+      expect.anything(),
+    );
+  });
 });

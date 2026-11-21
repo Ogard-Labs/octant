@@ -1000,4 +1000,79 @@ describe("coordinator host-checked done-when conditions", () => {
     expect(h.hostTurns).toHaveLength(1);
     expect(h.hostTurns[0]?.prompt).toContain(`thread ${OTHER} is not Done`);
   });
+
+  it("skips dispatching a recovered done-when wake if waking is turned off during live evaluation", async () => {
+    const h = harness();
+    const prKey = coordinatorDoneWhenPullRequestKey("Ogard-Labs", "octant", 42);
+    h.threads.set(
+      COORDINATOR,
+      codeThread(COORDINATOR, {
+        coordinator: true,
+        messageWake: true,
+        coordinatorDoneWhen: doneWhen,
+      }),
+    );
+    h.threads.set(
+      WORKER,
+      codeThread(WORKER, { coordinatorThreadId: COORDINATOR, markedDoneAt: now }),
+    );
+    h.pullRequests.set(prKey, { status: "observed", state: "open", requiredChecks: "green" });
+
+    let markStarted: (() => void) | undefined;
+    const observationStarted = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let releaseObservation: (() => void) | undefined;
+    const wait = new Promise<void>((resolve) => {
+      releaseObservation = resolve;
+    });
+    const pausedService = new CoordinatorService({
+      readThread: (id) => h.threads.get(id),
+      readThreads: () => [...h.threads.values()],
+      readProject: () => ({ type: "code", lifecycle: "active" }) as unknown as Project,
+      readSettings: () => h.settings,
+      isDesignatedPlanner: (id) => h.planners.has(id),
+      isMarked: (id) => h.marked.has(id),
+      threadState: (id) => h.states.get(id) ?? "idle",
+      latestTurnId: (id) => h.turnIds.get(id),
+      providerKnown: () => true,
+      executeCode: async () => {
+        throw new Error("unexpected command");
+      },
+      startHostTurn: async (threadId, prompt) => {
+        h.hostTurns.push({ threadId: String(threadId), prompt });
+        return { status: "started", operationId: "turn-1" };
+      },
+      propose: () => ({ status: "refused", message: "unused" }),
+      counts: openCountStore(countStoreFile()),
+      observePullRequest: async () => {
+        markStarted?.();
+        await wait;
+        return { status: "observed", state: "open", requiredChecks: "green" };
+      },
+      uuid: () => NEW_WORKER,
+      now: () => h.clock,
+    });
+    const recovery = pausedService.continueWakeAfterRestart({
+      threadId: COORDINATOR,
+      wakeId: "81000000-0000-4000-8000-000000000403",
+      cause: "done-when",
+      senderThreadId: COORDINATOR,
+      hop: 0,
+      unmet: ["pull request Ogard-Labs/octant#42 is not merged (open)"],
+    });
+    await observationStarted;
+    // Person turns Wake when a message arrives off while live check is in flight.
+    h.threads.set(
+      COORDINATOR,
+      codeThread(COORDINATOR, {
+        coordinator: true,
+        coordinatorDoneWhen: doneWhen,
+      }),
+    );
+    releaseObservation?.();
+
+    expect(await recovery).toEqual({ kind: "superseded" });
+    expect(h.hostTurns).toEqual([]);
+  });
 });

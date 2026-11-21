@@ -386,7 +386,7 @@ export class GhPullRequestSwitchPort {
         "--repo",
         repository,
         "--json",
-        options.requiredChecks ? "state,mergeStateStatus" : "state",
+        options.requiredChecks ? "state,baseRefName,mergeStateStatus" : "state",
       ],
       signal,
     );
@@ -400,9 +400,14 @@ export class GhPullRequestSwitchPort {
       typeof pullRequest.mergeStateStatus === "string"
         ? pullRequest.mergeStateStatus.toUpperCase()
         : undefined;
+    const baseBranch =
+      typeof pullRequest.baseRefName === "string" && pullRequest.baseRefName.trim() !== ""
+        ? pullRequest.baseRefName.trim()
+        : undefined;
     const requiredChecks = await this.#requiredChecksForCondition(
       repository,
       request.number,
+      baseBranch,
       mergeStateStatus,
       signal,
     );
@@ -410,14 +415,16 @@ export class GhPullRequestSwitchPort {
   }
 
   /**
-   * Distinguishes passing required checks from unreported checks so a PR whose
-   * CI has not registered yet stays pending rather than falsely reporting green.
-   * When `gh pr checks --required` returns no entries, only GitHub's own
-   * `mergeStateStatus === "CLEAN"` verifies that no required checks are missing.
+   * Distinguishes passing required checks from unreported checks independently
+   * of review or other merge gates. When `gh pr checks --required` returns no
+   * entries and `mergeStateStatus` is not `CLEAN`, inspects the base branch's
+   * effective classic protection and rulesets so a branch requiring only review
+   * approvals reports green while unreported required checks stay pending.
    */
   async #requiredChecksForCondition(
     repository: string,
     number: number,
+    baseBranch: string | undefined,
     mergeStateStatus: string | undefined,
     signal: AbortSignal,
   ): Promise<"green" | "pending" | "failing" | "unavailable"> {
@@ -427,17 +434,21 @@ export class GhPullRequestSwitchPort {
     );
     if (result === undefined) return "unavailable";
     const value = parseJson(result.stdout);
-    if (!Array.isArray(value)) {
-      if (
-        /no required checks|no checks reported/i.test(`${result.stderr ?? ""}\n${result.stdout}`)
-      ) {
-        return mergeStateStatus === "CLEAN" ? "green" : "pending";
-      }
+    const noChecksReported = !Array.isArray(value)
+      ? /no required checks|no checks reported/i.test(`${result.stderr ?? ""}\n${result.stdout}`)
+      : value.length === 0;
+    if (noChecksReported) {
+      if (mergeStateStatus === "CLEAN") return "green";
+      const requirement = await this.#baseBranchRequiresStatusChecks(
+        repository,
+        baseBranch,
+        signal,
+      );
+      if (requirement === "none") return "green";
+      if (requirement === "required") return "pending";
       return "unavailable";
     }
-    if (value.length === 0) {
-      return mergeStateStatus === "CLEAN" ? "green" : "pending";
-    }
+    if (!Array.isArray(value)) return "unavailable";
     let pending = false;
     for (const entry of value) {
       if (!isRecord(entry)) return "unavailable";
@@ -446,6 +457,65 @@ export class GhPullRequestSwitchPort {
       else if (entry.bucket !== "pass" && entry.bucket !== "skipping") return "unavailable";
     }
     return pending ? "pending" : "green";
+  }
+
+  /**
+   * Read-only check of whether `baseBranch` configures any required status
+   * checks via classic branch protection or repository rulesets. Fails closed
+   * as `unknown` when either endpoint cannot be read or decoded.
+   */
+  async #baseBranchRequiresStatusChecks(
+    repository: string,
+    baseBranch: string | undefined,
+    signal: AbortSignal,
+  ): Promise<"required" | "none" | "unknown"> {
+    if (
+      baseBranch === undefined ||
+      baseBranch.length > 255 ||
+      /[\s\\?#:[\]^~*@{}\0]/.test(baseBranch) ||
+      baseBranch.includes("..")
+    ) {
+      return "unknown";
+    }
+    const encodedBranch = encodeURIComponent(baseBranch);
+    const branchResult = await this.#run(
+      ["api", `repos/${repository}/branches/${encodedBranch}`],
+      signal,
+    );
+    if (branchResult === undefined || branchResult.exitCode !== 0) return "unknown";
+    const branchJson = parseJson(branchResult.stdout);
+    if (!isRecord(branchJson)) return "unknown";
+    const protection = isRecord(branchJson.protection) ? branchJson.protection : undefined;
+    const protectionChecks =
+      protection?.enabled === true && isRecord(protection.required_status_checks)
+        ? protection.required_status_checks
+        : undefined;
+    const classicContexts = Array.isArray(protectionChecks?.contexts)
+      ? protectionChecks.contexts.length
+      : 0;
+    const classicChecks = Array.isArray(protectionChecks?.checks)
+      ? protectionChecks.checks.length
+      : 0;
+    if (classicContexts > 0 || classicChecks > 0) return "required";
+
+    const rulesResult = await this.#run(
+      ["api", `repos/${repository}/rules/branches/${encodedBranch}`],
+      signal,
+    );
+    if (rulesResult === undefined || rulesResult.exitCode !== 0) return "unknown";
+    const rulesJson = parseJson(rulesResult.stdout);
+    if (!Array.isArray(rulesJson)) return "unknown";
+    for (const rule of rulesJson) {
+      if (!isRecord(rule) || rule.type !== "required_status_checks") continue;
+      const params = isRecord(rule.parameters) ? rule.parameters : undefined;
+      if (
+        Array.isArray(params?.required_status_checks) &&
+        params.required_status_checks.length > 0
+      ) {
+        return "required";
+      }
+    }
+    return "none";
   }
 
   async #requiredChecks(

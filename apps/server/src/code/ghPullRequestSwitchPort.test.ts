@@ -376,25 +376,128 @@ describe("forge switch port", () => {
     });
     expect(run).toHaveBeenCalledTimes(3);
 
-    // Unreported required checks stay pending unless GitHub verifies CLEAN.
-    const unreported = port((args) =>
-      args[1] === "checks"
-        ? {
-            exitCode: 1,
-            stdout: "",
-            stderr: "no required checks reported on the 'feature/x' branch",
-          }
-        : { exitCode: 0, stdout: JSON.stringify({ state: "OPEN", mergeStateStatus: "BLOCKED" }) },
-    ).port;
+    // Unreported required checks stay pending when the base branch requires checks.
+    const unreported = port((args) => {
+      if (args[1] === "checks") {
+        return {
+          exitCode: 1,
+          stdout: "",
+          stderr: "no required checks reported on the 'feature/x' branch",
+        };
+      }
+      if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            protected: true,
+            protection: {
+              enabled: true,
+              required_status_checks: { contexts: ["test"], checks: [{ context: "test" }] },
+            },
+          }),
+        };
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          state: "OPEN",
+          baseRefName: "main",
+          mergeStateStatus: "BLOCKED",
+        }),
+      };
+    }).port;
     expect(
       await unreported.observePullRequestCondition(request, { requiredChecks: true }, signal),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+
+    // A branch requiring only review approval (BLOCKED) with zero required checks reports green.
+    const reviewOnlyBlocked = port((args) => {
+      if (args[1] === "checks") {
+        return { exitCode: 0, stdout: "[]" };
+      }
+      if (args[0] === "api" && args[1]?.includes("/rules/branches/main")) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { type: "pull_request", parameters: { required_approving_review_count: 1 } },
+          ]),
+        };
+      }
+      if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            protected: true,
+            protection: {
+              enabled: true,
+              required_status_checks: { contexts: [], checks: [] },
+            },
+          }),
+        };
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          state: "OPEN",
+          baseRefName: "main",
+          mergeStateStatus: "BLOCKED",
+        }),
+      };
+    }).port;
+    expect(
+      await reviewOnlyBlocked.observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
+
+    // Ruleset-required check that has not reported yet stays pending even with classic protection off.
+    const rulesetUnreported = port((args) => {
+      if (args[1] === "checks") return { exitCode: 0, stdout: "[]" };
+      if (args[0] === "api" && args[1]?.includes("/rules/branches/main")) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              type: "required_status_checks",
+              parameters: { required_status_checks: [{ context: "ci" }] },
+            },
+          ]),
+        };
+      }
+      if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+        return { exitCode: 0, stdout: JSON.stringify({ protected: false }) };
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          state: "OPEN",
+          baseRefName: "main",
+          mergeStateStatus: "BLOCKED",
+        }),
+      };
+    }).port;
+    expect(
+      await rulesetUnreported.observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
     ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
 
     // Empty check array with CLEAN merge state confirms no required checks are missing.
     const noRequiredClean = port((args) =>
       args[1] === "checks"
         ? { exitCode: 0, stdout: "[]" }
-        : { exitCode: 0, stdout: JSON.stringify({ state: "OPEN", mergeStateStatus: "CLEAN" }) },
+        : {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              state: "OPEN",
+              baseRefName: "main",
+              mergeStateStatus: "CLEAN",
+            }),
+          },
     ).port;
     expect(
       await noRequiredClean.observePullRequestCondition(request, { requiredChecks: true }, signal),

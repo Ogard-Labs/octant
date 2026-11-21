@@ -1644,8 +1644,7 @@ export class CoordinatorService {
         fresh.coordinator !== true ||
         fresh.lifecycle !== "active" ||
         fresh.coordinatorDoneWhen === undefined ||
-        coordinatorDoneWhenKey(fresh.coordinatorDoneWhen) !== conditionKey ||
-        !this.#idle(fresh)
+        coordinatorDoneWhenKey(fresh.coordinatorDoneWhen) !== conditionKey
       ) {
         this.#ports.wakes?.settled(wake.threadId, { wakeId: wake.wakeId, outcome: "dropped" });
         return { kind: "superseded" };
@@ -1664,6 +1663,27 @@ export class CoordinatorService {
       if (evaluation.status === "met") {
         this.#doneWhenUnmet.delete(wake.threadId);
         this.#markPersistedDoneWhenSatisfied(wake.threadId, conditionKey);
+        this.#ports.wakes?.settled(wake.threadId, { wakeId: wake.wakeId, outcome: "dropped" });
+        return { kind: "superseded" };
+      }
+      // Re-check wake eligibility after the async evaluation: the person may
+      // have turned off messageWake, lowered rounds, or started a turn meanwhile.
+      const freshDecision = decideMessageWake({
+        recipient: {
+          messageWake: fresh.messageWake === true,
+          coordinatorThreadId: undefined,
+          coordinatorWakeOff: fresh.coordinatorWakeOff === true,
+          idle: this.#idle(fresh),
+        },
+        senderThreadId: wake.senderThreadId,
+        hop: wake.hop,
+        wakeTurnRunning: false,
+        wakeTurnsInLastHour: 0,
+        bounds: this.#boundsFor(fresh),
+        defaults: this.#ports.messageWakeDefaults?.(),
+      });
+      if (freshDecision.status !== "wake") {
+        this.#doneWhenUnmet.set(wake.threadId, evaluation.unmet);
         this.#ports.wakes?.settled(wake.threadId, { wakeId: wake.wakeId, outcome: "dropped" });
         return { kind: "superseded" };
       }
