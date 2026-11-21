@@ -6245,6 +6245,99 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("counts the person's wait through an allow the agent refused, until their later deny", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    let clockNow = "2026-07-21T13:00:00.000Z";
+    const at = (seconds: number) =>
+      new Date(Date.parse("2026-07-21T13:00:00.000Z") + seconds * 1_000).toISOString();
+    const connection = {
+      ...providerConnection(queue),
+      answerApproval: vi.fn((input: { readonly approved: boolean }) =>
+        input.approved
+          ? Effect.fail({
+              category: "unsupported" as const,
+              message: "The agent only offers Always allow here.",
+            })
+          : Effect.void,
+      ),
+    };
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      clock: () => clockNow,
+    });
+    const startOperation = operationId(35);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      const offer = (value: Parameters<typeof providerEvent>[0]) =>
+        Effect.runPromise(Queue.offer(queue, providerEvent(value)));
+      await offer({
+        kind: "tool-start",
+        toolCallId: "call-1",
+        toolName: "Edit",
+        occurredAt: at(0),
+      });
+      clockNow = at(2);
+      await offer({
+        kind: "approval-request",
+        requestId: "ask-always-only",
+        toolCallId: "call-1",
+        action: "Edit",
+        description: "Edit src/a.ts",
+      });
+      let approvalId: string | undefined;
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        approvalId = events
+          .find((event) => event.kind === "approval-requested")
+          ?.approvalId.toString();
+        expect(approvalId).toBeDefined();
+      });
+      const answer = (decision: "approved" | "denied", operation: number) =>
+        fixture.runtime.execute(windowId, {
+          kind: "answer-provider-approval",
+          operationId: operationId(operation),
+          threadId,
+          checkoutId,
+          approvalId: approvalId as never,
+          decision,
+        });
+      clockNow = at(5);
+      await expect(answer("approved", 96)).resolves.toMatchObject({ kind: "provider-turn-state" });
+      clockNow = at(20);
+      await answer("denied", 97);
+      await offer({
+        kind: "tool-success",
+        toolCallId: "call-1",
+        summary: "done",
+        occurredAt: at(40),
+      });
+      await vi.waitFor(async () => {
+        const completed = (await operationEvents(fixture.runtime, startOperation)).find(
+          (event) =>
+            event.kind === "tool-activity" &&
+            event.toolCallId === "call-1" &&
+            event.state === "completed",
+        );
+        // Asked at :02, the refused allow at :05 put the ask back, denied at
+        // :20: all eighteen seconds are the person's wait.
+        expect(completed).toMatchObject({
+          timing: { startedAt: at(0), endedAt: at(40), approvalWaitMs: 18_000 },
+        });
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it("keeps an approval the agent cannot take as asked pending, journals no approval, and still takes a denial", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const refusal =

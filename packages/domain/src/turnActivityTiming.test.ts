@@ -160,6 +160,21 @@ describe("turn activity timing", () => {
     });
   });
 
+  test("keeps counting a person's wait after an answer the runtime refused, until they answer again", () => {
+    const timing = createTurnActivityTiming();
+    timing.callStarted({ toolCallId: "call-1", occurredAt: at(0) });
+    timing.approvalAsked({ approvalId: "a1", occurredAt: at(1), toolCallId: "call-1" });
+    // Approve at 10 is refused and the ask is put back; Deny comes at 70.
+    timing.approvalAnswered({ approvalId: "a1", occurredAt: at(10) });
+    timing.approvalReopened({ approvalId: "a1", occurredAt: at(10) });
+    timing.approvalAnswered({ approvalId: "a1", occurredAt: at(70) });
+    expect(timing.callEnded({ toolCallId: "call-1", occurredAt: at(72) })).toEqual({
+      startedAt: at(0),
+      endedAt: at(72),
+      approvalWaitMs: 69_000,
+    });
+  });
+
   test("an ask that outlives its own call never poisons or bills a later one", () => {
     const timing = createTurnActivityTiming();
     timing.callStarted({ toolCallId: "call-1", occurredAt: at(0) });

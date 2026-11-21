@@ -5573,6 +5573,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (refused !== undefined) {
       active.approvals.set(input.approvalId, providerRequestId);
       if (askedUnder !== undefined) active.approvalPostures.set(input.approvalId, askedUnder);
+      // The person is waiting again, so the time until their next answer is
+      // their wait, not the call's run time.
+      active.turnTiming.approvalReopened({
+        approvalId: input.approvalId,
+        occurredAt: this.#options.clock(),
+      });
       return turnState("failed", { category: "failed", message: refused.message });
     }
     // An owner's answer journals `owner-approval-settled` instead.

@@ -139,6 +139,16 @@ export interface TurnActivityTimingTracker {
    */
   readonly approvalSettled: (input: { readonly approvalId: string }) => void;
   /**
+   * The runtime refused the person's answer and the ask is open again (an
+   * agent that cannot take a one-call approval): the wait resumes from here,
+   * attributed as the ask was, until the next `approvalAnswered`. An ask the
+   * tracker never closed with an answer is left alone.
+   */
+  readonly approvalReopened: (input: {
+    readonly approvalId: string;
+    readonly occurredAt: UtcTimestamp | string;
+  }) => void;
+  /**
    * Closes an open reasoning span at a terminal instant the provider did not
    * timestamp — a journaled terminal frame uses its own journal time.
    */
@@ -152,6 +162,8 @@ export function createTurnActivityTiming(): TurnActivityTimingTracker {
   let reasoningMs = 0;
   const calls = new Map<string, TrackedCall>();
   const openApprovals = new Map<string, OpenApproval>();
+  // The call each answered ask named, so a refused answer can reopen it.
+  const answeredApprovals = new Map<string, string | undefined>();
   // Attributed waits accumulate under the call they name — merged on close,
   // released when that call ends — never scanned across a turn's history.
   const callWaits = new Map<string, CallWaits>();
@@ -180,7 +192,7 @@ export function createTurnActivityTiming(): TurnActivityTimingTracker {
     return waits;
   };
 
-  return {
+  const tracker: TurnActivityTimingTracker = {
     observeEvent(input) {
       const synthesized = input.provenance === "synthesized";
       const at = synthesized ? undefined : parseAt(input.occurredAt);
@@ -264,6 +276,7 @@ export function createTurnActivityTiming(): TurnActivityTimingTracker {
       const open = openApprovals.get(input.approvalId);
       if (open === undefined) return;
       openApprovals.delete(input.approvalId);
+      answeredApprovals.set(input.approvalId, open.toolCallId);
       if (open.toolCallId === undefined) unattributedOpen -= 1;
       const answeredAt = parseAt(input.occurredAt);
       const bounded = answeredAt !== undefined && answeredAt >= open.askedAt;
@@ -281,12 +294,23 @@ export function createTurnActivityTiming(): TurnActivityTimingTracker {
         if (!bounded || call.startedAt < answeredAt) call.poisoned = true;
       }
     },
+    approvalReopened(input) {
+      if (!answeredApprovals.has(input.approvalId)) return;
+      const toolCallId = answeredApprovals.get(input.approvalId);
+      answeredApprovals.delete(input.approvalId);
+      tracker.approvalAsked({
+        approvalId: input.approvalId,
+        occurredAt: input.occurredAt,
+        ...(toolCallId === undefined ? {} : { toolCallId }),
+      });
+    },
     closeReasoningAt(input) {
       const at = parseAt(input);
       return at === undefined ? undefined : closeReasoning(at);
     },
     reasoningMs: () => reasoningMs,
   };
+  return tracker;
 }
 
 /**
