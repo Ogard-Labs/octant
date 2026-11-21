@@ -57,6 +57,8 @@ import {
   permissionModeOf,
 } from "@octant/domain";
 import { SpeechCapabilityProvider } from "./voice/SpeechCapabilityContext";
+import { providerTerminalOffer } from "./code/providerTerminalOffer";
+import { workThreadAccessOf } from "@octant/domain/guardrail-policy";
 import {
   automationServerProviderChoices,
   buildAutomationEditorCatalog,
@@ -4149,6 +4151,20 @@ function LaunchedShell(
     () => [...chatProviderGroups, ...codeProviderGroups, ...workProviderGroups],
     [chatProviderGroups, codeProviderGroups, workProviderGroups],
   );
+  // The window's Work task's provider program, offered beside its Project
+  // terminal in Zen; the host resolves and decides it again.
+  const zenWorkProviderTerminal = useMemo(() => {
+    if (activeMode !== "work" || activeWorkThreadId === undefined) return undefined;
+    const thread = workNavigation.bootstrap?.threads.find(
+      (candidate) => String(candidate.id) === String(activeWorkThreadId),
+    );
+    if (thread === undefined) return undefined;
+    const name = providerTerminalOffer(bootstrapProviderGroups, {
+      providerInstanceId: thread.providerInstanceId,
+      executionPolicy: workThreadAccessOf(thread.access).executionPolicy,
+    }).providerProgramName;
+    return name === undefined ? undefined : { projectId: thread.projectId, name };
+  }, [activeMode, activeWorkThreadId, bootstrapProviderGroups, workNavigation.bootstrap]);
   useProviderBootstrap({
     discoveryController,
     enabled: true,
@@ -8296,6 +8312,7 @@ function LaunchedShell(
   async function addZenProjectTerminal(
     projectId: ProjectId,
     folder?: string,
+    program?: "provider",
   ): Promise<CodeTerminalId | undefined> {
     const terminalId = decodeCodeTerminalId(crypto.randomUUID());
     // No card means no way back to a shell: a Project terminal has no thread
@@ -8323,6 +8340,8 @@ function LaunchedShell(
           ? { workThreadId: decodeWorkThreadId(String(activeWorkThreadId)) }
           : {}),
         ...(folder === undefined ? {} : { folder }),
+        // The host refuses it without the Work task, so nothing is guessed.
+        ...(program === undefined ? {} : { program }),
       });
     } catch {
       // The reply was lost, not necessarily the start.
@@ -8663,6 +8682,9 @@ function LaunchedShell(
       workspace={controller.workspace}
       zen={zen}
       zenLiveThreadClients={zenLiveThreadClients}
+      {...(zenWorkProviderTerminal === undefined
+        ? {}
+        : { workProviderTerminal: zenWorkProviderTerminal })}
     >
       {hostFederationLifecycle === undefined ? null : (
         <FederatedHostsLifecycleStrip lifecycle={hostFederationLifecycle} />

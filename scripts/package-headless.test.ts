@@ -6,8 +6,10 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,10 +20,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildHeadlessArtifact,
   HEADLESS_ARTIFACT_TARGETS,
+  HEADLESS_CLI_LAUNCHER,
   HEADLESS_CLI_RUNTIME_PACKAGES,
   headlessMigrationsMetadata,
   headlessRuntimeFileRole,
   isHeadlessRuntimeFile,
+  pinnedBunVersion,
   renderHeadlessServiceTemplate,
   type HeadlessComponentSource,
 } from "./package-headless";
@@ -49,6 +53,7 @@ function fixtureSources(root: string): ReadonlyArray<HeadlessComponentSource> {
     ["migrations", "share/migrations.json", '{"storeVersion":1}\n'],
     ["notices", "share/NOTICES.txt", "third-party notices\n"],
     ["service-template", "share/service/octant.service.template", "[Unit]\n"],
+    ["runtime", "lib/runtime/bun", "runtime-bytes"],
   ];
   return sources.map(([role, path, body]) => {
     const source = join(root, "sources", path.replaceAll("/", "_"));
@@ -172,6 +177,56 @@ describe("buildHeadlessArtifact", () => {
       runtime: { platform: "linux", arch: "x64", wireVersion: "1", storeVersion: 1 },
     });
     expect(inspection).toMatchObject({ ok: true });
+  });
+
+  it("starts the octant command under the runtime the build carries, also through a link", async () => {
+    // macOS temporary folders sit behind a /var -> /private/var link, and a
+    // started process sees the resolved path, so compare from the resolved root.
+    const root = realpathSync(temporaryRoot("octant-headless-launcher-"));
+    const install = join(root, "install");
+    mkdirSync(join(install, "bin"), { recursive: true });
+    mkdirSync(join(install, "lib", "runtime"), { recursive: true });
+    writeFileSync(join(install, "bin", "octant"), HEADLESS_CLI_LAUNCHER, { mode: 0o755 });
+    // A stand-in runtime that prints what it was asked to run.
+    writeFileSync(
+      join(install, "lib", "runtime", "bun"),
+      '#!/bin/sh\necho "$OCTANT_CLI_LAUNCHER" >&2\necho "$@"\n',
+      {
+        mode: 0o755,
+      },
+    );
+    const environment = { PATH: "/usr/bin:/bin" };
+    const direct = await execFileAsync(join(install, "bin", "octant"), ["server", "status"], {
+      env: environment,
+    });
+    expect(direct.stdout.trim()).toBe(`${join(install, "bin")}/octant.mjs server status`);
+    expect(direct.stderr.trim()).toBe(join(install, "bin", "octant"));
+    mkdirSync(join(root, "path"));
+    symlinkSync(join(install, "bin", "octant"), join(root, "path", "octant"));
+    const linked = await execFileAsync(join(root, "path", "octant"), ["web"], { env: environment });
+    expect(linked.stdout.trim()).toBe(`${join(install, "bin")}/octant.mjs web`);
+    expect(linked.stderr.trim()).toBe(join(install, "bin", "octant"));
+    // Started by a relative path through a `current`-style link, the launcher
+    // still reports an absolute path that keeps the link.
+    symlinkSync(install, join(root, "current"));
+    const relative = await execFileAsync("./current/bin/octant", ["web"], {
+      cwd: root,
+      env: environment,
+    });
+    expect(relative.stderr.trim()).toBe(join(root, "current", "bin", "octant"));
+    // With CDPATH set, a bare relative cd prints the directory it chose; the
+    // launcher must not take that line into its path.
+    const withCdpath = await execFileAsync("/bin/sh", ["-c", "current/bin/octant web"], {
+      cwd: root,
+      env: { ...environment, CDPATH: "." },
+    });
+    expect(withCdpath.stderr.trim()).toBe(join(root, "current", "bin", "octant"));
+  });
+
+  it("carries the Bun the repository pins and nothing else", () => {
+    expect(pinnedBunVersion('{"packageManager":"bun@1.4.4"}')).toBe("1.4.4");
+    expect(() => pinnedBunVersion('{"packageManager":"npm@10.0.0"}')).toThrow(/bun@/);
+    expect(() => pinnedBunVersion("{}")).toThrow(/bun@/);
   });
 
   it("fails closed when a required component role is missing", async () => {

@@ -61,6 +61,12 @@ function validManifest(): HeadlessArtifactManifest {
         sha256: "0".repeat(64),
         byteLength: 16,
       },
+      {
+        role: "runtime",
+        path: "lib/runtime/bun",
+        sha256: "1".repeat(64),
+        byteLength: 17,
+      },
     ],
   };
 }
@@ -127,6 +133,7 @@ describe("headless artifact manifest", () => {
       "migrations",
       "notices",
       "service-template",
+      "runtime",
     ]) {
       const manifest = validManifest();
       const raw = JSON.stringify({

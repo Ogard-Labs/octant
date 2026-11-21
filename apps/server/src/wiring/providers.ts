@@ -292,6 +292,7 @@ import { protectedAtLevel, secretGuardEntries } from "../process/secretGuard";
 import type { OpenCodeProtectedPaths } from "../providers/openCodeDriver";
 
 export interface ConfiguredProviderDriverOptions {
+  readonly octantVersion?: string;
   readonly openCodeProcess: OpenCodeProcessPort;
   readonly codexProcess: CodexProcessPort;
   readonly acpProcess?: AcpProcessPort;
@@ -418,6 +419,7 @@ export function makeConfiguredProviderDriver(
     driver = runDirectEndpointOnNativeHarness(
       makeOpenAiCompatibleDriver({
         instanceId: instance.id,
+        ...(options.octantVersion === undefined ? {} : { octantVersion: options.octantVersion }),
         configuration: instance.configuration,
         runtimeRegistry: options.runtimeRegistry,
         ...(options.credentialResolver === undefined
@@ -1434,6 +1436,9 @@ export function wireProviders(deps: ProvidersDependencies) {
         hostEnvironment: () => process.env,
         homeDirectory: homedir(),
         workingDirectory: join(providerDataDirectory, "provider-tooling"),
+        confirmMinutes: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+            .toolingCommandConfirmMinutes,
         ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
           ? {}
           : {
@@ -2077,6 +2082,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         attachWorkRequestRuntime(
           makeConfiguredProviderDriver(instance, {
             hostStrict: () => deps.resolveHostStrict(),
+            octantVersion: version,
             openCodeProcess,
             codexProcess,
             acpProcess,
@@ -2310,6 +2316,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       return openAdmittedSqlite(admission);
     };
     const configuredDriverOptions: ConfiguredProviderDriverOptions = {
+      octantVersion: version,
       runtimeTurnsPerTurn: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).runtimeTurnsPerTurn,
       compactionShare: (keeper) => {

@@ -258,3 +258,18 @@ jobs:
       asset_prefix: Octant
       environment: stable
     secrets: inherit
+
+  # The headless build, signed with the stable key in the approval-gated
+  # stable environment and attached to this release.
+  headless:
+    name: Headless build
+    needs: verify
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-headless.yml
+    with:
+      version: ${{ needs.verify.outputs.version }}
+      ring: stable
+      product: Octant
+      environment: stable
+    secrets: inherit

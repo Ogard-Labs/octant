@@ -1740,17 +1740,19 @@ describe("ProjectService", () => {
     expect(fixture.append).toHaveBeenCalledTimes(1);
   });
 
-  it("refuses a Plan override on a Work Project", async () => {
+  it("starts a Work Project in Plan without journaling a lowering", async () => {
     const fixture = fixtureService({ projects: [workProject()] });
-    await expect(
-      fixture.service.executeProject(windowId, {
-        kind: "change-work-project-permission-mode",
-        projectId: workId,
-        expectedVersion: 1,
-        permissionMode: "plan",
-      } as never),
-    ).rejects.toBeDefined();
-    expect(fixture.append).not.toHaveBeenCalled();
+    const result = await fixture.service.executeProject(windowId, {
+      kind: "change-work-project-permission-mode",
+      projectId: workId,
+      expectedVersion: 1,
+      permissionMode: "plan",
+    } as never);
+    expect(result).toMatchObject({
+      kind: "work-project-permission-mode-changed",
+      project: { defaultPermissionMode: "plan" },
+    });
+    expect(fixture.append).toHaveBeenCalledTimes(1);
   });
 
   it("writes STATUS.md and never AGENTS.md into the folder when a Work Project opts into a status file", async () => {

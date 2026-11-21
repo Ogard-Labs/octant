@@ -309,7 +309,10 @@ async function startOrRecover(
  */
 function runLevelMode(projectMode: PermissionMode, picked: AutomationRunLevel): PermissionMode {
   return permissionModeOfWorkAccess(
-    clampWorkAccess(workAccessOfPermissionMode(projectMode) ?? "ask-first", picked),
+    clampWorkAccess(
+      projectMode === "plan" ? "ask-first" : workAccessOfPermissionMode(projectMode),
+      picked,
+    ),
   );
 }
 

@@ -55,6 +55,14 @@ describe("WorkSettingsView", () => {
     expect(work.update).toHaveBeenCalledWith({ defaultAccess: "full-access" });
   });
 
+  it("saves Plan as the default access, so new Work threads start read-only", () => {
+    const work = controller();
+    render(<WorkSettingsView controller={work} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Plan" }));
+    expect(work.update).toHaveBeenCalledWith({ defaultAccess: "plan" });
+  });
+
   it("turns off Continue after restart for every Work thread and shows the stored choice", () => {
     const work = controller();
     const { rerender } = render(<WorkSettingsView controller={work} />);

@@ -1633,6 +1633,30 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "helper agent child subagent wait seconds limit timeout",
         },
         {
+          id: settingId("shield-denials-in-a-row"),
+          label: "Denials in a row before you decide",
+          scope: "host",
+          keywords: "octant shield denials brake pause reviewer auto in a row",
+        },
+        {
+          id: settingId("shield-denials-per-thread"),
+          label: "Denials per thread before you decide",
+          scope: "host",
+          keywords: "octant shield denials brake pause reviewer auto thread",
+        },
+        {
+          id: settingId("follow-up-lateness-limit"),
+          label: "Latest a follow-up still runs",
+          scope: "host",
+          keywords: "follow-up follow up late missed hours routine asleep",
+        },
+        {
+          id: settingId("tooling-command-confirm"),
+          label: "Time to run a shown provider command",
+          scope: "host",
+          keywords: "run this command once provider claude codex mcp plugin minutes expire",
+        },
+        {
           id: settingId("agent-routines-start-active"),
           label: "Start agent-created routines active at Full access",
           scope: "host",

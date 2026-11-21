@@ -906,6 +906,14 @@ export function wireCanvas(deps: CanvasDependencies) {
         ? undefined
         : { id: String(project.id), type: project.type, lifecycle: project.lifecycle };
     },
+    // A host-run Chat turn has no window, so its Canvas reads the thread's
+    // own Project as recorded; the tool still requires an active Chat one.
+    threadProject: (projectId) => {
+      const project = persistence.readProject(decodeProjectId(projectId));
+      return project === undefined
+        ? undefined
+        : { id: String(project.id), type: project.type, lifecycle: project.lifecycle };
+    },
     // The design system in the Project's folder outranks the kit on its
     // record, so a design follows the same tokens the Project's code does.
     brandKit: async (projectId) => {

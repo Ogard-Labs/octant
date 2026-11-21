@@ -433,13 +433,14 @@ export type WorkProjectDeveloperTools = typeof WorkProjectDeveloperTools.Type;
 
 /**
  * The modes a Work Project can start new threads in. Work shares Code's
- * levels; Plan is a thread's own level and never where a thread starts.
+ * levels, Plan included (maintainer decision, 2026-11-21).
  */
 export const WorkProjectPermissionMode = Schema.Literal(
   "auto",
   "ask-first",
   "accept-edits",
   "full-access",
+  "plan",
 );
 export type WorkProjectPermissionMode = typeof WorkProjectPermissionMode.Type;
 

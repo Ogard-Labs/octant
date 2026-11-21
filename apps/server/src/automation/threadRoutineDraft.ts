@@ -4,8 +4,9 @@
 // moment of confirmation: the thread's Project, its binding, its checkout, its
 // provider and model, and an approval-gated profile. Nothing is ever wider
 // than the thread: Work and Code get the shell and Git the thread has and run
-// ask first, network and subagents stay off, and a session-only permission
-// stays session-only.
+// ask first, a Chat follow-up keeps Chat's authority (no folder, shell, or
+// Git), network and subagents stay off, and a session-only permission stays
+// session-only.
 
 import { createHash } from "node:crypto";
 import {
@@ -13,6 +14,7 @@ import {
   decodeBindingReceiptId,
   type AgentRunAuthority,
   type AutomationDefinitionDraft,
+  type AutomationMode,
   type PermissionPersistence,
   type RoutineProposal,
 } from "@octant/contracts";
@@ -32,7 +34,7 @@ export interface RoutineSourceThread {
 
 export interface RoutineSourceProject {
   readonly name: string;
-  readonly mode: "work" | "code";
+  readonly mode: AutomationMode;
   readonly active: boolean;
   readonly version: number;
   readonly bindingRevisionId: string | undefined;
@@ -42,7 +44,7 @@ export interface ThreadRoutineDraftDependencies {
   readonly hostId: string;
   /** The person on this host, who confirms the delivery target by confirming the proposal. */
   readonly actorId: string;
-  readonly readThread: (mode: "work" | "code", threadId: string) => RoutineSourceThread | undefined;
+  readonly readThread: (mode: AutomationMode, threadId: string) => RoutineSourceThread | undefined;
   readonly readProject: (projectId: string) => RoutineSourceProject | undefined;
   readonly checkoutAvailable: (checkoutId: string, repositoryId: string) => boolean;
   readonly profiles: () => ReadonlyArray<AgentProfile>;
@@ -59,6 +61,12 @@ export function buildThreadRoutineDraft(
   proposal: RoutineProposal,
 ): ThreadRoutineDraftResult {
   const mode = proposal.mode;
+  const followUp = proposal.targetPolicy === "same-thread";
+  // A Chat thread's only routine from the thread is a follow-up; a Chat
+  // routine that starts a new thread per run is made in Automation Center.
+  if (mode === "chat" && !followUp) {
+    return refused("A Chat thread can only set up a follow-up here.");
+  }
   const thread = deps.readThread(mode, String(proposal.threadId));
   if (
     thread === undefined ||
@@ -68,11 +76,13 @@ export function buildThreadRoutineDraft(
     return refused("The thread is no longer active in this Project.");
   }
   const project = deps.readProject(String(proposal.projectId));
+  // A Chat Project holds no folder, so it has no binding revision to name.
+  const bindingRevisionId = project?.bindingRevisionId;
   if (
     project === undefined ||
     !project.active ||
     project.mode !== mode ||
-    project.bindingRevisionId === undefined
+    (mode !== "chat" && bindingRevisionId === undefined)
   ) {
     return refused("The Project is no longer active.");
   }
@@ -95,10 +105,11 @@ export function buildThreadRoutineDraft(
   const sessionOnly =
     profile.defaultPermissionPersistence === "current-session" ||
     thread.permissionPersistence === "current-session";
+  const holdsFolder = mode !== "chat";
   const authority: AgentRunAuthority = {
-    filesystem: true,
-    shell: true,
-    git: true,
+    filesystem: holdsFolder,
+    shell: holdsFolder,
+    git: holdsFolder,
     network: false,
     tools: true,
     subagents: false,
@@ -106,33 +117,33 @@ export function buildThreadRoutineDraft(
     permissionPersistence: sessionOnly ? "current-session" : "project-default",
   };
   const now = deps.clock();
-  const followUp = proposal.targetPolicy === "same-thread";
-  const bindingRevisionId = project.bindingRevisionId;
   const projectId = String(proposal.projectId);
   const binding =
-    mode === "work" || thread.checkout === undefined
-      ? {
-          kind: "work",
-          hostId: deps.hostId,
-          projectId,
-          projectVersion: project.version,
-          bindingRevisionId,
-          bindingReceiptId: workBindingReceiptId(projectId, bindingRevisionId),
-        }
-      : {
-          kind: "code",
-          hostId: deps.hostId,
-          projectId,
-          projectVersion: project.version,
-          bindingRevisionId,
-          repositoryId: thread.checkout.repositoryId,
-          checkoutId: thread.checkout.checkoutId,
-          worktreeReceiptId: codeWorktreeReceiptId({
+    mode === "chat" || bindingRevisionId === undefined
+      ? { kind: "chat", hostId: deps.hostId, projectId, projectVersion: project.version }
+      : mode === "work" || thread.checkout === undefined
+        ? {
+            kind: "work",
+            hostId: deps.hostId,
             projectId,
+            projectVersion: project.version,
             bindingRevisionId,
-            ...thread.checkout,
-          }),
-        };
+            bindingReceiptId: workBindingReceiptId(projectId, bindingRevisionId),
+          }
+        : {
+            kind: "code",
+            hostId: deps.hostId,
+            projectId,
+            projectVersion: project.version,
+            bindingRevisionId,
+            repositoryId: thread.checkout.repositoryId,
+            checkoutId: thread.checkout.checkoutId,
+            worktreeReceiptId: codeWorktreeReceiptId({
+              projectId,
+              bindingRevisionId,
+              ...thread.checkout,
+            }),
+          };
   try {
     return {
       status: "ready",
@@ -171,8 +182,8 @@ export function buildThreadRoutineDraft(
           revision: 1,
           mode,
           summary: followUp
-            ? `One follow-up turn in the ${mode === "work" ? "Work" : "Code"} thread it was set up from, in ${project.name}.`
-            : `A new ${mode === "work" ? "Work" : "Code"} thread in ${project.name} for each run, from a routine proposed in one of its threads.`,
+            ? `One follow-up turn in the ${modeName(mode)} thread it was set up from, in ${project.name}.`
+            : `A new ${modeName(mode)} thread in ${project.name} for each run, from a routine proposed in one of its threads.`,
           confirmed: true,
           confirmedBy: deps.actorId,
           confirmedAt: now,
@@ -194,7 +205,7 @@ export function buildThreadRoutineDraft(
  */
 function chooseProfile(
   profiles: ReadonlyArray<AgentProfile>,
-  mode: "work" | "code",
+  mode: AutomationMode,
   thread: RoutineSourceThread,
 ): AgentProfile | undefined {
   const fits = (profile: AgentProfile) =>
@@ -204,6 +215,10 @@ function chooseProfile(
       profile.modelConstraints.map(String).includes(thread.modelId));
   const own = profiles.find((profile) => String(profile.id) === thread.profileId);
   return own !== undefined && fits(own) ? own : profiles.find(fits);
+}
+
+function modeName(mode: AutomationMode): string {
+  return mode === "chat" ? "Chat" : mode === "work" ? "Work" : "Code";
 }
 
 function refused(message: string): ThreadRoutineDraftResult {

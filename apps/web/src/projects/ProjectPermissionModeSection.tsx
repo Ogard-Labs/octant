@@ -18,9 +18,8 @@ const optionsFor = (modes: ReadonlyArray<(typeof PERMISSION_MODE_OPTIONS)[number
   { id: FOLLOW_SETTINGS, label: "Same as Settings" },
   ...modes.map((option) => ({ id: option.id, label: option.label })),
 ];
-const CODE_OPTIONS = optionsFor(PERMISSION_MODE_OPTIONS);
-// Work shares Code's levels; Plan is a thread's own level, never where one starts.
-const WORK_OPTIONS = optionsFor(PERMISSION_MODE_OPTIONS.filter((option) => option.id !== "plan"));
+// Work shares Code's levels, Plan included.
+const MODE_OPTIONS = optionsFor(PERMISSION_MODE_OPTIONS);
 
 export interface ProjectPermissionModeSectionProps {
   readonly project: BoundProjectSummary;
@@ -65,7 +64,7 @@ export function ProjectPermissionModeSection(props: ProjectPermissionModeSection
             void props.onChange(mode).finally(() => setPending(false));
           });
         }}
-        options={props.project.type === "work" ? WORK_OPTIONS : CODE_OPTIONS}
+        options={MODE_OPTIONS}
         value={value}
       />
       <span className="text-xs text-muted-foreground">Strict</span>

@@ -1,13 +1,15 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { existsSync, realpathSync } from "node:fs";
 import { chmod, lstat, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, win32 } from "node:path";
+import { basename, dirname, isAbsolute, join, win32 } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import type { HostRuntimePaths, HostLogReadResult, HostLogReadOptions } from "@octant/host-runtime";
 import {
   BoundedHostLogStore,
+  HEADLESS_ARTIFACT_MANIFEST_FILENAME,
   isWindowsSystemRoot,
   windowsLogonEntryPresent,
   WINDOWS_LOGON_ENTRY_KEY as WINDOWS_RUN_KEY,
@@ -312,10 +314,18 @@ interface ServiceInvocation {
 }
 
 function resolveServiceInvocation(options: UserServiceManagerOptions): ServiceInvocation {
-  const command = options.executable ?? process.execPath;
-  const runtimeEntryPoint =
+  const entryPoint =
     options.cliEntryPoint ??
     (options.executable === undefined ? resolveCurrentCliEntryPoint() : undefined);
+  const launcher =
+    options.executable === undefined && options.hostArguments === undefined
+      ? installedBuildLauncher(
+          entryPoint,
+          (options.runtimeEnvironment ?? process.env)["OCTANT_CLI_LAUNCHER"],
+        )
+      : undefined;
+  const command = launcher ?? options.executable ?? process.execPath;
+  const runtimeEntryPoint = launcher === undefined ? entryPoint : undefined;
   const args =
     options.hostArguments ??
     (runtimeEntryPoint === undefined ? ["server", "run"] : [runtimeEntryPoint, "server", "run"]);
@@ -343,12 +353,54 @@ function resolveServiceInvocation(options: UserServiceManagerOptions): ServiceIn
   return { command, args, environment };
 }
 
+/**
+ * An installed headless build's `bin/octant` launcher, when the CLI runs as that
+ * build's `bin/octant.mjs`. The service runs the launcher rather than this
+ * process's runtime: the kernel reports a runtime reached through the install's
+ * `current` link by its version's own path, so recording it would keep the
+ * service on that version's Bun after an upgrade. Bun resolves the entry
+ * point's links too, so the entry point names the version as well; the
+ * launcher reports the path it was started from in `OCTANT_CLI_LAUNCHER`,
+ * which is used when it is the launcher beside this entry point.
+ */
+function installedBuildLauncher(
+  entryPoint: string | undefined,
+  reportedLauncher: string | undefined,
+): string | undefined {
+  if (entryPoint === undefined || basename(entryPoint) !== "octant.mjs") return undefined;
+  const bin = dirname(entryPoint);
+  const launcher = join(bin, "octant");
+  if (
+    !existsSync(launcher) ||
+    !existsSync(join(dirname(bin), HEADLESS_ARTIFACT_MANIFEST_FILENAME))
+  ) {
+    return undefined;
+  }
+  if (
+    reportedLauncher !== undefined &&
+    isAbsolute(reportedLauncher) &&
+    basename(reportedLauncher) === "octant" &&
+    sameDirectory(dirname(reportedLauncher), bin)
+  ) {
+    return reportedLauncher;
+  }
+  return launcher;
+}
+
+function sameDirectory(left: string, right: string): boolean {
+  try {
+    return realpathSync(left) === realpathSync(right);
+  } catch {
+    return false;
+  }
+}
+
 export function resolveCurrentCliEntryPoint(): string {
   const current = process.argv[1];
   if (current !== undefined && isAbsolute(current)) {
     // Windows hands the entry point over with backslashes.
     const filename = current.split(/[\\/]/).pop() ?? "";
-    if (/^(?:bin\.(?:ts|js|mjs)|octant)$/.test(filename)) return current;
+    if (/^(?:bin\.(?:ts|js|mjs)|octant(?:\.mjs)?)$/.test(filename)) return current;
   }
   return fileURLToPath(new URL("./bin.ts", import.meta.url));
 }

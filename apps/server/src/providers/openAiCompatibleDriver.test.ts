@@ -960,6 +960,133 @@ function runTurns(
   );
 }
 
+describe("OpenCode Go request headers", () => {
+  const baseUrl = "https://opencode.ai/inference/go/v1";
+  const octantVersion = "1.2.3-preview.4";
+
+  it("keeps one conversation ID through retry, resume and compaction, and starts the next conversation separately", async () => {
+    const sent: Headers[] = [];
+    const cacheKeys: unknown[] = [];
+    const driver = makeDriver({
+      configuration: { ...configuration, baseUrl, protocol: "responses" },
+      octantVersion,
+      fetch: async (_url, init) => {
+        sent.push(new Headers(init?.headers));
+        const body = JSON.parse(String(init?.body)) as { readonly prompt_cache_key?: unknown };
+        cacheKeys.push(body.prompt_cache_key);
+        if (sent.length === 1) return new Response(null, { status: 503 });
+        return responsesTextStream("answer");
+      },
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "code",
+          });
+          const start = { modelId, executionPolicy: "approval-gated" } as const;
+          const send = (id: typeof sessionId, prompt: string) =>
+            Effect.gen(function* () {
+              const done = yield* Effect.fork(
+                collectSessionEvents(yield* connection.subscribe, id),
+              );
+              yield* connection.send({ sessionId: id, prompt, attachments: [], tools: [] });
+              expect(Array.from(yield* Fiber.join(done)).at(-1)?.kind).toBe("completed");
+            });
+          const handle = yield* connection.start({ ...start, sessionId });
+          yield* send(sessionId, "Read the parser.");
+          yield* connection.stop(sessionId);
+          if (handle.resumeCursor === undefined)
+            throw new Error("Expected a resumable Code conversation.");
+          yield* connection.resume({
+            ...start,
+            sessionId: otherSessionId,
+            resumeCursor: handle.resumeCursor,
+          });
+          yield* send(otherSessionId, "Explain the parse error.");
+          if (connection.compact === undefined) throw new Error("Expected Code compaction.");
+          expect(
+            (yield* connection.compact({
+              sessionId: otherSessionId,
+              compactionId: "go-compaction",
+            })).kind,
+          ).toBe("compacted");
+          yield* connection.stop(otherSessionId);
+          yield* connection.start({ ...start, sessionId: otherSessionId });
+          yield* send(otherSessionId, "Inspect a different test.");
+        }),
+      ),
+    );
+    expect(sent.map((headers) => headers.get("x-opencode-session"))).toEqual([
+      sessionId,
+      sessionId,
+      sessionId,
+      sessionId,
+      otherSessionId,
+    ]);
+    expect(sent.map((headers) => headers.get("user-agent"))).toEqual(
+      Array(5).fill(`octant-harness/${octantVersion}`),
+    );
+    expect(cacheKeys).toEqual(sent.map((headers) => headers.get("x-opencode-session")));
+  });
+
+  it("identifies discovery and keeps separate Verify tools checks stable through protocol fallback", async () => {
+    const sent: Array<{ path: string; headers: Headers }> = [];
+    const driver = makeDriver({
+      configuration: { ...configuration, baseUrl, protocol: "auto" },
+      octantVersion,
+      fetch: async (url, init) => {
+        sent.push({ path: String(url).slice(baseUrl.length), headers: new Headers(init?.headers) });
+        if (String(url).endsWith("/models")) return modelsResponse(url);
+        if (String(url).endsWith("/responses")) return new Response(null, { status: 404 });
+        return chatStream("answer");
+      },
+    });
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    const verify = driver.verifyToolCapability;
+    if (verify === undefined) throw new Error("Expected tool verification.");
+    await Effect.runPromise(Effect.scoped(verify({ instanceId, modelId })));
+    await Effect.runPromise(Effect.scoped(verify({ instanceId, modelId })));
+    expect(await runTurns(driver, ["Inspect the failing test."])).toEqual(["completed"]);
+    expect(sent.map(({ path }) => path)).toEqual([
+      "/models",
+      "/responses",
+      "/chat/completions",
+      "/chat/completions",
+      "/chat/completions",
+    ]);
+    expect(
+      sent.every(({ headers }) => headers.get("user-agent") === `octant-harness/${octantVersion}`),
+    ).toBe(true);
+    const ids = sent.map(({ headers }) => headers.get("x-opencode-session"));
+    expect(ids).toEqual([null, expect.any(String), ids[1], expect.any(String), sessionId]);
+    expect(new Set(ids.slice(1)).size).toBe(3);
+  });
+
+  it.each([
+    "https://opencode.ai/inference/v1",
+    "https://opencode.ai/inference/go-other/v1",
+    "https://opencode.ai.example/inference/go/v1",
+    "https://opencode.ai:8443/inference/go/v1",
+  ])("keeps the Go headers off %s", async (otherBaseUrl) => {
+    const sent: Headers[] = [];
+    const driver = makeDriver({
+      configuration: { ...configuration, baseUrl: otherBaseUrl },
+      octantVersion,
+      fetch: async (_url, init) => {
+        sent.push(new Headers(init?.headers));
+        return chatStream("answer");
+      },
+    });
+    expect(await runTurns(driver, ["Review this change."])).toEqual(["completed"]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.has("x-opencode-session")).toBe(false);
+    expect(sent[0]?.has("user-agent")).toBe(false);
+  });
+});
+
 describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
   const planConfiguration: OpenAiCompatibleProviderConfiguration = {
     kind: "openai-compatible-http",
@@ -1406,6 +1533,7 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
 });
 
 function makeDriver(options: {
+  readonly octantVersion?: string;
   readonly configuration?: OpenAiCompatibleProviderConfiguration;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch: CompatibleFetch;
@@ -1415,6 +1543,7 @@ function makeDriver(options: {
   const runtimeRegistry = options.runtimeRegistry ?? new ProviderRuntimeRegistry();
   const driver = makeOpenAiCompatibleDriver({
     instanceId,
+    ...(options.octantVersion === undefined ? {} : { octantVersion: options.octantVersion }),
     configuration: options.configuration ?? configuration,
     credentialResolver: options.credentialResolver ?? resolver(),
     fetch: options.fetch,

@@ -19,6 +19,7 @@ import {
   SHIELD_JUDGE_INSTRUCTIONS,
   shieldBrakeEngaged,
   shieldJudgePrompt,
+  type ShieldBrakeLimits,
   type ShieldBrakeState,
   type ShieldCall,
   type ShieldJudgeInput,
@@ -114,6 +115,8 @@ export interface OctantShieldOptions {
   readonly clock: () => string;
   readonly nowMs?: () => number;
   readonly timeoutMs?: number;
+  /** Settings' brake counts, read at each review; absent keeps 3 and 20. */
+  readonly brakeLimits?: () => ShieldBrakeLimits;
 }
 
 export interface ShieldReviewRequest {
@@ -225,7 +228,10 @@ export class OctantShield {
       return decision;
     };
 
-    const brake = shieldBrakeEngaged(this.#brakes.get(request.threadId) ?? SHIELD_BRAKE_RELEASED);
+    const brake = shieldBrakeEngaged(
+      this.#brakes.get(request.threadId) ?? SHIELD_BRAKE_RELEASED,
+      this.#options.brakeLimits?.(),
+    );
     if (brake.engaged) return decide("ask", "brake", brake.reason, { rule: "denial-brake" });
 
     const onServer = request.rootOnServer;

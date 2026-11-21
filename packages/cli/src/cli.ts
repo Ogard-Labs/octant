@@ -956,10 +956,13 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
   { octant: "server logs [--since <ISO-8601>] [--limit <n>] [--follow]" },
   {
     octant:
-      "server install --artifact <path> [--install-root <path>] [--pair [--hostname <address>] [--port <port>] [--cert <path> --key <path>]]",
+      "server install --artifact <path> [--install-root <path>] [--self-built] [--pair [--hostname <address>] [--port <port>] [--cert <path> --key <path>]]",
     nightly: null,
   },
-  { octant: "server upgrade --artifact <path> [--install-root <path>]", nightly: null },
+  {
+    octant: "server upgrade --artifact <path> [--install-root <path>] [--self-built]",
+    nightly: null,
+  },
   {
     octant:
       "server uninstall [--install-root <path>] [--data-dir <path>] [--remove-data --confirm <exact-data-dir>]",

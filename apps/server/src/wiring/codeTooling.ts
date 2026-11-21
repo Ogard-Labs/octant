@@ -125,6 +125,8 @@ import type { FoundationsWiring } from "./foundations";
 import type { IntegrationsWiring } from "./integrations";
 import type { ProvidersWiring } from "./providers";
 import { windowCanAccessWorkProject } from "../windowCodeProjectAccess";
+import { resolveProviderTerminal } from "../providers/providerTerminal";
+import { homedir } from "node:os";
 
 export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence" | "version"> &
   Pick<ComputerUseWiring, "desktopLeases" | "installDesktopPreviewRequest"> &
@@ -177,6 +179,7 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
     | "worktreePreparation"
     | "childWorktreeSources"
     | "resolveChildWorktree"
+    | "configuredDriverOptions"
   >;
 
 export function wireCodeTooling(deps: CodeToolingDependencies) {
@@ -362,6 +365,27 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
                 ? deps.resolveProjectStrict(String(projectId))
                 : deps.resolveThreadStrict(workThreadId),
             terminals: sharedTerminals,
+            providerTerminal: ({ workThreadId, shell, strict }) => {
+              const thread = workThreadProjection.read(workThreadId);
+              const access = thread === undefined ? undefined : workThreadAccessOf(thread.access);
+              return resolveProviderTerminal({
+                instance:
+                  thread === undefined
+                    ? undefined
+                    : persistence.readProviderInstance(thread.providerInstanceId),
+                hostEnvironment: process.env,
+                homeDirectory: homedir(),
+                platform: process.platform,
+                shell,
+                strict,
+                mode: "work",
+                ...(access === undefined ? {} : { executionPolicy: access.executionPolicy }),
+                fullAccessSandbox: thread?.fullAccessSandbox,
+                ...(deps.configuredDriverOptions.acpHome === undefined
+                  ? {}
+                  : { acpHome: deps.configuredDriverOptions.acpHome }),
+              });
+            },
             shell: () =>
               terminalShellFor({
                 platform: process.platform,
@@ -425,6 +449,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
               return {
                 root,
                 executionPolicy: workThreadAccessOf(thread.access).executionPolicy,
+                fullAccessSandbox: thread.fullAccessSandbox,
                 current,
                 active: current,
               };

