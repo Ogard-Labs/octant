@@ -1,5 +1,6 @@
 import { storedBrowserProfileOfPartitionFolder } from "@octant/domain";
 import { createDesktopBrowserCredentialFill } from "./desktopBrowserCredentialFill";
+import { configureDesktopProcessErrorNet } from "./desktopProcessErrorNet";
 import { createDesktopClientLifetime } from "./desktopClientLifetime";
 import {
   confirmUnresponsiveFilesClose,
@@ -274,6 +275,7 @@ import {
   probeHostInfoReceipt,
   probeLocalHost,
   createStderrTail,
+  forwardStderrWithTail,
   ServerExitedBeforeReady,
   type StderrTail,
   reserveLoopbackPort,
@@ -1498,6 +1500,10 @@ let quitPrepared = false;
 let quitAccepted = false;
 let browserQuitCleanup: Promise<"closed" | "unconfirmed"> | undefined;
 let preparingQuit = false;
+configureDesktopProcessErrorNet({
+  ...(desktopWindowsHost === undefined ? { dataDirectory: desktopDataDirectory } : {}),
+  isShuttingDown: () => preparingQuit || quitAccepted || quitPrepared,
+});
 // The active-work confirmation only applies to quits the user starts inside
 // the app (menu, Cmd+Q). Signal- or event-driven termination (SIGTERM,
 // AppleScript "quit", logout) cannot answer a dialog and must still proceed.
@@ -2261,11 +2267,13 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
         });
       },
     });
-    // pipe() honours backpressure from a slow parent stderr; the tail
-    // listener only keeps a bounded copy.
-    child.stderr.pipe(process.stderr, { end: false });
-    child.stderr.on("data", (chunk: Buffer) => serverStderr.append(chunk));
-    child.stderr.once("end", serverStderr.end);
+    // Route child spawn/pipe errors to this launch's teardown instead of the
+    // process error net; a server that failed to spawn ends the stderr drain.
+    child.on("error", () => serverStderr.end());
+    child.stdin.on("error", () => undefined);
+    // pipe() honours backpressure while process.stderr is healthy and falls
+    // back to tail-only draining if process.stderr closes with EPIPE.
+    forwardStderrWithTail(child.stderr, process.stderr, serverStderr);
     credentialBroker = broker;
     browserRuntimeBroker = nextBrowserRuntimeBroker;
     computerUseService = nextComputerService;

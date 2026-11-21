@@ -61,6 +61,7 @@ import { readAtMost } from "./bundledWhatsNewAnnouncement";
 import { desktopWindowProtocol } from "./desktopPeerWindows";
 import { linuxRendererSandboxDisabled } from "./desktopPeerStatus";
 import { popupNativeMenu, installNativeEditingMenus } from "./nativeContextMenus";
+import { configureDesktopProcessErrorNet } from "./desktopProcessErrorNet";
 import { writeDiagnostic } from "./diagnosticLog";
 import { showNoticeWithoutBlocking, showStartupFailureAndQuit } from "./startupFailureElectron";
 import { CODE_APPROVAL_PRELOAD_FILENAME, DESKTOP_PRELOAD_FILENAME } from "./runtimePaths";
@@ -173,6 +174,12 @@ export async function runNightlyClient(
         window.on("query-session-end", listener);
         window.on("session-end", listener);
       }),
+  });
+  // Nightly client never owns Octant's host data directory, so it sets no host
+  // crash-record path here; it still provides its quit predicate so reviewed
+  // Electron teardown races during quit are handled consistently.
+  configureDesktopProcessErrorNet({
+    isShuttingDown: () => acceptedQuit || quitRequested || systemShuttingDown(),
   });
   // One Files question for the whole client: the menu's Quit and the Dock's
   // both come through here.

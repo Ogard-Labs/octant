@@ -687,25 +687,50 @@ because the journal is what may have refused to open; nothing is sent.
 **Local crash records.** When the desktop-managed host exits without being
 asked to (the supervisor's unexpected exit, or an exit before it was ready),
 the desktop writes one owner-only JSON file to `crash-records/` in the host's
-data directory: the time, the process (`host`), how it ended (`exit code N`,
-`signal NAME`, or the host's refusal category), and its last output lines from
-the redacted stderr tail. Every string is redacted again on write and the home
-folder becomes `~`; the newest 20 records are kept. The desktop writes the
-record because a host that crashed cannot be trusted to. Records never leave
-the machine except inside a support bundle the person saves. Native crash dumps
-are not collected: they carry process memory no redaction can sweep. A host
-that no desktop watched (a background-service host, or the native Windows host,
-whose owned profile the desktop does not write into) keeps its own record at
-its next start: when `host-memory.json` shows the previous process ended
-without a clean stop and no record exists at or after that process's last
-reading, the host writes one with `stopped without a clean exit` and the last
-memory reading, through the same code on every platform. A record a watching
-desktop already wrote for that exit is reused, not doubled. The next start's
-"Octant stopped unexpectedly" notice names the record kept for that exit (how
-it ended and when) and says Save diagnostics includes it; host-control status
-carries it as `memory.previousStop.crashRecord`, with no path or output line.
-See
-[Persistence: startup repair](#persistence).
+data directory: the time, the process (`host` or `desktop`), how it ended
+(`exit code N`, `signal NAME`, the unhandled error event kind, or the host's
+refusal category), and its last output lines from the redacted stderr tail.
+Every string is redacted again on write and the home folder becomes `~`; the
+newest 20 records are kept. The desktop writes the record for a desktop-managed
+host because a host that crashed cannot be trusted to. Records never leave the
+machine except inside a support bundle the person saves. Native crash dumps are
+not collected: they carry process memory no redaction can sweep. A host that no
+desktop watched (a background-service host, or the native Windows host, whose
+owned profile the desktop does not write into) keeps its own record at its next
+start: when `host-memory.json` shows the previous process ended without a clean
+stop and no `host` record exists at or after that process's last reading, the
+host writes one with `stopped without a clean exit` and the last memory reading,
+through the same code on every platform. A record a watching desktop or the
+unwatched host's process error net already wrote for that exit is reused, not
+doubled. The next start's "Octant stopped unexpectedly" notice names the record
+kept for that exit (how it ended and when) and says Save diagnostics includes
+it; host-control status carries it as `memory.previousStop.crashRecord`, with no
+path or output line. See [Persistence: startup repair](#persistence).
+
+**Last-resort process error net.** Both the server (`host`) and the desktop main
+process (`desktop`) install one shared process error net at startup
+(`@octant/host-runtime/process-error-net`). Any `uncaughtException` or
+`unhandledRejection` logs a bounded, secret-redacted cause (replacing the home
+folder with `~` and keeping the summary plus top stack frames inside the
+desktop's 5-line / 1,000-character stderr tail) synchronously to stderr, guards
+against re-entrant crashes, and exits non-zero (`1`) so the supervisor (desktop,
+launchd, or systemd) restarts the process cleanly instead of leaving in-memory
+state undefined or opening Electron's blocking error dialog. A desktop-managed
+host relies on the watching desktop to write the host crash record from stderr
+on exit so records are not doubled; an unwatched POSIX host and the desktop main
+process itself also write a best-effort synchronous redacted record to
+`crash-records/` before exiting. Outside an explicit shutdown, every unhandled
+error event exits non-zero. Only a closed, reviewed list of benign teardown
+errors (`ERR_IPC_CHANNEL_CLOSED` and Electron's `"Object has been destroyed"` /
+`"Render frame was disposed"` wrapper races) is absorbed, and only while the
+process is already shutting down (logged as a redacted teardown diagnostic).
+Closed parent stdio pipes (`EPIPE` on `process.stdout` or `process.stderr`) are
+absorbed directly on those streams so logging cannot crash the process, while
+child-process stream errors (`stdin` `EPIPE` on a dead child in providers,
+terminals, MCP servers, file/device helpers, and CLI ports) route to their
+owner's cleanup rather than relying on the global net. `bun run style:check`
+refuses any other `uncaughtException` or `unhandledRejection` listener
+registration in shipped code outside that single module.
 
 **Human file editing.** Work previews of ordinary UTF-8 text and Markdown use
 the shared embedded editor and a Project-confined source read/save route for
