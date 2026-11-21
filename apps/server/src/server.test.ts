@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Cause, Effect } from "effect";
+import { Cause, Effect, Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_HOST_RESOURCE_POLICY,
@@ -22,10 +22,17 @@ import {
   decodeWorkThreadBootstrap,
   decodeProviderInstance,
   decodeStableHostId,
+  DeviceId,
+  RemoteSessionId,
+  decodeServiceOffersResponse,
   type ProviderDriverKind,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
 } from "@octant/contracts";
-import { PersistenceStartupFailed, makePersistenceLive } from "./persistence/persistenceService";
+import {
+  Persistence,
+  PersistenceStartupFailed,
+  makePersistenceLive,
+} from "./persistence/persistenceService";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { Journal } from "./persistence/journal";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
@@ -59,6 +66,8 @@ import { ClaudeResumeIdentityStore } from "./providers/claudeResumeIdentityStore
 import { ChatService } from "./chat/chatService";
 import { WorkThreadService } from "./work/workThreadService";
 import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceService";
+import { createAuthenticatedProductDispatch } from "./authenticatedProductRoutes";
+import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import { ThreadMessageQueueService } from "./messageQueue/threadMessageQueueService";
 import * as contextWiring from "./wiring/context";
 import { ServerProjectStore } from "./serverProjects/serverProjectStore";
@@ -112,6 +121,69 @@ describe("startOctantServer", () => {
             "x-octant-window-capability": capability,
             "content-type": "application/json",
           };
+          const paired = createAuthenticatedProductDispatch({
+            dispatch: async (request) => assertResponse(await route?.(request)),
+          });
+          const origin = "https://octant.example";
+          const principal = createRemoteDevicePrincipal({
+            deviceId: Schema.decodeUnknownSync(DeviceId)(randomUUID()),
+            hostId: decodeStableHostId(randomUUID()),
+            sessionId: Schema.decodeUnknownSync(RemoteSessionId)(randomUUID()),
+            origin,
+            protocolVersion: 1,
+            capabilityDigest: "a".repeat(64),
+            credentialGeneration: 1,
+            admittedBy: "host-person",
+          });
+          const fromPaired = (path: string) =>
+            paired({
+              request: new Request(origin + path),
+              principal,
+              abortSignal: new AbortController().signal,
+            });
+          const threadId = randomUUID();
+          const now = new Date().toISOString();
+          (yield* Persistence).journal.append({
+            aggregate: { aggregateType: "chat-thread", aggregateId: threadId },
+            expectedVersion: 0,
+            events: [
+              {
+                eventId: randomUUID(),
+                eventName: "chat.thread-created@1",
+                eventVersion: 1,
+                correlationId: randomUUID(),
+                actor: { kind: "system", actorId: randomUUID() },
+                occurredAt: now,
+                payload: {
+                  kind: "thread-created",
+                  thread: {
+                    id: threadId,
+                    title: "Paired thread",
+                    lifecycle: "active",
+                    providerInstanceId: randomUUID(),
+                    modelId: "fixture",
+                    researchEnabled: false,
+                    researchRouting: "automatic",
+                    personalityInstructions: "Be concise.",
+                    version: 1,
+                    createdAt: now,
+                    updatedAt: now,
+                  },
+                },
+              },
+            ],
+          });
+          const offersPath = (id: string) => `/api/offers?threadKind=chat-thread&scopeId=${id}`;
+          const list = yield* Effect.promise(() => fromPaired(offersPath(threadId)));
+          expect(list?.status).toBe(200);
+          expect(
+            yield* Effect.promise(
+              async () => decodeServiceOffersResponse(await list?.json()).offers,
+            ),
+          ).toEqual([]);
+          expect((yield* Effect.promise(() => fromPaired(offersPath(randomUUID()))))?.status).toBe(
+            404,
+          );
           for (const base of ["/api/offers", "/api/image/offers"]) {
             const read = yield* Effect.promise(() => call(base, { headers }));
             expect(read.status).toBe(400);
