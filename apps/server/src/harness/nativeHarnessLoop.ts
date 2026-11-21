@@ -48,6 +48,7 @@ import type {
   NativeHarnessProviderSearchDecisions,
   NativeHarnessRequest,
   NativeHarnessResponse,
+  NativeHarnessSendContext,
   NativeHarnessStreamEvent,
   NativeHarnessTransport,
   NativeHarnessTransportSession,
@@ -705,8 +706,9 @@ export function createNativeHarnessConnection(
       request: NativeHarnessRequest,
       signal: AbortSignal,
     ): Promise<NativeHarnessResponse> => {
-      const stream = {
+      const stream: NativeHarnessSendContext = {
         signal,
+        liveSessionId: state.sessionId,
         // A request's own usage says when that request was sent, which is what
         // lets its timing leave out the tool time between requests.
         onEvent: (event: NativeHarnessStreamEvent) => {
@@ -1148,8 +1150,7 @@ export function createNativeHarnessConnection(
       let chosen: { readonly turns: number; readonly request: NativeHarnessRequest } | undefined;
       for (let turns = latest; turns >= 1 && chosen === undefined; turns -= 1) {
         const request: NativeHarnessRequest = {
-          sessionId: state.sessionId,
-          conversationId: state.transcriptId,
+          sessionId: state.transcriptId,
           modelId: state.modelId,
           system: compactionInstruction(options.mode),
           history: [
@@ -1465,8 +1466,7 @@ export function createNativeHarnessConnection(
       fitRequest(
         state.endpoint,
         {
-          sessionId: state.sessionId,
-          conversationId: state.transcriptId,
+          sessionId: state.transcriptId,
           modelId: state.modelId,
           system: state.system,
           history,

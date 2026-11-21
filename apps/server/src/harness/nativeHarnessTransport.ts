@@ -27,6 +27,11 @@ export type NativeHarnessResponse = HarnessEndpointResponse;
 export type NativeHarnessTransportSession = HarnessEndpointSession;
 export type NativeHarnessTransport = HarnessEndpointTransport;
 
+/** Host retries check grants on the live handle even when it resumed an older transcript. */
+export type NativeHarnessSendContext = Parameters<HarnessEndpointSession["send"]>[1] & {
+  readonly liveSessionId?: ProviderSessionId;
+};
+
 /**
  * A token figure only appears in the total once some request has reported it.
  * Cost is stricter: a total is only a cost when every request in it reported

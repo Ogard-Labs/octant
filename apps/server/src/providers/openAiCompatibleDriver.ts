@@ -500,7 +500,7 @@ async function sendCompatibleRequest(
     stream.onEvent({ kind: event.kind, text: event.text });
   };
   const shared = {
-    endpoint: forOpenCodeGoConversation(endpoint, request.conversationId ?? request.sessionId),
+    endpoint: forOpenCodeGoConversation(endpoint, request.sessionId),
     modelId: request.modelId,
     history,
     prompt,
@@ -556,8 +556,9 @@ async function sendCompatibleRequest(
               openAiOwnSearchOrigin(options.configuration) !== undefined
                 ? { webSearch: true }
                 : {}),
-              // Go's cache key and session header identify the same transcript on resume.
-              promptCacheKey: shared.endpoint.openCodeGo?.sessionId ?? String(request.sessionId),
+              // One stable key per harness session, so every step of the
+              // conversation is routed to the same prompt cache.
+              promptCacheKey: String(request.sessionId),
               onAttemptFailure: (value) => {
                 metadata = value;
               },
