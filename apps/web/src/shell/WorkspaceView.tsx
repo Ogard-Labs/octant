@@ -3458,6 +3458,9 @@ function ChatThreadWorkspace(props: {
         {...(props.memoryProposalClient === undefined
           ? {}
           : { memoryProposalClient: props.memoryProposalClient })}
+        {...(props.automationClient === undefined
+          ? {}
+          : { automationClient: props.automationClient })}
         {...(props.browserAutomationClient === undefined
           ? {}
           : { browserAutomationClient: props.browserAutomationClient })}
