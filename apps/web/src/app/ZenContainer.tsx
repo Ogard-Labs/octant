@@ -296,15 +296,10 @@ export const ZenContainer = memo(function ZenContainer(props: ZenContainerProps)
                     terminalId={element.terminalId}
                     {...(element.program === "provider"
                       ? {
-                          // The card records only that it runs the program;
-                          // the window's Work task names it when it is the
-                          // same Project's.
-                          providerProgramName:
-                            props.workProviderTerminal !== undefined &&
-                            String(props.workProviderTerminal.projectId) ===
-                              String(element.projectId)
-                              ? props.workProviderTerminal.name
-                              : "The task's provider",
+                          // Named from what the card recorded at pinning,
+                          // never from the window's current Work task, which
+                          // may use another provider by now.
+                          providerProgramName: element.programName ?? "The task's provider",
                         }
                       : {})}
                     {...(props.workProviderTerminal === undefined ||

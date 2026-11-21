@@ -2301,7 +2301,10 @@ describe("Work task provider terminal", () => {
       expect(plain.events()[0]?.payload).not.toHaveProperty("program");
       const terminalId = decodeCodeTerminalId(ids.terminal);
       expect(f.service.program(terminalId)).toBe("provider");
+      // The card names the program this start resolved, not the task's later one.
+      expect(f.service.programName(terminalId)).toBe("Google Antigravity");
       expect(plain.service.program(terminalId)).toBeUndefined();
+      expect(plain.service.programName(terminalId)).toBeUndefined();
     } finally {
       f.connection.close();
       plain.connection.close();

@@ -267,6 +267,9 @@ describe("addElement", () => {
     expect(() =>
       updateElement(pinned, { ...card, program: "provider" }, pinned.version, localHostId),
     ).toThrow(ZenPolicyRejected);
+    expect(() =>
+      updateElement(pinned, { ...card, programName: "Gemini CLI" }, pinned.version, localHostId),
+    ).toThrow(ZenPolicyRejected);
     expect(
       updateElement(
         pinned,

@@ -250,6 +250,8 @@ interface Owner {
   readonly serverWorkShell?: true;
   /** Set for a terminal that runs its Work task's provider program. */
   readonly program?: "provider";
+  /** That program's name as the host resolved it at the start, e.g. "Gemini CLI". */
+  readonly programName?: string;
   uncertainty?: "server-transport-lost" | "server-stop-unconfirmed";
   /** Who the journal names for this shell's start and end: the device that opened it, if one did. */
   readonly actor?: EventActorValue;
@@ -608,6 +610,15 @@ export class ProjectTerminalService {
    */
   program(terminalId: CodeTerminalId): "provider" | undefined {
     return this.#owners.get(String(terminalId))?.program;
+  }
+
+  /**
+   * The name of the provider program a running Project terminal runs, as its
+   * start resolved it, so its Zen card names the program it really started
+   * rather than whatever the window's Work task now uses.
+   */
+  programName(terminalId: CodeTerminalId): string | undefined {
+    return this.#owners.get(String(terminalId))?.programName;
   }
 
   /**
@@ -1165,7 +1176,7 @@ export class ProjectTerminalService {
       workThread?.active,
       false,
       device,
-      providerProgram === undefined ? undefined : "provider",
+      providerProgram === undefined ? undefined : providerProgram.name,
     );
   }
 
@@ -1363,7 +1374,8 @@ export class ProjectTerminalService {
     authorized?: () => boolean,
     serverWorkShell = false,
     device?: { readonly actor: EventActorValue; readonly binding?: ProjectTerminalDeviceBinding },
-    program?: "provider",
+    /** The provider program's name, for a terminal that runs one. */
+    programName?: string,
   ): Promise<ProjectTerminalResult> {
     const personPairedDevice = this.#options.personPairedDevice;
     // A device's shell holds only while that device still acts as the person.
@@ -1382,7 +1394,7 @@ export class ProjectTerminalService {
       ...(action === undefined ? {} : { action }),
       ...(held === undefined ? {} : { authorized: held }),
       ...(serverWorkShell ? { serverWorkShell: true } : {}),
-      ...(program === undefined ? {} : { program }),
+      ...(programName === undefined ? {} : { program: "provider", programName }),
       ...(device === undefined
         ? {}
         : {
@@ -1407,7 +1419,7 @@ export class ProjectTerminalService {
             bindingRevisionId,
             posture,
             startedAt: this.#options.clock(),
-            ...(program === undefined ? {} : { program }),
+            ...(programName === undefined ? {} : { program: "provider" }),
           },
           owner.actor,
         );

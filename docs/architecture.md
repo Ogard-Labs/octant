@@ -17487,7 +17487,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `NO_COLOR`), its managed home and its host sign-in folder's variables, and
   no API key. A Work task's start journals `program: "provider"` on
   `code.project-terminal-started@1` (optional; absent is a shell), and a Zen
-  card pinned for it records the same from the host's answer. A Work task's runs
+  card pinned for it records the same, with the program's name, from the
+  host's answer. A Work task's runs
   by the same rule below in mode `work`, at the task's own level rather than
   the Full access a plain Project terminal takes outside Strict. It runs the
   way the thread's turns do (maintainer decision, 2026-11-21): where a turn
