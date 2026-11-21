@@ -3045,9 +3045,9 @@ tools, its process open between turns, unverified: Octant reviewed them on
 another release."). A release older than the earliest of them, or one whose
 version cannot be read, never inherits newer evidence. Compaction and file
 review stay limited to Mistral Vibe, the one agent whose dialect for them
-was read. The probe no longer reports a separate Full access value
-(`capabilities.atFullAccess`), since every level now reads the same one, so
-a spend ceiling counts such a release's turns as measured at every level.
+was read. Capabilities carry no separate Full access value for such a
+release, since every level reads the same one, so a spend ceiling counts
+such a release's turns as measured at every level.
 
 A release found to break with Octant is refused by name: a profile's
 `process.brokenVersions` (empty for every profile today) lists it, and

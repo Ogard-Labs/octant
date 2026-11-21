@@ -101,24 +101,19 @@ export interface SpendCeilingServiceOptions {
   /**
    * The provider a ledger row names, when its unreported turns are not
    * measured: the instance if it exists and its runtime declares it never
-   * reports usage at the level the turn ran at, otherwise undefined and its
-   * unreported turns keep refusing as unknown spend. Absent, every provider
-   * counts.
+   * reports usage, otherwise undefined and its unreported turns keep refusing
+   * as unknown spend. Absent, every provider counts.
    */
   readonly notMeasuredProvider?: (
     providerInstanceId: string,
-    ranAtFullAccess: boolean,
   ) => SpendCeilingNotMeasuredProvider | undefined;
 }
 
 /**
  * Whether a ledger row's provider is left out of token and money ceilings,
- * decided by provider and the level the row's turn ran at: by the instance's
- * runtime usage capability at that level as the host observes it now, for
- * old rows too. A turn at Full access reads `atFullAccess.usage` where a
- * probe gives Full access its own value (none does since a newer ACP release
- * keeps its usage at every level); every other turn, and a row
- * that recorded no level, reads `usage`. A removed or disabled instance, or
+ * decided by provider: by the instance's runtime usage capability as the host
+ * observes it now, for old rows too, at whatever level the row's turn ran.
+ * A removed or disabled instance, or
  * one with no observation yet, counts, so its unreported turns keep refusing.
  * Disabling a provider with a live session leaves its last observation in
  * place, so the enabled flag is checked here rather than trusted to have
@@ -130,17 +125,13 @@ export function notMeasuredProvider(
     readonly observedState: (instanceId: ProviderInstanceId) => ProviderObservedState | undefined;
   },
   providerInstanceId: string,
-  ranAtFullAccess: boolean,
 ): SpendCeilingNotMeasuredProvider | undefined {
   const instance = host
     .readProviderInstances()
     .find((candidate) => String(candidate.id) === providerInstanceId);
   if (instance === undefined || !instance.enabled) return undefined;
   const capabilities = host.observedState(instance.id)?.capabilities;
-  const usage = ranAtFullAccess
-    ? (capabilities?.atFullAccess?.usage ?? capabilities?.usage)
-    : capabilities?.usage;
-  return providerUsageIsNotMeasured(usage)
+  return providerUsageIsNotMeasured(capabilities?.usage)
     ? { providerInstanceId: instance.id, displayName: instance.displayName }
     : undefined;
 }
@@ -162,7 +153,6 @@ export class SpendCeilingService {
   readonly #projectExists: SpendCeilingServiceOptions["projectExists"];
   readonly #notMeasuredProvider: (
     providerInstanceId: string,
-    ranAtFullAccess: boolean,
   ) => SpendCeilingNotMeasuredProvider | undefined;
   readonly #reservations = new Map<string, LiveReservation>();
   readonly #turns = new Map<string, InFlightTurn>();
@@ -505,21 +495,20 @@ export class SpendCeilingService {
     if (where === undefined) return undefined;
     let rows: ReadonlyArray<CostByProvider>;
     try {
-      // Per provider and level, so the unreported turns of a provider that
-      // never reports usage at that level can be left out while a reported
+      // Per provider, so the unreported turns of a provider that never
+      // reports usage can be left out while a reported
       // row with no price, from any provider, still makes the money ceiling
       // refuse.
       rows = this.#connection
         .prepare(
           `SELECT
             provider_instance_id,
-            ${RAN_AT_FULL_ACCESS_SQL} AS ran_at_full_access,
             COALESCE(SUM(CASE WHEN cost_usd_micros IS NULL AND quality = 'unavailable' THEN 1 ELSE 0 END), 0) AS unreported,
             COALESCE(SUM(CASE WHEN cost_usd_micros IS NULL AND quality <> 'unavailable' THEN 1 ELSE 0 END), 0) AS unpriced,
             COALESCE(SUM(cost_usd_micros), 0) AS micros
           FROM usage_record_projection
           WHERE ${where.sql}
-          GROUP BY provider_instance_id, ran_at_full_access`,
+          GROUP BY provider_instance_id`,
         )
         .all(...where.params) as ReadonlyArray<CostByProvider>;
     } catch {
@@ -528,11 +517,7 @@ export class SpendCeilingService {
     let micros = 0;
     for (const row of rows) {
       if (row.unpriced > 0) return undefined;
-      if (
-        row.unreported > 0 &&
-        this.#notMeasuredProvider(row.provider_instance_id, row.ran_at_full_access === 1) ===
-          undefined
-      ) {
+      if (row.unreported > 0 && this.#notMeasuredProvider(row.provider_instance_id) === undefined) {
         return undefined;
       }
       micros += row.micros;
@@ -614,8 +599,7 @@ export class SpendCeilingService {
         ...(scope.kind === "project" ? { projectId: String(scope.projectId) } : {}),
         ...(from === undefined ? {} : { from }),
       },
-      (providerInstanceId, ranAtFullAccess) =>
-        this.#notMeasuredProvider(providerInstanceId, ranAtFullAccess) !== undefined,
+      (providerInstanceId) => this.#notMeasuredProvider(providerInstanceId) !== undefined,
     );
   }
 
@@ -635,35 +619,23 @@ export class SpendCeilingService {
       ...(from === undefined ? {} : { from }),
     });
     if (where === undefined) return [];
-    let rows: ReadonlyArray<{
-      readonly provider_instance_id: string;
-      readonly ran_at_full_access: number;
-    }>;
+    let rows: ReadonlyArray<{ readonly provider_instance_id: string }>;
     try {
       rows = this.#connection
         .prepare(
-          `SELECT DISTINCT provider_instance_id, ${RAN_AT_FULL_ACCESS_SQL} AS ran_at_full_access
+          `SELECT DISTINCT provider_instance_id
           FROM usage_record_projection
           WHERE ${where.sql} AND quality = 'unavailable'
           ORDER BY provider_instance_id`,
         )
-        .all(...where.params) as ReadonlyArray<{
-        readonly provider_instance_id: string;
-        readonly ran_at_full_access: number;
-      }>;
+        .all(...where.params) as ReadonlyArray<{ readonly provider_instance_id: string }>;
     } catch {
       return [];
     }
-    // One instance can leave out both its guarded and its Full access turns.
-    const named = new Map<string, SpendCeilingNotMeasuredProvider>();
-    for (const row of rows) {
-      const provider = this.#notMeasuredProvider(
-        row.provider_instance_id,
-        row.ran_at_full_access === 1,
-      );
-      if (provider !== undefined) named.set(String(provider.providerInstanceId), provider);
-    }
-    return [...named.values()];
+    return rows.flatMap((row) => {
+      const provider = this.#notMeasuredProvider(row.provider_instance_id);
+      return provider === undefined ? [] : [provider];
+    });
   }
 
   #childSubjectIds(parentThreadId: string): ReadonlyArray<string> {
@@ -811,7 +783,6 @@ function ledgerSubjects(
 
 interface CostByProvider {
   readonly provider_instance_id: string;
-  readonly ran_at_full_access: number;
   readonly unreported: number;
   readonly unpriced: number;
   readonly micros: number;
@@ -848,13 +819,6 @@ function ledgerWhere(input: {
   return { sql: clauses.join(" AND "), params };
 }
 
-/**
- * A row's level as the ceiling reads it: 1 only for a turn recorded as run at
- * Full access. A guarded turn and a row that recorded no level both read 0,
- * the provider's capability below Full access, as every row did before.
- */
-const RAN_AT_FULL_ACCESS_SQL = "COALESCE(ran_at_full_access, 0)";
-
 function sumUsageTokens(
   connection: SqliteConnection,
   input: {
@@ -862,36 +826,30 @@ function sumUsageTokens(
     readonly projectId?: string;
     readonly from?: string;
   },
-  notMeasured: (providerInstanceId: string, ranAtFullAccess: boolean) => boolean,
+  notMeasured: (providerInstanceId: string) => boolean,
 ): SpendTokenTotal {
   const where = ledgerWhere(input);
   if (where === undefined) return { status: "known", tokens: 0 };
-  // Per provider and level: an unreported turn refuses as unknown spend
-  // unless its provider never reports usage at the level the turn ran at,
-  // whose turns the ceiling does not measure.
+  // Per provider: an unreported turn refuses as unknown spend unless its
+  // provider never reports usage, whose turns the ceiling does not measure.
   const rows = connection
     .prepare(
       `SELECT
         provider_instance_id,
-        ${RAN_AT_FULL_ACCESS_SQL} AS ran_at_full_access,
         COALESCE(SUM(CASE WHEN quality = 'unavailable' THEN 1 ELSE 0 END), 0) AS unavailable_count,
         COALESCE(SUM(input_tokens + output_tokens + COALESCE(reasoning_tokens, 0)), 0) AS tokens
       FROM usage_record_projection
       WHERE ${where.sql}
-      GROUP BY provider_instance_id, ran_at_full_access`,
+      GROUP BY provider_instance_id`,
     )
     .all(...where.params) as ReadonlyArray<{
     readonly provider_instance_id: string;
-    readonly ran_at_full_access: number;
     readonly unavailable_count: number;
     readonly tokens: number;
   }>;
   let tokens = 0;
   for (const row of rows) {
-    if (
-      row.unavailable_count > 0 &&
-      !notMeasured(row.provider_instance_id, row.ran_at_full_access === 1)
-    ) {
+    if (row.unavailable_count > 0 && !notMeasured(row.provider_instance_id)) {
       return { status: "unavailable" };
     }
     tokens += row.tokens;

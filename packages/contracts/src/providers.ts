@@ -1740,21 +1740,6 @@ export const ProviderCapabilities = Schema.Struct({
    */
   appManagedToolsAtFullAccess: Schema.optional(Schema.Literal("mixed")),
   /**
-   * Full access's own value for features a release keeps unverified, where
-   * it differs from every other level's. No runtime reports it since a
-   * release at or above the earliest one a feature was reviewed on keeps it
-   * at every level (maintainer decision, 2026-11-21); the host still reads it
-   * where present. Absent means Full access reads the values above.
-   */
-  atFullAccess: Schema.optional(
-    Schema.Struct({
-      release: Schema.Literal("unverified"),
-      usage: ProviderCapabilitySupport,
-      userQuestions: ProviderCapabilitySupport,
-      appManagedTools: ProviderCapabilitySupport,
-    }).annotations(strict),
-  ),
-  /**
    * The driver natively serves ACP client filesystem and terminal methods
    * (`fs/read_text_file`, `fs/write_text_file`, `terminal/*`) over its own
    * connection, independently of the app-managed tool bridge.

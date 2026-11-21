@@ -880,7 +880,6 @@ describe("verified ACP usage", () => {
       userQuestions: "supported",
       appManagedTools: "supported",
     });
-    expect(probe.capabilities).not.toHaveProperty("atFullAccess");
     expect(probe.message).toBe(
       "Mistral Vibe 3.0.4 keeps usage, forms, Octant's tools, its process open between turns, unverified: Octant reviewed them on another release.",
     );
@@ -896,7 +895,6 @@ describe("verified ACP usage", () => {
       } = vibe;
       const { driver } = fixture(usageAndForms, { runtimeVersion });
       const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
-      expect(probe.capabilities).not.toHaveProperty("atFullAccess");
       expect(probe.message).toBeUndefined();
     },
   );
