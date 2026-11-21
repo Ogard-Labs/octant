@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { decodeWindowId } from "@octant/contracts/shell";
 import type { FleetActivity, FleetActivityThread } from "@octant/contracts/fleet-activity";
 import {
   buildMenuBarItems,
-  menuBarOfferWindow,
+  openMenuBarOffer,
   decodeMenuBarOpenThread,
   decodeMenuBarShutdownProgress,
   formatRedactedHostDiagnostics,
@@ -24,8 +24,15 @@ it("opens an offer in its own Project window, never the main window as a fallbac
   const owner = fleet.threads()[0]?.offerWindowId;
   expect(owner).toBe(secondary.windowId);
   if (owner === undefined) throw new Error("Missing offer window");
-  expect(menuBarOfferWindow(owner, [main, secondary])).toBe(secondary.window);
-  expect(menuBarOfferWindow(owner, [main])).toBeUndefined();
+  const open = vi.fn();
+  expect(openMenuBarOffer(owner, [main, secondary], () => true, open)).toBe("opened");
+  expect(open).toHaveBeenCalledExactlyOnceWith(secondary.window);
+  open.mockClear();
+  expect(openMenuBarOffer(owner, [main], () => true, open)).toBe("offer-window-unavailable");
+  expect(openMenuBarOffer(owner, [main, secondary], () => false, open)).toBe(
+    "offer-window-unavailable",
+  );
+  expect(open).not.toHaveBeenCalled();
   fleet.observe(activity([]));
   expect(fleet.threads()[0]).not.toHaveProperty("offerWindowId");
 });

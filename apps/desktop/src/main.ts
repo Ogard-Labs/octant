@@ -302,7 +302,7 @@ import {
   decodeMenuBarShutdownProgress,
   MenuBarFleet,
   menuBarTitle,
-  menuBarOfferWindow,
+  openMenuBarOffer,
   type MenuBarOpenThread,
   type MenuBarShutdownProgress,
 } from "./menuBar";
@@ -3265,13 +3265,17 @@ function sendMenuBarOpen(window: BrowserWindow, thread: MenuBarOpenThread): void
   window.webContents.send(IPC_CHANNELS.menuBarTask, thread);
 }
 
-async function openMenuBarThread(thread: MenuBarOpenThread, offerWindowId?: string): Promise<void> {
+async function openMenuBarThread(
+  thread: MenuBarOpenThread,
+  offerWindowId?: string,
+): Promise<"opened" | "queued" | "offer-window-unavailable"> {
   if (offerWindowId !== undefined) {
-    const owner = menuBarOfferWindow(offerWindowId, desktopWindows.active());
-    if (owner === undefined || !menuBarOpenThreads.has(owner.id))
-      throw new Error("The offer window is no longer available.");
-    sendMenuBarOpen(owner, thread);
-    return;
+    return openMenuBarOffer(
+      offerWindowId,
+      desktopWindows.active(),
+      (window) => menuBarOpenThreads.has(window.id),
+      (window) => sendMenuBarOpen(window, thread),
+    );
   }
   menuBarFleet.looked(thread);
   updateHostTray();
@@ -3281,7 +3285,7 @@ async function openMenuBarThread(thread: MenuBarOpenThread, offerWindowId?: stri
       : undefined;
   if (ready !== undefined) {
     sendMenuBarOpen(ready, thread);
-    return;
+    return "opened";
   }
   // No window can take it yet: open one, and hand it the thread once its
   // renderer reports it is ready to open threads.
@@ -3289,6 +3293,7 @@ async function openMenuBarThread(thread: MenuBarOpenThread, offerWindowId?: stri
   await ensureMenuWindow();
   mainWindow?.show();
   mainWindow?.focus();
+  return "queued";
 }
 
 function updateHostTray(): void {
@@ -3312,15 +3317,22 @@ function updateHostTray(): void {
           void openMenuBarThread(
             { mode: thread.mode, threadId: thread.threadId },
             thread.offerWindowId,
-          ).catch(() => {
-            showNoticeWithoutBlocking(
-              mainWindow,
-              "Octant could not open that thread",
-              thread.offerWindowId === undefined
-                ? "Open Octant and choose the thread from the sidebar."
-                : "The window that raised this offer is no longer available.",
-            );
-          });
+          )
+            .then((result) => {
+              if (result === "offer-window-unavailable")
+                showNoticeWithoutBlocking(
+                  mainWindow,
+                  "Octant could not open that thread",
+                  "The window that raised this offer is no longer available.",
+                );
+            })
+            .catch(() => {
+              showNoticeWithoutBlocking(
+                mainWindow,
+                "Octant could not open that thread",
+                "Open Octant and choose the thread from the sidebar.",
+              );
+            });
         },
       };
     return {

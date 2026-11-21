@@ -29,11 +29,16 @@ export function decodeMenuBarOpenThread(value: unknown): MenuBarOpenThread | und
   return { mode: value.mode, threadId: value.threadId };
 }
 
-export function menuBarOfferWindow<T>(
+export function openMenuBarOffer<T>(
   owner: string,
   windows: ReadonlyArray<{ readonly windowId: string; readonly window: T }>,
-): T | undefined {
-  return windows.find((context) => context.windowId === owner)?.window;
+  ready: (window: T) => boolean,
+  open: (window: T) => void,
+): "opened" | "offer-window-unavailable" {
+  const window = windows.find((context) => context.windowId === owner)?.window;
+  if (window === undefined || !ready(window)) return "offer-window-unavailable";
+  open(window);
+  return "opened";
 }
 
 export interface MenuBarFleetThread {
