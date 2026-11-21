@@ -444,14 +444,16 @@ describe.skipIf(!canRunThrowawaySshd)("a call on a throwaway server", () => {
 });
 
 describe.skipIf(process.platform === "win32")("a stream to a process on a server", () => {
-  function standInSsh() {
+  function standInSsh(greeting = "") {
     const scratch = mkdtempSync(join(tmpdir(), "octant-stream-ssh-"));
     const executable = join(scratch, "ssh");
-    // The last argument is the remote command, which a server's login shell runs.
+    // The last argument is the remote command, which a server's login shell
+    // runs, after printing whatever greeting its startup files print.
     writeFileSync(
       executable,
       `#!/usr/bin/env node
 const { spawn } = require('node:child_process');
+process.stdout.write(${JSON.stringify(greeting)});
 const child = spawn('sh', ['-c', process.argv[process.argv.length - 1]], { stdio: 'inherit' });
 child.on('exit', (code) => process.exit(code ?? 1));`,
     );
@@ -485,6 +487,22 @@ child.on('exit', (code) => process.exit(code ?? 1));`,
     }
   });
 
+  it("keeps a login shell's greeting out of the program's output", async () => {
+    const { connection, scratch } = standInSsh("Welcome to the build box\n");
+    try {
+      const stream = connection.openStream(server, { script: "exec cat" });
+      if (stream.status !== "open") throw new Error(stream.message);
+      const chunks: Buffer[] = [];
+      stream.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+      stream.stdin.write('{"id":1}\n');
+      stream.stop();
+      expect(await stream.exited).toEqual({ exitCode: 0 });
+      expect(Buffer.concat(chunks).toString("utf8")).toBe('{"id":1}\n');
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
   it("ends the program when the stream closes its standard input", async () => {
     const { connection, scratch } = standInSsh();
     try {
@@ -496,6 +514,18 @@ child.on('exit', (code) => process.exit(code ?? 1));`,
       rmSync(scratch, { recursive: true, force: true });
     }
   });
+
+  it("settles its exit after stopping even when nobody reads the program's output", async () => {
+    const { connection, scratch } = standInSsh();
+    try {
+      const stream = connection.openStream(server, { script: "exec head -c 1048576 /dev/zero" });
+      if (stream.status !== "open") throw new Error(stream.message);
+      stream.stop();
+      expect((await stream.exited).exitCode).not.toBeUndefined();
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }, 15_000);
 
   it("opens nothing for a refused server or an argument it cannot carry", () => {
     const refused = new ServerConnection({
