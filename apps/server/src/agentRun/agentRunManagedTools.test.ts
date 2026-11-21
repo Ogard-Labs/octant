@@ -95,6 +95,7 @@ function tool(
     summary?: ReadonlyArray<AgentRunParentSummaryEntry>;
     authorizeCancel?: (run: AgentRun) => boolean;
     remote?: RemoteDelegationPort;
+    mode?: "chat" | "work" | "code";
     ingestion?: "recorded" | "refused";
     resultTexts?: Readonly<Record<string, string>>;
     sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
@@ -169,7 +170,7 @@ function tool(
           options.resultTexts?.[String(runId)] ??
           (String(runId) === ids.run ? "child reply" : undefined),
       },
-      mode: "chat",
+      mode: options.mode ?? "chat",
       windowId: ids.window,
       parentThreadId: ids.thread,
       projectId: ids.project,
@@ -380,6 +381,14 @@ describe("agents managed tools", () => {
         reason: "remote-delegation-options-unsupported",
       });
     }
+  });
+
+  it("offers target-member delegation to a Code thread on a host that can reach members", async () => {
+    const remote: RemoteDelegationPort = {
+      start: async () => ({ status: "refused", reason: "x" }),
+    };
+    const code = await call(tool({ remote, mode: "code" }).set, { operation: "capabilities" });
+    expect(code.result).toMatchObject({ remoteDelegation: "target-member" });
   });
 
   it("does not offer target-member delegation to a Chat thread or a host that cannot reach members", async () => {

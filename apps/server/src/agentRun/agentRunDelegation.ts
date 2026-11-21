@@ -227,9 +227,10 @@ export function agentRunDelegationCapabilities(options: AgentRunDelegationOption
     },
     dependencies: true,
     parentContext: options.admission.parentContext !== undefined,
-    // Reported by what this thread can do, so a Chat or Code thread never offers it.
+    // Reported by what this thread can do: a Work thread sends Work and a Code
+    // thread sends Code; a Chat thread never offers it.
     remoteDelegation:
-      options.remote !== undefined && options.mode === "work"
+      options.remote !== undefined && (options.mode === "work" || options.mode === "code")
         ? ("target-member" as const)
         : ("unavailable" as const),
     targets: options.listTargets(),

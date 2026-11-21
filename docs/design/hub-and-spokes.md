@@ -1135,8 +1135,8 @@ a request naming a provider profile is refused. Its branch is
 `octant/delegated/<slug>-<request id>`, made from the marked remote and base
 branch. The delegating member reads the thread's state, and on completion
 is told the changes are on the thread's own branch on this computer; the
-thread's text stays here. Today
-only a Work Project takes delegated work, because a Code thread needs a
+thread's text stays here. A Code Project takes delegated work only once
+marked, because a Code thread needs a
 managed worktree and a delivery target a person confirmed. B offers Code for a
 Code Project only after its person marks that Project as accepting delegated
 Code work, which records the delivery target they confirmed (the remote, base
@@ -2789,9 +2789,9 @@ maintainer's hardware, or names the maintainer gate.
      receives it. A request asking for more than the clamp allows is refused with
      the posture it could have had, never run narrower.
    - A remote child has the parent's mode and no more than the parent's posture.
-   - Only Work Projects take delegated work. A Code Project reports no delegable
-     mode, because a Code thread needs a managed worktree and a delivery target a
-     person confirmed. Work asks first and has no read-only posture, so a plan-only
+   - In this slice only Work Projects took delegated work; Code delegation
+     ([above](#spoke-to-spoke-discovery-and-delegation)) later added Code Projects
+     their person marked, with a confirmed delivery target. Work asks first and has no read-only posture, so a plan-only
      request is refused; a named provider profile is refused, and the thread runs on
      the default model the Work settings name.
    - Artifact references are empty: a Work turn reports the paths it changed, not
@@ -2809,9 +2809,10 @@ maintainer's hardware, or names the maintainer gate.
      check, the peer-grant clamp, `peer:A` on B, approvals on B, the framed and
      tainting result, and the cancel on a stopped turn are one set of rules. The
      request takes a task only: a model, `after`, or the parent's conversation is
-     refused. The posture is always Work's approval-gated, clamped by the parent
-     and the grant, never chosen by the agent. Only a Work thread in a Work Project
-     may name a member; a Chat or Code parent, a Project that is not a Work Project,
+     refused. The posture is always approval-gated, clamped by the parent
+     and the grant, never chosen by the agent. Only a Work thread in a Work Project,
+     or (since Code delegation) a Code thread in a Code Project, may name a member;
+     a Chat parent, a Project whose type differs from the parent's mode,
      Work turned off, no hub membership, an unknown member, a paused parent, and a
      member that refuses (no grant for this host, or a grant that does not cover the
      request) each answer as a refusal value, and the target's own words are not

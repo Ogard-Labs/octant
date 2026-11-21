@@ -139,7 +139,7 @@ const AGENTS_TOOL_DEFINITION = {
         type: "string",
         maxLength: 36,
         description:
-          "Run the child on another member of the person's hub instead of this host. Work threads only, task only: no model, after, or parent context. The member's own grant decides what it may do, and its result comes back to this thread as outside content.",
+          "Run the child on another member of the person's hub instead of this host. Work and Code threads only (a Work thread sends Work, a Code thread sends Code to a Code Project that member marked for it), task only: no model, after, or parent context. The member's own grant decides what it may do, and its result comes back to this thread as outside content.",
       },
       targetProjectId: {
         type: "string",
