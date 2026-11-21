@@ -3,7 +3,8 @@ import type { Questionnaire } from "@octant/contracts";
 import { QuestionnaireCard } from "./QuestionnaireCard";
 import { useState } from "react";
 
-import { OctantButton } from "../ui/base/OctantButton";
+import { Eye, EyeOff } from "../ui/icons";
+import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 
@@ -23,6 +24,11 @@ export interface ProviderQuestionCardProps {
   readonly onDismiss?: (() => void) | undefined;
   /** Extra class for the surface's own layout, e.g. a thread-column wrapper. */
   readonly className?: string | undefined;
+  /**
+   * The provider asks for a secret: the typed answer is masked until the
+   * person reveals it, and the host passes it on without recording it.
+   */
+  readonly secret?: boolean | undefined;
 }
 
 const CUSTOM = "octant-question-custom";
@@ -43,8 +49,11 @@ export function ProviderQuestionCard(props: ProviderQuestionCardProps) {
 }
 
 function SingleQuestionCard(props: ProviderQuestionCardProps) {
-  const [selected, setSelected] = useState<string | undefined>(undefined);
+  const secret = props.secret === true;
+  // A secret is typed, so its field is open from the start.
+  const [selected, setSelected] = useState<string | undefined>(secret ? CUSTOM : undefined);
   const [customAnswer, setCustomAnswer] = useState("");
+  const [revealed, setRevealed] = useState(false);
   const custom = selected === CUSTOM;
   const count = props.questionCount ?? 1;
   const index = props.questionIndex ?? 1;
@@ -100,7 +109,7 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
           >
             <span className="provider-question-card__option-label">Type your own answer</span>
           </OctantButton>
-          {custom ? (
+          {custom && !secret ? (
             <OctantInput
               aria-label="Your answer"
               className="provider-question-card__custom"
@@ -109,8 +118,37 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
               value={customAnswer}
             />
           ) : null}
+          {custom && secret ? (
+            <div className="provider-question-card__secret">
+              <OctantInput
+                aria-label="Your secret answer"
+                autoCapitalize="off"
+                autoComplete="off"
+                className="provider-question-card__custom"
+                onChange={(event) => setCustomAnswer(event.target.value)}
+                placeholder="Type the secret…"
+                spellCheck={false}
+                type={revealed ? "text" : "password"}
+                value={customAnswer}
+              />
+              <OctantIconButton
+                aria-pressed={revealed}
+                disabled={customAnswer.length === 0}
+                label={revealed ? "Hide answer" : "Show answer"}
+                onClick={() => setRevealed(!revealed)}
+                type="button"
+              >
+                {revealed ? <EyeOff size={14} /> : <Eye size={14} />}
+              </OctantIconButton>
+            </div>
+          ) : null}
         </div>
       </div>
+      {secret ? (
+        <p className="provider-question-card__progress">
+          Sent only to the agent. Octant does not save it or add it to the thread.
+        </p>
+      ) : null}
       <footer className="provider-question-card__actions">
         {props.onDismiss === undefined ? null : (
           <OctantButton onClick={props.onDismiss} size="sm" type="button" variant="ghost">

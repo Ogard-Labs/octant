@@ -83,7 +83,12 @@ import type {
   AcpProcessPort,
   AcpSessionMode,
 } from "./acpProcess";
-import { acpExactReleaseClaim, acpSubagentsRun, type AcpProviderProfile } from "./acpProfiles";
+import {
+  acpExactReleaseClaim,
+  acpLoadsAllOwnSetup,
+  acpSubagentsRun,
+  type AcpProviderProfile,
+} from "./acpProfiles";
 import { createAcpManagedToolsBridge, type AcpManagedToolsBridge } from "./acpManagedTools";
 import {
   AcpFailure,
@@ -1954,10 +1959,13 @@ function makeConnection(
                 `${name} lists commands Octant has not reviewed, so this release runs at Full access only, unverified.`,
                 { reason: "runtime-incompatible" },
               );
-            // A Project trusted for the agent, outside Plan, loads the files
+            // A Project trusted for the agent, outside Plan, and any session
+            // outside Strict that carries the person's setup load the files
             // the refusal is about, as the agent does on its own.
             const projectRefusal =
-              runtimeRoot === projectRoot && input.nativeSetup?.projectCode !== true
+              runtimeRoot === projectRoot &&
+              input.nativeSetup?.projectCode !== true &&
+              !acpLoadsAllOwnSetup({ strict: input.strict, setup: input.nativeSetup })
                 ? profile.refusesProject?.(projectRoot)
                 : undefined;
             if (projectRefusal !== undefined) throw failure("incompatible", projectRefusal);

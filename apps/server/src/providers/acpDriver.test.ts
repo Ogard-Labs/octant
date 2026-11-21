@@ -4413,6 +4413,10 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
     root: string,
     mode: "code" | "chat" = "code",
     nativeSetup?: ProviderNativeSetup,
+    launch: {
+      readonly strict?: false;
+      readonly executionPolicy?: "approval-gated" | "plan";
+    } = {},
   ) => {
     const { driver, starts } = fixture(profile);
     const outcome = Effect.runPromise(
@@ -4423,8 +4427,9 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
             connection.start({
               sessionId,
               modelId,
-              executionPolicy: "approval-gated",
+              executionPolicy: launch.executionPolicy ?? "approval-gated",
               ...(nativeSetup === undefined ? {} : { nativeSetup }),
+              ...(launch.strict === false ? { strict: false } : {}),
             }),
           );
           if (result._tag === "Right") yield* connection.stop(sessionId);
@@ -4453,7 +4458,7 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
       expect(result.left).toMatchObject({ category: "incompatible" });
       const entry = file.startsWith(".mcp") ? file : file.split("/").slice(0, 2).join("/");
       expect(result.left.message).toContain(`\`${entry}\``);
-      expect(result.left.message).toMatch(/only once you trust this Project/);
+      expect(result.left.message).toMatch(/only once you allow this Project's code/);
       expect(result.left.message).toMatch(/remove or rename/);
       expect(starts).toEqual([]);
     },
@@ -4483,6 +4488,38 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
         projectCode: false,
       });
       expect((await held.outcome)._tag).toBe("Left");
+    },
+  );
+
+  it.each([
+    ["gemini", ".gemini/settings.json"],
+    ["qwen", ".mcp.json"],
+  ] as const)(
+    "starts %s outside Strict in a Project holding %s, in Plan too, and refuses it under Strict or with the setup turned off",
+    async (kind, file) => {
+      const root = projectWith(file);
+      // What a Plan session carries: no Project code.
+      const planSetup = {
+        subagents: true,
+        webTools: true,
+        skills: true,
+        toolServers: false,
+        hooks: false,
+        projectCode: false,
+      } as const;
+      const plan = { executionPolicy: "plan" } as const;
+      const open = startIn(acpProviderProfiles[kind], root, "code", planSetup, {
+        ...plan,
+        strict: false,
+      });
+      expect((await open.outcome)._tag).toBe("Right");
+      expect(open.starts).toHaveLength(1);
+      const strict = startIn(acpProviderProfiles[kind], root, "code", planSetup, plan);
+      expect((await strict.outcome)._tag).toBe("Left");
+      const turnedOff = startIn(acpProviderProfiles[kind], root, "code", undefined, {
+        strict: false,
+      });
+      expect((await turnedOff.outcome)._tag).toBe("Left");
     },
   );
 

@@ -117,7 +117,8 @@ export interface ProviderOwnMemorySettingProps {
  * turn memory on once the person turned it off. The text says what Octant does
  * not control while it is on, and what it may do in Plan and Chat: Claude Code
  * reads its memory there and cannot change it, and Codex, which writes its
- * memory in the background, keeps it off there. Only the host's own person may
+ * memory in the background, keeps it off there under Strict and follows this
+ * switch there outside Strict. Only the host's own person may
  * change it, at a window on this host or on a device they paired (the server
  * refuses every other device).
  */
@@ -133,7 +134,7 @@ export function ProviderOwnMemorySetting(props: ProviderOwnMemorySettingProps) {
           Projects; Octant does not show, journal, or clear it.{" "}
           {props.instance.driverKind === "claude"
             ? "In Plan and in Chat it reads its memory and cannot change it."
-            : "It stays off in Plan and in Chat, because it writes its memory in the background."}{" "}
+            : "Under Strict it stays off in Plan and in Chat, because it writes its memory in the background."}{" "}
           Octant’s Project memory and its memory of you work with this off. {name}’s telemetry and
           self-update stay off either way.
         </>

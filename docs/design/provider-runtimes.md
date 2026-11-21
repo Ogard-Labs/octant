@@ -261,8 +261,10 @@ in Plan and Chat too with its memory read-only (Octant's gate refuses a file
 write into the account's `CLAUDE.md` or a `projects/<folder>/memory/` folder
 there, since Claude Code's own check allows one unasked), and Codex's
 app-server starts without the `features.memories=false` override, on a
-process of its own, in Work and Code outside Plan only, because Codex writes
-`~/.codex/memories` by itself after a turn (maintainer decision, 2026-11-16;
+process of its own: outside Strict in every mode, Plan and Chat included, as
+in Codex itself (maintainer decision, 2026-11-21); under Strict in Work and
+Code outside Plan only, because Codex writes `~/.codex/memories` by itself
+after a turn (maintainer decision, 2026-11-16;
 [architecture](../architecture.md#security-and-authority));
 OpenCode and Mistral Vibe have no such memory and no setting
 ([architecture](../architecture.md#modes-chat-work-and-code)). Work and Code share one capability set, so each runtime starts a Work
@@ -1633,7 +1635,24 @@ authorize a Strict launch.
   so a typed answer passes through. A set with a question Codex marks
   `isSecret`, or that asks for a password, passphrase, API key, access token,
   or private key, is never shown: Codex is answered at once with a refusal
-  telling the model Octant does not collect secrets in chat. A subagent's set
+  telling the model Octant does not collect secrets in chat. Outside Strict,
+  in a Code thread, such a set is shown to the person as Codex shows it, its
+  answer kept out of the journal, logs and evidence (maintainer decision,
+  2026-11-21; built): each secret question carries `secret` on its
+  `user-input-request` and its journaled `input-requested`, the thread's card
+  takes the answer in a masked field with a reveal control, and
+  `answer-provider-input` carries it as `secretAnswer` (at most 4,096
+  characters) in place of a `response` put as evidence, so it reaches the
+  Codex process in memory and the record holds only that the question was
+  answered. Only the person answers it: the host refuses a `secretAnswer`
+  from anyone but a window on this host or a device they paired, refuses one
+  for a question not marked secret, and refuses an evidence answer to a
+  question that is, and a Needs you row for it finds the thread rather than
+  answering. The other questions of the set are asked and recorded as usual.
+  A Strict session, and every session but a Code thread's (a child run, Work,
+  Chat, whose question records keep the answer text), still refuses the set
+  unseen; Codex offers its form only in Plan, a Code level, so those surfaces
+  meet it only through a Codex Plan child run. A subagent's set
   (Codex offers the form to the root thread only) is answered empty. The
   capability is reported `supported`.
 
@@ -2364,9 +2383,18 @@ features:
   Grok Build's `trusted_folders.toml` becomes readable, so its own trust list
   decides; Grok reads a Project's instructions only in a folder that list
   trusts, so a folder the person never trusted in Grok gets none (not
-  built: telling Grok the folder is trusted at launch). In Plan, in Chat,
-  and in a Strict thread whose Project's code is not allowed every entry
-  stays held, and the two refusals stay.
+  built: telling Grok the folder is trusted at launch).
+- **Nothing held back outside Strict.** Outside Strict a session that carries
+  the person's setup holds back none of the profile's `forbiddenRootEntries`,
+  `hostDeniedEntries` or home `forbiddenEntries`, in every mode, Plan and
+  Chat included, and Gemini CLI and Qwen Code start in every Project
+  (`acpLoadsAllOwnSetup` in `apps/server/src/providers/acpProfiles.ts`,
+  maintainer decision, 2026-11-21, as Google Antigravity's profile already
+  did). Plan stays read-only through its OS wall. The profile's environment
+  guards still follow its `nativeSetup`. Under Strict, in Plan, in Chat and
+  in a thread whose Project's code is not allowed, every entry the setup does
+  not release stays held, and the two refusals stay; so they do outside
+  Strict for an account or thread whose person turned the setup off.
 - **The person's own home.** Kimi Code reads its home `AGENTS.md` with any of
   the setup, `skills` with skills, `mcp.json` and `plugins` with tool servers,
   and `hooks` with hooks (never in Chat or Plan). Kilo unsets
