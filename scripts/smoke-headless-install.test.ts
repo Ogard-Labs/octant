@@ -128,5 +128,12 @@ describe("headless install smoke on a downloaded build", () => {
     expect(await verifyDownloadedBuild(built.artifactRoot, trust)).toMatchObject({
       status: "refused",
     });
+    rmSync(join(built.artifactRoot, "lib", "server", "node_modules"), { recursive: true });
+    expect(await verifyDownloadedBuild(built.artifactRoot, trust)).toEqual({ status: "verified" });
+    // A stray file beside listed ones, in a directory the manifest names.
+    writeFileSync(join(built.artifactRoot, "lib", "server", "planted.mjs"), "x");
+    expect(await verifyDownloadedBuild(built.artifactRoot, trust)).toMatchObject({
+      status: "refused",
+    });
   });
 });
