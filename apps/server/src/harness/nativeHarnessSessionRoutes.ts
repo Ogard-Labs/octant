@@ -2,6 +2,7 @@ import { principalActsAsHostPerson } from "../clientPrincipal";
 import {
   type EventActor,
   decodeAnswerNativeHarnessQuestion,
+  MAX_SECRET_ANSWER_LENGTH,
   decodeDecideNativeHarnessApproval,
   decodeSteerNativeHarnessSession,
   type NativeHarnessApprovalDecisionResult,
@@ -105,6 +106,8 @@ export interface NativeHarnessSessionRouteDependencies {
     readonly threadId: string;
     readonly questionId: string;
     readonly answer: string;
+    /** A secret question's answer, held in memory only; see `NativeHarnessQuestion.secret`. */
+    readonly secret?: true;
     /** Who answered, from the authenticated request. */
     readonly actor: EventActor;
   }) => "answered" | "question-not-found" | "already-settled" | "invalid-answer";
@@ -419,6 +422,30 @@ export function createNativeHarnessSessionRouteHandler(
       } catch {
         return failure("Native harness question answer is invalid.", 400, origin);
       }
+      if ((answer.answer === undefined) === (answer.secretAnswer === undefined))
+        return failure(
+          "Answer a question with either its answer or its secret answer.",
+          400,
+          origin,
+        );
+      // A secret is the person's own to give: a window on this host or a
+      // device they paired answers one, never another device or an agent.
+      if (answer.secretAnswer !== undefined && person.kind === "remote-device")
+        return failure(
+          "Only you, from a window or a device you paired, can answer a secret question.",
+          403,
+          origin,
+        );
+      if (
+        answer.secretAnswer !== undefined &&
+        (answer.secretAnswer.trim().length === 0 ||
+          answer.secretAnswer.length > MAX_SECRET_ANSWER_LENGTH)
+      )
+        return failure(
+          `A secret answer is between 1 and ${String(MAX_SECRET_ANSWER_LENGTH)} characters.`,
+          400,
+          origin,
+        );
       if (
         person.kind === "remote-device" &&
         !questions.some(
@@ -433,12 +460,16 @@ export function createNativeHarnessSessionRouteHandler(
       const outcome = dependencies.answerQuestion?.({
         threadId,
         questionId: String(answer.questionId),
-        answer: answer.answer,
+        answer: answer.secretAnswer ?? answer.answer ?? "",
+        ...(answer.secretAnswer === undefined ? {} : { secret: true }),
         actor,
       });
       const settled = dependencies.store
         .read(threadId)
         ?.questions.find((question) => String(question.id) === String(answer.questionId));
+      const secretMismatch =
+        settled?.status === "pending" &&
+        (settled.secret === true) !== (answer.secretAnswer !== undefined);
       const result: NativeHarnessQuestionAnswerResult =
         outcome === "answered" && settled !== undefined
           ? { kind: "question-answered", question: settled }
@@ -452,11 +483,15 @@ export function createNativeHarnessSessionRouteHandler(
                     ? "already-settled"
                     : "question-not-found",
               message:
-                outcome === "invalid-answer"
-                  ? "The questionnaire answer is incomplete or contains invalid choices."
-                  : outcome === "already-settled"
-                    ? "That question was already answered."
-                    : "No pending question has that id on this thread.",
+                outcome === "invalid-answer" && secretMismatch
+                  ? settled.secret === true
+                    ? "That question asks for a secret. Answer it in its thread."
+                    : "That question does not ask for a secret."
+                  : outcome === "invalid-answer"
+                    ? "The questionnaire answer is incomplete or contains invalid choices."
+                    : outcome === "already-settled"
+                      ? "That question was already answered."
+                      : "No pending question has that id on this thread.",
             };
       return json(result, result.kind === "question-answered" ? 200 : 409, origin);
     }

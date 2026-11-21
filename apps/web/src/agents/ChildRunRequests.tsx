@@ -176,12 +176,16 @@ export function ChildRunRequests(props: {
             prompt={request.prompt}
             questionnaire={request.questionnaire}
             options={request.options.map((label) => ({ label }))}
+            secret={request.secret === true}
             onAnswer={(answer) =>
               respond(() =>
-                props.client.answerQuestion(props.threadId, {
-                  questionId: String(request.id),
-                  answer,
-                }),
+                props.client.answerQuestion(
+                  props.threadId,
+                  // A secret question's answer rides as `secretAnswer`, never kept.
+                  request.secret === true
+                    ? { questionId: String(request.id), secretAnswer: answer }
+                    : { questionId: String(request.id), answer },
+                ),
               )
             }
           />

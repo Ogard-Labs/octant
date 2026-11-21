@@ -1364,7 +1364,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     }
   }, [props.threadId, props.turnClient, stoppableTurn, forceStop.requestStop]);
   const answerWorkRequest = useCallback(
-    async (request: WorkRequest, resolution: WorkRequestResolution) => {
+    async (request: WorkRequest, resolution: WorkRequestResolution, secretAnswer?: string) => {
       const requestClient = props.requestClient;
       if (requestClient === undefined) return false;
       const threadKey = String(props.threadId);
@@ -1374,6 +1374,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           requestId: request.requestId,
           expectedVersion: request.version,
           resolution,
+          // A secret question's answer rides beside its resolution, never in it.
+          ...(secretAnswer === undefined ? {} : { secretAnswer }),
         });
         if (currentThreadKeyRef.current !== threadKey) return false;
         setStatus(undefined);
@@ -3007,6 +3009,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         ? {}
                         : { questionnaire: row.request.detail.questionnaire })}
                       onAnswer={(answer) => {
+                        if (row.request.detail.kind === "user-input" && row.request.detail.secret)
+                          return answerWorkRequest(
+                            row.request,
+                            { kind: "user-input", secret: true },
+                            answer,
+                          );
                         try {
                           const detail = row.request.detail;
                           const value =
@@ -3024,6 +3032,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       }}
                       options={row.request.detail.options.map((label) => ({ label }))}
                       prompt={row.request.detail.prompt}
+                      secret={row.request.detail.secret === true}
                     />
                   );
                 }

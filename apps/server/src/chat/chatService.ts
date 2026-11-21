@@ -121,6 +121,7 @@ import {
   type MentionableThreadId,
   type PendingRequest,
   type ProviderServiceLimits,
+  MAX_SECRET_ANSWER_LENGTH,
   USAGE_RESUME_CANCELLED,
   USAGE_RESUME_SCHEDULED,
   type UsageResumeRecord,
@@ -667,6 +668,12 @@ export interface ChatServiceExecutionContext {
    * route resolved it for. Absent, the change is the local person's.
    */
   readonly actor?: EventActor;
+  /**
+   * `user` when the person sent the command, from a window on this host or a
+   * device they paired, as the route resolved it. Only the person answers a
+   * question that asks for a secret; absent, a secret answer is refused.
+   */
+  readonly initiator?: "user" | "agent";
   /** One-hop coordination calls cannot expose the coordination tool again. */
   readonly coordinationDepth?: number;
   /**
@@ -1795,6 +1802,8 @@ export class ChatService {
             threadTitle: thread.title,
             text: question.prompt,
             options: question.options,
+            // A secret question's row finds the thread; only its masked field answers it.
+            ...(question.secret === true ? { secret: true } : {}),
             // A question carries no time of its own; journaling it is the
             // attempt's last update while the turn stays parked on it.
             requestedAt: attempt.updatedAt,
@@ -1878,7 +1887,7 @@ export class ChatService {
           return await this.#forceStopTurn(command);
         case "answer-chat-turn-question":
           return await this.#withThreadAdmission(command.threadId, () =>
-            this.#answerTurnQuestion(command),
+            this.#answerTurnQuestion(command, executionContext?.initiator),
           );
         case "snooze-chat-thread-at-usage-reset":
           return await this.#withThreadAdmission(command.threadId, () =>
@@ -4708,7 +4717,29 @@ export class ChatService {
    */
   async #answerTurnQuestion(
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "answer-chat-turn-question" }>,
+    initiator: "user" | "agent" | undefined,
   ): Promise<ChatCommandResult> {
+    if ((command.secretAnswer === undefined) === (command.answer === undefined))
+      throw new ChatServiceError({
+        category: "invalid",
+        message: "Answer a question with either its answer or its secret answer.",
+      });
+    // A secret is the person's own to give: only a window on this host or a
+    // device they paired answers one, never an agent acting for them.
+    if (command.secretAnswer !== undefined && initiator !== "user")
+      throw new ChatServiceError({
+        category: "unauthorized",
+        message: "Only you, from a window or a device you paired, can answer a secret question.",
+      });
+    if (
+      command.secretAnswer !== undefined &&
+      (command.secretAnswer.trim().length === 0 ||
+        command.secretAnswer.length > MAX_SECRET_ANSWER_LENGTH)
+    )
+      throw new ChatServiceError({
+        category: "invalid",
+        message: `A secret answer is between 1 and ${String(MAX_SECRET_ANSWER_LENGTH)} characters.`,
+      });
     const thread = this.#requireActiveThread(command.threadId);
     this.#assertExpectedThreadVersion(thread, command.expectedVersion);
     const view = this.#requireThreadView(command.threadId);
@@ -4728,15 +4759,27 @@ export class ChatService {
         message: "Chat attempt has no open question by that identity.",
       });
     }
+    // A secret answer reaches only the question that asked for one, and a
+    // secret question takes no answer the attempt would record.
+    if ((question.secret === true) !== (command.secretAnswer !== undefined))
+      throw new ChatServiceError({
+        category: "invalid",
+        message:
+          question.secret === true
+            ? "That question asks for a secret. Answer it in its thread."
+            : "That question does not ask for a secret.",
+      });
+    const answer = command.secretAnswer ?? command.answer ?? "";
     if (question.questionnaire !== undefined) {
-      const validation = validateQuestionnaireAnswer(question.questionnaire, command.answer);
+      const validation = validateQuestionnaireAnswer(question.questionnaire, answer);
       if (validation.status === "invalid")
         throw new ChatServiceError({ category: "invalid", message: validation.message });
     }
     const answered = await this.#turnRunner.deliverQuestionAnswer({
       attemptId: String(command.attemptId),
       requestId: String(command.requestId),
-      answer: command.answer,
+      answer,
+      ...(command.secretAnswer === undefined ? {} : { secret: true }),
     });
     if (answered === undefined) {
       // The turn is not running in this host: its provider session died with

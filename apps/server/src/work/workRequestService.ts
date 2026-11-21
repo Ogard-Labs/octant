@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import {
   EventActor,
+  MAX_SECRET_ANSWER_LENGTH,
   UtcTimestamp,
   decodeWorkRequest,
   decodeWorkRequestId,
@@ -378,7 +379,40 @@ export class WorkRequestService {
     ) {
       return failure("stale", APPROVAL_POSTURE_CHANGED_MESSAGE);
     }
-    if (entry.request.detail.kind === "user-input" && command.resolution.kind === "user-input") {
+    // A secret answer reaches only the question that asked for one, and a
+    // secret question takes no answer the request would record. The value
+    // rides beside the resolution, so the delivery intent never holds it.
+    const secretResolution =
+      command.resolution.kind === "user-input" && "secret" in command.resolution;
+    if (secretResolution !== (command.secretAnswer !== undefined)) {
+      return failure("invalid", "A secret answer is sent with a secret resolution, and only then.");
+    }
+    if (
+      entry.request.detail.kind === "user-input" &&
+      (entry.request.detail.secret === true) !== secretResolution
+    ) {
+      return failure(
+        "invalid",
+        secretResolution
+          ? "That question does not ask for a secret."
+          : "That question asks for a secret. Answer it in its thread.",
+      );
+    }
+    if (
+      command.secretAnswer !== undefined &&
+      (command.secretAnswer.trim().length === 0 ||
+        command.secretAnswer.length > MAX_SECRET_ANSWER_LENGTH)
+    ) {
+      return failure(
+        "invalid",
+        `A secret answer is between 1 and ${String(MAX_SECRET_ANSWER_LENGTH)} characters.`,
+      );
+    }
+    if (
+      entry.request.detail.kind === "user-input" &&
+      command.resolution.kind === "user-input" &&
+      "answer" in command.resolution
+    ) {
       const questionnaire = entry.request.detail.questionnaire;
       const answer = command.resolution.answer;
       if (
@@ -467,7 +501,10 @@ export class WorkRequestService {
             providerInstanceId: prepared.request.providerInstanceId,
             sessionId: prepared.request.providerSessionId,
             requestId: providerCallbackId(entry),
-            answer: providerAnswer(entry, command.resolution.answer),
+            answer:
+              "answer" in command.resolution
+                ? providerAnswer(entry, command.resolution.answer)
+                : (command.secretAnswer ?? ""),
           });
         }
       } catch {
@@ -1024,7 +1061,7 @@ function sameDelivery(left: WorkRequestDelivery, right: WorkRequestDelivery): bo
 
 function providerAnswer(
   entry: WorkRequestEntry,
-  answer: Extract<WorkRequestResolution, { kind: "user-input" }>["answer"],
+  answer: Extract<WorkRequestResolution, { kind: "user-input"; answer: unknown }>["answer"],
 ): string {
   if (typeof answer !== "string") return JSON.stringify(answer);
   if (entry.request.detail.kind !== "user-input") return answer;

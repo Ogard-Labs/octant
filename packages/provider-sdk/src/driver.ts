@@ -132,6 +132,15 @@ export interface ProviderSessionStart {
    */
   readonly strict?: boolean;
   /**
+   * The session's surface asks a question that wants a secret (a password or
+   * key) masked and keeps the typed answer out of every record, for a session
+   * that is not Strict but carries no `strict` of its own (a subagent, whose
+   * parent thread is outside Strict). A session with `strict: false` asks
+   * such questions already; `strict: true` never does. Absent, a driver that
+   * can tell such a question refuses it unseen.
+   */
+  readonly asksSecretQuestions?: true;
+  /**
    * Tools the person blocked for this provider in Settings, by the name its
    * runtime gives them, or `server__tool` for a tool of the provider's own
    * MCP server. A driver keeps each one from the session at every level, in
@@ -304,6 +313,8 @@ export interface ProviderSessionResume {
   readonly fullAccessSandbox?: boolean;
   /** Same meaning as in {@link ProviderSessionStart.strict}. */
   readonly strict?: boolean;
+  /** Same meaning as in {@link ProviderSessionStart.asksSecretQuestions}. */
+  readonly asksSecretQuestions?: true;
   /** As on {@link ProviderSessionStart}; restated on every resume. */
   readonly blockedTools?: ReadonlyArray<string>;
   /**

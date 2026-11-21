@@ -760,9 +760,10 @@ interface SessionState {
   readonly fullAccessSandbox: boolean | undefined;
   readonly strict: boolean | undefined;
   /**
-   * Whether a secret question Codex asks is shown to the person: only a Code
-   * thread outside Strict, the one surface whose answer path keeps the typed
-   * value out of every record. Every other session refuses it unseen.
+   * Whether a secret question Codex asks is shown to the person: a session
+   * outside Strict, whose surface (a Code, Work or Chat thread, or a subagent
+   * of one) answers it masked and keeps the typed value out of every record.
+   * A Strict session, or one whose surface never said, refuses it unseen.
    */
   readonly asksSecretQuestions: boolean;
   /** The sandbox this session's commands run in; see {@link CodexSessionSandbox}. */
@@ -3588,6 +3589,7 @@ function makeConnection(
         readonly autoApprove?: boolean;
         readonly fullAccessSandbox?: boolean;
         readonly strict?: boolean;
+        readonly asksSecretQuestions?: true;
       },
       thread: CodexThreadResult,
       modelId: string,
@@ -3617,7 +3619,9 @@ function makeConnection(
         autoApprove: input.autoApprove,
         fullAccessSandbox: input.fullAccessSandbox,
         strict: input.strict,
-        asksSecretQuestions: input.strict === false && (mode ?? "code") === "code",
+        asksSecretQuestions:
+          input.strict === false ||
+          (input.strict === undefined && input.asksSecretQuestions === true),
         sandbox: sessionSandbox(input),
         permissionProfile: nativeProfile(input) !== undefined,
         threadId: thread.thread.id,

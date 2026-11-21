@@ -1,6 +1,6 @@
 import { OwnerUnlockPrincipal } from "./hubAndSpokes";
 import { ConversationInputReceipt, ConversationInputPolicy } from "./conversationInputs";
-import { Questionnaire } from "./questionnaire";
+import { MAX_SECRET_ANSWER_LENGTH, Questionnaire } from "./questionnaire";
 import { SideChatDraftReturnReferences } from "./sideChatReturn";
 import {
   CodeGitHunk,
@@ -1129,8 +1129,8 @@ const StartProviderTurn = Schema.Struct({
    */
   delivery: Schema.optional(AgentRunResultDeliveryMark),
 }).annotations(strict);
-/** The longest secret answer the host passes on, as a one-use credential card's token. */
-export const MAX_CODE_SECRET_ANSWER_LENGTH = 4096;
+/** The longest secret answer the host passes on; the same bound on every surface. */
+export const MAX_CODE_SECRET_ANSWER_LENGTH = MAX_SECRET_ANSWER_LENGTH;
 const AnswerProviderInput = Schema.Struct({
   kind: Schema.Literal("answer-provider-input"),
   ...OperationScope,

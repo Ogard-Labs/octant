@@ -1063,15 +1063,23 @@ export const NativeHarnessQuestion = Schema.Struct({
   ),
   status: NativeHarnessQuestionStatus,
   answer: Schema.optional(QuestionnaireAnswerText),
+  /**
+   * A subagent's provider asks for a secret: the person answers in a masked
+   * field, with the answer's `secretAnswer`, and the question records only
+   * that it was answered, never the value.
+   */
+  secret: Schema.optional(Schema.Literal(true)),
   askedAt: UtcTimestamp,
   settledAt: Schema.optional(UtcTimestamp),
 })
   .annotations(strict)
-  // An answered question carries its answer; a pending one carries nothing yet.
+  // An answered question carries its answer, a secret one never does; a
+  // pending one carries nothing yet.
   .pipe(
     Schema.filter(
       (question) =>
-        (question.status === "answered") === (question.answer !== undefined) &&
+        (question.status === "answered" && question.secret !== true) ===
+          (question.answer !== undefined) &&
         (question.status === "pending") === (question.settledAt === undefined),
     ),
   )
@@ -1299,7 +1307,15 @@ export type NativeHarnessSteeringTaken = typeof NativeHarnessSteeringTaken.Type;
 
 export const AnswerNativeHarnessQuestion = Schema.Struct({
   questionId: NativeHarnessQuestionId,
-  answer: QuestionnaireAnswerText,
+  /** The answer to every question but a secret one. */
+  answer: Schema.optional(QuestionnaireAnswerText),
+  /**
+   * A secret question's answer, handed to the asking provider in memory and
+   * never journaled. Exactly one of this and `answer` is given; the host
+   * checks that, the bound and the question, so a decode failure never prints
+   * the value.
+   */
+  secretAnswer: Schema.optional(Schema.String),
 }).annotations(strict);
 export type AnswerNativeHarnessQuestion = typeof AnswerNativeHarnessQuestion.Type;
 

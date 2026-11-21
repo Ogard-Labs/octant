@@ -603,7 +603,8 @@ export class NativeHarnessSessionStore {
     const settled = decodeNativeHarnessQuestion({
       ...current,
       status: outcome.status,
-      ...(outcome.status === "answered" && outcome.answer !== undefined
+      // A secret question's answer is never journaled, whoever passes it here.
+      ...(outcome.status === "answered" && outcome.answer !== undefined && current.secret !== true
         ? { answer: outcome.answer }
         : {}),
       settledAt,

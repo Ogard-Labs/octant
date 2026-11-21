@@ -3,6 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
+  chatQuestion,
   codeChildQuestion,
   codeQuestion,
   codeDecision,
@@ -408,34 +409,62 @@ describe("an agent approval row", () => {
     expect(onAnswer).not.toHaveBeenCalled();
   });
 
-  it("sends a secret question to its thread and never answers it from the list", async () => {
-    const user = userEvent.setup();
-    const onAnswer = vi.fn();
-    const onOpenThread = vi.fn();
-    const request = decodePendingRequest({ ...codeQuestion(), secret: true });
-    render(
-      <PendingRequestRow
-        now={NOW}
-        onAnswer={onAnswer}
-        onOpenThread={onOpenThread}
-        request={request}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Review request" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "main" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Review request" }));
-    expect(onOpenThread).toHaveBeenCalledExactlyOnceWith(request);
-    const putEvidence = vi.fn();
-    const executeOperation = vi.fn();
-    await expect(
-      answerPendingRequest({ codeClient: { putEvidence, executeOperation } } as never, request, {
-        kind: "choice",
-        label: "main",
-      }),
-    ).resolves.not.toMatchObject({ status: "answered" });
-    expect(putEvidence).not.toHaveBeenCalled();
-    expect(executeOperation).not.toHaveBeenCalled();
-  });
+  it.each([
+    ["Code", codeQuestion],
+    ["Chat", chatQuestion],
+    [
+      "Work",
+      () =>
+        decodePendingRequest({
+          mode: "work",
+          kind: "question",
+          projectId: "22222222-2222-4222-8222-222222222222",
+          threadId: "33333333-3333-4333-8333-333333333333",
+          threadTitle: "Quarterly report",
+          text: "Database credential?",
+          options: [{ label: "main" }],
+          requestedAt: "2026-10-06T08:00:00.000Z",
+          answer: { requestId: "11111111-1111-4111-8111-111111111111", expectedVersion: 3 },
+        }),
+    ],
+  ] as const)(
+    "sends a %s secret question to its thread and never answers it from the list",
+    async (_mode, question) => {
+      const user = userEvent.setup();
+      const onAnswer = vi.fn();
+      const onOpenThread = vi.fn();
+      const request = decodePendingRequest({ ...question(), secret: true });
+      render(
+        <PendingRequestRow
+          now={NOW}
+          onAnswer={onAnswer}
+          onOpenThread={onOpenThread}
+          request={request}
+        />,
+      );
+      expect(screen.getByRole("button", { name: "Review request" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "main" })).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Review request" }));
+      expect(onOpenThread).toHaveBeenCalledExactlyOnceWith(request);
+      const putEvidence = vi.fn();
+      const executeOperation = vi.fn();
+      const execute = vi.fn();
+      await expect(
+        answerPendingRequest(
+          {
+            codeClient: { putEvidence, executeOperation },
+            workRequestClient: { execute },
+            chatClient: { execute },
+          } as never,
+          request,
+          { kind: "choice", label: "main" },
+        ),
+      ).resolves.not.toMatchObject({ status: "answered" });
+      expect(putEvidence).not.toHaveBeenCalled();
+      expect(executeOperation).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
 
   it("says an approval a restart left behind did not run", () => {
     render(

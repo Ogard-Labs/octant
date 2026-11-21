@@ -795,8 +795,8 @@ export function wireHarness(deps: HarnessDependencies) {
       }),
     recoveryBlockers: ({ threadId }) => recoveryBlockers(threadId),
     followUps: followUpActions,
-    answerQuestion: ({ threadId, questionId, answer, actor }) =>
-      nativeHarnessQuestions.answer(threadId, questionId, answer, actor),
+    answerQuestion: ({ threadId, questionId, answer, secret, actor }) =>
+      nativeHarnessQuestions.answer(threadId, questionId, answer, actor, secret),
     decideApproval: ({ threadId, approvalId, decision, answer }) =>
       nativeHarnessApprovals.decide(threadId, approvalId, decision, answer),
     steer: ({ threadId, command, actor }) => {

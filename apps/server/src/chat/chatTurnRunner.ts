@@ -264,6 +264,8 @@ export interface ChatTurnRunnerOptions {
 interface OpenChatQuestion {
   readonly questionnaire?: Questionnaire;
   readonly requestId: string;
+  /** The question asks for a secret; only a secret answer reaches it. */
+  readonly secret?: true;
   readonly deliver: (answer: string) => void;
   readonly answered: Promise<ChatAttempt>;
   readonly abandon: (reason: string) => void;
@@ -416,9 +418,12 @@ export class ChatTurnRunner {
     readonly attemptId: string;
     readonly requestId: string;
     readonly answer: string;
+    /** The answer is a secret question's, held in memory only; see `ChatAttemptQuestion.secret`. */
+    readonly secret?: true;
   }): Promise<ChatAttempt | undefined> {
     const question = this.#openQuestions.get(input.attemptId);
     if (question === undefined || question.requestId !== input.requestId) return undefined;
+    if ((question.secret === true) !== (input.secret === true)) return undefined;
     if (
       question.questionnaire !== undefined &&
       validateQuestionnaireAnswer(question.questionnaire, input.answer).status === "invalid"
@@ -857,6 +862,7 @@ export class ChatTurnRunner {
               ? {}
               : { questionnaire: question.questionnaire }),
             requestId: question.requestId,
+            ...(question.secret === true ? { secret: true } : {}),
             deliver: (answer) => {
               void Effect.runPromise(Deferred.succeed(answerDeferred, answer)).catch(
                 () => undefined,
@@ -884,13 +890,15 @@ export class ChatTurnRunner {
       let openAnswerSettle: ((attempt: ChatAttempt) => void) | undefined;
       let openAnswerAbandon: ((reason: string) => void) | undefined;
 
-      const settleAnsweredAttempt = (answer: string, requestId: string) =>
+      // A secret question's answer is never recorded: the attempt keeps only
+      // that one was given.
+      const settleAnsweredAttempt = (answer: string, requestId: string, secret?: true) =>
         Effect.gen(function* () {
           currentAttempt = answerChatTurnQuestion(currentAttempt, {
             turnId: input.attempt.turnId,
             attemptId: input.attempt.id,
             requestId,
-            answer,
+            answer: secret === true ? { secret } : answer,
             answeredAt: updatedAt(),
           });
           const persisted = yield* Effect.either(input.persistAttempt(currentAttempt));
@@ -1788,6 +1796,7 @@ export class ChatTurnRunner {
                             questionIndex: event.questionIndex,
                             questionCount: event.questionCount,
                           }),
+                      ...(event.secret === true ? { secret: true } : {}),
                     }),
                   );
                   yield* callProvider(
@@ -1797,7 +1806,11 @@ export class ChatTurnRunner {
                       answer,
                     }),
                   );
-                  yield* settleAnsweredAttempt(answer, event.requestId);
+                  yield* settleAnsweredAttempt(
+                    answer,
+                    event.requestId,
+                    event.secret === true ? true : undefined,
+                  );
                   return;
                 }
                 if (event.kind === "completed") {

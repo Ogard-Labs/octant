@@ -330,8 +330,8 @@ or choices, so the answer is given in the child's own detail view. The agent's
 own harness approval ("needs your approval") and a Work agent's own question
 ("is waiting for your answer") are rows the same way, with the request text and
 one action, **Review request**, which opens the thread, whose approval or
-question card above the composer answers it; so is a Code question that asks
-for a secret, which only the thread's masked field answers. If the window's thread list does not hold the parent yet, it reads the list once more and, when the parent is still missing, says it could not open the thread rather than doing nothing. This pending-request projection lists Work and Code children only; Chat's
+question card above the composer answers it; so is a Code, Work or Chat
+question that asks for a secret, which only the thread's masked field answers. If the window's thread list does not hold the parent yet, it reads the list once more and, when the parent is still missing, says it could not open the thread rather than doing nothing. This pending-request projection lists Work and Code children only; Chat's
 [Agents dock](workspace.md#subagents) does not extend that scope. At most five rows show, then **+N more**, which
 opens the Inbox. The card is hidden while nothing waits, and unavailable where
 this window has no reader (a remote window).

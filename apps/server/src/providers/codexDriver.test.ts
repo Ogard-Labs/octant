@@ -4705,7 +4705,7 @@ describe("Codex execution authority and approvals", () => {
     await acquired.close();
   });
 
-  it("asks a Code thread's secret question outside Strict as a masked question and hands Codex the typed answer", async () => {
+  it("asks a secret question outside Strict, on every surface and for a subagent, as a masked question and hands Codex the typed answer", async () => {
     const userInput = (id: string, questions: ReadonlyArray<object>): CodexServerMessage =>
       ({
         kind: "request",
@@ -4717,7 +4717,10 @@ describe("Codex execution authority and approvals", () => {
       { id: "pw", header: "Database", question: "Database credential?", isSecret: true },
       { id: "host", header: "Host", question: "Which host?", options: null },
     ];
-    const open = async (mode: "code" | "work", strict: boolean) => {
+    const open = async (
+      mode: "code" | "work" | "chat",
+      posture: { readonly strict?: boolean; readonly asksSecretQuestions?: true },
+    ) => {
       const f = fixture();
       let request = 0;
       const acquired = await acquireConnection(
@@ -4729,7 +4732,7 @@ describe("Codex execution authority and approvals", () => {
           sessionId,
           modelId: "gpt-5.4" as never,
           executionPolicy: "plan",
-          strict,
+          ...posture,
         }),
       );
       await Effect.runPromise(
@@ -4738,43 +4741,57 @@ describe("Codex execution authority and approvals", () => {
       return { f, acquired };
     };
 
-    const { f, acquired } = await open("code", false);
-    const asked = takeEvents(acquired.connection, 2);
-    f.emit(userInput("ask-secret", secretSet));
-    const events = await asked;
-    expect(events).toMatchObject([
-      { kind: "user-input-request", prompt: "Database credential?", secret: true },
-      { kind: "user-input-request", prompt: "Which host?" },
-    ]);
-    expect(events[1]).not.toHaveProperty("secret");
-    for (const [event, answer] of [
-      [events[0], "hunter2-sentinel"],
-      [events[1], "db.internal"],
+    // A Code, Work or Chat thread outside Strict, and a subagent whose
+    // surface says its parent is outside Strict, all ask it.
+    for (const [mode, posture] of [
+      ["code", { strict: false }],
+      ["work", { strict: false }],
+      ["chat", { strict: false }],
+      ["work", { asksSecretQuestions: true }],
     ] as const) {
-      if (event?.kind !== "user-input-request") throw new Error("Codex asked a question.");
-      await Effect.runPromise(
-        acquired.connection.answerUserInput({ sessionId, requestId: event.requestId, answer }),
-      );
-    }
-    expect(f.calls.filter((call) => call.method === "approval/respond")).toEqual([
-      {
-        method: "approval/respond",
-        input: {
-          providerRequestId: "ask-secret",
-          result: {
-            answers: { pw: { answers: ["hunter2-sentinel"] }, host: { answers: ["db.internal"] } },
+      const { f, acquired } = await open(mode, posture);
+      const asked = takeEvents(acquired.connection, 2);
+      f.emit(userInput("ask-secret", secretSet));
+      const events = await asked;
+      expect(events).toMatchObject([
+        { kind: "user-input-request", prompt: "Database credential?", secret: true },
+        { kind: "user-input-request", prompt: "Which host?" },
+      ]);
+      expect(events[1]).not.toHaveProperty("secret");
+      for (const [event, answer] of [
+        [events[0], "hunter2-sentinel"],
+        [events[1], "db.internal"],
+      ] as const) {
+        if (event?.kind !== "user-input-request") throw new Error("Codex asked a question.");
+        await Effect.runPromise(
+          acquired.connection.answerUserInput({ sessionId, requestId: event.requestId, answer }),
+        );
+      }
+      expect(f.calls.filter((call) => call.method === "approval/respond")).toEqual([
+        {
+          method: "approval/respond",
+          input: {
+            providerRequestId: "ask-secret",
+            result: {
+              answers: {
+                pw: { answers: ["hunter2-sentinel"] },
+                host: { answers: ["db.internal"] },
+              },
+            },
           },
         },
-      },
-    ]);
-    await acquired.close();
+      ]);
+      await acquired.close();
+    }
 
-    // Strict, and every surface but a Code thread, still refuse the set unseen.
-    for (const [mode, strict] of [
-      ["code", true],
-      ["work", false],
+    // Strict refuses the set unseen, whatever the surface says, and so does a
+    // session whose surface never said it keeps the answer out of its record.
+    for (const [mode, posture] of [
+      ["code", { strict: true }],
+      ["chat", { strict: true, asksSecretQuestions: true }],
+      ["work", {}],
     ] as const) {
-      const held = await open(mode, strict);
+      const held = await open(mode, posture);
       held.f.emit(userInput("ask-held", secretSet));
       await vi.waitFor(() =>
         expect(held.f.calls.at(-1)).toEqual({

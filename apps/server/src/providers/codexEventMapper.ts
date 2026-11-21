@@ -70,7 +70,7 @@ export interface CodexEventContext {
   readonly compactionRequested?: boolean;
   /**
    * A secret question is shown, masked, rather than refused: set only for a
-   * Code thread outside Strict, whose answer reaches Codex unrecorded.
+   * session outside Strict, whose answer reaches Codex unrecorded.
    */
   readonly asksSecretQuestions?: true;
   readonly requestIds: Map<CodexRpcId, string>;

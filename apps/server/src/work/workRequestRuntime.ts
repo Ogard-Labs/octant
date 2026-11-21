@@ -421,6 +421,7 @@ export class WorkRequestRuntime {
                 ...(event.questionnaire === undefined
                   ? {}
                   : { questionnaire: sanitizedQuestionnaire(event.questionnaire) }),
+                ...(event.secret === true ? { secret: true } : {}),
               },
       });
       const result: WorkRequestServiceResult = this.#requests.record(record);

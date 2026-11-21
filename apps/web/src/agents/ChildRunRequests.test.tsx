@@ -109,6 +109,36 @@ describe("answering a child beside its parent", () => {
     );
   });
 
+  it("takes a child's secret question in a masked field and sends it as a secret answer", async () => {
+    const api = client();
+    const secretQuestion = {
+      ...question,
+      prompt: "Database credential?",
+      options: [],
+      secret: true,
+    };
+    const session = vi.fn(
+      async () =>
+        ({ session: { status: "running" }, approvals: [], questions: [secretQuestion] }) as never,
+    );
+    render(
+      <ChildRunRequests
+        client={{ ...api, session }}
+        threadId={threadId}
+        entries={entries}
+        disconnected={false}
+      />,
+    );
+    const field = await screen.findByLabelText("Your secret answer");
+    expect(field).toHaveAttribute("type", "password");
+    await userEvent.type(field, "hunter2");
+    await userEvent.click(screen.getByRole("button", { name: "Submit" }));
+    expect(api.answerQuestion).toHaveBeenCalledExactlyOnceWith(threadId, {
+      questionId: "question-1",
+      secretAnswer: "hunter2",
+    });
+  });
+
   it("retains a failed answer for retry only while the same request remains pending", async () => {
     const api = client();
     api.decideApproval.mockRejectedValueOnce(new Error("offline"));
