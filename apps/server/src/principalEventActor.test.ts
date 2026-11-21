@@ -25,6 +25,7 @@ const NAMES_THE_ACTOR_ELSEWHERE: Readonly<Record<string, string>> = {
   "diskCleanupRoutes.ts": "reads disk usage and removes caches on disk; journals nothing",
   "externalContentRoutes.ts": "builds the device actor from the principal where it clears a mark",
   "harness/nativeHarnessEgressRoutes.ts": "hands the device to the rules store, which journals it",
+  "image/imageRoutes.ts": "a paired device can only read its thread's image results",
   "integrationRoutes.ts": "checks local tool integrations on this host; journals nothing",
   "localServerRoutes.ts": "reads server health and starts or stops local servers; journals nothing",
   "localUsageHistoryRoutes.ts": "reads provider history; changes nothing",
@@ -44,6 +45,7 @@ const NAMES_THE_ACTOR_ELSEWHERE: Readonly<Record<string, string>> = {
     "answers a device's read of its own standing; that route journals nothing",
   "terminalSessions/terminalSessionAuthority.ts": "an authority predicate; changes nothing",
   "threadDocumentDeliveryAuthority.ts": "an authority predicate; changes nothing",
+  "wiring/context.ts": "checks whether the device may open a thread; the check journals nothing",
 };
 
 /**

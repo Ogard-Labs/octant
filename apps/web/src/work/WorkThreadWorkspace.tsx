@@ -1,3 +1,4 @@
+import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
 import { TurnSubagentRows } from "../agents/threadSubagents";
 import { attachAllowingFiles, attachmentMediaType } from "../composer/attachmentMediaType";
@@ -121,7 +122,10 @@ import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
-import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import type {
+  ImageGenerationClient,
+  ThreadImageResults,
+} from "@octant/client-runtime/image-generation-client";
 import type { ImageArtifactRecord, ImageGenerationProfileView, ImageJob } from "@octant/contracts";
 import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
 import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
@@ -129,7 +133,7 @@ import { ScheduledFollowUpMark } from "../automation/ScheduledFollowUpMark";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageJobs, useGeneratedImageJobs } from "../image/GeneratedImageList";
 import { ImageGenerationAction } from "../image/ImageGenerationAction";
-import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt";
+import { ServiceOfferPrompt } from "../offers/ServiceOfferPrompt";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
@@ -603,6 +607,8 @@ export interface WorkThreadWorkspaceProps {
   readonly fileMentionClient?: FileMentionClient;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  readonly imageResults?: ThreadImageResults;
+  readonly serviceOfferClient?: ServiceOfferClient;
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly onOpenSettings?: () => void;
   /** Opens Settings at Image generation, where an image profile is added. */
@@ -931,6 +937,9 @@ function withoutHostTools(props: WorkThreadWorkspaceProps): WorkThreadWorkspaceP
     extensionClient: _extensions,
     fileMentionClient: _files,
     imageGenerationClient: _images,
+    imageResults: _imageResults,
+    imageGenerationProfiles: _imageProfiles,
+    serviceOfferClient: _offers,
     mutationClient: _mutations,
     ...rest
   } = props;
@@ -2557,7 +2566,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   // The transcript draws each image after the turn that made it; the trail
   // below the transcript shows the rest.
   const threadImages = useGeneratedImageJobs({
-    client: props.imageGenerationClient,
+    client: props.imageGenerationClient ?? props.imageResults,
     threadKind: "work-thread",
     scopeId: decodeImageGenerationScopeId(String(props.threadId)),
   });
@@ -2581,7 +2590,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     (job) => String(job.createdAt),
     (job) => String(job.id),
   );
-  const imageClient = props.imageGenerationClient;
+  const imageClient = props.imageGenerationClient ?? props.imageResults;
   const imageProfiles = props.imageGenerationProfiles;
   const saveGeneratedImage = (job: ImageJob, artifact: ImageArtifactRecord) => {
     void props.imageGenerationClient
@@ -3047,15 +3056,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             restoreKey={`work:${String(props.threadId)}`}
             role="log"
             trail={
-              (props.imageGenerationClient === undefined ||
-                props.imageGenerationProfiles === undefined) &&
+              (imageClient === undefined || props.imageGenerationProfiles === undefined) &&
               props.browserAutomationClient === undefined ? null : (
                 <div className="work-thread-workspace__transcript-trail">
-                  {props.imageGenerationClient === undefined ||
+                  {imageClient === undefined ||
                   props.imageGenerationProfiles === undefined ? null : (
                     <GeneratedImageJobs
                       canSaveToProject
-                      client={props.imageGenerationClient}
+                      client={imageClient}
                       jobs={threadImages.jobs.filter(
                         (job) => !imagePlacement.placed.has(String(job.id)),
                       )}
@@ -3127,9 +3135,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           threadId={String(props.threadId)}
           turnActive={turnRunning}
         />
-        <ImageGenerationOfferPrompt
+        <ServiceOfferPrompt
           className="thread-column"
-          client={props.imageGenerationClient}
+          client={props.serviceOfferClient}
           keptIn="project"
           profiles={props.imageGenerationProfiles ?? []}
           scopeId={decodeImageGenerationScopeId(String(props.threadId))}

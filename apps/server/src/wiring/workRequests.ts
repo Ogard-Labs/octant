@@ -92,7 +92,7 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
     AuthorityWiring,
     | "agentRunPersistence"
     | "extensionToolApprovalService"
-    | "imageGenerationOffers"
+    | "serviceOffers"
     | "routineProposalService"
     | "windowAuthorityStore"
   > &
@@ -139,7 +139,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     baseRouteCodeService,
     browserToolApprovalService,
     extensionToolApprovalService,
-    imageGenerationOffers,
+    serviceOffers,
     projectMemoryAccess,
     routineProposalService,
     chatService,
@@ -422,7 +422,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
           browserApprovals: browserToolApprovalService.list(reader.scopeId),
           memoryProposals: projectMemoryAccess.proposals.list(reader.scopeId),
           routineProposals: routineProposalService.list(reader.scopeId),
-          imageOffers: imageGenerationOffers.listForWindow(reader.scopeId),
+          imageOffers: serviceOffers.listForWindow(reader.scopeId),
         },
         readWaitingAskThread,
       ),

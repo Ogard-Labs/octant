@@ -517,6 +517,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     goalClient,
     goalLoopClient,
     imageGenerationClient,
+    serviceOfferClient,
     nativeHarnessClient,
     planClient,
     previewClient,
@@ -913,6 +914,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   previewClient={previewClient}
                   canvasClient={canvasClient}
                   imageGenerationClient={imageGenerationClient}
+                  serviceOfferClient={serviceOfferClient}
                   {...(imageGenerationProfiles === undefined ? {} : { imageGenerationProfiles })}
                   onOpenCanvasInSidebar={openCanvasInSidebar}
                   onOpenCanvasReference={(card) =>
