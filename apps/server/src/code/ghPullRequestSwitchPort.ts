@@ -642,7 +642,14 @@ export class GhPullRequestSwitchPort {
       firstNode !== undefined && isRecord(firstNode.commit) ? firstNode.commit : undefined;
     if (headCommit === undefined) return { status: "unavailable" };
 
-    const headChecks = await this.#collectCommitRollupChecks(owner, name, headCommit, signal);
+    const headChecks = await this.#collectCommitRollupChecks(
+      owner,
+      name,
+      number,
+      "head",
+      headCommit,
+      signal,
+    );
     if (headChecks === undefined) return { status: "unavailable" };
 
     if (pr?.potentialMergeCommit === null || pr?.potentialMergeCommit === undefined) {
@@ -652,6 +659,8 @@ export class GhPullRequestSwitchPort {
     const testMergeChecks = await this.#collectCommitRollupChecks(
       owner,
       name,
+      number,
+      "merge",
       pr.potentialMergeCommit,
       signal,
     );
@@ -662,6 +671,8 @@ export class GhPullRequestSwitchPort {
   async #collectCommitRollupChecks(
     owner: string,
     name: string,
+    number: number,
+    target: "head" | "merge",
     commit: Record<string, unknown>,
     signal: AbortSignal,
   ): Promise<ReadonlyArray<ObservedCommitCheck> | undefined> {
@@ -672,10 +683,11 @@ export class GhPullRequestSwitchPort {
     collected.push(...firstPage.checks);
     let hasNextPage = firstPage.hasNextPage;
     let cursor = firstPage.endCursor;
-    const oid = typeof commit.oid === "string" && commit.oid.length > 0 ? commit.oid : undefined;
+    const expectedOid =
+      typeof commit.oid === "string" && commit.oid.length > 0 ? commit.oid : undefined;
     let pagesRead = 1;
     while (hasNextPage) {
-      if (oid === undefined || cursor === undefined || pagesRead >= MAX_ROLLUP_PAGES) {
+      if (expectedOid === undefined || cursor === undefined || pagesRead >= MAX_ROLLUP_PAGES) {
         return undefined;
       }
       const nextResult = await this.#run(
@@ -686,12 +698,12 @@ export class GhPullRequestSwitchPort {
           `owner=${owner}`,
           "-f",
           `name=${name}`,
-          "-f",
-          `oid=${oid}`,
+          "-F",
+          `number=${String(number)}`,
           "-f",
           `cursor=${cursor}`,
           "-f",
-          `query=${COMMIT_ROLLUP_PAGE_QUERY}`,
+          `query=${target === "head" ? PR_HEAD_ROLLUP_PAGE_QUERY : PR_MERGE_ROLLUP_PAGE_QUERY}`,
         ],
         signal,
       );
@@ -699,9 +711,21 @@ export class GhPullRequestSwitchPort {
       const nextParsed = parseJson(nextResult.stdout);
       const data = isRecord(nextParsed) && isRecord(nextParsed.data) ? nextParsed.data : undefined;
       const repo = data !== undefined && isRecord(data.repository) ? data.repository : undefined;
-      const obj = repo !== undefined && isRecord(repo.object) ? repo.object : undefined;
-      if (obj === undefined) return undefined;
-      const page = parseCommitRollupPage(obj.statusCheckRollup);
+      const pr = repo !== undefined && isRecord(repo.pullRequest) ? repo.pullRequest : undefined;
+      let nextCommit: Record<string, unknown> | undefined;
+      if (target === "head") {
+        const commits = pr !== undefined && isRecord(pr.commits) ? pr.commits : undefined;
+        const nodes = Array.isArray(commits?.nodes) ? commits.nodes : undefined;
+        const first = nodes !== undefined && isRecord(nodes[0]) ? nodes[0] : undefined;
+        nextCommit = first !== undefined && isRecord(first.commit) ? first.commit : undefined;
+      } else {
+        nextCommit =
+          pr !== undefined && isRecord(pr.potentialMergeCommit)
+            ? pr.potentialMergeCommit
+            : undefined;
+      }
+      if (nextCommit === undefined || nextCommit.oid !== expectedOid) return undefined;
+      const page = parseCommitRollupPage(nextCommit.statusCheckRollup);
       if (page === "invalid" || page === "empty") return undefined;
       collected.push(...page.checks);
       hasNextPage = page.hasNextPage;
@@ -1091,32 +1115,40 @@ interface RequiredStatusCheck {
 }
 
 interface ObservedCommitCheck {
+  readonly kind: "check-run" | "status-context";
   readonly context: string;
   readonly appId?: number;
+  readonly workflowName?: string;
+  readonly isRequired?: boolean;
+  readonly timestampMs?: number;
   readonly bucket: "pass" | "pending" | "failing";
 }
 
 const MAX_ROLLUP_PAGES = 20;
 
-const ROLLUP_CONTEXTS_SELECTION = `
-  statusCheckRollup {
-    contexts(first: 100, after: $cursor) {
-      nodes {
-        __typename
-        ... on CheckRun {
-          name
-          status
-          conclusion
-          checkSuite { app { databaseId } }
-        }
-        ... on StatusContext {
-          context
-          state
-        }
+const ROLLUP_CONTEXT_NODES_SELECTION = `
+  nodes {
+    __typename
+    ... on CheckRun {
+      name
+      status
+      conclusion
+      startedAt
+      completedAt
+      isRequired(pullRequestNumber: $number)
+      checkSuite {
+        app { databaseId }
+        workflowRun { workflow { name } }
       }
-      pageInfo { hasNextPage endCursor }
+    }
+    ... on StatusContext {
+      context
+      state
+      createdAt
+      isRequired(pullRequestNumber: $number)
     }
   }
+  pageInfo { hasNextPage endCursor }
 `;
 
 const PR_COMMIT_ROLLUPS_QUERY = `
@@ -1129,20 +1161,7 @@ const PR_COMMIT_ROLLUPS_QUERY = `
               oid
               statusCheckRollup {
                 contexts(first: 100) {
-                  nodes {
-                    __typename
-                    ... on CheckRun {
-                      name
-                      status
-                      conclusion
-                      checkSuite { app { databaseId } }
-                    }
-                    ... on StatusContext {
-                      context
-                      state
-                    }
-                  }
-                  pageInfo { hasNextPage endCursor }
+                  ${ROLLUP_CONTEXT_NODES_SELECTION}
                 }
               }
             }
@@ -1152,20 +1171,7 @@ const PR_COMMIT_ROLLUPS_QUERY = `
           oid
           statusCheckRollup {
             contexts(first: 100) {
-              nodes {
-                __typename
-                ... on CheckRun {
-                  name
-                  status
-                  conclusion
-                  checkSuite { app { databaseId } }
-                }
-                ... on StatusContext {
-                  context
-                  state
-                }
-              }
-              pageInfo { hasNextPage endCursor }
+              ${ROLLUP_CONTEXT_NODES_SELECTION}
             }
           }
         }
@@ -1174,12 +1180,38 @@ const PR_COMMIT_ROLLUPS_QUERY = `
   }
 `;
 
-const COMMIT_ROLLUP_PAGE_QUERY = `
-  query($owner: String!, $name: String!, $oid: GitObjectID!, $cursor: String) {
+const PR_HEAD_ROLLUP_PAGE_QUERY = `
+  query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
     repository(owner: $owner, name: $name) {
-      object(oid: $oid) {
-        ... on Commit {
-          ${ROLLUP_CONTEXTS_SELECTION}
+      pullRequest(number: $number) {
+        commits(last: 1) {
+          nodes {
+            commit {
+              oid
+              statusCheckRollup {
+                contexts(first: 100, after: $cursor) {
+                  ${ROLLUP_CONTEXT_NODES_SELECTION}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+const PR_MERGE_ROLLUP_PAGE_QUERY = `
+  query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) {
+        potentialMergeCommit {
+          oid
+          statusCheckRollup {
+            contexts(first: 100, after: $cursor) {
+              ${ROLLUP_CONTEXT_NODES_SELECTION}
+            }
+          }
         }
       }
     }
@@ -1190,6 +1222,12 @@ function parseRequiredCheckAppId(value: unknown): number | undefined | "invalid"
   if (value === undefined || value === null || value === -1) return undefined;
   if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
   return "invalid";
+}
+
+function parseTimestampMs(value: unknown): number | undefined {
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function parseCommitRollupPage(rollup: unknown):
@@ -1222,18 +1260,40 @@ function parseCommitRollupPage(rollup: unknown):
         app.databaseId > 0
           ? app.databaseId
           : undefined;
-      checks.push(
-        appId === undefined
-          ? { context: node.name, bucket }
-          : { context: node.name, appId, bucket },
-      );
+      const workflowRun =
+        suite !== undefined && isRecord(suite.workflowRun) ? suite.workflowRun : undefined;
+      const workflow =
+        workflowRun !== undefined && isRecord(workflowRun.workflow)
+          ? workflowRun.workflow
+          : undefined;
+      const workflowName =
+        typeof workflow?.name === "string" && workflow.name.length > 0 ? workflow.name : undefined;
+      const isRequired = typeof node.isRequired === "boolean" ? node.isRequired : undefined;
+      const timestampMs = parseTimestampMs(node.completedAt) ?? parseTimestampMs(node.startedAt);
+      checks.push({
+        kind: "check-run",
+        context: node.name,
+        bucket,
+        ...(appId === undefined ? {} : { appId }),
+        ...(workflowName === undefined ? {} : { workflowName }),
+        ...(isRequired === undefined ? {} : { isRequired }),
+        ...(timestampMs === undefined ? {} : { timestampMs }),
+      });
       continue;
     }
     if (node.__typename === "StatusContext") {
       if (typeof node.context !== "string" || node.context.length === 0) return "invalid";
       const bucket = classifyStatusContext(node.state);
       if (bucket === undefined) return "invalid";
-      checks.push({ context: node.context, bucket });
+      const isRequired = typeof node.isRequired === "boolean" ? node.isRequired : undefined;
+      const timestampMs = parseTimestampMs(node.createdAt);
+      checks.push({
+        kind: "status-context",
+        context: node.context,
+        bucket,
+        ...(isRequired === undefined ? {} : { isRequired }),
+        ...(timestampMs === undefined ? {} : { timestampMs }),
+      });
       continue;
     }
     return "invalid";
@@ -1293,17 +1353,54 @@ function classifyStatusContext(state: unknown): "pass" | "pending" | "failing" |
   return undefined;
 }
 
+function selectLatestCommitChecks(
+  observed: ReadonlyArray<ObservedCommitCheck>,
+): ReadonlyArray<ObservedCommitCheck> {
+  const latestByIdentity = new Map<string, ObservedCommitCheck>();
+  for (const entry of observed) {
+    const key =
+      entry.kind === "check-run"
+        ? `check-run\0${entry.context}\0${entry.appId === undefined ? "*" : String(entry.appId)}\0${entry.workflowName ?? ""}`
+        : `status-context\0${entry.context}`;
+    const existing = latestByIdentity.get(key);
+    if (existing === undefined) {
+      latestByIdentity.set(key, entry);
+      continue;
+    }
+    if (
+      existing.timestampMs === undefined ||
+      (entry.timestampMs !== undefined && entry.timestampMs >= existing.timestampMs)
+    ) {
+      latestByIdentity.set(key, entry);
+    }
+  }
+  return [...latestByIdentity.values()];
+}
+
 function evaluateCommitRequiredChecks(
   required: ReadonlyArray<RequiredStatusCheck>,
   observed: ReadonlyArray<ObservedCommitCheck>,
 ): "green" | "pending" | "failing" {
+  const latest = selectLatestCommitChecks(observed);
+  const pinnedAppCountByContext = new Map<string, number>();
+  for (const requirement of required) {
+    if (requirement.appId === undefined) continue;
+    pinnedAppCountByContext.set(
+      requirement.context,
+      (pinnedAppCountByContext.get(requirement.context) ?? 0) + 1,
+    );
+  }
   let pending = false;
   for (const requirement of required) {
-    const matches = observed.filter(
-      (entry) =>
-        entry.context === requirement.context &&
-        (requirement.appId === undefined || entry.appId === requirement.appId),
-    );
+    const allowsRequiredStatusContext =
+      requirement.appId !== undefined &&
+      (pinnedAppCountByContext.get(requirement.context) ?? 0) === 1;
+    const matches = latest.filter((entry) => {
+      if (entry.context !== requirement.context) return false;
+      if (requirement.appId === undefined) return true;
+      if (entry.kind === "check-run") return entry.appId === requirement.appId;
+      return allowsRequiredStatusContext && entry.isRequired === true;
+    });
     if (matches.length === 0) {
       pending = true;
       continue;
