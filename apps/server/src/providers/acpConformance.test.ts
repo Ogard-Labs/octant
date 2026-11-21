@@ -106,10 +106,14 @@ describe.each(Object.values(acpProviderProfiles))(
           "task-progress",
           "task-list",
           "approval-request",
-          ...(profile.userQuestions === "supported" ? (["user-input-request"] as const) : []),
-          // Every agent without a pinned usage reading is read by ACP's
-          // standard usage, which this fixture's reply carries.
-          ...(profile.usageVersions === undefined ? (["usage"] as const) : []),
+          // This fixture's release is newer than every one a profile's
+          // features were reviewed on, so a form-asking agent asks by form.
+          ...(profile.userQuestions === "supported" || profile.elicitationVersions !== undefined
+            ? (["user-input-request"] as const)
+            : []),
+          // Every agent reports usage: by ACP's standard usage in the reply,
+          // or by the `usage_update` a reviewed usage reading takes.
+          "usage",
           "interrupted",
         ],
         expectedFailureCategories: {
@@ -167,11 +171,11 @@ describe.each(Object.values(acpProviderProfiles))(
 );
 
 /**
- * How an unknown answer is refused: a form-asking agent reports questions
- * `unavailable` on this fixture's release, which is outside its verified list.
+ * How an unknown answer is refused: an agent that asks questions, by
+ * permission or by form, refuses it as a protocol failure.
  */
 function unknownQuestionCategory(profile: AcpProviderProfile) {
-  if (profile.elicitationVersions !== undefined) return "unavailable" as const;
+  if (profile.elicitationVersions !== undefined) return "protocol" as const;
   return profile.userQuestions === "supported" ? ("protocol" as const) : ("unsupported" as const);
 }
 
@@ -284,7 +288,7 @@ class ConformanceClient implements AcpClientPort {
   closeSession = async () => undefined;
   newSession = async () => {
     const sessionId = `agent-session-${++this.#session}`;
-    if (this.profile.reviewedCommands !== undefined) {
+    if (this.profile.listedCommandsOnly === true) {
       this.#notifications.forEach((listener) =>
         listener({
           kind: "notification",
@@ -293,7 +297,7 @@ class ConformanceClient implements AcpClientPort {
             sessionId,
             update: {
               sessionUpdate: "available_commands_update",
-              availableCommands: this.profile.reviewedCommands!.map((name) => ({
+              availableCommands: ["compact", "help"].map((name) => ({
                 name,
                 description: name,
               })),
@@ -302,12 +306,27 @@ class ConformanceClient implements AcpClientPort {
         }),
       );
     }
+    this.announceSessionTotals(sessionId);
     return { sessionId, configOptions: this.configOptions };
   };
   loadSession = async (source: string) => {
     if (source === "stale") throw new Error("stale");
+    this.announceSessionTotals(source);
     return { sessionId: source, configOptions: this.configOptions };
   };
+  /**
+   * A reviewed usage reading takes session totals: these are the opened
+   * session's, and the turn's update and reply below add to them.
+   */
+  announceSessionTotals(sessionId: string): void {
+    if (this.profile.usageVersions === undefined) return;
+    this.announce(sessionId, {
+      sessionUpdate: "usage_update",
+      used: 1,
+      size: 200_000,
+      _meta: { promptTokens: 0, completionTokens: 0, cachedTokens: 0 },
+    });
+  }
   resumeSession = this.loadSession;
   setConfigOption = async () => ({ configOptions: this.configOptions });
   call = async <T = unknown>() => ({}) as T;
@@ -343,6 +362,14 @@ class ConformanceClient implements AcpClientPort {
     });
     notify({ sessionUpdate: "tool_call_update", toolCallId: "provider-tool", status: "completed" });
     notify({ sessionUpdate: "plan", entries: [{ content: "Inspect", status: "in_progress" }] });
+    if (this.profile.usageVersions !== undefined) {
+      notify({
+        sessionUpdate: "usage_update",
+        used: 19,
+        size: 200_000,
+        _meta: { promptTokens: 12, completionTokens: 3, cachedTokens: 4 },
+      });
+    }
     const request = (id: string, title: string, options: ReadonlyArray<Record<string, string>>) =>
       this.#requests.forEach((listener) =>
         listener({
@@ -366,9 +393,36 @@ class ConformanceClient implements AcpClientPort {
         { optionId: "q0_skip", name: "Skip", kind: "reject_once" },
       ]);
     }
+    if (this.profile.elicitationVersions !== undefined) {
+      this.#requests.forEach((listener) =>
+        listener({
+          kind: "request",
+          id: "form",
+          method: "elicitation/create",
+          params: {
+            sessionId: sourceSessionId,
+            mode: "form",
+            message: "Choose",
+            requestedSchema: {
+              type: "object",
+              required: ["q0"],
+              properties: {
+                q0: {
+                  type: "array",
+                  description: "Formats?",
+                  items: { anyOf: [{ const: "PDF" }, { const: "Text" }] },
+                },
+              },
+            },
+          },
+        }),
+      );
+    }
     return new Promise<{ stopReason: string; usage?: unknown }>((resolve) => {
       // The reply carries ACP's standard usage; a profile with a reviewed
-      // rule for a reply without a total gets that shape instead.
+      // rule for a reply without a total gets that shape instead, and one
+      // with a reviewed session-total reading gets the input and output sum
+      // that reading checks.
       this.#cancel = () =>
         resolve({
           stopReason: "cancelled",
@@ -376,7 +430,11 @@ class ConformanceClient implements AcpClientPort {
             inputTokens: 12,
             outputTokens: 3,
             cachedReadTokens: 4,
-            ...(this.profile.turnUsageWithoutTotal === undefined ? { totalTokens: 19 } : {}),
+            ...(this.profile.usageVersions !== undefined
+              ? { totalTokens: 15 }
+              : this.profile.turnUsageWithoutTotal === undefined
+                ? { totalTokens: 19 }
+                : {}),
           },
         });
     });

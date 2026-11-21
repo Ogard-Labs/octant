@@ -287,6 +287,8 @@ describe("octantSettingsRegistry", () => {
       "full-access-stalled-turn-limit",
       "provider-tool-call-pause-limit",
       "background-session-idle-limit",
+      "provider-own-telemetry",
+      "provider-self-update",
       "opencode-managed-update",
       "provider-display-name",
       "provider-binary-path",

@@ -987,6 +987,23 @@ export const ShellSettings = Schema.Struct({
     { default: () => DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES },
   ),
   /**
+   * Whether a provider launch outside Strict leaves the provider's own
+   * telemetry (usage metrics, error reports, trace and feedback uploads) to
+   * the provider's own settings. Off, Octant sets the provider's telemetry
+   * guards as Strict does. Strict sets them whatever this says. Off by
+   * default, including for a store persisted before the setting existed:
+   * before it, every launch set the telemetry guards, and Octant sends
+   * nothing to a vendor the person did not turn on.
+   */
+  providerTelemetry: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * Whether a provider launch outside Strict lets the provider check for and
+   * install a newer version of itself. Off, the default, keeps every
+   * self-update guard set, since Octant installs and updates provider CLIs
+   * itself; Strict keeps them set whatever this says.
+   */
+  providerSelfUpdate: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
    * How many wake-ups one thread may have waiting, missed ones included. A
    * store persisted before the setting existed decodes to the former fixed 8.
    */

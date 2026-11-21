@@ -337,6 +337,8 @@ export const PendingRequest = Schema.Union(
     options: Schema.Array(
       Schema.Struct({ label: WorkRequestSanitizedText }).annotations(strict),
     ).pipe(Schema.maxItems(MAX_WORK_REQUEST_OPTIONS)),
+    /** The question asks for a secret; only the thread's masked field answers it. */
+    secret: Schema.optional(Schema.Literal(true)),
   }).annotations(strict),
   Schema.Struct({
     ...CodePendingRequestFields,
@@ -359,6 +361,11 @@ export const PendingRequest = Schema.Union(
     options: Schema.Array(
       Schema.Struct({ label: CodeQuestionOptionText }).annotations(strict),
     ).pipe(Schema.maxItems(MAX_CODE_QUESTION_OPTIONS)),
+    /**
+     * The question asks for a secret. The row finds it and leaves the answer
+     * to the thread's masked field, so no list answers it as evidence.
+     */
+    secret: Schema.optional(Schema.Literal(true)),
     answer: CodePendingQuestionAnswer,
   })
     .annotations(strict)
@@ -417,6 +424,8 @@ export const PendingRequest = Schema.Union(
     threadId: ChatThreadId,
     text: ChatAttemptQuestion.from.fields.prompt,
     options: ChatAttemptQuestion.from.fields.options,
+    /** The question asks for a secret; only the thread's masked field answers it. */
+    secret: Schema.optional(Schema.Literal(true)),
     answer: ChatPendingQuestionAnswer,
   })
     .annotations(strict)

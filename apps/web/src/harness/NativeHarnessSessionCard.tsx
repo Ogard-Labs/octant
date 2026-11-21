@@ -1,4 +1,5 @@
 import { useRetainQuestionnaireDrafts } from "../transcript/questionnaireDrafts";
+import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { QuestionnaireCard, QuestionnaireSummary } from "../transcript/QuestionnaireCard";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { NativeHarnessRouteDecision, NativeHarnessSessionView } from "@octant/contracts";
@@ -155,10 +156,13 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
       if (pendingQuestion === undefined || busy) return false;
       setBusy(true);
       try {
-        const result = await props.client.answerQuestion(props.threadId, {
-          questionId: String(pendingQuestion.id),
-          answer,
-        });
+        const result = await props.client.answerQuestion(
+          props.threadId,
+          // A subagent's secret question takes its answer as `secretAnswer`, never kept.
+          pendingQuestion.secret === true
+            ? { questionId: String(pendingQuestion.id), secretAnswer: answer }
+            : { questionId: String(pendingQuestion.id), answer },
+        );
         if (result.kind === "question-refused") setError(result.message);
         setDraftAnswer("");
         await load();
@@ -275,7 +279,15 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
             />
           ),
         )}
-      {pendingQuestion === undefined ? null : pendingQuestion.questionnaire !== undefined ? (
+      {pendingQuestion === undefined ? null : pendingQuestion.secret === true ? (
+        <ProviderQuestionCard
+          key={String(pendingQuestion.id)}
+          onAnswer={answerQuestion}
+          options={[]}
+          prompt={pendingQuestion.prompt}
+          secret
+        />
+      ) : pendingQuestion.questionnaire !== undefined ? (
         <QuestionnaireCard
           key={String(pendingQuestion.id)}
           draftIdentity={{ scope: draftScope, requestId: String(pendingQuestion.id) }}

@@ -28,6 +28,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -4502,6 +4503,103 @@ describe("CodeOperationRuntime", () => {
     expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
     await fixture.runtime.close();
     expect(connection.stop).toHaveBeenCalledWith(sessionId);
+    fixture.close();
+  });
+
+  it("hands a secret question's answer to the provider from the person alone and never records it", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(10);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: startOperation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    for (const [requestId, secret] of [
+      ["secret-question", true],
+      ["plain-question", false],
+    ] as const)
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "user-input-request",
+            requestId,
+            prompt: secret ? "Database credential?" : "Which host?",
+            options: [],
+            ...(secret ? { secret: true as const } : {}),
+          }),
+        ),
+      );
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
+      expect(
+        frames.flatMap((frame) => (frame.event.kind === "input-requested" ? [frame.event] : [])),
+      ).toMatchObject([
+        { requestId: "secret-question", secret: true },
+        { requestId: "plain-question" },
+      ]);
+    });
+    const sentinel = "hunter2-secret-sentinel";
+    let nextOperation = 20;
+    const answer = (requestId: string, answered: Record<string, unknown>) =>
+      fixture.runtime.execute(
+        windowId,
+        {
+          kind: "answer-provider-input",
+          operationId: operationId(nextOperation++),
+          threadId,
+          checkoutId,
+          requestId,
+          ...answered,
+        } as never,
+        { initiator: "user" },
+      );
+
+    // An agent acting for the person cannot answer it, and neither path
+    // stands in for the other: a secret goes to no plain question, and a
+    // secret question takes no answer put as evidence.
+    await expect(
+      fixture.runtime.execute(
+        windowId,
+        {
+          kind: "answer-provider-input",
+          operationId: operationId(11),
+          threadId,
+          checkoutId,
+          requestId: "secret-question",
+          secretAnswer: sentinel,
+        },
+        { initiator: "agent" },
+      ),
+    ).resolves.toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
+    await expect(answer("plain-question", { secretAnswer: sentinel })).resolves.toMatchObject({
+      failure: { category: "invalid" },
+    });
+    await expect(answer("secret-question", { response: fixture.response })).resolves.toMatchObject({
+      failure: { category: "invalid" },
+    });
+    expect(connection.answerUserInput).not.toHaveBeenCalled();
+
+    await expect(answer("secret-question", { secretAnswer: sentinel })).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+    expect(connection.answerUserInput).toHaveBeenCalledWith({
+      sessionId,
+      requestId: "secret-question",
+      answer: sentinel,
+    });
+    await fixture.runtime.close();
+    expect([...fixture.evidenceValues.values()]).not.toContain(sentinel);
+    for (const file of readdirSync(fixture.directory))
+      if (statSync(join(fixture.directory, file)).isFile())
+        expect(readFileSync(join(fixture.directory, file)).includes(sentinel)).toBe(false);
     fixture.close();
   });
 

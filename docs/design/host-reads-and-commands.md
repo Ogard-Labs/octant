@@ -57,7 +57,11 @@ listed as `lead-question`, also with no answer handle: **Review request** opens
 the thread, whose question card above the composer answers it through the
 session's question route (`POST /api/native-harness/sessions/:thread/questions`),
 the one the Agents tab uses. It leaves the list once it is answered, cancelled,
-or expired, and a question a restart left behind is never listed.
+or expired, and a question a restart left behind is never listed. A Code,
+Work or Chat provider question marked `secret` keeps its answer handle but is
+a find-only row too: **Review request** opens the thread, whose masked
+question card answers it with `secretAnswer`, since an answer from the list
+would be recorded ([Provider runtimes: Codex](provider-runtimes.md#codex)).
 
 The command palette's **Approve** and **Deny** commands use
 `resolve-work-request` and `answer-provider-approval` without opening the

@@ -48,6 +48,22 @@ const pendingApproval = {
   version: 1,
 } as const;
 
+describe("a Work question that asks for a secret", () => {
+  it("settles only as a secret answer that holds no value, and only it settles that way", () => {
+    const secretDetail = { kind: "user-input", prompt: "Credential?", options: [], secret: true };
+    const settled = (detail: object, resolution: object) => () =>
+      decodeWorkRequest({ ...pendingApproval, detail, status: "resolved", resolution, settledAt });
+    expect(settled(secretDetail, { kind: "user-input", secret: true })()).toMatchObject({
+      resolution: { kind: "user-input", secret: true },
+    });
+    expect(settled(secretDetail, { kind: "user-input", answer: "hunter2" })).toThrow();
+    expect(settled(userInputDetail, { kind: "user-input", secret: true })).toThrow();
+    expect(() =>
+      decodeWorkRequestResolution({ kind: "user-input", secret: true, answer: "hunter2" }),
+    ).toThrow();
+  });
+});
+
 describe("Work questionnaire privacy", () => {
   it("keeps structured multiple selections without admitting paths, URLs or unsafe identities", () => {
     const questionnaire = {

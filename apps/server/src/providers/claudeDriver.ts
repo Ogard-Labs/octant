@@ -50,7 +50,9 @@ import type {
   ProviderNativeSessionMessage,
   ProviderNativeSessionCarry,
   ProviderNativeSessions,
+  ProviderOwnChannels,
 } from "@octant/provider-sdk/driver";
+import { launchOwnChannels } from "./providerOwnChannels";
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
   isOctantInstructionContext,
@@ -101,6 +103,7 @@ import {
   claudeAccountUsesStoredKey,
   mcpServerTool,
   planReadOnlyToolServers,
+  providerHoldsLevelWithoutSandbox,
   providerOwnMemoryLaunches,
   windowsProviderLaunch,
 } from "@octant/domain";
@@ -882,8 +885,8 @@ function isPlanShellCommand(
  * and their `permissions.allow`, `ask` and `deny` rules live. The source
  * cannot be read for those alone, because it also brings the plugins,
  * agents and commands the person's Octant switches keep out, so a session
- * that reads no home settings keeps Octant's gate and sandbox instead of
- * running with neither protection.
+ * that reads no home settings keeps Octant's gate, which asks before each
+ * command and each edit the level does not waive.
  */
 export function claudeOwnPermissions(input: {
   readonly strict: boolean;
@@ -902,17 +905,36 @@ export function claudeOwnPermissions(input: {
 /**
  * Whether Octant configures Claude's command sandbox for a session. Under
  * Strict it is today's configuration (the Project's folders, Network limits,
- * no unasked sandboxed commands); outside Strict Octant leaves Claude's
- * sandbox to the person's own Claude settings and passes it nothing. A Full
- * access thread that kept its sandbox keeps Octant's at every setting.
+ * no unasked sandboxed commands). Outside Strict a Work or Code launch
+ * below Full access outside Plan runs with no sandbox of Octant's
+ * (`providerHoldsLevelWithoutSandbox`, maintainer decision, 2026-11-21), as on
+ * Windows: Claude's own permission modes, the person's own Claude settings
+ * where the session reads them, and Octant's gate hold the level. Chat and
+ * Plan keep Octant's configuration, as does a legacy chosen sandbox policy in
+ * a session that reads none of the person's settings. A Full access thread
+ * that kept its sandbox keeps Octant's at every setting.
  */
 export function claudeOctantConfiguresSandbox(input: {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly fullAccessSandbox: boolean;
   readonly ownPermissions: boolean;
+  readonly mode: ProviderAcquireInput["mode"] | undefined;
+  readonly strict: boolean;
+  readonly sandboxPolicySelected: boolean;
 }): boolean {
   if (input.executionPolicy === "full-access" && input.fullAccessSandbox) return true;
-  return claudeRunsSandbox(input.executionPolicy) && !input.ownPermissions;
+  return (
+    claudeRunsSandbox(input.executionPolicy) &&
+    !input.ownPermissions &&
+    !providerHoldsLevelWithoutSandbox({
+      mode: input.mode ?? "code",
+      executionPolicy: input.executionPolicy,
+      strict: input.strict,
+      fullAccessSandbox: input.fullAccessSandbox,
+      sandboxPolicySelected: input.sandboxPolicySelected,
+      purpose: "session",
+    })
+  );
 }
 
 function claudePolicyOptions(
@@ -3846,6 +3868,7 @@ function makeConnection(
         readonly executionPolicy: ProviderExecutionPolicy;
         readonly fullAccessSandbox?: boolean;
         readonly strict?: boolean;
+        readonly ownChannels?: ProviderOwnChannels;
         readonly autoApprove?: boolean;
         readonly modelOptionValues?: ProviderModelOptionValues;
         readonly singleUse?: boolean;
@@ -3960,8 +3983,19 @@ function makeConnection(
         void initialized.promise.catch(() => undefined);
         const terminalResult = deferred<void>();
         // Read at each launch, like every other choice here: outside Strict the
-        // runtime gets the host's environment and its own channel settings.
+        // runtime gets the host's environment, and its telemetry and
+        // self-update follow the person's provider switches.
         const strict = input.strict !== false;
+        // A thread that keeps or chose a sandbox keeps the provider's own
+        // channels closed as Strict does, as an ACP agent's launch does: the
+        // person's switches open them only where Octant adds nothing of its own.
+        const ownChannels = launchOwnChannels(
+          strict || input.fullAccessSandbox === true || options.sandboxPolicy !== undefined,
+          input.ownChannels,
+        );
+        // Whether the launch carries Octant's telemetry guards, which decides
+        // how the host's own opt-outs are read and what Claude artifacts lift.
+        const telemetryGuarded = !ownChannels.telemetry;
         const environment = await runSetupEffect(
           environmentFactory(options.authentication, {
             ...(apiKey !== undefined ? { apiKey } : {}),
@@ -3971,7 +4005,7 @@ function makeConnection(
             ...(options.configDirectory === undefined
               ? {}
               : { configDirectory: options.configDirectory }),
-            ...(strict ? {} : { strict: false }),
+            ...(strict ? {} : { strict: false, ownChannels }),
           }).pipe(Effect.provideService(Scope.Scope, scope)),
           signal,
         );
@@ -4010,6 +4044,9 @@ function makeConnection(
           executionPolicy: input.executionPolicy,
           fullAccessSandbox: sandboxedFullAccess,
           ownPermissions,
+          mode,
+          strict,
+          sandboxPolicySelected: options.sandboxPolicy !== undefined,
         });
         const networkPolicy = sandboxedFullAccess ? "auto-accept-edits" : input.executionPolicy;
         // Claude's own process: its inference and in-process web fetch. It
@@ -4158,7 +4195,10 @@ function makeConnection(
           authentication: options.authentication,
           artifactDelivery: options.artifactDelivery?.() === true,
           threadChoseArtifacts: input.nativeArtifacts === true,
-          hostTrafficDisabled: disablesNonessentialTraffic(environment.environment, strict),
+          hostTrafficDisabled: disablesNonessentialTraffic(
+            environment.environment,
+            telemetryGuarded,
+          ),
           mode,
           executionPolicy: input.executionPolicy,
           strict,
@@ -4969,7 +5009,7 @@ function makeConnection(
           ...claudeGitIdentityEnvironment(gitIdentity),
         };
         const artifactEnvironment = offersArtifacts
-          ? claudeArtifactLaunchEnvironment(launchEnvironment, strict)
+          ? claudeArtifactLaunchEnvironment(launchEnvironment, telemetryGuarded)
           : launchEnvironment;
         // Read at each launch, like the artifact switch: the next turn after
         // the person turns the account's memory off launches guarded again.
@@ -5319,6 +5359,7 @@ function makeConnection(
                 ? {}
                 : { fullAccessSandbox: input.fullAccessSandbox }),
               ...(input.strict === false ? { strict: false } : {}),
+              ...(input.ownChannels === undefined ? {} : { ownChannels: input.ownChannels }),
               ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
               ...(input.modelOptionValues === undefined
                 ? {}

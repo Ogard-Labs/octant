@@ -129,12 +129,25 @@ export class WorkRequestApplicationService {
     // Who answered, resolved from the authenticated principal; absent means
     // the person at this host.
     actor?: EventActor,
+    // `user` when the person sent it, from a window on this host or a device
+    // they paired. Only the person answers a secret question; absent refuses.
+    initiator?: "user" | "agent",
   ): Promise<WorkRequestCommandResult> {
     const entry = this.#requests.lookup(command.requestId);
     if (entry === undefined) {
       throw new WorkRequestApplicationError("not-found", "Work request was not found.");
     }
     await this.#assertWorkProjectAccess(windowId, entry.projectId);
+    if (
+      command.kind === "resolve-work-request" &&
+      command.secretAnswer !== undefined &&
+      initiator !== "user"
+    ) {
+      throw new WorkRequestApplicationError(
+        "unauthorized",
+        "Only you, from a window or a device you paired, can answer a secret question.",
+      );
+    }
     const result: WorkRequestServiceResult =
       command.kind === "resolve-work-request"
         ? await this.#requests.resolve(command, undefined, actor)
@@ -173,6 +186,7 @@ function pendingRequestFrom(request: WorkRequest, threadTitle: string): PendingR
         kind: "question",
         text: request.detail.prompt,
         options: request.detail.options.map((label) => ({ label })),
+        ...(request.detail.secret === true ? { secret: true } : {}),
       };
 }
 

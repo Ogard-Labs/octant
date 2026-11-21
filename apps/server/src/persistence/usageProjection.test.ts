@@ -22,6 +22,7 @@ import { USAGE_PROJECTION_SCHEMA_VERSION } from "./usagePersistenceSchema";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
 import type { UsageProjectScope } from "../usageProjectScope";
 import { recordAgentRunTurnUsage } from "../agentRun/agentRunUsageLedger";
+import { SpendCeilingService } from "../spendCeilingService";
 
 const unfiledScope: UsageProjectScope = { kind: "unfiled" };
 const directories: Array<string> = [];
@@ -46,12 +47,15 @@ afterEach(() => {
   }
 });
 
-function openDatabase(): { connection: SqliteConnection; journal: Journal } {
+function openDatabase(migrations: typeof MIGRATIONS = MIGRATIONS): {
+  connection: SqliteConnection;
+  journal: Journal;
+} {
   const directory = mkdtempSync(join(tmpdir(), "octant-usage-proj-"));
   directories.push(directory);
   const path = join(directory, "octant.sqlite3");
   const connection = openSqlite(path);
-  applyMigrations(connection, MIGRATIONS, () => now);
+  applyMigrations(connection, migrations, () => now);
   const runtime = createPhase1RuntimeRegistries();
   const journal = new Journal({
     connection,
@@ -566,9 +570,13 @@ describe("UsageProjection", () => {
     connection.close();
   });
 
-  it("records whether a Code turn ran at Full access, only for turns started after the ledger began recording it", () => {
-    const { connection, journal } = openDatabase();
-    const turn = (operationId: string, executionPolicy?: string) =>
+  it("keeps a store's Code usage through the upgrade that drops the Full access column, and rebuilds it", () => {
+    // A store from before the column was dropped, holding rows that recorded
+    // the level, as the build that wrote it did.
+    const { connection, journal } = openDatabase(
+      MIGRATIONS.filter((migration) => migration.version <= 110),
+    );
+    const turn = (operationId: string, executionPolicy: string) =>
       journal.append({
         aggregate: { aggregateType: "code-operation", aggregateId: operationId },
         expectedVersion: 0,
@@ -579,7 +587,84 @@ describe("UsageProjection", () => {
             modelId: "acp-agent",
             sessionId: ids.entry,
             prompt: { contentId: ids.manifest, digest: "a".repeat(64), byteLength: 5 },
-            ...(executionPolicy === undefined ? {} : { executionPolicy }),
+            executionPolicy,
+          },
+          { kind: "usage", inputTokens: 30, outputTokens: 6 },
+          { kind: "operation-state", state: "completed" },
+        ].map((event, index) =>
+          pending("code.operation-event-recorded@1", {
+            threadId: ids.aggregate,
+            operationId,
+            cursor: index + 1,
+            occurredAt: now,
+            event,
+          }),
+        ),
+      });
+    turn(ids.usage, "full-access");
+    turn(ids.usage2, "approval-gated");
+    connection
+      .prepare(
+        "UPDATE usage_record_projection SET ran_at_full_access = 1 WHERE reconciliation_id = ?",
+      )
+      .run(ids.usage);
+    connection
+      .prepare(
+        "UPDATE usage_record_projection SET ran_at_full_access = 0 WHERE reconciliation_id = ?",
+      )
+      .run(ids.usage2);
+
+    applyMigrations(connection, MIGRATIONS, () => now);
+
+    const columns = connection
+      .prepare("PRAGMA table_info(usage_record_projection)")
+      .all() as ReadonlyArray<{ readonly name: string }>;
+    expect(columns.map((column) => column.name)).not.toContain("ran_at_full_access");
+    expect(
+      connection
+        .prepare("SELECT name FROM sqlite_master WHERE name = 'usage_turn_level_boundary'")
+        .all(),
+    ).toEqual([]);
+    const rows = () =>
+      connection
+        .prepare(
+          `SELECT reconciliation_id, quality, input_tokens, output_tokens
+          FROM usage_record_projection ORDER BY last_sequence`,
+        )
+        .all();
+    const expected = [
+      { reconciliation_id: ids.usage, quality: "exact", input_tokens: 30, output_tokens: 6 },
+      { reconciliation_id: ids.usage2, quality: "exact", input_tokens: 30, output_tokens: 6 },
+    ];
+    expect(rows()).toEqual(expected);
+    const projection = createPhase1RuntimeRegistries().projections.get("code-usage");
+    if (projection === undefined) throw new Error("Usage projection is missing");
+    rebuildProjection({ connection, journal, projection, clock: () => now });
+    expect(rows()).toEqual(expected);
+    turn(ids.usage3, "full-access");
+    expect(rows()).toEqual([
+      ...expected,
+      { reconciliation_id: ids.usage3, quality: "exact", input_tokens: 30, output_tokens: 6 },
+    ]);
+    connection.close();
+  });
+
+  it("remembers which unreported turns ran below Full access when the upgrade drops the level, through a rebuild", () => {
+    const { connection, journal } = openDatabase(
+      MIGRATIONS.filter((migration) => migration.version <= 110),
+    );
+    const unreportedTurn = (operationId: string, executionPolicy: string) =>
+      journal.append({
+        aggregate: { aggregateType: "code-operation", aggregateId: operationId },
+        expectedVersion: 0,
+        events: [
+          {
+            kind: "conversation-turn-started",
+            providerInstanceId: ids.provider,
+            modelId: "acp-agent",
+            sessionId: ids.entry,
+            prompt: { contentId: ids.manifest, digest: "a".repeat(64), byteLength: 5 },
+            executionPolicy,
           },
           { kind: "operation-state", state: "completed" },
         ].map((event, index) =>
@@ -592,40 +677,148 @@ describe("UsageProjection", () => {
           }),
         ),
       });
-    // Journaled and projected before this build, which had no level to
-    // write; the migration then places the boundary after it.
-    turn(ids.usage, "full-access");
-    connection.prepare("UPDATE usage_record_projection SET ran_at_full_access = NULL").run();
-    connection.prepare("UPDATE usage_turn_level_boundary SET global_sequence = ?").run(
-      (
-        connection.prepare("SELECT MAX(global_sequence) AS sequence FROM event_journal").get() as {
-          readonly sequence: number;
-        }
-      ).sequence,
+    unreportedTurn(ids.usage, "full-access");
+    unreportedTurn(ids.usage2, "approval-gated");
+    unreportedTurn(ids.usage3, "approval-gated");
+    const level = connection.prepare(
+      "UPDATE usage_record_projection SET ran_at_full_access = ? WHERE reconciliation_id = ?",
     );
-    turn(ids.usage2, "full-access");
-    turn(ids.usage3, "approval-gated");
-    // A turn whose start recorded no level is read as before too.
-    turn(ids.checkout);
+    level.run(1, ids.usage);
+    level.run(0, ids.usage2);
+    // A turn that recorded no level, which the earlier rule read as below Full access.
+    level.run(null, ids.usage3);
 
-    const rows = () =>
+    applyMigrations(connection, MIGRATIONS, () => now);
+
+    const kept = () =>
       connection
         .prepare(
-          `SELECT reconciliation_id, ran_at_full_access
-          FROM usage_record_projection ORDER BY last_sequence`,
+          "SELECT reconciliation_id FROM usage_unreported_guarded_turn ORDER BY reconciliation_id",
         )
         .all();
-    const expected = [
-      { reconciliation_id: ids.usage, ran_at_full_access: null },
-      { reconciliation_id: ids.usage2, ran_at_full_access: 1 },
-      { reconciliation_id: ids.usage3, ran_at_full_access: 0 },
-      { reconciliation_id: ids.checkout, ran_at_full_access: null },
-    ];
-    expect(rows()).toEqual(expected);
+    const expected = [{ reconciliation_id: ids.usage2 }, { reconciliation_id: ids.usage3 }];
+    expect(kept()).toEqual(expected);
     const projection = createPhase1RuntimeRegistries().projections.get("code-usage");
     if (projection === undefined) throw new Error("Usage projection is missing");
     rebuildProjection({ connection, journal, projection, clock: () => now });
-    expect(rows()).toEqual(expected);
+    expect(kept()).toEqual(expected);
+    connection.close();
+  });
+
+  it("keeps a guarded Code turn still open at the upgrade out of a lifetime ceiling once restart recovery settles it", () => {
+    const { connection, journal } = openDatabase(
+      MIGRATIONS.filter((migration) => migration.version <= 110),
+    );
+    const event = (operationId: string, cursor: number, body: Record<string, unknown>) =>
+      pending("code.operation-event-recorded@1", {
+        threadId: ids.aggregate,
+        operationId,
+        cursor,
+        occurredAt: now,
+        event: body,
+      });
+    // Started and sent to the provider, then cut off by the upgrade's restart
+    // with no usage and no terminal state.
+    const openTurn = (operationId: string, executionPolicy: string) =>
+      journal.append({
+        aggregate: { aggregateType: "code-operation", aggregateId: operationId },
+        expectedVersion: 0,
+        events: [
+          event(operationId, 1, {
+            kind: "conversation-turn-started",
+            providerInstanceId: ids.provider,
+            modelId: "acp-agent",
+            sessionId: ids.entry,
+            prompt: { contentId: ids.manifest, digest: "a".repeat(64), byteLength: 5 },
+            executionPolicy,
+          }),
+          event(operationId, 2, {
+            kind: "provider-session-ready",
+            sessionId: ids.entry,
+            providerInstanceId: ids.provider,
+            modelId: "acp-agent",
+            checkoutId: ids.checkout,
+          }),
+        ],
+      });
+    openTurn(ids.usage, "approval-gated");
+    openTurn(ids.usage2, "full-access");
+
+    applyMigrations(connection, MIGRATIONS, () => now);
+    for (const operationId of [ids.usage, ids.usage2])
+      journal.append({
+        aggregate: { aggregateType: "code-operation", aggregateId: operationId },
+        expectedVersion: 2,
+        events: [event(operationId, 3, { kind: "operation-state", state: "interrupted" })],
+      });
+
+    expect(readUsageRecord(connection, ids.usage)?.quality).toBe("unavailable");
+    expect(
+      connection.prepare("SELECT reconciliation_id FROM usage_unreported_guarded_turn").all(),
+    ).toEqual([{ reconciliation_id: ids.usage }]);
+    const service = new SpendCeilingService({
+      connection,
+      journal,
+      clock: () => now,
+      uuid: () => crypto.randomUUID(),
+      threadExists: () => true,
+      // An instance whose release keeps its usage reading unverified.
+      notMeasuredProvider: (providerInstanceId, keptBelowFullAccess) =>
+        keptBelowFullAccess
+          ? { providerInstanceId: providerInstanceId as never, displayName: "Mistral Vibe" }
+          : undefined,
+    });
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "thread", threadType: "code-thread", threadId: ids.aggregate as never },
+      expectedVersion: 0 as never,
+      policy: { tokenBudget: 1_000 },
+      window: { kind: "lifetime" },
+    });
+    const admit = () =>
+      service.admit({
+        reservationId: crypto.randomUUID() as never,
+        threadId: ids.aggregate,
+        threadType: "code-thread",
+        turnUpperBoundTokens: 100,
+      });
+    // The settled Full access turn was measured, so its missing report refuses.
+    expect(admit()).toMatchObject({ status: "refused", refusal: { kind: "unknown-spend" } });
+    connection
+      .prepare("DELETE FROM usage_record_projection WHERE reconciliation_id = ?")
+      .run(ids.usage2);
+    // The settled guarded turn alone is left out.
+    expect(admit()).toMatchObject({ status: "admitted" });
+    connection.close();
+  });
+
+  it("keeps the rows OpenCode wrote with reasoning apart from output when the upgrade starts counting reasoning inside it", () => {
+    const { connection } = openDatabase(MIGRATIONS.filter((migration) => migration.version <= 110));
+    const openCode = "63000000-0000-4000-8000-0000000000c1";
+    connection
+      .prepare(
+        `INSERT INTO provider_instance_projection (
+          instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+        ) VALUES (?, 1, 'opencode', 1, '{}', 1)`,
+      )
+      .run(openCode);
+    const row = connection.prepare(
+      `INSERT INTO usage_record_projection (
+        reconciliation_id, subject_type, subject_id, provider_instance_id, model_id,
+        request_shape, quality, input_tokens, output_tokens, reasoning_tokens,
+        planned_input_tokens, variance_tokens, schema_version, attribution_json,
+        observed_at, last_sequence, host_id
+      ) VALUES (?, 'chat-thread', ?, ?, 'model', 'chat-turn', 'exact', 10, 5, ?, 10, 0, 2, '[]', ?, 1, 'local')`,
+    );
+    row.run(ids.usage, ids.aggregate, openCode, 3, now);
+    row.run(ids.usage2, ids.aggregate, openCode, null, now);
+    row.run(ids.usage3, ids.aggregate, ids.provider, 3, now);
+
+    applyMigrations(connection, MIGRATIONS, () => now);
+
+    expect(
+      connection.prepare("SELECT reconciliation_id FROM usage_reasoning_outside_output").all(),
+    ).toEqual([{ reconciliation_id: ids.usage }]);
     connection.close();
   });
 

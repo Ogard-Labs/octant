@@ -256,6 +256,21 @@ visible while the details are closed; pressing it opens the details and gives
 the same answer without the picker. See
 [Providers and model endpoints](model-endpoints.md).
 
+### Provider channels
+
+Providers & Models carries a **Provider channels** section after Stalled
+turns with two host switches, each read at the next provider launch:
+**Let providers send their own telemetry** (off by default, for every provider
+and for a store saved before the switch existed: Octant sets the provider's
+telemetry guards, as every launch did before the switch; on, each provider's
+own settings decide its usage metrics, error reports and feedback uploads) and **Let providers update
+themselves** (off by default: Octant keeps each provider's self-update guard
+set, since it installs and updates provider CLIs itself; **Update CLI** is
+unaffected). Strict keeps every telemetry and self-update guard set whatever
+the switches say, and so does a thread that keeps or chose a sandbox. Which guards each provider takes is in
+[Provider runtimes](provider-runtimes.md#provider-channel-switches) and the rule
+in [Decisions and requirements](decisions.md#provider-telemetry-and-self-update-are-the-persons-switches).
+
 Provider catalog and the Octant Harness model endpoints (rows, detail
 sub-pages, and Add endpoint) follow
 [Providers and model endpoints](model-endpoints.md): one link per

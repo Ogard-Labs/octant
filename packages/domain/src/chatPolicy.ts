@@ -563,7 +563,12 @@ export interface AnswerChatTurnQuestionInput {
   readonly turnId: ChatTurnId;
   readonly attemptId: ChatAttempt["id"];
   readonly requestId: string;
-  readonly answer: string;
+  /**
+   * What the person answered, or `{ secret: true }` for a question that asked
+   * for a secret: its value went to the provider and the attempt keeps only
+   * that it was given.
+   */
+  readonly answer: string | { readonly secret: true };
   readonly answeredAt: UtcTimestamp;
 }
 
@@ -590,6 +595,9 @@ export function answerChatTurnQuestion(
   if (question.requestId !== input.requestId) {
     reject("retry-not-allowed", "Question identity does not match answer input");
   }
+  if ((question.secret === true) !== (typeof input.answer !== "string")) {
+    reject("retry-not-allowed", "A secret question takes a secret answer, and only it does");
+  }
   const resumed = transitionChatAttempt(attempt, {
     outcome: "streaming",
     updatedAt: input.answeredAt,
@@ -606,7 +614,7 @@ export function answerChatTurnQuestion(
       ...(question.questionIndex === undefined || question.questionCount === undefined
         ? {}
         : { questionIndex: question.questionIndex, questionCount: question.questionCount }),
-      answer: input.answer,
+      ...(typeof input.answer === "string" ? { answer: input.answer } : { secret: true }),
       answeredAt: input.answeredAt,
     },
   ].slice(-8);

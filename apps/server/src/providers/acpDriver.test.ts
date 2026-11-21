@@ -100,7 +100,9 @@ class FakeClient implements AcpClientPort {
   }>;
 
   constructor(readonly profile: AcpProviderProfile) {
-    this.availableCommands = [...(profile.reviewedCommands ?? [])];
+    // Only a profile that runs nothing but its listed commands lists any here.
+    this.availableCommands =
+      profile.listedCommandsOnly === true ? ["compact", "status", "usage", "help"] : [];
     this.configOptions = [
       {
         type: "select",
@@ -144,7 +146,7 @@ class FakeClient implements AcpClientPort {
   }
 
   emitCommands(sourceSessionId: string) {
-    if (this.profile.reviewedCommands === undefined) return;
+    if (this.profile.listedCommandsOnly !== true) return;
     this.emit({
       kind: "notification",
       method: "session/update",
@@ -333,90 +335,102 @@ describe("requested ACP compaction capability", () => {
       ),
     );
   });
-  it("keeps structured compaction receipts out of ordinary turn events and emits one requested boundary", async () => {
-    const f = fixture(
-      { ...vibe, compactionVersions: ["3.0.3"], reviewedCommands: ["compact"] },
-      { runtimeVersion: "3.0.3" },
-    );
-    f.client.prompt.mockImplementationOnce(async (nativeSession) => {
-      for (const update of [
-        {
-          sessionUpdate: "tool_call",
-          toolCallId: "compact-receipt",
-          kind: "other",
-          status: "in_progress",
-          title: "Compacting conversation history...",
-        },
-        {
-          sessionUpdate: "tool_call_update",
-          toolCallId: "compact-receipt",
-          status: "completed",
-          title: "Compacted conversation history",
-        },
-      ])
-        f.client.emit({
-          kind: "notification",
-          method: "session/update",
-          params: { sessionId: nativeSession, update },
-        });
-      return { stopReason: "end_turn" };
-    });
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
-          const events = yield* connection.subscribe;
-          const boundary = yield* events.pipe(Stream.take(1), Stream.runCollect, Effect.forkScoped);
-          yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools: [] });
-          const compact = connection.compact;
-          if (compact === undefined) throw new Error("Injected verified compaction missing");
-          expect(yield* compact({ sessionId, compactionId: "host-operation" })).toEqual({
-            kind: "compacted",
-          });
-          const observed = Array.from(yield* Fiber.join(boundary));
-          expect(observed.map((event) => event.kind)).toEqual(["context-compacted"]);
-          expect(observed[0]).toMatchObject({ trigger: "requested", sessionId });
-          expect(f.client.prompt).toHaveBeenCalledWith("agent-session-1", "/compact");
-          const late: ProviderRuntimeEvent[] = [];
-          const after = yield* connection.subscribe;
-          yield* after.pipe(
-            Stream.runForEach((event) =>
-              Effect.sync(() => {
-                late.push(event);
-              }),
-            ),
-            Effect.forkScoped,
-          );
+  it.each(["3.0.3", "3.0.4"])(
+    "on %s keeps structured compaction receipts out of ordinary turn events and emits one requested boundary",
+    async (runtimeVersion) => {
+      const f = fixture(
+        { ...vibe, compactionVersions: ["3.0.3"], listedCommandsOnly: true },
+        { runtimeVersion },
+      );
+      f.client.prompt.mockImplementationOnce(async (nativeSession) => {
+        for (const update of [
+          {
+            sessionUpdate: "tool_call",
+            toolCallId: "compact-receipt",
+            kind: "other",
+            status: "in_progress",
+            title: "Compacting conversation history...",
+          },
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "compact-receipt",
+            status: "completed",
+            title: "Compacted conversation history",
+          },
+        ])
           f.client.emit({
             kind: "notification",
             method: "session/update",
-            params: {
-              sessionId: "agent-session-1",
-              update: {
-                sessionUpdate: "tool_call_update",
-                toolCallId: "compact-receipt",
-                status: "completed",
-                title: "Compacted conversation history",
-              },
-            },
+            params: { sessionId: nativeSession, update },
           });
-          expect(
-            (yield* Effect.either(
-              connection.send({ sessionId, prompt: "competing turn", attachments: [], tools: [] }),
-            ))._tag,
-          ).toBe("Left");
-          yield* Effect.sleep(1);
-          expect(late).toEqual([]);
-          expect(f.client.prompt).toHaveBeenCalledOnce();
-        }),
-      ),
-    );
-  });
-  it.each(["3.0.4", "2.25.0"])(
-    "refuses an unverified %s runtime before sending the command",
+        return { stopReason: "end_turn" };
+      });
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+            const events = yield* connection.subscribe;
+            const boundary = yield* events.pipe(
+              Stream.take(1),
+              Stream.runCollect,
+              Effect.forkScoped,
+            );
+            yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools: [] });
+            const compact = connection.compact;
+            if (compact === undefined) throw new Error("Injected verified compaction missing");
+            expect(yield* compact({ sessionId, compactionId: "host-operation" })).toEqual({
+              kind: "compacted",
+            });
+            const observed = Array.from(yield* Fiber.join(boundary));
+            expect(observed.map((event) => event.kind)).toEqual(["context-compacted"]);
+            expect(observed[0]).toMatchObject({ trigger: "requested", sessionId });
+            expect(f.client.prompt).toHaveBeenCalledWith("agent-session-1", "/compact");
+            const late: ProviderRuntimeEvent[] = [];
+            const after = yield* connection.subscribe;
+            yield* after.pipe(
+              Stream.runForEach((event) =>
+                Effect.sync(() => {
+                  late.push(event);
+                }),
+              ),
+              Effect.forkScoped,
+            );
+            f.client.emit({
+              kind: "notification",
+              method: "session/update",
+              params: {
+                sessionId: "agent-session-1",
+                update: {
+                  sessionUpdate: "tool_call_update",
+                  toolCallId: "compact-receipt",
+                  status: "completed",
+                  title: "Compacted conversation history",
+                },
+              },
+            });
+            expect(
+              (yield* Effect.either(
+                connection.send({
+                  sessionId,
+                  prompt: "competing turn",
+                  attachments: [],
+                  tools: [],
+                }),
+              ))._tag,
+            ).toBe("Left");
+            yield* Effect.sleep(1);
+            expect(late).toEqual([]);
+            expect(f.client.prompt).toHaveBeenCalledOnce();
+          }),
+        ),
+      );
+    },
+  );
+  it.each(["2.25.0"])(
+    "refuses compaction on %s, older than the release Octant reviewed, before sending the command",
     async (runtimeVersion) => {
       const f = fixture(
-        { ...vibe, compactionVersions: ["3.0.3"], reviewedCommands: ["compact"] },
+        { ...vibe, compactionVersions: ["3.0.3"], listedCommandsOnly: true },
         { runtimeVersion },
       );
       await Effect.runPromise(
@@ -853,51 +867,46 @@ describe("verified ACP usage", () => {
     );
   });
 
-  it.each(["3.0.2", "3.0.4"])(
-    "leaves usage unsupported below Full access on the unreviewed release %s",
-    async (runtimeVersion) => {
-      const { driver } = fixture(vibe, { runtimeVersion });
-      const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
-      expect(probe.capabilities.usage).toBe("unsupported");
-    },
-  );
+  it("leaves usage unsupported on 3.0.2, older than the release Octant reviewed", async () => {
+    const { driver } = fixture(vibe, { runtimeVersion: "3.0.2" });
+    const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect(probe.capabilities.usage).toBe("unsupported");
+  });
 
-  it("offers a newer release's usage at Full access as unverified", async () => {
+  it("offers a newer release's reviewed features at every level, marked unverified", async () => {
     const { driver } = fixture(vibe, { runtimeVersion: "3.0.4" });
     const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
-    // Every pin Vibe carries was reviewed on an older release: usage and
+    // Every release Vibe's features were reviewed on is older: usage and
     // forms on 3.0.3, its unadvertised HTTP tools on 2.25.0.
     expect(probe.capabilities).toMatchObject({
-      usage: "unsupported",
-      userQuestions: "unavailable",
-      appManagedTools: "unsupported",
-      atFullAccess: {
-        release: "unverified",
-        usage: "supported",
-        userQuestions: "supported",
-        appManagedTools: "supported",
-      },
+      usage: "supported",
+      userQuestions: "supported",
+      appManagedTools: "supported",
     });
     expect(probe.message).toBe(
-      "Mistral Vibe 3.0.4 is newer than the release Octant reviewed. At Full access it keeps usage, forms, Octant's tools, unverified; below Full access those stay off until Octant reviews this release.",
+      "Mistral Vibe 3.0.4 keeps usage, forms, Octant's tools, its process open between turns, unverified: Octant reviewed them on another release.",
     );
   });
 
   it.each(["3.0.2", "3.0.3"])(
-    "gives the reviewed or older release %s no Full access value of its own",
+    "says nothing of an unverified release on the reviewed or older release %s",
     async (runtimeVersion) => {
-      const { unadvertisedHttpMcpVersions: _tools, ...usageAndForms } = vibe;
+      const {
+        unadvertisedHttpMcpVersions: _tools,
+        retainedSessionVersions: _warm,
+        ...usageAndForms
+      } = vibe;
       const { driver } = fixture(usageAndForms, { runtimeVersion });
       const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
-      expect(probe.capabilities).not.toHaveProperty("atFullAccess");
+      expect(probe.message).toBeUndefined();
     },
   );
 
   it.each([
     ["full-access", 1],
-    ["approval-gated", 0],
+    ["approval-gated", 1],
   ] as const)(
-    "reports a newer release's usage in a %s session only at Full access",
+    "reports a newer release's usage in a %s session as at every level",
     async (executionPolicy, reported) => {
       const { driver, client } = fixture(vibe, { runtimeVersion: "3.0.4" });
       const usage = (input: number, output: number) =>
@@ -1132,13 +1141,12 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         resume: "supported",
         interruption: "supported",
         approvals: "supported",
-        // A form-asking agent's questions are unavailable on a release
-        // outside its verified list, as this fixture's is.
+        // This fixture's release is newer than every one a profile's
+        // features were reviewed on, so it keeps them, unverified.
         userQuestions:
-          profile.elicitationVersions === undefined ? profile.userQuestions : "unavailable",
+          profile.elicitationVersions === undefined ? profile.userQuestions : "supported",
         reasoning: "supported",
-        // Only a profile that pins its usage reading loses it on another release.
-        usage: profile.usageVersions === undefined ? "supported" : "unsupported",
+        usage: "supported",
         fileChanges: "unavailable",
         nativeChildAgents: "unavailable",
         // Mistral Vibe's auto-approve mode is its own reviewer; no other agent has one.
@@ -1555,8 +1563,9 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
   });
 
   it("reports app-managed tools only when the ACP handshake advertises HTTP MCP", async () => {
+    const { unadvertisedHttpMcpVersions: _unadvertised, ...advertising } = profile;
     const unsupported = await Effect.runPromise(
-      Effect.scoped(fixture(profile).driver.probe({ instanceId })),
+      Effect.scoped(fixture(advertising).driver.probe({ instanceId })),
     );
     expect(unsupported.capabilities.appManagedTools).toBe("unsupported");
     const supported = await withProcessPlatform("darwin", () =>
@@ -1815,7 +1824,8 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
 
     it.each([
       ["2.25.0", undefined, "supported"],
-      ["2.25.1", undefined, "unsupported"],
+      ["2.25.1", undefined, "supported"],
+      ["2.24.1", undefined, "unsupported"],
       ["2.25.0", false, "unsupported"],
     ] as const)(
       "honors HTTP capability evidence for %s with advertisement %s",
@@ -2900,27 +2910,21 @@ describe("ACP provider driver profile quirks", () => {
     }
   });
 
-  it("offers a Kimi Code release with an unreviewed command as unverified: refused below Full access, run with that command at Full access", async () => {
+  it("runs a command a Kimi Code release lists beyond the ones Octant reviewed at every level, without refusing the release", async () => {
     const { driver, client } = fixture(kimi);
     client.availableCommands.push("unexpected-provider-command");
 
     const probed = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
     expect(probed.readiness).toBe("ready");
-    expect(probed.message).toContain("is unverified");
-    expect(probed.message).toContain("unexpected-provider-command");
+    expect(probed.message).toBeUndefined();
+    expect(probed.commands?.map((command) => command.name)).toContain(
+      "unexpected-provider-command",
+    );
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
-          const refused = yield* Effect.flip(
-            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
-          );
-          expect(refused).toMatchObject({
-            category: "incompatible",
-            message:
-              "Kimi Code lists commands Octant has not reviewed, so this release runs at Full access only, unverified.",
-          });
-          yield* connection.start({ sessionId, modelId, executionPolicy: "full-access" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           yield* connection.send({
             sessionId,
             prompt: "/unexpected-provider-command",
@@ -2934,7 +2938,7 @@ describe("ACP provider driver profile quirks", () => {
     );
   });
 
-  it("runs Kimi Code's own reviewed slash commands in Plan as in Code, and only those", async () => {
+  it("runs Kimi Code's listed slash commands in Plan as in Code, and only those", async () => {
     const { driver, client } = fixture(kimi);
     await Effect.runPromise(
       Effect.scoped(
@@ -2947,7 +2951,7 @@ describe("ACP provider driver profile quirks", () => {
           expect(failure).toEqual({
             category: "unauthorized",
             message:
-              "Kimi Code runs only the slash commands it listed and Octant reviewed. Rephrase the request without a leading slash.",
+              "Kimi Code runs only the slash commands it listed. Rephrase the request without a leading slash.",
           });
           expect(client.prompt).not.toHaveBeenCalled();
           yield* connection.send({ sessionId, prompt: "/compact", attachments: [], tools: [] });
@@ -2962,14 +2966,14 @@ describe("ACP provider driver profile quirks", () => {
         Effect.gen(function* () {
           const connection = yield* code.driver.acquire({ instanceId, projectRoot, mode: "code" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          // A command Kimi Code did not list and Octant did not review stays refused.
+          // A command Kimi Code did not list stays refused.
           const unreviewed = yield* Effect.flip(
             connection.send({ sessionId, prompt: "/skill:embedded", attachments: [], tools: [] }),
           );
           expect(unreviewed).toEqual({
             category: "unauthorized",
             message:
-              "Kimi Code runs only the slash commands it listed and Octant reviewed. Rephrase the request without a leading slash.",
+              "Kimi Code runs only the slash commands it listed. Rephrase the request without a leading slash.",
           });
           expect(code.client.prompt).not.toHaveBeenCalled();
           yield* connection.send({ sessionId, prompt: "/compact", attachments: [], tools: [] });
@@ -3401,7 +3405,8 @@ describe("ACP provider driver profile quirks", () => {
   const { elicitationVersions: _forms, ...vibeWithoutForms } = vibe;
   it.each([
     { profile: vibeWithoutForms, version: "3.0.3", expected: "unsupported" },
-    { profile: vibe, version: "3.0.4", expected: "unavailable" },
+    { profile: vibe, version: "3.0.2", expected: "unavailable" },
+    { profile: vibe, version: "3.0.4", expected: "supported" },
     { profile: vibe, version: "3.0.3", expected: "supported" },
   ])(
     "reports questions as $expected for the selected verified version",
@@ -3417,9 +3422,9 @@ describe("ACP provider driver profile quirks", () => {
 
   it.each([
     ["full-access", true],
-    ["approval-gated", false],
+    ["approval-gated", true],
   ] as const)(
-    "asks a newer release's session form in a %s session only at Full access",
+    "asks a newer release's session form in a %s session as at every level",
     async (executionPolicy, asked) => {
       const { driver, client } = fixture(vibe, {
         runtimeVersion: "3.0.4",
@@ -3528,8 +3533,8 @@ describe("ACP provider driver profile quirks", () => {
           const failure = yield* Effect.flip(
             connection.answerUserInput({ sessionId, requestId: "request-1", answer: "A" }),
           );
-          // Questions travel as forms on the verified release only; this one is not.
-          expect(failure.category).toBe("unavailable");
+          // Questions travel as forms on this release, and no form was asked.
+          expect(failure.category).toBe("protocol");
           yield* connection.stop(sessionId);
         }),
       ),
@@ -3666,27 +3671,31 @@ it("keeps a retained native session identity reserved while it is idle", async (
 it.each([
   ["Google Antigravity keeps", acpProviderProfiles.antigravity, "refused"],
   ["an agent with no reviewed warm release closes", acpProviderProfiles.gemini, "claimed"],
-] as const)("%s its process between turns on any release", async (_label, profile, expected) => {
-  const { driver, registry } = fixture(profile, { runtimeVersion: "9.9.9" });
-  await Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const connection = yield* driver.acquire({ instanceId, mode: "code", projectRoot });
-        yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-        const events = yield* connection.subscribe;
-        const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
-        yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
-        yield* Fiber.join(terminal);
-        yield* connection.stop(sessionId);
-        const claim = registry.claimNativeSession(
-          instanceId,
-          JSON.stringify(["acp-native", profile.kind, "agent-session-1"]),
-        );
-        expect(claim.status).toBe(expected);
-      }),
-    ),
-  );
-});
+  ["Mistral Vibe, newer than its reviewed warm release, keeps", vibe, "refused"],
+] as const)(
+  "%s its process between turns on a newer release",
+  async (_label, profile, expected) => {
+    const { driver, registry } = fixture(profile, { runtimeVersion: "9.9.9" });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, mode: "code", projectRoot });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const events = yield* connection.subscribe;
+          const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          yield* Fiber.join(terminal);
+          yield* connection.stop(sessionId);
+          const claim = registry.claimNativeSession(
+            instanceId,
+            JSON.stringify(["acp-native", profile.kind, "agent-session-1"]),
+          );
+          expect(claim.status).toBe(expected);
+        }),
+      ),
+    );
+  },
+);
 
 it.each([
   ["stays warm through a late update for the finished turn", "late-update"],
@@ -4526,6 +4535,10 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
     root: string,
     mode: "code" | "chat" = "code",
     nativeSetup?: ProviderNativeSetup,
+    launch: {
+      readonly strict?: false;
+      readonly executionPolicy?: "approval-gated" | "plan";
+    } = {},
   ) => {
     const { driver, starts } = fixture(profile);
     const outcome = Effect.runPromise(
@@ -4536,8 +4549,9 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
             connection.start({
               sessionId,
               modelId,
-              executionPolicy: "approval-gated",
+              executionPolicy: launch.executionPolicy ?? "approval-gated",
               ...(nativeSetup === undefined ? {} : { nativeSetup }),
+              ...(launch.strict === false ? { strict: false } : {}),
             }),
           );
           if (result._tag === "Right") yield* connection.stop(sessionId);
@@ -4566,7 +4580,7 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
       expect(result.left).toMatchObject({ category: "incompatible" });
       const entry = file.startsWith(".mcp") ? file : file.split("/").slice(0, 2).join("/");
       expect(result.left.message).toContain(`\`${entry}\``);
-      expect(result.left.message).toMatch(/only once you trust this Project/);
+      expect(result.left.message).toMatch(/only once you allow this Project's code/);
       expect(result.left.message).toMatch(/remove or rename/);
       expect(starts).toEqual([]);
     },
@@ -4596,6 +4610,38 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
         projectCode: false,
       });
       expect((await held.outcome)._tag).toBe("Left");
+    },
+  );
+
+  it.each([
+    ["gemini", ".gemini/settings.json"],
+    ["qwen", ".mcp.json"],
+  ] as const)(
+    "starts %s outside Strict in a Project holding %s, in Plan too, and refuses it under Strict or with the setup turned off",
+    async (kind, file) => {
+      const root = projectWith(file);
+      // What a Plan session carries: no Project code.
+      const planSetup = {
+        subagents: true,
+        webTools: true,
+        skills: true,
+        toolServers: false,
+        hooks: false,
+        projectCode: false,
+      } as const;
+      const plan = { executionPolicy: "plan" } as const;
+      const open = startIn(acpProviderProfiles[kind], root, "code", planSetup, {
+        ...plan,
+        strict: false,
+      });
+      expect((await open.outcome)._tag).toBe("Right");
+      expect(open.starts).toHaveLength(1);
+      const strict = startIn(acpProviderProfiles[kind], root, "code", planSetup, plan);
+      expect((await strict.outcome)._tag).toBe("Left");
+      const turnedOff = startIn(acpProviderProfiles[kind], root, "code", undefined, {
+        strict: false,
+      });
+      expect((await turnedOff.outcome)._tag).toBe("Left");
     },
   );
 

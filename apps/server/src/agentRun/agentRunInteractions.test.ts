@@ -319,6 +319,37 @@ describe("managed child interactions", () => {
     });
     expect(await interactions.askUser(input)).toBeUndefined();
   });
+
+  it("asks a child's secret question on its parent as one, so its answer is never journaled", async () => {
+    const question = vi.fn<NativeHarnessQuestionStore["ask"]>(async () => ({
+      status: "answered",
+      answer: "hunter2",
+      questionId: "77777777-7777-4777-8777-777777777779" as never,
+    }));
+    const interactions = createAgentRunInteractions({
+      parentLead,
+      parentAuthority: () => run.authority,
+      getById: () => run,
+      approvals: { ask: vi.fn() },
+      questions: { ask: question },
+    });
+    const answer = await interactions.askUser({
+      run,
+      signal: new AbortController().signal,
+      event: {
+        ...eventFacts,
+        kind: "user-input-request",
+        requestId: "question-2",
+        prompt: "Database credential?",
+        options: [],
+        secret: true,
+      },
+    });
+    expect(answer).toBe("hunter2");
+    expect(question).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: "Database credential?", secret: true }),
+    );
+  });
 });
 
 it("binds a phone response to the child execution's own admitting scope and current authority", () => {

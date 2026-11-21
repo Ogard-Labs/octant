@@ -1308,6 +1308,42 @@ function ActiveSectionContent({
               </div>
             </SettingsSection>
           </div>
+          <div hidden={harnessEndpointOpen} id="settings-provider-channels">
+            <SettingsSection title="Provider channels">
+              <div className="setgroup">
+                <SettingRow
+                  description="Leaves each provider's own usage metrics, error reports and feedback uploads to its own settings. Off by default: Octant turns them off at launch. Strict turns them off whatever this says. Applies from the next turn."
+                  focused={focusedSetting === settingId("provider-own-telemetry")}
+                  label="Let providers send their own telemetry"
+                  scope="host"
+                  settingId="provider-own-telemetry"
+                >
+                  <OctantSwitch
+                    label="Let providers send their own telemetry"
+                    checked={props.settings.providerTelemetry}
+                    onCheckedChange={(checked) =>
+                      props.onSettingsChange({ providerTelemetry: checked })
+                    }
+                  />
+                </SettingRow>
+                <SettingRow
+                  description="Lets each provider check for and install a newer version of itself. Off by default, since Octant installs and updates provider CLIs; Update CLI is unaffected. Strict keeps it off whatever this says. Applies from the next turn."
+                  focused={focusedSetting === settingId("provider-self-update")}
+                  label="Let providers update themselves"
+                  scope="host"
+                  settingId="provider-self-update"
+                >
+                  <OctantSwitch
+                    label="Let providers update themselves"
+                    checked={props.settings.providerSelfUpdate}
+                    onCheckedChange={(checked) =>
+                      props.onSettingsChange({ providerSelfUpdate: checked })
+                    }
+                  />
+                </SettingRow>
+              </div>
+            </SettingsSection>
+          </div>
           <ProviderCatalogSection
             discoveryController={props.discoveryController}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}

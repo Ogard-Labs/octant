@@ -94,7 +94,9 @@ describe("provider terminal", () => {
     const launch = resolve(instance("claude"), "darwin", "/bin/zsh", false);
     if (launch.status !== "resolved") throw new Error("expected a launch");
     expect(launch.environment.CLAUDE_CONFIG_DIR).toBe("/Users/person/.octant/claude-work");
-    expect(launch.environment.DISABLE_TELEMETRY).toBeUndefined();
+    // Outside Strict telemetry is off until the person turns it on, and the
+    // terminal does not read that switch yet, so the guard stays.
+    expect(launch.environment.DISABLE_TELEMETRY).toBe("1");
     expect(launch.environment.ANTHROPIC_API_KEY).toBeUndefined();
   });
 

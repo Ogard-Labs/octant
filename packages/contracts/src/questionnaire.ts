@@ -8,6 +8,13 @@ export const MAX_QUESTIONNAIRE_ANSWER_LENGTH = 16_384;
 export const QuestionnaireAnswerText = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(MAX_QUESTIONNAIRE_ANSWER_LENGTH),
 );
+/**
+ * The longest answer to a provider question that asks for a secret the host
+ * passes on, as a one-use credential card's token. Every surface's secret
+ * answer is carried as a plain string the host checks against this, so a
+ * decode failure never prints the value.
+ */
+export const MAX_SECRET_ANSWER_LENGTH = 4096;
 const Option = Schema.Struct({
   id: Id,
   label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),

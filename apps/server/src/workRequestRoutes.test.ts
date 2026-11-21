@@ -89,10 +89,13 @@ describe("Work request routes", () => {
       }),
     );
     expect(response?.status).toBe(200);
-    expect(execute).toHaveBeenCalledWith(windowId, command, {
-      kind: "local-user",
-      actorId: "00000000-0000-4000-8000-000000000002",
-    });
+    // A window on this host speaks for the person, who alone answers a secret question.
+    expect(execute).toHaveBeenCalledWith(
+      windowId,
+      command,
+      { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" },
+      "user",
+    );
   });
 
   it("maps request failures to typed HTTP responses", async () => {

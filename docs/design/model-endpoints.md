@@ -467,7 +467,7 @@ Under [Claude artifacts and Claude Design work as in Claude Code](decisions.md#c
 (maintainer decision, 2026-11-16; designed, not built) the switch alone
 offers the tool in the account's Work and Code threads, with every action so
 Claude Design works; the telemetry warning goes once the telemetry guard
-follows the person's own provider settings outside Strict, and each account
+follows the person's provider telemetry switch outside Strict, and each account
 keeps its own switch ([several Claude accounts](provider-runtimes.md#claude-code)).
 
 ### Add endpoint
