@@ -260,6 +260,12 @@ export interface AcpReportedUsageState {
   /** The session cost charged to earlier turns; absent until one is known. */
   charged?: AcpSessionCost | undefined;
   latestCost?: AcpSessionCost | undefined;
+  /**
+   * Whether a cost arrived since the last settled turn. Without one,
+   * `latestCost` is the figure already charged, and their difference would
+   * read as a provider-priced zero for a turn whose cost is unknown.
+   */
+  costUnsettled?: boolean;
   /** Context reported during the running turn; an earlier turn's is stale. */
   context?: { readonly used: number; readonly size: number } | undefined;
 }
@@ -287,12 +293,19 @@ export function observeAcpUsageUpdate(
     Number.isFinite(amount) &&
     amount >= 0 &&
     typeof currency === "string"
-  )
+  ) {
     state.latestCost = { amount, currency };
+    state.costUnsettled = true;
+  }
 }
 
 export function beginAcpReportedTurn(state: AcpReportedUsageState): void {
-  state.charged ??= state.latestCost;
+  if (state.charged === undefined && state.latestCost !== undefined) {
+    // An existing session's cost reported before its first turn is the
+    // baseline that turn grows from, not spend of that turn.
+    state.charged = state.latestCost;
+    state.costUnsettled = false;
+  }
   state.context = undefined;
 }
 
@@ -300,7 +313,8 @@ export function beginAcpReportedTurn(state: AcpReportedUsageState): void {
  * Settles a turn of an agent read by ACP's standard usage. Its cost is what
  * the session's cumulative cost grew by since the last settled turn, so a
  * cost update that arrives after a reply is charged to the next turn rather
- * than lost. Only US dollars become `costUsd`; another currency or unit
+ * than lost. A turn with no cost update since the last settlement is left
+ * unpriced rather than charged zero. Only US dollars become `costUsd`; another currency or unit
  * ("credits") leaves the turn unpriced by the provider, as does a cost that
  * fell or changed unit. A reply without whole token counts reports nothing,
  * so the turn records an unavailable row.
@@ -313,11 +327,14 @@ export function finishAcpReportedTurn(
   const charged = state.charged;
   const latest = state.latestCost;
   const context = state.context;
+  const unsettled = state.costUnsettled === true;
   state.charged = latest ?? charged;
+  state.costUnsettled = false;
   state.context = undefined;
   const tokens = acpTurnUsage(receipt, withoutTotal);
   if (tokens === undefined) return;
   const costUsd =
+    unsettled &&
     charged !== undefined &&
     latest !== undefined &&
     latest.currency === "USD" &&

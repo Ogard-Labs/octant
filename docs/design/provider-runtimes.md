@@ -2497,7 +2497,10 @@ by ACP's standard usage, and its probe declares `usage: "supported"`
   into a later one.
 - **Cost.** `cost` is the session's cumulative cost. A turn is charged what
   it grew by since the last settled turn, so an update that arrives after a
-  reply is charged to the next turn rather than lost. A session Octant opened
+  reply is charged to the next turn rather than lost. A turn with no cost
+  update since the last settlement is left without a provider cost rather
+  than charged zero; an update restating the same total charges zero. A
+  session Octant opened
   with `session/new` starts from zero; one it loaded or resumed is priced
   from the second cost it sees. Only `currency: "USD"` becomes `costUsd`;
   another currency or unit ("credits"), a cost that fell or a changed unit

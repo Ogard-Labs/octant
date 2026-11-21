@@ -272,6 +272,30 @@ describe("standard ACP usage updates", () => {
     expect(usage).not.toHaveProperty("contextTokens");
   });
 
+  it("leaves a turn unpriced when the agent sent no cost update since the last settled turn", () => {
+    const state = acpReportedUsageState("new");
+    beginAcpReportedTurn(state);
+    observeAcpUsageUpdate(state, update(0.5));
+    expect(finishAcpReportedTurn(state, reply)).toMatchObject({ costUsd: 0.5 });
+    beginAcpReportedTurn(state);
+    const silent = finishAcpReportedTurn(state, reply);
+    expect(silent).toMatchObject({ inputTokens: 100, outputTokens: 20 });
+    expect(silent).not.toHaveProperty("costUsd");
+    beginAcpReportedTurn(state);
+    observeAcpUsageUpdate(state, update(0.8));
+    expect(finishAcpReportedTurn(state, reply)).toMatchObject({ costUsd: 0.3 });
+  });
+
+  it("charges zero when the agent restates an unchanged cumulative cost", () => {
+    const state = acpReportedUsageState("new");
+    beginAcpReportedTurn(state);
+    observeAcpUsageUpdate(state, update(0.5));
+    finishAcpReportedTurn(state, reply);
+    beginAcpReportedTurn(state);
+    observeAcpUsageUpdate(state, update(0.5));
+    expect(finishAcpReportedTurn(state, reply)).toMatchObject({ costUsd: 0 });
+  });
+
   it("prices no turn of a loaded session until a cost was reported before it", () => {
     const state = acpReportedUsageState("existing");
     beginAcpReportedTurn(state);
