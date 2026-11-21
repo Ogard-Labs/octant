@@ -127,6 +127,7 @@
     "./project-view": "./src/projectView.ts",
     "./sidebar-thread-status": "./src/sidebarThreadStatus.ts",
     "./projects": "./src/projects.ts",
+    "./provider-folder-scan": "./src/providerFolderScan.ts",
     "./acp-agent-profiles": "./src/acpAgentProfiles.ts",
     "./providers": "./src/providers.ts",
     "./shield": "./src/shield.ts",
