@@ -36,3 +36,6 @@ packages/*/src/**/*.d.ts
 
 # The share service Compose settings hold its operator token
 apps/share/.env
+
+# PIDs the fake OpenCode CLI fixture records while server tests run
+apps/server/.fake-opencode-pids
