@@ -529,19 +529,12 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                 slotWithCandidates(
                   benchmarkRole.id,
                   saved,
-                  models.map(
-                    (model) =>
-                      saved?.candidates.find(
-                        (candidate) =>
-                          candidate.hostId === hostId &&
-                          candidate.providerInstanceId === model.providerInstanceId &&
-                          candidate.modelId === model.modelId,
-                      ) ?? {
-                        hostId,
-                        providerInstanceId: model.providerInstanceId,
-                        modelId: model.modelId,
-                      },
-                  ),
+                  models.map((model) => ({
+                    hostId,
+                    providerInstanceId: model.providerInstanceId,
+                    modelId: model.modelId,
+                    ...(model.effort === undefined ? {} : { reasoning: model.effort }),
+                  })),
                 ),
               ),
             );

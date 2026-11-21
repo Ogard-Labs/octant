@@ -14,8 +14,8 @@ export function rankModelsForSuite(
   readMetrics: (cell: BenchmarkCell) => BenchmarkCellMetrics | undefined,
   now: number,
 ): ReadonlyArray<BenchmarkModelAdvice> {
-  const seen = new Set<string>();
-  const result: BenchmarkModelAdvice[] = [];
+  const newest = new Map<string, BenchmarkRun["runId"]>();
+  const result = new Map<string, BenchmarkModelAdvice>();
   const finished = runs
     .filter((run) => run.status === "finished")
     .sort(
@@ -26,8 +26,9 @@ export function rankModelsForSuite(
   for (const run of finished) {
     for (const [index, contender] of run.contenders.entries()) {
       const key = JSON.stringify([contender.providerInstanceId, contender.modelId]);
-      if (seen.has(key)) continue;
-      seen.add(key);
+      const latest = newest.get(key);
+      if (latest !== undefined && latest !== run.runId) continue;
+      newest.set(key, run.runId);
       const cells = run.cells.filter((cell) => cell.contenderIndex === index);
       if (new Set(cells.map((cell) => cell.caseId)).size < MIN_CASES) continue;
       const passed = cells.filter(
@@ -54,23 +55,31 @@ export function rankModelsForSuite(
             ? upper
             : ((times[middle - 1] ?? upper) + upper) / 2;
       const runAt = run.endedAt ?? run.startedAt;
-      result.push({
+      const variant: BenchmarkModelAdvice = {
         providerInstanceId: contender.providerInstanceId,
         modelId: contender.modelId,
+        ...(contender.effort === undefined ? {} : { effort: contender.effort }),
         passRate,
         ...(totalCost === undefined ? {} : { costPerPass: totalCost / passed }),
         ...(medianMs === undefined ? {} : { medianMs }),
         runAt,
         stale: now - Date.parse(runAt) > STALE_AFTER_MS,
-      });
+      };
+      const incumbent = result.get(key);
+      if (incumbent === undefined || compareAdvice(variant, incumbent) < 0)
+        result.set(key, variant);
     }
   }
-  return result.sort(
-    (a, b) =>
-      compareReported(a.costPerPass, b.costPerPass) ||
-      compareReported(a.medianMs, b.medianMs) ||
-      a.providerInstanceId.localeCompare(b.providerInstanceId) ||
-      a.modelId.localeCompare(b.modelId),
+  return [...result.values()].sort(compareAdvice);
+}
+
+function compareAdvice(a: BenchmarkModelAdvice, b: BenchmarkModelAdvice): number {
+  return (
+    compareReported(a.costPerPass, b.costPerPass) ||
+    compareReported(a.medianMs, b.medianMs) ||
+    a.providerInstanceId.localeCompare(b.providerInstanceId) ||
+    a.modelId.localeCompare(b.modelId) ||
+    (a.effort ?? "").localeCompare(b.effort ?? "")
   );
 }
 

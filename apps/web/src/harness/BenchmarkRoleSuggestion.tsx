@@ -3,13 +3,13 @@ import type { BenchmarksClient } from "@octant/client-runtime";
 import {
   MAX_NATIVE_HARNESS_SLOT_CANDIDATES,
   type BenchmarkAdviceResponse,
+  type BenchmarkModelAdvice,
   type BenchmarkSuiteId,
 } from "@octant/contracts";
 import {
   findPickerModel,
   isDraftSelectionSelectable,
   MODEL_ROLE_NEEDS,
-  type ModelPickerSelection,
   type PickerGroup,
 } from "@octant/domain";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
@@ -21,7 +21,7 @@ export function BenchmarkRoleSuggestion(props: {
   readonly client: Pick<BenchmarksClient, "listSuites" | "advice">;
   readonly role: { readonly id: string; readonly label: string };
   readonly groups: ReadonlyArray<PickerGroup>;
-  readonly onAccept: (models: ReadonlyArray<ModelPickerSelection>) => void;
+  readonly onAccept: (models: ReadonlyArray<BenchmarkModelAdvice>) => void;
   readonly onCancel: () => void;
   readonly disabled: boolean;
 }) {
@@ -112,7 +112,9 @@ export function BenchmarkRoleSuggestion(props: {
             <ol aria-label="Ranked benchmark models">
               {models.map(({ model, displayName }) => (
                 <li key={`${model.providerInstanceId}:${model.modelId}`}>
-                  {displayName} · {model.runAt.slice(0, 10)}
+                  {displayName}
+                  {model.effort === undefined ? "" : ` (${model.effort} effort)`} ·{" "}
+                  {model.runAt.slice(0, 10)}
                   {model.costPerPass === undefined ? " · Cost not reported" : ""}
                   {model.stale ? " · Stale" : ""}
                 </li>

@@ -451,6 +451,7 @@ describe("NativeHarnessRoutingPanel roles", () => {
               {
                 modelId: "sonnet-5-5",
                 providerInstanceId: claudeId,
+                effort: "medium",
                 passRate: 1,
                 runAt: now,
                 stale: true,
@@ -507,7 +508,12 @@ describe("NativeHarnessRoutingPanel roles", () => {
     expect(updateRouting).toHaveBeenCalledWith({
       expectedVersion: 3,
       configuration: {
-        slots: [{ id: "default", candidates: [candidate(claudeId, "sonnet-5-5")] }],
+        slots: [
+          {
+            id: "default",
+            candidates: [{ ...candidate(claudeId, "sonnet-5-5"), reasoning: "medium" }],
+          },
+        ],
         jobSlots: [],
       },
     });

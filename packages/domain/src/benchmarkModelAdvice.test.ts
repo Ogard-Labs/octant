@@ -86,6 +86,36 @@ it("ranks the newest finished result per model by cost per pass, median time and
   expect(rankModelsForSuite(runs.toReversed(), 0.8, read, now)).toEqual(ranked);
 });
 
+it("recommends the best passing effort from the newest run for each model", () => {
+  const sample = run(9, ["same", "same", "same"], recent);
+  const contenders = sample.contenders.map((model, i) => ({
+    ...model,
+    effort: ["low", "medium", "high"][i] ?? "low",
+  }));
+  const ranked = rankModelsForSuite(
+    [
+      {
+        ...sample,
+        contenders,
+        cells: sample.cells.map((cell) =>
+          cell.contenderIndex === 0 ? { ...cell, checks: [] } : cell,
+        ),
+      },
+      run(8, ["same"], old),
+    ],
+    0.8,
+    (cell) => ({ stopReason: "end-of-turn", costUsd: 3 - cell.contenderIndex, wallMs: 10 }),
+    now,
+  );
+  expect(ranked).toHaveLength(1);
+  expect(ranked[0]).toMatchObject({
+    modelId: "same",
+    effort: "high",
+    costPerPass: 1,
+    runAt: recent,
+  });
+});
+
 it("counts failures in the denominator and requires complete cost reporting", () => {
   const sample = run(9, ["sometimes"], recent);
   const ranked = rankModelsForSuite(

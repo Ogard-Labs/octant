@@ -72,6 +72,7 @@ export function ComposerBenchmarkHint(props: {
           {model.costPerPass === undefined
             ? `Passed your ${suite.name} suite: ${picker.model.displayName} (cost not reported).`
             : `Passed your ${suite.name} suite at the lowest cost: ${picker.model.displayName}.`}{" "}
+          {model.effort === undefined ? "" : `Effort: ${model.effort}. `}
           {model.runAt.slice(0, 10)}
           {model.stale ? " · Stale" : ""}
         </span>
@@ -80,6 +81,9 @@ export function ComposerBenchmarkHint(props: {
             props.onSelect({
               providerInstanceId: model.providerInstanceId,
               modelId: model.modelId,
+              ...(model.effort === undefined
+                ? {}
+                : { modelOptionValues: { effort: model.effort } }),
             })
           }
           size="sm"

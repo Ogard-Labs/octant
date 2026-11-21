@@ -58,7 +58,7 @@ describe("ComposerModelPicker", () => {
           suiteId: "80000000-0000-4000-8000-0000000000aa",
           name: "Code review",
           models: [
-            { ...model, modelId: modelTwo, costPerPass: 0.01 },
+            { ...model, modelId: modelTwo, costPerPass: 0.01, effort: "high" },
             { ...model, modelId: modelOne, costPerPass: 0.03 },
           ],
         },
@@ -93,7 +93,11 @@ describe("ComposerModelPicker", () => {
     expect(await screen.findByText(/Code review.*2026-01-01.*Stale/)).toBeVisible();
     expect(onSelect).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Use model" }));
-    expect(onSelect).toHaveBeenCalledWith({ providerInstanceId: providerA, modelId: modelTwo });
+    expect(onSelect).toHaveBeenCalledWith({
+      providerInstanceId: providerA,
+      modelId: modelTwo,
+      modelOptionValues: { effort: "high" },
+    });
     view.rerender(tree(first, "code", modelTwo));
     expect(screen.queryByRole("button", { name: "Use model" })).not.toBeInTheDocument();
     view.rerender(tree(first, "code"));

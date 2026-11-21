@@ -442,6 +442,7 @@ export type BenchmarkAdviceRequest = typeof BenchmarkAdviceRequest.Type;
 export const BenchmarkModelAdvice = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
+  effort: Schema.optional(boundedText(40)),
   passRate: BenchmarkPassThreshold,
   costPerPass: Schema.optional(NonNegativeNumber),
   medianMs: Schema.optional(NonNegativeNumber),
