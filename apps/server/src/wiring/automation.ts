@@ -706,6 +706,9 @@ export function wireAutomation(deps: AutomationDependencies) {
         }
       },
     },
+    followUpLatenessLimitHours: () =>
+      (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+        .followUpLatenessLimitHours,
     readFollowUpThread: ({ mode, threadId }) => {
       // Chat has no follow-ups: a Chat definition cannot target a thread.
       if (mode === "chat") return { kind: "missing" };

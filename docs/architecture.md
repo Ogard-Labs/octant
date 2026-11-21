@@ -4586,14 +4586,18 @@ the thread it came from.
   anything is sent, so a thread archived or marked Done during the wait
   still refuses. A follow-up archived while it waits ends its run
   `cancelled`, a paused one keeps waiting, and one still waiting a day past
-  its time fails as `follow-up-missed`. The run's one first-turn request id
+  its time (the lateness limit below) fails as `follow-up-missed`. The run's one first-turn request id
   keeps the turn from being sent twice. (`thread-busy` is no longer
   recorded; it stays in the contract so older journals decode.) A refusal fails the run with its
   reason in the journal and sends nothing; unlike other routines, a follow-up
   is not left paused, because the once trigger then ends it.
 - **Follow-up missed window.** A follow-up missed while the host was asleep or
-  off runs once on return if it is at most 24 hours late. Past that it fails
-  as `follow-up-missed` and sends nothing: a check made a day late is stale.
+  off runs once on return if it is at most the person's lateness limit late:
+  24 hours by default, a host setting in Settings › Permissions
+  (`followUpLatenessLimitHours`, 1 to 720; maintainer decision, 2026-11-21).
+  Past that it fails as `follow-up-missed` and sends nothing: a check made
+  that late is stale. The same limit ends a follow-up still waiting on a busy
+  thread.
   Either way it runs at most once and then ends itself as `exhausted`, the
   state every spent one-time routine reaches, with its run history kept.
 - **Asleep or offline.** The scheduler is an in-process timer in the running
@@ -5039,7 +5043,7 @@ approved by the maintainer on 2026-10-12. This section is the effective rule.
   refused in Plan, on excluded profiles and cancelled turns; managed children,
   and Chat gain no messaging rights. Sending again, including retrying a
   send, creates a new durable message; receipt retries use the existing ID.
-- **Expiry.** Each newly admitted message records an explicit deadline 24 hours after admission under the maintainer-approved lifetime policy. The host journals `agent.message-expired@1` before deleting a queued body or freeing its slot; expiry is a separate receipt and never counts as provider delivery or refusal. Delivery rechecks expiry before carrying a message, startup reconciles it, and a scoped host sweep checks at most once a minute. An append failure retains the body for retry. Older records without a deadline retain their existing lifetime; no timestamp is reinterpreted as consent. A message already journaled delivered or acknowledged does not expire. The Chat mention path is unchanged.
+- **Expiry.** A newly admitted message records no deadline and waits until a turn carries it, it is refused, or its thread is purged (maintainer decision, 2026-11-21; before, each recorded a deadline 24 hours after admission, which lost a message sent to a thread the person returned to the next week). The body store's disk budget bounds what waits. A deadline an earlier host recorded still applies: the host journals `agent.message-expired@1` before deleting a queued body or freeing its slot; expiry is a separate receipt and never counts as provider delivery or refusal. Delivery rechecks expiry before carrying a message, startup reconciles it, and a scoped host sweep checks at most once a minute. An append failure retains the body for retry. No timestamp is reinterpreted as a deadline. A message already journaled delivered or acknowledged does not expire. The Chat mention path is unchanged.
 - **Refusals in the Agents center.** A refusal is journaled at the send, at
   the tool (a turn in Plan, a profile without the tool, a call with no
   message; a cancelled turn is not a refusal), and at delivery, with these
@@ -11018,8 +11022,8 @@ the model at another size.
   answer, an expiry, or a cancellation from any surface clears it. The
   question and its answer stay journaled on the session (Work, Code) or the
   attempt (Chat) and nowhere else. At most 32
-  questions and 32 approvals wait at once across the whole host, the cap MCP
-  and browser tool approvals use; one
+  questions and 32 approvals wait at once across the whole host, the cap
+  browser tool approvals use; one
   past it is refused at once as `question-too-many-waiting` or
   `approval-too-many-waiting`, journals nothing, and tells the lead nobody
   was asked. `NativeHarnessTurnObserver` puts the stable
@@ -12661,11 +12665,10 @@ that is not yet effective for the thread is refused and never reaches the model.
     its registration's deadline even before the expiry is reconciled) goes
     to nobody else and runs out.
 
-  At most 32 of those approvals
-  wait at once across the whole host; the cap is shared by every thread and
-  window, not counted per thread. A call past that cap is denied immediately
-  with the refusal a declined call already uses, and answering frees the
-  slot. An unanswered approval does not expire: it waits in Needs you until a
+  Any number of those approvals may wait across the host (maintainer
+  decision, 2026-11-21; before, a host-wide cap of 32 denied the next call at
+  once): a call waits for its answer before its turn can make another, so
+  the turns running bound how many wait. An unanswered approval does not expire: it waits in Needs you until a
   person answers it, and a host-run turn with no window (a routine, a goal
   loop) waits there too instead of being refused (maintainer request,
   2026-11-12). Built: an approval has no expiry and holds no timer; it is
@@ -13204,7 +13207,9 @@ person reads the exact command first**, as the shell-quoted command line with
 the account's folder variable and a `<secret>` placeholder, plus a plain
 sentence on what it adds, and chooses Run this command once; `plan` returns a
 plan id and a random confirmation token, `apply` runs only that plan with its token, once,
-within ten minutes, in the window that asked, and refuses when the account or
+within the time set in Settings › Permissions (`toolingCommandConfirmMinutes`,
+ten minutes by default, up to a day; maintainer decision, 2026-11-21), in the
+window that asked, and refuses when the account or
 its folder changed since (`changed-plan`), comparing the command written out as text when its turn comes, not a hash. **The person only**: every step
 needs a local window's capability or a paired device's session (maintainer
 decision, 2026-11-12; not built yet: today a request forwarded from a paired
@@ -15551,6 +15556,14 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     up to an hour, and the host refuses a wait past the setting; a Claude Code
     thread still ends one tool call at eleven minutes; maintainer decision,
     2026-11-19; built).
+  - **Octant Shield, follow-ups and shown commands** (maintainer decision,
+    2026-11-21; built). Shield's brakes (3 denials in a row, 20 in a thread),
+    how late a follow-up may still run (24 hours, up to 720) and how long a
+    shown provider command may still be run (ten minutes, up to a day) are
+    host settings with those defaults. Removed instead of made settings: the
+    host-wide cap of 32 waiting MCP tool approvals, and the 24-hour deadline
+    on a newly queued thread message; neither protected anything a person
+    would tune, and each refused or lost real work.
   - **Routines.** A file routine's 64-run activity window can be cleared or
     raised, and a setting, off by default, **Start agent-created routines
     active at Full access** lets a routine an agent creates at Full access
@@ -19950,8 +19963,11 @@ past the thread's level; a `network-access` answer yields `call` rules only,
 as the [egress rules](#security-and-authority) state for the reviewer. Once a
 thread is tainted, Shield cannot allow irreversible, publish, or new-egress
 classes; those go to the person, as taint already withdraws the provider's
-own reviewer. After 3 denials in a row, or 20 in one thread, Shield pauses
-and the next call goes to the person.
+own reviewer. After a number of denials in a row (3 by default), or in one
+thread (20 by default), Shield pauses and the next call goes to the person;
+both counts are host settings in Settings › Permissions, read at each review
+([Octant's own limits become settings](#security-and-authority); maintainer
+decision, 2026-11-21).
 
 **Watcher.** The Watcher reads outside content as it enters the thread, with
 deterministic detectors and no model call. Built for every successful result

@@ -63,6 +63,8 @@ export interface AutomationDispatchServiceOptions {
     readonly mode: AutomationRun["definitionSnapshot"]["mode"];
     readonly threadId: AutomationThreadId;
   }) => AutomationFollowUpThreadFacts;
+  /** Settings' `followUpLatenessLimitHours`, read at each offer; absent is one day. */
+  readonly followUpLatenessLimitHours?: () => number;
   readonly now: () => UtcTimestamp;
   readonly launchClaimLeaseMs?: number;
   /**
@@ -99,6 +101,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
   readonly #capacity: AutomationCapacityAdmissionPort;
   readonly #resolveFacts: AutomationDispatchServiceOptions["resolveFacts"];
   readonly #readFollowUpThread: AutomationDispatchServiceOptions["readFollowUpThread"];
+  readonly #followUpLatenessLimitHours: AutomationDispatchServiceOptions["followUpLatenessLimitHours"];
   readonly #now: () => UtcTimestamp;
   readonly #launchClaimLeaseMs: number;
   readonly #schedule: (work: () => Promise<void>) => void;
@@ -114,6 +117,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     this.#capacity = options.capacity;
     this.#resolveFacts = options.resolveFacts;
     this.#readFollowUpThread = options.readFollowUpThread;
+    this.#followUpLatenessLimitHours = options.followUpLatenessLimitHours;
     this.#now = options.now;
     this.#launchClaimLeaseMs = options.launchClaimLeaseMs ?? DEFAULT_LAUNCH_CLAIM_LEASE_MS;
     this.#schedule =
@@ -281,7 +285,9 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     if (definition.lifecycle === "paused") return undefined;
     const threadId = definition.originThreadId;
     const snapshot = run.definitionSnapshot;
+    const latenessLimitHours = this.#followUpLatenessLimitHours?.();
     const decision = decideAutomationFollowUp({
+      ...(latenessLimitHours === undefined ? {} : { latenessLimitHours }),
       projectId: String(snapshot.projectId),
       providerInstanceId: String(snapshot.executionProfile.providerInstanceId),
       modelId: String(snapshot.executionProfile.modelId),
