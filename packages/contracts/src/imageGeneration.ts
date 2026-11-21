@@ -69,6 +69,7 @@ export const ImageArtifactMediaType = Schema.Literal(...IMAGE_ARTIFACT_MEDIA_TYP
 export type ImageArtifactMediaType = typeof ImageArtifactMediaType.Type;
 
 export const MAX_GENERATED_IMAGE_BYTES = 20_971_520;
+export const THREAD_IMAGE_CHUNK_BYTES = 4 * 1_024 * 1_024;
 export const MAX_IMAGE_PROMPT_CHARACTERS = 32_000;
 export const MAX_IMAGE_VARIANTS = 4;
 export const IMAGE_JOB_HOST_CONCURRENCY = 2;

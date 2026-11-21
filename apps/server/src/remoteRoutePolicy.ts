@@ -8,6 +8,7 @@ import {
   HUB_WAKE_MAX_SPOKES,
   HUB_WAKE_MAX_TIMES_PER_SPOKE,
   MAX_CODE_ATTACHMENT_BYTES,
+  THREAD_IMAGE_CHUNK_BYTES,
   MAX_WORK_ATTACHMENT_BYTES,
   OWNER_IDENTITY_KEY_HEADER,
   OWNER_SESSION_HEADER,
@@ -16,6 +17,9 @@ import {
   REMOTE_SERVER_PROXY_RELAYED,
   REMOTE_SERVER_PROXY_RELAYED_HEADER,
   SHELL_SETTINGS_PATH,
+  SERVICE_OFFERS_DECIDE_PATH,
+  SERVICE_OFFERS_PATH,
+  SERVICE_OFFER_DECISION_MAX_BYTES,
   WORK_ATTACHMENT_MEDIA_TYPES,
 } from "@octant/contracts";
 import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
@@ -899,6 +903,29 @@ const DEFAULT_AUTHENTICATED_SERVICE_ROUTES: readonly RemoteRouteDefinition[] = [
 ];
 
 const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
+  { kind: "exact" as const, path: "/api/image/jobs", methods: ["GET"] as const, allowQuery: true },
+  {
+    kind: "exact" as const,
+    path: "/api/image/thread-artifact",
+    methods: ["GET"] as const,
+    allowQuery: true,
+    maxResponseBytes: THREAD_IMAGE_CHUNK_BYTES,
+  },
+  {
+    kind: "exact" as const,
+    path: SERVICE_OFFERS_PATH,
+    methods: ["GET"] as const,
+    allowQuery: true,
+    maxResponseBytes: 512 * 1_024,
+  },
+  {
+    kind: "exact" as const,
+    path: SERVICE_OFFERS_DECIDE_PATH,
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: SERVICE_OFFER_DECISION_MAX_BYTES,
+    maxResponseBytes: 4_096,
+  },
   {
     kind: "prefix" as const,
     path: "/api/native-harness/sessions/",

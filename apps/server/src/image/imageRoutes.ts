@@ -1,10 +1,8 @@
 import {
+  THREAD_IMAGE_CHUNK_BYTES,
   decodeImageArtifactId,
   decodeImageGenerationEnqueueRequest,
   decodeImageGenerationJobsResponse,
-  decodeImageGenerationOfferDecision,
-  decodeImageGenerationOfferDecisionResult,
-  decodeImageGenerationOffersResponse,
   decodeImageGenerationProfilesResponse,
   decodeImageGenerationSaveRequest,
   decodeImageGenerationSaveResult,
@@ -20,12 +18,11 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { listEligibleImageProfiles } from "@octant/domain";
-import { authenticateRouteWindowId } from "../principalRouteContext";
+import { authenticateRoutePrincipal, retainRouteAdmissionCurrent } from "../principalRouteContext";
+import { principalActsAsHostPerson, type ClientPrincipal } from "../clientPrincipal";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
-import type { ImageGenerationOfferService } from "./imageGenerationOfferService";
 import type { ImageJobService, ImageJobServiceError } from "./imageJobService";
-import type { KeptImageGenerationChoices } from "./keptImageGenerationChoices";
 
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
@@ -35,16 +32,13 @@ const ARTIFACT_PATH =
 
 export interface ImageRouteDependencies {
   readonly jobs: ImageJobService;
-  /** Agents' requests to generate, answered from the thread's card. */
-  readonly offers?: Pick<ImageGenerationOfferService, "list" | "find" | "claim">;
-  /** Where "Don't ask again" is kept: the thread's Project, or the thread outside one. */
-  readonly kept?: Pick<KeptImageGenerationChoices, "remember">;
   readonly listInstances: () => ReadonlyArray<ProviderInstance>;
   readonly readImageGenerationSettings: () => ImageGenerationSettings;
   readonly authorizeScope: (
     windowId: WindowId,
     threadKind: ImageJobThreadKind,
     scopeId: ImageGenerationScopeId,
+    principal?: ClientPrincipal,
   ) => Promise<boolean>;
   readonly saveToProject: (input: {
     readonly windowId: WindowId;
@@ -83,9 +77,9 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
 
-    let windowId: WindowId;
+    let context;
     try {
-      windowId = authenticateRouteWindowId({
+      context = authenticateRoutePrincipal({
         request,
         store: dependencies.windowAuthorityStore,
         now: now(),
@@ -97,6 +91,21 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
       return failure("Image request is invalid.", 400, origin);
     }
 
+    const windowId = context.scopeId;
+    const remote = context.principal.kind !== "local-window";
+    if (
+      remote &&
+      (!principalActsAsHostPerson(context.principal) ||
+        request.method !== "GET" ||
+        (route !== "jobs" && route !== "thread-artifact"))
+    )
+      return failure("Image jobs are unavailable.", 404, origin);
+    const current = retainRouteAdmissionCurrent({
+      request,
+      context,
+      store: dependencies.windowAuthorityStore,
+      now,
+    });
     try {
       if (route === "profiles" && request.method === "GET") {
         const instances = dependencies.listInstances();
@@ -115,11 +124,17 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
         if (threadKind === undefined || scopeId === undefined) {
           return failure("Image job list requires a thread.", 400, origin);
         }
-        if (!(await dependencies.authorizeScope(windowId, threadKind, scopeId))) {
+        if (
+          (remote && threadKind === "image-library") ||
+          !(await dependencies.authorizeScope(windowId, threadKind, scopeId, context.principal)) ||
+          !current()
+        ) {
           return failure("Image jobs are unavailable.", 404, origin);
         }
         const body = decodeImageGenerationJobsResponse({
-          jobs: dependencies.jobs.listByScope(scopeId),
+          jobs: dependencies.jobs
+            .listByScope(scopeId)
+            .filter((job) => !remote || job.threadKind === threadKind),
         });
         return json(body, 200, origin);
       }
@@ -162,101 +177,46 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
         return json(decodeImageJob(job), 200, origin);
       }
 
-      if (route === "offers" && request.method === "GET") {
-        const threadKind = parseThreadKind(url.searchParams.get("threadKind"));
-        const scopeId = parseScopeId(url.searchParams.get("scopeId"));
-        if (threadKind === undefined || threadKind === "image-library" || scopeId === undefined) {
-          return failure("Image offers require a thread.", 400, origin);
-        }
-        if (!(await dependencies.authorizeScope(windowId, threadKind, scopeId))) {
-          return failure("Image offers are unavailable.", 404, origin);
-        }
-        return json(
-          decodeImageGenerationOffersResponse({
-            offers: dependencies.offers?.list(windowId, { threadKind, scopeId }) ?? [],
-          }),
-          200,
-          origin,
+      if (route === "thread-artifact" && request.method === "GET") {
+        const jobId = parseJobId(url.searchParams.get("jobId") ?? "");
+        const job = jobId === undefined ? undefined : dependencies.jobs.get(jobId);
+        const attachment = job?.artifacts.find(
+          (item) => String(item.attachmentId) === url.searchParams.get("attachmentId"),
         );
+        if (!job || !attachment || job.threadKind === "image-library")
+          return failure("The generated image is unavailable.", 404, origin);
+        const canRead = async () =>
+          (await dependencies.authorizeScope(
+            windowId,
+            job.threadKind,
+            job.scopeId,
+            context.principal,
+          )) && current();
+        if (!(await canRead())) return failure("The generated image is unavailable.", 404, origin);
+        const offset = Number(url.searchParams.get("offset") ?? 0);
+        if (
+          !Number.isSafeInteger(offset) ||
+          offset < 0 ||
+          offset >= attachment.size ||
+          offset % THREAD_IMAGE_CHUNK_BYTES !== 0
+        )
+          return failure("Image offset is invalid.", 416, origin);
+        const artifact = await dependencies.jobs.readArtifact(job.id, attachment.attachmentId);
+        if (!artifact || !(await canRead()))
+          return failure("The generated image is unavailable.", 404, origin);
+        if (artifact.bytes.byteLength !== attachment.size)
+          return failure("The generated image is unavailable.", 404, origin);
+        const end = Math.min(offset + THREAD_IMAGE_CHUNK_BYTES, attachment.size);
+        return new Response(artifact.bytes.slice(offset, end), {
+          status: 206,
+          headers: {
+            ...corsHeaders(origin),
+            "content-type": artifact.mime,
+            "content-range": `bytes ${offset}-${end - 1}/${attachment.size}`,
+            "cache-control": "no-store",
+          },
+        });
       }
-
-      if (route === "offers/decide" && request.method === "POST") {
-        const decoded = await readJson(request, 8_192);
-        if (decoded.kind === "too-large") return failure("Request body is too large.", 413, origin);
-        if (decoded.kind === "invalid") {
-          return failure("Request body must be valid JSON.", 400, origin);
-        }
-        let decision;
-        try {
-          decision = decodeImageGenerationOfferDecision(decoded.value);
-        } catch {
-          return failure("Image offer decision is invalid.", 400, origin);
-        }
-        const answer = (body: unknown) =>
-          json(decodeImageGenerationOfferDecisionResult(body), 200, origin);
-        // A chosen model is checked before the offer is claimed, so a refusal
-        // leaves the card waiting for another choice.
-        if (decision.decision === "generate") {
-          const eligible = listEligibleImageProfiles(
-            dependencies.listInstances(),
-            dependencies.readImageGenerationSettings().customSources,
-          ).some(
-            (profile) =>
-              String(profile.instanceId) === String(decision.profileInstanceId) &&
-              profile.modelAllowlist.some((id) => String(id) === String(decision.modelId)),
-          );
-          if (!eligible) {
-            return answer({
-              kind: "image-offer-refused",
-              reason: "That image model is not available. Choose another one.",
-            });
-          }
-        }
-        // The window must still be able to open the thread that asked: one
-        // that moved to another Project answers nothing there, and the offer
-        // keeps waiting for its turn to end or its thread to be archived.
-        const waiting = dependencies.offers?.find(windowId, decision.offerId);
-        if (waiting === undefined) return answer({ kind: "image-offer-gone" });
-        if (!(await dependencies.authorizeScope(windowId, waiting.threadKind, waiting.scopeId))) {
-          return failure("Image offers are unavailable.", 404, origin);
-        }
-        const fits =
-          decision.decision === "cancel" ||
-          (waiting.kind === "generate"
-            ? decision.decision === "generate" || decision.decision === "agent-draws"
-            : decision.decision === "save");
-        if (!fits) {
-          return answer({
-            kind: "image-offer-refused",
-            reason: "That answer does not fit this request.",
-          });
-        }
-        const claimed = dependencies.offers?.claim(windowId, decision.offerId);
-        if (claimed === undefined) return answer({ kind: "image-offer-gone" });
-        if (decision.decision === "generate") {
-          const choice = {
-            profileInstanceId: decision.profileInstanceId,
-            modelId: decision.modelId,
-          };
-          if (decision.rememberForThread) {
-            // The person's answer still generates when the choice could not be
-            // kept (the Project changed under the answer): the next call asks.
-            await dependencies.kept?.remember(claimed.offer, choice).catch(() => undefined);
-          }
-          claimed.settle({ status: "generate", ...choice });
-        } else {
-          claimed.settle({
-            status:
-              decision.decision === "agent-draws"
-                ? "agent-draws"
-                : decision.decision === "save"
-                  ? "save"
-                  : "cancelled",
-          });
-        }
-        return answer({ kind: "image-offer-answered" });
-      }
-
       const artifactMatch = ARTIFACT_PATH.exec(route);
       if (artifactMatch !== undefined && artifactMatch !== null) {
         const jobId = decodeImageJobId(artifactMatch[1]);

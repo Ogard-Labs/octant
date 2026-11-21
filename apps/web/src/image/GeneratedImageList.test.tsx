@@ -189,6 +189,7 @@ describe("GeneratedImageList polling", () => {
     const open = vi.fn();
     const job = completedJob();
     const client = {
+      enqueue: vi.fn(),
       list: vi.fn(async () => ({ jobs: [job] })),
       artifact: vi.fn(async () => new Blob(["png"], { type: "image/png" })),
     } as unknown as ImageGenerationClient;
@@ -244,6 +245,29 @@ describe("GeneratedImageList polling", () => {
 
 describe("generated image preview read", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("shows a paired thread's finished image without offering a host save or a paid revision", async () => {
+    const job = completedJob();
+    const client = {
+      list: vi.fn(async () => ({ jobs: [job] })),
+      artifact: vi.fn(async () => new Blob(["png"], { type: "image/png" })),
+    };
+    render(
+      <GeneratedImageList
+        canSaveToProject
+        client={client}
+        profiles={[]}
+        scopeId={scopeId}
+        threadKind="chat-thread"
+      />,
+    );
+    expect(await screen.findByRole("button", { name: "Download" })).toBeVisible();
+    await waitFor(() =>
+      expect(client.artifact).toHaveBeenCalledWith(job.id, job.artifacts[0]?.attachmentId),
+    );
+    expect(screen.queryByRole("button", { name: "Revise" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save to Project" })).toBeNull();
+  });
 
   it("stops reading an image when its card goes away instead of finishing unobserved", async () => {
     const readers: FileReader[] = [];

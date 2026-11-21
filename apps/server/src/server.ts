@@ -296,6 +296,7 @@ export function startOctantServer(
       processAuthorityTime,
       routineProposalService,
       imageGenerationOffers,
+      serviceOffers,
       simulatorInputGrants,
       unsubscribeMachineChanges,
       unsubscribeThreadArchivals,
@@ -1433,6 +1434,7 @@ export function startOctantServer(
     });
     const {
       imageRoutes,
+      serviceOfferRoutes,
       previewHandoffBridgeRoutes,
       previewRoutes,
       speechRoutes,
@@ -1443,7 +1445,7 @@ export function startOctantServer(
       workResearchRoutes,
     } = wireWorkFiles({
       credentialResolver,
-      imageGenerationOffers,
+      serviceOffers,
       keptImageChoices,
       imageJobService,
       options,
@@ -1566,7 +1568,7 @@ export function startOctantServer(
       agentRunInteractions,
       browserToolApprovalService,
       extensionToolApprovalService,
-      imageGenerationOffers,
+      serviceOffers,
       projectMemoryAccess,
       routineProposalService,
       decisionReviewModelPort,
@@ -1947,6 +1949,7 @@ export function startOctantServer(
       goalLoopRoutes,
       goalRoutes,
       imageRoutes,
+      serviceOfferRoutes,
       integrationRoutes,
       latencyStats,
       launchSessionRoutes,
@@ -2489,7 +2492,7 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           browserToolApprovalService?.close();
-          imageGenerationOffers.close();
+          serviceOffers.close();
           try {
             stopComputerSettingsWatch();
             stopDesktopLeases();
