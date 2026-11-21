@@ -754,6 +754,7 @@ export function startOctantServer(
       codeBoardEventStore,
       codeEvidence,
       isProjectPolicyTargetAllowed,
+      resolveHostStrict,
       selectCodeConversation,
       managedCodeThreadCreation,
       managedWorktreeRefsList,

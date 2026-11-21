@@ -1,6 +1,7 @@
 import { boundPrincipalIsRestricted, boundPrincipalIsAgent } from "./principalRouteContext";
 import { principalActsAsHostPerson } from "./clientPrincipal";
 import {
+  decodeImportProviderFoldersRequest,
   decodeMemoryCommand,
   decodeProjectMemoryProposalDecision,
   decodeProjectMemoryProposalDecisionResult,
@@ -17,6 +18,7 @@ import type { ProjectIconReader } from "./projectIcon";
 import { MAX_PROJECT_ICON_BYTES } from "./projectIcon";
 import type { ProjectCustomIconStore } from "./projectIconStore";
 import { eventActorForPrincipal } from "./principalEventActor";
+import type { ProviderFolderScanApi } from "./providerFolderScanService";
 import { ProjectServiceError, type ProjectServiceApi } from "./projectService";
 import type { ProjectMemoryProposalService } from "./projectMemory/projectMemoryProposalService";
 import { isLoopbackHostname } from "./shellRoutes";
@@ -36,6 +38,8 @@ export interface ProjectRouteDependencies {
   readonly customIcons?: Pick<ProjectCustomIconStore, "write" | "remove">;
   /** Memory changes agents asked for, answered by the window whose turn raised them. */
   readonly memoryProposals?: Pick<ProjectMemoryProposalService, "list" | "decide">;
+  /** Read-only first-run provider folder discovery and one-click Code Project import. */
+  readonly providerFolderScan?: ProviderFolderScanApi;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
 }
@@ -68,6 +72,8 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
     const isMemoryCommands = url.pathname === "/api/projects/memory/commands";
     const isMemoryProposals = url.pathname === "/api/projects/memory/proposals";
     const isMemoryProposalDecision = url.pathname === "/api/projects/memory/proposals/decide";
+    const isProviderFolderScan = url.pathname === "/api/projects/provider-folders/scan";
+    const isProviderFolderImport = url.pathname === "/api/projects/provider-folders/import";
     const memoryMatch = /^\/api\/projects\/([^/]+)\/memory$/.exec(url.pathname);
     const isMemory = memoryMatch !== null;
     const environmentMatch = /^\/api\/projects\/([^/]+)\/environment$/.exec(url.pathname);
@@ -81,12 +87,19 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
       !isMemoryCommands &&
       !isMemoryProposals &&
       !isMemoryProposalDecision &&
+      !isProviderFolderScan &&
+      !isProviderFolderImport &&
       !isMemory &&
       !isEnvironment &&
       !isIcon
     )
       return undefined;
-    const isPost = isCommands || isMemoryCommands || isMemoryProposalDecision;
+    const isPost =
+      isCommands ||
+      isMemoryCommands ||
+      isMemoryProposalDecision ||
+      isProviderFolderScan ||
+      isProviderFolderImport;
     const changesIcon = isIcon && (request.method === "PUT" || request.method === "DELETE");
     if (
       ((isBootstrap || isSearch || isMemory || isMemoryProposals || isEnvironment) &&
@@ -102,7 +115,7 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
     }
 
     let body: unknown = {};
-    if (isPost) {
+    if (isPost && !isProviderFolderScan) {
       const read = await readJson(request, bodyLimit);
       if (read.kind === "too-large")
         return response(
@@ -299,6 +312,55 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           await dependencies.service.executeMemory(
             command,
             eventActorForPrincipal(readPrincipalRouteContext(request)?.principal),
+          ),
+          200,
+          origin,
+        );
+      }
+      if (isProviderFolderScan || isProviderFolderImport) {
+        const principal = readPrincipalRouteContext(request)?.principal;
+        if (principal !== undefined && principal.kind !== "local-window") {
+          return response(
+            {
+              category: "unauthorized",
+              message: "Scanning provider folders on this computer requires a local window.",
+            },
+            403,
+            origin,
+          );
+        }
+        if (dependencies.providerFolderScan === undefined) {
+          return response(
+            {
+              category: "unavailable",
+              message: "Provider folder discovery is unavailable on this host.",
+            },
+            503,
+            origin,
+          );
+        }
+        if (isProviderFolderScan) {
+          return response(
+            await dependencies.providerFolderScan.scan(windowId, request.signal),
+            200,
+            origin,
+          );
+        }
+        let importRequest;
+        try {
+          importRequest = decodeImportProviderFoldersRequest(body);
+        } catch {
+          return response(
+            { category: "invalid", message: "Provider folder import request is invalid." },
+            400,
+            origin,
+          );
+        }
+        return response(
+          await dependencies.providerFolderScan.importFolders(
+            windowId,
+            importRequest,
+            eventActorForPrincipal(principal),
           ),
           200,
           origin,
