@@ -342,7 +342,8 @@ satisfy it. Ordinary issues do not acquire a blanket human-signoff gate.
     generated files. The bottom PR targets `main`, each child targets its parent,
     every PR records the stack order and links its adjacent PRs, and each layer
     has at most one child. Pull requests whose base is not `main` skip the
-    advisory macOS and Windows CI jobs; the merge queue runs them.
+    advisory macOS and Windows jobs in the `CI` workflow; the merge queue runs
+    them. Path-filtered native workflows still run on every ready layer.
   - Use separate PRs targeting `main` for independent outcomes so the merge queue
     can group them without creating artificial dependencies.
 - Treat a stack as one delivery unit: keep its branches linear, enqueue or merge

@@ -110,7 +110,7 @@ Once applicable checks pass, proceed to delivery under the
   lines outside tests and generated files: link the parent and child PRs, record
   their order, keep the stack linear with at most one child per layer, and
   queue it from the lowest eligible PR. Stack layers whose base is not `main`
-  skip the advisory macOS and Windows CI jobs. Use separate `main` PRs for
+  skip the advisory macOS and Windows jobs in the `CI` workflow. Use separate `main` PRs for
   independent work. The full rules are in
   [AGENTS.md](AGENTS.md#delivery-and-completion).
 - CI must be green on the exact head being merged. If `main` has moved, a
