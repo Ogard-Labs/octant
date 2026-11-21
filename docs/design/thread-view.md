@@ -736,8 +736,12 @@ turn where its runtime steers (maintainer decision, 2026-11-21;
 [Architecture](../architecture.md#persistence)): it passes through the queue,
 leaves it once the runtime takes it, and shows inside the running turn, after
 its reply, as the person's message headed "Sent while the turn ran", with its
-time. The queue shows no separate steered state; a message the runtime does
-not take stays in the queue for the next turn.
+time. The phone's Work and Code transcripts show it the same way, in the
+person's message bubble under the same heading. The queue shows no separate
+steered state, since its read lists only messages still waiting: the message
+leaves the queue and the same change notice that refreshes the turn brings
+it into the transcript at once. A message the runtime does not take stays in
+the queue for the next turn.
 
 ## Scheduled wake-ups
 
