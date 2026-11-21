@@ -24,8 +24,6 @@ import {
   decodeWindowId,
   type AgentRun,
   type AgentRunAuthority,
-  type NativeHarnessApproval,
-  type ProviderFailure,
   type ProviderContextBlock,
   type ProviderExecutionPolicy,
   type ProviderTurnInput,
@@ -72,8 +70,6 @@ import {
 } from "./agentRunSessionRuntime";
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { appToolHostLines } from "../providers/appToolHostLines";
-import { NativeHarnessApprovalStore } from "../harness/nativeHarnessApprovals";
-import { createAgentRunInteractions } from "./agentRunInteractions";
 
 const testDirectories: string[] = [];
 afterEach(() => {
@@ -297,8 +293,6 @@ function fakeProvider(options?: {
   readonly steerable?: boolean;
   readonly completeOnSteer?: boolean;
   readonly changedResumeIdentity?: boolean;
-  /** Offers Always allow and a reject but no Allow once, as some ACP agents ask. */
-  readonly offersOnlyAllowAlways?: boolean;
 }) {
   let shutdownFails = options?.shutdownFails ?? false;
   let wedge = options?.wedge;
@@ -391,12 +385,7 @@ function fakeProvider(options?: {
             );
       }),
     answerApproval: (input: { readonly approved: boolean }) =>
-      options?.offersOnlyAllowAlways === true && input.approved
-        ? Effect.fail({
-            category: "unsupported",
-            message: "Example Agent only offers Always allow here.",
-          } satisfies ProviderFailure)
-        : Effect.sync(() => void answeredApprovals.push(input)),
+      Effect.sync(() => void answeredApprovals.push(input)),
     answerUserInput: (input: { readonly answer: string }) =>
       Effect.sync(() => void answeredQuestions.push(input)),
     answerTool: (input: { readonly isError?: boolean }) =>
@@ -2129,89 +2118,6 @@ describe("managed child interaction continuity", () => {
     expect((await result).kind).toBe("completed");
     expect(approve).toHaveBeenCalledOnce();
     expect(provider.answeredApprovals).toHaveLength(1);
-  });
-
-  it("denies a child's request offering only Always allow when the person approves it, saying why, and lets the run go on", async () => {
-    const provider = fakeProvider({ offersOnlyAllowAlways: true });
-    // Chat children are held to Plan; a Code child may ask to run things.
-    const base = agentRun({
-      authority: { ...authority, executionPolicy: "approval-gated" },
-      workspaceReceipt: {
-        kind: "code-worktree",
-        mode: "code",
-        projectId: "88888888-8888-4888-8888-888888888888" as never,
-        checkoutRoot: "/repo",
-        worktreeRoot: "/child",
-        verified: true,
-      },
-    });
-    const run = { ...base, lifecycleStatus: "running" } satisfies AgentRun;
-    const asked: NativeHarnessApproval[] = [];
-    const journaled: Array<{ readonly approvalId: string; readonly outcome: unknown }> = [];
-    const approvals = new NativeHarnessApprovalStore({
-      sessions: {
-        ensure: () => undefined as never,
-        askApproval: (_threadId, approval) => void asked.push(approval),
-        settleApproval: (_threadId, approvalId, outcome) => {
-          journaled.push({ approvalId: String(approvalId), outcome });
-          return "approval-not-found";
-        },
-      },
-      uuid: () => "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",
-      clock: () => now,
-    });
-    const interactions = createAgentRunInteractions({
-      getById: () => run,
-      approvals,
-      questions: { ask: vi.fn() },
-      providerName: () => "Example Agent",
-      parentLead: () => ({
-        hostId: "local" as never,
-        providerInstanceId: providerInstanceId as never,
-        modelId: "gpt-4o" as never,
-      }),
-      parentAuthority: () => run.authority,
-    });
-    const runtime = createAgentRunSessionRuntime(
-      runtimeOptions(provider, {
-        interactions: { approve: (input) => interactions.approve(input) },
-        verifyCodeWorkspace: async () => ({ status: "verified", identity: "child-identity" }),
-      }),
-    );
-    const result = settled(runtime.start(run));
-    await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
-    await provider.emit({
-      kind: "approval-request",
-      sessionId,
-      requestId: "permission-1",
-      action: "shell",
-      description: "Run the tests",
-      occurredAt: now,
-    });
-    await vi.waitFor(() => expect(asked).toHaveLength(1));
-    const approvalId = String(asked[0]?.id);
-    expect(approvals.decide(String(run.parentThreadId), approvalId, "approve")).toBe("decided");
-
-    await vi.waitFor(() =>
-      expect(provider.answeredApprovals).toEqual([
-        expect.objectContaining({ approved: false, scope: "once" }),
-      ]),
-    );
-    await vi.waitFor(() =>
-      expect(journaled).toEqual([
-        {
-          approvalId,
-          outcome: {
-            status: "denied",
-            refusal:
-              "Example Agent only offers Always allow, which a helper run can't grant; denied.",
-          },
-        },
-      ]),
-    );
-    await provider.emit({ kind: "text-delta", sessionId, text: "Skipped it", occurredAt: now });
-    await provider.emit({ kind: "completed", sessionId });
-    expect((await result).kind).toBe("completed");
   });
 
   it("expires a pending question on cancellation and never delivers a late answer", async () => {
