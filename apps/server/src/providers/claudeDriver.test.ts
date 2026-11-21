@@ -68,7 +68,7 @@ import {
   claudeServerFileToolSecretRefusal,
   makeClaudeDriver,
 } from "./claudeDriver";
-import { CLAUDE_SERVER_STRICT_REFUSAL } from "./claudeServerProcess";
+import { CLAUDE_SERVER_STRICT_REFUSAL, claudeServerSignInRefusal } from "./claudeServerProcess";
 import type { ClaudeResumeIdentity, ClaudeResumeIdentityPort } from "./claudeDriver";
 import {
   REQUIRED_GUARDS,
@@ -80,6 +80,7 @@ import {
   claudeLoginKeychainPath,
   claudePlanRunsCommands,
   claudeProjectFolderName,
+  makeClaudeProcessLive,
   type ClaudeProcessPort,
 } from "./claudeProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
@@ -10168,7 +10169,13 @@ describe("Claude Code on a server Project's server", () => {
       expect(makeEnvironmentScope).not.toHaveBeenCalled();
       expect(gitIdentity).not.toHaveBeenCalled();
       expect(f.credentialResolver.resolve).not.toHaveBeenCalled();
-      expect(f.process.probeSubscription).not.toHaveBeenCalled();
+      // The sign-in asked about is the server login's, never this host's account.
+      for (const [, environment, confinement] of vi.mocked(f.process.probeSubscription).mock
+        .calls) {
+        expect(environment).toEqual({});
+        expect(confinement?.server).toBe(placement);
+      }
+      expect(f.process.probeSubscription).toHaveBeenCalledTimes(2);
       expect(f.process.probeVersion).toHaveBeenCalledWith("/opt/homebrew/bin/claude", placement);
       // The resume looked for the transcript on the server, not in this host's account.
       expect(f.sdk.findSession).not.toHaveBeenCalled();
@@ -10185,6 +10192,46 @@ describe("Claude Code on a server Project's server", () => {
     } finally {
       await rm(configDirectory, { recursive: true, force: true });
     }
+  });
+
+  it("refuses a Claude Code turn on a server where Claude Code is not signed in", async () => {
+    const f = harness("api-key");
+    // The real process port reads `claude auth status --json` through the
+    // placement; the server's login answers that it is signed out.
+    vi.mocked(f.process.probeSubscription).mockImplementation(
+      makeClaudeProcessLive().probeSubscription,
+    );
+    const statusReads: Array<ReadonlyArray<string>> = [];
+    const placement: ProviderServerPlacement = {
+      serverName: "devbox",
+      start: () => ({ status: "unreachable", message: "Not started in this test." }),
+      run: async (program) => {
+        if (program.join(" ") !== "claude auth status --json") throw new Error("unexpected run");
+        statusReads.push(program);
+        return { status: "ran", exitCode: 1, output: '{"loggedIn":false}\n', errorOutput: "" };
+      },
+    };
+    const acquired = await acquirePlaced(f.driver, placement);
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          strict: false,
+        }),
+      ),
+    );
+    expect(refused).toEqual({
+      category: "unauthenticated",
+      message: claudeServerSignInRefusal("devbox"),
+    });
+    expect(refused.message).toContain("Project terminal");
+    expect(statusReads).toHaveLength(1);
+    // Nothing started, and no key of this host was read for it.
+    expect(f.opens).toHaveLength(0);
+    expect(f.credentialResolver.resolve).not.toHaveBeenCalled();
+    await acquired.close();
   });
 
   it("refuses Claude Code on a server under Strict, before anything starts", async () => {

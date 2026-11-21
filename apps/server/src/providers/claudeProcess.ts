@@ -72,9 +72,11 @@ import { canonicalClaudeAccountDirectory } from "./claudeAccountIsolation";
 import { REQUIRED_GUARDS, sanitizeClaudeEnvironment } from "./claudeEnvironment";
 import {
   CLAUDE_SERVER_STRICT_REFUSAL,
+  readClaudeSignInOnServer,
   readClaudeVersionOnServer,
   spawnClaudeOnServer,
 } from "./claudeServerProcess";
+import { ServerSignIns } from "./serverSignIn";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import type { ProviderRuntimeProxiedNetwork } from "../network/providerRuntimeNetwork";
 
@@ -148,7 +150,9 @@ export interface ClaudeProcessPort {
   /**
    * Whether the account is signed in. With a confinement, the check runs inside
    * the sandbox that launch will use: a sign-in the sandbox cannot read is no
-   * sign-in for that launch, and an unconfined check cannot tell.
+   * sign-in for that launch, and an unconfined check cannot tell. With a
+   * server, `claude auth status` runs there as the server login, and a
+   * signed-in answer is held briefly for that server.
    */
   readonly probeSubscription: (
     binaryPath: string,
@@ -313,7 +317,8 @@ function captureChunk(
   };
 }
 
-function parseAuthenticationStatus(
+/** What `claude auth status --json` says: its `loggedIn`, or `undefined` when it says neither. */
+export function parseAuthenticationStatus(
   output: string,
 ): "authenticated" | "unauthenticated" | undefined {
   try {
@@ -1645,6 +1650,9 @@ export function makeClaudeProcessLive(options: ClaudeProcessOptions = {}): Claud
     onProcessStarted: options.onProcessStarted,
     linuxPlanShellCapsule: options.linuxPlanShellCapsule,
   };
+  // On a server Claude Code signs in as that server's login, whichever
+  // instance launches it, so its answer is held per server alone.
+  const serverSignIns = new ServerSignIns(readClaudeSignInOnServer);
 
   return {
     probeVersion: (binaryPath, server) =>
@@ -1666,15 +1674,33 @@ export function makeClaudeProcessLive(options: ClaudeProcessOptions = {}): Claud
                 : Effect.fail(failure("unavailable", found.message)),
             ),
           ),
-    probeSubscription: (binaryPath, environment, confinement) =>
-      runProbe(
-        binaryPath,
-        ["auth", "status", "--json"],
-        environment,
-        "authentication",
-        resolved,
-        confinement,
-      ),
+    probeSubscription: (binaryPath, environment, confinement) => {
+      const server = confinement?.server;
+      if (server === undefined) {
+        return runProbe(
+          binaryPath,
+          ["auth", "status", "--json"],
+          environment,
+          "authentication",
+          resolved,
+          confinement,
+        );
+      }
+      return Effect.tryPromise({
+        try: () => serverSignIns.read(server),
+        catch: () => failure("unavailable", `Octant could not reach ${server.serverName}.`),
+      }).pipe(
+        Effect.flatMap((answer) =>
+          answer.status === "refused"
+            ? Effect.fail(failure("unavailable", answer.message))
+            : Effect.succeed(
+                answer.status === "signed-in"
+                  ? ("authenticated" as const)
+                  : ("unauthenticated" as const),
+              ),
+        ),
+      );
+    },
     spawn: (confinement) => (spawnOptions) => {
       const server = confinement.server;
       if (server !== undefined) {

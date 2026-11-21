@@ -266,6 +266,39 @@ app-server --listen stdio://` after `codex --version` there; for Claude Code,
     in the provider's own read-only plan mode; Claude Code's Plan there has no
     shell, since the sandbox that keeps Plan's commands read-only on this host
     cannot run there.
+  - Before a turn starts the program, the host runs the provider's own status
+    command on the server as that login (`codex login status`, whose exit
+    status answers; `claude auth status --json`, whose `loggedIn` answers) and
+    keeps nothing else it prints. A login that is not signed in refuses the
+    turn before anything starts, naming the server and telling the person to
+    sign in there, for example in the Project terminal; an answer it cannot
+    read refuses too, saying so, and an unreachable server keeps the
+    unreachable refusal. A signed-in answer is held for five minutes per
+    server and provider, so the command does not run before every turn; any
+    other answer is never held, so signing in there counts at the next turn.
+    A Codex app-server already running for the thread is reused without a
+    new check.
+  - Every program a placed runtime starts is recorded on the server, so one
+    a dropped connection leaves running is stopped. Its start runs behind a
+    shell that writes the shell's PID and start identity (on Linux the boot id
+    and `/proc/<pid>/stat` field 22, elsewhere `ps -o lstart=`) to
+    `~/.octant/server-runtimes/<host tag>.<run>.<sequence>` under umask 077,
+    then `exec`s the program, which keeps both; a program that cannot be
+    recorded does not start. The host tag is a digest of this host's id, the
+    run names this run of the host, and the host keeps in memory, per server
+    login, which of this run's programs it still holds open. When a stream
+    ends without the program's own exit (the connection dropped, or the host
+    ended a connection whose program ignored the end of its input), and at the
+    next call to that login, the host runs a sweep there that takes every
+    record of its tag from an earlier run and every record of this run whose
+    stream has ended. A recorded PID that is alive, not a zombie, and still
+    has its recorded start identity gets TERM, then KILL if it is still that
+    process after five seconds; then the record is removed. A PID whose start
+    identity differs belongs to another program and is left running, and a
+    record of another host's tag, or of a program this host still holds open,
+    is never touched. A sweep that cannot reach the server keeps every record
+    for the next call. Only the recorded program itself is stopped: a child it
+    started and left behind is not recorded.
   - Strict refuses it, naming why: Octant's own sandbox cannot run on a
     server, and Octant claims no sandbox there. A Claude Code thread that keeps
     Octant's sandbox at Full access is refused the same way.
@@ -303,11 +336,10 @@ app-server --listen stdio://` after `codex --version` there; for Claude Code,
     computer. Details keeps it one click away after that. The provider is
     listed only once this host has probed it; its models come from this
     host's catalog for it.
-  - Not built yet: reading sign-in with the provider's own status command
-    before the first turn, recording the remote process to stop an orphan
-    after a dropped connection, a Claude Code account this host has not
-    signed in (its model list is this host's probe, so the turn is refused
-    until it is), and Work Projects, which stay on the Octant Harness.
+  - Not built yet: a Claude Code account this host has not signed in (its
+    model list is this host's probe, so the turn is refused until it is),
+    stopping what a recorded program started and left behind, and Work
+    Projects, which stay on the Octant Harness.
 - **Attached files.** A file the turn names by path rather than sends (any
   file but an image or a file the model takes natively) is copied before the
   turn is accepted, over the Project's own SSH connection, into the thread's

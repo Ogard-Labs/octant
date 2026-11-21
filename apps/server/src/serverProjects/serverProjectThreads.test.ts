@@ -15,6 +15,7 @@ import {
   serverCodeCheckoutRoot,
   serverProjectOf,
 } from "./serverProjectThreads";
+import { ServerRuntimeRecords } from "./serverRuntimeRecords";
 import {
   canRunThrowawaySshd,
   startThrowawaySshd,
@@ -164,6 +165,7 @@ describe.skipIf(!canRunThrowawaySshd)("a server Project's turn", () => {
           refusal: () => options.refusal,
         },
         composition,
+        runtimes: new ServerRuntimeRecords({ connection, hostId: () => "test-host" }),
         record: (input) => {
           recorded.push({
             command: input.command,

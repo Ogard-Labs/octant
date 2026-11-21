@@ -17,8 +17,10 @@ import { Effect, type Scope } from "effect";
 import { decodeInitializeResult } from "./codexProtocol";
 import type { CodexAppServerConnection } from "./codexProcess";
 import { makeCodexRpcClient } from "./codexRpcClient";
+import type { ServerSignIn, ServerSignIns } from "./serverSignIn";
 
 const VERSION_TIMEOUT_MS = 20_000;
+const SIGN_IN_TIMEOUT_MS = 20_000;
 const STARTUP_TIMEOUT_MS = 30_000;
 const SEMVER = /\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/;
 
@@ -55,8 +57,34 @@ export async function readCodexVersionOnServer(
     : { status: "found", version };
 }
 
+/** Said when Codex on the server reports no sign-in for the server's login. */
+export function codexServerSignInRefusal(serverName: string): string {
+  return `Codex isn't signed in on ${serverName}. Sign in there as the server's login, for example by running \`codex login\` in the Project terminal, then try again.`;
+}
+
 /**
- * Starts `codex app-server` on the server and initializes it. The connection
+ * Whether Codex is signed in on the server, from its own `codex login status`
+ * there: it exits 0 when signed in, and otherwise says it is not logged in.
+ * Nothing it prints is kept, since a signed-in answer can name the key's kind.
+ */
+export async function readCodexSignInOnServer(
+  placement: ProviderServerPlacement,
+): Promise<ServerSignIn> {
+  const ran = await placement.run(["codex", "login", "status"], {
+    timeoutMs: SIGN_IN_TIMEOUT_MS,
+  });
+  if (ran.status === "unreachable") return { status: "refused", message: ran.message };
+  if (ran.exitCode === 0) return { status: "signed-in" };
+  if (/not logged in/i.test(`${ran.output}\n${ran.errorOutput}`)) return { status: "signed-out" };
+  return {
+    status: "refused",
+    message: `Octant could not read whether Codex is signed in on ${placement.serverName}. Check \`codex login status\` in the Project terminal.`,
+  };
+}
+
+/**
+ * Starts `codex app-server` on the server and initializes it, once Codex
+ * there reports a sign-in. The connection
  * ends when its scope closes: standard input closes, and the host ends the
  * SSH connection if it is still open shortly after.
  */
@@ -64,12 +92,21 @@ export function startCodexOnServer(input: {
   readonly placement: ProviderServerPlacement;
   readonly args: (version: string) => ReadonlyArray<string>;
   readonly octantVersion: string;
+  /** Codex's sign-in answers per server, read before the app-server starts. */
+  readonly signIns: ServerSignIns;
 }): Effect.Effect<CodexAppServerConnection, ProviderFailure, Scope.Scope> {
   return Effect.acquireRelease(
     Effect.tryPromise({
       try: async () => {
         const found = await readCodexVersionOnServer(input.placement);
         if (found.status === "refused") throw failure("unavailable", found.message);
+        // Refused before the app-server starts: one with no sign-in would
+        // start and fail only at its first model request.
+        const signIn = await input.signIns.read(input.placement);
+        if (signIn.status === "signed-out") {
+          throw failure("unauthenticated", codexServerSignInRefusal(input.placement.serverName));
+        }
+        if (signIn.status === "refused") throw failure("unavailable", signIn.message);
         const stream = input.placement.start(["codex", ...input.args(found.version)]);
         if (stream.status === "unreachable") throw failure("unavailable", stream.message);
         const rpc = makeCodexRpcClient({
