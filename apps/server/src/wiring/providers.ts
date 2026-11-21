@@ -24,6 +24,8 @@ import {
   runAcpAgentInstallScripts,
 } from "../providers/acpAgentInstall";
 import { makeProcessConfinementLive } from "../process/seatbeltProfile";
+import { resolvePackagedWindowsConfineLauncher } from "../process/windowsConfinement";
+import { WindowsConfinementLeaseStore } from "../process/windowsConfinementRecovery";
 import { homedir, tmpdir } from "node:os";
 import {
   makeAccountSessionCarrier,
@@ -866,6 +868,14 @@ export function wireProviders(deps: ProvidersDependencies) {
         code: persistence.readCodeSettings()?.settings,
         work: workThreadProjection.settings(),
       });
+    const windowsConfinementLeases = new WindowsConfinementLeaseStore({
+      leaseDirectory: join(providerDataDirectory, "windows-confinement", "leases"),
+    });
+    if (process.platform === "win32") {
+      yield* Effect.promise(() => windowsConfinementLeases.recoverAll());
+    }
+    const packagedWindowsLauncher =
+      process.platform === "win32" ? resolvePackagedWindowsConfineLauncher() : undefined;
     const openCodeProcess =
       options.openCodeProcess ??
       makeOpenCodeProcessLive({ runtimeNetwork, serverAccess, windowsCatalogUnconfined });
@@ -876,6 +886,14 @@ export function wireProviders(deps: ProvidersDependencies) {
         runtimeNetwork,
         serverAccess,
         windowsCatalogUnconfined,
+        ...(packagedWindowsLauncher === undefined
+          ? {}
+          : {
+              windowsConfinement: {
+                launcherPath: packagedWindowsLauncher,
+                leaseStore: windowsConfinementLeases,
+              },
+            }),
       });
     const codexProcess: CodexProcessPort = {
       start: (input) =>

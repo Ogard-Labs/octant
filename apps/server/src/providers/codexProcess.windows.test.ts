@@ -1,9 +1,23 @@
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { decodeProviderInstanceId, type ProviderFailure } from "@octant/contracts";
+import {
+  WINDOWS_KEPT_SANDBOX_REFUSAL,
+  WINDOWS_STRICT_REFUSAL,
+  WINDOWS_STRICT_SHIM_REFUSAL,
+} from "@octant/domain/guardrail-policy";
 import { Effect, Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { WindowsConfinementLeaseStore } from "../process/windowsConfinementRecovery";
 import { makeCodexDriver } from "./codexDriver";
 import { makeCodexProcessLive, type CodexLaunchAuthority } from "./codexProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
@@ -14,6 +28,7 @@ import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
  * names here. Without it the real Windows checks do not run.
  */
 const fakeCodex = process.env.OCTANT_FAKE_CODEX_EXE;
+const windowsConfineLauncher = process.env.OCTANT_WINDOWS_CONFINE_EXE;
 const directories: string[] = [];
 
 afterEach(() => {
@@ -88,21 +103,105 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
       expect(running(started.right.pid)).toBe(false);
     }, 60_000);
 
-    it("refuses Strict and a kept sandbox by name before Codex runs", async () => {
+    it("refuses lower levels under Strict and the retired legacy sandbox setting by name before Codex runs", async () => {
       const root = mkdtempSync(join(tmpdir(), "octant-codex-windows-"));
       directories.push(root);
-      for (const level of [{ executionPolicy: "full-access", fullAccessSandbox: true }] as const) {
-        const refused = await startAndStop(fakeCodex ?? "", {
-          kind: "thread",
-          root,
-          mode: "code",
-          ...level,
-        });
-        expect(Either.isLeft(refused)).toBe(true);
-        if (Either.isLeft(refused))
-          expect(refused.left.message).toMatch(/sandbox Windows doesn't have yet/);
-      }
+      const legacyRefused = await startAndStop(fakeCodex ?? "", {
+        kind: "thread",
+        root,
+        mode: "code",
+        executionPolicy: "full-access",
+        fullAccessSandbox: true,
+      });
+      expect(legacyRefused).toEqual(
+        Either.left({ category: "incompatible", message: WINDOWS_KEPT_SANDBOX_REFUSAL }),
+      );
+      const strictGuardedRefused = await startAndStop(fakeCodex ?? "", {
+        kind: "thread",
+        root,
+        mode: "code",
+        executionPolicy: "approval-gated",
+        strict: true,
+      });
+      expect(strictGuardedRefused).toEqual(
+        Either.left({ category: "incompatible", message: WINDOWS_STRICT_REFUSAL }),
+      );
     }, 60_000);
+
+    it.runIf(windowsConfineLauncher !== undefined)(
+      "starts native Codex at Full access under Windows Strict inside the AppContainer and Job Object, cleans up durable leases, and refuses .cmd shims",
+      async () => {
+        const root = realpathSync.native(mkdtempSync(join(tmpdir(), "octant-codex-strict-win-")));
+        const leaseDir = realpathSync.native(mkdtempSync(join(tmpdir(), "octant-codex-leases-")));
+        const codexHome = realpathSync.native(mkdtempSync(join(tmpdir(), "octant-codex-home-")));
+        directories.push(root, leaseDir, codexHome);
+        const leaseStore = new WindowsConfinementLeaseStore({ leaseDirectory: leaseDir });
+        const confinedPort = makeCodexProcessLive({
+          platform: "win32",
+          octantVersion: "0.1.0-test",
+          startupTimeoutMs: 20_000,
+          shutdownTimeoutMs: 2_000,
+          windowsConfinement: {
+            launcherPath: realpathSync.native(windowsConfineLauncher ?? ""),
+            leaseStore,
+          },
+        });
+        const started = await Effect.runPromise(
+          Effect.either(
+            Effect.scoped(
+              confinedPort
+                .start({
+                  binaryPath: realpathSync.native(fakeCodex ?? ""),
+                  authority: {
+                    kind: "thread",
+                    root,
+                    mode: "code",
+                    executionPolicy: "full-access",
+                    strict: true,
+                  },
+                  environment: {
+                    ...process.env,
+                    CODEX_HOME: codexHome,
+                  },
+                })
+                .pipe(
+                  Effect.map((connection) => ({
+                    version: connection.version,
+                    pid: connection.pid,
+                  })),
+                ),
+            ),
+          ),
+        );
+        if (Either.isLeft(started)) throw new Error(started.left.message);
+        expect(started.right.version).toBe("0.144.4");
+        expect(running(started.right.pid)).toBe(false);
+        expect(readdirSync(leaseDir)).toEqual([]);
+
+        const shimPath = join(root, "codex.cmd");
+        writeFileSync(shimPath, "@ECHO off\r\necho should-not-run\r\n");
+        const shimRefused = await Effect.runPromise(
+          Effect.either(
+            Effect.scoped(
+              confinedPort.start({
+                binaryPath: shimPath,
+                authority: {
+                  kind: "thread",
+                  root,
+                  mode: "code",
+                  executionPolicy: "full-access",
+                  strict: true,
+                },
+              }),
+            ),
+          ),
+        );
+        expect(shimRefused).toEqual(
+          Either.left({ category: "incompatible", message: WINDOWS_STRICT_SHIM_REFUSAL }),
+        );
+      },
+      60_000,
+    );
 
     it("starts through an npm command shim by the program it names, with no shell", async () => {
       const npm = mkdtempSync(join(tmpdir(), "octant-codex-npm-"));

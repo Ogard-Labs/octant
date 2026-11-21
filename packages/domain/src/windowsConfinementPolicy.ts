@@ -68,6 +68,13 @@ export interface WindowsConfinementInput {
   readonly temporaryDirectory: string;
   readonly additionalWriteRoots: ReadonlyArray<string>;
   readonly readRoots: ReadonlyArray<string>;
+  /**
+   * Paths that must remain strictly read-only for this launch (such as explicit
+   * read-only policy grants or thread attachments). Unlike generic `readRoots`,
+   * a writable grant covering one of these refuses the launch because an
+   * inheritable modify ACE on Windows cannot be narrowed beneath a parent.
+   */
+  readonly explicitReadOnlyRoots?: ReadonlyArray<string>;
   readonly network: WindowsConfinementNetwork;
   /** `denied` for a launch that may neither fork nor exec (Plan, Chat). */
   readonly processCreation: "allowed" | "denied";
@@ -122,7 +129,7 @@ export function planWindowsConfinedLaunch(
   if (input.network === "proxied") {
     return refused(
       "proxied-network",
-      "Windows confinement has no proxied network: an AppContainer cannot reach the host's egress proxy on loopback without an administrator's exemption.",
+      "The requested network limits are not supported by the Windows sandbox.",
     );
   }
   const executable = windowsNativePath(input.executable);
@@ -155,6 +162,18 @@ export function planWindowsConfinedLaunch(
     if (path === undefined) return unspelled("read root");
     requested.push({ path, access: "read", fresh: false });
   }
+  const explicitReadOnly: Array<{
+    path: string;
+    access: WindowsConfinementAccess;
+    fresh: boolean;
+  }> = [];
+  for (const root of input.explicitReadOnlyRoots ?? []) {
+    const path = windowsNativePath(root);
+    if (path === undefined) return unspelled("read-only root");
+    const grant = { path, access: "read" as const, fresh: false };
+    requested.push(grant);
+    explicitReadOnly.push(grant);
+  }
   requested.push({ path: windowsParent(executable), access: "read", fresh: false });
 
   for (const grant of requested) {
@@ -168,13 +187,15 @@ export function planWindowsConfinedLaunch(
     }
   }
 
-  // A writable grant above a read-only checkout passes its inheritable modify
-  // entry down to it, and an allow entry for read cannot take that back (nor
-  // is a deny entry relied on), so such a launch is refused. Seatbelt denies
-  // the checkout's write after every grant instead; Windows has no such order.
+  // A writable grant above a read-only checkout or explicit read-only grant
+  // passes its inheritable modify entry down to it, and an allow entry for read
+  // cannot take that back (nor is a deny entry relied on), so such a launch is
+  // refused. Seatbelt denies the write after every grant instead; Windows has
+  // no such order.
+  const writableGrants = requested.filter((grant) => grant.access === "modify");
   if (!input.writeBoundRoot) {
     const bound = requested.slice(0, 1 + input.extraBoundRoots.length);
-    for (const writable of requested.filter((grant) => grant.access === "modify")) {
+    for (const writable of writableGrants) {
       const writableForm = guardForm(writable.path);
       const below = bound.find((root) => {
         const form = guardForm(root.path);
@@ -186,6 +207,18 @@ export function planWindowsConfinedLaunch(
           `Windows confinement cannot keep ${below.path} read-only beneath ${writable.path}, which the launch may write.`,
         );
       }
+    }
+  }
+  for (const readOnly of explicitReadOnly) {
+    const readOnlyForm = guardForm(readOnly.path);
+    const covering = writableGrants.find((writable) =>
+      isSameOrInside(readOnlyForm, guardForm(writable.path)),
+    );
+    if (covering !== undefined) {
+      return refused(
+        "writable-above-read-only",
+        `Windows confinement cannot keep ${readOnly.path} read-only beneath ${covering.path}, which the launch may write.`,
+      );
     }
   }
 
@@ -259,6 +292,26 @@ export function windowsConfinedLauncherArguments(
     "--",
     plan.executable,
     ...args,
+  ];
+}
+
+/** The native launcher's arguments for serialized, idempotent ACL/profile recovery. */
+export function windowsConfinedRecoveryArguments(input: {
+  readonly appContainerName: string;
+  readonly grants: ReadonlyArray<string>;
+}): ReadonlyArray<string> | undefined {
+  if (!/^Octant\.Confined\.[0-9a-f]{32}$/u.test(input.appContainerName)) return undefined;
+  const grantPaths: string[] = [];
+  for (const grant of input.grants) {
+    const native = windowsNativePath(grant);
+    if (native === undefined) return undefined;
+    grantPaths.push(native);
+  }
+  return [
+    "--recover",
+    "--container",
+    input.appContainerName,
+    ...grantPaths.flatMap((path) => ["--grant-path", path]),
   ];
 }
 
@@ -345,6 +398,6 @@ function unspelled(label: string): WindowsConfinementDecision {
 function coversProtected(path: string, entry: ResolvedProtectedEntry): WindowsConfinementDecision {
   return refused(
     "covers-protected",
-    `Windows confinement does not grant ${path}: it would reach ${entry.label}, which the secret guard protects.`,
+    `Windows confinement does not grant ${path}: it would reach ${entry.label}, which the secret guard protects. Choose a narrower clean folder or another host.`,
   );
 }

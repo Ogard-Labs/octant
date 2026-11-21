@@ -3,15 +3,14 @@
  * and a kill-on-close job object, applied by the fixed native launcher
  * `octant-windows-confine.exe` (built from `apps/desktop/native/windows-confine`).
  *
- * Dormant by design. `makeProcessConfinementLive` reaches this only when its
- * caller passes `unverifiedWindowsConfinement`, and no production caller does:
- * the mechanism has run only on a hosted Windows runner, never with a real
- * provider on a person's Windows machine, so Work and Code stay refused on
- * Windows at every level until that evidence exists.
+ * Used by Windows Strict, phase 1 for verified native Codex launches at Full
+ * access (and by the Windows confinement smoke tests). Every other Windows
+ * caller continues to refuse confinement by default unless explicitly wired.
  */
 import { randomBytes } from "node:crypto";
-import { readdirSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 import {
   isSameOrInside,
   protectedEntryFor,
@@ -29,8 +28,9 @@ import {
   ProcessConfinementError,
   type ProcessConfinementPrepareInput,
 } from "./seatbeltProfile";
+import type { WindowsConfinementLeaseStore } from "./windowsConfinementRecovery";
 
-export interface UnverifiedWindowsConfinementOptions {
+export interface WindowsConfinementOptions {
   /** Drive-absolute path of `octant-windows-confine.exe`. */
   readonly launcherPath: string;
   readonly homeDirectory?: string;
@@ -41,6 +41,37 @@ export interface UnverifiedWindowsConfinementOptions {
    * ...); tests substitute a fixture for the Windows disk.
    */
   readonly readDirectory?: (path: string) => ReadonlyArray<DirectoryEntry>;
+  /**
+   * Durable pre-ACL ownership store. When provided, every confined launch
+   * writes its pre-ACL lease before returning and refuses if cleanup is pending
+   * on an overlapping grant.
+   */
+  readonly leaseStore?: WindowsConfinementLeaseStore;
+}
+
+export type UnverifiedWindowsConfinementOptions = WindowsConfinementOptions;
+
+/**
+ * Resolves the host-packaged `octant-windows-confine.exe` beside the native
+ * resources directory, matching `windowsForeground.ts`. Never accepts an
+ * arbitrary environment override or symlink.
+ */
+export function resolvePackagedWindowsConfineLauncher(): string | undefined {
+  if (process.platform !== "win32") return undefined;
+  try {
+    const candidate = fileURLToPath(
+      new URL("../../../../native/octant-windows-confine.exe", import.meta.url),
+    );
+    const meta = lstatSync(candidate);
+    if (!meta.isFile() || meta.isSymbolicLink()) return undefined;
+    const canonical = realpathSync.native(candidate);
+    const normalized = windowsNativePath(canonical);
+    return normalized !== undefined && /\\octant-windows-confine\.exe$/iu.test(normalized)
+      ? normalized
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 interface DirectoryEntry {
@@ -71,6 +102,7 @@ export function buildWindowsConfinedLaunch(
   refuseWhatWindowsCannotExpress(input);
 
   const homeDirectory = options.homeDirectory ?? homedir();
+  const launchId = options.launchId ?? randomBytes(16).toString("hex");
   const ownAccountPaths =
     input.ownAccountAccess === "none"
       ? []
@@ -78,8 +110,12 @@ export function buildWindowsConfinedLaunch(
           ...(input.readRoots ?? []),
           ...(input.additionalWriteRoots ?? []),
         ]);
+  const explicitReadOnlyRoots = [
+    ...(input.explicitReadOnlyRoots ?? []),
+    ...(input.policyReadOnlyRoots ?? []),
+  ];
   const decision = planWindowsConfinedLaunch({
-    launchId: options.launchId ?? randomBytes(16).toString("hex"),
+    launchId,
     executable: input.executable,
     boundRoot: input.boundRoot,
     extraBoundRoots: input.extraBoundRoots ?? [],
@@ -87,6 +123,7 @@ export function buildWindowsConfinedLaunch(
     temporaryDirectory: input.temporaryDirectory,
     additionalWriteRoots: input.additionalWriteRoots ?? [],
     readRoots: input.readRoots ?? [],
+    ...(explicitReadOnlyRoots.length === 0 ? {} : { explicitReadOnlyRoots }),
     network: typeof input.networkEgress === "object" ? "proxied" : input.networkEgress,
     processCreation:
       input.allowProcessFork === false || input.allowProcessExec === false ? "denied" : "allowed",
@@ -173,9 +210,32 @@ export function buildWindowsConfinedLaunch(
       `Windows confinement does not let the launch write ${underDenyWrite.path}, which it asked to keep unwritable.`,
     );
   }
+  const leaseStore = options.leaseStore;
+  if (leaseStore !== undefined) {
+    const recorded = leaseStore.recordPreAcl({
+      launchId,
+      appContainerName: decision.appContainerName,
+      grants: decision.grants.map((grant) => grant.path),
+      launcherPath: launcher,
+    });
+    if (recorded.status === "refused") {
+      throw new ProcessConfinementError("incompatible", recorded.message);
+    }
+  }
   return {
     command: launcher,
     args: windowsConfinedLauncherArguments(decision, input.args),
+    ...(leaseStore === undefined
+      ? {}
+      : {
+          onSpawned: (pid: number) => leaseStore.recordLauncherPid(launchId, pid),
+          verifyCleanup: async () => {
+            const outcome = await leaseStore.releaseAndVerify(launchId);
+            if (outcome.status === "cleanup-pending") {
+              throw new Error(outcome.message);
+            }
+          },
+        }),
   };
 }
 
@@ -195,6 +255,24 @@ function refuseWhatWindowsCannotExpress(input: ProcessConfinementPrepareInput): 
   if ((input.loopbackRelayPorts ?? []).length > 0) refuse("loopback relay");
   if ((input.serverRelays ?? []).length > 0) refuse("server relay");
   if (input.recipientAdmission !== undefined) refuse("pinned credential recipient");
+  if (
+    input.policyBlockHostServices === true ||
+    input.sandboxPolicy?.policy.hostServices === "blocked"
+  ) {
+    throw new ProcessConfinementError(
+      "incompatible",
+      "The requested network limits are not supported by the Windows sandbox.",
+    );
+  }
+  if (
+    (input.sandboxPolicy?.policy.approvedDestinations?.length ?? 0) > 0 ||
+    (input.sandboxPolicy?.policy.localServices?.length ?? 0) > 0
+  ) {
+    throw new ProcessConfinementError(
+      "incompatible",
+      "The requested network limits are not supported by the Windows sandbox.",
+    );
+  }
 }
 
 function patternMatches(

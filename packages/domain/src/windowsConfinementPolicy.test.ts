@@ -4,6 +4,7 @@ import {
   planWindowsConfinedLaunch,
   type WindowsConfinementInput,
   windowsConfinedLauncherArguments,
+  windowsConfinedRecoveryArguments,
   windowsFullAccessLauncherArguments,
   windowsNativePath,
 } from "./windowsConfinementPolicy";
@@ -226,5 +227,50 @@ describe("Windows confined launch plan", () => {
     expect(windowsNativePath("c:/Users/Ada/src/")).toBe("C:\\Users\\Ada\\src");
     expect(windowsNativePath("C:\\")).toBe("C:");
     expect(windowsNativePath("C:\\a\\.\\b")).toBeUndefined();
+  });
+
+  it("refuses an explicit read-only root beneath a writable grant and names the Windows network limit refusal", () => {
+    const overlap = planWindowsConfinedLaunch(
+      input({
+        explicitReadOnlyRoots: [`${HOME}\\src\\octant\\readonly-dir`],
+      }),
+    );
+    expect(overlap).toMatchObject({ status: "refused", refusal: "writable-above-read-only" });
+
+    const proxied = planWindowsConfinedLaunch(input({ network: "proxied" }));
+    expect(proxied).toEqual({
+      status: "refused",
+      refusal: "proxied-network",
+      message: "The requested network limits are not supported by the Windows sandbox.",
+    });
+  });
+
+  it("builds recovery arguments only for valid container names and native paths", () => {
+    expect(
+      windowsConfinedRecoveryArguments({
+        appContainerName: `Octant.Confined.${LAUNCH_ID}`,
+        grants: ["c:/Work/repo", "D:\\Temp\\scratch"],
+      }),
+    ).toEqual([
+      "--recover",
+      "--container",
+      `Octant.Confined.${LAUNCH_ID}`,
+      "--grant-path",
+      "C:\\Work\\repo",
+      "--grant-path",
+      "D:\\Temp\\scratch",
+    ]);
+    expect(
+      windowsConfinedRecoveryArguments({
+        appContainerName: "Other.Container",
+        grants: ["C:\\Work\\repo"],
+      }),
+    ).toBeUndefined();
+    expect(
+      windowsConfinedRecoveryArguments({
+        appContainerName: `Octant.Confined.${LAUNCH_ID}`,
+        grants: ["\\\\server\\share\\repo"],
+      }),
+    ).toBeUndefined();
   });
 });

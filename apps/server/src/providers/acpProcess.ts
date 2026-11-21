@@ -233,6 +233,7 @@ function acpWindowsLaunch(
     executionPolicy: input.executionPolicy,
     fullAccessSandbox: input.fullAccessSandbox,
     strict: input.sandboxPolicy === undefined ? input.strict : true,
+    driverKind: "acp-agent",
   });
 }
 

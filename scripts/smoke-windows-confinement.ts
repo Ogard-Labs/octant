@@ -286,7 +286,20 @@ try {
   );
 
   const marker = `octant-confine-${randomBytes(6).toString("hex")}`;
-  const held = prepare(cmd, ["/d", "/c", "cmd", "/d", "/c", `set /p OCTANT_WAIT= & rem ${marker}`]);
+  const killedLaunchId = randomBytes(16).toString("hex");
+  const killedContainer = `Octant.Confined.${killedLaunchId}`;
+  const heldPort = makeProcessConfinementLive({
+    platform: "win32",
+    windowsConfinement: { launcherPath, homeDirectory: home, launchId: killedLaunchId },
+  });
+  const held = heldPort.prepare({
+    executable: cmd,
+    args: ["/d", "/c", "cmd", "/d", "/c", `set /p OCTANT_WAIT= & rem ${marker}`],
+    boundRoot: granted,
+    temporaryDirectory: temporary,
+    readRoots: [readOnly],
+    networkEgress: "none",
+  });
   const launcher = spawn(held.command, [...held.args], { stdio: ["pipe", "ignore", "ignore"] });
   const markedProcesses = () =>
     spawnSync(
@@ -313,6 +326,84 @@ try {
     "ends the command's whole process tree when the launcher is killed",
     started !== "0" && remaining === "0",
     { started, remaining },
+  );
+
+  // Killing the launcher outright leaves its SID ACE on `granted`; start a
+  // second live launch on `granted` and verify `--recover` removes only the
+  // killed launch's SID ACE and profile while preserving the live launch.
+  const sidsBeforeRecovery = containerSids();
+  const survivorLaunch = prepare(cmd, shell("set /p OCTANT_WAIT= & echo survivor-ok"));
+  const survivor = spawn(survivorLaunch.command, [...survivorLaunch.args], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let survivorOut = "";
+  survivor.stdout.on("data", (chunk: Buffer) => (survivorOut += chunk.toString()));
+  const survivorDone = new Promise<number | null>((done) =>
+    survivor.on("close", (code) => done(code)),
+  );
+  for (
+    let attempt = 0;
+    attempt < 40 && containerSids().size <= sidsBeforeRecovery.size;
+    attempt += 1
+  ) {
+    await new Promise((done) => setTimeout(done, 250));
+  }
+  const recoverFirst = spawnSync(
+    launcherPath,
+    [
+      "--recover",
+      "--container",
+      killedContainer,
+      "--grant-path",
+      granted,
+      "--grant-path",
+      temporary,
+      "--grant-path",
+      readOnly,
+    ],
+    { encoding: "utf8", timeout: 30_000, windowsHide: true },
+  );
+  const recoverSecond = spawnSync(
+    launcherPath,
+    ["--recover", "--container", killedContainer, "--grant-path", granted],
+    { encoding: "utf8", timeout: 30_000, windowsHide: true },
+  );
+  const sidsWhileSurvivorAlive = containerSids().size;
+  survivor.stdin.end("go\r\n");
+  const survivorCode = await survivorDone;
+  const sidsAfterSurvivor = containerSids().size;
+  check(
+    "recovers an abruptly killed launch idempotently without disturbing a concurrent live launch",
+    sidsBeforeRecovery.size >= 1 &&
+      recoverFirst.status === 0 &&
+      recoverSecond.status === 0 &&
+      sidsWhileSurvivorAlive === 1 &&
+      survivorCode === 0 &&
+      survivorOut.includes("survivor-ok") &&
+      sidsAfterSurvivor === 0,
+    {
+      sidsBeforeRecovery: [...sidsBeforeRecovery],
+      recoverFirst,
+      recoverSecond,
+      sidsWhileSurvivorAlive,
+      survivorCode,
+      survivorOut,
+      sidsAfterSurvivor,
+    },
+  );
+
+  // An executable path passing through a junction must be refused before spawn.
+  const exeAlias = join(root, "sys-alias");
+  const exeJunction = spawnSync(cmd, ["/d", "/c", "mklink", "/J", exeAlias, system32], {
+    encoding: "utf8",
+  });
+  const linkedExe = run(join(exeAlias, "cmd.exe"), shell("exit 0"));
+  check(
+    "refuses an executable whose path passes through a junction",
+    exeJunction.status === 0 &&
+      linkedExe.status === 125 &&
+      /passes through a junction or link/u.test(linkedExe.stderr),
+    { exeJunction: exeJunction.stdout, linkedExe },
   );
 } finally {
   rmSync(homeFile, { force: true });

@@ -9,7 +9,7 @@ import {
   type ProviderToolDefinition,
 } from "@octant/contracts";
 import { cacheHitRate, deriveTurnMetrics, foldCodeTurnUsage } from "@octant/domain";
-import { WINDOWS_STRICT_REFUSAL } from "@octant/domain/guardrail-policy";
+import { WINDOWS_STRICT_CHAT_REFUSAL } from "@octant/domain/guardrail-policy";
 import { ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -4508,6 +4508,9 @@ describe("ACP Chat on Windows", () => {
         ),
       ),
     );
-    expect(refused).toMatchObject({ category: "incompatible", message: WINDOWS_STRICT_REFUSAL });
+    expect(refused).toMatchObject({
+      category: "incompatible",
+      message: WINDOWS_STRICT_CHAT_REFUSAL,
+    });
   });
 });

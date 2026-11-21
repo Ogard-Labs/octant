@@ -12,6 +12,8 @@
 //     [--grant-read PATH | --grant-modify PATH]...
 //     [--active-process-limit 1] --cwd PATH -- PROGRAM.exe [ARG]...
 //   octant-windows-confine --full-access --cwd PATH -- PROGRAM.exe [ARG]...
+//   octant-windows-confine --recover --container Octant.Confined.<32 hex>
+//     [--grant-path PATH]...
 //
 // A refusal or setup failure exits 125 with one line on stderr; otherwise the
 // exit code is the command's.
@@ -19,6 +21,7 @@
 #include <aclapi.h>
 #include <sddl.h>
 #include <userenv.h>
+#include <algorithm>
 #include <cstdio>
 #include <cwchar>
 #include <cwctype>
@@ -28,6 +31,9 @@
 
 #ifndef PROC_THREAD_ATTRIBUTE_JOB_LIST
 #define PROC_THREAD_ATTRIBUTE_JOB_LIST ProcThreadAttributeValue(13, FALSE, TRUE, FALSE)
+#endif
+#ifndef PROC_THREAD_ATTRIBUTE_HANDLE_LIST
+#define PROC_THREAD_ATTRIBUTE_HANDLE_LIST ProcThreadAttributeValue(2, FALSE, TRUE, FALSE)
 #endif
 
 namespace {
@@ -45,6 +51,7 @@ constexpr wchar_t all_application_packages_sid[] = L"S-1-15-2-1";
 // erase another's live grant.
 constexpr wchar_t acl_mutex_name[] = L"Local\\octant-windows-confine-acl";
 constexpr DWORD acl_lock_wait_ms = 60000;
+constexpr DWORD job_drain_timeout_ms = 15000;
 
 struct Grant {
   std::wstring path;
@@ -53,9 +60,11 @@ struct Grant {
 
 struct Options {
   bool full_access = false;
+  bool recover = false;
   std::wstring container;
   std::vector<std::wstring> capabilities;
   std::vector<Grant> grants;
+  std::vector<std::wstring> recover_paths;
   DWORD active_process_limit = 0;
   std::wstring cwd;
   std::vector<std::wstring> command;
@@ -96,6 +105,10 @@ bool parse(int argc, wchar_t** argv, Options& options) {
       options.full_access = true;
       continue;
     }
+    if (flag == L"--recover") {
+      options.recover = true;
+      continue;
+    }
     if (i + 1 >= argc) return false;
     const std::wstring value = argv[++i];
     if (flag == L"--container") {
@@ -107,6 +120,9 @@ bool parse(int argc, wchar_t** argv, Options& options) {
     } else if (flag == L"--grant-read" || flag == L"--grant-modify") {
       if (!drive_absolute(value)) return false;
       options.grants.push_back({value, flag == L"--grant-read" ? read_mask : modify_mask});
+    } else if (flag == L"--grant-path") {
+      if (!drive_absolute(value)) return false;
+      options.recover_paths.push_back(value);
     } else if (flag == L"--active-process-limit") {
       if (value != L"1") return false;
       options.active_process_limit = 1;
@@ -118,6 +134,11 @@ bool parse(int argc, wchar_t** argv, Options& options) {
     }
   }
   for (; i < argc; ++i) options.command.emplace_back(argv[i]);
+  if (options.recover) {
+    return !options.full_access && valid_container(options.container) && options.capabilities.empty() &&
+      options.grants.empty() && options.active_process_limit == 0 && options.cwd.empty() && options.command.empty();
+  }
+  if (!options.recover_paths.empty()) return false;
   if (options.command.empty() || options.cwd.empty() || !drive_absolute(options.command[0])) return false;
   if (options.full_access) {
     // Full access is full access: nothing confining may ride along with it.
@@ -200,8 +221,10 @@ enum class Edit { applied, unnecessary, missing, linked, failed };
 // between the check and the edit.
 class HeldPath {
 public:
-  ~HeldPath() {
+  ~HeldPath() { release(); }
+  void release() {
     for (HANDLE handle : handles_) CloseHandle(handle);
+    handles_.clear();
   }
   HeldPath() = default;
   HeldPath(const HeldPath&) = delete;
@@ -475,21 +498,97 @@ HANDLE make_job(const Options& options) {
   return job;
 }
 
-void inherit_standard_handles(STARTUPINFOW& startup) {
+// Collects only the valid stdio handles and marks them inheritable so
+// PROC_THREAD_ATTRIBUTE_HANDLE_LIST passes exclusively those handles to the
+// child (never unrelated host handles).
+std::vector<HANDLE> collect_standard_handles(STARTUPINFOW& startup) {
   startup.dwFlags |= STARTF_USESTDHANDLES;
   startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
   startup.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
   startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+  std::vector<HANDLE> inherited;
   for (HANDLE handle : {startup.hStdInput, startup.hStdOutput, startup.hStdError}) {
-    if (handle != nullptr && handle != INVALID_HANDLE_VALUE) {
-      SetHandleInformation(handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+    if (handle == nullptr || handle == INVALID_HANDLE_VALUE) continue;
+    if (std::find(inherited.begin(), inherited.end(), handle) != inherited.end()) continue;
+    if (SetHandleInformation(handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) != FALSE) {
+      inherited.push_back(handle);
+    }
+  }
+  return inherited;
+}
+
+bool wait_for_job_empty(HANDLE job, HANDLE iocp, DWORD timeout_ms) {
+  const ULONGLONG deadline = GetTickCount64() + timeout_ms;
+  for (;;) {
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting{};
+    if (QueryInformationJobObject(job, JobObjectBasicAccountingInformation, &accounting, sizeof(accounting), nullptr) !=
+          FALSE &&
+        accounting.ActiveProcesses == 0) {
+      return true;
+    }
+    const ULONGLONG now = GetTickCount64();
+    if (now >= deadline) return false;
+    const DWORD remaining = static_cast<DWORD>(deadline - now);
+    DWORD message = 0;
+    ULONG_PTR key = 0;
+    LPOVERLAPPED overlapped = nullptr;
+    if (!GetQueuedCompletionStatus(iocp, &message, &key, &overlapped, remaining)) {
+      if (GetLastError() == WAIT_TIMEOUT) continue;
+      return false;
+    }
+    if (message == JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO && key == reinterpret_cast<ULONG_PTR>(job)) {
+      return true;
     }
   }
 }
 
+// Serialized, idempotent cleanup for a launch whose launcher was interrupted or
+// ended before container.release() finished. Derives the exact container SID,
+// removes only that SID's explicit ACEs under AclLock + HeldPath, and deletes
+// the AppContainer profile. Unrelated ACLs and other live launches stay intact.
+int recover_container(const Options& options) {
+  PSID sid = nullptr;
+  const HRESULT derived = DeriveAppContainerSidFromAppContainerName(options.container.c_str(), &sid);
+  if (FAILED(derived) || sid == nullptr) {
+    report(L"could not derive the AppContainer SID for recovery", static_cast<DWORD>(derived));
+    return refused_exit;
+  }
+  bool clean = true;
+  for (auto it = options.recover_paths.rbegin(); it != options.recover_paths.rend(); ++it) {
+    const Edit edit = remove_explicit(*it, sid);
+    if (edit == Edit::linked) {
+      report(L"refused recovery on a path that passes through a junction or link");
+      clean = false;
+    } else if (edit != Edit::applied && edit != Edit::missing) {
+      report(L"could not remove a grant during recovery");
+      clean = false;
+    }
+  }
+  FreeSid(sid);
+  const HRESULT deleted = DeleteAppContainerProfile(options.container.c_str());
+  if (FAILED(deleted) && deleted != HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) &&
+      deleted != HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND)) {
+    report(L"could not delete the AppContainer profile during recovery", static_cast<DWORD>(deleted));
+    clean = false;
+  }
+  return clean ? 0 : refused_exit;
+}
+
 int run(const Options& options) {
+  if (options.recover) return recover_container(options);
+
   Container container;
+  HeldPath held_executable;
   if (!options.full_access) {
+    const Edit exe_edit = held_executable.hold(options.command[0]);
+    if (exe_edit == Edit::linked) {
+      report(L"refused an executable whose path passes through a junction or link");
+      return refused_exit;
+    }
+    if (exe_edit != Edit::applied || (held_executable.attributes() & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+      report(L"could not verify the executable path; the launch was refused");
+      return refused_exit;
+    }
     if (!container.create(options)) return refused_exit;
     for (const auto& grant : options.grants) {
       const Edit edit = container.grant(grant);
@@ -509,8 +608,26 @@ int run(const Options& options) {
     report(L"could not create the job object", GetLastError());
     return refused_exit;
   }
+  HANDLE iocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 1);
+  if (iocp == nullptr) {
+    report(L"could not create the job completion port", GetLastError());
+    CloseHandle(job);
+    return refused_exit;
+  }
+  JOBOBJECT_ASSOCIATE_COMPLETION_PORT completion_port{job, iocp};
+  if (!SetInformationJobObject(job, JobObjectAssociateCompletionPortInformation, &completion_port,
+        sizeof(completion_port))) {
+    report(L"could not associate the job completion port", GetLastError());
+    CloseHandle(iocp);
+    CloseHandle(job);
+    return refused_exit;
+  }
 
-  const DWORD attribute_count = options.full_access ? 1 : 2;
+  STARTUPINFOEXW startup{};
+  startup.StartupInfo.cb = sizeof(startup);
+  std::vector<HANDLE> inherited_handles = collect_standard_handles(startup.StartupInfo);
+
+  const DWORD attribute_count = (options.full_access ? 1u : 2u) + (inherited_handles.empty() ? 0u : 1u);
   SIZE_T size = 0;
   InitializeProcThreadAttributeList(nullptr, attribute_count, 0, &size);
   std::vector<unsigned char> buffer(size);
@@ -525,8 +642,13 @@ int run(const Options& options) {
     ok = UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, &capabilities,
            sizeof(capabilities), nullptr, nullptr) != FALSE;
   }
+  if (ok && !inherited_handles.empty()) {
+    ok = UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited_handles.data(),
+           inherited_handles.size() * sizeof(HANDLE), nullptr, nullptr) != FALSE;
+  }
   if (!ok) {
     report(L"could not prepare the process attributes", GetLastError());
+    CloseHandle(iocp);
     CloseHandle(job);
     return refused_exit;
   }
@@ -536,16 +658,16 @@ int run(const Options& options) {
     if (!command_line.empty()) command_line.push_back(L' ');
     command_line += quote(argument);
   }
-  STARTUPINFOEXW startup{};
-  startup.StartupInfo.cb = sizeof(startup);
   startup.lpAttributeList = attributes;
-  inherit_standard_handles(startup.StartupInfo);
   PROCESS_INFORMATION process{};
-  if (!CreateProcessW(options.command[0].c_str(), command_line.data(), nullptr, nullptr, TRUE,
-        EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT, nullptr, options.cwd.c_str(),
-        &startup.StartupInfo, &process)) {
+  const BOOL created = CreateProcessW(options.command[0].c_str(), command_line.data(), nullptr, nullptr,
+    inherited_handles.empty() ? FALSE : TRUE, EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT, nullptr,
+    options.cwd.c_str(), &startup.StartupInfo, &process);
+  held_executable.release();
+  if (!created) {
     report(L"could not start the command", GetLastError());
     DeleteProcThreadAttributeList(attributes);
+    CloseHandle(iocp);
     CloseHandle(job);
     return refused_exit;
   }
@@ -555,11 +677,18 @@ int run(const Options& options) {
   DWORD exit_code = refused_exit;
   GetExitCodeProcess(process.hProcess, &exit_code);
   CloseHandle(process.hProcess);
-  // The command's descendants end with it, as they do when a capsule's PID
-  // namespace ends on Linux.
+  // End every remaining descendant in the job and wait for active process count
+  // to reach zero before releasing ACLs and deleting the AppContainer profile.
   TerminateJobObject(job, exit_code);
+  const bool drained = wait_for_job_empty(job, iocp, job_drain_timeout_ms);
   CloseHandle(job);
-  if (!container.release()) report(L"a grant or the AppContainer profile could not be removed");
+  CloseHandle(iocp);
+  if (!drained) {
+    report(L"job descendants did not exit before cleanup timeout");
+  }
+  const bool released = container.release();
+  if (!released) report(L"a grant or the AppContainer profile could not be removed");
+  if (!drained || !released) return refused_exit;
   return static_cast<int>(exit_code);
 }
 }  // namespace

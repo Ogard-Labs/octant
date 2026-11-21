@@ -164,16 +164,18 @@ export function refusesFullAccessSandbox(input: {
 }
 
 /**
- * Why one of Octant's own terminals or commands refuses on a Windows host.
- * Outside Strict they run there unconfined at every level, as a person's own
- * terminal and a provider's own commands do in other agent workspaces on
- * Windows, each command still asking as its level asks. Strict, and Full
- * access with the sandbox kept, need Octant's sandbox, and Windows has none
- * Octant can use yet: its launcher is built but has not run on a person's
- * Windows machine. A provider turn is judged by {@link hostProviderTurnRefusal}.
+ * Why Octant-operated tools, terminals, checks, Project actions, and host
+ * operations refuse on behalf of a Windows Strict launch or turn.
+ */
+export const WINDOWS_SANDBOX_OPERATION_REFUSAL =
+  "This operation cannot run inside the Windows sandbox yet.";
+
+/**
+ * Why a host operation that serves no admitted Windows Strict launch (such as
+ * an unconfigured catalog read) refuses on a Windows host.
  */
 export const WINDOWS_SANDBOX_MISSING_REASON =
-  "This needs Octant's sandbox, which Windows does not have yet. Under Strict, or with the sandbox kept at Full access, Octant's own terminals and commands do not run on this computer; turn Strict off (and Keep the sandbox off) for this thread, or run it on a Mac or Linux host.";
+  "This needs Octant's sandbox, which Windows does not have yet for this operation. Turn Strict off, or run it on a Mac or Linux host.";
 
 /**
  * Why one of Octant's own terminals or commands at `access` refuses on this
@@ -191,52 +193,112 @@ export function hostSandboxRefusal(input: {
   return input.strict !== false ||
     input.access.strict === true ||
     (input.access.executionPolicy === "full-access" && input.access.fullAccessSandbox === true)
-    ? WINDOWS_SANDBOX_MISSING_REASON
+    ? WINDOWS_SANDBOX_OPERATION_REFUSAL
     : undefined;
 }
 
 /**
- * Why Strict refuses on a Windows host at every level. The shared Strict
- * control is independent of autonomy and Windows has no admitted Octant
- * sandbox. A native approval mode cannot substitute for its confinement.
+ * Why Strict below Full access refuses on a Windows host. Phase 1 admits
+ * verified native Codex at Full access only; every lower level keeps refusing
+ * by name until its runtime is verified.
  */
 export const WINDOWS_STRICT_REFUSAL =
-  "Strict needs a sandbox Windows doesn't have yet. Turn Strict off for this thread to run it with the provider's own approvals, or run it on a Mac or Linux host.";
+  "Windows Strict currently works only at Full access with Codex. Switch to Full access with Codex, turn Strict off to use the provider's own approvals, or run on a Mac or Linux host.";
 
-/** Why Full access with the sandbox kept refuses on a Windows host. */
+/** Why Chat under Strict refuses on a Windows host. */
+export const WINDOWS_STRICT_CHAT_REFUSAL =
+  "Windows Strict does not support Chat yet. Turn Strict off for this thread, or run it on a Mac or Linux host.";
+
+/** Why a legacy Full-access-only sandbox record without canonical Strict refuses on Windows. */
 export const WINDOWS_KEPT_SANDBOX_REFUSAL =
-  "Keeping the sandbox at Full access needs a sandbox Windows doesn't have yet. Turn Keep the sandbox off, or run it on a Mac or Linux host.";
+  "The legacy Full access sandbox setting is not supported on Windows. Turn it off, or use Strict with Codex at Full access.";
+
+/** Why a command shim or script executable refuses under Windows Strict. */
+export const WINDOWS_STRICT_SHIM_REFUSAL =
+  "Command shims and scripts are not verified for Windows Strict yet. Point Settings at the native codex.exe instead, turn Strict off, or run on a Mac or Linux host.";
+
+/** Why proxy-only or relay network limits refuse under Windows Strict. */
+export const WINDOWS_STRICT_NETWORK_REFUSAL =
+  "The requested network limits are not supported by the Windows sandbox.";
+
+function windowsStrictRuntimeLabel(driverKind: ProviderDriverKind | undefined): string {
+  if (driverKind === undefined) return "This runtime";
+  if (driverKind === "claude") return "Claude Code";
+  if (driverKind === "opencode") return "OpenCode";
+  if (driverKind === "pi") return "Pi";
+  if (driverKind === "acp-agent" || isAcpAgentKind(driverKind)) return "ACP agents";
+  if (isNativeHarnessDriverKind(driverKind)) return "Octant Harness";
+  return "This runtime";
+}
+
+/**
+ * Why a non-Codex runtime refuses under Windows Strict at Full access. Each
+ * runtime keeps refusing by name until its Windows Strict path is verified.
+ */
+export function windowsStrictRuntimeRefusal(driverKind?: ProviderDriverKind): string {
+  const label = windowsStrictRuntimeLabel(driverKind);
+  const verb = label === "ACP agents" ? "are" : "is";
+  return `${label} ${verb} not verified for Windows Strict yet. Choose a supported Codex installation at Full access, turn Strict off, or run on a Mac or Linux host.`;
+}
+
+/**
+ * Whether a provider turn is admitted to Windows Strict, phase 1: native
+ * Windows, canonical Strict on, Full access, Work or Code, and Codex.
+ */
+export function isWindowsStrictConfinedTurn(input: {
+  readonly platform: string | undefined;
+  readonly access: ThreadAccess;
+  readonly strict: boolean;
+  readonly driverKind?: ProviderDriverKind | undefined;
+  readonly mode?: "chat" | "work" | "code" | undefined;
+}): boolean {
+  return (
+    input.platform === "win32" &&
+    (input.strict || input.access.strict === true) &&
+    input.access.executionPolicy === "full-access" &&
+    input.mode !== "chat" &&
+    input.driverKind === "codex"
+  );
+}
 
 /**
  * Why a provider turn at `access` refuses on this host, or undefined when it
- * may start. On Windows a turn below Full access runs with the provider's own
- * approvals and no Octant sandbox claimed, so only what needs Octant's sandbox
- * refuses there: Strict below Full access and Full access with the sandbox
- * kept. Octant's own terminals and commands keep {@link hostSandboxRefusal}.
+ * may start. On Windows outside Strict, every level runs with the provider's
+ * own approvals and no Octant sandbox claimed. Under canonical Strict, phase 1
+ * admits Full access with Codex (AppContainer + Job Object) and refuses every
+ * other provider or level by name. Legacy `fullAccessSandbox` without
+ * canonical Strict is refused rather than reused or silently run unconfined.
+ * Octant's own terminals and commands keep {@link hostSandboxRefusal}.
  */
 export function hostProviderTurnRefusal(input: {
   readonly platform: string | undefined;
   readonly access: ThreadAccess;
   readonly strict: boolean;
+  readonly driverKind?: ProviderDriverKind | undefined;
 }): string | undefined {
   if (input.platform !== "win32") return undefined;
-  if (input.strict || input.access.strict === true) return WINDOWS_STRICT_REFUSAL;
+  if (input.strict || input.access.strict === true) {
+    if (input.access.executionPolicy !== "full-access") return WINDOWS_STRICT_REFUSAL;
+    return input.driverKind === "codex" ? undefined : windowsStrictRuntimeRefusal(input.driverKind);
+  }
   if (input.access.executionPolicy === "full-access") {
     return input.access.fullAccessSandbox === true ? WINDOWS_KEPT_SANDBOX_REFUSAL : undefined;
   }
-  return input.strict ? WINDOWS_STRICT_REFUSAL : undefined;
+  return undefined;
 }
 
 /**
  * How one provider launch runs on a Windows host, decided from that launch's
- * own mode, level and Strict value, so no earlier launch or cached read admits
- * another. `unconfined` starts the provider with no Octant sandbox: at Full
- * access with no approvals, below it and in Chat outside Strict with the
- * provider's own rules and approvals, every ask still answered and journaled
- * on the server. A launch that does not say whether it is Strict is Strict.
+ * own mode, level, driver kind and Strict value, so no earlier launch or cached
+ * read admits another. `confined` starts verified native Codex at Full access
+ * inside the Windows AppContainer + Job Object sandbox; `unconfined` starts
+ * outside Strict with no Octant sandbox (at Full access with no approvals, or
+ * below it / in Chat with the provider's own rules and approvals). A launch
+ * that does not say whether it is Strict is Strict outside open Full access.
  */
 export type WindowsProviderLaunch =
   | { readonly status: "unconfined"; readonly approvals: "none" | "provider" }
+  | { readonly status: "confined" }
   | { readonly status: "refused"; readonly reason: string };
 
 export function windowsProviderLaunch(input: {
@@ -244,15 +306,23 @@ export function windowsProviderLaunch(input: {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly fullAccessSandbox?: boolean | undefined;
   readonly strict?: boolean | undefined;
+  readonly driverKind?: ProviderDriverKind | undefined;
 }): WindowsProviderLaunch {
-  if (input.strict === true) return { status: "refused", reason: WINDOWS_STRICT_REFUSAL };
+  if (input.strict === true) {
+    if (input.mode === "chat") return { status: "refused", reason: WINDOWS_STRICT_CHAT_REFUSAL };
+    if (input.executionPolicy !== "full-access") {
+      return { status: "refused", reason: WINDOWS_STRICT_REFUSAL };
+    }
+    if (input.driverKind === "codex") return { status: "confined" };
+    return { status: "refused", reason: windowsStrictRuntimeRefusal(input.driverKind) };
+  }
   if (input.fullAccessSandbox === true) {
     return { status: "refused", reason: WINDOWS_KEPT_SANDBOX_REFUSAL };
   }
   if (input.mode === "chat") {
     return input.strict === false
       ? { status: "unconfined", approvals: "provider" }
-      : { status: "refused", reason: WINDOWS_STRICT_REFUSAL };
+      : { status: "refused", reason: WINDOWS_STRICT_CHAT_REFUSAL };
   }
   if (input.executionPolicy === "full-access") {
     return { status: "unconfined", approvals: "none" };

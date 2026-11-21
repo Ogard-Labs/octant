@@ -14,7 +14,15 @@ import {
 } from "./process/macosSandboxScope";
 import type { SandboxPolicyLaunchDetails } from "@octant/contracts/sandbox-policy";
 import { admitSandboxPolicy, intersectSandboxPolicies } from "@octant/domain/sandbox-policy";
-import { refusesFullAccessSandbox } from "@octant/domain/guardrail-policy";
+import {
+  refusesFullAccessSandbox,
+  WINDOWS_KEPT_SANDBOX_REFUSAL,
+  WINDOWS_SANDBOX_OPERATION_REFUSAL,
+  WINDOWS_STRICT_NETWORK_REFUSAL,
+  WINDOWS_STRICT_REFUSAL,
+  windowsStrictRuntimeRefusal,
+} from "@octant/domain/guardrail-policy";
+import { resolvePackagedWindowsConfineLauncher } from "./process/windowsConfinement";
 import { isNativeHarnessDriverKind } from "@octant/domain/provider-policy";
 import { isAcpProviderKind } from "./providers/acpProfiles";
 import { ProviderDriverKind, ProjectId } from "@octant/contracts";
@@ -102,6 +110,7 @@ export interface SandboxRestrictionsDependencies {
   readonly platform?: NodeJS.Platform;
   readonly dataDirectory?: string;
   readonly accessTimeMediationAvailable?: (authority: string | undefined) => boolean;
+  readonly windowsConfinementAvailable?: () => boolean;
 }
 
 export class SandboxRestrictionsService implements SandboxRestrictionsAuthority {
@@ -313,9 +322,15 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
     const strictPolicy = this.#strictPolicy(scope);
     const platform = this.#dependencies.platform ?? process.platform;
     const policy = effective?.policy;
+    const windowsBackendReady =
+      platform === "win32" &&
+      this.#dependencies.dataDirectory !== undefined &&
+      (this.#dependencies.windowsConfinementAvailable?.() ??
+        resolvePackagedWindowsConfineLauncher() !== undefined);
     const backendReady =
       (platform === "linux" && linuxPinnedLaunchAvailable(this.#dependencies.dataDirectory)) ||
-      (platform === "darwin" && macosSandboxScopeAvailable());
+      (platform === "darwin" && macosSandboxScopeAvailable()) ||
+      windowsBackendReady;
     const accessTimeReady =
       platform === "linux" &&
       (this.#dependencies.accessTimeMediationAvailable ?? linuxMediationProductionAvailable)(
@@ -337,6 +352,16 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
       ...(platform === "darwin" && !backendReady
         ? [
             "Strict enrollment requires the installed native scope helper and an active macOS GUI session. Existing legacy sandbox choices remain available.",
+          ]
+        : []),
+      ...(platform === "win32"
+        ? [
+            ...(windowsBackendReady
+              ? []
+              : [
+                  "Windows Strict requires the packaged octant-windows-confine.exe launcher and private host storage.",
+                ]),
+            "Windows Strict phase 1 works at Full access with a verified native Codex .exe installation inside an AppContainer and Job Object. Other providers, lower access levels, command shims, proxy-only network limits, and Octant-operated tools refuse by name.",
           ]
         : []),
       ...(this.#dependencies.enrollmentEnabled === false
@@ -432,7 +457,7 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
         folders: backendReady,
         protectedPaths: accessTimeReady,
         isolatedCredentials: accessTimeReady,
-        blockedHostServices: backendReady,
+        blockedHostServices: backendReady && platform !== "win32",
       },
       denials: [...this.#denials.values()].filter(
         (denial) =>
@@ -643,6 +668,15 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
       strictEnabled = resolved.strictEnabled;
       legacyStrict = resolved.legacyStrict;
       const { record, parentRecord, selectedPolicy } = resolved;
+      const platform = this.#dependencies.platform ?? process.platform;
+      if (platform === "win32" && strictEnabled) {
+        if (request.executionRoute === "terminal") {
+          throw new Error(WINDOWS_SANDBOX_OPERATION_REFUSAL);
+        }
+        if (legacyStrict) {
+          throw new Error(WINDOWS_KEPT_SANDBOX_REFUSAL);
+        }
+      }
       if (strictEnabled && selectedPolicy !== undefined) {
         if (!legacyStrict && selectedPolicy.network === "unrestricted" && sandboxNetworkLimitsOn())
           throw new Error(
@@ -655,7 +689,6 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
           this.active(request.parentThreadId) === undefined
         )
           this.#validate(parentRecord);
-        const platform = this.#dependencies.platform ?? process.platform;
         const kind =
           request.executionRoute === "terminal"
             ? undefined
@@ -683,15 +716,41 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
           throw new Error(
             "macOS Strict requires the installed native scope helper, private host storage and an active GUI session.",
           );
-        if (platform !== "linux" && platform !== "darwin")
+        if (platform === "win32") {
+          const prefs = this.#dependencies.strictPreferences?.(policyScope);
+          if (prefs?.executionPolicy !== "full-access") {
+            throw new Error(WINDOWS_STRICT_REFUSAL);
+          }
+          if (kind !== "codex") {
+            throw new Error(windowsStrictRuntimeRefusal(kind));
+          }
+          if (
+            selectedPolicy.hostServices === "blocked" ||
+            (selectedPolicy.approvedDestinations?.length ?? 0) > 0 ||
+            (selectedPolicy.localServices?.length ?? 0) > 0 ||
+            (selectedPolicy.network === "existing-policy" && sandboxNetworkLimitsOn())
+          ) {
+            throw new Error(WINDOWS_STRICT_NETWORK_REFUSAL);
+          }
+          const windowsReady =
+            this.#dependencies.dataDirectory !== undefined &&
+            (this.#dependencies.windowsConfinementAvailable?.() ??
+              resolvePackagedWindowsConfineLauncher() !== undefined);
+          if (!windowsReady) {
+            throw new Error(
+              "Windows Strict requires the packaged octant-windows-confine.exe launcher and private host storage.",
+            );
+          }
+        } else if (platform !== "linux" && platform !== "darwin") {
           throw new Error("This platform cannot enforce the selected sandbox restrictions.");
+        }
         const admission = admitSandboxPolicy(selectedPolicy, {
           allowedFolders: true,
           protectedPaths: accessTimeReady,
           networkDeny: true,
           unrestrictedNetwork: true,
           isolatedCredentials: accessTimeReady,
-          blockedHostServices: true,
+          blockedHostServices: platform !== "win32",
         });
         if (admission.status === "refused")
           throw new Error(

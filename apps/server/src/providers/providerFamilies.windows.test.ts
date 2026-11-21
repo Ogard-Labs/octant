@@ -2,7 +2,11 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
-import { WINDOWS_STRICT_REFUSAL } from "@octant/domain/guardrail-policy";
+import {
+  WINDOWS_STRICT_CHAT_REFUSAL,
+  WINDOWS_STRICT_REFUSAL,
+  windowsStrictRuntimeRefusal,
+} from "@octant/domain/guardrail-policy";
 import { Effect, Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeAcpConfinementLive, makeAcpProcessLive } from "./acpProcess";
@@ -213,8 +217,15 @@ describe.runIf(process.platform === "win32" && fakeAcpAgent !== undefined)(
     it("refuses Strict by name before the agent runs", async () => {
       for (const [level, message] of [
         [{ mode: "code", executionPolicy: "approval-gated" }, WINDOWS_STRICT_REFUSAL],
-        [{ mode: "chat", executionPolicy: "approval-gated", strict: true }, WINDOWS_STRICT_REFUSAL],
-        [{ mode: "chat", executionPolicy: "approval-gated" }, WINDOWS_STRICT_REFUSAL],
+        [
+          { mode: "code", executionPolicy: "full-access", strict: true },
+          windowsStrictRuntimeRefusal("acp-agent"),
+        ],
+        [
+          { mode: "chat", executionPolicy: "approval-gated", strict: true },
+          WINDOWS_STRICT_CHAT_REFUSAL,
+        ],
+        [{ mode: "chat", executionPolicy: "approval-gated" }, WINDOWS_STRICT_CHAT_REFUSAL],
       ] as const) {
         const refused = await startAndStop(level);
         expect(Either.isLeft(refused)).toBe(true);

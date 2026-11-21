@@ -191,9 +191,17 @@ describe("Windows confinement port", () => {
       kind: "proxied",
       endpoint: { kind: "loopback", port: 9000 },
     } as const;
-    expect(refusalOf(() => port.prepare({ ...launch, networkEgress: proxied }))).toMatch(
-      /no proxied network/u,
+    expect(refusalOf(() => port.prepare({ ...launch, networkEgress: proxied }))).toBe(
+      "The requested network limits are not supported by the Windows sandbox.",
     );
+    expect(
+      refusalOf(() =>
+        port.prepare({
+          ...launch,
+          explicitReadOnlyRoots: [`${launch.boundRoot}\\readonly-sub`],
+        }),
+      ),
+    ).toMatch(/cannot keep .* read-only beneath/u);
     expect(refusalOf(() => port.prepare({ ...launch, allowFileReadStar: true }))).toMatch(
       /read-everywhere/u,
     );

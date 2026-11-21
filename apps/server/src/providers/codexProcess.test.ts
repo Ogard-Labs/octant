@@ -2,7 +2,10 @@ import { spawnSync } from "node:child_process";
 import {
   WINDOWS_KEPT_SANDBOX_REFUSAL,
   WINDOWS_SANDBOX_MISSING_REASON,
+  WINDOWS_STRICT_CHAT_REFUSAL,
+  WINDOWS_STRICT_NETWORK_REFUSAL,
   WINDOWS_STRICT_REFUSAL,
+  WINDOWS_STRICT_SHIM_REFUSAL,
 } from "@octant/domain/guardrail-policy";
 import {
   accessSync,
@@ -1097,9 +1100,104 @@ describe("Codex launch confinement", () => {
     for (const strict of [true, undefined])
       expect(launch(strict)).toMatchObject({
         status: "refused",
-        failure: { message: WINDOWS_STRICT_REFUSAL },
+        failure: { message: WINDOWS_STRICT_CHAT_REFUSAL },
       });
     expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it("prepares Windows Strict phase 1 confined Codex launches at Full access and refuses shims and proxy-only network without unconfined fallback", () => {
+    const seen: Array<{ readonly executable: string; readonly networkEgress: unknown }> = [];
+    const confinement = {
+      prepare: vi.fn(
+        (input: {
+          readonly executable: string;
+          readonly args: ReadonlyArray<string>;
+          readonly networkEgress: unknown;
+        }) => {
+          seen.push({ executable: input.executable, networkEgress: input.networkEgress });
+          return {
+            command: "C:\\Program Files\\Octant\\resources\\native\\octant-windows-confine.exe",
+            args: [
+              "--container",
+              "Octant.Confined.0123456789abcdef0123456789abcdef",
+              "--",
+              input.executable,
+              ...input.args,
+            ],
+          };
+        },
+      ),
+    };
+
+    const admitted = prepareCodexLaunch({
+      binaryPath: "C:\\Tools\\Codex\\codex.exe",
+      args: ["app-server"],
+      authority: {
+        kind: "thread",
+        root: "C:\\Work\\repo",
+        mode: "code",
+        executionPolicy: "full-access",
+        strict: true,
+      },
+      environment: { USERPROFILE: "C:\\Users\\Ada", CODEX_HOME: "C:\\Users\\Ada\\.codex" },
+      confinement,
+      platform: "win32",
+    });
+    expect(admitted.status).toBe("prepared");
+    if (admitted.status === "prepared") {
+      expect(admitted.launch.command).toBe(
+        "C:\\Program Files\\Octant\\resources\\native\\octant-windows-confine.exe",
+      );
+      expect(admitted.launch.confined).toBe(true);
+      admitted.launch.release();
+    }
+    expect(seen).toEqual([{ executable: "C:\\Tools\\Codex\\codex.exe", networkEgress: "allow" }]);
+
+    // Command shims refuse before confinement or spawn.
+    const shimRefused = prepareCodexLaunch({
+      binaryPath: "C:\\Tools\\Codex\\codex.cmd",
+      args: ["app-server"],
+      authority: {
+        kind: "thread",
+        root: "C:\\Work\\repo",
+        mode: "work",
+        executionPolicy: "full-access",
+        strict: true,
+      },
+      environment: {},
+      confinement,
+      platform: "win32",
+    });
+    expect(shimRefused).toEqual({
+      status: "refused",
+      failure: { category: "incompatible", message: WINDOWS_STRICT_SHIM_REFUSAL },
+    });
+
+    // Proxy-only network refuses by name rather than falling back to direct network.
+    const proxiedRefused = prepareCodexLaunch({
+      binaryPath: "C:\\Tools\\Codex\\codex.exe",
+      args: ["app-server"],
+      authority: {
+        kind: "thread",
+        root: "C:\\Work\\repo",
+        mode: "code",
+        executionPolicy: "full-access",
+        strict: true,
+      },
+      environment: {},
+      confinement,
+      platform: "win32",
+      network: {
+        endpoint: { kind: "loopback", port: 9000 },
+        environment: { HTTP_PROXY: "http://127.0.0.1:9000" },
+      },
+    });
+    expect(proxiedRefused).toEqual({
+      status: "refused",
+      failure: { category: "incompatible", message: WINDOWS_STRICT_NETWORK_REFUSAL },
+    });
+    // Neither refused call invoked confinement.prepare again.
+    expect(confinement.prepare).toHaveBeenCalledTimes(1);
   });
 
   it("reads the Windows catalog unconfined only for a host whose new threads run with no Octant sandbox", () => {

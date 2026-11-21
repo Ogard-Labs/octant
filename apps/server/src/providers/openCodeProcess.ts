@@ -1328,6 +1328,7 @@ function openCodeWindowsLaunch(
     executionPolicy: input.executionPolicy ?? "approval-gated",
     fullAccessSandbox: input.fullAccessSandbox,
     strict: input.sandboxPolicy === undefined ? input.strict : true,
+    driverKind: "opencode",
   });
 }
 
