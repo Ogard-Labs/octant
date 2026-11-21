@@ -367,12 +367,14 @@ export function finishAcpReportedTurn(
   if (tokens === undefined) return;
   const costUsd =
     unsettled &&
-    !stale &&
     charged !== undefined &&
     latest !== undefined &&
     latest.currency === "USD" &&
     (charged.currency === undefined || charged.currency === "USD") &&
-    latest.amount >= charged.amount
+    latest.amount >= charged.amount &&
+    // Growth that spans an earlier unpriced turn can't be attributed, but an
+    // unchanged total has none to attribute, so it still records zero.
+    (!stale || latest.amount === charged.amount)
       ? // Subtracting decimal dollars leaves binary noise in the last digits.
         Math.round((latest.amount - charged.amount) * 1e9) / 1e9
       : undefined;

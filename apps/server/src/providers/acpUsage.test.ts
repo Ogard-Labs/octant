@@ -328,6 +328,18 @@ describe("standard ACP usage updates", () => {
     expect(finishAcpReportedTurn(state, reply)).toMatchObject({ costUsd: 0.2 });
   });
 
+  it("records zero for the turn after an unpriced one when the agent restates an unchanged total", () => {
+    const state = acpReportedUsageState("new");
+    beginAcpReportedTurn(state);
+    observeAcpUsageUpdate(state, update(0.5));
+    expect(finishAcpReportedTurn(state, reply)).toMatchObject({ costUsd: 0.5 });
+    beginAcpReportedTurn(state);
+    expect(finishAcpReportedTurn(state, reply)).not.toHaveProperty("costUsd");
+    beginAcpReportedTurn(state);
+    observeAcpUsageUpdate(state, update(0.5));
+    expect(finishAcpReportedTurn(state, reply)).toMatchObject({ costUsd: 0 });
+  });
+
   it("keeps charging exact growth while the agent reports a cost every turn", () => {
     const state = acpReportedUsageState("new");
     for (const [amount, expected] of [
