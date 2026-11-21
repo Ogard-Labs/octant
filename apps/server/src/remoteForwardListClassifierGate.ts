@@ -76,6 +76,7 @@ const PRODUCT_PROBES = [
   { path: "/api/integrations/linear/authentication", method: "GET" },
   { path: "/api/integrations/linear/authentication/commands", method: "POST" },
   { path: "/api/integrations/linear/operations", method: "POST" },
+  { path: "/api/benchmarks/advice", method: "POST" },
   { path: "/api/benchmarks/suites/list", method: "POST" },
   { path: "/api/benchmarks/runs/list", method: "POST" },
   { path: "/api/benchmarks/runs/read", method: "POST" },

@@ -1599,6 +1599,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             ) : null}
           </OctantDialogPresence>
           <ChatComposer
+            benchmarkProjectId={view.thread.projectId}
             notices={sideChatNotice === undefined ? [] : [sideChatNotice]}
             key={String(thread.id)}
             info={

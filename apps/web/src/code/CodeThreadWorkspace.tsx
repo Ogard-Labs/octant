@@ -3066,6 +3066,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               <>
                 <ComposerModelPicker
                   threadId={String(thread.id)}
+                  benchmarkScope={{ kind: "code", projectId: thread.projectId }}
                   ariaLabel="Provider and model"
                   disabled={busy}
                   groups={threadModelGroups}

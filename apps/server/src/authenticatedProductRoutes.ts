@@ -317,7 +317,8 @@ export function classifyProductAction(request: Request): string | undefined {
     // with a local window.
     if (method === "POST" && path === "/api/benchmarks/cells/rate") return "benchmark.rate-cell";
     return method === "POST" &&
-      (path === "/api/benchmarks/suites/list" ||
+      (path === "/api/benchmarks/advice" ||
+        path === "/api/benchmarks/suites/list" ||
         path === "/api/benchmarks/runs/list" ||
         path === "/api/benchmarks/runs/read" ||
         path === "/api/benchmarks/suites/history" ||

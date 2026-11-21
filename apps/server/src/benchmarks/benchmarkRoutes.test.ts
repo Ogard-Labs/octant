@@ -112,6 +112,42 @@ const startBody = {
 };
 
 describe("benchmark routes", () => {
+  it("returns read-only suggestions only for the requested Project and thread kind", async () => {
+    const { handler, projection } = setup();
+    const projectId = "66100000-0000-4000-8000-0000000000cc";
+    const saved = await handler(
+      post(BENCHMARK_ROUTE_PATHS.suitesSave, {
+        ...saveBody,
+        projectId,
+        kind: "work",
+        passThreshold: 0.9,
+      }),
+    );
+    expect(saved?.status).toBe(200);
+    const advice = await handler(post(BENCHMARK_ROUTE_PATHS.advice, { projectId, kind: "work" }));
+    expect(await advice?.json()).toEqual({
+      suites: [{ suiteId: benchmarkIds.suite, name: saveBody.name, models: [] }],
+    });
+    const wrong = await handler(post(BENCHMARK_ROUTE_PATHS.advice, { projectId, kind: "chat" }));
+    expect(await wrong?.json()).toEqual({ suites: [] });
+    const ambiguous = await handler(
+      post(BENCHMARK_ROUTE_PATHS.advice, {
+        projectId,
+        kind: "work",
+        suiteId: benchmarkIds.suite,
+      }),
+    );
+    expect(ambiguous?.status).toBe(400);
+    const unrelated = await handler(
+      post(BENCHMARK_ROUTE_PATHS.advice, {
+        projectId: benchmarkIds.suite,
+        kind: "work",
+      }),
+    );
+    expect(await unrelated?.json()).toEqual({ suites: [] });
+    expect(projection.suites()[0]).toMatchObject({ revision: 1, projectId, passThreshold: 0.9 });
+    expect(projection.runs()).toEqual([]);
+  });
   it("lets a local window save a suite, start a run on it, and read both back", async () => {
     const { handler, kicks } = setup();
     const saved = await handler(post(BENCHMARK_ROUTE_PATHS.suitesSave, saveBody));

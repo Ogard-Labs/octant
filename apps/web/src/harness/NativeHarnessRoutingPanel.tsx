@@ -1,8 +1,9 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { ArrowDown, ArrowUp, X } from "../ui/icons";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import {
   DEFAULT_NATIVE_HARNESS_JOB_SLOTS,
+  decodeHostId,
   NATIVE_HARNESS_BUILT_IN_SLOT_IDS,
   NativeHarnessJob,
   type NativeHarnessRoutingConfiguration,
@@ -34,6 +35,8 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { ModelRoleEditor } from "./ModelRoleEditor";
 import { nativeHarnessReadinessById, roleSuggestionModels } from "./modelRoleOptions";
 import { RoleSuggestionPreview } from "./RoleSuggestionPreview";
+import { BenchmarkAdviceContext } from "../usage/benchmarks/BenchmarkAdviceContext";
+import { BenchmarkRoleSuggestion } from "./BenchmarkRoleSuggestion";
 import {
   ADVISOR_ROLE,
   UNRESOLVED_BUILT_IN_SLOT_IDS,
@@ -132,6 +135,11 @@ export function nativeHarnessSlotsUsing(
  * cannot silently overwrite each other and nothing waits behind a Save step.
  */
 export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps) {
+  const benchmarks = useContext(BenchmarkAdviceContext)?.client;
+  const [benchmarkRole, setBenchmarkRole] = useState<{
+    readonly id: string;
+    readonly label: string;
+  }>();
   const [settings, setSettings] = useState<NativeHarnessRoutingSettings>();
   // The change being sent, shown at once so a choice never snaps back while it saves.
   const [pending, setPending] = useState<NativeHarnessRoutingConfiguration>();
@@ -322,6 +330,19 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
     <ModelRoleEditor
       disabled={saving}
       groups={props.groups}
+      headAction={
+        benchmarks === undefined || !hasModels ? null : (
+          <OctantButton
+            aria-label={`Suggest from my benchmarks for ${role.label}`}
+            disabled={saving}
+            onClick={() => setBenchmarkRole(role)}
+            size="sm"
+            variant="ghost"
+          >
+            Suggest from my benchmarks
+          </OctantButton>
+        )
+      }
       hostId={props.hostId}
       key={role.id}
       onChange={(next) => void commit(withSlot(role.id, next))}
@@ -490,6 +511,36 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
           </div>
         )}
       </SettingsSection>
+      {benchmarks === undefined || benchmarkRole === undefined ? null : (
+        <BenchmarkRoleSuggestion
+          client={benchmarks}
+          role={benchmarkRole}
+          groups={props.groups}
+          disabled={saving}
+          onCancel={() => setBenchmarkRole(undefined)}
+          onAccept={(models) => {
+            setBenchmarkRole(undefined);
+            if (models.length === 0) return;
+            const hostId = decodeHostId(props.hostId);
+            const saved = slotFor(benchmarkRole.id);
+            void commit(
+              withSlot(
+                benchmarkRole.id,
+                slotWithCandidates(
+                  benchmarkRole.id,
+                  saved,
+                  models.map((model) => ({
+                    hostId,
+                    providerInstanceId: model.providerInstanceId,
+                    modelId: model.modelId,
+                    ...(model.effort === undefined ? {} : { reasoning: model.effort }),
+                  })),
+                ),
+              ),
+            );
+          }}
+        />
+      )}
       {preview === undefined ? null : (
         <RoleSuggestionPreview
           onCancel={() => setPreview(undefined)}

@@ -241,6 +241,7 @@ export * from "./providerToolingPolicy";
 export * from "./turnDiagnosticsPolicy";
 export * from "./turnDiagnosticsReport";
 export * from "./benchmarkPolicy";
+export * from "./benchmarkModelAdvice";
 export * from "./hostHealthPolicy";
 export * from "./turnMetricsPolicy";
 export * from "./liveTurnPolicy";

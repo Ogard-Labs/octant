@@ -97,6 +97,33 @@ No score can mark a thread Done or change its delivery target.
 3. **Stars**: the person rates a cell from 1 to 5, with an optional note, in any
    window of the host owner.
 
+## Suggestions from your benchmarks
+
+A suite has an editable passing threshold (80% by default), a suggestion kind
+(Chat, Work or Code), and an optional Project. The kind tags suggestions, not
+how a case runs. Older suites replay with the default threshold, Chat and no
+Project. A finished run keeps its original cases and check results.
+
+The host uses the newest finished run for each provider/model pair in a suite.
+When that run tested several effort settings, the highest-ranked passing setting
+represents the model. Accepting the suggestion uses that measured effort.
+It considers only models tested on at least five distinct cases. A trial
+passes when the cell answered and all its recorded checks passed; a trial with
+no checks or no answer does not pass. Repetitions count as separate trials in
+the pass rate. Models at or above the threshold with at least one pass are
+ranked by total contender cost divided by passes, then median wall time, then
+provider and model IDs for stable ties. Cost is unreported if any trial lacks
+it, and unreported costs sort after reported ones. The result names its run
+date and is labelled stale after 90 days.
+
+**Suggest from my benchmarks** in Settings previews eligible candidates from a
+chosen suite for one [model role](model-endpoints.md#model-roles). The composer
+model picker offers the best selectable model from a suite tagged for the
+thread's Project and kind when its current model is also ranked but placed
+lower. Dismissal is stored per Project in the client's local preferences.
+Neither surface changes a model until the person accepts; existing routing
+version checks and thread model authority still apply.
+
 ## Pages
 
 A **Benchmarks** source joins Diagnostics in the Usage source switch:

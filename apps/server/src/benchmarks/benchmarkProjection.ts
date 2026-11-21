@@ -63,7 +63,15 @@ export class BenchmarkProjection implements Projection {
   }
 
   apply(_connection: SqliteConnection, event: EventEnvelope): void {
-    if (event.eventVersion !== 1) return;
+    if (
+      event.eventVersion !== 1 &&
+      !(
+        event.eventVersion === 2 &&
+        event.aggregateType === BENCHMARK_SUITE_AGGREGATE_TYPE &&
+        event.eventName === BENCHMARK_EVENT_NAMES.suiteSaved
+      )
+    )
+      return;
     if (event.aggregateType === BENCHMARK_SUITE_AGGREGATE_TYPE) {
       this.#applySuite(event);
       return;
