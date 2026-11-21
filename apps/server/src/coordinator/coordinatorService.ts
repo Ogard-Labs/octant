@@ -2,6 +2,7 @@ import {
   AGENT_MESSAGE_EVENT_NAMES,
   decodeAgentMessageSent,
   decodeCodeCommand,
+  decodeCodeThread,
   decodeCoordinatorStartInput,
   type CodeCommand,
   type CodeCommandResult,
@@ -9,6 +10,7 @@ import {
   type CodeThread,
   type CodeThreadId,
   type CoordinatorBounds,
+  type CoordinatorDoneWhen,
   type CoordinatorStartInput,
   type CoordinatorWorkerChoice,
   type CoordinatorWorkerNotice,
@@ -40,6 +42,7 @@ import {
   workerClockTime,
   workerModelHandles,
   workerRolesConfigured,
+  type CoordinatorDoneWhenEvaluation,
   type CoordinatorDoneWhenPullRequestFact,
   type CoordinatorDoneWhenScheduleState,
   type CoordinatorDoneWhenThreadFact,
@@ -272,6 +275,8 @@ export class CoordinatorService {
     string,
     { readonly conditionKey: string; readonly schedule: CoordinatorDoneWhenScheduleState }
   >();
+  /** Satisfied condition keys persisted to the wake journal, so restarts never re-arm them. */
+  readonly #persistedSatisfied = new Map<string, string>();
   /** Latest unmet done-when item summaries per coordinator, for its next turn context. */
   readonly #doneWhenUnmet = new Map<string, ReadonlyArray<string>>();
   /** Guards against overlapping async done-when checks for the same coordinator. */
@@ -280,6 +285,16 @@ export class CoordinatorService {
 
   constructor(ports: CoordinatorServicePorts) {
     this.#ports = ports;
+    const satisfied = ports.wakes?.satisfiedDoneWhen?.();
+    if (satisfied !== undefined) {
+      for (const [threadId, conditionKey] of satisfied) {
+        this.#persistedSatisfied.set(threadId, conditionKey);
+        this.#doneWhenTrackers.set(threadId, {
+          conditionKey,
+          schedule: { status: "satisfied" },
+        });
+      }
+    }
   }
 
   /**
@@ -799,6 +814,10 @@ export class CoordinatorService {
   /** Feed committed journal appends: an admitted agent message may wake its recipient. */
   onCommittedEvents(events: ReadonlyArray<EventEnvelope>): void {
     for (const event of events) {
+      if (event.eventName === "code.thread-updated@1") {
+        this.#onThreadUpdated(event.payload);
+        continue;
+      }
       if (event.eventName !== AGENT_MESSAGE_EVENT_NAMES.sent) continue;
       let sent: ReturnType<typeof decodeAgentMessageSent>;
       try {
@@ -812,6 +831,52 @@ export class CoordinatorService {
       void this.#maybeWake(String(sent.recipientThreadId), sender, this.#hopFrom(sender), {
         kind: "message",
       }).catch((error: unknown) => this.#ports.onError?.("A wake turn failed to start.", error));
+    }
+  }
+
+  #onThreadUpdated(payload: unknown): void {
+    if (typeof payload !== "object" || payload === null || !("thread" in payload)) return;
+    let thread: CodeThread;
+    try {
+      thread = decodeCodeThread(payload.thread);
+    } catch {
+      return;
+    }
+    const threadId = String(thread.id);
+    const nextKey =
+      thread.coordinator === true &&
+      thread.lifecycle === "active" &&
+      thread.coordinatorDoneWhen !== undefined
+        ? coordinatorDoneWhenKey(thread.coordinatorDoneWhen)
+        : undefined;
+    const tracked = this.#doneWhenTrackers.get(threadId);
+    const persisted = this.#persistedSatisfied.get(threadId);
+    if (nextKey === undefined || (tracked !== undefined && tracked.conditionKey !== nextKey)) {
+      this.#doneWhenTrackers.delete(threadId);
+      this.#doneWhenUnmet.delete(threadId);
+    }
+    if (persisted !== undefined && (nextKey === undefined || persisted !== nextKey)) {
+      this.#resetPersistedDoneWhen(threadId);
+    }
+  }
+
+  #markPersistedDoneWhenSatisfied(threadId: string, conditionKey: string): void {
+    if (this.#persistedSatisfied.get(threadId) === conditionKey) return;
+    this.#persistedSatisfied.set(threadId, conditionKey);
+    try {
+      this.#ports.wakes?.markDoneWhenSatisfied?.(threadId, conditionKey);
+    } catch (error) {
+      this.#ports.onError?.("Could not record a satisfied done-when condition.", error);
+    }
+  }
+
+  #resetPersistedDoneWhen(threadId: string): void {
+    if (!this.#persistedSatisfied.has(threadId)) return;
+    this.#persistedSatisfied.delete(threadId);
+    try {
+      this.#ports.wakes?.resetDoneWhen?.(threadId);
+    } catch (error) {
+      this.#ports.onError?.("Could not clear a satisfied done-when condition.", error);
     }
   }
 
@@ -864,6 +929,78 @@ export class CoordinatorService {
     await this.#checkDoneWhenConditions(threads);
   }
 
+  async #evaluateDoneWhen(
+    coordinator: CodeThread,
+    condition: CoordinatorDoneWhen,
+  ): Promise<CoordinatorDoneWhenEvaluation> {
+    const prRequests = new Map<
+      string,
+      {
+        readonly repositoryOwner: string;
+        readonly repositoryName: string;
+        readonly number: number;
+        requiredChecks: boolean;
+      }
+    >();
+    for (const item of condition.items) {
+      if (item.kind === "thread-done") continue;
+      const key = coordinatorDoneWhenPullRequestKey(
+        item.repositoryOwner,
+        item.repositoryName,
+        item.number,
+      );
+      const existing = prRequests.get(key);
+      if (existing === undefined) {
+        prRequests.set(key, {
+          repositoryOwner: item.repositoryOwner,
+          repositoryName: item.repositoryName,
+          number: item.number,
+          requiredChecks: item.kind === "pull-request-checks-green",
+        });
+      } else if (item.kind === "pull-request-checks-green") {
+        existing.requiredChecks = true;
+      }
+    }
+    const pullRequests = new Map<string, CoordinatorDoneWhenPullRequestFact>();
+    for (const [key, target] of prRequests) {
+      const fact: CoordinatorDoneWhenPullRequestFact =
+        this.#ports.observePullRequest === undefined
+          ? { status: "unavailable" }
+          : await this.#ports
+              .observePullRequest(
+                {
+                  repositoryOwner: target.repositoryOwner,
+                  repositoryName: target.repositoryName,
+                  number: target.number,
+                },
+                { requiredChecks: target.requiredChecks },
+              )
+              .catch(() => ({ status: "unavailable" as const }));
+      pullRequests.set(key, fact);
+    }
+    const threadFacts = new Map<string, CoordinatorDoneWhenThreadFact>();
+    for (const item of condition.items) {
+      if (item.kind !== "thread-done") continue;
+      const id = String(item.threadId);
+      const target = this.#ports.readThread(id);
+      if (target === undefined || String(target.projectId) !== String(coordinator.projectId)) {
+        threadFacts.set(id, "missing");
+      } else if (target.lifecycle === "archived") {
+        threadFacts.set(id, "archived");
+      } else if (this.#readsAsCoordinator(target)) {
+        // Coordinators and designated planners have no Done state.
+        threadFacts.set(id, "not-done");
+      } else {
+        const done =
+          this.#ports.isThreadDone !== undefined
+            ? await Promise.resolve(this.#ports.isThreadDone(target)).catch(() => false)
+            : target.markedDoneAt !== undefined;
+        threadFacts.set(id, done ? "done" : "not-done");
+      }
+    }
+    return evaluateCoordinatorDoneWhen(condition, { pullRequests, threads: threadFacts });
+  }
+
   /**
    * Evaluates each active coordinator's host-checked "done when" condition on
    * its backoff schedule. Wakes the coordinator with only the unmet items
@@ -881,10 +1018,11 @@ export class CoordinatorService {
         activeIds.add(String(thread.id));
       }
     }
-    for (const trackedId of this.#doneWhenTrackers.keys()) {
+    for (const trackedId of [...this.#doneWhenTrackers.keys()]) {
       if (!activeIds.has(trackedId)) {
         this.#doneWhenTrackers.delete(trackedId);
         this.#doneWhenUnmet.delete(trackedId);
+        this.#resetPersistedDoneWhen(trackedId);
       }
     }
     for (const coordinator of threads) {
@@ -900,6 +1038,9 @@ export class CoordinatorService {
       const conditionKey = coordinatorDoneWhenKey(condition);
       let tracker = this.#doneWhenTrackers.get(coordinatorId);
       if (tracker === undefined || tracker.conditionKey !== conditionKey) {
+        if (tracker !== undefined && tracker.conditionKey !== conditionKey) {
+          this.#resetPersistedDoneWhen(coordinatorId);
+        }
         tracker = {
           conditionKey,
           schedule: { status: "pending", attempts: 0, nextCheckAt: 0, lastUnmetKey: "" },
@@ -912,68 +1053,7 @@ export class CoordinatorService {
       if (this.#checkingDoneWhen.has(coordinatorId)) continue;
       this.#checkingDoneWhen.add(coordinatorId);
       try {
-        const prRequests = new Map<
-          string,
-          {
-            readonly repositoryOwner: string;
-            readonly repositoryName: string;
-            readonly number: number;
-            requiredChecks: boolean;
-          }
-        >();
-        for (const item of condition.items) {
-          if (item.kind === "thread-done") continue;
-          const key = coordinatorDoneWhenPullRequestKey(
-            item.repositoryOwner,
-            item.repositoryName,
-            item.number,
-          );
-          const existing = prRequests.get(key);
-          if (existing === undefined) {
-            prRequests.set(key, {
-              repositoryOwner: item.repositoryOwner,
-              repositoryName: item.repositoryName,
-              number: item.number,
-              requiredChecks: item.kind === "pull-request-checks-green",
-            });
-          } else if (item.kind === "pull-request-checks-green") {
-            existing.requiredChecks = true;
-          }
-        }
-        const pullRequests = new Map<string, CoordinatorDoneWhenPullRequestFact>();
-        for (const [key, target] of prRequests) {
-          const fact: CoordinatorDoneWhenPullRequestFact =
-            this.#ports.observePullRequest === undefined
-              ? { status: "unavailable" }
-              : await this.#ports
-                  .observePullRequest(
-                    {
-                      repositoryOwner: target.repositoryOwner,
-                      repositoryName: target.repositoryName,
-                      number: target.number,
-                    },
-                    { requiredChecks: target.requiredChecks },
-                  )
-                  .catch(() => ({ status: "unavailable" as const }));
-          pullRequests.set(key, fact);
-        }
-        const threadFacts = new Map<string, CoordinatorDoneWhenThreadFact>();
-        for (const item of condition.items) {
-          if (item.kind !== "thread-done") continue;
-          const id = String(item.threadId);
-          const target = this.#ports.readThread(id);
-          if (target === undefined || String(target.projectId) !== String(coordinator.projectId)) {
-            threadFacts.set(id, "missing");
-          } else if (target.lifecycle === "archived") {
-            threadFacts.set(id, "archived");
-          } else {
-            const done =
-              this.#ports.isThreadDone !== undefined
-                ? await Promise.resolve(this.#ports.isThreadDone(target)).catch(() => false)
-                : target.markedDoneAt !== undefined;
-            threadFacts.set(id, done ? "done" : "not-done");
-          }
-        }
+        const evaluation = await this.#evaluateDoneWhen(coordinator, condition);
         // Re-read after async observation: a person who cleared the condition,
         // stopped coordinating, or archived the thread meanwhile wins.
         const fresh = this.#ports.readThread(coordinatorId);
@@ -986,12 +1066,9 @@ export class CoordinatorService {
         ) {
           this.#doneWhenTrackers.delete(coordinatorId);
           this.#doneWhenUnmet.delete(coordinatorId);
+          this.#resetPersistedDoneWhen(coordinatorId);
           continue;
         }
-        const evaluation = evaluateCoordinatorDoneWhen(condition, {
-          pullRequests,
-          threads: threadFacts,
-        });
         const nextSchedule = nextCoordinatorDoneWhenCheck({
           now: this.#ports.now(),
           ...(tracker.schedule.attempts > 0 ? { previous: tracker.schedule } : {}),
@@ -1006,6 +1083,7 @@ export class CoordinatorService {
         this.#doneWhenTrackers.set(coordinatorId, { conditionKey, schedule: nextSchedule });
         if (evaluation.status === "met") {
           this.#doneWhenUnmet.delete(coordinatorId);
+          this.#markPersistedDoneWhenSatisfied(coordinatorId, conditionKey);
           continue;
         }
         this.#doneWhenUnmet.set(coordinatorId, evaluation.unmet);
@@ -1551,8 +1629,46 @@ export class CoordinatorService {
       );
       this.#notices.set(wake.threadId, pending);
     }
-    if (wake.cause === "done-when" && wake.unmet !== undefined) {
-      this.#doneWhenUnmet.set(wake.threadId, wake.unmet);
+    let unmetForTurn = wake.unmet;
+    if (wake.cause === "done-when") {
+      const condition = recipient.coordinatorDoneWhen;
+      if (condition === undefined) {
+        this.#ports.wakes?.settled(wake.threadId, { wakeId: wake.wakeId, outcome: "dropped" });
+        return { kind: "superseded" };
+      }
+      const conditionKey = coordinatorDoneWhenKey(condition);
+      const evaluation = await this.#evaluateDoneWhen(recipient, condition);
+      const fresh = this.#ports.readThread(wake.threadId);
+      if (
+        fresh === undefined ||
+        fresh.coordinator !== true ||
+        fresh.lifecycle !== "active" ||
+        fresh.coordinatorDoneWhen === undefined ||
+        coordinatorDoneWhenKey(fresh.coordinatorDoneWhen) !== conditionKey ||
+        !this.#idle(fresh)
+      ) {
+        this.#ports.wakes?.settled(wake.threadId, { wakeId: wake.wakeId, outcome: "dropped" });
+        return { kind: "superseded" };
+      }
+      const nextSchedule = nextCoordinatorDoneWhenCheck({
+        now: this.#ports.now(),
+        evaluation,
+        ...(this.#ports.doneWhenSchedule === undefined
+          ? {}
+          : {
+              initialDelayMs: this.#ports.doneWhenSchedule.initialDelayMs,
+              maxDelayMs: this.#ports.doneWhenSchedule.maxDelayMs,
+            }),
+      });
+      this.#doneWhenTrackers.set(wake.threadId, { conditionKey, schedule: nextSchedule });
+      if (evaluation.status === "met") {
+        this.#doneWhenUnmet.delete(wake.threadId);
+        this.#markPersistedDoneWhenSatisfied(wake.threadId, conditionKey);
+        this.#ports.wakes?.settled(wake.threadId, { wakeId: wake.wakeId, outcome: "dropped" });
+        return { kind: "superseded" };
+      }
+      unmetForTurn = evaluation.unmet;
+      this.#doneWhenUnmet.set(wake.threadId, evaluation.unmet);
     }
     const turn = await this.#startWakeTurn(
       recipient.id,
@@ -1560,7 +1676,7 @@ export class CoordinatorService {
       wake.senderThreadId,
       wake.hop,
       wake.cause,
-      wake.unmet,
+      unmetForTurn,
     );
     return turn.status === "started"
       ? { kind: "dispatched" }

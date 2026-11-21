@@ -103,6 +103,7 @@ import {
   codeSiblingThreadState,
 } from "../siblingThreads/codeSiblingThreadSource";
 import { CoordinatorService } from "../coordinator/coordinatorService";
+import { createCoordinatorThreadDoneEvaluator } from "../coordinator/coordinatorDoneWhenEvidence";
 import type { ThreadWakeupModePort } from "../wakeups/threadWakeupService";
 import { createCoordinatorWakeJournal } from "../coordinator/coordinatorWakeJournal";
 import { createCoordinatorCountStore } from "../coordinator/coordinatorCountStore";
@@ -2156,6 +2157,37 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       }
     })();
     const coordinatorDoneWhenAbort = new AbortController();
+    const doneWhenSignal = () =>
+      AbortSignal.any([coordinatorDoneWhenAbort.signal, AbortSignal.timeout(15_000)]);
+    const doneWhenProbePath = decodeCodeRelativePath("package.json");
+    const isCoordinatorDoneWhenThreadDone = createCoordinatorThreadDoneEvaluator({
+      readThread: (threadId) => persistence.readCodeThread(threadId),
+      readCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
+      projectExists: (projectId) => persistence.readProject(projectId) !== undefined,
+      resolveCheckoutRoot: async (thread, checkout, signal) => {
+        const resolved = await roots.resolve(
+          ROUTINE_HOST_SCOPE_ID,
+          thread,
+          checkout,
+          doneWhenProbePath,
+          signal,
+        );
+        return resolved?.rootPath;
+      },
+      git: gitObservationPort,
+      history: { read: (threadId) => codeBoardEventStore.summaryForThread(threadId) },
+      pullRequestLinks: pullRequestLinkService,
+      ...(pullRequestSwitchForge === undefined
+        ? {}
+        : {
+            observePullRequest: (request, signal) =>
+              pullRequestSwitchForge.observe(request, signal, {
+                failures: false,
+                activity: false,
+              }),
+          }),
+      createSignal: doneWhenSignal,
+    });
     // Coordinator threads and message wakes (docs/design/coordinator-threads.md):
     // a worker is created through the ordinary Code command path and started,
     // like a wake turn, as an agent-initiated host turn under the routine host
@@ -2338,10 +2370,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       wakes: coordinatorWakes,
       observePullRequest: async (target, readOptions) => {
         if (pullRequestSwitchForge === undefined) return { status: "unavailable" };
-        const signal = AbortSignal.any([
-          coordinatorDoneWhenAbort.signal,
-          AbortSignal.timeout(15_000),
-        ]);
         return await pullRequestSwitchForge.observePullRequestCondition(
           {
             owner: target.repositoryOwner,
@@ -2349,20 +2377,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             number: target.number,
           },
           readOptions,
-          signal,
+          doneWhenSignal(),
         );
       },
-      isThreadDone: async (thread) => {
-        if (thread.markedDoneAt !== undefined) return true;
-        if (thread.lifecycle === "archived") return false;
-        const projected = await codeThreadMetadataService.project([
-          {
-            thread,
-            projectProjectionPresent: persistence.readProject(thread.projectId) !== undefined,
-          },
-        ]);
-        return projected.threads[0]?.deliverySatisfaction === "done";
-      },
+      isThreadDone: isCoordinatorDoneWhenThreadDone,
       uuid: randomUUID,
       now: () => Date.now(),
       onError: (message, error) => console.error(`[coordinators] ${message}`, error),

@@ -94,8 +94,10 @@
   display: flex;
   flex-direction: column;
   gap: var(--oct-space-1);
+  max-height: calc(var(--oct-space-6) * 8);
   margin: 0;
   padding: 0;
+  overflow-y: auto;
   list-style: none;
 }
 
@@ -111,6 +113,11 @@
   font-size: var(--oct-text-sm);
 }
 
+.coordinator-bounds-dialog__done-when-item > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .coordinator-bounds-dialog__done-when-builder {
   display: flex;
   flex-direction: column;
@@ -121,4 +128,10 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) calc(var(--oct-space-6) * 3);
   gap: var(--oct-space-2);
+}
+
+@media (max-width: 480px) {
+  .coordinator-bounds-dialog__done-when-pr-inputs {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

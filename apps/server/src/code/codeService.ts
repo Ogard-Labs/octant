@@ -4584,7 +4584,14 @@ export class CodeService {
               "A coordinator's done-when condition may only name threads in its own Project.",
             );
           }
-          if (target.coordinator === true) {
+          if (
+            readsAsCoordinator({
+              lifecycle: target.lifecycle,
+              coordinator: target.coordinator === true,
+              startedByCoordinator: target.coordinatorThreadId !== undefined,
+              designatedPlanner: this.#isDesignatedPlanner(target),
+            })
+          ) {
             throw this.#failure("invalid", "A coordinator thread cannot be named as Done.");
           }
         }

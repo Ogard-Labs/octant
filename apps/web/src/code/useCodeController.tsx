@@ -2272,6 +2272,10 @@ export function useCodeController(options: CodeControllerOptions) {
             ? await client.execute(command)
             : await client.execute(command, signal);
         if (!mounted.current) return undefined;
+        // Update the ref immediately so a sequential command awaited right
+        // after this one (such as saving bounds and done-when in one dialog
+        // click) reads the committed thread version before React re-renders.
+        bootstrapRef.current = applyResult(bootstrapRef.current, result);
         setBootstrap((current) => applyResult(current, result));
         setActiveView((current) => withUpdatedThread(current, result));
         const currentThreadId = activeThreadId.current;

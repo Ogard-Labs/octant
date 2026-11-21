@@ -375,5 +375,39 @@ describe("forge switch port", () => {
       requiredChecks: "green",
     });
     expect(run).toHaveBeenCalledTimes(3);
+
+    // Unreported required checks stay pending unless GitHub verifies CLEAN.
+    const unreported = port((args) =>
+      args[1] === "checks"
+        ? {
+            exitCode: 1,
+            stdout: "",
+            stderr: "no required checks reported on the 'feature/x' branch",
+          }
+        : { exitCode: 0, stdout: JSON.stringify({ state: "OPEN", mergeStateStatus: "BLOCKED" }) },
+    ).port;
+    expect(
+      await unreported.observePullRequestCondition(request, { requiredChecks: true }, signal),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+
+    // Empty check array with CLEAN merge state confirms no required checks are missing.
+    const noRequiredClean = port((args) =>
+      args[1] === "checks"
+        ? { exitCode: 0, stdout: "[]" }
+        : { exitCode: 0, stdout: JSON.stringify({ state: "OPEN", mergeStateStatus: "CLEAN" }) },
+    ).port;
+    expect(
+      await noRequiredClean.observePullRequestCondition(request, { requiredChecks: true }, signal),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
+
+    // Unknown check bucket fails closed as unavailable.
+    const unknownBucket = port((args) =>
+      args[1] === "checks"
+        ? { exitCode: 0, stdout: JSON.stringify([{ name: "ci", bucket: "mystery" }]) }
+        : { exitCode: 0, stdout: JSON.stringify({ state: "OPEN", mergeStateStatus: "UNSTABLE" }) },
+    ).port;
+    expect(
+      await unknownBucket.observePullRequestCondition(request, { requiredChecks: true }, signal),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "unavailable" });
   });
 });

@@ -379,7 +379,15 @@ export class GhPullRequestSwitchPort {
       return { status: "unavailable" };
     }
     const view = await this.#run(
-      ["pr", "view", String(request.number), "--repo", repository, "--json", "state"],
+      [
+        "pr",
+        "view",
+        String(request.number),
+        "--repo",
+        repository,
+        "--json",
+        options.requiredChecks ? "state,mergeStateStatus" : "state",
+      ],
       signal,
     );
     if (view === undefined || view.exitCode !== 0) return { status: "unavailable" };
@@ -388,16 +396,56 @@ export class GhPullRequestSwitchPort {
     const state = normalizeState(pullRequest.state);
     if (state === undefined) return { status: "unavailable" };
     if (!options.requiredChecks) return { status: "observed", state };
-    const checks = await this.#requiredChecks(repository, request.number, signal);
-    const requiredChecks =
-      checks === undefined
-        ? "unavailable"
-        : checks.failed.length > 0
-          ? "failing"
-          : checks.pending
-            ? "pending"
-            : "green";
+    const mergeStateStatus =
+      typeof pullRequest.mergeStateStatus === "string"
+        ? pullRequest.mergeStateStatus.toUpperCase()
+        : undefined;
+    const requiredChecks = await this.#requiredChecksForCondition(
+      repository,
+      request.number,
+      mergeStateStatus,
+      signal,
+    );
     return { status: "observed", state, requiredChecks };
+  }
+
+  /**
+   * Distinguishes passing required checks from unreported checks so a PR whose
+   * CI has not registered yet stays pending rather than falsely reporting green.
+   * When `gh pr checks --required` returns no entries, only GitHub's own
+   * `mergeStateStatus === "CLEAN"` verifies that no required checks are missing.
+   */
+  async #requiredChecksForCondition(
+    repository: string,
+    number: number,
+    mergeStateStatus: string | undefined,
+    signal: AbortSignal,
+  ): Promise<"green" | "pending" | "failing" | "unavailable"> {
+    const result = await this.#run(
+      ["pr", "checks", String(number), "--repo", repository, "--required", "--json", "name,bucket"],
+      signal,
+    );
+    if (result === undefined) return "unavailable";
+    const value = parseJson(result.stdout);
+    if (!Array.isArray(value)) {
+      if (
+        /no required checks|no checks reported/i.test(`${result.stderr ?? ""}\n${result.stdout}`)
+      ) {
+        return mergeStateStatus === "CLEAN" ? "green" : "pending";
+      }
+      return "unavailable";
+    }
+    if (value.length === 0) {
+      return mergeStateStatus === "CLEAN" ? "green" : "pending";
+    }
+    let pending = false;
+    for (const entry of value) {
+      if (!isRecord(entry)) return "unavailable";
+      if (entry.bucket === "fail" || entry.bucket === "cancel") return "failing";
+      if (entry.bucket === "pending") pending = true;
+      else if (entry.bucket !== "pass" && entry.bucket !== "skipping") return "unavailable";
+    }
+    return pending ? "pending" : "green";
   }
 
   async #requiredChecks(

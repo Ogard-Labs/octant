@@ -3111,13 +3111,37 @@ describe("CodeService commands", () => {
       ),
     ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
 
-    // Waiting on itself or a thread in another Project is refused.
+    // Waiting on itself, a designated planner, or a thread in another Project is refused.
     await expect(
       fixture.service.execute(ids.window, {
         kind: "set-code-thread-coordinator-done-when",
         threadId: ids.thread,
         expectedVersion: 1,
         doneWhen: { items: [{ kind: "thread-done", threadId: ids.thread }] },
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    const plannerThreadId = "00000000-0000-4000-8000-000000000097" as never;
+    const plannerThread = thread({ id: plannerThreadId });
+    const plannerFixture = serviceFixture({
+      threads: [coordinatorThread, plannerThread],
+    });
+    Object.assign(plannerFixture.persistence, {
+      readCodePlannerThreadId: (projectId: unknown) =>
+        String(projectId) === String(ids.project) ? plannerThreadId : undefined,
+    });
+    plannerFixture.persistence.readCodeThread.mockImplementation((id) =>
+      String(id) === String(ids.thread)
+        ? coordinatorThread
+        : String(id) === String(plannerThreadId)
+          ? plannerThread
+          : undefined,
+    );
+    await expect(
+      plannerFixture.service.execute(ids.window, {
+        kind: "set-code-thread-coordinator-done-when",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        doneWhen: { items: [{ kind: "thread-done", threadId: plannerThreadId }] },
       }),
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
     await expect(

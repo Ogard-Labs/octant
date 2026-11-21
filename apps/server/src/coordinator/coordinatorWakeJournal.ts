@@ -19,6 +19,8 @@ export const COORDINATOR_WAKE_AGGREGATE_TYPE = "coordinator-wake";
 export const COORDINATOR_WAKE_EVENT_NAMES = {
   decided: "coordinator.wake-decided@1",
   settled: "coordinator.wake-settled@1",
+  doneWhenSatisfied: "coordinator.done-when-satisfied@1",
+  doneWhenReset: "coordinator.done-when-reset@1",
 } as const;
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -58,10 +60,22 @@ export const CoordinatorWakeSettled = Schema.Struct({
 }).annotations(strict);
 export type CoordinatorWakeSettled = typeof CoordinatorWakeSettled.Type;
 
+/** Persisted marker that a coordinator's exact done-when condition held, so a restart does not re-arm it. */
+export const CoordinatorDoneWhenSatisfied = Schema.Struct({
+  conditionKey: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096)),
+}).annotations(strict);
+export type CoordinatorDoneWhenSatisfied = typeof CoordinatorDoneWhenSatisfied.Type;
+
+/** Clears any prior done-when satisfied marker after the condition was edited, cleared, or stopped. */
+export const CoordinatorDoneWhenReset = Schema.Struct({}).annotations(strict);
+export type CoordinatorDoneWhenReset = typeof CoordinatorDoneWhenReset.Type;
+
 export function registerCoordinatorWakeEvents(registry: EventRegistry): EventRegistry {
   return registry
     .register(COORDINATOR_WAKE_EVENT_NAMES.decided, 1, CoordinatorWakeDecided)
-    .register(COORDINATOR_WAKE_EVENT_NAMES.settled, 1, CoordinatorWakeSettled);
+    .register(COORDINATOR_WAKE_EVENT_NAMES.settled, 1, CoordinatorWakeSettled)
+    .register(COORDINATOR_WAKE_EVENT_NAMES.doneWhenSatisfied, 1, CoordinatorDoneWhenSatisfied)
+    .register(COORDINATOR_WAKE_EVENT_NAMES.doneWhenReset, 1, CoordinatorDoneWhenReset);
 }
 
 /** A decided wake whose turn never started and that was never dropped. */
@@ -69,17 +83,22 @@ export interface OpenCoordinatorWake extends CoordinatorWakeDecided {
   readonly threadId: string;
 }
 
-/** Writes and reads the wake frames. */
+/** Writes and reads the wake frames and done-when satisfaction markers. */
 export interface CoordinatorWakes {
   readonly decided: (threadId: string, wake: CoordinatorWakeDecided) => void;
   readonly settled: (threadId: string, settled: CoordinatorWakeSettled) => void;
   /** Each thread's newest decided wake that is still open, oldest thread first. */
   readonly open: () => ReadonlyArray<OpenCoordinatorWake>;
+  readonly markDoneWhenSatisfied?: (threadId: string, conditionKey: string) => void;
+  readonly resetDoneWhen?: (threadId: string) => void;
+  /** Satisfied done-when condition fingerprint per coordinator thread from journal replay. */
+  readonly satisfiedDoneWhen?: () => ReadonlyMap<string, string>;
 }
 
 const REPLAY_BATCH_SIZE = 1_000;
 const decodeDecided = Schema.decodeUnknownSync(CoordinatorWakeDecided);
 const decodeSettled = Schema.decodeUnknownSync(CoordinatorWakeSettled);
+const decodeDoneWhenSatisfied = Schema.decodeUnknownSync(CoordinatorDoneWhenSatisfied);
 
 export function createCoordinatorWakeJournal(options: {
   readonly journal: Pick<Journal, "append" | "replayAggregateType">;
@@ -112,6 +131,9 @@ export function createCoordinatorWakeJournal(options: {
   return {
     decided: (threadId, wake) => append(threadId, COORDINATOR_WAKE_EVENT_NAMES.decided, wake),
     settled: (threadId, settled) => append(threadId, COORDINATOR_WAKE_EVENT_NAMES.settled, settled),
+    markDoneWhenSatisfied: (threadId, conditionKey) =>
+      append(threadId, COORDINATOR_WAKE_EVENT_NAMES.doneWhenSatisfied, { conditionKey }),
+    resetDoneWhen: (threadId) => append(threadId, COORDINATOR_WAKE_EVENT_NAMES.doneWhenReset, {}),
     open: () => {
       const latest = new Map<string, OpenCoordinatorWake | undefined>();
       let afterSequence = 0;
@@ -139,6 +161,32 @@ export function createCoordinatorWakeJournal(options: {
         if (batch.length < REPLAY_BATCH_SIZE) break;
       }
       return [...latest.values()].filter((wake) => wake !== undefined);
+    },
+    satisfiedDoneWhen: () => {
+      const satisfied = new Map<string, string>();
+      let afterSequence = 0;
+      for (;;) {
+        const batch = options.journal.replayAggregateType({
+          aggregateType: COORDINATOR_WAKE_AGGREGATE_TYPE,
+          afterSequence,
+          limit: REPLAY_BATCH_SIZE,
+        });
+        for (const envelope of batch) {
+          afterSequence = envelope.globalSequence;
+          const threadId = String(envelope.aggregateId);
+          try {
+            if (envelope.eventName === COORDINATOR_WAKE_EVENT_NAMES.doneWhenSatisfied) {
+              satisfied.set(threadId, decodeDoneWhenSatisfied(envelope.payload).conditionKey);
+            } else if (envelope.eventName === COORDINATOR_WAKE_EVENT_NAMES.doneWhenReset) {
+              satisfied.delete(threadId);
+            }
+          } catch {
+            // A frame this host cannot read says nothing it can act on.
+          }
+        }
+        if (batch.length < REPLAY_BATCH_SIZE) break;
+      }
+      return satisfied;
     },
   };
 }

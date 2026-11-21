@@ -9315,12 +9315,19 @@ function LaunchedShell(
           project?.type !== "code" || project.connectedRepository === undefined
             ? undefined
             : `${project.connectedRepository.owner}/${project.connectedRepository.repository}`;
+        const plannerThreadIds = new Set(
+          (codeController.bootstrap?.plannerThreadIds ?? []).map(String),
+        );
         const doneWhenThreads = (codeController.bootstrap?.threads ?? [])
           .filter(
             (candidate) =>
               String(candidate.projectId) === String(coordinator.projectId) &&
               candidate.lifecycle === "active" &&
               candidate.coordinator !== true &&
+              !(
+                candidate.coordinatorThreadId === undefined &&
+                plannerThreadIds.has(String(candidate.id))
+              ) &&
               String(candidate.id) !== String(coordinator.id),
           )
           .map((candidate) => ({ id: candidate.id, title: candidate.title }));

@@ -122,4 +122,31 @@ describe("a running coordinator's limits", () => {
     await userEvent.setup().click(button);
     expect(onClick).toHaveBeenCalledOnce();
   });
+
+  it("caps done-when items at 16 while keeping item controls and Save reachable", () => {
+    const items = Array.from({ length: 16 }, (_, index) => ({
+      kind: "pull-request-merged" as const,
+      repositoryOwner: "Ogard-Labs",
+      repositoryName: "octant",
+      number: index + 1,
+    }));
+    render(
+      <CoordinatorBoundsDialog
+        bounds={undefined}
+        doneWhen={{
+          value: { items },
+          threads: [],
+          defaultRepository: "Ogard-Labs/octant",
+          onSave: vi.fn(),
+        }}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        title="Release coordinator"
+      />,
+    );
+    expect(screen.getAllByRole("listitem")).toHaveLength(16);
+    expect(screen.getByRole("button", { name: "Add condition" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Clear all" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
 });

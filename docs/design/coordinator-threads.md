@@ -540,8 +540,13 @@ workers itself.
   the same pull request coalesce into one read-only forge check. Checking stops
   immediately once every item holds, or if the condition is cleared or the
   coordinator stops coordinating or is archived. Because the condition is
-  journaled on the coordinator's thread record, an unmet condition survives a
-  host restart.
+  journaled on the coordinator's thread record and satisfaction is journaled
+  against that condition (`coordinator.done-when-satisfied@1` /
+  `coordinator.done-when-reset@1`), an unmet condition survives a host restart
+  while an already-satisfied condition never re-arms across restarts unless
+  edited or cleared and re-set. Recovering an open done-when wake after restart
+  re-evaluates the condition live so a stale wake drops if the condition now
+  holds.
 - **Wakes under existing bounds and never starts workers.** Each unmet check
   wakes the coordinator through its ordinary wake path and bounds (hourly wake
   cap, round bound, single turn at a time, and the thread's wake switch),
