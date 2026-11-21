@@ -104,16 +104,17 @@ export function ServerProjectPreviewTunnel(props: {
     }
   }
   const running = view !== null && view.status !== "stopped" && view.status !== "revoked";
+  // Only a window on this computer is given the listing; a paired device's
+  // preview is relayed through a signed route, not a local TCP port, so its
+  // Local port field does not gate a start.
+  const localWindow = client.listeners !== undefined;
   const localPortValid =
     /^\d+$/.test(localPort) && Number(localPort) >= 0 && Number(localPort) <= 65535;
   const valid =
     /^\d+$/.test(remotePort) &&
     Number(remotePort) > 0 &&
     Number(remotePort) <= 65535 &&
-    localPortValid;
-  // Only a window on this computer is given the listing; a paired device's
-  // preview is relayed through a signed route, not a local TCP port.
-  const localWindow = client.listeners !== undefined;
+    (localPortValid || !localWindow);
   return (
     <OctantCollapsible
       className="w-full min-w-0"

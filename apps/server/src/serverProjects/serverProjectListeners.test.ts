@@ -92,6 +92,8 @@ describe("the TCP ports a server Project serves", () => {
           "4000\tnode\t[::1]",
           "4001\tnode\t192.168.1.20",
           "4002\tnode\t[fe80::1%eth0]",
+          "3004\tnode\t[::ffff:127.0.0.1]",
+          "4003\tnode\t[::ffff:192.168.1.20]",
         ].join("\n"),
       ).map((listener) => [listener.port, listener.loopbackReachable]),
     ).toEqual([
@@ -99,9 +101,11 @@ describe("the TCP ports a server Project serves", () => {
       [3001, true],
       [3002, true],
       [3003, true],
+      [3004, true],
       [4000, false],
       [4001, false],
       [4002, false],
+      [4003, false],
     ]);
   });
 

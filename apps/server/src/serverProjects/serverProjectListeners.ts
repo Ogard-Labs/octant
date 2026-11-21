@@ -77,7 +77,11 @@ done`;
  * `%interface`.
  */
 function answersOnIpv4Loopback(host: string): boolean {
-  const bare = host.trim().replace(/%.*$/, "");
+  // An IPv4-mapped address (`[::ffff:127.0.0.1]` from `ss`) is that IPv4 endpoint.
+  const bare = host
+    .trim()
+    .replace(/%.*$/, "")
+    .replace(/^\[::ffff:([0-9.]+)\]$/i, "$1");
   return ["127.0.0.1", "0.0.0.0", "*", "[::]", "::"].includes(bare);
 }
 
