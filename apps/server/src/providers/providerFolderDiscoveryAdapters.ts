@@ -340,10 +340,7 @@ function scanOpenCodeSqlite(
   context: ProviderProjectFolderDiscoveryContext,
 ): ProviderProjectFolderDiscoveryResult {
   if (context.isCancelled()) return { status: "cancelled" };
-  // Use `remaining + 1` even when `remaining === 0` (`LIMIT 1`) so an unread
-  // session row triggers `consumeItemBudget()` and records `file-limit` rather
-  // than silently reporting a complete scan.
-  const limit = Math.max(0, context.remainingItemBudget()) + 1;
+  const remaining = Math.max(0, context.remainingItemBudget());
   let db;
   try {
     db = openReadOnlySqlite(dbPath);
@@ -364,17 +361,30 @@ function scanOpenCodeSqlite(
     );
     if (!columns.has("directory")) return { status: "completed" };
 
+    const whereClauses = ["directory IS NOT NULL", "directory != ''"];
+    if (columns.has("parent_id")) {
+      whereClauses.push("(parent_id IS NULL OR parent_id = '')");
+    }
+    // When the item budget is already at 0, run an unordered existence probe
+    // so SQLite stops at the first matching row without sorting the table.
+    if (remaining === 0) {
+      const probe = db.all(
+        `SELECT 1 AS found FROM session WHERE ${whereClauses.join(" AND ")} LIMIT 1`,
+      );
+      if (probe.length > 0 && !context.consumeItemBudget()) {
+        return { status: "stopped", reason: "file-limit" };
+      }
+      return { status: "completed" };
+    }
+
     const selectCols = [
       columns.has("id") ? "id" : "rowid AS id",
       "directory",
       columns.has("time_updated") ? "time_updated" : "NULL AS time_updated",
       columns.has("time_created") ? "time_created" : "NULL AS time_created",
     ];
-    const whereClauses = ["directory IS NOT NULL", "directory != ''"];
-    if (columns.has("parent_id")) {
-      whereClauses.push("(parent_id IS NULL OR parent_id = '')");
-    }
     const orderClause = columns.has("time_updated") ? "ORDER BY time_updated DESC" : "";
+    const limit = remaining + 1;
     const rows = db.all(
       `SELECT ${selectCols.join(", ")} FROM session WHERE ${whereClauses.join(" AND ")} ${orderClause} LIMIT ${String(limit)}`,
     );

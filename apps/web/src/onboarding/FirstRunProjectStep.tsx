@@ -39,6 +39,8 @@ export interface FirstRunProjectStepProps {
   readonly onChooseFolder: () => void;
   /** Optional host-side read-only scan of folders local providers already used. */
   readonly providerFolderScan?: FirstRunProviderFolderScan | undefined;
+  /** Called when a folder import starts or settles so the wizard can hold navigation. */
+  readonly onImportingChange?: (importing: boolean) => void;
 }
 
 const MODE_COPY: Record<FirstRunTaskMode, { readonly label: string; readonly lead: string }> = {
@@ -188,6 +190,8 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
   const providerScan = props.providerFolderScan;
   const providerScanRef = useRef(providerScan);
   providerScanRef.current = providerScan;
+  const onImportingChangeRef = useRef(props.onImportingChange);
+  onImportingChangeRef.current = props.onImportingChange;
   const scanAllowed = props.mode === "code" && providerScan !== undefined && !providerScan.strict;
 
   const [scanState, setScanState] = useState<ScanState>({ status: "idle" });
@@ -246,6 +250,12 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
     };
   }, [scanAllowed, runScan, cancelActiveScan]);
 
+  useEffect(() => {
+    return () => {
+      onImportingChangeRef.current?.(false);
+    };
+  }, []);
+
   function toggleFolder(id: DiscoveredProviderFolderId, checked: boolean): void {
     setTickedIds((previous) => {
       const next = new Set(previous);
@@ -274,6 +284,7 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
     if (batches.length === 0) return;
 
     setImporting(true);
+    onImportingChangeRef.current?.(true);
     setImportNotice(undefined);
     try {
       const aggregated: ImportedProviderFolderOutcome[] = [];
@@ -346,6 +357,7 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
       setImportNotice("Could not import the selected folders.");
     } finally {
       setImporting(false);
+      onImportingChangeRef.current?.(false);
     }
   }
 
@@ -390,7 +402,9 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
               >
                 <OctantToggleGroup<FirstRunTaskMode>
                   aria-label="First task mode"
+                  disabled={importing}
                   onValueChange={(value) => {
+                    if (importing) return;
                     const selected = value[0];
                     if (selected !== undefined) props.onSelectMode(selected);
                   }}
@@ -595,6 +609,7 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
 
       <div className="first-run__button-row">
         <OctantButton
+          disabled={importing}
           onClick={props.onChooseFolder}
           type="button"
           variant={hasProjects ? "ghost" : "outline"}

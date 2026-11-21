@@ -36,7 +36,11 @@ export interface ProviderProjectFolderDiscoveryContext {
   readonly env: Readonly<Record<string, string | undefined>>;
   /** Currently configured provider instances on this host. */
   readonly providerInstances: ReadonlyArray<ProviderInstance>;
-  /** Returns true once the host has canceled, superseded, or Strict-gated the scan. */
+  /**
+   * Returns true once the host has canceled, superseded, or Strict-gated the
+   * scan, or once the scan deadline or an already-recorded budget stop has
+   * ended discovery.
+   */
   readonly isCancelled: () => boolean;
   /**
    * Returns how many file or row reads remain in the host's inspection budget
