@@ -15936,8 +15936,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   older clients still get `image-offer` rows. A service-offer row shows a
   short action line, not the prompt, and is visible only to the scope that
   raised it while that scope can still open the thread. The desktop Needs you
-  card and Inbox show a notice when a previously observed offer disappears
-  across a host restart. No offer or answer can be recovered from the notice.
+  card and Inbox show a notice when a previously observed offer in one of
+  their listed modes disappears across a host restart. No offer or answer
+  can be recovered from the notice.
   The phone Inbox shows the action line on its thread; the phone's in-thread
   card requires device confirmation before sending image generation or save.
   A memory or routine proposal and an image offer are still not raised by a
