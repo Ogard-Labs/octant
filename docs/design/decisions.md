@@ -177,7 +177,7 @@ Status: Built. Detail: [Architecture: Overview and principles](../architecture.m
 
 One setting says how much a thread's tool calls are guarded, with four levels: Ask first (Guarded), Accept edits, Auto (Reviewed), and Full access.
 
-- Ask first: the person approves anything with effects, under Octant's OS confinement plus the provider's own sandbox.
+- Ask first: the person approves anything with effects, under Octant's OS confinement plus the provider's own sandbox under Strict, and under the provider's own sandbox and permission modes alone in Work and Code outside Strict (maintainer decision, 2026-11-21; see [Providers run in their own sandbox](#providers-run-in-their-own-sandbox)).
 - Accept edits: as Ask first, except file edits inside the folder go through.
 - Auto (Reviewed): a reviewer the person chooses, the provider's own or Octant Shield, answers prompts and escalates to the person what it will not allow.
 - Full access means no sandbox and no prompts, as in the providers' own apps, with protected files guarded by redaction, so a shell command and Octant's own file tools can read them (only provider sign-ins stay refused); outside content is only recorded and marked, and every hard line still holds.
@@ -2180,7 +2180,7 @@ A provider runtime launch is wrapped when the process carries exactly one thread
 - A runtime that makes its own API call resolves provider-endpoints-only below Full access. On macOS and Linux, with Network limits on (they ship off), the runtime then runs on its own egress proxy, reaching its provider's endpoints, its Project's rules and the person's safe networks; OpenCode on Linux still materializes it as plain network allow.
 - A new module may not launch a provider process without the shared confinement builder unless the matrix names it.
 - Runtimes get no reusable cloud credential the person did not configure for that account; shared-config and default-chain cloud sign-in is refused.
-- Below Full access this matrix changes per provider under [Providers run in their own sandbox](#providers-run-in-their-own-sandbox) (designed, not built).
+- Below Full access this matrix changes per provider under [Providers run in their own sandbox](#providers-run-in-their-own-sandbox) (partly built: outside Strict Codex, Claude Code and ACP agents leave Octant's sandbox in Work and Code outside Plan).
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Sandbox](../architecture.md#security-and-authority).
 
@@ -2189,6 +2189,7 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Sandbo
 Below Full access, a provider that has a sandbox of its own runs in it, as it does on its own; Octant's sandbox becomes the opt-in Strict setting and the fallback (maintainer decision, 2026-11-15).
 
 - Octant configures the native sandbox rather than wrapping it in its own profile: writable roots are the Project's folders, network follows Network limits, and Octant's protected paths become the provider's deny rules wherever it supports them.
+- Outside Strict the provider holds the level (maintainer decision, 2026-11-21): a Work or Code launch outside Plan, with no sandbox kept at Full access, no chosen sandbox policy, and not a readiness check, starts with no Octant sandbox at every level, as on Windows; the provider's own sandbox and permission modes enforce the level and Octant's approval gate answers what they ask. Chat and Plan keep Octant's sandbox, and Strict changes nothing. One shared rule decides it for every driver (`providerHoldsLevelWithoutSandbox`). Built for ACP agents, Codex (its own workspace-write sandbox: Ask first and Accept edits `untrusted`, Auto `on-request` with Codex's reviewer) and Claude Code (its own permission modes and Octant's gate, with no Octant-configured sandbox even in a launch that reads none of the person's Claude settings).
 - Claude Code is the exception: Octant passes its sandbox no settings (no writable roots, network, read or deny rules, or auto-allow change), so it runs as the person's own Claude Code settings configure it; Plan keeps its read-only confinement.
 - The provider's request to run one command outside its sandbox reaches the person as an Octant approval (Reviewed's reviewer at Reviewed); approved runs that one command, and denied or unanswered stays refused.
 - Strict is an opt-in set in the same places as the opt-in sandbox at Full access (per thread, as a Project's default, and in Settings): the provider runs inside Octant's profile, provider sign-ins, `~/.ssh` and cloud keys stay unreadable, and a provider inside Octant's profile has no native escalation. Built: the setting, resolved by the host at each launch and call (a thread's choice, else its Project's, else Settings', else off); a hub-introduced device or an agent grant may turn it on, never off.

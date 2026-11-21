@@ -2268,6 +2268,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           projectRoot,
           extraFolders,
           mode,
+          sandboxPolicy !== undefined,
           {
             instanceId: options.instanceId,
             clock,
@@ -2708,6 +2709,8 @@ function makeConnection(
   projectRoot: string,
   extraFolders: ReadonlyArray<string>,
   mode: ProviderAcquireInput["mode"],
+  /** The thread chose a sandbox policy, which keeps Octant's profile. */
+  sandboxPolicySelected: boolean,
   factories: ConnectionFactories,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
@@ -2808,6 +2811,7 @@ function makeConnection(
       input.strict === false;
     const sessionSandbox = (input: {
       readonly executionPolicy: ProviderExecutionPolicy;
+      readonly fullAccessSandbox?: boolean;
       readonly strict?: boolean;
     }): CodexSessionSandbox =>
       (process.platform === "win32" && input.strict !== true) ||
@@ -2815,6 +2819,8 @@ function makeConnection(
         mode: mode ?? "code",
         executionPolicy: input.executionPolicy,
         strict: input.strict,
+        fullAccessSandbox: input.fullAccessSandbox,
+        sandboxPolicySelected,
       }) ||
       codexPlanRunsNativeSandbox(input)
         ? { kind: "native", writableRoots: [projectRoot, ...extraFolders] }

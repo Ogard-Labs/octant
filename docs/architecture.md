@@ -16487,7 +16487,20 @@ approval-gated` command that undoes it. The terminal shows no one-time
   they change per provider as the next rule says.
 
   **Providers run in their own sandbox** (maintainer decision, 2026-11-15;
-  built for Claude Code, designed and not built for the others). Octant's sandbox becomes the opt-in and the fallback:
+  built for Claude Code, Codex and ACP agents, designed and not built for the others). Octant's sandbox becomes the opt-in and the fallback:
+  - **Outside Strict the provider holds the level** (maintainer decision,
+    2026-11-21). A Work or Code launch outside Strict and outside Plan, with
+    no sandbox kept at Full access, no chosen sandbox policy, and not a
+    readiness check, starts with no Octant sandbox at every level, as it does
+    on Windows: the provider's own sandbox and permission modes enforce the
+    thread's level, and Octant's approval gate answers what they ask. Chat
+    and Plan keep Octant's sandbox, which there enforces the mode itself, and
+    Strict changes nothing. One shared rule decides it for every driver
+    (`providerHoldsLevelWithoutSandbox`). Built for Codex (its own
+    workspace-write sandbox and approval policy, below), Claude Code (its own
+    permission modes and Octant's gate, below) and ACP agents (their own
+    modes asking Octant before each side effect; an agent whose shell never
+    asks keeps Octant's sandbox).
   - **The provider's own sandbox by default.** Below Full access, every
     provider that has a sandbox of its own runs in it, as it does on its own.
     Octant configures that sandbox, Claude Code excepted (below), rather
@@ -16545,11 +16558,15 @@ approval-gated` command that undoes it. The terminal shows no one-time
     `autoAllowBashIfSandboxed: false`, and Claude's own request to run one
     command outside it still asks every time, as today (maintainer decision,
     2026-11-16). Built for Claude Code (`claudeOctantConfiguresSandbox`):
-    outside Strict a Work or Code launch outside Plan that reads the person's
-    own Claude settings carries no `sandbox` option, so those settings decide
-    (one that reads none keeps Octant's configuration and gate, failing
-    closed), and a Full access thread that
-    kept its sandbox keeps Octant's configuration. Gemini CLI and Qwen Code use their
+    outside Strict a Work or Code launch outside Plan carries no `sandbox`
+    option: one that reads the person's own Claude settings runs as those
+    settings decide, and one that reads none runs with no sandbox on Claude's
+    own permission mode and Octant's gate, which keeps every per-call rule
+    (protected paths, folders the session holds, the asks for a command, a
+    publish or a level change) (maintainer decision, 2026-11-21). Chat, Plan
+    and a legacy chosen sandbox policy in a launch that reads none of the
+    person's settings keep Octant's configuration, and a Full access thread
+    that kept its sandbox keeps Octant's configuration. Gemini CLI and Qwen Code use their
     native sandboxes. Copilot CLI and Cursor follow once their ACP releases
     are checked for a sandbox Octant can configure, and Grok Build once it is
     known why its launch sets `GROK_SANDBOX=off`; until then each keeps
@@ -16584,12 +16601,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
   sign-in is never among them: a native sandbox that cannot refuse those
   keeps Octant's profile.
 
-  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                                                     | OS egress below Full access                  | Plan's read-only enforced by                                                                                                                                                                                                               |
-  | ------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                                                               | `proxied` on macOS; `allow` on Linux         | Octant sandbox: no root write, no exec or fork                                                                                                                                                                                             |
-  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only                                   | `allow` on Plan; commands `proxied` on macOS | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder; on macOS exec only zsh and listed read-only tools, which get no network and write only the launch temporary directory |
-  | Codex app-server (`codexProcess.ts`)                                      | Wrapped                         | Wrapped under Strict; outside Strict unwrapped in Codex's own workspace-write sandbox | `proxied` on macOS; `allow` on Linux         | Octant sandbox: root read-only; writes only the account home (not its configuration) and a private temporary directory; Codex's own sandbox set to external                                                                                |
-  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Account-read wrapper            | Account-read wrapper                                                                  | No network                                   | No turn runs; only its isolated account and private temporary state are available                                                                                                                                                          |
+  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                                                                                                  | OS egress below Full access                  | Plan's read-only enforced by                                                                                                                                                                                                               |
+  | ------------------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                                                                                                            | `proxied` on macOS; `allow` on Linux         | Octant sandbox: no root write, no exec or fork                                                                                                                                                                                             |
+  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; under Strict the runtime's own sandbox, project root only; outside Strict no Octant-configured sandbox in Work and Code | `allow` on Plan; commands `proxied` on macOS | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder; on macOS exec only zsh and listed read-only tools, which get no network and write only the launch temporary directory |
+  | Codex app-server (`codexProcess.ts`)                                      | Wrapped                         | Wrapped under Strict; outside Strict unwrapped in Codex's own workspace-write sandbox                                              | `proxied` on macOS; `allow` on Linux         | Octant sandbox: root read-only; writes only the account home (not its configuration) and a private temporary directory; Codex's own sandbox set to external                                                                                |
+  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Account-read wrapper            | Account-read wrapper                                                                                                               | No network                                   | No turn runs; only its isolated account and private temporary state are available                                                                                                                                                          |
 
   Wherever a row names the root or the checkout, a Project's extra folders
   get the same rule ([Projects with several folders](#projects-with-several-folders)).
@@ -16617,12 +16634,15 @@ approval-gated` command that undoes it. The terminal shows no one-time
     safe networks rather than a blanket `allow` (built on macOS, behind the
     Network limits switch, which ships off;
     [provider runtime network](#provider-runtime-network)).
-  - **Claude Agent SDK:** unwrapped as in Code's approval-gated posture; the
-    runtime's own sandbox holds commands to the Project root, and its
-    permission prompts carry each command to the person at Guarded.
+  - **Claude Agent SDK:** unwrapped as in Code's approval-gated posture; under
+    Strict, in Chat, and for a chosen sandbox policy the runtime's own sandbox
+    holds commands to the Project root, and outside Strict a Work or Code
+    thread runs with none Octant configures; either way its permission
+    prompts carry each command to the person at Guarded.
   - **Codex app-server:** outside Strict, unwrapped at Guarded and Reviewed in
-    Codex's own workspace-write sandbox (below); under Strict, and in Plan and
-    Chat at every Strict value, wrapped as in Code, with the lease keyed by
+    Codex's own workspace-write sandbox (below); under Strict, for a chosen
+    sandbox policy, and in Plan and Chat at every Strict value, wrapped as in
+    Code, with the lease keyed by
     root, mode, posture and Strict (below); a wrapped shell runs inside
     Octant's profile, so `~/.ssh` is reachable only through the person's SSH
     agent or a server registered with Octant Shield. At Full access unwrapped.
@@ -16651,8 +16671,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   that needs to fails there (not built yet: carrying that ask; see
   [Provider runtimes: Codex](design/provider-runtimes.md#codex)). Under
   [Providers run in their own sandbox](#security-and-authority) (built for
-  Codex) a Work or Code thread outside Strict leaves Octant's profile below
-  Full access for Codex's native workspace-write sandbox, whose escalation
+  Codex) a Work or Code thread outside Strict, with no chosen sandbox policy,
+  leaves Octant's profile below Full access for Codex's native workspace-write
+  sandbox (`codexRunsNativeSandbox`, on the shared
+  `providerHoldsLevelWithoutSandbox`), whose escalation
   carries that ask: the process runs unwrapped, each turn sends
   `sandboxPolicy: { type: "workspaceWrite" }` with the Project's folders as
   `writableRoots` and `networkAccess` true unless the launch took the egress
