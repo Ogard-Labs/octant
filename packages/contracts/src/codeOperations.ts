@@ -475,6 +475,13 @@ const StartTerminal = Schema.Struct({
    * working directory. The host refuses any other path.
    */
   folder: Schema.optional(Schema.String.pipe(Schema.maxLength(4_096))),
+  /**
+   * Start the thread's provider's own command-line program, interactively,
+   * instead of a shell. The host resolves the program, its account folder and
+   * its environment from the thread's provider; the command names none of
+   * them. Only the person may ask: the host refuses it for every other caller.
+   */
+  program: Schema.optional(Schema.Literal("provider")),
 }).annotations(strict);
 const AttachTerminal = Schema.Struct({
   kind: Schema.Literal("attach-terminal"),

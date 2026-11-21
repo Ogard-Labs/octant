@@ -67,6 +67,16 @@ const PROVIDER_NAME: Readonly<Record<ProviderToolingProvider, string>> = {
   codex: "Codex",
 };
 
+/**
+ * The name of the provider command-line program a person can open in a
+ * thread's terminal tab, or undefined for a driver Octant cannot open one
+ * for. It is the same pair whose account folder Octant resolves for its
+ * tooling commands, so the terminal starts against the account a turn uses.
+ */
+export function providerTerminalName(driverKind: string): string | undefined {
+  return driverKind === "claude" || driverKind === "codex" ? PROVIDER_NAME[driverKind] : undefined;
+}
+
 function refuse(
   reason: ProviderToolingRefusalCode,
   message: string,

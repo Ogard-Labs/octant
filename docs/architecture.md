@@ -149,13 +149,16 @@ The design rests on a small set of invariants that every package obeys:
 - **The event journal is authoritative; projections are rebuildable.** Commands
   append versioned events to a SQLite journal. Read models are idempotent
   projections that can be dropped and rebuilt from the journal at any time.
-  _Rationale for no interactive raw provider terminal mode_ (maintainer
-  decision, 2026-11-14): Octant offers no mode in which the person types into
-  a provider's own terminal program inside a thread. Keystrokes typed there
-  reach the provider directly, so its tool calls bypass Octant's approvals and
-  never reach the journal; the thread would claim a record it does not hold.
-  The person can still run a provider's CLI in an ordinary terminal, outside
-  any thread's authority.
+  _Rationale for a person-operated provider terminal_ (maintainer decision,
+  2026-11-21, replacing the 2026-11-14 exclusion): keystrokes typed into a
+  provider's own terminal program reach the provider directly, so its tool
+  calls bypass Octant's approvals and never reach the journal. Excluding it
+  also blocked workflows only a provider's own interface offers. A Code
+  thread's terminal tab may therefore run its provider's program, but only as
+  a person-operated terminal: only the person opens or types into it, it is
+  confined as that thread's terminals are, and the thread claims nothing that
+  happens in it, so the journal never holds a record it does not have
+  ([Workspace: provider terminal](design/workspace.md)).
 - **Contracts are schema-only, domain is pure.** `@octant/contracts` holds
   Effect Schema definitions and nothing else. `@octant/domain` holds pure
   policy and state transitions with no I/O.
@@ -17363,6 +17366,19 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Project inactive or rebound ends the terminal the same way. A host restart
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
+- **Provider terminals.** A Code thread's `start-terminal` may ask for
+  `program: "provider"`. The host then resolves the thread's provider's own
+  command-line program (Claude Code, Codex) with the account binary, folder
+  and launch environment its turns use at the thread's Strict value, and runs
+  it in place of the interactive shell, in the thread's folder, under the
+  thread terminal's confinement, unwidened. The command names no program,
+  path or variable. The host refuses the start, and any write to such a
+  terminal, for every caller but the person (their local window or a device
+  they paired), before any approval is consulted, since keystrokes there
+  reach the provider past Octant's approvals. Plan, a Project on a server, a
+  Browser grant and a provider with no program are refused. Its output follows
+  the thread terminal's replay path and never enters the conversation,
+  transcript or usage ([Workspace: provider terminal](design/workspace.md)).
 - **Project actions.** A Work or Code Project keeps up to twelve named
   actions on its record: a unique name, a one-line command and a relative
   directory. The person saves the list from the Project overview through the
@@ -20595,8 +20611,9 @@ scope again under the sequence and confinement gate below. Work and Code run
 there at Full access only (step 3).
 
 Also out of scope, kept on 2026-11-14: physical phones and tablets and
-app-store upload (above), and an interactive raw provider terminal mode, whose
-rationale sits beside [the journal principle](#overview-and-principles).
+app-store upload (above). A person-operated provider terminal, excluded on
+2026-11-14, is in scope since 2026-11-21; its rationale sits beside [the
+journal principle](#overview-and-principles).
 
 Desktop is one product on macOS, Linux, and Windows; platform differences are
 fail-closed posture, never a second app. The desktop process owns its local

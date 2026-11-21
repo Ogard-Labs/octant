@@ -151,6 +151,8 @@ import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
 import type { CanvasWiring } from "./canvas";
 import { sessionNativeSetup } from "../providers/providerNativeSetup";
+import { resolveProviderTerminal } from "../providers/providerTerminal";
+import { homedir } from "node:os";
 import {
   backgroundSessionIdleLimitMs,
   providerToolCallPauseLimitMs,
@@ -1054,6 +1056,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         liveTurns,
         activeTurns: codeActiveTurns,
         terminalBrowserGrants: grants,
+        providerTerminal: ({ thread, shell, strict }) =>
+          resolveProviderTerminal({
+            instance: persistence.readProviderInstance(thread.providerInstanceId),
+            hostEnvironment: process.env,
+            homeDirectory: homedir(),
+            platform: process.platform,
+            shell,
+            strict,
+          }),
         onPendingRequestWithdrawn: () => machineChangeFeed.publish(["code-navigation"]),
         gitMutationPort,
         agentRuns: agentRunPersistence,
