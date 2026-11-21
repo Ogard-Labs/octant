@@ -464,13 +464,19 @@ no private address
 this computer made an Octant computer reads "Octant computer, version <v>"
 under its open row, and offers **Update** and **Remove Octant** in place of
 that action. Update opens a dialog stating both versions and the ring, the
-signature check, that running turns stop now and continue after the restart
-(waiting for them is not offered yet), the `octant server upgrade` swap in
-the install folder and any store migration, and what makes Octant roll back;
-it lists the five steps (Copy the build, Verify it on the server, Stop
-running turns, Swap to <v>, Confirm its signed hello) before **Update to
-<v>** and Cancel, then their states, with Roll back to <v> added after a
-failed swap or confirmation and a closing line saying why it was rolled back.
+signature check, how running turns stop, the `octant server upgrade` swap in
+the install folder and any store migration, and what makes Octant roll back.
+Running turns is a radio group of **Wait up to N minutes for running work**,
+chosen first, and **Stop now**; with Wait chosen a minutes field (1 to 60,
+default 10) follows, and the line under it says the server refuses new turns
+at once, lets running ones finish for up to that long, then stops, and that a
+turn still running continues once it starts again; with Stop now it says the
+server refuses new turns and stops now. It lists the five steps (Copy the
+build, Verify it on the server, Drain running turns, Swap to <v>, Confirm its
+signed hello) before **Update to <v>** and Cancel, then their states, the
+Drain step saying how many turns were still running when a wait ran out, with
+Roll back to <v> added after a failed drain, swap or confirmation and a
+closing line saying why it was rolled back.
 Remove Octant opens a dialog stating that the server leaves the hub, its user
 service is stopped and removed, what is Deleted and what is Kept, with one
 **Also delete the data folder** checkbox, unticked, that moves the data

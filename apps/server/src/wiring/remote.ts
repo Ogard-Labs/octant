@@ -253,7 +253,10 @@ export type RemoteDependencies = {
     readonly bind: (routes: ReadonlyArray<PairedDeviceRoutes>) => void;
   };
 } & Pick<ServerStart, "options" | "persistence" | "serve" | "startedAt" | "version"> &
-  Pick<HarnessWiring, "beginGoogleCliChange" | "shieldServerStore" | "webSearchSettings"> &
+  Pick<
+    HarnessWiring,
+    "beginGoogleCliChange" | "hostDrain" | "shieldServerStore" | "webSearchSettings"
+  > &
   Pick<
     AuthorityWiring,
     | "browserCaptureStore"
@@ -2607,6 +2610,7 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   const hostControlRoutes = createHostControlRouteHandler({
     windowAuthorityStore,
+    drain: deps.hostDrain,
     diagnostics: composeHostDiagnostics,
     memory: () => hostMemoryGuard.report(),
     restartRecovery: deps.restartRecovery,

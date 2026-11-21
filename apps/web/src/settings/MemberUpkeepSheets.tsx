@@ -1,12 +1,15 @@
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
 import {
   MEMBER_REMOVAL_STEPS,
+  MEMBER_UPDATE_MAX_WAIT_MINUTES,
   MEMBER_UPDATE_STEPS,
   type MemberInstallRefusalReason,
   type MemberInstallResult,
   type MemberRemovalPlan,
   type MemberRemovalProgress,
   type MemberRemovalStep,
+  type MemberUpdateDrain,
+  type MemberUpdateDrainKind,
   type MemberUpdateFailure,
   type MemberUpdatePlan,
   type MemberUpdateProgress,
@@ -18,6 +21,8 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
+import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 
 export const MEMBER_UPDATE_ACTION = "Update";
 export const MEMBER_REMOVAL_ACTION = "Remove Octant";
@@ -34,6 +39,9 @@ const STATE_LABELS: Readonly<Record<StepRunState, string>> = {
 
 /** How often a sheet reads its running steps. */
 const PROGRESS_POLL_MS = 1_000;
+
+/** How long an update waits for running work unless the person picks another bound. */
+const DEFAULT_WAIT_MINUTES = 10;
 
 /** Why the swapped build was rolled back, as the sheet says it. */
 const ROLLBACK_REASONS: Readonly<Record<MemberUpdateFailure, string>> = {
@@ -164,23 +172,30 @@ function updateStepLabels(from: string, to: string): Readonly<Record<MemberUpdat
   return {
     copy: "Copy the build",
     verify: "Verify it on the server",
-    drain: "Stop running turns",
+    drain: "Drain running turns",
     swap: `Swap to ${to}`,
     confirm: "Confirm its signed hello",
     "roll-back": `Roll back to ${from}`,
   };
 }
 
+function minutesText(minutes: number): string {
+  return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+}
+
 /**
  * Update: one sheet that states, before anything runs, which signed build
- * replaces which, how running turns stop, and what makes Octant roll the
- * member back, then shows each step as it runs. The host checks the person,
- * the build and the member's hello itself.
+ * replaces which, how running turns stop (waiting up to a bound the person
+ * picks, or stopping now), and what makes Octant roll the member back, then
+ * shows each step as it runs. The host checks the person, the build and the
+ * member's hello itself.
  */
 export function MemberUpdateSheet(props: MemberSheetProps) {
   const { server, client } = props;
   const titleId = useId();
   const [confirming, setConfirming] = useState(false);
+  const [drainKind, setDrainKind] = useState<MemberUpdateDrainKind>("wait");
+  const [waitMinutes, setWaitMinutes] = useState(DEFAULT_WAIT_MINUTES);
   const [state, setState] = useMemberSheet<MemberUpdatePlan, MemberUpdateProgress>({
     client,
     prepare: { kind: "prepare-member-update", serverId: server.serverId },
@@ -205,11 +220,15 @@ export function MemberUpdateSheet(props: MemberSheetProps) {
   async function confirm(plan: MemberUpdatePlan) {
     setConfirming(true);
     setVersions({ from: plan.fromVersion, to: plan.toVersion });
+    const drain: MemberUpdateDrain =
+      drainKind === "wait" && plan.drains.includes("wait")
+        ? { kind: "wait", minutes: waitMinutes }
+        : { kind: "stop-now" };
     try {
       const result = await client.memberInstall({
         kind: "confirm-member-update",
         planId: plan.planId,
-        drain: "stop-now",
+        drain,
       });
       if (result.kind === "member-update-progress") {
         setState({ kind: "progress", progress: result.progress });
@@ -261,9 +280,51 @@ export function MemberUpdateSheet(props: MemberSheetProps) {
             </dd>
             <dt>Running turns</dt>
             <dd>
-              Octant on {state.plan.alias} stops now, before the swap. Turns the stop cuts off
-              continue by themselves once it starts again. Waiting for running turns to finish first
-              is not offered yet.
+              <div
+                aria-label="Before the swap"
+                className="member-update__drains"
+                onKeyDown={moveWithinRadioGroup}
+                role="radiogroup"
+              >
+                {state.plan.drains.map((kind) => (
+                  <OctantButton
+                    aria-checked={drainKind === kind}
+                    key={kind}
+                    onClick={() => setDrainKind(kind)}
+                    role="radio"
+                    tabIndex={drainKind === kind ? 0 : -1}
+                    type="button"
+                    variant={drainKind === kind ? "secondary" : "ghost"}
+                  >
+                    {kind === "wait"
+                      ? `Wait up to ${minutesText(waitMinutes)} for running work`
+                      : "Stop now"}
+                  </OctantButton>
+                ))}
+              </div>
+              {drainKind === "wait" ? (
+                <>
+                  <OctantNumberStepper
+                    field
+                    label="Minutes to wait for running work"
+                    max={MEMBER_UPDATE_MAX_WAIT_MINUTES}
+                    min={1}
+                    onChange={setWaitMinutes}
+                    suffix="min"
+                    value={waitMinutes}
+                  />
+                  <span>
+                    {state.plan.alias} refuses new turns at once and lets running ones finish, for
+                    up to {minutesText(waitMinutes)}. Then it stops; any turn still running
+                    continues by itself once it starts again.
+                  </span>
+                </>
+              ) : (
+                <span>
+                  {state.plan.alias} refuses new turns and stops now, before the swap. Turns the
+                  stop cuts off continue by themselves once it starts again.
+                </span>
+              )}
             </dd>
             <dt>Swap</dt>
             <dd>

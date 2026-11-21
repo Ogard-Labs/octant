@@ -25,7 +25,10 @@ export const SHIELD_SERVERS_EVENT_NAMES = {
   projectOverrideCleared: "shield-servers.project-override-cleared@1",
   memberInstallRequested: "shield-servers.member-install-requested@1",
   memberInstallStepRecorded: "shield-servers.member-install-step@1",
-  memberUpdateRequested: "shield-servers.member-update-requested@1",
+  /** Names the drain the person chose: stop now, or wait up to some minutes. */
+  memberUpdateRequested: "shield-servers.member-update-requested@2",
+  /** Written before waiting for running turns was built; read back, never written. */
+  memberUpdateRequestedV1: "shield-servers.member-update-requested@1",
   memberUpdateStepRecorded: "shield-servers.member-update-step@1",
   memberRemovalRequested: "shield-servers.member-removal-requested@1",
   memberRemovalStepRecorded: "shield-servers.member-removal-step@1",
@@ -417,13 +420,26 @@ export const MemberUpdateFailure = Schema.Literal(
 );
 export type MemberUpdateFailure = typeof MemberUpdateFailure.Type;
 
+/** The longest the person may have an update wait for running turns. */
+export const MEMBER_UPDATE_MAX_WAIT_MINUTES = 60;
+
 /**
- * How the member stops admitting turns before the swap. Only stopping now is
- * built: the member's owner stops gracefully, and the turns that stop cuts
- * off continue by themselves once it starts again.
+ * How the member stops admitting turns before the swap, as the person chose.
+ * Both first refuse new turns. `wait` lets running turns finish for up to
+ * `minutes` and then stops the member; `stop-now` stops it at once. Either
+ * way the member's owner stops gracefully, and the turns the stop cuts off
+ * continue by themselves once it starts again.
  */
-export const MemberUpdateDrain = Schema.Literal("stop-now");
+export const MemberUpdateDrain = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("stop-now") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("wait"),
+    minutes: Schema.Int.pipe(Schema.between(1, MEMBER_UPDATE_MAX_WAIT_MINUTES)),
+  }).annotations(strict),
+);
 export type MemberUpdateDrain = typeof MemberUpdateDrain.Type;
+export const MemberUpdateDrainKind = Schema.Literal("wait", "stop-now");
+export type MemberUpdateDrainKind = typeof MemberUpdateDrainKind.Type;
 
 /** The person confirmed an update. Journaled before anything runs on the server; it names builds, never a key. */
 export const MemberUpdateRequestedPayload = Schema.Struct({
@@ -436,6 +452,13 @@ export const MemberUpdateRequestedPayload = Schema.Struct({
   drain: MemberUpdateDrain,
 }).annotations(strict);
 export type MemberUpdateRequestedPayload = typeof MemberUpdateRequestedPayload.Type;
+
+/** `shield-servers.member-update-requested@1`, whose only drain was stopping now. */
+export const MemberUpdateRequestedPayloadV1 = Schema.Struct({
+  ...MemberUpdateRequestedPayload.fields,
+  drain: Schema.Literal("stop-now"),
+}).annotations(strict);
+export type MemberUpdateRequestedPayloadV1 = typeof MemberUpdateRequestedPayloadV1.Type;
 
 export const MemberUpdateStepRecordedPayload = Schema.Struct({
   updateId: AggregateId,
@@ -493,8 +516,8 @@ export const MemberUpdatePlan = Schema.Struct({
   installRoot: MemberInstallPath,
   /** The new build migrates the member's store; `octant server upgrade` takes a verified backup first. */
   storeMigration: Schema.Boolean,
-  /** The ways to drain on offer; waiting for running turns is not built. */
-  drains: Schema.Array(MemberUpdateDrain).pipe(Schema.minItems(1), Schema.maxItems(1)),
+  /** The ways to drain on offer, the one the sheet starts on first. */
+  drains: Schema.Array(MemberUpdateDrainKind).pipe(Schema.minItems(1), Schema.maxItems(2)),
 }).annotations(strict);
 export type MemberUpdatePlan = typeof MemberUpdatePlan.Type;
 
@@ -663,6 +686,9 @@ export const decodeMemberInstallStepRecordedPayload = Schema.decodeUnknownSync(
 );
 export const decodeMemberUpdateRequestedPayload = Schema.decodeUnknownSync(
   MemberUpdateRequestedPayload,
+);
+export const decodeMemberUpdateRequestedPayloadV1 = Schema.decodeUnknownSync(
+  MemberUpdateRequestedPayloadV1,
 );
 export const decodeMemberUpdateStepRecordedPayload = Schema.decodeUnknownSync(
   MemberUpdateStepRecordedPayload,

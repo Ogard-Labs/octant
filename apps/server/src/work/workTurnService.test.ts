@@ -128,6 +128,7 @@ import { liveWorkFilesystem } from "./workFilesystemPort";
 import type { TurnEndSummary } from "../metrics/turnEnd";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { HOST_DRAINING_REFUSAL, HostDrain } from "../hostDrain";
 import { frameExternalContentForModel } from "../context/externalContentFraming";
 import {
   WINDOWS_KEPT_SANDBOX_REFUSAL,
@@ -2113,6 +2114,58 @@ describe("WorkTurnService", () => {
     expect(run).not.toHaveBeenCalled();
     expect(turnStarted).not.toHaveBeenCalled();
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("a draining host refuses a new turn and lets a running one finish", async () => {
+    // Composed as the harness wiring composes it: the drain answers admission
+    // first and counts the turns every mode reports starting and ending.
+    const drain = new HostDrain({ now: Date.now });
+    const started = deferred<void>();
+    const release = deferred<void>();
+    const run = vi.fn<WorkTurnRuntimePort["run"]>(async () => {
+      started.resolve();
+      await release.promise;
+      return { kind: "completed", response: "Provider reply" };
+    });
+    const fixture = serviceFixture({
+      turnRuntime: { run },
+      nativeHarness: {
+        contextFor: () => [],
+        admitTurn: () => {
+          const refusal = drain.refusal();
+          return refusal === undefined
+            ? { kind: "admitted" }
+            : { kind: "draining", detail: refusal };
+        },
+        turnStarted: (scope) => drain.turnStarted(scope),
+        turnCompleted: vi.fn(async () => undefined),
+        turnEnded: (scope) => drain.turnEnded(scope),
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await started.promise;
+
+    expect(drain.enter(10)).toEqual({ state: "draining", running: 1 });
+    const next = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    await expect(
+      fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        requestId: decodeWorkTurnRequestId(next),
+        turnId: decodeWorkTurnId(next),
+        prompt: "One more thing",
+      }),
+    ).rejects.toMatchObject({
+      failure: { category: "unavailable", message: HOST_DRAINING_REFUSAL },
+    });
+    expect(run).toHaveBeenCalledOnce();
+
+    release.resolve();
+    await fixture.waitForIdle();
+    expect(await fixture.service.lookupFirstTurn(ids.window, ids.request)).toMatchObject({
+      kind: "accepted",
+      turn: { status: "completed" },
+    });
+    expect(drain.status()).toEqual({ state: "drained" });
   });
 
   it("hands what a Work turn cost and how it ran to the harness when it completes and when it ends", async () => {

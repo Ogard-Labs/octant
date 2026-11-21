@@ -24,6 +24,7 @@ import {
   decodeMemberInstallStepRecordedPayload,
   decodeMemberRemovalStepRecordedPayload,
   decodeMemberUpdateRequestedPayload,
+  decodeMemberUpdateRequestedPayloadV1,
   decodeMemberUpdateStepRecordedPayload,
   decodeShieldProjectServersClearedPayload,
   decodeShieldProjectServersSetPayload,
@@ -692,6 +693,14 @@ export class ShieldServerStore {
     if (eventName === SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequested) {
       const requested = decodeMemberUpdateRequestedPayload(payload);
       this.#updateRequests.set(String(requested.updateId), requested);
+      return;
+    }
+    if (eventName === SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequestedV1) {
+      const requested = decodeMemberUpdateRequestedPayloadV1(payload);
+      this.#updateRequests.set(String(requested.updateId), {
+        ...requested,
+        drain: { kind: "stop-now" },
+      });
       return;
     }
     if (eventName === SHIELD_SERVERS_EVENT_NAMES.memberUpdateStepRecorded) {

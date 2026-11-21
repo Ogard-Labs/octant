@@ -2987,7 +2987,10 @@ export class ChatService {
     return { kind: "thread-updated", thread: next };
   }
 
-  /** A paused harness session refuses a new prompt, whether sent or edited in. */
+  /**
+   * A paused harness session refuses a new prompt, whether sent or edited in,
+   * and so does a host draining before an update.
+   */
   #admitHarnessTurn(thread: ChatThread): void {
     const admission = this.#nativeHarness?.admitTurn?.({
       threadId: String(thread.id),
@@ -2996,6 +2999,11 @@ export class ChatService {
       modelId: decodeProviderModelId(thread.modelId),
       ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
     });
+    if (admission?.kind === "draining") {
+      throw new ChatServiceError(
+        decodeChatFailure({ category: "unavailable", message: admission.detail }),
+      );
+    }
     if (admission?.kind === "paused") {
       throw new ChatServiceError(
         decodeChatFailure({

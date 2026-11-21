@@ -1557,6 +1557,7 @@ export class WorkTurnService {
             modelId: thread.modelId,
             projectId: thread.projectId,
           });
+    if (admission?.kind === "draining") throw this.#failure("unavailable", admission.detail);
     if (admission?.kind === "paused") {
       throw this.#failure(
         "unavailable",
