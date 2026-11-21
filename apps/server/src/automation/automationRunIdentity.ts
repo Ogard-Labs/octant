@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   decodeAutomationRun,
+  decodeChatSubmissionId,
   decodeCodeOperationId,
   deriveAutomationOccurrenceKey,
   type AutomationDefinition,
@@ -30,6 +31,17 @@ export function deterministicAutomationUuid(seed: string): string {
 export function automationCodeOperationId(run: AutomationRun) {
   return decodeCodeOperationId(
     deterministicAutomationUuid(`automation-code-op:${String(run.occurrenceKey)}`),
+  );
+}
+
+/**
+ * The submission identity a Chat run's task turn is sent under. The dispatch
+ * port sends with it, so a retry finds the turn it already sent, and the
+ * scheduler finds the same turn by it to read the run's outcome.
+ */
+export function automationChatSubmissionId(run: AutomationRun) {
+  return decodeChatSubmissionId(
+    deterministicAutomationUuid(`automation-chat-turn:${String(run.occurrenceKey)}`),
   );
 }
 
