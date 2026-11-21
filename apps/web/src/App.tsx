@@ -5466,6 +5466,17 @@ function LaunchedShell(
       new Map(projectController.allProjects.map((project) => [String(project.id), project.name])),
     [projectController.allProjects],
   );
+  // Only Code and Work Projects: Act governs thread starts there, and a Chat
+  // Project offered under Act would be a setting nothing reads.
+  const actProjectNamesById = useMemo(
+    () =>
+      new Map(
+        projectController.allProjects
+          .filter((project) => project.type !== "chat")
+          .map((project) => [String(project.id), project.name]),
+      ),
+    [projectController.allProjects],
+  );
   const projectIconIds = useMemo(
     () => projectController.allProjects.map((project) => String(project.id)),
     [projectController.allProjects],
@@ -8442,6 +8453,7 @@ function LaunchedShell(
       nativeBoundsAvailable={nativeHost !== undefined}
       {...(pendingUsageFilter === undefined ? {} : { pendingUsageFilter })}
       projectNamesById={projectNamesById}
+      actProjectNamesById={actProjectNamesById}
       providerController={providerController}
       settings={loadedSettings}
       presentation={presentation}

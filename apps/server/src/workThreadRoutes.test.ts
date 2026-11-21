@@ -132,11 +132,11 @@ describe("Work thread routes", () => {
       hostId: "local",
       bindingRevisionId: "72000000-0000-4000-8000-000000000008",
     };
-    const fromIntroduced = () => {
+    const fromIntroduced = (command: Record<string, unknown> = create) => {
       const remote = request("/api/work/threads/commands", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(create),
+        body: JSON.stringify(command),
       });
       bindPrincipalRouteContext(remote, {
         principal: createRemoteDevicePrincipal({
@@ -155,6 +155,18 @@ describe("Work thread routes", () => {
     };
 
     expect((await route(fromIntroduced()))?.status).toBe(200);
+    // A fork lands in its source's Project, which the route does not read, so
+    // even with Act naming a Project a fork from such a device is refused.
+    const forked = await route(
+      fromIntroduced({
+        kind: "fork-work-thread",
+        threadId: "73000000-0000-4000-8000-000000000040",
+        sourceThreadId: threadId,
+        throughRequestId: "73000000-0000-4000-8000-000000000041",
+        title: "Draft brief, again",
+      }),
+    );
+    expect(forked?.status).toBe(403);
     grant.current = { items: ["act"], actProjects: [] };
     const refused = await route(fromIntroduced());
     expect(refused?.status).toBe(403);

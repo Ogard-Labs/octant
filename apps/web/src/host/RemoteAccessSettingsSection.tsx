@@ -60,7 +60,7 @@ export interface RemoteAccessSettingsSectionProps {
   readonly hub?: HubAdministrationBridge | undefined;
   /** This Mac's unlock key, made when joining a hub as an owner; absent outside the desktop app. */
   readonly ownerUnlock?: OwnerUnlockBridge | undefined;
-  /** This computer's Projects by id, which the hub grant's Act item can name. */
+  /** This computer's Code and Work Projects by id, which the hub grant's Act item can name. */
   readonly projectNames?: ReadonlyMap<string, string>;
   /** Reads the clock so a test can freeze ticket expiry. */
   readonly now?: () => number;

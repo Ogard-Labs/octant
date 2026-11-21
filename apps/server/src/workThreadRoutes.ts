@@ -223,9 +223,18 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
       const command = decodeWorkThreadCommand(value);
       // A device only the hub introduced starts a thread only in a Project the
       // member's Act item names, read at this start; the server always binds
-      // the scope, so a route built without one belongs to no hub.
-      if (command.kind === "create-work-thread" && boundPrincipalIsHubIntroduced(request)) {
-        const decision = dependencies.hubActScope?.()?.decideStart(String(command.projectId));
+      // the scope, so a route built without one belongs to no hub. A fork's
+      // Project is its source's, which this route does not read, so a fork
+      // from such a device is refused while this host is in a hub, as the
+      // Code route does.
+      const startProjectId =
+        command.kind === "create-work-thread"
+          ? String(command.projectId)
+          : command.kind === "fork-work-thread"
+            ? ""
+            : undefined;
+      if (startProjectId !== undefined && boundPrincipalIsHubIntroduced(request)) {
+        const decision = dependencies.hubActScope?.()?.decideStart(startProjectId);
         if (decision?.status === "refused") {
           return failureResponse(
             { category: "unauthorized", message: hubActRefusalMessage(decision) },

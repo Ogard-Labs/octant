@@ -559,9 +559,12 @@ otherwise.
   Built for starting threads (slice 16): while a host is a hub member, a
   device only the hub introduced starts a Code or Work thread there only in
   a Project the member's Act item names, read at each start, so unticking
-  Act or a Project refuses the next one with a sentence; a Code fork from
+  Act or a Project refuses the next one with a sentence; a Code or Work fork from
   such a device is refused, because its Project is its source's and the
-  route does not read it. The hub settings name those Projects under Act. A
+  route does not read it. The hub settings name those Projects under Act,
+  offering only Code and Work Projects because Chat starts never read Act;
+  `octant hub grant` keeps the Projects already named and cannot name new
+  ones, so a headless member names them from a window. A
   host in no hub keeps its own rules for such a device. Not built yet: a
   desktop window adding the hub's other members to its computers, so the
   window reaches each member directly as a browser guest does.

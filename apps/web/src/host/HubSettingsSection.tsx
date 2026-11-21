@@ -57,7 +57,10 @@ export interface HubSettingsSectionProps {
   readonly ownerUnlock?: Pick<OwnerUnlockBridge, "ownerUnlockMakeKey" | "ownerUnlockForgetKey">;
   /** Reads the clock so a test can freeze a code's time left. */
   readonly now?: () => number;
-  /** This computer's Projects by id, for the Projects the Act item names. */
+  /**
+   * This computer's Code and Work Projects by id, for the Projects the Act
+   * item names. A saved id missing here stays listed so it can be unticked.
+   */
   readonly projectNames?: ReadonlyMap<string, string>;
 }
 
