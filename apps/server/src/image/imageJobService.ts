@@ -1239,7 +1239,10 @@ export class ImageJobService {
       });
       if (pendingAdmission.status === "admitted") {
         this.#spendReservations.set(String(entry.job.id), pendingReservationId);
-        this.#updateWorkAdmission(entry.job.id, entry.work, entry.projectId, false);
+        // Keep `needsReadmission` true while this moved job remains queued so
+        // its reservation stays provisional and is rechecked against any
+        // ceiling installed or tightened before it actually dispatches.
+        this.#updateWorkAdmission(entry.job.id, entry.work, entry.projectId, true);
       }
     }
 
