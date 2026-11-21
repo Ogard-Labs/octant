@@ -406,13 +406,26 @@ export function wireChat(deps: ChatDependencies) {
     const guardChatAttachmentPurge = (guard: (threadId: ChatThreadId) => Promise<void>): void => {
       attachmentPurgeGuards.push(guard);
     };
-    const chatToolContributors: Array<
-      (windowId: WindowId, thread: ChatThread) => AppManagedToolSet | undefined
-    > = [];
+    type ChatToolContributor = (
+      windowId: WindowId,
+      thread: ChatThread,
+    ) => AppManagedToolSet | undefined;
+    const chatToolContributors: Array<ChatToolContributor> = [];
+    const chatHostAnsweredToolContributors: Array<ChatToolContributor> = [];
+    /**
+     * A contributed set's results are outside content unless the area says
+     * they are only the host's own answers (a card the person confirms, a
+     * receipt); those stay outside the taint wrapper, as the side-task offer
+     * does, so offering one does not mark the thread.
+     */
     const contributeChatTools = (
-      contributor: (windowId: WindowId, thread: ChatThread) => AppManagedToolSet | undefined,
+      contributor: ChatToolContributor,
+      options?: { readonly results: "host-answers" },
     ): void => {
-      chatToolContributors.push(contributor);
+      (options?.results === "host-answers"
+        ? chatHostAnsweredToolContributors
+        : chatToolContributors
+      ).push(contributor);
     };
     // Side Chat lanes and the navigator assistant's own threads, which no
     // thread list shows and no notification names.
@@ -623,6 +636,9 @@ export function wireChat(deps: ChatDependencies) {
             sideChat,
             tools: () =>
               combineAppManagedToolSets(
+                ...chatHostAnsweredToolContributors.map((contribute) =>
+                  contribute(windowId, thread),
+                ),
                 // Outside the taint wrapper: a Canvas marks its reader only
                 // when a read or preview returns content from a Canvas that
                 // carries a mark, the rule Work and Code follow, so describe

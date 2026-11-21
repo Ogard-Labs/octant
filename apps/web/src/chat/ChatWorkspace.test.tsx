@@ -1122,6 +1122,43 @@ describe("ChatWorkspace", () => {
     });
   });
 
+  it("shows a follow-up this Chat thread's agent proposed and schedules it only on the person's click", async () => {
+    const user = userEvent.setup();
+    const proposalId = "44000000-0000-4000-8000-000000000020";
+    const automation = {
+      listProposals: vi.fn(async () => [
+        {
+          proposalId,
+          threadId,
+          mode: "chat",
+          projectId: "44000000-0000-4000-8000-000000000021",
+          displayName: "Check for the reply",
+          taskPrompt: "Check whether the reply arrived and summarise it.",
+          trigger: { kind: "once", scheduledAt: "2026-11-01T08:00:00.000Z" },
+          missedRunPolicy: "run-once",
+          targetPolicy: "same-thread",
+          firstRunAt: "2026-11-01T08:00:00.000Z",
+          requestedAt: now,
+        },
+      ]),
+      decideProposal: vi.fn(async () => ({ kind: "routine-proposal-declined" as const })),
+    };
+    render(
+      <ChatWorkspace
+        automationClient={automation as never}
+        controller={controllerFixture()}
+        providerSnapshot={providerSnapshot()}
+      />,
+    );
+
+    const card = await screen.findByRole("article", { name: "Follow-up proposal" });
+    expect(card).toHaveTextContent("Check for the reply");
+    expect(card).not.toHaveTextContent("asks before it changes anything");
+    expect(automation.decideProposal).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Schedule follow-up" }));
+    expect(automation.decideProposal).toHaveBeenCalledWith({ proposalId, decision: "confirm" });
+  });
+
   it("does not commit again when tool-approval polling returns the same data", async () => {
     const client = extensionClient();
     const approval = {

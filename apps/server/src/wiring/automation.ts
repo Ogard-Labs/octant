@@ -133,7 +133,7 @@ export type AutomationDependencies = {
     | "contributeServerCodeTools"
     | "routeCodeService"
   > &
-  Pick<ChatWiring, "chatService"> &
+  Pick<ChatWiring, "chatService" | "contributeChatTools"> &
   Pick<WorkWiring, "workThreadService" | "workThreadServiceWithWorkflows" | "workTurnService"> &
   Pick<
     FoundationsWiring,
@@ -149,6 +149,7 @@ export function wireAutomation(deps: AutomationDependencies) {
     externalContentIngestionStore,
     readHarnessProcessReceipts,
     chatService,
+    contributeChatTools,
     codeCompletedThreadSource,
     codeEvidence,
     codeBoardEventStore,
@@ -931,6 +932,22 @@ export function wireAutomation(deps: AutomationDependencies) {
   // routine records alone, so a server thread may propose, read, and report
   // on its Project's routines as a local one does.
   contributeServerCodeTools(routineToolsForCodeTurn);
+  // A Chat thread in a Chat Project may propose a follow-up in itself, and
+  // nothing else; one outside a Project has nowhere for a routine to live.
+  // Its answer is the host's own receipt, so it does not mark the thread.
+  contributeChatTools(
+    (windowId, thread) =>
+      thread.projectId === undefined
+        ? undefined
+        : createRoutineProposalTools({
+            windowId,
+            thread: { id: String(thread.id), mode: "chat", projectId: String(thread.projectId) },
+            isAutomationOrigin: isRoutineHostScope(windowId),
+            proposals: routineProposalService,
+            now: Date.now,
+          }),
+    { results: "host-answers" },
+  );
   const draftThreadRoutine = (proposal: RoutineProposal) =>
     buildThreadRoutineDraft(
       {

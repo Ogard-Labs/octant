@@ -4137,11 +4137,12 @@ file, shell, or Git authority for a routine to widen: its definition binds an
 active Chat Project (the receipt names the Project and its version, with no
 folder or binding revision), its authority snapshot grants no filesystem,
 shell, Git, or subagents, and the contract refuses a Chat definition that
-does. It has no level to pick, and no thread's agent proposes one, because
-Chat is offered no routine tool. A follow-up (`same-thread`) may target a Chat
-thread (maintainer decision, 2026-11-21): the person sets it up from the Chat
-thread's Environment, and its one turn goes into that thread on the thread's
-own model, as below. Every other run creates a Chat thread in the Project through
+does. It has no level to pick, and no thread's agent proposes one that starts
+new threads. A follow-up (`same-thread`) may target a Chat thread (maintainer
+decision, 2026-11-21): the person sets it up from the Chat thread's
+Environment, or the thread's agent proposes it and the person confirms the
+chip, and its one turn goes into that thread on the thread's own model, as
+below. Every other run creates a Chat thread in the Project through
 `create-chat-thread`, puts it on the routine's provider and model, and sends
 the task as one `send-chat-turn` under a submission identity derived from the
 occurrence, so a retry after a crash finds the turn it already sent. Each occurrence creates
@@ -4392,7 +4393,9 @@ the thread it came from.
   bounds above, or weekly at a local time in an IANA zone), and a missed-run
   policy. It names nothing else: the thread's own Project and mode are implied,
   and the agent cannot choose another Project, a profile, a model, or any
-  authority. Chat is never offered the tool, a turn that runs as the host (a
+  authority. A Chat thread in a Chat Project is offered it only for a
+  follow-up in itself (below); a Chat thread outside a Project and a Side Chat
+  are not offered it. A turn that runs as the host (a
   routine's run, or a usage-limit resume) is refused it as
   `automation-recursion`. A turn in Plan is offered and may call it, as it
   may offer a side task: a proposal records only a suggestion the person
@@ -4540,8 +4543,16 @@ the thread it came from.
   thread's Environment, the host builds it with Chat's authority from the
   Chat thread's live facts (`AutomationFollowUpRequest.mode` takes `chat`),
   and the Chat dispatcher sends its one turn into that thread under the same
-  heading, on the thread's own model; no agent proposes a Chat follow-up,
-  since Chat has no routine tool. The proposal refusals above apply. Moving it (`reschedule-follow-up`) is an ordinary
+  heading, on the thread's own model. The Chat thread's agent may propose
+  one with `octant_propose_routine` (maintainer decision, 2026-11-21): its
+  Chat definition offers only trigger `follow-up`, any other trigger is
+  refused as `chat-follow-up-only` and the draft refuses a Chat proposal that
+  is not a follow-up again at confirmation, and the proposal always waits on
+  the same chip in the Chat transcript, since Chat has no Full access and a
+  paused follow-up would never fire. The tool's answer is the host's own
+  receipt, so it does not mark the Chat thread as having read outside
+  content, and Chat is still offered no `octant_routines`. The proposal
+  refusals above apply. Moving it (`reschedule-follow-up`) is an ordinary
   update of its time; cancelling it is the ordinary archive. An edit cannot
   change any routine's target policy, and Run now is refused for a follow-up,
   because its one turn is its scheduled one. Its turn runs as the host under

@@ -303,21 +303,6 @@ async function propose(h: ReturnType<typeof harness>, input = weeklyInput) {
 }
 
 describe("routine proposals from a thread", () => {
-  it("offers nothing to a Chat thread and refuses a call that names the tool anyway", async () => {
-    const proposals = new RoutineProposalService({ uuid, now: () => NOW_MS });
-    const chat = createRoutineProposalTools({
-      windowId,
-      thread: { id: THREAD, mode: "chat", projectId: PROJECT },
-      isAutomationOrigin: false,
-      proposals,
-      now: () => NOW_MS,
-    });
-    expect(chat.definitions).toEqual([]);
-    const outcome = await chat.execute({ name: "octant_propose_routine", inputJson: weeklyInput });
-    expect(outcome).toMatchObject({ isError: true, result: { reason: "chat-has-no-routines" } });
-    expect(proposals.list(windowId)).toEqual([]);
-  });
-
   it("refuses a routine's own run with automation-recursion and shows the person nothing", async () => {
     const h = harness();
     const outcome = await h
@@ -771,6 +756,68 @@ describe("one-time follow-ups in the same thread", () => {
         },
       },
     });
+  });
+
+  it("lets a Chat agent propose a follow-up for its own thread that exists only once the person confirms it", async () => {
+    const h = harness({ mode: "chat" });
+    const { call, proposal } = await propose(h, followUpInput);
+    expect(proposal).toMatchObject({
+      mode: "chat",
+      threadId: THREAD,
+      projectId: PROJECT,
+      targetPolicy: "same-thread",
+      trigger: { kind: "once", scheduledAt: "2026-11-01T08:00:00.000Z" },
+    });
+    expect(
+      h.projection.listSummaries({ hostId: "local" as never, mode: "all", limit: 10 }).items,
+    ).toEqual([]);
+    const answer = await decide(h.handler, String(proposal.proposalId), "confirm");
+    const outcome = await call;
+    if (answer.kind !== "routine-proposal-confirmed") throw new Error(JSON.stringify(answer));
+    expect(outcome.result).toMatchObject({
+      status: "confirmed",
+      routineId: String(answer.automation.id),
+    });
+    expect(answer.automation).toMatchObject({
+      mode: "chat",
+      targetPolicy: "same-thread",
+      originThreadId: THREAD,
+      lifecycle: "enabled",
+      binding: { kind: "chat" },
+      authorityProfile: {
+        effective: { filesystem: false, shell: false, git: false, subagents: false },
+      },
+    });
+  });
+
+  it("offers a Chat agent only a follow-up and refuses any other routine without showing the person a card", async () => {
+    const h = harness({ mode: "chat" });
+    const chat = h.tools();
+    expect(chat.definitions.map((definition) => definition.inputSchema)).toMatchObject([
+      { properties: { trigger: { enum: ["follow-up"] } } },
+    ]);
+    const once = JSON.stringify({ ...JSON.parse(followUpInput), trigger: "once" });
+    // Saying the person asked does not open another kind of routine to Chat.
+    const requested = JSON.stringify({ ...JSON.parse(weeklyInput), requestedByPerson: true });
+    for (const inputJson of [weeklyInput, once, requested]) {
+      expect(await chat.execute({ name: "octant_propose_routine", inputJson })).toMatchObject({
+        isError: true,
+        result: { reason: "chat-follow-up-only" },
+      });
+    }
+    expect(await listed(h.handler)).toEqual([]);
+    expect(
+      h.projection.listSummaries({ hostId: "local" as never, mode: "all", limit: 10 }).items,
+    ).toEqual([]);
+  });
+
+  it("refuses a Chat follow-up proposal from a turn the host runs", async () => {
+    const h = harness({ mode: "chat" });
+    const outcome = await h
+      .tools(windowId, true)
+      .execute({ name: "octant_propose_routine", inputJson: followUpInput });
+    expect(outcome).toMatchObject({ isError: true, result: { reason: "automation-recursion" } });
+    expect(await listed(h.handler)).toEqual([]);
   });
 
   it("refuses a routine created through the editor that claims to be a follow-up", async () => {
