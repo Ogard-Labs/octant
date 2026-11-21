@@ -747,26 +747,44 @@ describe("ProviderFolderScanService", () => {
     expect(fakeProjects.created.map((entry) => entry.canonicalRoot)).toEqual([submoduleDir]);
   });
 
-  it("discovers folders whose Codex sessions live in archived_sessions without double counting", async () => {
+  it("discovers folders whose Codex sessions live only in archived_sessions without double counting duplicates", async () => {
     const home = makeTempDir("octant-codex-archive-");
-    const archivedRepo = join(home, "code", "archived-widget");
-    createGitRepo(archivedRepo, "https://github.com/acme/archived-widget.git");
+    const archivedOnlyRepo = join(home, "code", "archived-widget");
+    const sharedRepo = join(home, "code", "shared-widget");
+    createGitRepo(archivedOnlyRepo, "https://github.com/acme/archived-widget.git");
+    createGitRepo(sharedRepo, "https://github.com/acme/shared-widget.git");
     const codexHome = join(home, ".codex");
-    const sessionUuid = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const archiveOnlySessionUuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const duplicateSessionUuid = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
     const archiveDir = join(codexHome, "archived_sessions");
     mkdirSync(archiveDir, { recursive: true });
     writeFileSync(
-      join(archiveDir, `rollout-2026-11-20T08-00-00-${sessionUuid}.jsonl`),
+      join(archiveDir, `rollout-2026-11-20T09-00-00-${archiveOnlySessionUuid}.jsonl`),
       `${JSON.stringify({
         type: "session_meta",
-        payload: { id: sessionUuid, cwd: archivedRepo, timestamp: "2026-11-20T08:00:00.000Z" },
+        payload: {
+          id: archiveOnlySessionUuid,
+          cwd: archivedOnlyRepo,
+          timestamp: "2026-11-20T09:00:00.000Z",
+        },
+      })}\n`,
+    );
+    writeFileSync(
+      join(archiveDir, `rollout-2026-11-20T08-00-00-${duplicateSessionUuid}.jsonl`),
+      `${JSON.stringify({
+        type: "session_meta",
+        payload: {
+          id: duplicateSessionUuid,
+          cwd: sharedRepo,
+          timestamp: "2026-11-20T08:00:00.000Z",
+        },
       })}\n`,
     );
     // Same session ID also in active sessions must deduplicate to 1 session.
     writeCodexSession(
       codexHome,
-      archivedRepo,
-      sessionUuid,
+      sharedRepo,
+      duplicateSessionUuid,
       ["2026", "11", "20"],
       "2026-11-20T08:00:00.000Z",
     );
@@ -787,9 +805,10 @@ describe("ProviderFolderScanService", () => {
     const scanned = await scanner.scan(decodeWindowId(randomUUID()));
     expect(scanned.status).toBe("ready");
     if (scanned.status !== "ready") return;
-    expect(scanned.groups).toHaveLength(1);
-    expect(scanned.groups[0]?.label).toBe("acme/archived-widget");
-    expect(scanned.groups[0]?.sessionCount).toBe(1);
+    expect(scanned.groups.map((group) => [group.label, group.sessionCount])).toEqual([
+      ["acme/archived-widget", 1],
+      ["acme/shared-widget", 1],
+    ]);
   });
 
   it("stops an in-flight scan or import when Strict turns on mid-operation", async () => {
