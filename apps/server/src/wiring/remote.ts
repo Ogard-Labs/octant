@@ -10,8 +10,10 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { readPrivateListener } from "../hub/privateListenerReading";
 import { createHeadlessBuilds } from "../shield/headlessBuilds";
-import { MemberInstallService } from "../shield/memberInstall";
+import { MemberInstallService, MemberServerWork } from "../shield/memberInstall";
 import { createMemberInstallRouteHandler } from "../shield/memberInstallRoutes";
+import { MemberUpkeepService } from "../shield/memberUpkeep";
+import { hubMemberAt, readMemberHello } from "../hub/memberHello";
 import {
   type AgentRunId,
   AgentRunParentThreadId,
@@ -40,6 +42,7 @@ import {
   decodeBrowserCaptureId,
   decodeBrowserThreadId,
 } from "@octant/contracts/browser-automation";
+import { REMOTE_ACCESS_PROTOCOL_VERSION } from "@octant/contracts/remote-access";
 import { canvasOutsideContentWriters } from "../canvas/canvasOutsideContentMark";
 import { conversationInputSource } from "./conversationInputs";
 import type { ThreadPartsDestination, ThreadPartsSource } from "../hub/movedThreadParts";
@@ -679,10 +682,15 @@ export function wireRemote(deps: RemoteDependencies) {
   // Making a registered server an Octant computer: installed over its SSH
   // connection and joined to this hub, whose pairing decides the one claim
   // whose comparison code the server printed.
+  const headlessBuilds = createHeadlessBuilds({
+    folder: join(providerDataDirectory, "headless-builds"),
+  });
+  const memberServerWork = new MemberServerWork();
   const memberInstalls = new MemberInstallService({
     servers: () => deps.shieldServerStore.servers(),
     connection: deps.serverConnection,
-    builds: createHeadlessBuilds({ folder: join(providerDataDirectory, "headless-builds") }),
+    builds: headlessBuilds,
+    work: memberServerWork,
     hub: {
       readiness: () => {
         if (hubService.status().enabled) {
@@ -757,9 +765,43 @@ export function wireRemote(deps: RemoteDependencies) {
     uuid: randomUUID,
     now: Date.now,
   });
+  // Updating such a member and removing Octant from it, over the same
+  // connection; this hub reads the updated member's signed hello and removes
+  // a member that could not leave by itself.
+  const memberUpkeep = new MemberUpkeepService({
+    servers: () => deps.shieldServerStore.servers(),
+    connection: deps.serverConnection,
+    builds: headlessBuilds,
+    hub: {
+      listed: (listener) => hubMemberAt(hubStateStore, listener) !== undefined,
+      readHello: async (listener) => {
+        const member = hubMemberAt(hubStateStore, listener);
+        return member === undefined
+          ? { status: "unreachable" }
+          : await readMemberHello({ member, transport: hubTransport, now: Date.now });
+      },
+      removeMember: async (listener, actor) => {
+        const member = hubMemberAt(hubStateStore, listener);
+        if (member === undefined) return "not-listed";
+        const removed = await hubService.removeMember(
+          { memberId: member.memberId },
+          actor.kind === "remote-device"
+            ? { kind: "remote-device", deviceId: actor.deviceId }
+            : { kind: "local-window" },
+        );
+        return removed.status === "removed" ? "removed" : "refused";
+      },
+    },
+    journal: deps.shieldServerStore,
+    work: memberServerWork,
+    protocolVersion: REMOTE_ACCESS_PROTOCOL_VERSION,
+    uuid: randomUUID,
+    now: Date.now,
+  });
   const memberInstallRoutes = createMemberInstallRouteHandler({
     windowAuthorityStore,
     service: memberInstalls,
+    upkeep: memberUpkeep,
   });
   const spokeLinkService = new SpokeLinkService({
     state: hubStateStore,

@@ -78,6 +78,8 @@ export interface MemberInstallOptions {
   readonly builds: HeadlessBuilds;
   readonly hub: MemberInstallHub;
   readonly journal: Pick<ShieldServerStore, "recordMemberInstall">;
+  /** Shared with updates and removals, so only one of them runs on a server at a time. */
+  readonly work?: MemberServerWork;
   readonly uuid: () => string;
   readonly now: () => number;
   readonly sleep?: (milliseconds: number) => Promise<void>;
@@ -119,7 +121,7 @@ ip -o addr show || ifconfig
 exit 0`;
 
 /** `$1` work folder, the build on standard input; prints its SHA-256. */
-const COPY_SCRIPT = `exec 2>/dev/null
+export const COPY_SCRIPT = `exec 2>/dev/null
 umask 077
 mkdir -p -- "$1" || exit 3
 cat > "$1/build.tar.gz" || exit 3
@@ -127,7 +129,7 @@ s=$(sha256sum -- "$1/build.tar.gz" || shasum -a 256 -- "$1/build.tar.gz") || exi
 printf '%s' "\${s%% *}"`;
 
 /** `$1` work folder: unpacks the copy and prints its root and its manifest's and signature's digests. */
-const VERIFY_SCRIPT = `umask 077
+export const VERIFY_SCRIPT = `umask 077
 cd -- "$1" || exit 3
 rm -rf -- unpacked && mkdir unpacked || exit 3
 tar -xzf build.tar.gz -C unpacked --no-same-owner || exit 4
@@ -199,16 +201,48 @@ type StepOutcome =
   | { readonly ok: true }
   | { readonly ok: false; readonly failure: MemberInstallFailure; readonly message: string };
 
+/** How one call over the server's SSH connection ended, for a script that must exit 0. */
+export type ServerStepCall =
+  | { readonly ok: true; readonly output: string }
+  | {
+      readonly ok: false;
+      readonly failure: "server-unreachable" | "timed-out" | "command-failed";
+      readonly message: string;
+    };
+
+/**
+ * Which servers have an install, update or removal running now. Each claims
+ * the server before it journals its request, so a second confirmation on the
+ * same server is refused rather than racing the first.
+ */
+export class MemberServerWork {
+  readonly #running = new Map<string, string>();
+
+  claim(serverId: string, workId: string): boolean {
+    if (this.#running.has(serverId)) return false;
+    this.#running.set(serverId, workId);
+    return true;
+  }
+
+  busy(serverId: string): boolean {
+    return this.#running.has(serverId);
+  }
+
+  release(serverId: string, workId: string): void {
+    if (this.#running.get(serverId) === workId) this.#running.delete(serverId);
+  }
+}
+
 export class MemberInstallService {
   readonly #options: MemberInstallOptions;
   readonly #plans = new Map<string, PreparedPlan>();
   readonly #installs = new Map<string, RunningInstall>();
-  /** The install running on each server now, so a second confirmation cannot race the first. */
-  readonly #busy = new Map<string, string>();
+  readonly #work: MemberServerWork;
   readonly #sleep: (milliseconds: number) => Promise<void>;
 
   constructor(options: MemberInstallOptions) {
     this.#options = options;
+    this.#work = options.work ?? new MemberServerWork();
     this.#sleep =
       options.sleep ?? ((milliseconds) => new Promise((done) => setTimeout(done, milliseconds)));
   }
@@ -312,7 +346,7 @@ export class MemberInstallService {
     if (server === undefined || server.alias !== plan.alias || server.user !== plan.user) {
       return refused("server-not-found");
     }
-    if (this.#busy.has(String(plan.serverId))) return refused("already-installing");
+    if (this.#work.busy(String(plan.serverId))) return refused("already-installing");
     const hub = this.#options.hub.readiness();
     if (hub.status === "refused") return refused(hub.reason, hub.message);
     // The build is checked again: the file the sheet named may have changed since.
@@ -324,9 +358,11 @@ export class MemberInstallService {
         "The build changed after the sheet was read. Open the sheet again.",
       );
     }
-    if (this.#busy.has(String(plan.serverId))) return refused("already-installing");
-    this.#plans.delete(input.planId);
     const installId = decodeAggregateId(this.#options.uuid());
+    if (!this.#work.claim(String(plan.serverId), String(installId))) {
+      return refused("already-installing");
+    }
+    this.#plans.delete(input.planId);
     const requested = this.#options.journal.recordMemberInstall(
       {
         event: "requested",
@@ -343,7 +379,10 @@ export class MemberInstallService {
       },
       actor,
     );
-    if (!requested) return refused("unavailable");
+    if (!requested) {
+      this.#work.release(String(plan.serverId), String(installId));
+      return refused("unavailable");
+    }
     const install: RunningInstall = {
       installId,
       serverId: plan.serverId,
@@ -353,9 +392,8 @@ export class MemberInstallService {
       ),
     };
     this.#installs.set(String(installId), install);
-    this.#busy.set(String(plan.serverId), String(installId));
     const done = this.#run(install, prepared, build, input.listenAddress, actor).finally(() => {
-      this.#busy.delete(String(plan.serverId));
+      this.#work.release(String(plan.serverId), String(installId));
     });
     void done.catch(() => undefined);
     return { kind: "member-install-progress", progress: progressOf(install) };
@@ -556,7 +594,7 @@ export class MemberInstallService {
   }
 
   /** One call whose script must exit 0; its output, trimmed of a final newline. */
-  async #call(
+  #call(
     server: ServerAddress,
     input: {
       readonly script: string;
@@ -564,28 +602,8 @@ export class MemberInstallService {
       readonly stdin?: Buffer;
       readonly timeoutMs: number;
     },
-  ): Promise<{ readonly ok: true; readonly output: string } | (StepOutcome & { ok: false })> {
-    const call: ServerCall = await this.#options.connection.run(server, {
-      ...input,
-      maxOutputBytes: 64 * 1024,
-    });
-    if (call.status === "unreachable") {
-      return failed(
-        "server-unreachable",
-        `${server.alias} could not be reached: ${call.message}. Nothing ran after this step.`,
-      );
-    }
-    if (call.status !== "ran") {
-      return failed("timed-out", `${server.alias} did not finish this step in time.`);
-    }
-    const output = call.output.toString("utf8").replace(/\n$/, "");
-    if (call.exitCode !== 0) {
-      return failed(
-        "command-failed",
-        lastLine(call.errorOutput) ?? lastLine(output) ?? `The step exited ${call.exitCode}.`,
-      );
-    }
-    return { ok: true, output };
+  ): Promise<ServerStepCall> {
+    return callServer(this.#options.connection, server, input);
   }
 
   #server(serverId: string): ShieldServer | undefined {
@@ -600,7 +618,52 @@ export class MemberInstallService {
   }
 }
 
-function actorOf(requester: MemberInstallRequester): EventActor | undefined {
+/** One call over the server's own SSH connection whose script must exit 0; its output, trimmed of a final newline. */
+export async function callServer(
+  connection: Pick<ServerConnection, "run">,
+  server: ServerAddress,
+  input: {
+    readonly script: string;
+    readonly args: ReadonlyArray<string>;
+    readonly stdin?: Buffer;
+    readonly timeoutMs: number;
+  },
+): Promise<ServerStepCall> {
+  const call: ServerCall = await connection.run(server, { ...input, maxOutputBytes: 64 * 1024 });
+  if (call.status === "unreachable") {
+    return {
+      ok: false,
+      failure: "server-unreachable",
+      message:
+        `${server.alias} could not be reached: ${call.message}. Nothing ran after this step.`.slice(
+          0,
+          1_024,
+        ),
+    };
+  }
+  if (call.status !== "ran") {
+    return {
+      ok: false,
+      failure: "timed-out",
+      message: `${server.alias} did not finish this step in time.`,
+    };
+  }
+  const output = call.output.toString("utf8").replace(/\n$/, "");
+  if (call.exitCode !== 0) {
+    return {
+      ok: false,
+      failure: "command-failed",
+      message: (
+        lastLine(call.errorOutput) ??
+        lastLine(output) ??
+        `The step exited ${call.exitCode}.`
+      ).slice(0, 1_024),
+    };
+  }
+  return { ok: true, output };
+}
+
+export function actorOf(requester: MemberInstallRequester): EventActor | undefined {
   return requester.kind === "person" ? requester.actor : undefined;
 }
 
@@ -632,6 +695,10 @@ const MESSAGES: Readonly<Record<MemberInstallRefusalReason, string>> = {
   "install-not-found": "That install is not running on this computer.",
   "already-installing": "Octant is already being installed on that server.",
   unavailable: "Octant could not record the request, so nothing ran.",
+  "not-a-member": "That server is not an Octant computer this computer made.",
+  "no-newer-build": "No newer signed Octant build for that server is on this computer.",
+  "update-not-found": "That update is not running on this computer.",
+  "removal-not-found": "That removal is not running on this computer.",
 };
 
 function refused(reason: MemberInstallRefusalReason, message?: string): MemberInstallResult {
@@ -642,7 +709,9 @@ function failed(failure: MemberInstallFailure, message: string): StepOutcome & {
   return { ok: false, failure, message: message.slice(0, 1_024) };
 }
 
-function buildRefusal(build: Extract<HeadlessBuildCheck, { readonly status: "refused" }>): string {
+export function buildRefusal(
+  build: Extract<HeadlessBuildCheck, { readonly status: "refused" }>,
+): string {
   switch (build.reason) {
     case "unsigned":
       return "The Octant build on this computer carries no release signature, so it is not installed on another computer. Use the signed build from Octant's release.";
@@ -678,7 +747,7 @@ function exitOf(log: string): string | undefined {
   return /(?:^|\n)exit=(\d+)\s*$/.exec(log)?.[1];
 }
 
-function lastLine(text: string): string | undefined {
+export function lastLine(text: string): string | undefined {
   const lines = text
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -718,7 +787,7 @@ function readServerFacts(
   };
 }
 
-function targetOf(system: string): MemberInstallTarget | undefined {
+export function targetOf(system: string): MemberInstallTarget | undefined {
   const [kernel, machine] = system.split(/\s+/);
   if (kernel === "Darwin" && machine === "arm64") return "darwin-arm64";
   if (kernel === "Linux" && (machine === "x86_64" || machine === "amd64")) return "linux-x64";

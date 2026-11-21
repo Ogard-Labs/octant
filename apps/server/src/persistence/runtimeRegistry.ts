@@ -305,6 +305,10 @@ import {
 import {
   MemberInstallRequestedPayload,
   MemberInstallStepRecordedPayload,
+  MemberRemovalRequestedPayload,
+  MemberRemovalStepRecordedPayload,
+  MemberUpdateRequestedPayload,
+  MemberUpdateStepRecordedPayload,
   SHIELD_REMOTE_COMMAND_EVENT_NAMES,
   SHIELD_SERVERS_EVENT_NAMES,
   ShieldRemoteCommandRanPayload,
@@ -712,6 +716,18 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       SHIELD_SERVERS_EVENT_NAMES.memberInstallStepRecorded,
       1,
       MemberInstallStepRecordedPayload,
+    )
+    .register(SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequested, 1, MemberUpdateRequestedPayload)
+    .register(
+      SHIELD_SERVERS_EVENT_NAMES.memberUpdateStepRecorded,
+      1,
+      MemberUpdateStepRecordedPayload,
+    )
+    .register(SHIELD_SERVERS_EVENT_NAMES.memberRemovalRequested, 1, MemberRemovalRequestedPayload)
+    .register(
+      SHIELD_SERVERS_EVENT_NAMES.memberRemovalStepRecorded,
+      1,
+      MemberRemovalStepRecordedPayload,
     )
     .register(SHIELD_REMOTE_COMMAND_EVENT_NAMES.ran, 1, ShieldRemoteCommandRanPayload)
     .register(SERVER_PROJECTS_EVENT_NAMES.bound, 1, ServerProjectBoundPayload)

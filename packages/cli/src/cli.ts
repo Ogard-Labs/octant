@@ -289,7 +289,9 @@ export async function runCli(
       printUsage(context.identity);
       return 1;
     }
-    if (action !== "logs" && Object.keys(lifecycleFlags).length > 0) {
+    // `--remove-service` belongs to `disable` alone.
+    const removeService = action === "disable" && lifecycleFlags["remove-service"] === true;
+    if (action !== "logs" && Object.keys(lifecycleFlags).length > (removeService ? 1 : 0)) {
       printUsage(context.identity);
       return 1;
     }
@@ -308,6 +310,7 @@ export async function runCli(
           action,
           ...lifecycleHostDependencies(context),
           stdout: process.stdout,
+          ...(removeService ? { removeService } : {}),
           ...(logs === undefined ? {} : { logs }),
           ...(followAbortController === undefined ? {} : { signal: followAbortController.signal }),
         });
@@ -954,6 +957,7 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
     nightly: null,
   },
   { octant: "server stop|restart|enable|disable", nightly: null },
+  { octant: "server disable --remove-service", nightly: null },
   { octant: "server logs [--since <ISO-8601>] [--limit <n>] [--follow]" },
   {
     octant:

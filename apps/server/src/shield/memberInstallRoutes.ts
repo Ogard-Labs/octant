@@ -13,6 +13,7 @@ import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { MemberInstallRequester, MemberInstallService } from "./memberInstall";
+import type { MemberUpkeepService } from "./memberUpkeep";
 
 export const MEMBER_INSTALL_PATH = "/api/shield/servers/member-install";
 const METHODS = "POST, OPTIONS";
@@ -22,6 +23,16 @@ const BODY_LIMIT = 4_096;
 export interface MemberInstallRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly service: Pick<MemberInstallService, "prepare" | "confirm" | "progress">;
+  readonly upkeep: Pick<
+    MemberUpkeepService,
+    | "members"
+    | "prepareUpdate"
+    | "confirmUpdate"
+    | "updateProgress"
+    | "prepareRemoval"
+    | "confirmRemoval"
+    | "removalProgress"
+  >;
   readonly now?: () => number;
 }
 
@@ -52,9 +63,50 @@ function memberInstallRequesterFor(principal: ClientPrincipal): MemberInstallReq
     : { kind: "restricted-device" };
 }
 
+/** What the person asked for, decided by the install or the upkeep service. */
+async function answer(
+  dependencies: MemberInstallRouteDependencies,
+  command: MemberInstallCommand,
+  requester: MemberInstallRequester,
+): Promise<MemberInstallResult> {
+  const { service, upkeep } = dependencies;
+  switch (command.kind) {
+    case "prepare-member-install":
+      return await service.prepare(String(command.serverId), requester);
+    case "confirm-member-install":
+      return await service.confirm(
+        { planId: String(command.planId), listenAddress: command.listenAddress },
+        requester,
+      );
+    case "read-member-install":
+      return service.progress(String(command.installId), requester);
+    case "list-member-computers":
+      return upkeep.members(requester);
+    case "prepare-member-update":
+      return await upkeep.prepareUpdate(String(command.serverId), requester);
+    case "confirm-member-update":
+      return await upkeep.confirmUpdate(
+        { planId: String(command.planId), drain: command.drain },
+        requester,
+      );
+    case "read-member-update":
+      return upkeep.updateProgress(String(command.updateId), requester);
+    case "prepare-member-removal":
+      return await upkeep.prepareRemoval(String(command.serverId), requester);
+    case "confirm-member-removal":
+      return upkeep.confirmRemoval(
+        { planId: String(command.planId), deleteData: command.deleteData },
+        requester,
+      );
+    case "read-member-removal":
+      return upkeep.removalProgress(String(command.removalId), requester);
+  }
+}
+
 /**
- * Settings › Servers › Make this an Octant computer. The route resolves the
- * principal from the authenticated request; the service decides.
+ * Settings › Servers › Make this an Octant computer, Update, and Remove
+ * Octant. The route resolves the principal from the authenticated request;
+ * the services decide.
  */
 export function createMemberInstallRouteHandler(dependencies: MemberInstallRouteDependencies) {
   const now = dependencies.now ?? Date.now;
@@ -100,15 +152,7 @@ export function createMemberInstallRouteHandler(dependencies: MemberInstallRoute
     } catch {
       return json({ error: "Server command is invalid." }, 400, origin);
     }
-    const result: MemberInstallResult =
-      command.kind === "prepare-member-install"
-        ? await dependencies.service.prepare(String(command.serverId), requester)
-        : command.kind === "confirm-member-install"
-          ? await dependencies.service.confirm(
-              { planId: String(command.planId), listenAddress: command.listenAddress },
-              requester,
-            )
-          : dependencies.service.progress(String(command.installId), requester);
+    const result = await answer(dependencies, command, requester);
     return json(
       result,
       result.kind !== "member-install-refused"

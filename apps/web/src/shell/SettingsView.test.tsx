@@ -595,6 +595,7 @@ describe("SettingsView", () => {
           sshAgent: "available",
         }),
         command,
+        memberInstall: async () => ({ kind: "member-computers", members: [] }),
       } as never,
     });
     await user.click(screen.getByRole("button", { name: "Work in a server folder" }));
