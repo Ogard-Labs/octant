@@ -3615,9 +3615,10 @@ a numbered slice. Built, with these narrower readings:
     item names through that spoke's real Code route and product dispatch and
     is refused in another, the spoke's list shows it, unticking Act ends the
     window's session there and refuses its next start, and a removed member
-    leaves the list. Answers to approvals and questions, and Stop, from such
-    a device are held to the Act item on every route that answers or stops,
-    with server route tests. Not built: the hub as a spoke window's
+    leaves the list. Answers to a Code or Work thread's approvals and
+    questions, and its Stop, from such a device are held to the Act item on
+    every route that answers or stops one, with server route tests; Chat
+    threads are not held to it yet. Not built: the hub as a spoke window's
     computer. Acceptance: a hub-introduced device starts a Code thread only
     in a Project the Act item names; removing the item refuses the next
     create. Verification: server tests and a three-host
