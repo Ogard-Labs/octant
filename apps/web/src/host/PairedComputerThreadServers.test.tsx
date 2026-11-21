@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -178,6 +178,7 @@ describe("a thread's servers on another computer", () => {
   });
 
   it("keeps the last rows and says so when a later read of that computer fails", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     let calls = 0;
     render(
       <PairedComputerThreadServers
@@ -193,12 +194,20 @@ describe("a thread's servers on another computer", () => {
         threadId={THREAD}
       />,
     );
-    // The next read is the controller's regular refresh, five seconds on.
-    expect(await screen.findByRole("status", {}, { timeout: 8_000 })).toHaveTextContent(
-      "Couldn't list this thread's servers on Studio.",
-    );
-    expect(screen.getByText("vite on port 5173")).toBeTruthy();
-  }, 12_000);
+    try {
+      await screen.findByText("vite on port 5173");
+      // The next read is the controller's regular refresh, five seconds on.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(await screen.findByRole("status")).toHaveTextContent(
+        "Couldn't list this thread's servers on Studio.",
+      );
+      expect(screen.getByText("vite on port 5173")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("says when that computer could not list the thread's servers", async () => {
     render(
