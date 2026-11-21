@@ -4185,7 +4185,10 @@ decision, 2026-11-21): the Canvas only, bound to the thread's own Chat Project
 as the host records it (an active Chat Project, else refused) or to the thread
 alone when it is in none. That is the scope a window showing that Project
 gives, never wider, and the Canvas tool asks the person nothing, so no answer
-is borrowed from a window. Chat has no Browser, from a window or not, and the
+is borrowed from a window. Where the thread's saved session has a fixed tool
+catalog without the Canvas (a Codex session begun before it), the turn goes
+without the Canvas and resumes that session, since no person is there to
+choose Continue with updated tools; a person's own send still asks. Chat has no Browser, from a window or not, and the
 other window tools (Computer, the window's harness, thread dialogue, image
 generation) are keyed on the window that sends a turn, so a host-run turn
 takes none of them. A child's result delivery and a usage-limit retry into

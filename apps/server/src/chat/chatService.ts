@@ -4974,7 +4974,7 @@ export class ChatService {
         extensionPhase,
         executionContext?.windowId,
       ));
-    const tools = this.#mergeToolSets(
+    let tools = this.#mergeToolSets(
       appManagedTools,
       resolvedExtensions.toolSet,
       MAX_PROVIDER_TOOLS,
@@ -4996,13 +4996,31 @@ export class ChatService {
       // The session the turn takes up: the moved one under the new account
       // when it came along, otherwise the previous attempt's as it stands.
       const sessionPrevious = accountMove.session ?? previous;
-      const catalogChanged =
+      const needsHandoff = (candidate: AppManagedToolSet | undefined): boolean =>
         sessionPrevious?.resumeCursor !== undefined &&
         String(sessionPrevious.providerInstanceId) === String(thread.providerInstanceId) &&
         driver.toolCatalogContinuation?.({
           resumeCursor: sessionPrevious.resumeCursor,
-          tools: tools?.definitions ?? [],
+          tools: candidate?.definitions ?? [],
         }) === "handoff-required";
+      let catalogChanged = needsHandoff(tools);
+      // A host-run turn (a routine's or a follow-up's) has no person to
+      // choose Continue with updated tools, so where its host-run tools are
+      // all that a saved session's fixed catalog lacks, the turn goes without
+      // them rather than failing. Seen with a Codex follow-up whose saved
+      // session predated the Canvas: the send failed as a launch error.
+      if (catalogChanged && !toolCatalogHandoff && hostRunTools !== undefined) {
+        const withoutHostRun = this.#mergeToolSets(
+          searchTools,
+          resolvedExtensions.toolSet,
+          MAX_PROVIDER_TOOLS,
+        );
+        if (!needsHandoff(withoutHostRun)) {
+          await hostRunTools.close?.().catch(() => undefined);
+          tools = withoutHostRun;
+          catalogChanged = false;
+        }
+      }
       if (catalogChanged && !toolCatalogHandoff) {
         throw new ChatServiceError({
           category: "tools-changed",

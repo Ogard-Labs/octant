@@ -12559,6 +12559,52 @@ describe("handing a Chat conversation to a new provider session", () => {
   const lastAttempt = (fixture: ReturnType<typeof openFixture>, threadId: ChatThreadId) =>
     fixture.service.read(threadId).turns.at(-1)?.attempts.at(-1);
 
+  it("sends a follow-up without the host-run Canvas when the saved session's tools lack it, rather than failing for a handoff no one can choose", async () => {
+    const canvas = vi.fn(() => ({
+      definitions: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
+      execute: async () => ({ result: {} }),
+      close: vi.fn(async () => undefined),
+    }));
+    const fixture = openMoving({
+      nativeConversation: true,
+      // A fixed catalog recorded before the Canvas existed: only adding it
+      // needs a handoff.
+      toolCatalogContinuation: ({ tools }) =>
+        tools.some((tool) => tool.name === "octant_canvas") ? "handoff-required" : "unchanged",
+      resolveHostRunTools: canvas,
+    });
+    const threadId = await answeredThread(fixture);
+    await fixture.service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId,
+        expectedVersion: fixture.service.read(threadId).thread.version,
+        prompt: "Scheduled follow-up",
+      },
+      { hostRun: true },
+    );
+    expect(fixture.service.read(threadId).turns).toHaveLength(2);
+    expect(fixture.fakeDriver.sentTurns.at(-1)?.tools.map(({ name }) => name)).not.toContain(
+      "octant_canvas",
+    );
+    // The saved session is resumed, not replaced by a handed-over one.
+    expect(fixture.fakeDriver.startedSessionIds).toHaveLength(1);
+    expect(lastAttempt(fixture, threadId)?.handoff).toBeUndefined();
+    expect(canvas.mock.results[0]?.value.close).toHaveBeenCalled();
+
+    // A person's own send keeps the explicit choice: no window-less hostRun,
+    // so nothing is dropped for them and the changed-tools refusal stands.
+    const refusing = openMoving({
+      nativeConversation: true,
+      toolCatalogContinuation: () => "handoff-required",
+      resolveHostRunTools: canvas,
+    });
+    const other = await answeredThread(refusing);
+    await expect(sendFollowUp(refusing, other, "Use the new tools")).rejects.toThrow(
+      "different tools",
+    );
+  });
+
   it("keeps the draft unaccepted until the person chooses a text handoff for changed tools", async () => {
     const fixture = openMoving({
       nativeConversation: true,
