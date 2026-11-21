@@ -339,8 +339,9 @@ export interface AcpProviderProfile {
    * (MCP servers, hooks, extensions). Used where the entry cannot be denied
    * because the agent fails to start without being able to read it. A session
    * whose setup carries the Project's code (`projectCode`, a Project trusted
-   * for the agent, outside Plan) is not refused: the files then load as the
-   * agent loads them on its own.
+   * for the agent, outside Plan) is not refused, nor is any session outside
+   * Strict that carries the person's setup (`acpLoadsAllOwnSetup`): the files
+   * then load as the agent loads them on its own.
    */
   readonly refusesProject?: (root: string) => string | undefined;
   /**
@@ -484,6 +485,23 @@ export function acpSubagentsRun(
   return (
     setup?.subagents === true && executionPolicy !== "plan" && (mode === "work" || mode === "code")
   );
+}
+
+/**
+ * Whether a launch loads all of the agent's own setup, holding back none of
+ * the profile's denied Project and home entries and refusing no Project at
+ * start: outside Strict, wherever the session carries the person's setup, in
+ * every mode, as the agent loads it on its own (maintainer decision,
+ * 2026-11-21). Plan stays read-only through its OS wall, not through these
+ * entries. Strict keeps the hold-backs until the person allows the Project's
+ * code, and a person who turned the setup off for the account or thread
+ * (no setup on the session) keeps them too.
+ */
+export function acpLoadsAllOwnSetup(input: {
+  readonly strict: boolean | undefined;
+  readonly setup: ProviderNativeSetup | undefined;
+}): boolean {
+  return input.strict === false && input.setup !== undefined;
 }
 
 /**
@@ -1356,7 +1374,7 @@ const refusesProjectEntries =
     const found = entries.filter((entry) => projectHoldsEntry(root, entry));
     if (found.length === 0) return undefined;
     const names = found.map((entry) => `\`${entry}\``).join(", ");
-    return `${displayName} starts the MCP servers, hooks, and extensions that ${names} in this Project declare, so it starts here only once you trust this Project for ${displayName}. Trust it, remove or rename ${found.length === 1 ? "that file" : "those files"}, or use another provider in this Project.`;
+    return `${displayName} starts the MCP servers, hooks, and extensions that ${names} in this Project declare, so it starts here only once you allow this Project's code for ${displayName}. Allow it, remove or rename ${found.length === 1 ? "that file" : "those files"}, or use another provider in this Project.`;
   };
 
 const geminiProfile: AcpProviderProfile = {

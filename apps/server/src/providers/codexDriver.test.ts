@@ -5272,14 +5272,17 @@ describe("Codex running as itself", () => {
     expect(codexAppServerArgs("0.164.0")).toContain("agents.enabled=false");
   });
 
-  it("leases a process that keeps Codex's memories only for a Work or Code session outside Plan on an account whose person turned them on", async () => {
-    for (const [mode, executionPolicy, ownMemory, keeps] of [
-      ["code", "approval-gated", true, true],
-      ["work", "full-access", true, true],
-      ["code", "plan", true, false],
-      ["chat", "approval-gated", true, false],
+  it("leases a process that keeps Codex's memories on an account whose person turned them on, in Plan and Chat only outside Strict", async () => {
+    for (const [mode, executionPolicy, ownMemory, strict, keeps] of [
+      ["code", "approval-gated", true, true, true],
+      ["work", "full-access", true, true, true],
+      ["code", "plan", true, true, false],
+      ["chat", "approval-gated", true, true, false],
+      ["code", "plan", true, false, true],
+      ["chat", "approval-gated", true, false, true],
       // Full access and running as itself never turn the account's memory on.
-      ["code", "full-access", false, false],
+      ["code", "full-access", false, true, false],
+      ["code", "plan", false, false, false],
     ] as const) {
       const f = fixture();
       const acquired = await acquireConnection(
@@ -5292,10 +5295,11 @@ describe("Codex running as itself", () => {
           modelId: "gpt-5.4" as never,
           executionPolicy,
           nativeSetup: ownSetup,
+          ...(strict ? {} : { strict: false }),
         }),
       );
       const authority = f.authorities()[0];
-      const label = `${mode} ${executionPolicy} ${String(ownMemory)}`;
+      const label = `${mode} ${executionPolicy} ${String(ownMemory)} strict=${String(strict)}`;
       if (keeps) expect(authority, label).toMatchObject({ ownMemory: true });
       else expect(authority, label).not.toHaveProperty("ownMemory");
       await acquired.close();

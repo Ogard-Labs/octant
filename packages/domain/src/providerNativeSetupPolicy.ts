@@ -154,13 +154,16 @@ export type ProviderMemoryWrites = "session-tools" | "background";
  * Whether a session launches with the provider's own memory on. The account's
  * own setting decides (on unless the person turned it off,
  * `accountKeepsOwnMemory`), and nothing else turns it on: not "Run as itself",
- * not a trusted Project, not Full access. Plan and Chat may write nothing a
- * later session would load, and the runtime's memory folder is exactly that,
- * so there the memory is loaded only when it is read-only: a provider whose
- * memory only its session tools write keeps it in Plan and Chat, where Plan
- * holds no write tool and its sandbox binds that folder read-only, and Chat's
- * gate refuses a write into it; a provider that writes memories in the
- * background keeps it off there (maintainer decision, 2026-11-16).
+ * not a trusted Project, not Full access. Outside Strict that setting decides
+ * in Plan and Chat too, as in the provider's own app, whichever way the
+ * runtime writes its memory (maintainer decision, 2026-11-21). Under Strict,
+ * Plan and Chat may write nothing a later session would load, and the
+ * runtime's memory folder is exactly that, so there the memory is loaded only
+ * when it is read-only: a provider whose memory only its session tools write
+ * keeps it in Plan and Chat, where Plan holds no write tool and its sandbox
+ * binds that folder read-only, and Chat's gate refuses a write into it; a
+ * provider that writes memories in the background keeps it off there
+ * (maintainer decision, 2026-11-16).
  */
 export function providerOwnMemoryLaunches(input: {
   /** The account's own switch (`accountKeepsOwnMemory`). */
@@ -168,8 +171,11 @@ export function providerOwnMemoryLaunches(input: {
   readonly mode: "chat" | "work" | "code" | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly memoryWrites: ProviderMemoryWrites;
+  /** Whether the launch is Strict; absent is Strict. */
+  readonly strict?: boolean | undefined;
 }): boolean {
   if (!input.accountAllows || input.mode === undefined) return false;
+  if (input.strict === false) return true;
   const readOnlyLaunch = input.mode === "chat" || input.executionPolicy === "plan";
   return !readOnlyLaunch || input.memoryWrites === "session-tools";
 }

@@ -1522,6 +1522,58 @@ describe("Kimi Code host-profile extension surfaces", () => {
     );
   });
 
+  it("holds back none of the home or Project setup outside Strict, in Plan too, and keeps it held under Strict or with the setup turned off", async () => {
+    const target = fixture(kimi);
+    const managedHome = join(target.canonicalRoot, "managed-kimi");
+    const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
+    directories.push(hostHome);
+    const hostAuthenticationPath = join(hostHome, ".kimi-code");
+    mkdirSync(join(hostAuthenticationPath, "hooks"), { recursive: true });
+    writeFileSync(join(hostAuthenticationPath, "mcp.json"), "{}\n");
+    const canonicalHostPath = realpathSync(hostAuthenticationPath);
+    mkdirSync(join(target.canonicalRoot, ".kimi-code"));
+    // What a Plan session carries: the person's skills, no hooks, servers or Project code.
+    const planSetup = {
+      subagents: true,
+      webTools: true,
+      skills: true,
+      toolServers: false,
+      hooks: false,
+      projectCode: false,
+    } as const;
+    const deniedIn = async (input: {
+      readonly strict?: false;
+      readonly nativeSetup?: ProviderNativeSetup;
+    }) => {
+      const launch = await Effect.runPromise(
+        makeAcpConfinementLive({
+          platform: "darwin",
+          sandboxPath: target.sandboxPath,
+          temporaryDirectory: join(target.canonicalRoot, "tmp"),
+          hostAuthenticationPath: canonicalHostPath,
+        }).prepare({
+          profile: kimi,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome,
+          mode: "code",
+          executionPolicy: "plan",
+          environment: { PATH: "/usr/bin" },
+          ...input,
+        }),
+      );
+      const profileText = seatbeltProfile(launch);
+      return [
+        join(canonicalHostPath, "hooks"),
+        join(canonicalHostPath, "mcp.json"),
+        join(target.canonicalRoot, ".kimi-code"),
+      ].filter((path) => profileText.includes(`(deny file-read* (subpath "${path}"))`));
+    };
+    expect(await deniedIn({ strict: false, nativeSetup: planSetup })).toEqual([]);
+    expect(await deniedIn({ nativeSetup: planSetup })).toHaveLength(3);
+    expect(await deniedIn({ strict: false })).toHaveLength(3);
+  });
+
   it.each([
     { platform: "darwin", sandboxName: "sandbox" },
     { platform: "linux", sandboxName: "bwrap" },

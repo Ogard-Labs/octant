@@ -26,6 +26,7 @@ import { Effect, type Scope } from "effect";
 import {
   HOST_PASSTHROUGH_VARIABLES,
   PROTOCOL_STREAM_GUARDS,
+  acpLoadsAllOwnSetup,
   acpReleaseClaim,
   acpSubagentsRun,
   type AcpProviderProfile,
@@ -484,11 +485,19 @@ function prepareHostAuthentication(
   });
 }
 
-/** What a session with the person's own setup releases of the profile's guards and denies. */
+/**
+ * What a session with the person's own setup releases of the profile's guards
+ * and denies. Outside Strict such a session holds back none of the profile's
+ * denied entries (`acpLoadsAllOwnSetup`); its guards still follow the profile.
+ */
 function releasedByNativeSetup(
   profile: AcpProviderProfile,
   setup: ProviderNativeSetup | undefined,
-  launch: { readonly executionPolicy: ProviderExecutionPolicy; readonly mode?: AcpSessionMode },
+  launch: {
+    readonly executionPolicy: ProviderExecutionPolicy;
+    readonly mode?: AcpSessionMode;
+    readonly strict?: boolean;
+  },
 ): {
   readonly guards: ReadonlySet<string>;
   readonly rootEntries: ReadonlySet<string>;
@@ -498,8 +507,22 @@ function releasedByNativeSetup(
     setup === undefined || profile.process.nativeSetup === undefined
       ? undefined
       : profile.process.nativeSetup(setup, launch);
+  const guards = new Set(released?.releasedGuards ?? []);
+  if (acpLoadsAllOwnSetup({ strict: launch.strict, setup })) {
+    const hostAuthentication = profile.process.hostAuthentication;
+    return {
+      guards,
+      rootEntries: new Set(profile.process.forbiddenRootEntries ?? []),
+      hostEntries: new Set([
+        ...(profile.process.hostDeniedEntries ?? []),
+        ...(hostAuthentication?.kind === "directory"
+          ? (hostAuthentication.forbiddenEntries ?? [])
+          : []),
+      ]),
+    };
+  }
   return {
-    guards: new Set(released?.releasedGuards ?? []),
+    guards,
     rootEntries: new Set(released?.releasedRootEntries ?? []),
     hostEntries: new Set(released?.releasedHostEntries ?? []),
   };
@@ -509,7 +532,11 @@ function hostExtensionDenyPaths(
   profile: AcpProviderProfile,
   hostDirectory: string | undefined,
   root: string,
-  launch: { readonly executionPolicy: ProviderExecutionPolicy; readonly mode: AcpSessionMode },
+  launch: {
+    readonly executionPolicy: ProviderExecutionPolicy;
+    readonly mode: AcpSessionMode;
+    readonly strict?: boolean;
+  },
   nativeSetup?: ProviderNativeSetup,
 ): ReadonlyArray<string> {
   const released = releasedByNativeSetup(profile, nativeSetup, launch);
@@ -609,6 +636,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           releasedByNativeSetup(profile, input.nativeSetup, {
             executionPolicy: input.executionPolicy,
             mode: input.mode,
+            ...(input.strict === false ? { strict: false } : {}),
           }).hostEntries,
         );
         const hostReadPaths = yield* canonicalExistingReadPaths(profile);
@@ -632,7 +660,11 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             profile,
             hostAuthentication.writePaths[0] ?? hostAuthentication.readPaths[0],
             root,
-            { executionPolicy: input.executionPolicy, mode: input.mode },
+            {
+              executionPolicy: input.executionPolicy,
+              mode: input.mode,
+              ...(input.strict === false ? { strict: false } : {}),
+            },
             input.nativeSetup,
           ),
         ];

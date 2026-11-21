@@ -141,8 +141,8 @@ export type CodexLaunchAuthority =
       readonly ownSubagents?: true;
       /**
        * The person turned this account's own memory on, and this is a Work or
-       * Code lease outside Plan. Codex then keeps its memories as it does on
-       * its own.
+       * Code lease outside Plan, or any lease outside Strict. Codex then keeps
+       * its memories as it does on its own.
        */
       readonly ownMemory?: true;
       /**
