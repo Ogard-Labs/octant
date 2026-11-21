@@ -37,6 +37,8 @@ describe("the headless release workflow", () => {
       "OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY: ${{ inputs.ring != 'stable' && secrets.OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY || '' }}",
     );
     expect(sign).toContain("bun scripts/sign-headless-artifact.ts");
+    expect(sign).toContain('--version "$VERSION"');
+    expect(sign).toContain('--target "$TARGET"');
     expect(sign).not.toContain("package-headless.ts");
   });
 

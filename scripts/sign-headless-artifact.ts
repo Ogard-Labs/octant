@@ -13,7 +13,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -45,6 +45,12 @@ export interface SignHeadlessArtifactDirectoryOptions {
   readonly ring: ReleaseRing;
   readonly privateKeyBase64: string;
   readonly trustedKeys?: Readonly<Record<ReleaseRing, ReadonlyArray<string>>>;
+  /**
+   * The release slot this build is signed for. The manifest only describes
+   * itself, so without this a build labelled for another version or target
+   * would be signed and uploaded under this slot's name.
+   */
+  readonly expected?: { readonly version: string; readonly target: string };
 }
 
 /** Checks an unpacked build against its manifest and writes its signature beside it. */
@@ -61,6 +67,18 @@ export async function signHeadlessArtifactDirectory(
     );
   } catch {
     return { status: "refused", reason: "the build has no readable manifest." };
+  }
+  if (options.expected !== undefined) {
+    const declaredTarget = `${declared.target.platform}-${declared.target.arch}`;
+    if (
+      declared.artifactVersion !== options.expected.version ||
+      declaredTarget !== options.expected.target
+    ) {
+      return {
+        status: "refused",
+        reason: `the build is ${declared.artifactVersion} for ${declaredTarget}, not ${options.expected.version} for ${options.expected.target}.`,
+      };
+    }
   }
   // Inspected as its own target so a build for another platform can be signed
   // on this one; what is checked is that every file matches its digest.
@@ -89,9 +107,22 @@ export async function signHeadlessArtifactDirectory(
   if (check.status === "refused") {
     return { status: "refused", reason: `the signature did not verify (${check.reason}).` };
   }
-  await writeFile(join(options.artifactRoot, HEADLESS_ARTIFACT_SIGNATURE_FILENAME), signatureText, {
-    mode: 0o644,
-  });
+  // The build comes from an unreviewed job and the manifest does not list the
+  // signature path, so the archive could place a link there that points
+  // outside the workspace. Only a plain file is replaced, and the new one is
+  // created exclusively, which never follows a link.
+  const signaturePath = join(options.artifactRoot, HEADLESS_ARTIFACT_SIGNATURE_FILENAME);
+  const existing = await lstat(signaturePath).catch(() => undefined);
+  if (existing !== undefined) {
+    if (!existing.isFile()) {
+      return {
+        status: "refused",
+        reason: "the build carries a signature path that is not a file.",
+      };
+    }
+    await unlink(signaturePath);
+  }
+  await writeFile(signaturePath, signatureText, { mode: 0o644, flag: "wx" });
   return { status: "signed", version: inspection.manifest.artifactVersion };
 }
 
@@ -111,6 +142,9 @@ export async function signHeadlessArtifactTarball(
       return { status: "refused", reason: "the tarball does not hold exactly one build." };
     }
     const artifactRoot = join(workspace, artifactName);
+    if (!(await lstat(artifactRoot)).isDirectory()) {
+      return { status: "refused", reason: "the tarball's build is not a directory." };
+    }
     const signed = await signHeadlessArtifactDirectory({ ...options, artifactRoot });
     if (signed.status === "refused") return signed;
     await writeFile(options.out, await createDeterministicTarball(artifactRoot, artifactName));
@@ -121,7 +155,7 @@ export async function signHeadlessArtifactTarball(
 }
 
 const USAGE =
-  "Usage: sign-headless-artifact.ts --tarball <build.tar.gz> --ring <stable|preview|candidate> --out <signed.tar.gz>";
+  "Usage: sign-headless-artifact.ts --tarball <build.tar.gz> --ring <stable|preview|candidate> --version <version> --target <platform-arch> --out <signed.tar.gz>";
 
 async function main(argv: ReadonlyArray<string>): Promise<void> {
   const value = (flag: string): string | undefined => {
@@ -131,7 +165,16 @@ async function main(argv: ReadonlyArray<string>): Promise<void> {
   const tarball = value("--tarball");
   const ring = value("--ring");
   const out = value("--out");
-  if (tarball === undefined || out === undefined || ring === undefined || !isAppReleaseRing(ring)) {
+  const version = value("--version");
+  const target = value("--target");
+  if (
+    tarball === undefined ||
+    out === undefined ||
+    version === undefined ||
+    target === undefined ||
+    ring === undefined ||
+    !isAppReleaseRing(ring)
+  ) {
     throw new Error(USAGE);
   }
   const material = resolveFeedSigningMaterial(ring);
@@ -141,6 +184,7 @@ async function main(argv: ReadonlyArray<string>): Promise<void> {
     out: resolve(out),
     ring,
     privateKeyBase64: material.privateKey,
+    expected: { version, target },
   });
   if (signed.status === "refused") {
     throw new Error(`Refusing to sign ${basename(tarball)}: ${signed.reason}`);
