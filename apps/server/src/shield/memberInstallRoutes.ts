@@ -22,7 +22,10 @@ const BODY_LIMIT = 4_096;
 
 export interface MemberInstallRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
-  readonly service: Pick<MemberInstallService, "prepare" | "confirm" | "progress">;
+  readonly service: Pick<
+    MemberInstallService,
+    "prepare" | "confirm" | "progress" | "downloadProgress"
+  >;
   readonly upkeep: Pick<
     MemberUpkeepService,
     | "members"
@@ -100,6 +103,8 @@ async function answer(
       );
     case "read-member-removal":
       return upkeep.removalProgress(String(command.removalId), requester);
+    case "read-member-build-download":
+      return service.downloadProgress(String(command.downloadId), requester);
   }
 }
 

@@ -22,13 +22,14 @@ import {
 import { decodeHeadlessArtifactManifest } from "@octant/host-runtime";
 import { Schema } from "effect";
 import type { ServerAddress, ServerConnection } from "../serverProjects/serverConnection";
-import type { HeadlessBuildCheck, HeadlessBuilds } from "./headlessBuilds";
+import { isNewerVersion, type HeadlessBuildCheck, type HeadlessBuilds } from "./headlessBuilds";
 import {
   actorOf,
   buildRefusal,
   callServer,
   COPY_SCRIPT,
   MemberServerWork,
+  startBuildDownload,
   targetOf,
   VERIFY_SCRIPT,
   type MemberInstallRequester,
@@ -41,8 +42,10 @@ import type { ShieldServerStore } from "./shieldServerStore";
  * from it, over the server's own SSH connection after one confirmation.
  * Canonical: docs/design/hub-and-spokes.md § Adding a computer over SSH.
  *
- * Preparing reads the server's install and changes nothing. An update copies
- * and checks the newest signed build exactly as the install does, stops the
+ * Preparing reads the server's install and changes nothing on it. When no
+ * build newer than the installed one is on this computer, it starts
+ * downloading one from this computer's ring, as the install does. An update
+ * copies and checks the newest signed build exactly as the install does, stops the
  * member gracefully (waiting for running turns is not built; the turns the
  * stop cuts off continue after it starts again), runs the installed
  * `octant server upgrade`, which stages, backs up a migrating store, swaps
@@ -281,17 +284,25 @@ export class MemberUpkeepService {
     const { facts } = read;
     const buildPath = await this.#options.builds.find(facts.target);
     if (buildPath === undefined) {
-      return refused(
-        "no-build",
-        `No signed Octant build for ${facts.target} is on this computer. Put octant-<version>-${facts.target}.tar.gz from Octant's release in ${this.#options.builds.folder}, then try again.`,
+      return startBuildDownload(
+        this.#options.builds,
+        { target: facts.target, newerThan: facts.version },
+        refused(
+          "no-build",
+          `No signed Octant build for ${facts.target} is on this computer. Put octant-<version>-${facts.target}.tar.gz from Octant's release in ${this.#options.builds.folder}, then try again.`,
+        ),
       );
     }
     const build = await this.#options.builds.check(buildPath, facts.target);
     if (build.status === "refused") return refused("build-unverified", buildRefusal(build));
-    if (!isNewer(build.version, facts.version)) {
-      return refused(
-        "no-newer-build",
-        `${server.alias} already runs Octant ${facts.version}, and the newest signed build on this computer is ${build.version}. Put a newer release build in ${this.#options.builds.folder}, then try again.`,
+    if (!isNewerVersion(build.version, facts.version)) {
+      return startBuildDownload(
+        this.#options.builds,
+        { target: facts.target, newerThan: facts.version },
+        refused(
+          "no-newer-build",
+          `${server.alias} already runs Octant ${facts.version}, and the newest signed build on this computer is ${build.version}. Put a newer release build in ${this.#options.builds.folder}, then try again.`,
+        ),
       );
     }
     if (!SAFE_VERSION.test(build.version)) {
@@ -898,10 +909,6 @@ function listenerOf(member: MemberComputer): MemberListener {
 }
 
 /** Whether `candidate` is a later version than `installed`, compared as release file names are. */
-function isNewer(candidate: string, installed: string): boolean {
-  return candidate.localeCompare(installed, undefined, { numeric: true }) > 0;
-}
-
 /**
  * The probe's answer, when it names an install Octant made: a supported
  * system, absolute folders, and a `current` link naming the version folder

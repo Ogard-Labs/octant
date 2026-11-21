@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { createHash, generateKeyPairSync, randomUUID } from "node:crypto";
+import { createHash, createPrivateKey, generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import {
   chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   rmSync,
@@ -26,11 +27,14 @@ import {
   MemberInstallResult,
 } from "@octant/contracts/shield-servers";
 import { Schema } from "effect";
+import { decodeHeadlessBuildRelease } from "@octant/contracts/app-updates";
+import { canonicalHeadlessReleaseBytes } from "@octant/domain";
 import {
   encodeHeadlessArtifactManifest,
   encodeHeadlessArtifactSignature,
   signHeadlessArtifactManifest,
   type HeadlessArtifactManifest,
+  type ReleaseRing,
 } from "@octant/host-runtime";
 import { AGENT_ACCESS_ORIGIN } from "../clientPrincipal";
 import { Journal } from "../persistence/journal";
@@ -41,7 +45,7 @@ import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { ServerConnection } from "../serverProjects/serverConnection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
-import { createHeadlessBuilds } from "./headlessBuilds";
+import { createHeadlessBuilds, type HeadlessBuildFeed } from "./headlessBuilds";
 import {
   MemberInstallService,
   MemberServerWork,
@@ -150,6 +154,7 @@ function signedBuild(
   signingKey: string,
   version = "1.2.3",
   storeVersion = 1,
+  ring: ReleaseRing = "preview",
 ): string {
   const work = scratchDirectory();
   const name = `octant-${version}-linux-x64`;
@@ -191,7 +196,7 @@ function signedBuild(
   writeFileSync(join(root, "octant-artifact.json"), encodeHeadlessArtifactManifest(manifest));
   writeFileSync(
     join(root, "octant-artifact.sig"),
-    encodeHeadlessArtifactSignature(signHeadlessArtifactManifest(manifest, "preview", signingKey)),
+    encodeHeadlessArtifactSignature(signHeadlessArtifactManifest(manifest, ring, signingKey)),
   );
   mkdirSync(folder, { recursive: true });
   const tarball = join(folder, `${name}.tar.gz`);
@@ -317,16 +322,25 @@ function setUp(
     readonly addresses?: ReadonlyArray<string>;
     readonly claimCode?: string;
     readonly trusted?: boolean;
+    /** The build the person placed on this computer, or none. */
+    readonly placed?: "1.2.3" | "none";
+    /** Where this computer downloads builds from; none by default. */
+    readonly feed?: (keys: {
+      readonly releaseKey: ReturnType<typeof keyPair>;
+      readonly otherKey: ReturnType<typeof keyPair>;
+    }) => HeadlessBuildFeed;
   } = {},
 ) {
   const server = standInServer(options.addresses ?? ["100.101.102.103", "192.168.1.20"]);
   const releaseKey = keyPair();
   const otherKey = keyPair();
   const builds = join(scratchDirectory(), "headless-builds");
-  signedBuild(
-    builds,
-    options.trusted === false ? otherKey.privateKeyBase64 : releaseKey.privateKeyBase64,
-  );
+  if (options.placed !== "none") {
+    signedBuild(
+      builds,
+      options.trusted === false ? otherKey.privateKeyBase64 : releaseKey.privateKeyBase64,
+    );
+  }
   const journal = openJournal();
   const store = new ShieldServerStore({
     journal,
@@ -349,6 +363,7 @@ function setUp(
       preview: [releaseKey.publicKeyBase64],
       candidate: [releaseKey.publicKeyBase64],
     },
+    ...(options.feed === undefined ? {} : { feed: options.feed({ releaseKey, otherKey }) }),
   });
   const work = new MemberServerWork();
   const service = new MemberInstallService({
@@ -1155,5 +1170,243 @@ describe("updating a member and removing Octant from it over SSH", () => {
     });
     expect(paired.status).toBe(200);
     expect(await paired.json()).toMatchObject({ kind: "member-update-plan" });
+  });
+});
+
+const FEED_BASE = "https://octant.sh/updates";
+const LISTING_URL = `${FEED_BASE}/candidate/linux-x64.octant-headless.json`;
+/** Where octant.sh sends the listing, as it redirects every feed file to the ring's mailbox release. */
+const MAILBOX_URL =
+  "https://github.com/Ogard-Labs/octant/releases/download/feed-candidate/linux-x64.octant-headless.json";
+
+function buildUrl(version: string): string {
+  return `https://github.com/Ogard-Labs/octant/releases/download/v${version}/octant-${version}-linux-x64.tar.gz`;
+}
+
+/** A candidate build packed as the release attaches it, kept off this computer's builds folder. */
+function releasedBuild(signingKey: string, version: string): Buffer {
+  return readFileSync(signedBuild(scratchDirectory(), signingKey, version, 1, "candidate"));
+}
+
+/** The ring's signed listing of one build, as `scripts/sign-update-feed.ts --headless` writes it. */
+function listingOf(input: {
+  readonly version: string;
+  readonly bytes: Uint8Array;
+  readonly signingKey: string;
+}): string {
+  const release = decodeHeadlessBuildRelease({
+    product: "octant",
+    version: input.version,
+    target: "linux-x64",
+    ring: "candidate",
+    url: buildUrl(input.version),
+    sha256: createHash("sha256").update(input.bytes).digest("hex"),
+    releasedAt: "2026-11-20T12:00:00.000Z",
+  });
+  const key = createPrivateKey({
+    key: Buffer.from(input.signingKey, "base64"),
+    format: "der",
+    type: "pkcs8",
+  });
+  const signature = sign(null, canonicalHeadlessReleaseBytes(release), key).toString("base64");
+  return JSON.stringify({ schemaVersion: 1, release, signature });
+}
+
+/**
+ * The release host as the feed reaches it, injected the way the desktop
+ * updater's tests inject theirs: the listing behind octant.sh's redirect to
+ * the mailbox release, and the build on its release. Offline, every request
+ * fails as a dropped connection does. It records each URL asked for.
+ */
+function standInReleaseHost(files: {
+  readonly listing?: string;
+  readonly builds?: Readonly<Record<string, Uint8Array>>;
+  readonly offline?: boolean;
+}) {
+  const requested: string[] = [];
+  const fetch = (async (input: string | URL | Request) => {
+    const url = input instanceof Request ? input.url : String(input);
+    requested.push(url);
+    if (files.offline === true) throw new TypeError("fetch failed");
+    if (url === LISTING_URL) {
+      return new Response(null, { status: 302, headers: { location: MAILBOX_URL } });
+    }
+    if (url === MAILBOX_URL && files.listing !== undefined) {
+      return new Response(files.listing, { status: 200 });
+    }
+    const build = files.builds?.[url];
+    if (build !== undefined) return new Response(new Uint8Array(build), { status: 200 });
+    return new Response("Not Found", { status: 404 });
+  }) as typeof globalThis.fetch;
+  const feed: HeadlessBuildFeed = { baseUrl: FEED_BASE, ring: () => "candidate", fetch };
+  return { feed, requested };
+}
+
+/** Reads a download, as the sheet does, until it is ready or refused. */
+async function settledDownload(setup: ReturnType<typeof setUp>, result: MemberInstallResult) {
+  if (result.kind !== "member-build-download") throw new Error(JSON.stringify(result));
+  for (;;) {
+    const read = setup.service.downloadProgress(String(result.download.downloadId), person);
+    if (read.kind !== "member-build-download") throw new Error(JSON.stringify(read));
+    const { state } = read.download;
+    if (state === "ready" || state === "refused") return read.download;
+    await new Promise((done) => setTimeout(done, 10));
+  }
+}
+
+function folderEntries(folder: string): ReadonlyArray<string> {
+  return existsSync(folder) ? readdirSync(folder) : [];
+}
+
+describe("downloading the build from this computer's ring", () => {
+  it("downloads the server's build from the ring when none is on this computer, and installs it", async () => {
+    let host: ReturnType<typeof standInReleaseHost> | undefined;
+    const setup = setUp({
+      placed: "none",
+      feed: ({ releaseKey }) => {
+        const bytes = releasedBuild(releaseKey.privateKeyBase64, "1.2.3");
+        host = standInReleaseHost({
+          listing: listingOf({ version: "1.2.3", bytes, signingKey: releaseKey.privateKeyBase64 }),
+          builds: { [buildUrl("1.2.3")]: bytes },
+        });
+        return host.feed;
+      },
+    });
+    const started = await setup.service.prepare(setup.serverId, person);
+    expect(started).toMatchObject({
+      kind: "member-build-download",
+      download: { target: "linux-x64", ring: "candidate", state: "downloading" },
+    });
+    const download = await settledDownload(setup, started);
+    expect(download).toMatchObject({ state: "ready", version: "1.2.3" });
+    // The listing behind the feed's redirect, then the build it names, and
+    // nothing about this computer in either request.
+    expect(host?.requested).toEqual([LISTING_URL, MAILBOX_URL, buildUrl("1.2.3")]);
+    // Kept under the release's own name, with nothing staged left beside it.
+    expect(folderEntries(setup.builds)).toEqual(["octant-1.2.3-linux-x64.tar.gz"]);
+    // Downloading changed nothing on the server.
+    expect(setup.server.calls()).toBe("");
+
+    const { plan, progress } = await installOver(setup);
+    expect(plan).toMatchObject({ artifactVersion: "1.2.3", ring: "candidate" });
+    expect(progress.state).toBe("joined");
+    expect(currentVersion(setup)).toBe("1.2.3");
+  });
+
+  it("refuses a downloaded build whose digest or signature does not match the feed, and keeps nothing", async () => {
+    // The bytes served are not the ones the signed listing names.
+    const substituted = setUp({
+      placed: "none",
+      feed: ({ releaseKey }) => {
+        const listed = releasedBuild(releaseKey.privateKeyBase64, "1.2.3");
+        const served = releasedBuild(releaseKey.privateKeyBase64, "1.2.3");
+        return standInReleaseHost({
+          listing: listingOf({
+            version: "1.2.3",
+            bytes: listed,
+            signingKey: releaseKey.privateKeyBase64,
+          }),
+          builds: { [buildUrl("1.2.3")]: Buffer.concat([served, Buffer.from("tampered")]) },
+        }).feed;
+      },
+    });
+    expect(
+      await settledDownload(
+        substituted,
+        await substituted.service.prepare(substituted.serverId, person),
+      ),
+    ).toMatchObject({ state: "refused", refusal: "digest-mismatch" });
+    expect(folderEntries(substituted.builds)).toEqual([]);
+
+    // A listing no key trusted for the ring signed: the build is never asked for.
+    let untrustedHost: ReturnType<typeof standInReleaseHost> | undefined;
+    const untrusted = setUp({
+      placed: "none",
+      feed: ({ releaseKey, otherKey }) => {
+        const bytes = releasedBuild(releaseKey.privateKeyBase64, "1.2.3");
+        untrustedHost = standInReleaseHost({
+          listing: listingOf({ version: "1.2.3", bytes, signingKey: otherKey.privateKeyBase64 }),
+          builds: { [buildUrl("1.2.3")]: bytes },
+        });
+        return untrustedHost.feed;
+      },
+    });
+    expect(
+      await settledDownload(untrusted, await untrusted.service.prepare(untrusted.serverId, person)),
+    ).toMatchObject({ state: "refused", refusal: "untrusted-listing" });
+    expect(untrustedHost?.requested).not.toContain(buildUrl("1.2.3"));
+    expect(folderEntries(untrusted.builds)).toEqual([]);
+
+    // A genuine listing of a build whose own release signature is not trusted.
+    const unsigned = setUp({
+      placed: "none",
+      feed: ({ releaseKey, otherKey }) => {
+        const bytes = releasedBuild(otherKey.privateKeyBase64, "1.2.3");
+        return standInReleaseHost({
+          listing: listingOf({ version: "1.2.3", bytes, signingKey: releaseKey.privateKeyBase64 }),
+          builds: { [buildUrl("1.2.3")]: bytes },
+        }).feed;
+      },
+    });
+    expect(
+      await settledDownload(unsigned, await unsigned.service.prepare(unsigned.serverId, person)),
+    ).toMatchObject({ state: "refused", refusal: "build-unverified" });
+    expect(folderEntries(unsigned.builds)).toEqual([]);
+
+    for (const setup of [substituted, untrusted, unsigned]) {
+      expect(setup.server.calls()).toBe("");
+      expect(setup.records()).toEqual([]);
+    }
+  });
+
+  it("keeps the hand-placed build when one is newer than the ring's", async () => {
+    let host: ReturnType<typeof standInReleaseHost> | undefined;
+    const setup = setUp({
+      feed: ({ releaseKey }) => {
+        const bytes = releasedBuild(releaseKey.privateKeyBase64, "1.2.9");
+        host = standInReleaseHost({
+          listing: listingOf({ version: "1.2.9", bytes, signingKey: releaseKey.privateKeyBase64 }),
+          builds: { [buildUrl("1.2.9")]: bytes },
+        });
+        return host.feed;
+      },
+    });
+    await memberAt123(setup);
+    // The person placed 1.3.0, newer than both the member and the ring's 1.2.9.
+    const placed = signedBuild(setup.builds, setup.releaseKey.privateKeyBase64, "1.3.0");
+    const plan = updatePlanOf(await setup.upkeep.prepareUpdate(setup.serverId, person));
+    expect(plan).toMatchObject({ fromVersion: "1.2.3", toVersion: "1.3.0" });
+    expect(host?.requested).toEqual([]);
+
+    // With no build newer than the member's on this computer, the ring's is downloaded.
+    rmSync(placed);
+    const download = await settledDownload(
+      setup,
+      await setup.upkeep.prepareUpdate(setup.serverId, person),
+    );
+    expect(download).toMatchObject({ state: "ready", version: "1.2.9" });
+    expect(updatePlanOf(await setup.upkeep.prepareUpdate(setup.serverId, person))).toMatchObject({
+      fromVersion: "1.2.3",
+      toVersion: "1.2.9",
+      ring: "candidate",
+    });
+  });
+
+  it("says where to place a build when the ring cannot be reached", async () => {
+    const setup = setUp({
+      placed: "none",
+      feed: () => standInReleaseHost({ offline: true }).feed,
+    });
+    const download = await settledDownload(
+      setup,
+      await setup.service.prepare(setup.serverId, person),
+    );
+    expect(download).toMatchObject({ state: "refused", refusal: "unreachable" });
+    expect(download.message).toContain("No signed Octant build for linux-x64 is on this computer");
+    expect(download.message).toContain(
+      `Put octant-<version>-linux-x64.tar.gz from Octant's release in ${setup.builds}`,
+    );
+    expect(folderEntries(setup.builds)).toEqual([]);
+    expect(setup.server.calls()).toBe("");
   });
 });

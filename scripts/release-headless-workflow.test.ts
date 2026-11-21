@@ -40,6 +40,16 @@ describe("the headless release workflow", () => {
     expect(sign).not.toContain("package-headless.ts");
   });
 
+  it("lists each signed build in the ring's feed after attaching it", () => {
+    const sign = job("sign", undefined);
+    const attached = sign.indexOf("gh release upload");
+    const listed = sign.indexOf("bun scripts/sign-update-feed.ts --headless");
+    expect(attached).toBeGreaterThan(-1);
+    expect(listed).toBeGreaterThan(attached);
+    expect(sign).toContain('--print-feed-path --headless --ring "$RING" --target "$TARGET"');
+    expect(sign.indexOf('scripts/publish-update-feed.sh "$RING" "$out"')).toBeGreaterThan(listed);
+  });
+
   it("ships only with Octant releases, never with Octant Nightly", () => {
     const shared = readFileSync(resolve(workflowsDirectory, "release-build.yml"), "utf8");
     expect(shared).toContain(

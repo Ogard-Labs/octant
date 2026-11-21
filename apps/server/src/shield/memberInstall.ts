@@ -28,7 +28,9 @@ import type { ShieldServerStore } from "./shieldServerStore";
  *
  * Preparing reads the server over its own SSH connection (`uname -sm`, its
  * login's data folder, its private addresses) and checks this computer's
- * signed build, and changes nothing anywhere. Only the person's one
+ * signed build, and changes nothing on the server. When no build for the
+ * server's target is on this computer, it starts downloading one from this
+ * computer's ring instead, and the sheet prepares again once it is ready. Only the person's one
  * confirmation runs anything: the build is copied and its digest checked,
  * the copy is recognized as the build checked here, `octant server install`
  * checks the signature again and installs into the login's data folder, the
@@ -283,9 +285,13 @@ export class MemberInstallService {
     }
     const buildPath = await this.#options.builds.find(facts.facts.target);
     if (buildPath === undefined) {
-      return refused(
-        "no-build",
-        `No signed Octant build for ${facts.facts.target} is on this computer. Put octant-<version>-${facts.facts.target}.tar.gz from Octant's release in ${this.#options.builds.folder}, then try again.`,
+      return startBuildDownload(
+        this.#options.builds,
+        { target: facts.facts.target },
+        refused(
+          "no-build",
+          `No signed Octant build for ${facts.facts.target} is on this computer. Put octant-<version>-${facts.facts.target}.tar.gz from Octant's release in ${this.#options.builds.folder}, then try again.`,
+        ),
       );
     }
     const build = await this.#options.builds.check(buildPath, facts.facts.target);
@@ -397,6 +403,14 @@ export class MemberInstallService {
     });
     void done.catch(() => undefined);
     return { kind: "member-install-progress", progress: progressOf(install) };
+  }
+
+  /** A build download a prepare started, here or for an update, read until it ends. */
+  downloadProgress(downloadId: string, requester: MemberInstallRequester): MemberInstallResult {
+    if (actorOf(requester) === undefined) return refusedRequester(requester);
+    const download = this.#options.builds.downloadProgress(downloadId);
+    if (download === undefined) return refused("download-not-found");
+    return { kind: "member-build-download", download };
   }
 
   progress(installId: string, requester: MemberInstallRequester): MemberInstallResult {
@@ -663,6 +677,20 @@ export async function callServer(
   return { ok: true, output };
 }
 
+/**
+ * No suitable build is on this computer: start downloading one from this
+ * computer's ring, or join the download already running, for the sheet to
+ * read. A computer that reads no feed answers with `fallback`.
+ */
+export function startBuildDownload(
+  builds: Pick<HeadlessBuilds, "download">,
+  input: { readonly target: MemberInstallTarget; readonly newerThan?: string },
+  fallback: MemberInstallResult,
+): MemberInstallResult {
+  const download = builds.download(input);
+  return download === undefined ? fallback : { kind: "member-build-download", download };
+}
+
 export function actorOf(requester: MemberInstallRequester): EventActor | undefined {
   return requester.kind === "person" ? requester.actor : undefined;
 }
@@ -699,6 +727,7 @@ const MESSAGES: Readonly<Record<MemberInstallRefusalReason, string>> = {
   "no-newer-build": "No newer signed Octant build for that server is on this computer.",
   "update-not-found": "That update is not running on this computer.",
   "removal-not-found": "That removal is not running on this computer.",
+  "download-not-found": "That download is not running on this computer. Open the sheet again.",
 };
 
 function refused(reason: MemberInstallRefusalReason, message?: string): MemberInstallResult {

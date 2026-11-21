@@ -6,6 +6,9 @@ import {
   type AppUpdateRelease,
   type AppVersion,
   CANDIDATE_PRERELEASE_TAG,
+  HeadlessBuildFeed,
+  type HeadlessBuildRelease,
+  type HeadlessBuildTarget,
   PREVIEW_PRERELEASE_TAG,
 } from "@octant/contracts/app-updates";
 import { Schema } from "effect";
@@ -222,6 +225,72 @@ export function resolveNightlyInstallRelease(input: {
   if (feed.release.ring !== "preview" || ringForVersion(feed.release.version) !== "preview") {
     return { kind: "refuse", refusal: "wrong-ring" };
   }
+  return { kind: "offer", release: feed.release };
+}
+
+/**
+ * The exact bytes a headless build document's signature covers: its release's
+ * fields in key order, no whitespace, as {@link canonicalReleaseBytes} does
+ * for a desktop release. The two field sets differ (`target` against
+ * `platform` and `arch`), so no signature verifies as the other kind.
+ */
+export function canonicalHeadlessReleaseBytes(release: HeadlessBuildRelease): Uint8Array {
+  return canonicalBytes({
+    product: release.product,
+    releasedAt: String(release.releasedAt),
+    ring: release.ring,
+    sha256: release.sha256,
+    target: release.target,
+    url: release.url,
+    version: String(release.version),
+  });
+}
+
+export type HeadlessBuildOffer =
+  | { readonly kind: "offer"; readonly release: HeadlessBuildRelease }
+  | {
+      readonly kind: "refuse";
+      readonly refusal: Extract<
+        AppUpdateRefusal,
+        "malformed" | "untrusted-signature" | "wrong-platform" | "wrong-ring"
+      >;
+    };
+
+const decodeHeadlessFeed = Schema.decodeUnknownEither(HeadlessBuildFeed);
+
+/**
+ * Decide whether a fetched headless build document names a build this host
+ * may download for a server's target. The signature is verified against the
+ * keys of the ring the document names before any field is believed, and that
+ * signed ring must be the one this host follows, so a genuine build published
+ * to another ring is refused rather than installed.
+ */
+export function resolveHeadlessBuildOffer(input: {
+  readonly document: unknown;
+  readonly target: HeadlessBuildTarget;
+  readonly ring: AppReleaseRing;
+  readonly verifySignature: (
+    message: Uint8Array,
+    signature: string,
+    ring: AppReleaseRing,
+  ) => boolean;
+}): HeadlessBuildOffer {
+  const decoded = decodeHeadlessFeed(input.document);
+  if (decoded._tag === "Left") return { kind: "refuse", refusal: "malformed" };
+  const feed = decoded.right;
+  let verified = false;
+  try {
+    verified = input.verifySignature(
+      canonicalHeadlessReleaseBytes(feed.release),
+      feed.signature,
+      feed.release.ring,
+    );
+  } catch {
+    verified = false;
+  }
+  if (!verified) return { kind: "refuse", refusal: "untrusted-signature" };
+  if (feed.release.target !== input.target) return { kind: "refuse", refusal: "wrong-platform" };
+  if (feed.release.ring !== input.ring) return { kind: "refuse", refusal: "wrong-ring" };
   return { kind: "offer", release: feed.release };
 }
 
