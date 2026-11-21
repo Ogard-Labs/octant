@@ -27,6 +27,7 @@ import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { ProjectionRegistry } from "./persistence/projection";
 import { openSqlite, type SqliteConnection } from "./persistence/sqlitePort";
 import { configureSandboxToolNetwork } from "./process/sandboxRuntimePolicy";
+import { makeProcessConfinementLive, ProcessConfinementError } from "./process/seatbeltProfile";
 import {
   registerSandboxRestrictionsEvents,
   SandboxRestrictionsService,
@@ -383,5 +384,108 @@ describe("Windows Strict, phase 1 admission, isolation, and tool refusals", () =
       status: "refused",
       message: WINDOWS_STRICT_NETWORK_REFUSAL,
     });
+  });
+
+  it("admits a SandboxRestrictionsService Windows Strict selection through makeProcessConfinementLive and refuses unsupported custom rules", async () => {
+    configureSandboxToolNetwork(undefined, () => false);
+    const { root, service } = makeSandboxService({
+      executionPolicy: "full-access",
+      strict: true,
+    });
+    const threadId = "50000000-0000-4000-8000-000000000021";
+    const admitted = service.beginTurn({
+      threadId,
+      projectId: String(projectId),
+      mode: "code",
+      root,
+      provider: "codex",
+    });
+    expect(admitted.status).toBe("admitted");
+    if (admitted.status !== "admitted") return;
+    try {
+      expect(admitted.turn.selection).toBeDefined();
+      const launcherPath =
+        "C:\\Program Files\\Octant\\resources\\native\\octant-windows-confine.exe";
+      const port = makeProcessConfinementLive({
+        platform: "win32",
+        windowsConfinement: {
+          launcherPath,
+          homeDirectory: "C:\\Users\\Ada",
+          launchId: "0123456789abcdef0123456789abcdef",
+          readDirectory: () => [],
+        },
+      });
+      const prepared = port.prepare({
+        executable: "C:\\Tools\\Codex\\codex.exe",
+        args: ["app-server"],
+        boundRoot: "C:\\Work\\repo",
+        temporaryDirectory: "C:\\Temp\\octant-scratch",
+        networkEgress: "allow",
+        ...(admitted.turn.selection === undefined
+          ? {}
+          : { sandboxPolicy: admitted.turn.selection }),
+      });
+      expect(prepared.command).toBe(launcherPath);
+      expect(prepared.args).toContain("--container");
+      expect(prepared.args).toContain("Octant.Confined.0123456789abcdef0123456789abcdef");
+      expect(prepared.policyReceipt?.backend).toBe("windows-appcontainer-v1");
+
+      // Unsupported custom restrictions (custom protectedPaths or isolated credentials)
+      // fail closed cleanly as incompatible rather than hitting the POSIX-only compiler.
+      if (admitted.turn.selection !== undefined) {
+        const unsupportedProtected = {
+          ...admitted.turn.selection,
+          policy: decodeSandboxPolicy({
+            ...admitted.turn.selection.policy,
+            filesystem: {
+              ...admitted.turn.selection.policy.filesystem,
+              protectedPaths: [{ path: "/work/repo/secrets", mode: "deny" }],
+            },
+          }),
+        };
+        let protectedError: unknown;
+        try {
+          port.prepare({
+            executable: "C:\\Tools\\Codex\\codex.exe",
+            args: ["app-server"],
+            boundRoot: "C:\\Work\\repo",
+            temporaryDirectory: "C:\\Temp\\octant-scratch",
+            networkEgress: "allow",
+            sandboxPolicy: unsupportedProtected,
+          });
+        } catch (error) {
+          protectedError = error;
+        }
+        expect(protectedError).toBeInstanceOf(ProcessConfinementError);
+        expect((protectedError as ProcessConfinementError).message).toMatch(/protected-path/u);
+
+        const unsupportedCredentials = {
+          ...admitted.turn.selection,
+          policy: decodeSandboxPolicy({
+            ...admitted.turn.selection.policy,
+            credentials: "isolated",
+          }),
+        };
+        let credentialsError: unknown;
+        try {
+          port.prepare({
+            executable: "C:\\Tools\\Codex\\codex.exe",
+            args: ["app-server"],
+            boundRoot: "C:\\Work\\repo",
+            temporaryDirectory: "C:\\Temp\\octant-scratch",
+            networkEgress: "allow",
+            sandboxPolicy: unsupportedCredentials,
+          });
+        } catch (error) {
+          credentialsError = error;
+        }
+        expect(credentialsError).toBeInstanceOf(ProcessConfinementError);
+        expect((credentialsError as ProcessConfinementError).message).toMatch(
+          /isolated credential/u,
+        );
+      }
+    } finally {
+      await admitted.turn.end();
+    }
   });
 });

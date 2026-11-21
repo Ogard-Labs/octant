@@ -4,6 +4,7 @@ import {
   ProcessConfinementError,
   type ProcessConfinementPrepareInput,
 } from "./seatbeltProfile";
+import { resolvePackagedWindowsConfineLauncher } from "./windowsConfinement";
 
 const HOME = "C:\\Users\\Ada";
 const LAUNCHER = "C:\\Program Files\\Octant\\resources\\native\\octant-windows-confine.exe";
@@ -222,5 +223,11 @@ describe("Windows confinement port", () => {
       unverifiedWindowsConfinement: { launcherPath: "C:\\Windows\\System32\\cmd.exe" },
     });
     expect(refusalOf(() => port.prepare(launch))).toMatch(/octant-windows-confine\.exe/u);
+  });
+
+  it("refuses packaged launcher discovery on non-Windows platforms and missing bundle paths", () => {
+    expect(resolvePackagedWindowsConfineLauncher(import.meta.url, "darwin")).toBeUndefined();
+    expect(resolvePackagedWindowsConfineLauncher(import.meta.url, "linux")).toBeUndefined();
+    expect(resolvePackagedWindowsConfineLauncher(import.meta.url, "win32")).toBeUndefined();
   });
 });

@@ -4,7 +4,15 @@
 // administrator account); it runs no provider and lifts no Windows refusal.
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -392,9 +400,30 @@ try {
     },
   );
 
+  // Recovery on a machine-managed read-only directory where ALL APPLICATION
+  // PACKAGES already grants read (and the caller lacks WRITE_DAC, e.g.
+  // System32 owned by TrustedInstaller) must succeed without rewriting its
+  // DACL when no explicit container SID ACE exists.
+  const recoverSystemDir = spawnSync(
+    launcherPath,
+    ["--recover", "--container", killedContainer, "--grant-path", system32],
+    { encoding: "utf8", timeout: 30_000, windowsHide: true },
+  );
+  check(
+    "recovers cleanly without rewriting DACL on a read-only system directory with no container ACE",
+    recoverSystemDir.status === 0,
+    recoverSystemDir,
+  );
+
   // An executable path passing through a junction must be refused before spawn.
-  const exeAlias = join(root, "sys-alias");
-  const exeJunction = spawnSync(cmd, ["/d", "/c", "mklink", "/J", exeAlias, system32], {
+  // Target a small folder inside the temp fixture rather than System32 so the
+  // pre-launch browser-store pattern scan completes and the native launcher's
+  // own HeldPath junction check executes.
+  const exeTarget = join(root, "exe-target");
+  mkdirSync(exeTarget, { recursive: true });
+  copyFileSync(cmd, join(exeTarget, "cmd.exe"));
+  const exeAlias = join(root, "exe-alias");
+  const exeJunction = spawnSync(cmd, ["/d", "/c", "mklink", "/J", exeAlias, exeTarget], {
     encoding: "utf8",
   });
   const linkedExe = run(join(exeAlias, "cmd.exe"), shell("exit 0"));

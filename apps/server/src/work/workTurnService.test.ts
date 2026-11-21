@@ -224,6 +224,80 @@ describe("WorkTurnService", () => {
     }
   });
 
+  it("withholds Octant host tools before continuation checks so Windows Strict Work follow-up turns resume without tools-changed", async () => {
+    const resolveAppManagedTools = vi.fn(() => ({
+      definitions: [
+        {
+          name: "octant_host_tool",
+          description: "Host tool withheld under Windows Strict",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+      execute: async () => ({ result: "ok" }),
+    }));
+    const observedContinuationTools: Array<number> = [];
+    const fixture = serviceFixture({
+      threadAccess: "full-access",
+      resolveStrict: () => true,
+      resolveAppManagedTools,
+      turnRuntime: {
+        run: async (input) => {
+          input.onSessionReady?.({
+            sessionId: input.providerSessionId,
+            resumeCursor: { driverKind: "codex", value: "codex-session-1" },
+          });
+          return { kind: "completed" as const, response: "done" };
+        },
+      },
+      resolveDriver: (_id, fallback) => ({
+        ...fallback,
+        kind: "codex",
+        conversationOwnership: "provider",
+        toolCatalogContinuation: ({ tools }) => {
+          observedContinuationTools.push(tools.length);
+          return tools.length === 0 ? "unchanged" : "handoff-required";
+        },
+      }),
+    });
+    const providerRecord = fixture.persistence.readProviderInstance();
+    if (providerRecord !== undefined) {
+      fixture.persistence.readProviderInstance.mockReturnValue({
+        id: providerRecord.id,
+        displayName: providerRecord.displayName,
+        enabled: providerRecord.enabled,
+        environmentPolicy: providerRecord.environmentPolicy,
+        version: providerRecord.version,
+        createdAt: providerRecord.createdAt,
+        updatedAt: providerRecord.updatedAt,
+        driverKind: "codex",
+        configuration: { kind: "codex-cli", binaryPath: "C:\\Tools\\Codex\\codex.exe" },
+      });
+    }
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      const first = startCommand();
+      await expect(fixture.service.startFirstTurn(ids.window, first)).resolves.toMatchObject({
+        kind: "accepted",
+      });
+      await fixture.waitForIdle();
+
+      const second = {
+        ...first,
+        requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+        turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+        prompt: "Follow-up turn under Windows Strict",
+      };
+      await expect(fixture.service.startFirstTurn(ids.window, second)).resolves.toMatchObject({
+        kind: "accepted",
+      });
+      await fixture.waitForIdle(second.requestId);
+      expect(resolveAppManagedTools).not.toHaveBeenCalled();
+      expect(observedContinuationTools).toEqual([0]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it.each([true, false])(
     "journals what Strict kept with the turn as it launches only when Strict is on (Strict: %s)",
     async (strict) => {

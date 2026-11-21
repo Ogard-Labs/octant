@@ -2329,8 +2329,8 @@ A confined launch on Windows runs in a fresh AppContainer with ACL grants and a 
 - Plan and Chat get an active-process limit of one; the job ends the whole tree when the launcher ends, which is the Windows process-tree stop.
 - `none` has no capability and `allow` the client capabilities; `proxied`, the relays, read-everywhere, Seatbelt rules and a non-`.exe` program are refused as incompatible rather than dropped.
 - Full access is the job object alone, with no container or grants.
-- The port refuses `win32` unless its caller passes `unverifiedWindowsConfinement`, which no production caller does, and the launcher is not packaged. Full access with the sandbox off runs on Windows without the launcher, stopped by the tree stop instead of its job; every confined launch stays refused.
-- Hosted Windows evidence covers the mechanism on an administrator runner; an ordinary account, a desktop Windows release, ACL propagation cost on a large checkout, terminals and a real provider remain unverified.
+- The launcher (`octant-windows-confine.exe`) is packaged with Windows desktop builds and wired through `windowsConfinement` for the admitted [Windows Strict, phase 1](#windows-strict-phase-1) path (verified native Codex at Full access, plus confined Codex catalog reads) with durable pre-ACL lease records and idempotent `--recover` cleanup; every other Windows Strict launch stays refused by name, and Strict-off runs unconfined using the tree stop instead of a container.
+- Hosted Windows CI covers the confinement mechanism, recovery sweep, and native Codex smoke on an administrator runner; standard-user Windows 11 desktop verification (Gate 5), ACL propagation cost on a large checkout, terminals, and other providers remain unverified.
 
 Status: Partly built. Since: 2026-11-15. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 

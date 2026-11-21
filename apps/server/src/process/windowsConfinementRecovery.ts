@@ -28,6 +28,7 @@ import {
   windowsConfinedRecoveryArguments,
   windowsNativePath,
 } from "@octant/domain/windows-confinement-policy";
+import { readWindowsProcessIdentity } from "./nodeOwnedProcessReceipt";
 import { stopWindowsProcessTree, type WindowsProcessTreeStop } from "./windowsProcessTree";
 
 export interface WindowsConfinementLeaseRecord {
@@ -38,6 +39,8 @@ export interface WindowsConfinementLeaseRecord {
   readonly launcherPath: string;
   readonly createdAt: string;
   readonly launcherPid?: number;
+  /** Native process creation identity (pid + start time hash) proving PID ownership. */
+  readonly launcherIdentity?: string;
 }
 
 export type WindowsConfinementPreAclResult =
@@ -63,6 +66,7 @@ export interface WindowsConfinementLeaseStoreOptions {
   readonly runRecovery?: (launcherPath: string, args: ReadonlyArray<string>) => Promise<boolean>;
   readonly stopProcessTree?: (pid: number) => Promise<WindowsProcessTreeStop>;
   readonly isProcessAlive?: (pid: number) => boolean;
+  readonly readProcessIdentity?: (pid: number) => Promise<string | undefined>;
   readonly clock?: () => string;
 }
 
@@ -150,6 +154,13 @@ function parseLeaseRecord(raw: string): WindowsConfinementLeaseRecord | undefine
     }
     launcherPid = candidate.launcherPid;
   }
+  let launcherIdentity: string | undefined;
+  if (candidate.launcherIdentity !== undefined) {
+    if (typeof candidate.launcherIdentity !== "string" || candidate.launcherIdentity.length === 0) {
+      return undefined;
+    }
+    launcherIdentity = candidate.launcherIdentity;
+  }
   return {
     schemaVersion: 1,
     launchId: candidate.launchId,
@@ -158,6 +169,7 @@ function parseLeaseRecord(raw: string): WindowsConfinementLeaseRecord | undefine
     launcherPath: candidate.launcherPath,
     createdAt: candidate.createdAt,
     ...(launcherPid === undefined ? {} : { launcherPid }),
+    ...(launcherIdentity === undefined ? {} : { launcherIdentity }),
   };
 }
 
@@ -196,9 +208,11 @@ export class WindowsConfinementLeaseStore {
   readonly #runRecovery: (launcherPath: string, args: ReadonlyArray<string>) => Promise<boolean>;
   readonly #stopProcessTree: (pid: number) => Promise<WindowsProcessTreeStop>;
   readonly #isProcessAlive: (pid: number) => boolean;
+  readonly #readProcessIdentity: (pid: number) => Promise<string | undefined>;
   readonly #clock: () => string;
   readonly #activeLeases = new Set<string>();
   readonly #pendingBlockers = new Map<string, PendingBlocker>();
+  readonly #pendingIdentityReads = new Map<string, Promise<void>>();
   #queue: Promise<void> = Promise.resolve();
 
   constructor(options: WindowsConfinementLeaseStoreOptions) {
@@ -206,7 +220,13 @@ export class WindowsConfinementLeaseStore {
     this.#runRecovery = options.runRecovery ?? defaultRunRecovery;
     this.#stopProcessTree = options.stopProcessTree ?? stopWindowsProcessTree;
     this.#isProcessAlive = options.isProcessAlive ?? defaultIsProcessAlive;
+    this.#readProcessIdentity =
+      options.readProcessIdentity ?? ((pid) => readWindowsProcessIdentity(pid));
     this.#clock = options.clock ?? (() => new Date().toISOString());
+  }
+
+  get leaseDirectory(): string {
+    return this.#leaseDirectory;
   }
 
   #enqueue<T>(task: () => Promise<T>): Promise<T> {
@@ -292,7 +312,11 @@ export class WindowsConfinementLeaseStore {
     }
   }
 
-  /** Updates an active lease record with the spawned launcher PID. */
+  /**
+   * Updates an active lease record with the spawned launcher PID and captures
+   * its native creation identity (PID + start time) so recovery can verify PID
+   * ownership before ever terminating a recovered PID.
+   */
   recordLauncherPid(launchId: string, pid: number): void {
     if (!Number.isSafeInteger(pid) || pid < 1) return;
     const filePath = this.#leaseFilePath(launchId);
@@ -302,7 +326,22 @@ export class WindowsConfinementLeaseStore {
       writeAtomicJson(filePath, { ...existing, launcherPid: pid });
     } catch {
       // The pre-ACL record already holds container and grant paths for recovery.
+      return;
     }
+    const capture = this.#readProcessIdentity(pid)
+      .then((identity) => {
+        if (identity === undefined || identity.length === 0) return;
+        if (!this.#activeLeases.has(launchId)) return;
+        try {
+          const current = parseLeaseRecord(readFileSync(filePath, "utf8"));
+          if (current === undefined || current.launcherPid !== pid) return;
+          writeAtomicJson(filePath, { ...current, launcherIdentity: identity });
+        } catch {
+          // Lease was already recovered or removed.
+        }
+      })
+      .catch(() => undefined);
+    this.#pendingIdentityReads.set(launchId, capture);
   }
 
   /**
@@ -313,6 +352,11 @@ export class WindowsConfinementLeaseStore {
    */
   releaseAndVerify(launchId: string): Promise<WindowsConfinementLeaseCleanupResult> {
     return this.#enqueue(async () => {
+      const pendingIdentity = this.#pendingIdentityReads.get(launchId);
+      if (pendingIdentity !== undefined) {
+        this.#pendingIdentityReads.delete(launchId);
+        await pendingIdentity;
+      }
       const fileName = `${launchId}.json`;
       const filePath = join(this.#leaseDirectory, fileName);
       const outcome = await this.#recoverFile(fileName, filePath);
@@ -406,12 +450,43 @@ export class WindowsConfinementLeaseStore {
     if (record === undefined) {
       return { status: "pending", global: true, grants: [] };
     }
-    if (record.launcherPid !== undefined && this.#isProcessAlive(record.launcherPid)) {
-      const stopped = await this.#stopProcessTree(record.launcherPid).catch(
-        () => "failed" as const,
-      );
-      if (stopped === "failed" || this.#isProcessAlive(record.launcherPid)) {
-        return { status: "pending", global: false, grants: record.grants };
+    if (record.launcherPid !== undefined) {
+      if (record.launcherIdentity === undefined) {
+        // Without a captured creation identity we cannot prove a live PID is
+        // still our launcher rather than a reused PID: never terminate it
+        // blindly, and keep cleanup pending while the PID is alive.
+        if (this.#isProcessAlive(record.launcherPid)) {
+          return { status: "pending", global: false, grants: record.grants };
+        }
+      } else {
+        let liveIdentity: string | undefined;
+        try {
+          liveIdentity = await this.#readProcessIdentity(record.launcherPid);
+        } catch {
+          // Could not prove whether a live process is our launcher; fail closed
+          // without terminating an unverified PID.
+          return { status: "pending", global: false, grants: record.grants };
+        }
+        // Only terminate when the live PID matches the exact recorded creation
+        // identity. Undefined (gone) or a different identity (reused PID) proves
+        // our launcher already exited.
+        if (liveIdentity === record.launcherIdentity) {
+          const stopped = await this.#stopProcessTree(record.launcherPid).catch(
+            () => "failed" as const,
+          );
+          if (stopped === "failed") {
+            return { status: "pending", global: false, grants: record.grants };
+          }
+          let afterIdentity: string | undefined;
+          try {
+            afterIdentity = await this.#readProcessIdentity(record.launcherPid);
+          } catch {
+            return { status: "pending", global: false, grants: record.grants };
+          }
+          if (afterIdentity === record.launcherIdentity) {
+            return { status: "pending", global: false, grants: record.grants };
+          }
+        }
       }
     }
     const recoveryArgs = windowsConfinedRecoveryArguments({

@@ -4736,6 +4736,65 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("validates non-default model options on a Full-access Codex Code thread under Windows Strict", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const baseThread = thread();
+    const probeProvider = vi.fn(async () => ({
+      readiness: "ready" as const,
+      models: [
+        {
+          id: baseThread.modelId,
+          displayName: "GPT-5.4",
+          reasoning: "supported" as const,
+          inputModalities: ["text" as const],
+          source: "discovered" as const,
+          verification: "verified" as const,
+          options: [
+            {
+              id: "effort",
+              displayName: "Effort",
+              kind: "selection" as const,
+              values: ["medium", "high"] as const,
+            },
+          ],
+        },
+      ],
+    }));
+    const codexFixture = runtimeFixture({
+      provider: { ...providerDriver(connection), kind: "codex" },
+      resolveStrict: () => true,
+      probeProvider,
+    });
+    codexFixture.setThread(
+      decodeCodeThread({
+        ...baseThread,
+        executionPolicy: "full-access",
+        strict: true,
+        modelOptionValues: { effort: "high" },
+      }),
+    );
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      await expect(
+        codexFixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(19),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: codexFixture.prompt,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      expect(probeProvider).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    } finally {
+      vi.unstubAllGlobals();
+      await codexFixture.runtime.close();
+      codexFixture.close();
+    }
+  });
+
   it("records what Strict kept with a Strict launch's session, and nothing for a launch outside Strict", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);

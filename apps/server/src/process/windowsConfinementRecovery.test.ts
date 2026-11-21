@@ -34,6 +34,7 @@ describe("Windows confinement durable pre-ACL recovery", () => {
     const store = new WindowsConfinementLeaseStore({
       leaseDirectory: dir,
       isProcessAlive: () => false,
+      readProcessIdentity: async () => undefined,
       runRecovery: async (launcher, args) => {
         calls.push({ launcher, args });
         return true;
@@ -70,10 +71,14 @@ describe("Windows confinement durable pre-ACL recovery", () => {
     expect(readdirSync(dir)).toEqual([]);
   });
 
-  it("recovers leftover leases on startup after terminating a surviving launcher, and is idempotent", async () => {
+  it("recovers leftover leases on startup after verifying creation identity of a surviving launcher, and is idempotent", async () => {
     const dir = leaseDirectory();
-    // Simulate a crashed host that left a durable record with a live PID.
-    const writer = new WindowsConfinementLeaseStore({ leaseDirectory: dir });
+    const recordedIdentity = "win32-launcher-7777-created-1000";
+    // Simulate a crashed host that left a durable record with a live PID and creation identity.
+    const writer = new WindowsConfinementLeaseStore({
+      leaseDirectory: dir,
+      readProcessIdentity: async (pid) => (pid === 7777 ? recordedIdentity : undefined),
+    });
     writer.recordPreAcl({
       launchId: LAUNCH_A,
       appContainerName: CONTAINER_A,
@@ -81,6 +86,11 @@ describe("Windows confinement durable pre-ACL recovery", () => {
       launcherPath: LAUNCHER,
     });
     writer.recordLauncherPid(LAUNCH_A, 7777);
+    await vi.waitFor(() => {
+      expect(existsSync(join(dir, `${LAUNCH_A}.json`))).toBe(true);
+    });
+    // Allow the async creation-identity capture to persist before simulating restart.
+    await new Promise((resolve) => setTimeout(resolve, 20));
 
     let alive = true;
     const stopped: number[] = [];
@@ -88,6 +98,7 @@ describe("Windows confinement durable pre-ACL recovery", () => {
     const restarted = new WindowsConfinementLeaseStore({
       leaseDirectory: dir,
       isProcessAlive: (pid) => pid === 7777 && alive,
+      readProcessIdentity: async (pid) => (pid === 7777 && alive ? recordedIdentity : undefined),
       stopProcessTree: async (pid) => {
         stopped.push(pid);
         alive = false;
@@ -116,6 +127,67 @@ describe("Windows confinement durable pre-ACL recovery", () => {
     const secondSweep = await restarted.recoverAll();
     expect(secondSweep).toEqual({ status: "clean", recoveredCount: 0 });
     expect(restarted.pendingBlockerFor(["C:\\Work\\repo"])).toBeUndefined();
+  });
+
+  it("never terminates a reused or unverified PID during recovery", async () => {
+    const dir = leaseDirectory();
+    // Case 1: PID 8888 was reused by another process (different creation identity).
+    // Recovery must NOT terminate PID 8888, and must still run --recover and clear the lease.
+    writeFileSync(
+      join(dir, `${LAUNCH_A}.json`),
+      JSON.stringify({
+        schemaVersion: 1,
+        launchId: LAUNCH_A,
+        appContainerName: CONTAINER_A,
+        grants: ["C:\\Work\\reused"],
+        launcherPath: LAUNCHER,
+        createdAt: "2026-11-21T12:00:00.000Z",
+        launcherPid: 8888,
+        launcherIdentity: "win32-launcher-8888-old",
+      }),
+      "utf8",
+    );
+    const stopTree = vi.fn(async () => "stopped" as const);
+    const runRecovery = vi.fn(async () => true);
+    const storeReused = new WindowsConfinementLeaseStore({
+      leaseDirectory: dir,
+      isProcessAlive: () => true,
+      readProcessIdentity: async () => "win32-unrelated-8888-new",
+      stopProcessTree: stopTree,
+      runRecovery,
+    });
+    expect(await storeReused.recoverAll()).toEqual({ status: "clean", recoveredCount: 1 });
+    expect(stopTree).not.toHaveBeenCalled();
+    expect(runRecovery).toHaveBeenCalledTimes(1);
+    expect(readdirSync(dir)).toEqual([]);
+
+    // Case 2: Live PID without a recorded creation identity cannot be proven to be
+    // our launcher — must fail closed as cleanup-pending without calling stopProcessTree.
+    writeFileSync(
+      join(dir, `${LAUNCH_B}.json`),
+      JSON.stringify({
+        schemaVersion: 1,
+        launchId: LAUNCH_B,
+        appContainerName: CONTAINER_B,
+        grants: ["C:\\Work\\unverified"],
+        launcherPath: LAUNCHER,
+        createdAt: "2026-11-21T12:00:00.000Z",
+        launcherPid: 9999,
+      }),
+      "utf8",
+    );
+    const storeUnverified = new WindowsConfinementLeaseStore({
+      leaseDirectory: dir,
+      isProcessAlive: (pid) => pid === 9999,
+      stopProcessTree: stopTree,
+      runRecovery,
+    });
+    expect(await storeUnverified.recoverAll()).toMatchObject({
+      status: "cleanup-pending",
+      pendingCount: 1,
+    });
+    expect(stopTree).not.toHaveBeenCalled();
+    expect(existsSync(join(dir, `${LAUNCH_B}.json`))).toBe(true);
   });
 
   it("retains the durable record and refuses affected launches when cleanup cannot be verified", async () => {

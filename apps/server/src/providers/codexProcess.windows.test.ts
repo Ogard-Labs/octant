@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { decodeProviderInstanceId, type ProviderFailure } from "@octant/contracts";
 import {
   WINDOWS_KEPT_SANDBOX_REFUSAL,
@@ -17,6 +18,7 @@ import {
 } from "@octant/domain/guardrail-policy";
 import { Effect, Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resolvePackagedWindowsConfineLauncher } from "../process/windowsConfinement";
 import { WindowsConfinementLeaseStore } from "../process/windowsConfinementRecovery";
 import { makeCodexDriver } from "./codexDriver";
 import { makeCodexProcessLive, type CodexLaunchAuthority } from "./codexProcess";
@@ -134,15 +136,43 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
         const root = realpathSync.native(mkdtempSync(join(tmpdir(), "octant-codex-strict-win-")));
         const leaseDir = realpathSync.native(mkdtempSync(join(tmpdir(), "octant-codex-leases-")));
         const codexHome = realpathSync.native(mkdtempSync(join(tmpdir(), "octant-codex-home-")));
-        directories.push(root, leaseDir, codexHome);
+        const bundleRoot = realpathSync.native(mkdtempSync(join(tmpdir(), "octant-win-bundle-")));
+        directories.push(root, leaseDir, codexHome, bundleRoot);
+        // Verify packaged launcher discovery from the real desktop bundle layout
+        // (`resources/app/apps/server/dist/server.mjs` -> `resources/native/octant-windows-confine.exe`).
+        const bundledServerEntry = join(
+          bundleRoot,
+          "resources",
+          "app",
+          "apps",
+          "server",
+          "dist",
+          "server.mjs",
+        );
+        const bundledLauncher = join(
+          bundleRoot,
+          "resources",
+          "native",
+          "octant-windows-confine.exe",
+        );
+        mkdirSync(dirname(bundledServerEntry), { recursive: true });
+        mkdirSync(dirname(bundledLauncher), { recursive: true });
+        writeFileSync(bundledServerEntry, "");
+        copyFileSync(realpathSync.native(windowsConfineLauncher ?? ""), bundledLauncher);
+        const discoveredLauncher = resolvePackagedWindowsConfineLauncher(
+          pathToFileURL(bundledServerEntry),
+          "win32",
+        );
+        expect(discoveredLauncher).toBe(realpathSync.native(bundledLauncher));
         const leaseStore = new WindowsConfinementLeaseStore({ leaseDirectory: leaseDir });
         const confinedPort = makeCodexProcessLive({
           platform: "win32",
           octantVersion: "0.1.0-test",
           startupTimeoutMs: 20_000,
           shutdownTimeoutMs: 2_000,
+          windowsCatalogUnconfined: () => false,
           windowsConfinement: {
-            launcherPath: realpathSync.native(windowsConfineLauncher ?? ""),
+            launcherPath: discoveredLauncher ?? realpathSync.native(windowsConfineLauncher ?? ""),
             leaseStore,
           },
         });
@@ -199,6 +229,30 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
         expect(shimRefused).toEqual(
           Either.left({ category: "incompatible", message: WINDOWS_STRICT_SHIM_REFUSAL }),
         );
+
+        // Confined catalog probe succeeds even when host defaults disallow unconfined catalog reads.
+        const catalogProbed = await Effect.runPromise(
+          Effect.either(
+            Effect.scoped(
+              confinedPort
+                .start({
+                  binaryPath: realpathSync.native(fakeCodex ?? ""),
+                  authority: { kind: "catalog" },
+                  environment: { ...process.env, CODEX_HOME: codexHome },
+                })
+                .pipe(
+                  Effect.map((connection) => ({
+                    version: connection.version,
+                    pid: connection.pid,
+                  })),
+                ),
+            ),
+          ),
+        );
+        if (Either.isLeft(catalogProbed)) throw new Error(catalogProbed.left.message);
+        expect(catalogProbed.right.version).toBe("0.144.4");
+        expect(running(catalogProbed.right.pid)).toBe(false);
+        expect(readdirSync(leaseDir)).toEqual([]);
       },
       60_000,
     );

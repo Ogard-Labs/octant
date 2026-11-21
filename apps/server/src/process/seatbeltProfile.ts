@@ -1105,6 +1105,23 @@ export function makeProcessConfinementLive(
           "invalid-configuration",
           "This sandbox policy expired or its folder binding changed before launch. Start a new turn after reviewing the restrictions.",
         );
+      // Route Windows before the POSIX-only sandbox compiler so admitted
+      // Windows Strict phase 1 launches carrying a SandboxRestrictionsService
+      // selection validate and materialize Windows-supported rules cleanly.
+      if (platform === "win32") {
+        const windowsConfinement =
+          options.windowsConfinement ?? options.unverifiedWindowsConfinement;
+        if (windowsConfinement === undefined) {
+          throw new ProcessConfinementError(
+            "incompatible",
+            "Confinement is supported only on macOS and Linux.",
+          );
+        }
+        return buildWindowsConfinedLaunch(
+          selectedPolicy === undefined ? input : { ...input, sandboxPolicy: selectedPolicy },
+          windowsConfinement,
+        );
+      }
       const toolNetwork = sandboxToolNetwork(selectedPolicy);
       const policyInput =
         selectedPolicy === undefined
@@ -1261,13 +1278,6 @@ export function makeProcessConfinementLive(
             ? pinLinuxLaunch(launch, authority, selectedPolicy)
             : launch,
         );
-      }
-      // Only explicitly admitted Windows Strict phase 1 launches (and tests)
-      // pass Windows confinement options; every other Windows caller stays
-      // refused rather than falling back.
-      const windowsConfinement = options.windowsConfinement ?? options.unverifiedWindowsConfinement;
-      if (platform === "win32" && windowsConfinement !== undefined) {
-        return buildWindowsConfinedLaunch(input, windowsConfinement);
       }
       throw new ProcessConfinementError(
         "incompatible",

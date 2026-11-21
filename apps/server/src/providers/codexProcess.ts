@@ -108,6 +108,13 @@ export type CodexLaunchAuthority =
        * platforms ignore it.
        */
       readonly unconfinedOnWindows?: true;
+      /**
+       * Read for a Windows Strict host when the packaged Windows confinement
+       * launcher is available: the catalog probe runs inside the AppContainer
+       * and Job Object sandbox with read-only access to the account home and a
+       * private scratch root, never unconfined. Other platforms ignore it.
+       */
+      readonly confinedOnWindows?: true;
     }
   | {
       readonly kind: "thread";
@@ -251,9 +258,13 @@ function runsWithoutOctantConfinement(
  */
 function codexWindowsLaunch(authority: CodexLaunchAuthority): WindowsProviderLaunch {
   if (authority.kind === "catalog") {
-    return authority.unconfinedOnWindows === true
-      ? { status: "unconfined", approvals: "none" }
-      : { status: "refused", reason: WINDOWS_SANDBOX_MISSING_REASON };
+    if (authority.unconfinedOnWindows === true) {
+      return { status: "unconfined", approvals: "none" };
+    }
+    if (authority.confinedOnWindows === true) {
+      return { status: "confined" };
+    }
+    return { status: "refused", reason: WINDOWS_SANDBOX_MISSING_REASON };
   }
   return windowsProviderLaunch({
     mode: authority.mode,
@@ -1141,17 +1152,11 @@ function prepareWindowsCodexLaunch(input: {
     return { status: "refused", failure: failure("incompatible", form.reason) };
   }
   if (form.status === "confined") {
-    if (authority.kind !== "thread") {
-      return {
-        status: "refused",
-        failure: failure("incompatible", WINDOWS_SANDBOX_MISSING_REASON),
-      };
-    }
     const binaryRefusal = windowsStrictCodexBinaryRefusal(input.binaryPath);
     if (binaryRefusal !== undefined) {
       return { status: "refused", failure: failure("incompatible", binaryRefusal) };
     }
-    const policy = authority.sandboxPolicy?.policy;
+    const policy = authority.kind === "thread" ? authority.sandboxPolicy?.policy : undefined;
     if (
       input.network !== undefined ||
       policy?.hostServices === "blocked" ||
@@ -1192,21 +1197,34 @@ function prepareWindowsCodexLaunch(input: {
       const createdScratch = mkdtempSync(join(tmpdir(), "octant-codex-"));
       temporaryDirectory =
         process.platform === "win32" ? realpathSync.native(createdScratch) : createdScratch;
-      const root = nativeRealpath(authority.root);
+      const confinedSqliteHome = join(temporaryDirectory, "codex-sqlite");
+      mkdirSync(confinedSqliteHome, { recursive: true });
+      const root =
+        authority.kind === "thread" ? nativeRealpath(authority.root) : temporaryDirectory;
       if (process.platform === "win32" && !statSync(root).isDirectory()) {
         throw new Error("Codex root is not a directory.");
       }
-      const extraFolders = existingNativePaths([
-        ...(authority.extraFolders ?? []),
-        ...(policy?.filesystem.readWriteRoots ?? []),
-      ]);
+      const extraFolders =
+        authority.kind === "thread"
+          ? existingNativePaths([
+              ...(authority.extraFolders ?? []),
+              ...(policy?.filesystem.readWriteRoots ?? []),
+            ])
+          : [];
+      const home = input.environment.USERPROFILE ?? input.environment.HOME ?? homedir();
+      const codexHome = input.environment.CODEX_HOME ?? `${home}\\.codex`;
+      // Windows AppContainer cannot carve read-only authority entries
+      // (`config.toml`, `hooks.json`, `.env`, `plugins`, `rules`, `skills`,
+      // `AGENTS.md`) out of a writable parent grant. Keep the shared Codex
+      // home strictly read-only so a confined turn cannot poison startup
+      // config or integrations for later Strict-off launches, and direct
+      // Codex's writable SQLite state into the per-launch scratch folder.
+      const accountReadRoots = existingNativePaths([codexHome]);
       const explicitReadOnly = existingNativePaths([
         ...(authority.readOnlyFolders ?? []),
         ...(policy?.filesystem.readOnlyRoots ?? []),
+        ...accountReadRoots,
       ]);
-      const home = input.environment.USERPROFILE ?? input.environment.HOME ?? homedir();
-      const codexHome = input.environment.CODEX_HOME ?? `${home}\\.codex`;
-      const accountRoots = existingNativePaths([codexHome, input.environment.CODEX_SQLITE_HOME]);
       const executable = nativeRealpath(input.binaryPath);
       const networkEgress = policy?.network === "deny" ? ("none" as const) : ("allow" as const);
       const launch = input.confinement.prepare({
@@ -1214,16 +1232,15 @@ function prepareWindowsCodexLaunch(input: {
         args: input.args,
         boundRoot: root,
         extraBoundRoots: extraFolders,
-        writeBoundRoot: true,
+        writeBoundRoot: authority.kind === "thread",
         temporaryDirectory,
-        additionalWriteRoots: accountRoots,
-        readRoots: [...accountRoots],
+        readRoots: [...accountReadRoots],
         ...(explicitReadOnly.length === 0 ? {} : { explicitReadOnlyRoots: explicitReadOnly }),
-        ownAccountPaths: accountRoots,
+        ownAccountPaths: accountReadRoots,
         networkEgress,
-        ...(authority.sandboxPolicy === undefined
-          ? {}
-          : { sandboxPolicy: authority.sandboxPolicy }),
+        ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined
+          ? { sandboxPolicy: authority.sandboxPolicy }
+          : {}),
       });
       return {
         status: "prepared",
@@ -1234,14 +1251,15 @@ function prepareWindowsCodexLaunch(input: {
           environment: {
             ...input.environment,
             ...launch.environment,
+            CODEX_SQLITE_HOME: confinedSqliteHome,
             TMP: temporaryDirectory,
             TEMP: temporaryDirectory,
             TMPDIR: temporaryDirectory,
           },
           release,
-          ...(authority.sandboxPolicy === undefined
-            ? {}
-            : { sandboxPolicy: authority.sandboxPolicy }),
+          ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined
+            ? { sandboxPolicy: authority.sandboxPolicy }
+            : {}),
         },
       };
     } catch (error) {
@@ -1536,10 +1554,12 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
       Effect.suspend(() => {
         let terminate: (() => Promise<void>) | undefined;
         const authority: CodexLaunchAuthority =
-          requested.kind === "catalog" &&
-          platform === "win32" &&
-          options.windowsCatalogUnconfined?.() === true
-            ? { ...requested, unconfinedOnWindows: true }
+          requested.kind === "catalog" && platform === "win32"
+            ? options.windowsCatalogUnconfined?.() === true
+              ? { ...requested, unconfinedOnWindows: true }
+              : windowsConfinement !== undefined || options.confinement !== undefined
+                ? { ...requested, confinedOnWindows: true }
+                : requested
             : requested;
         // A native launch probes its executable natively. Metadata and version
         // results never authorize a restricted launch; Strict admits it afresh.

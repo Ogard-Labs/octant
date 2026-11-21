@@ -7,10 +7,15 @@
  * access (and by the Windows confinement smoke tests). Every other Windows
  * caller continues to refuse confinement by default unless explicitly wired.
  */
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, release } from "node:os";
 import { fileURLToPath } from "node:url";
+import {
+  decodeSandboxPolicySelection,
+  type SandboxPolicySelection,
+} from "@octant/contracts/sandbox-policy";
+import { WINDOWS_STRICT_NETWORK_REFUSAL } from "@octant/domain/guardrail-policy";
 import {
   isSameOrInside,
   protectedEntryFor,
@@ -22,6 +27,12 @@ import {
   windowsConfinedLauncherArguments,
   windowsNativePath,
 } from "@octant/domain/windows-confinement-policy";
+import {
+  recordSandboxLaunch,
+  sandboxAuthorityDirectory,
+  sandboxNetworkLimitsOn,
+  sandboxNetworkSnapshot,
+} from "./sandboxRuntimePolicy";
 import { secretGuardEntries } from "./secretGuard";
 import {
   type ConfinedProcessLaunch,
@@ -56,15 +67,19 @@ export type UnverifiedWindowsConfinementOptions = WindowsConfinementOptions;
  * resources directory, matching `windowsForeground.ts`. Never accepts an
  * arbitrary environment override or symlink.
  */
-export function resolvePackagedWindowsConfineLauncher(): string | undefined {
-  if (process.platform !== "win32") return undefined;
+export function resolvePackagedWindowsConfineLauncher(
+  moduleUrl: string | URL = import.meta.url,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
+  if (platform !== "win32") return undefined;
   try {
     const candidate = fileURLToPath(
-      new URL("../../../../native/octant-windows-confine.exe", import.meta.url),
+      new URL("../../../../native/octant-windows-confine.exe", moduleUrl),
     );
     const meta = lstatSync(candidate);
     if (!meta.isFile() || meta.isSymbolicLink()) return undefined;
-    const canonical = realpathSync.native(candidate);
+    const canonical =
+      process.platform === "win32" ? realpathSync.native(candidate) : realpathSync(candidate);
     const normalized = windowsNativePath(canonical);
     return normalized !== undefined && /\\octant-windows-confine\.exe$/iu.test(normalized)
       ? normalized
@@ -99,7 +114,8 @@ export function buildWindowsConfinedLaunch(
       "Windows confinement requires octant-windows-confine.exe.",
     );
   }
-  refuseWhatWindowsCannotExpress(input);
+  const selectedPolicy = parseWindowsSandboxPolicy(input.sandboxPolicy);
+  refuseWhatWindowsCannotExpress(input, selectedPolicy);
 
   const homeDirectory = options.homeDirectory ?? homedir();
   const launchId = options.launchId ?? randomBytes(16).toString("hex");
@@ -110,21 +126,36 @@ export function buildWindowsConfinedLaunch(
           ...(input.readRoots ?? []),
           ...(input.additionalWriteRoots ?? []),
         ]);
-  const explicitReadOnlyRoots = [
-    ...(input.explicitReadOnlyRoots ?? []),
-    ...(input.policyReadOnlyRoots ?? []),
+  const extraBoundRoots = [
+    ...new Set([
+      ...(input.extraBoundRoots ?? []),
+      ...(selectedPolicy?.policy.filesystem.readWriteRoots ?? []),
+    ]),
   ];
+  const explicitReadOnlyRoots = [
+    ...new Set([
+      ...(input.explicitReadOnlyRoots ?? []),
+      ...(input.policyReadOnlyRoots ?? []),
+      ...(selectedPolicy?.policy.filesystem.readOnlyRoots ?? []),
+    ]),
+  ];
+  const network =
+    selectedPolicy?.policy.network === "deny"
+      ? ("none" as const)
+      : typeof input.networkEgress === "object"
+        ? ("proxied" as const)
+        : input.networkEgress;
   const decision = planWindowsConfinedLaunch({
     launchId,
     executable: input.executable,
     boundRoot: input.boundRoot,
-    extraBoundRoots: input.extraBoundRoots ?? [],
+    extraBoundRoots,
     writeBoundRoot: input.writeBoundRoot !== false,
     temporaryDirectory: input.temporaryDirectory,
     additionalWriteRoots: input.additionalWriteRoots ?? [],
     readRoots: input.readRoots ?? [],
     ...(explicitReadOnlyRoots.length === 0 ? {} : { explicitReadOnlyRoots }),
-    network: typeof input.networkEgress === "object" ? "proxied" : input.networkEgress,
+    network,
     processCreation:
       input.allowProcessFork === false || input.allowProcessExec === false ? "denied" : "allowed",
     protectedEntries: secretGuardEntries({ platform: "win32", homeDirectory }),
@@ -210,6 +241,26 @@ export function buildWindowsConfinedLaunch(
       `Windows confinement does not let the launch write ${underDenyWrite.path}, which it asked to keep unwritable.`,
     );
   }
+  // Refuse any grant that overlaps private host enforcement storage (such as
+  // the durable pre-ACL lease store or sandbox authority directory).
+  const privateHostRoots = [options.leaseStore?.leaseDirectory, sandboxAuthorityDirectory()]
+    .map((path) => (path === undefined ? undefined : windowsGuardPath(path)))
+    .filter((form): form is string => form !== undefined);
+  for (const grant of decision.grants) {
+    const grantForm = windowsGuardPath(`${grant.path}\\`);
+    if (
+      grantForm !== undefined &&
+      privateHostRoots.some(
+        (privateRoot) =>
+          isSameOrInside(grantForm, privateRoot) || isSameOrInside(privateRoot, grantForm),
+      )
+    ) {
+      throw new ProcessConfinementError(
+        "incompatible",
+        `Windows confinement does not grant ${grant.path}: it overlaps private host sandbox storage.`,
+      );
+    }
+  }
   const leaseStore = options.leaseStore;
   if (leaseStore !== undefined) {
     const recorded = leaseStore.recordPreAcl({
@@ -222,9 +273,47 @@ export function buildWindowsConfinedLaunch(
       throw new ProcessConfinementError("incompatible", recorded.message);
     }
   }
+  const args = windowsConfinedLauncherArguments(decision, input.args);
+  if (selectedPolicy !== undefined) {
+    const readGrantPaths = decision.grants
+      .filter((grant) => grant.access === "read")
+      .map((grant) => grant.path);
+    const writeGrantPaths = decision.grants
+      .filter((grant) => grant.access === "modify")
+      .map((grant) => grant.path);
+    recordSandboxLaunch(selectedPolicy, {
+      provider: selectedPolicy.context.provider,
+      backend: `Windows AppContainer + Job Object · ${release()}`,
+      reads: readGrantPaths.slice(0, 64),
+      writes: writeGrantPaths.slice(0, 64),
+      authentication: ownAccountPaths.slice(0, 64),
+    });
+  }
+  const policyReceipt =
+    selectedPolicy === undefined
+      ? undefined
+      : Object.freeze({
+          policyDigest: createHash("sha256")
+            .update(JSON.stringify(selectedPolicy.policy))
+            .digest("hex"),
+          reuseKey: createHash("sha256")
+            .update(
+              JSON.stringify({
+                backend: "windows-appcontainer-v1",
+                launchId,
+                launcher,
+                policy: selectedPolicy.policy,
+                grants: decision.grants,
+                capabilities: decision.capabilities,
+              }),
+            )
+            .digest("hex"),
+          backend: "windows-appcontainer-v1" as const,
+        });
   return {
     command: launcher,
-    args: windowsConfinedLauncherArguments(decision, input.args),
+    args,
+    ...(policyReceipt === undefined ? {} : { policyReceipt }),
     ...(leaseStore === undefined
       ? {}
       : {
@@ -239,11 +328,26 @@ export function buildWindowsConfinedLaunch(
   };
 }
 
+function parseWindowsSandboxPolicy(raw: unknown): SandboxPolicySelection | undefined {
+  if (raw === undefined) return undefined;
+  try {
+    return decodeSandboxPolicySelection(raw);
+  } catch {
+    throw new ProcessConfinementError(
+      "invalid-configuration",
+      "Windows confinement received a malformed sandbox policy selection.",
+    );
+  }
+}
+
 /**
  * Parts of the port with no Windows form yet. Each is refused rather than
  * dropped, so a launch never runs with less confinement than it asked for.
  */
-function refuseWhatWindowsCannotExpress(input: ProcessConfinementPrepareInput): void {
+function refuseWhatWindowsCannotExpress(
+  input: ProcessConfinementPrepareInput,
+  selectedPolicy: SandboxPolicySelection | undefined,
+): void {
   const refuse = (what: string) => {
     throw new ProcessConfinementError("incompatible", `Windows confinement has no ${what}.`);
   };
@@ -255,23 +359,43 @@ function refuseWhatWindowsCannotExpress(input: ProcessConfinementPrepareInput): 
   if ((input.loopbackRelayPorts ?? []).length > 0) refuse("loopback relay");
   if ((input.serverRelays ?? []).length > 0) refuse("server relay");
   if (input.recipientAdmission !== undefined) refuse("pinned credential recipient");
-  if (
-    input.policyBlockHostServices === true ||
-    input.sandboxPolicy?.policy.hostServices === "blocked"
-  ) {
-    throw new ProcessConfinementError(
-      "incompatible",
-      "The requested network limits are not supported by the Windows sandbox.",
-    );
+  if (input.policyBlockHostServices === true || selectedPolicy?.policy.hostServices === "blocked") {
+    throw new ProcessConfinementError("incompatible", WINDOWS_STRICT_NETWORK_REFUSAL);
   }
   if (
-    (input.sandboxPolicy?.policy.approvedDestinations?.length ?? 0) > 0 ||
-    (input.sandboxPolicy?.policy.localServices?.length ?? 0) > 0
+    (selectedPolicy?.policy.approvedDestinations?.length ?? 0) > 0 ||
+    (selectedPolicy?.policy.localServices?.length ?? 0) > 0
   ) {
-    throw new ProcessConfinementError(
-      "incompatible",
-      "The requested network limits are not supported by the Windows sandbox.",
-    );
+    throw new ProcessConfinementError("incompatible", WINDOWS_STRICT_NETWORK_REFUSAL);
+  }
+  if (selectedPolicy !== undefined) {
+    if (selectedPolicy.policy.filesystem.protectedPaths.length > 0) {
+      throw new ProcessConfinementError(
+        "incompatible",
+        "Windows confinement does not support custom protected-path rules yet.",
+      );
+    }
+    if (selectedPolicy.policy.credentials === "isolated") {
+      throw new ProcessConfinementError(
+        "incompatible",
+        "Windows confinement does not support isolated credential mediation yet.",
+      );
+    }
+    if (
+      selectedPolicy.policy.network === "existing-policy" &&
+      (sandboxNetworkSnapshot(selectedPolicy)?.limitsOn ?? sandboxNetworkLimitsOn())
+    ) {
+      throw new ProcessConfinementError("incompatible", WINDOWS_STRICT_NETWORK_REFUSAL);
+    }
+    if (
+      input.writeBoundRoot === false &&
+      selectedPolicy.policy.filesystem.readWriteRoots.length > 0
+    ) {
+      throw new ProcessConfinementError(
+        "invalid-configuration",
+        "Windows confinement cannot add writable policy folders to a read-only launch.",
+      );
+    }
   }
 }
 

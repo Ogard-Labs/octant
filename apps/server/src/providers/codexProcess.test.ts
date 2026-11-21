@@ -1106,15 +1106,30 @@ describe("Codex launch confinement", () => {
   });
 
   it("prepares Windows Strict phase 1 confined Codex launches at Full access and refuses shims and proxy-only network without unconfined fallback", () => {
-    const seen: Array<{ readonly executable: string; readonly networkEgress: unknown }> = [];
+    const seen: Array<{
+      readonly executable: string;
+      readonly networkEgress: unknown;
+      readonly writeBoundRoot: boolean | undefined;
+      readonly additionalWriteRoots: ReadonlyArray<string> | undefined;
+      readonly explicitReadOnlyRoots: ReadonlyArray<string> | undefined;
+    }> = [];
     const confinement = {
       prepare: vi.fn(
         (input: {
           readonly executable: string;
           readonly args: ReadonlyArray<string>;
           readonly networkEgress: unknown;
+          readonly writeBoundRoot?: boolean;
+          readonly additionalWriteRoots?: ReadonlyArray<string>;
+          readonly explicitReadOnlyRoots?: ReadonlyArray<string>;
         }) => {
-          seen.push({ executable: input.executable, networkEgress: input.networkEgress });
+          seen.push({
+            executable: input.executable,
+            networkEgress: input.networkEgress,
+            writeBoundRoot: input.writeBoundRoot,
+            additionalWriteRoots: input.additionalWriteRoots,
+            explicitReadOnlyRoots: input.explicitReadOnlyRoots,
+          });
           return {
             command: "C:\\Program Files\\Octant\\resources\\native\\octant-windows-confine.exe",
             args: [
@@ -1149,9 +1164,45 @@ describe("Codex launch confinement", () => {
         "C:\\Program Files\\Octant\\resources\\native\\octant-windows-confine.exe",
       );
       expect(admitted.launch.confined).toBe(true);
+      // Shared CODEX_HOME must never be writable by a confined turn, and
+      // Codex SQLite state must be directed into the ephemeral scratch folder.
+      expect(admitted.launch.environment.CODEX_SQLITE_HOME).toContain("codex-sqlite");
+      expect(admitted.launch.environment.CODEX_SQLITE_HOME).not.toContain("C:\\Users\\Ada\\.codex");
       admitted.launch.release();
     }
-    expect(seen).toEqual([{ executable: "C:\\Tools\\Codex\\codex.exe", networkEgress: "allow" }]);
+    expect(seen).toEqual([
+      {
+        executable: "C:\\Tools\\Codex\\codex.exe",
+        networkEgress: "allow",
+        writeBoundRoot: true,
+        additionalWriteRoots: undefined,
+        explicitReadOnlyRoots: ["C:\\Users\\Ada\\.codex"],
+      },
+    ]);
+
+    // Confined Windows Strict catalog probe runs with read-only bound root and
+    // read-only CODEX_HOME (never unconfined) so Full-access threads can verify
+    // model options even when host defaults are Strict + Ask first.
+    const confinedCatalog = prepareCodexLaunch({
+      binaryPath: "C:\\Tools\\Codex\\codex.exe",
+      args: ["app-server"],
+      authority: { kind: "catalog", confinedOnWindows: true },
+      environment: { USERPROFILE: "C:\\Users\\Ada", CODEX_HOME: "C:\\Users\\Ada\\.codex" },
+      confinement,
+      platform: "win32",
+    });
+    expect(confinedCatalog.status).toBe("prepared");
+    if (confinedCatalog.status === "prepared") {
+      expect(confinedCatalog.launch.confined).toBe(true);
+      confinedCatalog.launch.release();
+    }
+    expect(seen[1]).toEqual({
+      executable: "C:\\Tools\\Codex\\codex.exe",
+      networkEgress: "allow",
+      writeBoundRoot: false,
+      additionalWriteRoots: undefined,
+      explicitReadOnlyRoots: ["C:\\Users\\Ada\\.codex"],
+    });
 
     // Command shims refuse before confinement or spawn.
     const shimRefused = prepareCodexLaunch({
@@ -1197,7 +1248,7 @@ describe("Codex launch confinement", () => {
       failure: { category: "incompatible", message: WINDOWS_STRICT_NETWORK_REFUSAL },
     });
     // Neither refused call invoked confinement.prepare again.
-    expect(confinement.prepare).toHaveBeenCalledTimes(1);
+    expect(confinement.prepare).toHaveBeenCalledTimes(2);
   });
 
   it("reads the Windows catalog unconfined only for a host whose new threads run with no Octant sandbox", () => {

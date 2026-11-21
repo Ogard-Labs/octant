@@ -347,11 +347,21 @@ Edit remove_explicit(const std::wstring& path, PSID sid) {
   const Edit opened = open_object(path, object);
   if (opened != Edit::applied) return opened;
   DWORD size = sizeof(ACL);
+  bool found = false;
   for (DWORD index = 0; index < object.dacl->AceCount; ++index) {
     void* raw = nullptr;
     if (!GetAce(object.dacl, index, &raw)) return Edit::failed;
-    size += static_cast<ACE_HEADER*>(raw)->AceSize;
+    const auto* header = static_cast<ACE_HEADER*>(raw);
+    if ((header->AceFlags & INHERITED_ACE) == 0 && names_sid(header, sid)) {
+      found = true;
+    }
+    size += header->AceSize;
   }
+  // If grant_acl never wrote an explicit ACE for this container SID (for
+  // example on a machine-managed read-only directory where ALL APPLICATION
+  // PACKAGES already holds read access), skip SetNamedSecurityInfoW so
+  // standard users do not need WRITE_DAC on paths they never modified.
+  if (!found) return Edit::unnecessary;
   std::vector<unsigned char> buffer(size);
   auto* updated = reinterpret_cast<PACL>(buffer.data());
   const DWORD revision = object.dacl->AclRevision > ACL_REVISION ? object.dacl->AclRevision : ACL_REVISION;
@@ -559,7 +569,7 @@ int recover_container(const Options& options) {
     if (edit == Edit::linked) {
       report(L"refused recovery on a path that passes through a junction or link");
       clean = false;
-    } else if (edit != Edit::applied && edit != Edit::missing) {
+    } else if (edit != Edit::applied && edit != Edit::unnecessary && edit != Edit::missing) {
       report(L"could not remove a grant during recovery");
       clean = false;
     }

@@ -1792,10 +1792,21 @@ export class WorkTurnService {
       skillContext = resolved.context;
       extensionTools = resolved.tools;
     }
+    // Windows Strict phase 1 withholds Octant-operated host tools before
+    // continuation checks so follow-up turns compare the actual admitted empty
+    // tool catalog against the saved session instead of demanding a handoff.
+    const windowsStrictLocal =
+      server === undefined &&
+      platform === "win32" &&
+      (this.#resolveStrict?.(String(command.threadId)) ?? true);
+    if (windowsStrictLocal && extensionTools !== undefined) {
+      await extensionTools.close?.().catch(() => undefined);
+      extensionTools = undefined;
+    }
     const hostTools =
       server !== undefined
         ? server.tools
-        : thread === undefined
+        : windowsStrictLocal || thread === undefined
           ? undefined
           : this.#resolveAppManagedTools?.({
               thread,
@@ -1805,8 +1816,9 @@ export class WorkTurnService {
               turnId: command.turnId,
               ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
             });
-    const preparedTools =
-      extensionTools === undefined
+    const preparedTools = windowsStrictLocal
+      ? undefined
+      : extensionTools === undefined
         ? hostTools
         : combineAppManagedToolSets(hostTools, extensionTools);
     let toolsLaunched = false;

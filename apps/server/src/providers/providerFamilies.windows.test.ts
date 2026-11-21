@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
 import {
+  WINDOWS_KEPT_SANDBOX_REFUSAL,
   WINDOWS_STRICT_CHAT_REFUSAL,
   WINDOWS_STRICT_REFUSAL,
   windowsStrictRuntimeRefusal,
@@ -93,15 +94,21 @@ describe.runIf(process.platform === "win32" && fakeOpenCode !== undefined)(
     }, 90_000);
 
     it("refuses Strict and a kept sandbox by name before OpenCode runs", async () => {
-      for (const level of [
-        { executionPolicy: "approval-gated" },
-        { mode: "chat", executionPolicy: "approval-gated", strict: true },
-        { executionPolicy: "full-access", fullAccessSandbox: true, strict: false },
+      for (const [level, message] of [
+        [{ executionPolicy: "approval-gated" }, WINDOWS_STRICT_REFUSAL],
+        [{ executionPolicy: "full-access", strict: true }, windowsStrictRuntimeRefusal("opencode")],
+        [
+          { mode: "chat", executionPolicy: "approval-gated", strict: true },
+          WINDOWS_STRICT_CHAT_REFUSAL,
+        ],
+        [
+          { executionPolicy: "full-access", fullAccessSandbox: true, strict: false },
+          WINDOWS_KEPT_SANDBOX_REFUSAL,
+        ],
       ] as const) {
         const refused = await startAndStop(level);
         expect(Either.isLeft(refused)).toBe(true);
-        if (Either.isLeft(refused))
-          expect(refused.left.message).toMatch(/sandbox Windows doesn't have yet/);
+        if (Either.isLeft(refused)) expect(refused.left.message).toBe(message);
       }
     }, 60_000);
   },
