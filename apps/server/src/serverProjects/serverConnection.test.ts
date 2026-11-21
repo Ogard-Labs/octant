@@ -515,6 +515,18 @@ child.on('exit', (code) => process.exit(code ?? 1));`,
     }
   });
 
+  it("settles its exit after stopping even when nobody reads the program's output", async () => {
+    const { connection, scratch } = standInSsh();
+    try {
+      const stream = connection.openStream(server, { script: "exec head -c 1048576 /dev/zero" });
+      if (stream.status !== "open") throw new Error(stream.message);
+      stream.stop();
+      expect((await stream.exited).exitCode).not.toBeUndefined();
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }, 15_000);
+
   it("opens nothing for a refused server or an argument it cannot carry", () => {
     const refused = new ServerConnection({
       sshPath: "/nonexistent/ssh",

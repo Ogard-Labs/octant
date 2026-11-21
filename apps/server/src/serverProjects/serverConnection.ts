@@ -582,7 +582,19 @@ export class ServerConnection {
         child.stdin.end();
         const force = setTimeout(() => child.kill("SIGTERM"), STREAM_STOP_GRACE_MS);
         force.unref();
-        void exited.then(() => clearTimeout(force));
+        // `close` waits for the output pipes, and output nobody reads pauses
+        // them: a caller that stops without reading would wait on `exited`
+        // forever, even after SSH has gone. A second grace releases the pipes.
+        const release = setTimeout(() => {
+          child.stdout.destroy();
+          child.stderr.destroy();
+          stdout.destroy();
+        }, 2 * STREAM_STOP_GRACE_MS);
+        release.unref();
+        void exited.then(() => {
+          clearTimeout(force);
+          clearTimeout(release);
+        });
       },
       exited,
     };
