@@ -5,7 +5,11 @@ import {
   SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
   type AttachedFileByPath,
 } from "../attachments/attachedFiles";
-import type { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
+import type {
+  createProductFeedbackTurnPort,
+  ProductFeedbackClaimDecision,
+  ProductFeedbackTakeResult,
+} from "../browser/productFeedbackTurnPort";
 import { requiresLiveCodeReviewAuthority } from "./codeReviewAuthority";
 import {
   retainedReviewTarget,
@@ -70,6 +74,7 @@ import {
   type CodeOperationCommand,
   type CodeOperationId,
   type CodeOperationResult,
+  type CodePullRequestLineNotesSource,
   type CodeTerminalId,
   type CodeTerminalLiveFrame,
   type CodeTerminalLiveRequest,
@@ -86,6 +91,7 @@ import {
   type AgentRunId,
   type MentionableThreadId,
   type PendingRequest,
+  type ProjectId,
   type ScaffoldEntry,
   type ScaffoldRun,
   type ProviderAttachmentInput,
@@ -1125,10 +1131,16 @@ export interface CodeOperationTurnPort {
      */
     readonly onContextDelivered?: () => void;
     /** Consume feedback synchronously only after the runtime's final admission check. */
-    readonly takeProductFeedback?: (maxAttachments?: number) => {
-      readonly context?: string;
-      readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
-    };
+    readonly takeProductFeedback?: (
+      maxAttachments?: number,
+      onClaimed?: () => ProductFeedbackClaimDecision,
+    ) => ProductFeedbackTakeResult;
+    /**
+     * Records outside-content provenance synchronously only after every busy,
+     * move, driver, session, and admission check has passed, before owning the
+     * turn or launching the provider. Returning `false` refuses fail-closed.
+     */
+    readonly recordOutsideContent?: () => boolean;
   }) => Promise<{
     readonly state: "running" | "waiting" | "completed" | "interrupted" | "failed";
     readonly evidence?: string;
@@ -1436,6 +1448,20 @@ export interface CodeOperationServiceOptions {
   readonly recordReviewContent?: (
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
+  /**
+   * Resolves the observed pull request's author and the signed-in `gh` viewer
+   * login for line notes composed on a pull request's diff. When they differ or
+   * either cannot be read, the host marks the thread as having read outside
+   * content before starting the turn.
+   */
+  readonly resolvePullRequestLineNotesAuthorship?: (input: {
+    readonly projectId: ProjectId;
+    readonly source: CodePullRequestLineNotesSource;
+    readonly signal: AbortSignal;
+  }) => Promise<{
+    readonly pullRequestAuthor: string | undefined;
+    readonly viewerLogin: string | undefined;
+  }>;
   readonly turns: CodeOperationTurnPort;
   readonly evidence: CodeOperationEvidencePort;
   /**
@@ -6923,6 +6949,59 @@ export class CodeOperationService {
         );
       }
     }
+    let recordPullRequestLineNotesOutsideContent: (() => boolean) | undefined;
+    if (command.pullRequestLineNotesSource !== undefined) {
+      const source = command.pullRequestLineNotesSource;
+      const authorship = await this.#options
+        .resolvePullRequestLineNotesAuthorship?.({
+          projectId: thread.projectId,
+          source,
+          signal: AbortSignal.timeout(5_000),
+        })
+        .catch(() => undefined);
+      if (admissionCurrent?.() === false) {
+        await extensionTools?.close?.().catch(() => undefined);
+        return this.#failed(
+          command.operationId,
+          "unauthorized",
+          "Code turn admission is no longer current.",
+          "refused",
+        );
+      }
+      const author = authorship?.pullRequestAuthor?.trim();
+      const viewer = authorship?.viewerLogin?.trim();
+      const authoredBySignedInUser =
+        author !== undefined &&
+        author.length > 0 &&
+        author !== "Unknown author" &&
+        viewer !== undefined &&
+        viewer.length > 0 &&
+        author.toLowerCase() === viewer.toLowerCase();
+      if (!authoredBySignedInUser) {
+        const recordReviewContent = this.#options.recordReviewContent;
+        if (recordReviewContent === undefined) {
+          await extensionTools?.close?.().catch(() => undefined);
+          return this.#failed(
+            command.operationId,
+            "unavailable",
+            "Could not record outside-content provenance for pull-request line notes. Nothing was sent.",
+            "refused",
+          );
+        }
+        // Deferred to the runtime's atomic admission boundary so a refused
+        // start (such as a busy thread) never leaves a permanent taint mark.
+        recordPullRequestLineNotesOutsideContent = () => {
+          const recorded = recordReviewContent({
+            threadId: thread.id,
+            provenance: { origin: "external-content", sourceLabel: "pull-request-line-notes" },
+            contentReference: `pull-request-line-notes:${source.repositoryOwner}:${source.repositoryName}:${String(source.number)}:${String(command.operationId)}`,
+            correlationId: command.operationId,
+            authorized: true,
+          });
+          return recorded.kind === "recorded" || recorded.kind === "already-recorded";
+        };
+      }
+    }
     // Read last, after every refusal above: carrying a message marks this
     // thread as having ingested external content, and a turn that was never
     // going to start should not do that. A failed read costs the turn its
@@ -6985,7 +7064,25 @@ export class CodeOperationService {
                 .catch(() => undefined);
             },
           }),
-      ...(preparedFeedback === undefined ? {} : { takeProductFeedback: preparedFeedback.take }),
+      ...(preparedFeedback === undefined
+        ? {}
+        : {
+            takeProductFeedback:
+              preparedFeedback.takeWithClaim ??
+              ((maxAttachments) => {
+                try {
+                  return {
+                    status: "taken" as const,
+                    delivery: preparedFeedback.take(maxAttachments),
+                  };
+                } catch {
+                  return { status: "feedback-changed" as const };
+                }
+              }),
+          }),
+      ...(recordPullRequestLineNotesOutsideContent === undefined
+        ? {}
+        : { recordOutsideContent: recordPullRequestLineNotesOutsideContent }),
     });
     if (turn.admission !== "refused") {
       this.#options.consumeIssueContextFramed?.(String(thread.id));

@@ -1872,6 +1872,19 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             port: canvasAgentToolPort,
           }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+        resolvePullRequestLineNotesAuthorship: async ({ projectId, source, signal }) => {
+          const pullRequestAuthor = projectPullRequestService.observedAuthor({
+            projectId,
+            repositoryOwner: source.repositoryOwner,
+            repositoryName: source.repositoryName,
+            number: source.number,
+          });
+          if (pullRequestAuthor === undefined) {
+            return { pullRequestAuthor: undefined, viewerLogin: undefined };
+          }
+          const viewerLogin = await projectPullRequestService.observeViewerLogin(signal);
+          return { pullRequestAuthor, viewerLogin };
+        },
         outsideContentMarks: runtimeOutsideContentMarks,
         forgeChanges: runtimeForgeChanges,
         readThreadExternalContentTaint: (threadId) =>

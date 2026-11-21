@@ -1390,4 +1390,32 @@ describe("GhPullRequestPort forge node IDs", () => {
       },
     });
   });
+
+  it("reads the signed-in viewer login via GraphQL and fails closed on errors or empty output", async () => {
+    const ok = fixture([
+      { exitCode: 0, stdout: JSON.stringify({ data: { viewer: { login: " henrik " } } }) },
+    ]);
+    expect(await ok.port.observeViewerLogin(new AbortController().signal)).toBe("henrik");
+    expect(ok.command.run).toHaveBeenCalledWith(
+      ["api", "graphql", "-f", "query=query{viewer{login}}"],
+      expect.any(Object),
+      expect.any(AbortSignal),
+    );
+
+    const failed = fixture([{ exitCode: 1, stdout: "", stderr: "not logged in" }]);
+    expect(await failed.port.observeViewerLogin(new AbortController().signal)).toBeUndefined();
+
+    const timedOut = fixture([
+      { exitCode: 0, stdout: '{"data":{"viewer":{"login":"henrik"}}}', timedOut: true },
+    ]);
+    expect(await timedOut.port.observeViewerLogin(new AbortController().signal)).toBeUndefined();
+
+    const invalidJson = fixture([{ exitCode: 0, stdout: "not-json" }]);
+    expect(await invalidJson.port.observeViewerLogin(new AbortController().signal)).toBeUndefined();
+
+    const blank = fixture([
+      { exitCode: 0, stdout: JSON.stringify({ data: { viewer: { login: "   " } } }) },
+    ]);
+    expect(await blank.port.observeViewerLogin(new AbortController().signal)).toBeUndefined();
+  });
 });

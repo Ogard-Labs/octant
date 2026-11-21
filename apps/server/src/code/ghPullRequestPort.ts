@@ -280,6 +280,8 @@ const BASE_REPOSITORY_IDENTITY_QUERY =
 const ISSUE_CLOSURE_QUERY =
   "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){number title timelineItems(last:25,itemTypes:[CLOSED_EVENT]){pageInfo{hasPreviousPage} nodes{... on ClosedEvent{createdAt closer{... on PullRequest{number repository{owner{login} name}}}}}}}}}";
 
+const VIEWER_LOGIN_QUERY = "query{viewer{login}}";
+
 const MAX_ISSUE_CLOSURE_EVENTS = 25;
 
 const MAX_PR_REVIEW_ITEMS = 500;
@@ -1011,6 +1013,36 @@ export class GhPullRequestPort {
     if (nodeId === undefined) return undefined;
     const canonical = canonicalRepositoryFromGraphql(repository);
     return { nodeId, ...(canonical === undefined ? {} : { repository: canonical }) };
+  }
+
+  /**
+   * Read-only lookup of the signed-in `gh` viewer login. Fails closed to
+   * `undefined` when `gh` is unavailable, unauthenticated, timed out, or
+   * returns an unreadable response.
+   */
+  async observeViewerLogin(signal: AbortSignal): Promise<string | undefined> {
+    if (signal.aborted) return undefined;
+    let result: GhCommandResult;
+    try {
+      result = await this.#command.run(
+        ["api", "graphql", "-f", `query=${VIEWER_LOGIN_QUERY}`],
+        { environment: this.#environment, stdin: undefined },
+        signal,
+      );
+    } catch {
+      return undefined;
+    }
+    if (result.timedOut === true || result.exitCode !== 0) return undefined;
+    let value: unknown;
+    try {
+      value = JSON.parse(result.stdout);
+    } catch {
+      return undefined;
+    }
+    const data = isRecord(value) ? value.data : undefined;
+    const viewer = isRecord(data) ? data.viewer : undefined;
+    const login = isRecord(viewer) && typeof viewer.login === "string" ? viewer.login.trim() : "";
+    return login.length > 0 ? login : undefined;
   }
 
   /**

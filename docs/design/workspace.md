@@ -1366,24 +1366,36 @@ clearing the imported draft or preparing a truthful replacement, not silently
 retaining the excerpt as trusted plain prose.
 
 Line notes are the lighter way to answer a turn from its change view
-(maintainer decision, 2026-11-14). In Review opened from a turn's changed-file
-row, the line-number button on either side of the diff also opens a note
-anchored to that file, side (new or old) and line; the note may extend through
-a later line on the same side. Notes stay pending in that view, where the
-person edits or removes each one. They are this window's unsent drafts: they
-journal nothing and close with the view. **Send notes** sends them together as
-one ordinary follow-up message in the owning thread through the normal send
-path, so mode, access level, Plan and every host check apply unchanged. The
-message lists each note with its file, side and line or lines, the first
-line's text quoted and cut to 120 characters, then the note. Send waits while
-the thread runs a turn or a pending note is being edited. Notes count as sent
-once the host accepts the message, whatever its turn then does, so a turn that
-waits, stops or fails never invites sending them twice; only a refusal keeps
-them. A line note
-carries no finding reference: its message is plain person text, the same as
-typing the quoted line into the composer, so the outside-content record that a
-correction draft's references take does not apply. Local findings and their
-correction draft stay the path for review that is tracked and resolved.
+(maintainer decision, 2026-11-14) or a pull request from its diff
+(maintainer decision, 2026-11-21). In Review opened from a turn's changed-file
+row, and in a pull request's diff (Review › pull request › Changes and the
+dock's pull-request review), the line-number button on either side of the diff
+opens a note anchored to that file, side (new or old) and line; the note may
+extend through a later line on the same side. Notes stay pending in that view,
+where the person edits or removes each one. They are this window's unsent
+drafts: they journal nothing and close with the view. **Send notes** sends them
+together as one ordinary follow-up message through the normal send path, so
+mode, access level, Plan and every host check apply unchanged. On a pull
+request's diff a small thread picker under **Send notes** chooses which linked
+Code thread receives the message, defaulting to the first linked thread (as
+Auto-fix does); with no thread linked, notes can still be written and **Send
+notes** is disabled with "Link a Code thread to send notes". Sending line notes
+never posts comments or reviews to GitHub, which stays a separate explicit
+action. The message lists each note with its file, side and line or lines, the
+first line's text quoted and cut to 120 characters, then the note. Send waits
+while the thread runs a turn or a pending note is being edited. Notes count as
+sent once the host accepts the message, whatever its turn then does, so a turn
+that waits, stops or fails never invites sending them twice; only a refusal
+keeps them. On a turn's change view, a line note carries no finding reference:
+its message is plain person text, the same as typing the quoted line into the
+composer, so the outside-content record that a correction draft's references
+take does not apply. On a pull request's diff, the host checks the observed
+pull request's author against the signed-in `gh` user before starting the turn:
+when they match, the message is sent as plain person text; when they differ or
+either cannot be read, the host marks the thread as having read outside content
+first (the same mechanism Auto-fix uses) and refuses the send if that mark
+cannot be recorded. Local findings and their correction draft stay the path for
+review that is tracked and resolved.
 
 After a correction, Refresh reads the new comparison and latest recorded checks.
 Checks that lack a comparison binding are labeled as such. An agent reply never
@@ -1421,7 +1433,8 @@ menu holding Close or Reopen pull request. Under it, the state pill with
 "repository #number", the title in the page-title role (26px, 600), one meta
 line (author, age, head → base) and, on Summary, the description as markdown at
 13px with a 720px measure; Summary holds no form. Changes lists commits, changed
-files and the diff. Timeline lists the reviews and comments, newest last, then
+files and the diff (with clickable line numbers and window-local line notes sent
+to a linked Code thread). Timeline lists the reviews and comments, newest last, then
 the labels, review-thread replies, the comment form and the review form
 (Approve, Request changes with a note) at the end. The status column (260px,
 sticky) has small captions in the navigation-group role: Merge status (one
