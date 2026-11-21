@@ -10,13 +10,12 @@ import {
 } from "@octant/contracts";
 import { listEligibleImageProfiles } from "@octant/domain";
 import { createThreadImageAgentTools, IMAGE_TOOL_NAME } from "../image/imageAgentTools";
-import {
-  ImageGenerationOfferService,
-  type ImageOfferAnswer,
-} from "../image/imageGenerationOfferService";
+import { ImageGenerationOfferService } from "../image/imageGenerationOfferService";
 import { imageOfferDecisionRules } from "../image/imageOfferDecisionRules";
+import type { ServiceOfferAnswer } from "../offers/serviceOfferDecision";
 import { createServiceOfferRouteHandler } from "../offers/serviceOfferRoutes";
 import { ServiceOfferService } from "../offers/serviceOfferService";
+import { transcriptionDecision } from "../speech/transcriptionTool";
 import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { createRemoteDevicePrincipal } from "../clientPrincipal";
@@ -1448,7 +1447,7 @@ describe("ChatService", () => {
       listInstances: () => [profile],
       readImageGenerationSettings: () => ({ customSources: [] }),
     };
-    const waiting = new ServiceOfferService<ServiceOffer, ImageOfferAnswer>(5, {
+    const waiting = new ServiceOfferService<ServiceOffer, ServiceOfferAnswer>(5, {
       uuid: () => crypto.randomUUID(),
       now: Date.now,
     });
@@ -1490,7 +1489,7 @@ describe("ChatService", () => {
     const chat = createChatRouteHandler({ service, windowAuthorityStore });
     const offerRoute = createServiceOfferRouteHandler({
       offers: waiting,
-      rules: imageOfferDecisionRules(imageProfiles),
+      rules: { ...imageOfferDecisionRules(imageProfiles), transcribe: transcriptionDecision },
       authorizeScope: async (_scope, kind, id) =>
         kind === "chat-thread" &&
         service.read(decodeChatThreadId(id)).thread.lifecycle === "active",
