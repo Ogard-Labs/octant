@@ -1,10 +1,15 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { createGunzip } from "node:zlib";
+import { AppVersion } from "@octant/contracts/app-updates";
 import type { MemberInstallTarget } from "@octant/contracts/shield-servers";
+import { compareAppVersions } from "@octant/domain";
+import { Schema } from "effect";
 import {
   createReleaseFeedVerifier,
   decodeHeadlessArtifactManifest,
@@ -34,6 +39,12 @@ const execFileAsync = promisify(execFile);
 const WIRE_VERSION = "1";
 /** A release build is tens of megabytes; anything near this is not one. */
 const MAX_BUILD_BYTES = 1024 * 1024 * 1024;
+/**
+ * The unpacked size a build may claim. The archive is unpacked before its
+ * signature can be checked, so a small archive that inflates without bound
+ * would fill this computer's temporary folder; it is measured first.
+ */
+const MAX_UNPACKED_BYTES = 2 * 1024 * 1024 * 1024;
 const BUILD_NAME = /^octant-(.+)-(darwin-arm64|linux-x64|linux-arm64)\.tar\.gz$/;
 
 export type HeadlessBuildCheck =
@@ -80,7 +91,7 @@ export function createHeadlessBuilds(options: {
         return match?.[1] !== undefined && match[2] === target ? [{ name, version: match[1] }] : [];
       });
       const newest = versions.sort((left, right) =>
-        right.version.localeCompare(left.version, undefined, { numeric: true }),
+        compareBuildVersions(right.version, left.version),
       )[0];
       return newest === undefined ? undefined : join(options.folder, newest.name);
     },
@@ -92,6 +103,7 @@ export function createHeadlessBuilds(options: {
       } catch {
         return refused("unreadable");
       }
+      if (!(await unpacksWithin(path, MAX_UNPACKED_BYTES))) return refused("unreadable");
       const workspace = await mkdtemp(join(tmpdir(), "octant-member-build-"));
       try {
         try {
@@ -156,4 +168,33 @@ function refused(
   reason: Extract<HeadlessBuildCheck, { readonly status: "refused" }>["reason"],
 ): HeadlessBuildCheck {
   return { status: "refused", reason };
+}
+
+const isAppVersion = Schema.is(AppVersion);
+
+/**
+ * Orders two build versions: negative when `left` is older. A prerelease
+ * sorts below the release it leads to, so `1.2.3` outranks
+ * `1.2.3-candidate.20261120.1`; a plain numeric string comparison put the
+ * candidate first. Names that are not app versions fall back to that
+ * comparison.
+ */
+export function compareBuildVersions(left: string, right: string): number {
+  return isAppVersion(left) && isAppVersion(right)
+    ? compareAppVersions(left, right)
+    : left.localeCompare(right, undefined, { numeric: true });
+}
+
+/** Whether the gzip archive at `path` inflates to at most `limit` bytes, read without writing anything. */
+async function unpacksWithin(path: string, limit: number): Promise<boolean> {
+  let total = 0;
+  try {
+    for await (const chunk of createReadStream(path).pipe(createGunzip())) {
+      total += (chunk as Buffer).length;
+      if (total > limit) return false;
+    }
+  } catch {
+    return false;
+  }
+  return true;
 }

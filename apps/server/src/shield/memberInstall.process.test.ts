@@ -67,18 +67,29 @@ const decodeMemberInstallResult = Schema.decodeUnknownSync(MemberInstallResult);
  * `$HOME/octant-calls.log` and does what the real one would to the login's
  * folders, and its `hub join` prints a comparison code and waits for this
  * computer's approval, which the stand-in hub writes as `$HOME/approved`.
+ * Like the real one it refuses to install a version twice. \`$HOME/listen-fails\`
+ * makes its listener fail, and \`$HOME/old-cli\` makes it a build whose usage
+ * predates \`hub join -\`. Reading its usage is not recorded.
  */
 const STAND_IN_CLI = `#!/bin/sh
+if [ "$1" = --help ]; then
+  echo "Usage:"
+  [ -f "$HOME/old-cli" ] || echo "  octant hub join <code|-> [--items <list>]"
+  exit 0
+fi
 printf '%s\\n' "$*" >> "$HOME/octant-calls.log"
 case "$1 $2" in
   "server install")
     artifact=$4; root=$6
     [ -f "$artifact/octant-artifact.sig" ] || { echo "Octant refuses an unsigned build." >&2; exit 1; }
+    [ -e "$root/versions/1.2.3" ] && { echo "Octant version 1.2.3 is already installed; refusing to overwrite it." >&2; exit 1; }
     mkdir -p "$root/versions/1.2.3" && cp -R "$artifact/." "$root/versions/1.2.3/" && ln -sfn "$root/versions/1.2.3" "$root/current"
     echo "Octant 1.2.3 installed at $root." ;;
   "server enable") echo "enabled" ;;
   "server start") echo "ready" ;;
-  "listener enable") echo "listening on $4:$6" ;;
+  "listener enable")
+    [ -f "$HOME/listen-fails" ] && { echo "Port $6 is in use." >&2; exit 1; }
+    echo "listening on $4:$6" ;;
   "hub join")
     # The real CLI reads the code from standard input when given a dash.
     if [ "$3" = "-" ]; then IFS= read -r code; else code=$3; fi
@@ -441,6 +452,46 @@ describe("making a registered server an Octant computer over SSH", () => {
         person,
       ),
     ).toMatchObject({ reason: "plan-expired" });
+  });
+
+  it("finishes on a retry after a later step failed, without installing the build twice", async () => {
+    const setup = setUp();
+    writeFileSync(join(setup.server.home, "listen-fails"), "");
+    const first = await installOver(setup);
+    expect(first.progress.state).toBe("failed");
+    rmSync(join(setup.server.home, "listen-fails"));
+    const retry = await installOver(setup);
+    expect(retry.progress.state).toBe("joined");
+    expect(
+      setup.server
+        .calls()
+        .split("\n")
+        .filter((line) => line.startsWith("server install")),
+    ).toHaveLength(1);
+  });
+
+  it("offers a final release over the candidate build that led to it", async () => {
+    const folder = scratchDirectory();
+    for (const version of ["1.2.3-candidate.20261120.1", "1.2.3", "1.2.2"]) {
+      writeFileSync(join(folder, `octant-${version}-linux-x64.tar.gz`), "");
+    }
+    expect(await createHeadlessBuilds({ folder }).find("linux-x64")).toBe(
+      join(folder, "octant-1.2.3-linux-x64.tar.gz"),
+    );
+  });
+
+  it("refuses to join with a build whose CLI cannot read the join code on standard input", async () => {
+    const setup = setUp();
+    // The stand-in reads the old-build marker when asked for its usage.
+    mkdirSync(setup.server.home, { recursive: true });
+    writeFileSync(join(setup.server.home, "old-cli"), "");
+    const { progress } = await installOver(setup);
+    expect(progress.state).toBe("failed");
+    expect(progress.steps.find((step) => step.step === "join")?.message).toContain(
+      "cannot take a join code on standard input",
+    );
+    expect(setup.server.calls()).not.toContain("hub join");
+    expect(setup.decisions).toEqual([]);
   });
 
   it("refuses an artifact whose signature does not verify, and changes nothing on the server", async () => {

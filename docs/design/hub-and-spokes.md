@@ -602,8 +602,10 @@ keys when it has them) and changes nothing anywhere. The sheet states:
 
 **Where the build comes from.** Octant downloads no build itself yet: the
 newest `octant-<version>-<target>.tar.gz` in the `headless-builds` folder of
-this computer's Octant data folder is used, as the release publishes it. A
-build that is unsigned, signed by a key not trusted for its ring, or whose
+this computer's Octant data folder is used, as the release publishes it; a
+final release outranks the candidate or preview build of the same version
+that led to it. An archive that would unpack to more than 2 GiB is refused
+before it is unpacked. A build that is unsigned, signed by a key not trusted for its ring, or whose
 files differ from its manifest is refused before a byte is sent; it is
 checked again when the person confirms, and a build changed since the sheet
 was read is refused.
@@ -620,7 +622,10 @@ after it.
    must be the very files checked here.
 3. **Install.** The build's own `octant server install --artifact …
 --install-root …` installs it, checking its signature again first; Octant
-   never passes `--self-built` here.
+   never passes `--self-built` here. When an earlier attempt failed after this
+   step and left this exact signed build current (the same manifest and
+   signature), a retry goes on past it instead of being refused as already
+   installed; any other installed build is still refused.
 4. **Start.** `octant server enable`, then `octant server start`, from the
    installed copy.
 5. **Listen.** `octant listener enable --hostname <picked address> --port
@@ -636,7 +641,9 @@ after it.
    hub approves that ticket only when the comparison code it derives for the
    waiting claim matches; a claim whose code differs is denied and the step
    fails ([decision H26](#decisions)). The step succeeds when the server's
-   join finishes.
+   join finishes. A build whose CLI usage does not offer `hub join -` (one
+   from before it, which would submit the dash as the code) fails this step
+   before a code is minted; the code is never passed as an argument instead.
 
 **Journal.** The request (`shield-servers.member-install-requested@1`) and
 each step's outcome (`shield-servers.member-install-step@1`, with a closed

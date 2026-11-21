@@ -1031,7 +1031,7 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
   { octant: "hub join-code [--owner]" },
   {
     octant:
-      "hub join <code> [--items <roster,status,introduce,wake,owners,standby,push,provision,act|none>]",
+      "hub join <code|-> [--items <roster,status,introduce,wake,owners,standby,push,provision,act|none>]",
   },
   { octant: "hub grant [--items <list>|none]" },
   { octant: "hub leave" },

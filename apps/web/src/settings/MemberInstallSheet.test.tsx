@@ -5,6 +5,7 @@ import type {
   MemberInstallResult,
   ShieldServer,
 } from "@octant/contracts/shield-servers";
+import { ShieldServersClientFailure } from "@octant/client-runtime/shield-servers-client";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -197,6 +198,38 @@ describe("Make this an Octant computer", () => {
       await screen.findByText("Nothing ran after the step that failed.", {}, { timeout: 4_000 }),
     ).toBeTruthy();
     expect(reads).toBe(2);
+  });
+
+  it("stops reading progress once the host no longer accepts this window", async () => {
+    const memberInstall = vi.fn(async (command: MemberInstallCommand) => {
+      if (command.kind === "prepare-member-install") {
+        return { kind: "member-install-plan", plan: PLAN } as MemberInstallResult;
+      }
+      if (command.kind === "confirm-member-install") {
+        return {
+          kind: "member-install-progress",
+          progress: progress("running", [{ step: "copy", state: "running" }]),
+        } as MemberInstallResult;
+      }
+      throw new ShieldServersClientFailure("Unauthorized", 401);
+    });
+    const user = userEvent.setup();
+    render(
+      <MemberInstallSheet
+        client={{ memberInstall }}
+        onClose={() => {}}
+        onOpenPrivateNetworkGuide={() => {}}
+        server={SERVER}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Install and join" }));
+    expect(
+      await screen.findByText(/no longer accepts this window/, {}, { timeout: 4_000 }),
+    ).toBeTruthy();
+    await new Promise((done) => setTimeout(done, 1_500));
+    expect(memberInstall.mock.calls.filter(([c]) => c.kind === "read-member-install")).toHaveLength(
+      1,
+    );
   });
 
   it("refuses a server with no private address and links the private network guide", async () => {

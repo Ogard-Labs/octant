@@ -1,4 +1,7 @@
-import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
+import {
+  ShieldServersClientFailure,
+  type ShieldServersClient,
+} from "@octant/client-runtime/shield-servers-client";
 import type {
   MemberInstallPlan,
   MemberInstallProgress,
@@ -122,8 +125,23 @@ export function MemberInstallSheet(props: MemberInstallSheetProps) {
               poll();
             }
           },
-          () => {
-            if (current) poll();
+          (error: unknown) => {
+            if (!current) return;
+            // The host refusing this window (signed out, or no longer the
+            // person's) does not pass by waiting, so it ends the polling.
+            if (
+              error instanceof ShieldServersClientFailure &&
+              (error.status === 401 || error.status === 403)
+            ) {
+              setState({
+                kind: "refused",
+                reason: "not-the-person",
+                message:
+                  "The host no longer accepts this window, so the install's progress cannot be read here.",
+              });
+            } else {
+              poll();
+            }
           },
         );
       }, PROGRESS_POLL_MS);

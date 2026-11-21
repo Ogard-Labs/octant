@@ -140,9 +140,17 @@ printf '%s\\n%s\\n%s' "$r" "$(digest "$r/octant-artifact.json")" "$(digest "$r/o
 /**
  * `$1` the unpacked build, `$2` the install root, `$3` the work folder. The
  * build's own CLI installs it and checks its signature first; there is no
- * \`--self-built\` here, ever.
+ * \`--self-built\` here, ever. An earlier attempt that failed after this step
+ * left this exact signed build current (the same manifest and signature), and
+ * the CLI refuses to install a version twice, so a retry resumes past it; any
+ * other installed build is still refused by the CLI.
  */
-const INSTALL_SCRIPT = `"$1/bin/octant" server install --artifact "$1" --install-root "$2" || exit $?
+const INSTALL_SCRIPT = `if cmp -s -- "$1/octant-artifact.json" "$2/current/octant-artifact.json" &&
+  cmp -s -- "$1/octant-artifact.sig" "$2/current/octant-artifact.sig"; then
+  echo "This build is already installed."
+else
+  "$1/bin/octant" server install --artifact "$1" --install-root "$2" || exit $?
+fi
 rm -rf -- "$3/unpacked" "$3/build.tar.gz"
 exit 0`;
 
@@ -166,6 +174,13 @@ log="$1/join.log"
 rm -f -- "$log"
 printf '%s\\n' "$code" | nohup sh -c '"$0" hub join - --items "$1"; printf "\\nexit=%s\\n" "$?"' "$2" "$3" >"$log" 2>&1 &
 exit 0`;
+
+/**
+ * `$1` the installed CLI. Builds from before \`hub join -\` would submit the
+ * dash itself as the join code, and the code never goes in an argument as a
+ * fallback, so the join runs only when the build's usage offers the dash.
+ */
+const JOIN_SUPPORT_SCRIPT = `"$1" --help 2>/dev/null | grep -q -- 'hub join <code|->'`;
 
 const JOIN_READ_SCRIPT = `cat -- "$1/join.log" 2>/dev/null; exit 0`;
 
@@ -493,6 +508,19 @@ export class MemberInstallService {
     cli: string,
     actor: EventActor,
   ): Promise<StepOutcome> {
+    const supported = await this.#call(server, {
+      script: JOIN_SUPPORT_SCRIPT,
+      args: [cli],
+      timeoutMs: SHORT_STEP_TIMEOUT_MS,
+    });
+    if (!supported.ok) {
+      return supported.failure === "server-unreachable"
+        ? supported
+        : failed(
+            "command-failed",
+            `The build installed on ${alias} cannot take a join code on standard input. Put a newer release build in the builds folder, then try again.`,
+          );
+    }
     const minted = this.#options.hub.mintJoinCode();
     if (minted.status === "refused") return failed("join-code-unavailable", minted.message);
     const started = await this.#call(server, {
