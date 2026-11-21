@@ -19328,7 +19328,16 @@ approval-gated` command that undoes it. The terminal shows no one-time
     connection reaches the forward, including a guarded tool command with a
     `localServices` grant, a Full access turn, and any process outside
     Octant's sandbox; the row that forwarded it says so (maintainer decision,
-    2026-11-20).
+    2026-11-20). An SSH server with no Octant (a server Project) forwards the
+    same way from a window on this computer alone: each connection is its own
+    `ssh -W 127.0.0.1:<port>` stdio stream, at most eight at once, under the
+    dev-server preview's checks, the listener is on this computer's
+    `127.0.0.1` alone, the forward ends after an hour, at stop and at restart,
+    and its opening and closing are journaled as
+    `server-projects.port-forward-opened@1` and
+    `server-projects.port-forward-closed@1` with the Project and ports, never
+    the server's address. Every device is refused, and the row states the same
+    loopback sentence ([Server Projects: port forwards](design/server-projects.md#person-operated-port-forwards)).
 - **Host-driven provider sign-in.** A local principal may start a descriptor-driven
   PKCE or device-code sign-in. The host, not a provider child and not the
   renderer, owns the loopback redirect, the device poll, and refresh. State and

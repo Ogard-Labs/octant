@@ -417,3 +417,70 @@ export const ServerPreviewResult = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("refused"), reason: Schema.String }).annotations(strict),
 );
 export type ServerPreviewResult = typeof ServerPreviewResult.Type;
+
+/**
+ * Person-operated forward of one TCP port on the registered server's loopback
+ * to this computer's `127.0.0.1`, as raw TCP for tools that are not a browser
+ * (a database client, a debugger). Only a window on this computer starts one.
+ */
+export const ServerPortForwardCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("start"),
+    projectId: ProjectId,
+    remotePort: Schema.Int.pipe(Schema.between(1, 65535)),
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("stop"), projectId: ProjectId }).annotations(strict),
+);
+export type ServerPortForwardCommand = typeof ServerPortForwardCommand.Type;
+export const ServerPortForwardView = Schema.Struct({
+  projectId: Schema.String,
+  remotePort: Schema.Int.pipe(Schema.between(1, 65535)),
+  /** The port on this computer's `127.0.0.1`: the server's number when it was free. */
+  localPort: Schema.Int.pipe(Schema.between(1, 65535)),
+  status: Schema.Literal("listening", "lost", "stopped", "revoked"),
+}).annotations(strict);
+export type ServerPortForwardView = typeof ServerPortForwardView.Type;
+export const ServerPortForwardResult = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("forward"), view: ServerPortForwardView }).annotations(
+    strict,
+  ),
+  Schema.Struct({ kind: Schema.Literal("refused"), reason: Schema.String }).annotations(strict),
+);
+export type ServerPortForwardResult = typeof ServerPortForwardResult.Type;
+
+export const SERVER_PROJECTS_PORT_FORWARD_OPENED = "server-projects.port-forward-opened@1" as const;
+export const SERVER_PROJECTS_PORT_FORWARD_CLOSED = "server-projects.port-forward-closed@1" as const;
+/** Journaled with the Project and the ports, never the server's address or what travels. */
+export const ServerPortForwardOpenedPayload = Schema.Struct({
+  projectId: Schema.String,
+  remotePort: Schema.Int.pipe(Schema.between(1, 65535)),
+  localPort: Schema.Int.pipe(Schema.between(1, 65535)),
+}).annotations(strict);
+export type ServerPortForwardOpenedPayload = typeof ServerPortForwardOpenedPayload.Type;
+/**
+ * - `expired`: its hour ran out.
+ * - `revoked`: the window that opened it closed, or the Project's binding changed.
+ * - `lost`: an SSH stream to the server failed.
+ * - `host-stopped`: the host shut down, or a starting host found it left open.
+ */
+export const ServerPortForwardCloseReason = Schema.Literal(
+  "stopped",
+  "expired",
+  "revoked",
+  "lost",
+  "host-stopped",
+);
+export type ServerPortForwardCloseReason = typeof ServerPortForwardCloseReason.Type;
+export const ServerPortForwardClosedPayload = Schema.Struct({
+  projectId: Schema.String,
+  remotePort: Schema.Int.pipe(Schema.between(1, 65535)),
+  localPort: Schema.Int.pipe(Schema.between(1, 65535)),
+  reason: ServerPortForwardCloseReason,
+}).annotations(strict);
+export type ServerPortForwardClosedPayload = typeof ServerPortForwardClosedPayload.Type;
+export const decodeServerPortForwardOpenedPayload = Schema.decodeUnknownSync(
+  ServerPortForwardOpenedPayload,
+);
+export const decodeServerPortForwardClosedPayload = Schema.decodeUnknownSync(
+  ServerPortForwardClosedPayload,
+);
