@@ -6,6 +6,7 @@ import { Effect, Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   decodeChatThreadId,
+  decodeProjectId,
   decodeStableHostId,
   decodeWindowId,
   DeviceId,
@@ -15,6 +16,7 @@ import {
 } from "@octant/contracts";
 import { PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE } from "@octant/contracts/pending-requests";
 import { defaultWindowWorkspace } from "@octant/domain";
+import { windowAdmitsProject } from "@octant/domain/shell-policy";
 import { assertReadableChatThread } from "../chat/chatService";
 import {
   createRemoteDevicePrincipal,
@@ -38,7 +40,7 @@ afterEach(() => {
 });
 
 describe("wireWorkRequests service offers", () => {
-  it("lists a person-paired device's waiting Chat offer and aggregates local-window offers for the menu bar", async () => {
+  it("lists a person-paired device's waiting Chat offer and gives the menu bar each saved window's offers that window can still open", async () => {
     const dataDirectory = mkdtempSync(join(tmpdir(), "octant-work-requests-"));
     tempDirs.push(dataDirectory);
 
@@ -51,9 +53,12 @@ describe("wireWorkRequests service offers", () => {
 
           const pairedThreadId = randomUUID();
           const localThreadId = randomUUID();
-          for (const [id, title] of [
-            [pairedThreadId, "Phone chat"],
-            [localThreadId, "Desktop chat"],
+          const projectThreadId = randomUUID();
+          const otherProjectId = randomUUID();
+          for (const [id, title, projectId] of [
+            [pairedThreadId, "Phone chat", undefined],
+            [localThreadId, "Desktop chat", undefined],
+            [projectThreadId, "Project chat", otherProjectId],
           ] as const) {
             persistence.journal.append({
               aggregate: { aggregateType: "chat-thread", aggregateId: id },
@@ -71,6 +76,7 @@ describe("wireWorkRequests service offers", () => {
                     thread: {
                       id,
                       title,
+                      ...(projectId === undefined ? {} : { projectId }),
                       lifecycle: "active",
                       providerInstanceId: randomUUID(),
                       modelId: "fixture",
@@ -88,24 +94,28 @@ describe("wireWorkRequests service offers", () => {
           }
 
           const localWindowId = decodeWindowId(randomUUID());
+          // A second saved window whose offer waits on a Chat thread in a
+          // Project its own layout does not reach, so it cannot open that thread.
+          const refusedWindowId = decodeWindowId(randomUUID());
           const menuBarWindowId = decodeWindowId(randomUUID());
           const menuBarCapability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-          const localWorkspace = { ...defaultWindowWorkspace(localWindowId), version: 1 };
-          persistence.journal.append({
-            aggregate: { aggregateType: "window-workspace", aggregateId: String(localWindowId) },
-            expectedVersion: 0,
-            events: [
-              {
-                eventId: randomUUID(),
-                eventName: "workspace.layout-replaced",
-                eventVersion: 1,
-                correlationId: randomUUID(),
-                actor,
-                occurredAt: now,
-                payload: { workspace: localWorkspace },
-              },
-            ],
-          });
+          for (const windowId of [localWindowId, refusedWindowId]) {
+            persistence.journal.append({
+              aggregate: { aggregateType: "window-workspace", aggregateId: String(windowId) },
+              expectedVersion: 0,
+              events: [
+                {
+                  eventId: randomUUID(),
+                  eventName: "workspace.layout-replaced",
+                  eventVersion: 1,
+                  correlationId: randomUUID(),
+                  actor,
+                  occurredAt: now,
+                  payload: { workspace: { ...defaultWindowWorkspace(windowId), version: 1 } },
+                },
+              ],
+            });
+          }
 
           const deviceId = Schema.decodeUnknownSync(DeviceId)(randomUUID());
           const deviceScope = decodeWindowId(String(deviceId));
@@ -159,6 +169,11 @@ describe("wireWorkRequests service offers", () => {
             stamp: (offerId, requestedAt) =>
               makeOffer(localThreadId, "Desktop skyline", offerId, requestedAt),
           });
+          const refusedWait = serviceOffers.wait({
+            windowId: refusedWindowId,
+            stamp: (offerId, requestedAt) =>
+              makeOffer(projectThreadId, "Project harbour", offerId, requestedAt),
+          });
 
           // Mirrors wireContext's Chat access rule: paired devices have no desktop
           // workspace row and depend on `principal` being threaded from the route.
@@ -183,7 +198,15 @@ describe("wireWorkRequests service offers", () => {
             const thread = persistence.readChatThread(decodeChatThreadId(threadId));
             const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
             return chatImageScopeAllowedForWindow({
-              chatAdmits: workspace === undefined ? undefined : () => true,
+              chatAdmits:
+                workspace === undefined
+                  ? undefined
+                  : (projectId) =>
+                      windowAdmitsProject(
+                        workspace,
+                        "chat",
+                        projectId === null ? null : decodeProjectId(projectId),
+                      ),
               thread,
             });
           };
@@ -323,7 +346,8 @@ describe("wireWorkRequests service offers", () => {
             ]);
 
             // 2. Menu bar (a separate local window with no offers of its own) sees the
-            // local desktop window's waiting offer in /api/fleet-activity, not the paired device's.
+            // local desktop window's waiting offer in /api/fleet-activity, not the paired
+            // device's, and not the offer whose thread its own window can no longer open.
             const menuBarFleetRequest = new Request("http://127.0.0.1/api/fleet-activity", {
               headers: { "x-octant-window-capability": menuBarCapability },
             });
@@ -352,7 +376,7 @@ describe("wireWorkRequests service offers", () => {
             ]);
           } finally {
             serviceOffers.close();
-            yield* Effect.promise(() => Promise.all([pairedWait, localWait]));
+            yield* Effect.promise(() => Promise.all([pairedWait, localWait, refusedWait]));
           }
         }).pipe(Effect.provide(makePersistenceLive({ dataDirectory }))),
       ),
