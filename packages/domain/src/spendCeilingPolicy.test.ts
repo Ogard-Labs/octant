@@ -253,16 +253,29 @@ describe("evaluateSpendCeilingAdmission turn and run-time budgets", () => {
       project,
       thread,
       estimatedCostUsdCents: 5,
-      countsAsTurn: false,
+      skipTurnAndRunTimeCeiling: true,
       skipTokenCeiling: true,
     });
     expect(admitted).toEqual({
       status: "admitted",
       reservedTokens: 0,
       reservedCostUsdCents: 5,
+      reservedCostUsdMicros: 50_000,
       reservations: [
-        { scopeKind: "project", scopeId: projectId, reservedTokens: 0, reservedCostUsdCents: 5 },
-        { scopeKind: "thread", scopeId: threadId, reservedTokens: 0, reservedCostUsdCents: 5 },
+        {
+          scopeKind: "project",
+          scopeId: projectId,
+          reservedTokens: 0,
+          reservedCostUsdCents: 5,
+          reservedCostUsdMicros: 50_000,
+        },
+        {
+          scopeKind: "thread",
+          scopeId: threadId,
+          reservedTokens: 0,
+          reservedCostUsdCents: 5,
+          reservedCostUsdMicros: 50_000,
+        },
       ],
     });
 
@@ -270,7 +283,7 @@ describe("evaluateSpendCeilingAdmission turn and run-time budgets", () => {
       project,
       thread,
       estimatedCostUsdCents: 6,
-      countsAsTurn: false,
+      skipTurnAndRunTimeCeiling: true,
       skipTokenCeiling: true,
     });
     expect(refused.status).toBe("refused");
@@ -293,7 +306,7 @@ describe("evaluateSpendCeilingAdmission turn and run-time budgets", () => {
     const refused = evaluateSpendCeilingAdmission({
       thread,
       estimatedCostUsdCents: "unknown",
-      countsAsTurn: false,
+      skipTurnAndRunTimeCeiling: true,
       skipTokenCeiling: true,
     });
     expect(refused.status).toBe("refused");
@@ -317,10 +330,49 @@ describe("evaluateSpendCeilingAdmission turn and run-time budgets", () => {
     const admitted = evaluateSpendCeilingAdmission({
       thread,
       estimatedCostUsdCents: "unknown",
-      countsAsTurn: false,
+      skipTurnAndRunTimeCeiling: true,
       skipTokenCeiling: true,
     });
     expect(admitted).toEqual({ status: "admitted", reservedTokens: 0, reservations: [] });
+  });
+
+  it("keeps enforcing turn and run-time ceilings unless skipTurnAndRunTimeCeiling is explicitly set", () => {
+    const thread = threadFacts({
+      policy: { turnBudget: 1 },
+      usedTurns: 1,
+    });
+    const refused = evaluateSpendCeilingAdmission({
+      thread,
+    });
+    expect(refused.status).toBe("refused");
+    if (refused.status !== "refused") return;
+    expect(refused.refusal).toMatchObject({ kind: "exhausted", dimension: "turns" });
+  });
+
+  it("compares settled spend, reservations, and new image estimates in micro-dollars so fractional cents cannot slip past a ceiling", () => {
+    // 21-cent ceiling (210,000 micros), 15.9 cents already settled (159,000 micros) -> 51,000 micros left.
+    // A 5.3-cent image (53,000 micros) would take the total to 21.2 cents and must be refused.
+    const thread = threadFacts({
+      policy: { costBudgetUsdCents: 21 },
+      committed: { status: "known", tokens: 0 },
+      usedCostUsdCents: 15,
+      usedCostUsdMicros: 159_000,
+      reservedCostUsdMicros: 0,
+    });
+    const refused = evaluateSpendCeilingAdmission({
+      thread,
+      estimatedCostUsdMicros: 53_000,
+      skipTurnAndRunTimeCeiling: true,
+      skipTokenCeiling: true,
+    });
+    expect(refused.status).toBe("refused");
+    if (refused.status !== "refused") return;
+    expect(refused.refusal).toMatchObject({
+      kind: "exhausted",
+      dimension: "monetary",
+      remainingUsdCents: 5,
+      ceilingUsdCents: 21,
+    });
   });
 });
 

@@ -10116,25 +10116,38 @@ force.
 Billed image generation reserves money before provider dispatch (maintainer
 decision, 2026-11-21). Both composer/manual requests (`POST /api/image/jobs`)
 and agent tool calls (`octant_create_image`) enter the shared `ImageJobService`
-path, which resolves the thread's current Project and admits the job against
-both the thread and Project spend ceilings with `countsAsTurn: false` (an image
-job is spend, not a conversation turn) and without blocking on token ceilings
-for image providers that do not report tokens. When a monetary ceiling is active
-on the thread or Project, `ImageJobService` estimates the job's API-equivalent
-price from the checked-in image rate table (`packages/domain/src/imageGenerationPricing.ts`)
-by provider, model, quality/size/resolution, and variant count (rounding up to
-whole US cents, and using the conservative upper bound for `auto` or omitted
-OpenAI quality/size) and reserves those cents in `SpendCeilingService`; if the
+path, which freezes the effective request options (quality, size, aspect ratio,
+resolution) at enqueue time so changing profile defaults while a job waits
+cannot dispatch a costlier request than was admitted, resolves the thread's
+current Project, and admits the job against both the thread and Project spend
+ceilings with `countsAsTurn: false` and explicit non-turn/non-token ceiling
+skipping (an image job is spend, not a conversation turn, and does not block on
+token ceilings for image providers that do not report tokens, while Shield
+reviews and other non-turn model callers keep their existing turn and run-time
+checks). When a monetary ceiling is active on the thread or Project,
+`ImageJobService` estimates the job's API-equivalent per-image output price from
+the checked-in image rate table (`packages/domain/src/imageGenerationPricing.ts`)
+by provider, model, quality/size/resolution, and variant count (using the
+conservative upper bound for `auto` or omitted OpenAI quality/size; separate
+prompt/reference input-token surcharges are not quoted before dispatch) and
+reserves those exact micro-dollars in `SpendCeilingService`, comparing settled
+micro-dollars plus live reservations plus the new estimate against the ceiling
+in integer micro-dollars so fractional cents cannot slip past the budget. If the
 model, option, or custom source has no known rate, admission fails closed with
-`unknown-spend` without calling the provider. Completed jobs record their
-estimated `api-estimate` cost in micro-dollars on `context.usage-reconciled@1`
-before settling the reservation, and monetary ceiling queries include each
-thread's and Project's `image-job` rows (even when the image provider reports no
-token counts) without double-counting, while token ceilings continue to exclude
-unmeasured image rows. Every other terminal path — provider failure, safety
-refusal, stop/cancellation while queued or running, journal write failure, and
-restart interruption — abandons the reservation so capacity never leaks. The
-existing in-thread cost confirmation card remains independent.
+`unknown-spend` without calling the provider. Live monetary reservations track
+the thread's current Project dynamically (and a queued job whose thread moved
+Projects before dispatch is re-admitted against the destination Project before
+calling the provider). Whenever the provider returns generated images — even if
+local artifact storage fails or cancellation arrives after the provider already
+responded — the job journals its estimated `api-estimate` cost in micro-dollars
+on `context.usage-reconciled@1` before settling the reservation, and monetary
+ceiling queries include each thread's and Project's `image-job` rows (even when
+the image provider reports no token counts) without double-counting, while token
+ceilings continue to exclude unmeasured image rows. Every path where the
+provider did not return billed images — provider failure, safety refusal,
+cancellation before provider completion, journal write failure, and restart
+interruption — abandons the reservation so capacity never leaks. The existing
+in-thread cost confirmation card remains independent.
 
 ### Native harness
 

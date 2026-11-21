@@ -1405,6 +1405,7 @@ describe("SpendCeilingService", () => {
       projectId: ids.project,
       estimatedCostUsdCents: 4,
       countsAsTurn: false,
+      skipTurnAndRunTimeCeiling: true,
       skipTokenCeiling: true,
     });
     expect(refused).toMatchObject({
@@ -1414,6 +1415,166 @@ describe("SpendCeilingService", () => {
         dimension: "monetary",
         remainingUsdCents: 2,
         ceilingUsdCents: 10,
+      },
+    });
+  });
+
+  it("still refuses a non-turn Shield-style admission when the active turn exhausted the thread turn ceiling", () => {
+    const { service } = openService();
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "thread", threadType: "work-thread", threadId: ids.thread },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { turnBudget: 1 },
+      window: { kind: "lifetime" },
+    });
+    expect(
+      service.admit({
+        reservationId: ids.reservationA,
+        threadId: ids.thread,
+        threadType: "work-thread",
+      }).status,
+    ).toBe("admitted");
+
+    // Without skipTurnAndRunTimeCeiling, countsAsTurn: false still respects the turn ceiling.
+    const shieldLike = service.admit({
+      reservationId: ids.reservationB,
+      threadId: ids.thread,
+      threadType: "work-thread",
+      countsAsTurn: false,
+    });
+    expect(shieldLike).toMatchObject({
+      status: "refused",
+      refusal: { kind: "exhausted", dimension: "turns", ceilingTurns: 1 },
+    });
+  });
+
+  it("follows a Chat thread's current Project for live monetary reservations when the thread moves Projects", () => {
+    const { connection, service } = openService();
+    const projectB = "73000000-0000-4000-8000-000000000099";
+    seedChatThread(connection, ids.thread, ids.project);
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "project", projectId: decodeProjectId(ids.project) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 4 },
+      window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    });
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "project", projectId: decodeProjectId(projectB) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 4 },
+      window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    });
+
+    const first = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      projectId: ids.project,
+      estimatedCostUsdMicros: 40_000,
+      countsAsTurn: false,
+      skipTurnAndRunTimeCeiling: true,
+      skipTokenCeiling: true,
+    });
+    expect(first.status).toBe("admitted");
+
+    // Move the Chat thread from Project A to Project B while the image job is still in flight.
+    connection
+      .prepare("UPDATE chat_thread_projection SET project_id = ? WHERE thread_id = ?")
+      .run(projectB, ids.thread);
+
+    // Project A's 4-cent budget is freed immediately; Project B now carries the 4-cent reservation.
+    expect(
+      remainingOf(
+        service.snapshot({ principalKind: "local-window", projectId: ids.project }),
+        "project",
+      ),
+    ).toMatchObject({ ceilingUsdCents: 4, remainingUsdCents: 4 });
+    expect(
+      remainingOf(
+        service.snapshot({ principalKind: "local-window", projectId: projectB }),
+        "project",
+      ),
+    ).toMatchObject({ ceilingUsdCents: 4, remainingUsdCents: 0 });
+
+    const refusedOnB = service.admit({
+      reservationId: ids.reservationB,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      projectId: projectB,
+      estimatedCostUsdMicros: 40_000,
+      countsAsTurn: false,
+      skipTurnAndRunTimeCeiling: true,
+      skipTokenCeiling: true,
+    });
+    expect(refusedOnB).toMatchObject({
+      status: "refused",
+      refusal: {
+        kind: "exhausted",
+        dimension: "monetary",
+        scopeKind: "project",
+        scopeId: projectB,
+      },
+    });
+  });
+
+  it("refuses a fractional-cent image admission when settled micro-dollars plus the new image would exceed the ceiling", () => {
+    const { connection, service } = openService();
+    // Three 53,000-micro images = 159,000 micros (15.9 cents) under a 21-cent ceiling (210,000 micros).
+    for (const [index, jobSuffix] of ["e1", "e2", "e3"].entries()) {
+      const jobId = `73000000-0000-4000-8000-0000000000${jobSuffix}`;
+      connection
+        .prepare(
+          `INSERT INTO event_journal (
+            event_id, aggregate_type, aggregate_id, aggregate_version, event_name,
+            event_version, correlation_id, actor_kind, actor_id, occurred_at, payload_json
+          ) VALUES (?, 'image-job', ?, 1, 'image.job-queued@1', 1, ?, 'system', ?, ?, ?)`,
+        )
+        .run(
+          crypto.randomUUID(),
+          jobId,
+          crypto.randomUUID(),
+          ids.provider,
+          now,
+          JSON.stringify({ job: { id: jobId, threadKind: "chat-thread", scopeId: ids.thread } }),
+        );
+      insertUsage(connection, {
+        id: `73000000-0000-4000-8000-0000000001${jobSuffix}`,
+        subjectType: "image-job",
+        subjectId: jobId,
+        tokens: { input: 0, output: 0 },
+        quality: "unavailable",
+        costUsdMicros: 53_000,
+        costKind: "api-estimate",
+        sequence: index + 1,
+      });
+    }
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "thread", threadType: "chat-thread", threadId: ids.thread },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 21 },
+      window: { kind: "lifetime" },
+    });
+
+    const fourth = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      estimatedCostUsdMicros: 53_000,
+      countsAsTurn: false,
+      skipTurnAndRunTimeCeiling: true,
+      skipTokenCeiling: true,
+    });
+    expect(fourth).toMatchObject({
+      status: "refused",
+      refusal: {
+        kind: "exhausted",
+        dimension: "monetary",
+        remainingUsdCents: 5,
+        ceilingUsdCents: 21,
       },
     });
   });

@@ -53,10 +53,19 @@ export interface SpendCeilingScopeFacts {
    */
   readonly usedCostUsdCents?: number;
   /**
-   * In-flight US-dollar reservations in the window (for example billed image
-   * generation jobs whose per-image price is reserved before dispatch).
+   * Exact settled US-dollar spend in integer micro-dollars (1 cent = 10,000 micros).
+   * Used for exact monetary comparisons so fractional cents cannot slip past a ceiling.
+   */
+  readonly usedCostUsdMicros?: number;
+  /**
+   * In-flight US-dollar reservations in the window, in whole cents (for display
+   * and callers that only specify cents).
    */
   readonly reservedCostUsdCents?: number;
+  /**
+   * Exact in-flight US-dollar reservations in integer micro-dollars.
+   */
+  readonly reservedCostUsdMicros?: number;
 }
 
 export type SpendCeilingAdmission =
@@ -64,11 +73,13 @@ export type SpendCeilingAdmission =
       readonly status: "admitted";
       readonly reservedTokens: number;
       readonly reservedCostUsdCents?: number;
+      readonly reservedCostUsdMicros?: number;
       readonly reservations: ReadonlyArray<{
         readonly scopeKind: "project" | "thread";
         readonly scopeId: string;
         readonly reservedTokens: number;
         readonly reservedCostUsdCents?: number;
+        readonly reservedCostUsdMicros?: number;
       }>;
     }
   | { readonly status: "refused"; readonly refusal: SpendCeilingRefusal };
@@ -248,16 +259,40 @@ function configuredTurnBound(scopes: ReadonlyArray<SpendCeilingScopeFacts>): num
   return Math.min(...bounds);
 }
 
+const USD_MICROS_PER_CENT = 10_000;
+
+function resolveRequestedCostMicros(input: {
+  readonly estimatedCostUsdMicros?: number | "unknown";
+  readonly estimatedCostUsdCents?: number | "unknown";
+}): number | "unknown" | undefined {
+  if (input.estimatedCostUsdMicros === "unknown" || input.estimatedCostUsdCents === "unknown") {
+    return "unknown";
+  }
+  if (input.estimatedCostUsdMicros !== undefined) {
+    return Number.isSafeInteger(input.estimatedCostUsdMicros) && input.estimatedCostUsdMicros > 0
+      ? input.estimatedCostUsdMicros
+      : "unknown";
+  }
+  if (input.estimatedCostUsdCents !== undefined) {
+    if (!Number.isSafeInteger(input.estimatedCostUsdCents) || input.estimatedCostUsdCents <= 0) {
+      return "unknown";
+    }
+    const micros = input.estimatedCostUsdCents * USD_MICROS_PER_CENT;
+    return Number.isSafeInteger(micros) && micros > 0 ? micros : "unknown";
+  }
+  return undefined;
+}
+
 function refuseTurnsRunTimeOrMoney(
   facts: SpendCeilingScopeFacts,
   options: {
-    readonly countsAsTurn: boolean;
-    readonly estimatedCostUsdCents?: number | "unknown";
+    readonly skipTurnAndRunTimeCeiling: boolean;
+    readonly requestedCostUsdMicros?: number | "unknown";
   },
 ): SpendCeilingRefusal | undefined {
   const { turnBudget, runTimeBudgetSeconds } = facts.policy;
   const where = { scopeKind: facts.scopeKind, scopeId: facts.scopeId } as const;
-  if (options.countsAsTurn && turnBudget !== undefined) {
+  if (!options.skipTurnAndRunTimeCeiling && turnBudget !== undefined) {
     if (facts.usedTurns === undefined) {
       return makeRefusal({
         ...where,
@@ -276,7 +311,7 @@ function refuseTurnsRunTimeOrMoney(
       });
     }
   }
-  if (options.countsAsTurn && runTimeBudgetSeconds !== undefined) {
+  if (!options.skipTurnAndRunTimeCeiling && runTimeBudgetSeconds !== undefined) {
     if (facts.usedRunTimeMs === undefined) {
       return makeRefusal({
         ...where,
@@ -297,7 +332,7 @@ function refuseTurnsRunTimeOrMoney(
   }
   const costBudgetUsdCents = facts.policy.costBudgetUsdCents;
   if (costBudgetUsdCents !== undefined) {
-    if (options.estimatedCostUsdCents === "unknown") {
+    if (options.requestedCostUsdMicros === "unknown") {
       return makeRefusal({
         ...where,
         kind: "unknown-spend",
@@ -306,19 +341,12 @@ function refuseTurnsRunTimeOrMoney(
         unknownRequestCost: true,
       });
     }
-    if (
-      options.estimatedCostUsdCents !== undefined &&
-      (!Number.isSafeInteger(options.estimatedCostUsdCents) || options.estimatedCostUsdCents <= 0)
-    ) {
-      return makeRefusal({
-        ...where,
-        kind: "unknown-spend",
-        dimension: "monetary",
-        ceilingUsdCents: costBudgetUsdCents,
-        unknownRequestCost: true,
-      });
-    }
-    if (facts.usedCostUsdCents === undefined) {
+    const settledMicros =
+      facts.usedCostUsdMicros ??
+      (facts.usedCostUsdCents === undefined
+        ? undefined
+        : facts.usedCostUsdCents * USD_MICROS_PER_CENT);
+    if (settledMicros === undefined || !Number.isSafeInteger(settledMicros) || settledMicros < 0) {
       return makeRefusal({
         ...where,
         kind: "unknown-spend",
@@ -326,21 +354,23 @@ function refuseTurnsRunTimeOrMoney(
         ceilingUsdCents: costBudgetUsdCents,
       });
     }
-    const reservedCost = facts.reservedCostUsdCents ?? 0;
-    const effectiveUsedCost = facts.usedCostUsdCents + reservedCost;
-    const remainingUsdCents = Math.max(0, costBudgetUsdCents - effectiveUsedCost);
-    if (options.estimatedCostUsdCents !== undefined) {
-      if (remainingUsdCents < options.estimatedCostUsdCents) {
+    const reservedMicros =
+      facts.reservedCostUsdMicros ?? (facts.reservedCostUsdCents ?? 0) * USD_MICROS_PER_CENT;
+    const budgetMicros = costBudgetUsdCents * USD_MICROS_PER_CENT;
+    const effectiveUsedMicros = settledMicros + reservedMicros;
+    const remainingMicros = Math.max(0, budgetMicros - effectiveUsedMicros);
+    if (options.requestedCostUsdMicros !== undefined) {
+      if (remainingMicros < options.requestedCostUsdMicros) {
         return makeRefusal({
           ...where,
           kind: "exhausted",
           dimension: "monetary",
-          remainingUsdCents,
+          remainingUsdCents: Math.floor(remainingMicros / USD_MICROS_PER_CENT),
           ceilingUsdCents: costBudgetUsdCents,
-          neededUsdCents: options.estimatedCostUsdCents,
+          neededUsdCents: Math.ceil(options.requestedCostUsdMicros / USD_MICROS_PER_CENT),
         });
       }
-    } else if (effectiveUsedCost >= costBudgetUsdCents) {
+    } else if (effectiveUsedMicros >= budgetMicros) {
       return makeRefusal({
         ...where,
         kind: "exhausted",
@@ -360,16 +390,17 @@ function refuseTurnsRunTimeOrMoney(
  * run-time budgets count in-flight turns, so a turn is admitted while any turn
  * and any run time remains; a turn already running is never cut off when the
  * run-time budget runs out, the next admission refuses instead. When
- * `estimatedCostUsdCents` is supplied (for billed image generation), monetary
- * ceilings reserve that estimate before dispatch and fail closed when the
- * request has no known price rate.
+ * `estimatedCostUsdMicros` or `estimatedCostUsdCents` is supplied (for billed
+ * image generation), monetary ceilings reserve that exact micro-dollar estimate
+ * before dispatch and fail closed when the request has no known price rate.
  */
 export function evaluateSpendCeilingAdmission(input: {
   readonly project?: SpendCeilingScopeFacts;
   readonly thread?: SpendCeilingScopeFacts;
   readonly turnUpperBoundTokens?: number;
+  readonly estimatedCostUsdMicros?: number | "unknown";
   readonly estimatedCostUsdCents?: number | "unknown";
-  readonly countsAsTurn?: boolean;
+  readonly skipTurnAndRunTimeCeiling?: boolean;
   readonly skipTokenCeiling?: boolean;
 }): SpendCeilingAdmission {
   const scopes = [input.project, input.thread].filter(
@@ -379,8 +410,9 @@ export function evaluateSpendCeilingAdmission(input: {
     return { status: "admitted", reservedTokens: 0, reservations: [] };
   }
 
-  const countsAsTurn = input.countsAsTurn !== false;
+  const skipTurnAndRunTimeCeiling = input.skipTurnAndRunTimeCeiling === true;
   const skipTokenCeiling = input.skipTokenCeiling === true;
+  const requestedCostUsdMicros = resolveRequestedCostMicros(input);
 
   if (!skipTokenCeiling) {
     for (const facts of scopes) {
@@ -408,22 +440,22 @@ export function evaluateSpendCeilingAdmission(input: {
 
   for (const facts of scopes) {
     const refusal = refuseTurnsRunTimeOrMoney(facts, {
-      countsAsTurn,
-      ...(input.estimatedCostUsdCents === undefined
-        ? {}
-        : { estimatedCostUsdCents: input.estimatedCostUsdCents }),
+      skipTurnAndRunTimeCeiling,
+      ...(requestedCostUsdMicros === undefined ? {} : { requestedCostUsdMicros }),
     });
     if (refusal !== undefined) return { status: "refused", refusal };
   }
 
   const costScopes =
-    typeof input.estimatedCostUsdCents === "number"
+    typeof requestedCostUsdMicros === "number"
       ? scopes.filter((facts) => facts.policy.costBudgetUsdCents !== undefined)
       : [];
-  const reservedCostUsdCents =
-    costScopes.length > 0 && typeof input.estimatedCostUsdCents === "number"
-      ? input.estimatedCostUsdCents
+  const reservedCostUsdMicros =
+    costScopes.length > 0 && typeof requestedCostUsdMicros === "number"
+      ? requestedCostUsdMicros
       : 0;
+  const reservedCostUsdCents =
+    reservedCostUsdMicros > 0 ? Math.ceil(reservedCostUsdMicros / USD_MICROS_PER_CENT) : 0;
 
   const tokenScopes = skipTokenCeiling
     ? []
@@ -492,23 +524,24 @@ export function evaluateSpendCeilingAdmission(input: {
     readonly scopeId: string;
     readonly reservedTokens: number;
     readonly reservedCostUsdCents?: number;
+    readonly reservedCostUsdMicros?: number;
   }> = [];
   for (const facts of scopes) {
     const hasToken = reservedTokens > 0 && facts.policy.tokenBudget !== undefined;
-    const hasCost = reservedCostUsdCents > 0 && facts.policy.costBudgetUsdCents !== undefined;
+    const hasCost = reservedCostUsdMicros > 0 && facts.policy.costBudgetUsdCents !== undefined;
     if (!hasToken && !hasCost) continue;
     reservations.push({
       scopeKind: facts.scopeKind,
       scopeId: facts.scopeId,
       reservedTokens: hasToken ? reservedTokens : 0,
-      ...(hasCost ? { reservedCostUsdCents } : {}),
+      ...(hasCost ? { reservedCostUsdCents, reservedCostUsdMicros } : {}),
     });
   }
 
   return {
     status: "admitted",
     reservedTokens,
-    ...(reservedCostUsdCents > 0 ? { reservedCostUsdCents } : {}),
+    ...(reservedCostUsdMicros > 0 ? { reservedCostUsdCents, reservedCostUsdMicros } : {}),
     reservations,
   };
 }
