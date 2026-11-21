@@ -211,6 +211,13 @@ describe("buildHeadlessArtifact", () => {
       env: environment,
     });
     expect(relative.stderr.trim()).toBe(join(root, "current", "bin", "octant"));
+    // With CDPATH set, a bare relative cd prints the directory it chose; the
+    // launcher must not take that line into its path.
+    const withCdpath = await execFileAsync("/bin/sh", ["-c", "current/bin/octant web"], {
+      cwd: root,
+      env: { ...environment, CDPATH: "." },
+    });
+    expect(withCdpath.stderr.trim()).toBe(join(root, "current", "bin", "octant"));
   });
 
   it("carries the Bun the repository pins and nothing else", () => {
