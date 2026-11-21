@@ -2828,7 +2828,7 @@ also ship as an unverified profile without the live probe (below).
 | `mistral-vibe`            | Mistral Vibe       | `vibe-acp` (binary)                                    | Shipped (`mistral-vibe`)                                                                            |
 | `qwen-code`               | Qwen Code          | `npx @qwen-code/qwen-code --acp --experimental-skills` | Shipped (`qwen`; Octant does not pass `--experimental-skills`)                                      |
 | `opencode`, `opencode-v2` | OpenCode           | `opencode acp` (binary)                                | Shipped as the native OpenCode driver, not an ACP profile                                           |
-| `antigravity-acp`         | Google Antigravity | `agy_acp_server.par` (binary)                          | Shipped as `antigravity` on the official `agy` CLI; the registry server stays listed for adding     |
+| `antigravity-acp`         | Google Antigravity | `agy_acp_server.par` (binary)                          | Shipped as `antigravity` on the official `agy` CLI; adding the registry server points to it         |
 | `junie`                   | Junie              | `junie --acp=true` (binary inside `junie.app`)         | Listed for adding as any ACP agent; profile needs the probe                                         |
 | `amp-acp`                 | Amp                | `amp-acp` (binary)                                     | Listed for adding as any ACP agent; profile needs the probe                                         |
 | `auggie`                  | Auggie CLI         | `npx @augmentcode/auggie --acp`                        | Listed for adding as any ACP agent; profile needs the probe                                         |
@@ -2918,28 +2918,56 @@ person keeps provider telemetry off, and the self-update guard is left out only
 when the person lets providers update themselves outside Strict
 ([Provider channel switches](#provider-channel-switches)).
 
-It stays inside Google's terms (read 2026-11-20). The Antigravity Additional
-Terms of Service (`antigravity.google/terms`) make "using third party
-software, tools, or services to access the Service (e.g. using OpenClaw with
-Antigravity OAuth)" a breach that may suspend the account. Google's own
-guide (`antigravity.google/docs/ide/extensions/acp`) is the sanctioned path:
-"Any ACP client can launch Antigravity CLI. Configure it to run this command
-with the project directory as the working directory: `agy acp`", with the
-agent, its tools, sign-in and settings coming from the CLI itself. Octant is
-that ACP client and does nothing outside the guide: it never reads, copies or
-replays the CLI's OAuth credentials, sends no other client's identity (the
-guide offers third-party models only to some named editors, so Octant gets
-Gemini models alone), passes only flags the guide lists, and never uses
-`--dangerously-skip-permissions`. The FAQ (`antigravity.google/docs/faq`)
-says headless mode (`agy -p`) "is intended for direct scripting and CI
-workflows. Wrapping agy inside third-party coding agents or applications, or
-automating account rotation, is not supported under consumer plans", so
-Octant never runs `agy -p` (not even for `/usage`) and never rotates or
-switches Antigravity accounts by itself; one person's own sign-in serves
-their own threads. `--process-per-session` is the guide's flag "required for
-HTTP MCP servers that your editor configures", which is how Octant offers its
-tools. Discovery finds `agy` on the
-PATH. It speaks standard ACP over stdio, and Octant does nothing to the CLI's
+It stays inside Google's terms. Official sources, read 2026-11-20 and again
+2026-11-21:
+
+- **The ACP guide** (`antigravity.google/docs/ide/extensions/acp`, "Other
+  editors (ACP)") is the sanctioned path: any editor that supports ACP can run
+  `agy acp`, which "talks JSON-RPC over stdin and stdout"; "Every client
+  except Android Studio registers the same command: agy with the single
+  argument acp", and "The agent, its tools, and your settings come from
+  Antigravity CLI". Its flag list is `--add-dir`, `--agent`, `--sandbox`,
+  `--dangerously-skip-permissions`, `--process-per-session`,
+  `--ide-mcp-port`, `--login`, `--log-file` and `--disable-telemetry`; Octant
+  passes only `--process-per-session` ("Required for HTTP MCP servers that
+  your editor configures", which is how Octant offers its tools) and
+  `--disable-telemetry`, both listed, and never
+  `--dangerously-skip-permissions`. "Gemini models are available in every
+  client. Third-party models are only offered to JetBrains IDEs (including
+  JetBrains Air), Android Studio, Android Performance Analyzer, Zed, and
+  Xcode", so Octant gets Gemini models alone and sends no other client's
+  identity. Its sign-in methods are `oauth-personal` (a personal Google
+  account), `oauth-business` (Gemini Enterprise), `gemini-api-key`
+  (`GEMINI_API_KEY` in the agent's environment), `agent-platform` (formerly
+  Vertex AI, Application Default Credentials) and `terminal-login`; `agy acp`
+  reuses the credentials cached by an interactive `agy` session.
+- **The FAQ** (`antigravity.google/docs/faq`): "Using third-party software,
+  tools, or services to access Antigravity is a violation of our Terms of
+  Service ... Such actions can result in suspension or termination of your
+  account", recommending "a Gemini Enterprise or Google AI Studio API key"
+  for a third-party coding agent; and headless mode (`agy -p`) "is intended
+  for direct scripting and CI workflows. Wrapping agy inside third-party
+  coding agents or applications, or automating account rotation, is not
+  supported under consumer plans".
+- **The Antigravity Additional Terms of Service** (`antigravity.google/terms`):
+  "Using third party software, tools, or services to access the Service ...
+  is a breach of this Agreement" that "may be grounds for suspension or
+  termination"; access "through Gemini Enterprise (Google Cloud), Gemini
+  Enterprise for Business or a Google Workspace subscription ..., or with an
+  API Key in Gemini for business" is governed by "the terms of use accepted
+  or signed by your administrator".
+
+Octant is the ACP client the guide describes and does nothing outside it: it
+never reads, copies or replays the CLI's OAuth credentials. One knob is not
+in Google's documentation: `AGY_CLI_DISABLE_AUTO_UPDATE=1` (absent from the
+ACP guide, the CLI reference, settings, install, troubleshooting and
+changelog pages read 2026-11-21, which document other `AGY_CLI_*`
+variables). It is kept because it only stops the CLI updating itself
+mid-session, which the person controls through the provider's self-update
+switch. Following the FAQ's headless answer, Octant never runs `agy -p` (not
+even for `/usage`) and never rotates or switches Antigravity accounts by
+itself; one person's own sign-in serves their own threads. Discovery finds
+`agy` on the PATH. It speaks standard ACP over stdio, and Octant does nothing to the CLI's
 identity or sign-in: no spoofed `clientInfo`, no faked environment that moves
 where the CLI keeps its sign-in, and no call to Google's internal endpoints
 with the person's token. The CLI talks to Google itself.
@@ -2958,15 +2986,29 @@ runs its sign-in does not cover (`personalSignIn` in the contracts profile
 table), each with the sentence a refused run shows, and the server refuses by
 that declaration, never by the profile id:
 
-- **Routines** (`refusesUnattendedRuns`). Every Automation dispatch on an
-  `antigravity` instance (scheduled, triggered, Run now, a follow-up, and a
-  Chat follow-up proposal, which runs through the same dispatch) is refused
-  at the dispatcher's authority revalidation as `provider-capability-mismatch`,
-  before a thread is created or the CLI starts. The provider is read live at
-  dispatch, so a routine saved earlier is refused at its next run: "Google
-  doesn't support unattended runs of Google Antigravity on a personal Google
-  sign-in, so this routine did not run. Choose a provider that uses a Gemini
-  API key, such as Gemini CLI with an API key."
+- **Routines and every other turn no person sent** (`refusesUnattendedRuns`).
+  Every Automation dispatch on an `antigravity` instance (scheduled,
+  triggered, Run now, a follow-up, and a Chat follow-up proposal, which runs
+  through the same dispatch) is refused at the dispatcher's authority
+  revalidation as `provider-capability-mismatch`, before a thread is created
+  or the CLI starts; the provider is read live at dispatch, so a routine
+  saved earlier is refused at its next run. Every other turn the host starts
+  as itself runs under the host's own scope (`ROUTINE_HOST_SCOPE_ID`), which
+  no window or device can claim, and is refused at that mode's turn
+  admission: a Work turn (`startFirstTurn`) and a Code turn
+  (`start-provider-turn`) under that scope, and a Chat send, retry, resume or
+  child-result delivery that carries no window, the host's scope, a
+  usage-limit recovery or another thread's coordination depth. That covers a
+  message or wake-up waking an idle thread, a coordinator's worker, a pull
+  request's Auto-fix rounds, goal-loop rounds, a
+  usage-limit resume, a restart continuation, a child's result delivered into
+  the thread, a peer's delegated task, a
+  benchmark cell, and one Chat thread messaging another. A person's own send
+  carries their window (a queued message keeps the window that queued it), so
+  it, and steering their own turn, still run. Each shows: "Google doesn't
+  support unattended runs of Google Antigravity on a personal Google sign-in,
+  so Octant did not start this run. Choose a provider that uses a Gemini API
+  key, such as Gemini CLI with an API key."
 - **Helper runs** (`refusesHelperRuns`). Antigravity is never a helper
   target: the target list names it unavailable as `helper-runs-refused`, so an
   explicit target, a role slot and a follow-up on it are refused, and a child
@@ -2994,10 +3036,22 @@ that declaration, never by the profile id:
   hub-introduced device acts only as an owner device after a fresh unlock.
   Agent grants are the one non-person caller that sends turns, and they are
   refused above.
-- **Not built yet.** Other turns no person starts (a message that wakes an
-  idle thread, a pull request's Auto-fix, goal-loop rounds) are not yet held
-  to this line, and an Antigravity server added from the ACP registry as an
-  ordinary added agent carries no profile and so no declaration.
+- **No copy without the limits.** An added ACP agent that is Antigravity
+  under another name (the registry's `antigravity-acp` server, which lists
+  `shippedAs: "antigravity"`, or a local command whose executable is `agy` or
+  `agy.exe`, whatever its arguments) is refused when added, refused when
+  turned on, and never started if it was added earlier: "Google Antigravity
+  runs only as its built-in provider, which keeps it to the use its vendor
+  supports on a personal sign-in. Add Google Antigravity in Settings ›
+  Providers instead." The registry entry stays listed so the person finds
+  that pointer.
+- **Every sign-in.** The limits bind every `antigravity` instance whatever
+  sign-in the CLI has cached: Octant cannot verify which method the cached
+  credentials use, and the profile offers no posture of its own. A Gemini API
+  key, Gemini Enterprise or Agent Platform sign-in is governed by the
+  organization's terms rather than the consumer line, so lifting the limits
+  for those is a possible follow-up once a verifiable signal of the sign-in
+  method exists.
 
 - **No sandbox in Work and Code outside Strict.** There the CLI starts as the
   person's own terminal would start it, at every level: no Octant sandbox, no
@@ -3020,7 +3074,7 @@ that declaration, never by the profile id:
   `www.googleapis.com`, `accounts.google.com`, `antigravity.google`).
 - **Sign-in.** The person runs `agy` in a terminal and signs in with their
   own Google account; Octant reuses that sign-in as the CLI reads it, in the
-  person's own threads only (routines, helper runs and outside agents are
+  person's own threads only (turns no person sent, helper runs and outside agents are
   refused, above). On macOS the CLI keeps it in the login
   keychain and reads it by running `/usr/bin/security`. Unconfined, that read
   needs nothing from Octant. A sandboxed launch sets `readsLoginKeychain`: the

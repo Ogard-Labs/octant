@@ -36,6 +36,7 @@ import {
   type CodeReviewCorrectionPrepared,
   type CodeTurnReviewPreview,
   type CodeTurnReviewCapture,
+  personalSignInRefusals,
 } from "@octant/contracts";
 import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "../chat/sideChatReturn";
 import type { GitService } from "./gitService";
@@ -120,6 +121,7 @@ import {
   hostProviderTurnRefusal,
   providerHoldsLevelWithoutSandbox,
 } from "@octant/domain/guardrail-policy";
+import { isRoutineHostScope } from "../routineHostScope";
 import {
   coordinatorTurnPosture,
   decideRunMerge,
@@ -6822,6 +6824,17 @@ export class CodeOperationService {
     });
     if (sandboxRefusal !== undefined)
       return this.#failed(command.operationId, "unavailable", sandboxRefusal, "refused");
+    // A turn the host starts as itself (a routine, a wake, Auto-fix, a
+    // coordinator's worker, a usage-limit or restart continuation, a child's
+    // result) has no person driving it, which some providers' personal
+    // sign-in does not cover. A person's own send carries their window.
+    if (isRoutineHostScope(windowId)) {
+      const unattended = personalSignInRefusals(
+        String((await this.#options.providerDriverKind?.(thread)) ?? ""),
+      )?.refusesUnattendedRuns;
+      if (unattended !== undefined)
+        return this.#failed(command.operationId, "unauthorized", unattended, "refused");
+    }
     const prompt = await this.#options.evidence.read?.(command.prompt);
     if (prompt === undefined)
       return this.#failed(

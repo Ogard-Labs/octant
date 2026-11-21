@@ -210,7 +210,7 @@ describe("revalidateAutomationAuthority", () => {
       kind: "blocked",
       reason: "provider-capability-mismatch",
       message:
-        "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so this routine did not run. Choose a provider that uses a Gemini API key, such as Gemini CLI with an API key.",
+        "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Choose a provider that uses a Gemini API key, such as Gemini CLI with an API key.",
     });
     // Another ACP agent runs routines as before.
     expect(on("gemini")).toEqual({ kind: "ok" });

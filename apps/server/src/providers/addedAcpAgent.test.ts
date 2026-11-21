@@ -259,7 +259,30 @@ describe("adding any ACP agent", () => {
     ).rejects.toMatchObject({ failure: { category: "invalid-configuration" } });
     expect(fixture.append).not.toHaveBeenCalled();
   });
+
+  it("refuses Google Antigravity added as any ACP agent, pointing to its built-in provider", async () => {
+    const fixture = serviceWith(installed);
+    const add = (source: unknown) =>
+      fixture.service.execute(windowId, {
+        kind: "add-acp-agent",
+        instanceId,
+        expectedVersion: 0 as never,
+        source: source as never,
+      });
+    for (const source of [
+      { kind: "registry", registryId: "antigravity-acp" },
+      { kind: "local", displayName: "agy", command: "/opt/homebrew/bin/agy", args: ["acp"] },
+      { kind: "local", displayName: "agy", command: "/Users/me/bin/AGY.exe", args: [] },
+    ])
+      await expect(add(source)).rejects.toMatchObject({
+        failure: { category: "invalid-configuration", message: ANTIGRAVITY_ADDED_REFUSAL },
+      });
+    expect(fixture.append).not.toHaveBeenCalled();
+  });
 });
+
+const ANTIGRAVITY_ADDED_REFUSAL =
+  "Google Antigravity runs only as its built-in provider, which keeps it to the use its vendor supports on a personal sign-in. Add Google Antigravity in Settings › Providers instead.";
 
 function addedAgent(trusted: boolean): AddedAcpAgentProviderInstance {
   const instance = decodeProviderInstance({
@@ -365,6 +388,22 @@ describe("an added agent's launch", () => {
       ),
     );
     expect(starts[0]).toBe(sessionStart);
+  });
+
+  it("starts nothing for an Antigravity agent added before such agents were refused", async () => {
+    const { driver } = recordingDriver();
+    const agent = addedAgent(true);
+    const agy = {
+      ...agent,
+      configuration: {
+        ...agent.configuration,
+        source: { kind: "local" as const, command: "/usr/local/bin/agy" },
+      },
+    } as AddedAcpAgentProviderInstance;
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(withAddedAcpAgentLaunch(driver, agy).acquire({ instanceId } as never)),
+    );
+    expect(JSON.stringify(exit)).toContain(ANTIGRAVITY_ADDED_REFUSAL);
   });
 
   it("starts nothing for an agent that is not on", async () => {

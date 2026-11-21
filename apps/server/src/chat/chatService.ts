@@ -61,6 +61,7 @@ import {
   decodeContextSubjectRef,
   decodeProviderAttachmentInput,
   decodeProviderInstanceId,
+  personalSignInRefusals,
   decodeProviderModelId,
   decodeProviderSessionId,
   MAX_PROVIDER_TOOLS,
@@ -316,6 +317,7 @@ import {
 } from "../context/inheritedExternalContentMark";
 import type { RuntimeOutsideContentMarking } from "../context/runtimeOutsideContentMark";
 import { STOP_CONFIRMATION_MS } from "../stopConfirmation";
+import { isRoutineHostScope } from "../routineHostScope";
 
 const RESEARCH_TOOL_NAME = WEB_SEARCH_TOOL_DEFINITION.name;
 const DEFAULT_CHAT_PERSONALITY_INSTRUCTIONS = "Be calm, direct, and useful.";
@@ -1861,6 +1863,13 @@ export class ChatService {
         return await this.#threadWork.execute(input);
       }
       const command = decodeChatCommand(input);
+      if (
+        command.kind === "send-chat-turn" ||
+        command.kind === "retry-chat-turn" ||
+        command.kind === "resume-chat-turn" ||
+        command.kind === "deliver-chat-agent-result"
+      )
+        this.#refuseUnattendedTurn(command.threadId, executionContext);
       switch (command.kind) {
         case "create-chat-thread":
           return await this.#createThread(command, executionContext?.inheritedMark);
@@ -2562,6 +2571,36 @@ export class ChatService {
       }
     }
     return { kind: "thread-created", thread };
+  }
+
+  /**
+   * Refuses a turn no person sent on a thread whose provider's personal
+   * sign-in does not cover it. The host's own sends (a restart continuation,
+   * a usage-limit retry, a routine, a benchmark, a child's result) carry no
+   * window or the host's scope, and another thread's message carries a
+   * coordination depth; a person's send carries their window and neither.
+   */
+  #refuseUnattendedTurn(threadId: string, context: ChatServiceExecutionContext | undefined): void {
+    const unattended =
+      context?.windowId === undefined ||
+      isRoutineHostScope(context.windowId) ||
+      (context.coordinationDepth ?? 0) > 0 ||
+      context.limitRecovery === true;
+    if (!unattended) return;
+    let thread: ChatThread | undefined;
+    try {
+      thread = this.#persistence.readChatThread(decodeChatThreadId(threadId));
+    } catch {
+      // An id that does not decode is refused by the command's own handler.
+      return;
+    }
+    if (thread === undefined) return;
+    const refusal = personalSignInRefusals(
+      this.#persistence.readProviderInstance(decodeProviderInstanceId(thread.providerInstanceId))
+        ?.driverKind ?? "",
+    )?.refusesUnattendedRuns;
+    if (refusal !== undefined)
+      throw new ChatServiceError({ category: "unauthorized", message: refusal });
   }
 
   /**

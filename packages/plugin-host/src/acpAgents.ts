@@ -1,3 +1,8 @@
+import {
+  ACP_AGENT_KINDS,
+  acpAgentProfile,
+  type AcpAgentKind,
+} from "@octant/contracts/acp-agent-profiles";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 
 /**
@@ -162,6 +167,40 @@ export interface AcpRegistryAgent {
   readonly distribution: AcpRegistryDistribution;
   /** Why Octant has no reviewed profile for it yet. */
   readonly unreviewedBecause: string;
+  /** The shipped profile that runs the same agent and sign-in, when there is one. */
+  readonly shippedAs?: AcpAgentKind;
+}
+
+/**
+ * The shipped profile an added agent would run under another name, when that
+ * profile declares limits for its personal sign-in: the registry server it is
+ * shipped in place of, or its own executable typed in as a local command
+ * (`agy`, or `agy.exe`, whatever the arguments). Added that way it would run
+ * without the profile's limits, so the host refuses to add, enable or start
+ * it and points to the built-in provider instead.
+ */
+export function addedAcpAgentLimitedProfile(
+  source:
+    | { readonly kind: "registry"; readonly registryId: string }
+    | { readonly kind: "local"; readonly command: string },
+): AcpAgentKind | undefined {
+  const kind =
+    source.kind === "registry"
+      ? acpRegistryAgent(source.registryId)?.shippedAs
+      : ACP_AGENT_KINDS.find((candidate) => {
+          const name = (source.command.split(/[\\/]/u).at(-1) ?? "").toLowerCase();
+          const executable = acpAgentProfile(candidate).executable.toLowerCase();
+          return name === executable || name === `${executable}.exe`;
+        });
+  return kind !== undefined && acpAgentProfile(kind).personalSignIn !== undefined
+    ? kind
+    : undefined;
+}
+
+/** What the person is told when an added agent is a limited profile's agent. */
+export function addedAcpAgentLimitedProfileRefusal(kind: AcpAgentKind): string {
+  const { name } = acpAgentProfile(kind);
+  return `${name} runs only as its built-in provider, which keeps it to the use its vendor supports on a personal sign-in. Add ${name} in Settings › Providers instead.`;
 }
 
 /**
@@ -187,6 +226,7 @@ export const ACP_REGISTRY_AGENTS: ReadonlyArray<AcpRegistryAgent> = [
     },
     unreviewedBecause:
       "How it signs in outside its IDE extension, and whether it runs without the IDE, needs a signed-in probe.",
+    shippedAs: "antigravity",
   },
   {
     registryId: "factory-droid",

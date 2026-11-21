@@ -184,9 +184,12 @@ import { erasePurgedThread } from "../persistence/threadPurge";
 import { buildDocxFixture } from "../preview/previewTestFixtures";
 import { MAX_CHAT_ATTACHED_TEXT_CHARACTERS } from "./chatAttachedFiles";
 import { ChatAttachmentStore } from "./chatAttachmentStore";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 
 const directories: Array<string> = [];
 const now = "2026-07-19T22:10:00.000Z";
+const ANTIGRAVITY_UNATTENDED_REFUSAL =
+  "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Choose a provider that uses a Gemini API key, such as Gemini CLI with an API key.";
 const ids = {
   actor: "84000000-0000-4000-8000-000000000001",
   correlation: "84000000-0000-4000-8000-000000000002",
@@ -304,6 +307,8 @@ function openFixture(options?: {
   readonly contextFacts?: ProviderDriver["contextFacts"];
   readonly seedSettings?: boolean;
   readonly providerEnabled?: boolean;
+  /** The driver kind each provider instance reports; absent reads as an OpenAI-compatible endpoint. */
+  readonly driverKindFor?: (providerInstanceId: string) => string;
   /** Per-instance enablement; overrides `providerEnabled` when provided. */
   readonly providerEnabledFor?: (providerInstanceId: string) => boolean;
   readonly missingProviderInstanceIds?: ReadonlyArray<string>;
@@ -509,7 +514,7 @@ function openFixture(options?: {
       return {
         id: decodeProviderInstanceId(id),
         displayName: "Fixture provider",
-        driverKind: "openai-compatible",
+        driverKind: options?.driverKindFor?.(id) ?? "openai-compatible",
         enabled: options?.providerEnabledFor?.(id) ?? options?.providerEnabled ?? true,
         configuration: {},
         version: 1,
@@ -1430,6 +1435,41 @@ function providerSearchComposition(tainted: ReadonlySet<string>) {
 }
 
 describe("ChatService", () => {
+  it("sends no turn nobody sent on a thread running on Google Antigravity, and takes the person's own", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000011");
+    const { service, fakeDriver } = openFixture({ driverKindFor: () => "antigravity" });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Antigravity",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const send = (context: Parameters<typeof service.execute>[1]) =>
+      service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Hello",
+        },
+        context,
+      );
+
+    // The host's own send (a restart continuation, a benchmark run), the
+    // routine scope, and another thread's message are each refused.
+    for (const context of [
+      undefined,
+      { windowId: ROUTINE_HOST_SCOPE_ID },
+      { windowId: window, coordinationDepth: 1 },
+    ])
+      await expect(send(context)).rejects.toMatchObject({
+        failure: { category: "unauthorized", message: ANTIGRAVITY_UNATTENDED_REFUSAL },
+      });
+    expect(fakeDriver.sentTurns).toHaveLength(0);
+
+    await expect(send({ windowId: window })).resolves.toMatchObject({ kind: "turn-created" });
+  });
+
   it("checks the thread's model for tools by itself before each sent turn, and sends the turn when the check fails", async () => {
     const order: Array<string> = [];
     const verifyModelToolsOnFirstUse = vi.fn(async () => {

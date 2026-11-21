@@ -14,7 +14,11 @@ export type AcpAgentAuthentication = typeof AcpAgentAuthentication.Type;
  * refuses by what the profile declares, never by the profile's id.
  */
 export interface AcpPersonalSignInRefusals {
-  /** A routine run: scheduled, triggered, Run now, or a follow-up. */
+  /**
+   * A turn no person sent: a routine run, and every turn the host starts as
+   * itself (a wake, Auto-fix, a goal round, a usage-limit or restart
+   * continuation, a child's result, a benchmark) or another thread sends.
+   */
   readonly refusesUnattendedRuns: string;
   /** A helper run on the agent, and a helper run a thread on it starts. */
   readonly refusesHelperRuns: string;
@@ -232,7 +236,7 @@ export const ACP_AGENT_PROFILES = {
     // another agent loop, and other callers belong on a Gemini API key.
     personalSignIn: {
       refusesUnattendedRuns:
-        "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so this routine did not run. Choose a provider that uses a Gemini API key, such as Gemini CLI with an API key.",
+        "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Choose a provider that uses a Gemini API key, such as Gemini CLI with an API key.",
       refusesHelperRuns:
         "Google doesn't support Google Antigravity as a helper agent, or starting helpers from it, on a personal Google sign-in. Use a provider that uses a Gemini API key, such as Gemini CLI with an API key, for helper work.",
       refusesOutsideAgents:
