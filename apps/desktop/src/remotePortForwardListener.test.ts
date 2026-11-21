@@ -151,4 +151,57 @@ describe("a port forward's listener on this computer", () => {
     });
     expect(refused).toBe(true);
   });
+
+  it("ends a connection whose far end sends a ping over the 125 bytes a control frame may carry, and echoes none of it", async () => {
+    const sockets: Socket[] = [];
+    const received: Buffer[] = [];
+    const host: Server = createHttpServer();
+    host.on("upgrade", (request, socket: Socket) => {
+      sockets.push(socket);
+      const accept = createHash("sha1")
+        .update(
+          `${String(request.headers["sec-websocket-key"])}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`,
+        )
+        .digest("base64");
+      socket.on("data", (chunk: Buffer) => received.push(chunk));
+      // A 256-byte ping: two length bytes after 126.
+      socket.write(
+        Buffer.concat([
+          Buffer.from(
+            `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+          ),
+          Buffer.from([0x89, 126, 0x01, 0x00]),
+          Buffer.alloc(256, 7),
+        ]),
+      );
+    });
+    await new Promise<void>((resolve) => host.listen(0, "127.0.0.1", () => resolve()));
+    cleanups.push(() => {
+      for (const socket of sockets) socket.destroy();
+      host.close();
+    });
+    const hostPort = (host.address() as AddressInfo).port;
+    const listening = await listenForPortForward(
+      { hostId: HOST_ID, forward: forward(0) },
+      {
+        sign: async () => ({ status: "signed", headers: { "x-octant-device-proof": "proof" } }),
+        upgradeToHost: (request) =>
+          upgradeThroughListener(
+            {
+              listenerOrigin: "https://192.168.1.20:9443",
+              trust: { current: { kind: "platform" } },
+            },
+            request,
+            async () => ({ status: "connected", socket: connectTcp(hostPort, "127.0.0.1") }),
+          ),
+      },
+    );
+    if (listening.status !== "listening") throw new Error(listening.message);
+    cleanups.push(listening.close);
+    const client = connectTcp(listening.port, "127.0.0.1");
+    cleanups.push(() => client.destroy());
+    await new Promise<void>((resolve) => client.on("close", () => resolve()));
+    // At most a close frame went back, never a 256-byte pong.
+    expect(Buffer.concat(received).byteLength).toBeLessThan(64);
+  });
 });

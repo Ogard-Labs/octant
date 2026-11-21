@@ -29,6 +29,10 @@ const HANDSHAKE_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const EMPTY_BODY_DIGEST = createHash("sha256").update("").digest("hex");
 /** The largest message the other computer may send, as its relay caps it. */
 const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
+/** The most a frame this side writes carries; a larger TCP chunk goes in several. */
+const MAX_FRAME_BYTES = 64 * 1024;
+/** RFC 6455: a control frame (close, ping, pong) carries at most 125 bytes. */
+const MAX_CONTROL_BYTES = 125;
 
 export interface PortForwardListenerPorts {
   /** Asks the window that opened the forward to sign one connection's upgrade. */
@@ -179,7 +183,11 @@ export function bridge(tcp: Socket, remote: Duplex, head: Uint8Array): void {
     setTimeout(end, 1_000).unref();
   });
   tcp.on("data", (chunk: Buffer) => {
-    if (!sendFrame(OPCODE.binary, chunk)) {
+    let flushed = true;
+    for (let offset = 0; offset < chunk.byteLength; offset += MAX_FRAME_BYTES) {
+      flushed = sendFrame(OPCODE.binary, chunk.subarray(offset, offset + MAX_FRAME_BYTES));
+    }
+    if (!flushed) {
       tcp.pause();
       remote.once("drain", () => tcp.resume());
     }
@@ -233,6 +241,8 @@ function closePayload(code: number): Buffer {
 /** One masked frame, as a client sends every frame. */
 function frame(opcode: number, payload: Buffer): Buffer {
   const length = payload.byteLength;
+  // Every caller bounds what it frames; a larger payload is a broken invariant.
+  if (length > MAX_FRAME_BYTES) throw new RangeError("A frame payload is over its bound.");
   const lengthBytes = length < 126 ? 0 : length <= 0xffff ? 2 : 8;
   const header = Buffer.alloc(2 + lengthBytes + 4);
   header[0] = 0x80 | opcode;
@@ -275,9 +285,14 @@ function readFrame(
     offset = 10;
   }
   if (length > MAX_MESSAGE_BYTES) return "broken";
+  const opcode = first & 0x0f;
+  // A control frame is final and short, so a ping is never echoed at the size the far end chose.
+  if (opcode >= OPCODE.close && (length > MAX_CONTROL_BYTES || (first & 0x80) === 0)) {
+    return "broken";
+  }
   if (buffer.byteLength < offset + length) return "incomplete";
   return {
-    opcode: first & 0x0f,
+    opcode,
     payload: Buffer.from(buffer.subarray(offset, offset + length)),
     length: offset + length,
   };
