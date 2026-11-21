@@ -102,6 +102,8 @@ export interface DeviceHelperChild extends NativeHelperChild {
   readonly stdout: {
     on(event: "data", listener: (chunk: Uint8Array) => void): unknown;
     off(event: "data", listener: (chunk: Uint8Array) => void): unknown;
+    on(event: "error", listener: () => void): unknown;
+    off(event: "error", listener: () => void): unknown;
   };
   /** File descriptor 3: length-prefixed JPEG frames while a stream is running. */
   readonly frames: {
@@ -374,10 +376,12 @@ export function createSimulatorDeviceHelpers(options: SimulatorDeviceHelpersOpti
     // not from `write`. With no listener that is an unhandled error event,
     // which would take the desktop's main process down with the helper.
     helper.child.stdin.on("error", gone);
+    helper.child.stdout.on("error", gone);
     helper.child.frames.on("error", gone);
     void shutdown.closed.then(() => {
       helper.child.off("error", gone);
       helper.child.stdin.off("error", gone);
+      helper.child.stdout.off("error", gone);
       helper.child.frames.off("error", gone);
     });
     running.set(simulatorId, helper);

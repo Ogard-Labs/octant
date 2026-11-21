@@ -512,6 +512,8 @@ function runProbe(
       );
 
       child.stdout.on("data", onStdout);
+      child.stdout.on("error", () => undefined);
+      child.stderr.on("error", () => undefined);
       child.stderr.on("data", onStderr);
       child.once("error", onError);
       child.once("close", onClose);
@@ -1556,6 +1558,8 @@ function spawnOwnedClaudeProcess(
     resolveExited = resolve;
   });
 
+  child.stdin.on("error", () => requestTermination("SIGTERM"));
+  child.stderr.on("error", () => undefined);
   child.stderr.on("data", onStderr);
   child.stderr.once("close", () => {
     let pending: Buffer | string | null = child.stderr.read();

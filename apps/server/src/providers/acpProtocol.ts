@@ -537,7 +537,13 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
     options.stdout.off("data", onStdoutData);
     options.stdout.off("end", onStdoutEnd);
     options.stdout.off("error", onStdoutError);
-    options.stdin.off("error", onStdinError);
+    // Keep the stdin error listener until close so an async EPIPE from an
+    // in-flight write or `end()` settles locally instead of hitting the net.
+    if (options.stdin.closed) {
+      options.stdin.off("error", onStdinError);
+    } else {
+      options.stdin.once("close", () => options.stdin.off("error", onStdinError));
+    }
     options.stderr?.off("data", onStderrData);
     options.stderr?.off("end", onStderrEnd);
     options.stderr?.off("error", onStderrError);
@@ -923,7 +929,9 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
 
   const close = async () => {
     if (terminal) return;
-    options.stdin.end();
+    if (!options.stdin.destroyed && !options.stdin.writableEnded) {
+      options.stdin.end();
+    }
     finish();
     await writeChain;
   };

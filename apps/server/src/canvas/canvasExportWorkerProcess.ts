@@ -118,6 +118,8 @@ export async function runCanvasExportWorker(
       authorityPoll = setInterval(() => {
         if (!input.current()) finish(failed);
       }, 100);
+      stdin.on("error", () => finish(failed));
+      stdout.on("error", () => finish(failed));
       stdout.setEncoding("utf8");
       stdout.on("data", (chunk: string) => {
         if (finished) return;

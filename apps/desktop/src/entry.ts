@@ -1,4 +1,5 @@
 import { CANVAS_PROTOTYPE_HOST_SWITCH } from "./canvasPrototypeProtocol";
+import { installDesktopProcessErrorNet } from "./desktopProcessErrorNet";
 import {
   loadCanvasPrototypeHostRuntime,
   loadNightlyClientRuntime,
@@ -36,6 +37,19 @@ import {
 } from "./runtimePaths";
 import { resolveStartupHostRole } from "./nightlyTestData";
 import { createNightlyLaunchLinks } from "./nightlyLaunchLinks";
+
+// Install the process error net before role checks or runtime imports so any
+// unhandled exception or rejection logs a redacted cause and exits non-zero
+// instead of opening Electron's blocking error dialog.
+installDesktopProcessErrorNet({
+  exit: (code) => {
+    try {
+      app.exit(code);
+    } catch {
+      process.exit(code);
+    }
+  },
+});
 
 // Identity and launch-role checks precede imports of the host-owning desktop.
 const identity = app.isPackaged

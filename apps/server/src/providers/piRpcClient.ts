@@ -113,7 +113,15 @@ export function makePiRpcClient(options: Options): PiRpcClient {
     options.stdout.off("data", onData);
     options.stdout.off("end", onEnd);
     options.stdout.off("error", onError);
-    options.stdin.off("error", onError);
+    // Keep the stdin error listener attached until the stream closes: a write
+    // callback or `end()` on a dead child emits EPIPE asynchronously after
+    // `finish()` runs, and removing the listener early would send it to the
+    // process error net.
+    if (options.stdin.closed) {
+      options.stdin.off("error", onError);
+    } else {
+      options.stdin.once("close", () => options.stdin.off("error", onError));
+    }
     options.signal?.removeEventListener("abort", onAbort);
   };
 
@@ -255,7 +263,9 @@ export function makePiRpcClient(options: Options): PiRpcClient {
 
   const close = async () => {
     if (terminal) return;
-    options.stdin.end();
+    if (!options.stdin.destroyed && !options.stdin.writableEnded) {
+      options.stdin.end();
+    }
     finish();
   };
 

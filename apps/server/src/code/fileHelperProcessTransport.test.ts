@@ -10,10 +10,10 @@ class FakeChild extends EventEmitter implements FileHelperChildProcess {
   readonly stdout = new EventEmitter();
   onEnd?: () => void;
   onKill?: (signal: NodeJS.Signals) => void;
-  readonly stdin = {
+  readonly stdin = Object.assign(new EventEmitter(), {
     write: vi.fn((_frame, callback) => callback?.()),
     end: vi.fn(() => this.onEnd?.()),
-  };
+  });
   readonly kill = vi.fn((signal: NodeJS.Signals) => {
     this.onKill?.(signal);
     return true;
@@ -162,6 +162,25 @@ describe("file helper process transport", () => {
     expect(child.kill).toHaveBeenCalledTimes(1);
     child.emit("close", 0, "SIGTERM");
     await Promise.all([first, second]);
+  });
+
+  it("a stdin EPIPE on a dead child reaches its owner, not the net", async () => {
+    const child = new FakeChild();
+    const transport = createFileHelperProcessTransport({
+      helperPath: "/helper",
+      platform: "darwin",
+      arch: "arm64",
+      spawn: () => child,
+    });
+    const exit = vi.fn();
+    transport.onExit(exit);
+
+    const epipe = Object.assign(new Error("write EPIPE"), { code: "EPIPE", syscall: "write" });
+    expect(() => child.stdin.emit("error", epipe)).not.toThrow();
+    expect(exit).toHaveBeenCalledOnce();
+    await expect(transport.write(new Uint8Array([1]))).rejects.toBeInstanceOf(
+      FileHelperProcessError,
+    );
   });
 });
 
