@@ -7,6 +7,7 @@ import {
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import {
+  coordinatorDoneWhenEqual,
   decideCoordinatorRole,
   decideProviderAccountMove,
   decideUsageLimitHandoff,
@@ -2252,6 +2253,7 @@ export class CodeService {
           command.thread.coordinatorThreadId !== undefined ||
           command.thread.coordinatorChoice !== undefined ||
           command.thread.coordinatorBounds !== undefined ||
+          command.thread.coordinatorDoneWhen !== undefined ||
           command.thread.coordinatorWorkerLevel !== undefined ||
           command.thread.messageWake !== undefined ||
           command.thread.coordinatorWakeOff !== undefined ||
@@ -2396,6 +2398,15 @@ export class CodeService {
       if (command.kind === "mark-code-thread-done" && isRoutineHostScope(authenticatedWindowId)) {
         throw this.#failure("unauthorized", "Only a person can mark a Code thread Done.");
       }
+      if (
+        command.kind === "set-code-thread-coordinator-done-when" &&
+        (isRoutineHostScope(authenticatedWindowId) || actor?.kind === "system")
+      ) {
+        throw this.#failure(
+          "unauthorized",
+          "Only a person can set or clear a coordinator's done-when condition.",
+        );
+      }
       const current = this.#persistence.readCodeThread(command.threadId);
       if (current === undefined) throw this.#failure("invalid", "Code thread was not found.");
       await this.#authorizeThread(authenticatedWindowId, current);
@@ -2530,6 +2541,7 @@ export class CodeService {
       if (
         command.kind === "set-code-thread-coordinator" ||
         command.kind === "set-code-thread-coordinator-bounds" ||
+        command.kind === "set-code-thread-coordinator-done-when" ||
         command.kind === "set-code-thread-message-wake" ||
         command.kind === "set-code-thread-coordinator-wake"
       ) {
@@ -4494,6 +4506,7 @@ export class CodeService {
         readonly kind:
           | "set-code-thread-coordinator"
           | "set-code-thread-coordinator-bounds"
+          | "set-code-thread-coordinator-done-when"
           | "set-code-thread-message-wake"
           | "set-code-thread-coordinator-wake";
       }
@@ -4503,18 +4516,22 @@ export class CodeService {
     const {
       coordinator: _coordinator,
       coordinatorBounds: _bounds,
+      coordinatorDoneWhen: _doneWhen,
       coordinatorWorkerLevel: _workerLevel,
       messageWake: _messageWake,
       coordinatorWakeOff: _wakeOff,
       ...withoutRole
     } = current;
-    // The bounds and the workers' level stay with the role through every
-    // change here but Stop coordinating and a bounds change itself.
+    // The bounds, done-when condition, and workers' level stay with the role
+    // through every change here except Stop coordinating or their own command.
     const rest = {
       ...withoutRole,
       ...(current.coordinatorBounds === undefined
         ? {}
         : { coordinatorBounds: current.coordinatorBounds }),
+      ...(current.coordinatorDoneWhen === undefined
+        ? {}
+        : { coordinatorDoneWhen: current.coordinatorDoneWhen }),
       ...(current.coordinatorWorkerLevel === undefined
         ? {}
         : { coordinatorWorkerLevel: current.coordinatorWorkerLevel }),
@@ -4533,6 +4550,53 @@ export class CodeService {
         ...withoutRole,
         coordinator: true,
         ...(Object.keys(command.bounds).length === 0 ? {} : { coordinatorBounds: command.bounds }),
+        ...(current.coordinatorDoneWhen === undefined
+          ? {}
+          : { coordinatorDoneWhen: current.coordinatorDoneWhen }),
+        ...(current.coordinatorWorkerLevel === undefined
+          ? {}
+          : { coordinatorWorkerLevel: current.coordinatorWorkerLevel }),
+        ...(current.messageWake === true ? { messageWake: true } : {}),
+        ...(current.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
+        ...stamp,
+      });
+    }
+    if (command.kind === "set-code-thread-coordinator-done-when") {
+      if (current.coordinator !== true) {
+        throw this.#failure(
+          "invalid",
+          "Only a coordinator thread has a done-when condition to set.",
+        );
+      }
+      if (command.doneWhen !== undefined) {
+        for (const item of command.doneWhen.items) {
+          if (item.kind !== "thread-done") continue;
+          if (String(item.threadId) === String(current.id)) {
+            throw this.#failure("invalid", "A coordinator cannot wait for itself to be Done.");
+          }
+          const target = this.#persistence.readCodeThread(item.threadId);
+          if (target === undefined) {
+            throw this.#failure("invalid", "A thread named in done-when was not found.");
+          }
+          if (String(target.projectId) !== String(current.projectId)) {
+            throw this.#failure(
+              "unauthorized",
+              "A coordinator's done-when condition may only name threads in its own Project.",
+            );
+          }
+          if (target.coordinator === true) {
+            throw this.#failure("invalid", "A coordinator thread cannot be named as Done.");
+          }
+        }
+      }
+      if (coordinatorDoneWhenEqual(current.coordinatorDoneWhen, command.doneWhen)) return current;
+      return decodeCodeThread({
+        ...withoutRole,
+        coordinator: true,
+        ...(current.coordinatorBounds === undefined
+          ? {}
+          : { coordinatorBounds: current.coordinatorBounds }),
+        ...(command.doneWhen === undefined ? {} : { coordinatorDoneWhen: command.doneWhen }),
         ...(current.coordinatorWorkerLevel === undefined
           ? {}
           : { coordinatorWorkerLevel: current.coordinatorWorkerLevel }),

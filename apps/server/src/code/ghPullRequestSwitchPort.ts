@@ -4,6 +4,7 @@ import {
   type CodeProjectPullRequestMergeMethod,
   type CodeProjectPullRequestMergeWait,
 } from "@octant/contracts";
+import type { CoordinatorDoneWhenPullRequestFact } from "@octant/domain";
 import {
   sanitizeGhEnvironment,
   validRepository,
@@ -361,6 +362,42 @@ export class GhPullRequestSwitchPort {
       waitingOn,
       failures: failures.slice(0, MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_FAILURES),
     };
+  }
+
+  /**
+   * Closed-set read for a coordinator's done-when condition: only merge state
+   * and (when requested) required checks status, never PR titles, comments, or
+   * check logs.
+   */
+  async observePullRequestCondition(
+    request: GhPullRequestSwitchRequest,
+    options: { readonly requiredChecks: boolean },
+    signal: AbortSignal,
+  ): Promise<CoordinatorDoneWhenPullRequestFact> {
+    const repository = `${request.owner}/${request.name}`;
+    if (!validRepository(repository) || !validNumber(request.number)) {
+      return { status: "unavailable" };
+    }
+    const view = await this.#run(
+      ["pr", "view", String(request.number), "--repo", repository, "--json", "state"],
+      signal,
+    );
+    if (view === undefined || view.exitCode !== 0) return { status: "unavailable" };
+    const pullRequest = parseJson(view.stdout);
+    if (!isRecord(pullRequest)) return { status: "unavailable" };
+    const state = normalizeState(pullRequest.state);
+    if (state === undefined) return { status: "unavailable" };
+    if (!options.requiredChecks) return { status: "observed", state };
+    const checks = await this.#requiredChecks(repository, request.number, signal);
+    const requiredChecks =
+      checks === undefined
+        ? "unavailable"
+        : checks.failed.length > 0
+          ? "failing"
+          : checks.pending
+            ? "pending"
+            : "green";
+    return { status: "observed", state, requiredChecks };
   }
 
   async #requiredChecks(

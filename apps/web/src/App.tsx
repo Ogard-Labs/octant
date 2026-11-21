@@ -409,6 +409,7 @@ import { decodeStableHostId } from "@octant/contracts/remote-access";
 import { TodoListHostSettingsContext } from "./todos/TodoListHostSettings";
 import { TodoQuickAddDialog, useNewTodoShortcut } from "./todos/TodoQuickAddDialog";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
+import { coordinatorDoneWhenEqual } from "@octant/domain";
 import { CoordinatorBoundsDialog } from "./projects/CoordinatorBoundsDialog";
 import { MoveThreadToProjectDialog } from "./projects/MoveThreadToProjectDialog";
 import {
@@ -9307,19 +9308,63 @@ function LaunchedShell(
         );
         // A thread that stopped coordinating, or left the list, has no limits to change.
         if (coordinator === undefined || coordinator.coordinator !== true) return null;
+        const project = projectController.allProjects.find(
+          (candidate) => String(candidate.id) === String(coordinator.projectId),
+        );
+        const defaultRepository =
+          project?.type !== "code" || project.connectedRepository === undefined
+            ? undefined
+            : `${project.connectedRepository.owner}/${project.connectedRepository.repository}`;
+        const doneWhenThreads = (codeController.bootstrap?.threads ?? [])
+          .filter(
+            (candidate) =>
+              String(candidate.projectId) === String(coordinator.projectId) &&
+              candidate.lifecycle === "active" &&
+              candidate.coordinator !== true &&
+              String(candidate.id) !== String(coordinator.id),
+          )
+          .map((candidate) => ({ id: candidate.id, title: candidate.title }));
         return (
           <CoordinatorBoundsDialog
             bounds={coordinator.coordinatorBounds}
+            doneWhen={{
+              value: coordinator.coordinatorDoneWhen,
+              threads: doneWhenThreads,
+              defaultRepository,
+              onSave: (bounds, nextDoneWhen) => {
+                setCoordinatorBoundsThreadId(undefined);
+                const boundsChanged =
+                  coordinator.coordinatorBounds?.wakesPerHour !== bounds.wakesPerHour ||
+                  coordinator.coordinatorBounds?.rounds !== bounds.rounds ||
+                  coordinator.coordinatorBounds?.startsPerHour !== bounds.startsPerHour;
+                const doneWhenChanged = !coordinatorDoneWhenEqual(
+                  coordinator.coordinatorDoneWhen,
+                  nextDoneWhen,
+                );
+                void (async () => {
+                  if (boundsChanged) {
+                    const outcome = await codeController.setThreadCoordinatorBounds(
+                      coordinator.id,
+                      bounds,
+                    );
+                    if (outcome.status === "refused") {
+                      setThreadExportNotice(outcome.message);
+                      return;
+                    }
+                  }
+                  if (doneWhenChanged) {
+                    const outcome = await codeController.setThreadCoordinatorDoneWhen(
+                      coordinator.id,
+                      nextDoneWhen,
+                    );
+                    if (outcome.status === "refused") setThreadExportNotice(outcome.message);
+                  }
+                })();
+              },
+            }}
             key={String(coordinator.id)}
             onClose={() => setCoordinatorBoundsThreadId(undefined)}
-            onSave={(bounds) => {
-              setCoordinatorBoundsThreadId(undefined);
-              void codeController
-                .setThreadCoordinatorBounds(coordinator.id, bounds)
-                .then((outcome) => {
-                  if (outcome.status === "refused") setThreadExportNotice(outcome.message);
-                });
-            }}
+            onSave={() => setCoordinatorBoundsThreadId(undefined)}
             title={coordinator.title}
           />
         );

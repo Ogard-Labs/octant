@@ -3,6 +3,7 @@ import type { ConversationInputPolicy } from "@octant/contracts/conversation-inp
 import type {
   CodeReviewFindingReference,
   CoordinatorBounds,
+  CoordinatorDoneWhen,
   CoordinatorOpenWorkerLimit,
   CoordinatorStartingByProject,
   CoordinatorStartingChoice,
@@ -129,6 +130,7 @@ import {
   reopenCodeThread,
   setCodeThreadCoordinator,
   setCodeThreadCoordinatorBounds,
+  setCodeThreadCoordinatorDoneWhen,
   setCodeThreadCoordinatorWake,
   setCodeThreadMessageWake,
   setCodeThreadRestartContinuation,
@@ -2763,6 +2765,11 @@ export function useCodeController(options: CodeControllerOptions) {
       restCommand(threadId, (thread) => setCodeThreadCoordinatorBounds(thread, bounds)),
     [restCommand],
   );
+  const setThreadCoordinatorDoneWhen = useCallback(
+    (threadId: CodeThreadId, doneWhen: CoordinatorDoneWhen | undefined) =>
+      restCommand(threadId, (thread) => setCodeThreadCoordinatorDoneWhen(thread, doneWhen)),
+    [restCommand],
+  );
   const setThreadMessageWake = useCallback(
     (threadId: CodeThreadId, wake: boolean) =>
       restCommand(threadId, (thread) => setCodeThreadMessageWake(thread, wake)),
@@ -3531,6 +3538,7 @@ export function useCodeController(options: CodeControllerOptions) {
     pinThread,
     setThreadCoordinator,
     setThreadCoordinatorBounds,
+    setThreadCoordinatorDoneWhen,
     setThreadCoordinatorWake,
     setThreadMessageWake,
     setThreadRestartContinuation,

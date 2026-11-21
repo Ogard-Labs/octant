@@ -202,6 +202,7 @@ export * from "./agentRunAuthorityCeiling";
 export * from "./agentRunLiveGrant";
 export * from "./agentMessagePolicy";
 export * from "./siblingThreadPolicy";
+export * from "./coordinatorDoneWhenPolicy";
 export * from "./coordinatorPolicy";
 export * from "./coordinatorWorkerChoicePolicy";
 export * from "./providerAvailabilityPolicy";

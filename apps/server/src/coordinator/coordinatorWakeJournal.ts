@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { CoordinatorWorkerNotice } from "@octant/contracts";
+import { CoordinatorWorkerNotice, MAX_COORDINATOR_DONE_WHEN_ITEMS } from "@octant/contracts";
 import { Schema } from "effect";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import type { EventRegistry } from "../persistence/eventRegistry";
@@ -26,7 +26,7 @@ const Id = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128));
 
 export const CoordinatorWakeDecided = Schema.Struct({
   wakeId: Schema.UUID,
-  cause: Schema.Literal("message", "notice"),
+  cause: Schema.Literal("message", "notice", "done-when"),
   senderThreadId: Id,
   hop: Schema.Int.pipe(Schema.nonNegative()),
   /**
@@ -40,6 +40,13 @@ export const CoordinatorWakeDecided = Schema.Struct({
       state: CoordinatorWorkerNotice,
       at: Schema.String.pipe(Schema.maxLength(64)),
     }).annotations(strict),
+  ),
+  /** Unmet host-checked done-when items a done-when wake is reporting. */
+  unmet: Schema.optional(
+    Schema.Array(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(240))).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(MAX_COORDINATOR_DONE_WHEN_ITEMS),
+    ),
   ),
 }).annotations(strict);
 export type CoordinatorWakeDecided = typeof CoordinatorWakeDecided.Type;

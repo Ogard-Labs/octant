@@ -345,4 +345,35 @@ describe("forge switch port", () => {
     expect(passed).toMatchObject({ checks: "passed", failedChecks: [] });
     expect(passed?.reviewDecision).toBeUndefined();
   });
+
+  it("reads only merge state and optional required checks for a coordinator done-when condition", async () => {
+    const { port: forge, run } = port((args) =>
+      args[1] === "checks"
+        ? {
+            exitCode: 0,
+            stdout: JSON.stringify([{ name: "test", bucket: "pass", link: "" }]),
+          }
+        : { exitCode: 0, stdout: JSON.stringify({ state: "MERGED" }) },
+    );
+
+    const stateOnly = await forge.observePullRequestCondition(
+      request,
+      { requiredChecks: false },
+      signal,
+    );
+    expect(stateOnly).toEqual({ status: "observed", state: "merged" });
+    expect(run).toHaveBeenCalledTimes(1);
+
+    const withChecks = await forge.observePullRequestCondition(
+      request,
+      { requiredChecks: true },
+      signal,
+    );
+    expect(withChecks).toEqual({
+      status: "observed",
+      state: "merged",
+      requiredChecks: "green",
+    });
+    expect(run).toHaveBeenCalledTimes(3);
+  });
 });
