@@ -5,6 +5,8 @@ import {
   decodeExtensionCommandResult,
   decodeUserAddedMcpServerRequest,
   decodeExtensionSnapshot,
+  decodeMcpServerSignInRelayRequest,
+  decodeMcpServerSignInRelayResult,
   decodeMcpServerSignInView,
   decodeMcpReportedAccount,
   decodeMcpServerConnectionListing,
@@ -172,6 +174,63 @@ describe("extension RPC contracts", () => {
         kind: "sign-out-pending",
         message: "Finish signing out.",
         credentialRef: "55000000-0000-4000-8000-000000000002",
+      }),
+    ).toThrow();
+  });
+
+  it("decodes paired-device device-code views and one-time relay contracts without excess secret fields", () => {
+    const attemptId = "55000000-0000-4000-8000-000000000003";
+    const expiresAt = "2026-11-20T12:00:00.000Z";
+    const deviceView = {
+      kind: "awaiting-device-code",
+      attemptId,
+      issuerHost: "auth.example",
+      verificationUri: "https://auth.example/device",
+      verificationUriComplete: "https://auth.example/device?user_code=ABCD-1234",
+      userCode: "ABCD-1234",
+      expiresAt,
+    } as const;
+    expect(decodeMcpServerSignInView(deviceView)).toEqual(deviceView);
+    expect(() => decodeMcpServerSignInView({ ...deviceView, deviceCode: "secret-code" })).toThrow();
+
+    const relayView = {
+      kind: "awaiting-consent",
+      attemptId,
+      flow: "relay",
+      relayable: true,
+      authorizationUrl: "https://auth.example/authorize?state=abc",
+      expiresAt,
+    } as const;
+    expect(decodeMcpServerSignInView(relayView)).toEqual(relayView);
+
+    const relayRequest = {
+      attemptId,
+      callbackUrl: "http://127.0.0.1:43125/oauth/callback?code=abc&state=xyz",
+    } as const;
+    expect(decodeMcpServerSignInRelayRequest(relayRequest)).toEqual(relayRequest);
+    expect(() =>
+      decodeMcpServerSignInRelayRequest({ ...relayRequest, verifier: "nope" }),
+    ).toThrow();
+
+    expect(
+      decodeMcpServerSignInRelayResult({
+        kind: "retry",
+        remainingAttempts: 2,
+        message: "Check the pasted callback address.",
+      }),
+    ).toMatchObject({ kind: "retry", remainingAttempts: 2 });
+    expect(
+      decodeMcpServerSignInRelayResult({
+        kind: "refused",
+        reason: "sign-in-settled",
+        message: "This sign-in attempt has already finished.",
+      }),
+    ).toMatchObject({ kind: "refused", reason: "sign-in-settled" });
+    expect(() =>
+      decodeMcpServerSignInRelayResult({
+        kind: "signed-in",
+        issuer: "auth.example",
+        accessToken: "must-not-appear",
       }),
     ).toThrow();
   });

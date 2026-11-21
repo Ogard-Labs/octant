@@ -286,6 +286,13 @@ export function honoredImageGenerationOptions(
   }
 }
 
+export function imageProfileSupportsReferences(
+  profile: Pick<ImageGenerationProfileView, "driverKind">,
+): boolean {
+  return honoredImageGenerationOptions(imageGenerationConfigurationKind(profile.driverKind))
+    .supportsReferences;
+}
+
 export function imageGenerationConfigurationKind(
   driverKind: ImageGenerationProfileView["driverKind"],
 ):

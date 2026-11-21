@@ -243,6 +243,9 @@ function RemoteModeSurface(props: RemoteWorkspaceProps) {
           projectBrowserClient={props.clients.projectBrowser}
           projectClient={props.clients.project}
           projectTerminalClient={props.clients.projectTerminal}
+          {...(props.clients.serverProjects === undefined
+            ? {}
+            : { serverProjectsClient: props.clients.serverProjects })}
         />
       ) : null}
       <OctantDialogPresence>
@@ -367,6 +370,7 @@ function RemoteChatSurface(
           <ChatWorkspace
             canvasClient={canvasClient}
             controller={controller}
+            {...serviceOfferProps(props)}
             {...(props.extensionClient === undefined
               ? {}
               : { extensionClient: props.extensionClient })}
@@ -441,6 +445,7 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
         >
           <WorkThreadWorkspace
             key={String(activeThread.id)}
+            {...serviceOfferProps(props)}
             title={activeThread.title}
             threadId={activeThread.id}
             initialThread={activeThread}
@@ -521,7 +526,9 @@ function RemoteCodeSurface(props: RemoteSurfaceProps) {
             />
           )}
           <CodeThreadWorkspace
+            actsAsHostPerson={props.actsAsHostPerson}
             canvasClient={props.clients.canvas}
+            {...serviceOfferProps(props)}
             onOpenCanvas={props.onOpenCanvas}
             onOpenCanvasInSidebar={props.onOpenCanvas}
             canvasOpenLabel="Open Canvas"
@@ -537,6 +544,18 @@ function RemoteCodeSurface(props: RemoteSurfaceProps) {
       )}
     </RemoteThreadPane>
   );
+}
+
+function serviceOfferProps({ actsAsHostPerson, clients }: RemoteSurfaceProps) {
+  const client = clients.serviceOffers;
+  return !actsAsHostPerson
+    ? {}
+    : {
+        ...(client === undefined ? {} : { serviceOfferClient: client }),
+        ...(clients.imageResults === undefined
+          ? {}
+          : { imageResults: clients.imageResults, imageGenerationProfiles: [] }),
+      };
 }
 
 type RemoteThread = ChatThread | WorkThread | CodeThread;

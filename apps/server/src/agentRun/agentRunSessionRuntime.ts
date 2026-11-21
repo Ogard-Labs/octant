@@ -58,6 +58,7 @@ import {
   RUNTIME_OUTSIDE_CONTENT_REFUSAL,
   type RuntimeOutsideContentMarking,
 } from "../context/runtimeOutsideContentMark";
+import { appToolHostLines } from "../providers/appToolHostLines";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import type { AgentRunSessionRecord, AgentRunSessionStatePort } from "./agentRunSessionStore";
@@ -1075,7 +1076,19 @@ export function createAgentRunSessionRuntime(
             driver,
             authority,
             projectRoot,
-            context: continuation === undefined ? context : [],
+            // A child is told when to use each Octant tool it is offered, as a
+            // lead is; a follow-up continues a session that already has them.
+            context:
+              continuation === undefined
+                ? [
+                    ...context,
+                    ...appToolHostLines(appManagedTools?.definitions).map((line) => ({
+                      kind: "instructions" as const,
+                      text: line.text,
+                      tool: line.tool,
+                    })),
+                  ]
+                : [],
             ...(continuation !== undefined || run.routingReceipt.admittedInputCount === undefined
               ? {}
               : {
@@ -1923,6 +1936,8 @@ function runSessionTurn(
             // The clamped run authority is what reaches the provider. Nothing here
             // may widen it, and no parent-thread policy is consulted.
             executionPolicy: input.authority.executionPolicy,
+            // Every approval a helper gets holds for that one call.
+            answersOncePerCall: true,
             ...(sandboxPolicy === undefined ? {} : { fullAccessSandbox: true }),
             tools: input.appManagedTools?.definitions ?? [],
           })
@@ -1934,6 +1949,7 @@ function runSessionTurn(
               ? {}
               : { modelOptionValues: input.modelOptionValues }),
             executionPolicy: input.authority.executionPolicy,
+            answersOncePerCall: true,
             ...(sandboxPolicy === undefined ? {} : { fullAccessSandbox: true }),
             tools: input.appManagedTools?.definitions ?? [],
           });

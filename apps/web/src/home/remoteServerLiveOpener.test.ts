@@ -120,4 +120,35 @@ describe("opening another computer's server live from this window", () => {
     opener.dispose();
     expect(await desktop.sign({ ...request, hostId: HOST.hostId })).toBeUndefined();
   });
+
+  it("adopts a relayed server Project preview grant and signs requests under its proxy path", async () => {
+    const desktop = bridge();
+    const opener = createRemoteServerLiveOpener(desktop);
+    const outcome = await opener.openServerProjectPreview(
+      HOST,
+      {
+        projectId: "44444444-4444-4444-8444-444444444444",
+        remotePort: 5173,
+        grantId: GRANT_ID,
+      },
+      "octant-browser",
+    );
+    expect(outcome).toEqual({ kind: "opened" });
+    expect(desktop.openRemoteServerPage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hostId: HOST.hostId,
+        listenerOrigin: HOST.origin,
+        grant: expect.objectContaining({ grantId: GRANT_ID, port: 5173 }),
+      }),
+    );
+    const signed = await desktop.sign({
+      hostId: HOST.hostId,
+      grantId: GRANT_ID,
+      method: "GET",
+      pathQuery: `/api/server-proxy/${GRANT_ID}/`,
+      bodyDigest: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    });
+    expect(signed).toMatchObject({ status: "signed" });
+    opener.dispose();
+  });
 });

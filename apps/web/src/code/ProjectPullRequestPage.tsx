@@ -22,7 +22,7 @@ import { useState, type ReactNode, type RefObject } from "react";
 import { PullRequestStatePill } from "./PullRequestStatePill";
 import { Markdown } from "../markdown/Markdown";
 import { relativeTimeLabel } from "../lib/relativeTime";
-import { CodeBlock } from "../transcript/CodeBlock";
+import { PullRequestDiffWithNotes } from "./ProjectPullRequestDiff";
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import {
   OctantMenuItem,
@@ -601,7 +601,8 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
               )}
             </OctantTabsPanel>
 
-            <OctantTabsPanel className="pr-detail__panel" value="changes">
+            {/* Kept mounted while hidden so unsent line notes survive tab switches. */}
+            <OctantTabsPanel className="pr-detail__panel" keepMounted value="changes">
               <Block
                 label={`Commits (${detail.commits.length})`}
                 stale={stale("commits") ? "commits" : undefined}
@@ -644,20 +645,16 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
                 )}
               </Block>
               <Block label="Diff" stale={stale("diff") ? "diff" : undefined}>
-                {detail.diffTruncated ? (
-                  <p className="pr-detail__quiet" role="note">
-                    This diff is truncated and is not complete.
-                  </p>
-                ) : null}
-                {detail.diff.length === 0 ? (
-                  <p className="pr-detail__quiet" role="status">
-                    No diff observed.
-                  </p>
-                ) : (
-                  <div className="code-pr-review__diff">
-                    <CodeBlock code={detail.diff} language="diff" />
-                  </div>
-                )}
+                <PullRequestDiffWithNotes
+                  diff={detail.diff}
+                  diffTruncated={detail.diffTruncated}
+                  emptyClassName="pr-detail__quiet"
+                  linkedThreads={props.linkedThreads}
+                  noticeClassName="pr-detail__quiet"
+                  {...(props.onSendLineNotes === undefined
+                    ? {}
+                    : { onSendLineNotes: props.onSendLineNotes })}
+                />
               </Block>
             </OctantTabsPanel>
 

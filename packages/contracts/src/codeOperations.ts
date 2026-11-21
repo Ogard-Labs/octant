@@ -78,7 +78,11 @@ import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention"
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { ThreadBoardReason, ThreadBoardStatus } from "./threadBoard";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
-import { GithubRepositoryNodeId } from "./githubCatalogue";
+import {
+  GithubRepositoryName,
+  GithubRepositoryNodeId,
+  GithubRepositoryOwner,
+} from "./githubCatalogue";
 import { GithubPullRequestNodeId } from "./pullRequestIdentity";
 import { ThreadWindowBoundsFields } from "./threadWindow";
 import { StrictKeptProtections } from "./strictNotice";
@@ -1069,6 +1073,19 @@ const PrepareReviewCorrection = Schema.Struct({
     }).annotations(strict),
   ).pipe(Schema.minItems(1), Schema.maxItems(MAX_CODE_REVIEW_CORRECTION_FINDINGS)),
 }).annotations(strict);
+/**
+ * Pull request whose diff a set of line notes came from. The host resolves
+ * the observed pull request's author against the signed-in `gh` viewer login
+ * before starting the turn; when they differ or either cannot be read, the
+ * host marks the thread as having read outside content.
+ */
+export const CodePullRequestLineNotesSource = Schema.Struct({
+  repositoryOwner: GithubRepositoryOwner,
+  repositoryName: GithubRepositoryName,
+  number: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+export type CodePullRequestLineNotesSource = typeof CodePullRequestLineNotesSource.Type;
+
 const StartProviderTurn = Schema.Struct({
   kind: Schema.Literal("start-provider-turn"),
   /** Explicit consent to a fresh native session with a bounded conversation handoff. */
@@ -1103,6 +1120,7 @@ const StartProviderTurn = Schema.Struct({
   ),
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
+  pullRequestLineNotesSource: Schema.optional(CodePullRequestLineNotesSource),
   threadMentionIds: Schema.optional(
     Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
   ),
@@ -2061,6 +2079,8 @@ const UsageEvent = Schema.Struct({
   /** Absent means the provider did not report cache usage. */
   cacheReadInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   cacheWriteInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  /** Absent means the provider did not report reasoning tokens, never that it spent none. */
+  reasoningTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
 
   /**
    * What the provider says this turn cost, in US dollars. Absent whenever the
@@ -2145,9 +2165,10 @@ const ResultEvent = Schema.Struct({
  * The person started this thread from a provider session begun outside
  * Octant, on the same account and folder. Journaled ahead of the
  * `provider-session-ready` that records its resume cursor, in an operation
- * of its own that holds no turn. Only the runtime's own session id is kept,
- * never its title or history. Absent from every thread journaled before
- * adoption existed.
+ * of its own that holds no turn. Only the runtime's own session id is kept
+ * here, never its title; the session's earlier conversation is journaled in
+ * the same unit as a `native-session.history-imported@1` record of its own.
+ * Absent from every thread journaled before adoption existed.
  */
 const NativeSessionAdoptedEvent = Schema.Struct({
   kind: Schema.Literal("native-session-adopted"),

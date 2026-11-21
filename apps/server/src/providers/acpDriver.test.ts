@@ -9,6 +9,7 @@ import {
   type ProviderToolDefinition,
 } from "@octant/contracts";
 import { cacheHitRate, deriveTurnMetrics, foldCodeTurnUsage } from "@octant/domain";
+import { WINDOWS_STRICT_REFUSAL } from "@octant/domain/guardrail-policy";
 import { ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,7 +18,7 @@ import { Effect, Fiber, Stream } from "effect";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { makeAcpDriver, type AcpClientPort, type AcpDriverOptions } from "./acpDriver";
 import type { AcpConnection, AcpProcessPort } from "./acpProcess";
-import { sanitizeAcpEnvironment } from "./acpProcess";
+import { makeAcpProcessLive, sanitizeAcpEnvironment } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind, type AcpProviderProfile } from "./acpProfiles";
 import { addedAcpAgentProfile } from "./addedAcpAgent";
 import { AcpFailure, type AcpNewSessionResult, type AcpConfigOptionsResult } from "./acpProtocol";
@@ -196,7 +197,10 @@ function permissionRequest(id: string, toolCallId: string) {
 function fixture(
   profile: AcpProviderProfile,
   overrides: Partial<
-    Pick<AcpDriverOptions, "authentication" | "managedToolsBridgeFactory" | "process">
+    Pick<
+      AcpDriverOptions,
+      "authentication" | "managedToolsBridgeFactory" | "permissionPersistence" | "process"
+    >
   > & {
     readonly mcpHttp?: boolean;
     readonly nativeResume?: boolean;
@@ -944,6 +948,147 @@ describe("verified ACP usage", () => {
   );
 });
 
+describe("standard ACP usage", () => {
+  const kilo = acpProviderProfiles.kilo;
+  const runTurn = async (driverFixture: ReturnType<typeof fixture>) =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driverFixture.driver.acquire({
+            instanceId,
+            projectRoot,
+            mode: "code",
+          });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const stream = yield* connection.subscribe;
+          const collected = yield* Effect.fork(Effect.promise(() => collectTerminal(stream)));
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          const events = yield* Fiber.join(collected);
+          yield* connection.stop(sessionId);
+          return events;
+        }),
+      ),
+    );
+  const usageUpdate = (client: ReturnType<typeof fixture>["client"], amount: number) =>
+    client.emit({
+      kind: "notification",
+      method: "session/update",
+      params: {
+        sessionId: "agent-session-1",
+        update: {
+          sessionUpdate: "usage_update",
+          used: 9_000,
+          size: 128_000,
+          cost: { amount, currency: "USD" },
+        },
+      },
+    });
+
+  it("records an unpinned agent's reply usage with its US-dollar cost and context before it completes", async () => {
+    const f = fixture(kilo);
+    f.client.prompt.mockImplementationOnce(async () => {
+      usageUpdate(f.client, 0.042);
+      return {
+        stopReason: "end_turn",
+        usage: { inputTokens: 1_000, outputTokens: 200, cachedReadTokens: 600, totalTokens: 1_800 },
+      };
+    });
+    const events = await runTurn(f);
+    expect(events.map((event) => event.kind)).toEqual(["usage", "completed"]);
+    expect(events[0]).toMatchObject({
+      kind: "usage",
+      inputTokens: 1_600,
+      outputTokens: 200,
+      cacheReadInputTokens: 600,
+      costUsd: 0.042,
+      contextTokens: 9_000,
+      contextWindow: 128_000,
+    });
+  });
+
+  it("charges a resumed session's first turn the growth from the cost the agent reported while loading it", async () => {
+    const f = fixture(kilo);
+    const loaded = async (sourceSessionId: string) => {
+      usageUpdate(f.client, 5);
+      return { sessionId: sourceSessionId, configOptions: f.client.configOptions };
+    };
+    f.client.loadSession.mockImplementationOnce(loaded);
+    f.client.resumeSession.mockImplementationOnce(loaded);
+    f.client.prompt.mockImplementationOnce(async () => {
+      usageUpdate(f.client, 5.5);
+      return {
+        stopReason: "end_turn",
+        usage: { inputTokens: 1_000, outputTokens: 200, totalTokens: 1_200 },
+      };
+    });
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          const started = yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+          });
+          yield* connection.stop(sessionId);
+          if (started.resumeCursor === undefined) throw new Error("Missing resume cursor.");
+          yield* connection.resume({
+            sessionId,
+            resumeCursor: started.resumeCursor,
+            executionPolicy: "approval-gated",
+          });
+          const stream = yield* connection.subscribe;
+          const collected = yield* Effect.fork(Effect.promise(() => collectTerminal(stream)));
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          const events = yield* Fiber.join(collected);
+          yield* connection.stop(sessionId);
+          return events;
+        }),
+      ),
+    );
+    expect(events.find((event) => event.kind === "usage")).toMatchObject({ costUsd: 0.5 });
+  });
+
+  it("records no usage for an unpinned agent whose reply carries none", async () => {
+    const f = fixture(kilo);
+    f.client.prompt.mockImplementationOnce(async () => {
+      usageUpdate(f.client, 0.5);
+      return { stopReason: "end_turn" };
+    });
+    const events = await runTurn(f);
+    expect(events.map((event) => event.kind)).toEqual(["completed"]);
+  });
+
+  it("keeps the usage a reviewed agent showed before its prompt was rejected", async () => {
+    const f = fixture(vibe, { runtimeVersion: "3.0.3" });
+    const snapshot = (input: number, output: number) =>
+      f.client.emit({
+        kind: "notification",
+        method: "session/update",
+        params: {
+          sessionId: "agent-session-1",
+          update: {
+            sessionUpdate: "usage_update",
+            used: 600,
+            size: 200_000,
+            _meta: { promptTokens: input, completionTokens: output, cachedTokens: 0 },
+          },
+        },
+      });
+    f.client.newSession.mockImplementationOnce(async () => {
+      snapshot(1_000, 200);
+      return { sessionId: "agent-session-1", configOptions: f.client.configOptions };
+    });
+    f.client.prompt.mockImplementationOnce(async () => {
+      snapshot(1_300, 260);
+      throw new Error("agent exited");
+    });
+    const events = await runTurn(f);
+    expect(events.map((event) => event.kind)).toEqual(["usage", "failed"]);
+    expect(events[0]).toMatchObject({ inputTokens: 300, outputTokens: 60, contextTokens: 600 });
+  });
+});
+
 describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
   it("delivers immediate prompt output to every established subscriber", async () => {
     const { driver } = fixture(profile);
@@ -992,7 +1137,8 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         userQuestions:
           profile.elicitationVersions === undefined ? profile.userQuestions : "unavailable",
         reasoning: "supported",
-        usage: "unsupported",
+        // Only a profile that pins its usage reading loses it on another release.
+        usage: profile.usageVersions === undefined ? "supported" : "unsupported",
         fileChanges: "unavailable",
         nativeChildAgents: "unavailable",
         // Mistral Vibe's auto-approve mode is its own reviewer; no other agent has one.
@@ -1251,6 +1397,36 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     expect(textOnly.probed.models[0]?.inputModalities).toEqual(["text"]);
     expect(textOnly.sent).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
     expect(textOnly.prompt).not.toHaveBeenCalled();
+  });
+
+  it("sends attached audio as an audio block to an agent that advertises audio", async () => {
+    const memo = {
+      attachmentId: "file-3",
+      displayName: "memo.wav",
+      mediaType: "audio/wav",
+      bytes: new Uint8Array([0x52, 0x49, 0x46, 0x46]),
+    };
+    const f = fixture(profile);
+    Object.assign(f.connection.initialized.agentCapabilities, {
+      promptCapabilities: { image: false, audio: true, embeddedContext: false },
+    });
+    const probed = await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+    expect(probed.models[0]?.inputModalities).toEqual(["text", "audio"]);
+    const sent = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          return yield* Effect.either(
+            connection.send({ sessionId, prompt: "listen", attachments: [memo], tools: [] }),
+          );
+        }),
+      ),
+    );
+    expect(sent._tag).toBe("Right");
+    expect(f.client.prompt).toHaveBeenCalledWith(expect.any(String), expect.any(String), [
+      { type: "audio", mimeType: "audio/wav", data: Buffer.from(memo.bytes).toString("base64") },
+    ]);
   });
 
   it("sends an attached document as an embedded resource only to an agent that advertises embedded context", async () => {
@@ -1965,7 +2141,14 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       }
       const modeValue = profile.sessionMode(productMode, executionPolicy);
       const expectedModeRequest = profile.setModeCall?.("agent-session-1", modeValue);
-      if (expectedModeRequest === undefined) {
+      if (profile.selectsNoMode === true) {
+        // The session keeps the mode it opened with.
+        expect(client.setConfigOption).not.toHaveBeenCalledWith(
+          "agent-session-1",
+          "mode",
+          expect.anything(),
+        );
+      } else if (expectedModeRequest === undefined) {
         expect(client.setConfigOption).toHaveBeenCalledWith("agent-session-1", "mode", modeValue);
       } else {
         expect(client.call).toHaveBeenCalledWith(
@@ -3480,6 +3663,98 @@ it("keeps a retained native session identity reserved while it is idle", async (
   );
 });
 
+it.each([
+  ["Google Antigravity keeps", acpProviderProfiles.antigravity, "refused"],
+  ["an agent with no reviewed warm release closes", acpProviderProfiles.gemini, "claimed"],
+] as const)("%s its process between turns on any release", async (_label, profile, expected) => {
+  const { driver, registry } = fixture(profile, { runtimeVersion: "9.9.9" });
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* driver.acquire({ instanceId, mode: "code", projectRoot });
+        yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+        const events = yield* connection.subscribe;
+        const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+        yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+        yield* Fiber.join(terminal);
+        yield* connection.stop(sessionId);
+        const claim = registry.claimNativeSession(
+          instanceId,
+          JSON.stringify(["acp-native", profile.kind, "agent-session-1"]),
+        );
+        expect(claim.status).toBe(expected);
+      }),
+    ),
+  );
+});
+
+it.each([
+  ["stays warm through a late update for the finished turn", "late-update"],
+  ["closes on a request it would have to answer", "request"],
+] as const)("Google Antigravity's process parked between turns %s", async (_label, activity) => {
+  const { driver, client, registry, starts, active } = fixture(acpProviderProfiles.antigravity, {
+    runtimeVersion: "9.9.9",
+  });
+  try {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, mode: "code", projectRoot });
+          const started = yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+          });
+          const events = yield* connection.subscribe;
+          const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          yield* Fiber.join(terminal);
+          yield* connection.stop(sessionId);
+          expect(active()).toBe(1);
+          if (activity === "late-update") {
+            // The CLI's delayed usage and a trailing chunk for the finished turn.
+            client.emit({
+              kind: "notification",
+              method: "session/update",
+              params: {
+                sessionId: "agent-session-1",
+                update: { sessionUpdate: "usage_update", used: 1200, size: 200000 },
+              },
+            });
+            client.emit({
+              kind: "notification",
+              method: "session/update",
+              params: {
+                sessionId: "agent-session-1",
+                update: {
+                  sessionUpdate: "agent_message_chunk",
+                  content: { type: "text", text: "late" },
+                },
+              },
+            });
+            expect(active()).toBe(1);
+            if (started.resumeCursor === undefined) throw new Error("Missing cursor");
+            const before = starts.length;
+            yield* connection.resume({
+              sessionId,
+              resumeCursor: started.resumeCursor,
+              executionPolicy: "approval-gated",
+            });
+            expect(starts).toHaveLength(before);
+            expect(client.resumeSession).not.toHaveBeenCalled();
+            yield* connection.stop(sessionId);
+          } else {
+            client.request(permissionRequest("late-permission", "late-call"));
+            yield* Effect.promise(() => vi.waitFor(() => expect(active()).toBe(0)));
+          }
+        }),
+      ),
+    );
+  } finally {
+    await registry.closeAll();
+  }
+});
+
 it("never takes up a retained session opened under another reviewer or another of the person's setups", async () => {
   const own = {
     subagents: false,
@@ -4453,5 +4728,291 @@ describe("an added ACP agent's model selection", () => {
     });
     expect(client.call).not.toHaveBeenCalledWith("session/set_model", expect.anything());
     expect(client.setConfigOption).not.toHaveBeenCalled();
+  });
+});
+
+it("asks Google Antigravity for each following session/list page with the cursor it returned", async () => {
+  const f = fixture(acpProviderProfiles.antigravity, { runtimeVersion: "1.5.12" });
+  const driver = makeAcpDriver({
+    profile: acpProviderProfiles.antigravity,
+    instanceId,
+    binaryPath,
+    managedHome,
+    process: {
+      start: () => Effect.succeed(f.connection),
+    },
+    runtimeRegistry: new ProviderRuntimeRegistry(),
+    clientFactory: () => f.client,
+    sessionOwnership: { held: () => new Set(["held"]) },
+  });
+  vi.mocked(f.client.call).mockImplementation(async (_method, params) =>
+    params.cursor === "page-2"
+      ? { sessions: [{ sessionId: "later", cwd: projectRoot }] }
+      : { sessions: [{ sessionId: "held", cwd: projectRoot }], nextCursor: "page-2" },
+  );
+  const listed = await Effect.runPromise(
+    driver.nativeSessions?.list({ instanceId, projectRoot }) ?? Effect.die("no native sessions"),
+  );
+  expect(listed.map((session) => session.nativeSessionId)).toEqual(["later"]);
+  expect(f.client.call).toHaveBeenCalledWith("session/list", {
+    cwd: projectRoot,
+    cursor: "page-2",
+  });
+});
+
+describe("Google Antigravity's allow-always offer without allow-once", () => {
+  const allowAlwaysRequest = {
+    kind: "request" as const,
+    id: "always-provider",
+    method: "session/request_permission" as const,
+    params: {
+      sessionId: "agent-session-1",
+      toolCall: { toolCallId: "edit-always", title: "Edit file", kind: "edit" as const },
+      options: [
+        { optionId: "always", name: "Always allow", kind: "allow_always" },
+        { optionId: "no", name: "Reject", kind: "reject_once" },
+      ],
+    },
+  };
+  const run = (
+    executionPolicy: "approval-gated" | "plan",
+    persistence: "current-session" | "project-default",
+    answer: (
+      connection: Effect.Effect.Success<
+        ReturnType<ReturnType<typeof fixture>["driver"]["acquire"]>
+      >,
+    ) => Effect.Effect<unknown, unknown>,
+    answersOncePerCall?: true,
+  ) => {
+    const f = fixture(acpProviderProfiles.antigravity, {
+      runtimeVersion: "1.5.12",
+      permissionPersistence: () => persistence,
+    });
+    const offered: ProviderRuntimeEvent[] = [];
+    return Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy,
+            ...(answersOncePerCall === undefined ? {} : { answersOncePerCall }),
+          });
+          const events = yield* connection.subscribe;
+          yield* Effect.fork(
+            Stream.runForEach(events, (event) => Effect.sync(() => offered.push(event))),
+          );
+          yield* Effect.sleep("1 millis");
+          f.client.emit({
+            kind: "notification",
+            method: "session/update",
+            params: {
+              sessionId: "agent-session-1",
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "edit-always",
+                title: "Edit file",
+                kind: "edit",
+                status: "pending",
+              },
+            },
+          });
+          f.client.request(allowAlwaysRequest);
+          yield* Effect.sleep("1 millis");
+          yield* answer(connection);
+        }),
+      ),
+    ).then(() => ({ client: f.client, offered }));
+  };
+
+  it("refuses it in Plan and never offers it as a question", async () => {
+    const { client, offered } = await run("plan", "current-session", (connection) =>
+      Effect.flip(
+        connection.answerUserInput({ sessionId, requestId: "request-1", answer: "Always allow" }),
+      ).pipe(Effect.asVoid),
+    );
+    expect(client.respondPermission).toHaveBeenCalledTimes(1);
+    expect(client.respondPermission).toHaveBeenCalledWith("always-provider", "no");
+    expect(offered.some((event) => event.kind === "user-input-request")).toBe(false);
+  });
+
+  it("chooses allow-always when the person keeps approvals for the session", async () => {
+    const { client, offered } = await run("approval-gated", "current-session", (connection) =>
+      connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
+    );
+    expect(offered.some((event) => event.kind === "approval-request")).toBe(true);
+    expect(client.respondPermission).toHaveBeenCalledWith("always-provider", "always");
+  });
+
+  it("denies it on arrival in a helper run, whose answers hold for one call, and says why", async () => {
+    const { client, offered } = await run(
+      "approval-gated",
+      "current-session",
+      () => Effect.void,
+      true,
+    );
+    expect(client.respondPermission).toHaveBeenCalledTimes(1);
+    expect(client.respondPermission).toHaveBeenCalledWith("always-provider", "no");
+    expect(offered.some((event) => event.kind === "approval-request")).toBe(false);
+    expect(offered.some((event) => event.kind === "failed")).toBe(false);
+    expect(offered).toContainEqual(
+      expect.objectContaining({
+        kind: "tool-progress",
+        message:
+          "Google Antigravity only offers Always allow, which a helper run can't grant; denied.",
+      }),
+    );
+  });
+
+  it("sends nothing for an approval that holds for one call only, and keeps the request for a denial", async () => {
+    const refusals: unknown[] = [];
+    const approveThenDeny =
+      (scope: "once" | undefined) =>
+      (
+        connection: Effect.Effect.Success<
+          ReturnType<ReturnType<typeof fixture>["driver"]["acquire"]>
+        >,
+      ) =>
+        Effect.gen(function* () {
+          refusals.push(
+            yield* Effect.flip(
+              connection.answerApproval({
+                sessionId,
+                requestId: "request-1",
+                approved: true,
+                ...(scope === undefined ? {} : { scope }),
+              }),
+            ),
+          );
+          yield* connection.answerApproval({ sessionId, requestId: "request-1", approved: false });
+        });
+    const perProject = await run("approval-gated", "project-default", approveThenDeny(undefined));
+    const once = await run("approval-gated", "current-session", approveThenDeny("once"));
+    for (const { client } of [perProject, once]) {
+      expect(client.respondPermission).toHaveBeenCalledTimes(1);
+      expect(client.respondPermission).toHaveBeenCalledWith("always-provider", "no");
+    }
+    expect(refusals).toEqual([
+      {
+        category: "unsupported",
+        message:
+          "Google Antigravity only offers Always allow here. Approve it for this session, or deny it.",
+      },
+      {
+        category: "unsupported",
+        message:
+          "Google Antigravity only offers Always allow here. Approve it for this session, or deny it.",
+      },
+    ]);
+  });
+});
+
+it("offers Google Antigravity no client file writes, while still offering reads and the terminal", async () => {
+  const nativeTools = Object.values(ACP_CLIENT_TOOL_NAMES).map((name) => ({
+    name,
+    inputSchema: { type: "object" },
+  }));
+  const { driver, starts } = fixture(acpProviderProfiles.antigravity, {
+    runtimeVersion: "1.5.12",
+  });
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+        yield* connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          tools: nativeTools,
+        });
+        expect(starts[0]).toMatchObject({
+          clientCapabilities: { readTextFile: true, writeTextFile: false, terminal: true },
+        });
+      }),
+    ),
+  );
+});
+
+it("sends Google Antigravity its own command first and Octant's context after it", async () => {
+  const { driver, client } = fixture(acpProviderProfiles.antigravity, {
+    runtimeVersion: "1.5.12",
+  });
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+        yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+        const events = yield* connection.subscribe;
+        const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+        yield* connection.send({
+          sessionId,
+          prompt: "/compact",
+          context: [{ kind: "instructions", text: "Octant's standing instructions." }],
+          attachments: [],
+          tools: [],
+        });
+        yield* Fiber.join(terminal);
+      }),
+    ),
+  );
+  const blocks: unknown = client.prompt.mock.calls[0]?.at(1);
+  if (!Array.isArray(blocks)) throw new Error("Expected separate text blocks");
+  expect(blocks[0]).toBe("/compact");
+  expect(String(blocks[1])).toContain("Octant's standing instructions.");
+});
+
+describe("ACP Chat on Windows", () => {
+  it("starts an ACP agent Chat session on Windows outside Strict without confinement and refuses Strict", async () => {
+    const { driver, starts } = fixture(kilo);
+    await withProcessPlatform("win32", () =>
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "chat" });
+            yield* connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "approval-gated",
+              strict: false,
+            });
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      ),
+    );
+    expect(starts[0]).toMatchObject({
+      mode: "chat",
+      executionPolicy: "approval-gated",
+      strict: false,
+    });
+
+    const strictDriver = makeAcpDriver({
+      instanceId,
+      profile: kilo,
+      binaryPath,
+      managedHome,
+      process: makeAcpProcessLive({ platform: "win32" }),
+      runtimeRegistry: new ProviderRuntimeRegistry(),
+    });
+    const refused = await withProcessPlatform("win32", () =>
+      Effect.runPromise(
+        Effect.flip(
+          Effect.scoped(
+            strictDriver.acquire({ instanceId, projectRoot, mode: "chat" }).pipe(
+              Effect.flatMap((connection) =>
+                connection.start({
+                  sessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                  strict: true,
+                }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(refused).toMatchObject({ category: "incompatible", message: WINDOWS_STRICT_REFUSAL });
   });
 });

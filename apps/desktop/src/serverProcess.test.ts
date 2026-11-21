@@ -1,6 +1,7 @@
 import { chmod, mkdtemp, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough, Writable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import {
   HostRuntimePathError,
@@ -13,6 +14,7 @@ import {
   ServerExitedBeforeReady,
   ServerReadyTimeout,
   createStderrTail,
+  forwardStderrWithTail,
   assertAutomaticHostStartupEnabled,
   formatDesktopStartupFailure,
   ManagedServerCleanupFailed,
@@ -1302,5 +1304,48 @@ describe("createSingleFlight", () => {
     await expect(Promise.all([first, second])).resolves.toEqual(["created", "created"]);
     await run();
     expect(operation).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("forwardStderrWithTail", () => {
+  it("keeps capturing host stderr into the tail after the forwarded stderr destination fails with EPIPE", async () => {
+    const source = new PassThrough();
+    const forwarded: string[] = [];
+    let writes = 0;
+    const destination = new Writable({
+      write(chunk, _encoding, callback) {
+        writes += 1;
+        if (writes === 1) {
+          forwarded.push(Buffer.from(chunk).toString("utf8"));
+          callback();
+          return;
+        }
+        callback(Object.assign(new Error("write EPIPE"), { code: "EPIPE", syscall: "write" }));
+      },
+    });
+    // Mirror the process error net absorbing EPIPE on process.stderr.
+    destination.on("error", () => undefined);
+    const tail = createStderrTail();
+
+    forwardStderrWithTail(source, destination, tail);
+
+    source.write("first line\n");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(forwarded.join("")).toBe("first line\n");
+
+    // Second write breaks the destination with EPIPE; Node's pipe() unpipes and
+    // pauses source, and forwardStderrWithTail must resume source in tail-only mode.
+    source.write("line that hits epipe\n");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    source.write("fatal crash after parent stderr closed\n");
+    source.end();
+    await tail.drained(500);
+
+    expect(tail.text()).toContain("first line");
+    expect(tail.text()).toContain("line that hits epipe");
+    expect(tail.text()).toContain("fatal crash after parent stderr closed");
+    expect(destination.listenerCount("error")).toBe(1);
+    expect(destination.listenerCount("close")).toBe(0);
   });
 });

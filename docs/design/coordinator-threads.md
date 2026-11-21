@@ -38,11 +38,11 @@ read-only gate is a maintainer live check.
   is a field on the thread's own record: each change is journaled as
   `code.thread-updated@1` under the thread's expected version (commands
   `set-code-thread-coordinator`, `set-code-thread-coordinator-bounds`,
-  `set-code-thread-message-wake`, and `set-code-thread-coordinator-wake`), a
-  stale version is refused, and the Code commands route refuses all four from
-  anything but a local window or a device the host's own person paired. A new
-  thread's creation command may not carry the role, lineage, switches, bounds,
-  or workers' level.
+  `set-code-thread-coordinator-done-when`, `set-code-thread-message-wake`, and
+  `set-code-thread-coordinator-wake`), a stale version is refused, and the Code
+  commands route refuses all five from anything but a local window or a device
+  the host's own person paired. A new thread's creation command may not carry
+  the role, lineage, switches, bounds, done-when condition, or workers' level.
 - **Several per Project.** A Code Project may have as many coordinators at
   once as Settings › Permissions › Coordinators per Project allows (default 4,
   1 to 32), for separate lines of work (one for the backlog, one for a
@@ -510,6 +510,54 @@ polling with `wait`, which spends its turn budget and its context. A closed set
 of states is enough to decide whether to read the worker, and it keeps the
 coordinator unmarked until it chooses to read.
 
+## Host-checked done-when condition
+
+A person may give a coordinator a host-checked "done when" condition (maintainer
+decision, 2026-11-21; built). While it is unmet, the host checks it on a
+bounded schedule with backoff and wakes the coordinator with only what is still
+unmet until every item holds, then stops checking. The host never starts
+workers itself.
+
+- **Closed set of conditions.** One coordinator holds at most 16 unique items,
+  each from a closed set: a pull request merged (`pull-request-merged`), a pull
+  request's required checks green (`pull-request-checks-green`), or an active
+  non-coordinator Code thread in the coordinator's own Project marked or
+  objectively satisfied as Done (`thread-done`). Unknown kinds, duplicate
+  items, empty lists, self-references, and threads from other Projects are
+  refused.
+- **Journaled and person-only.** Setting or clearing the condition runs through
+  `set-code-thread-coordinator-done-when` under the thread's expected version
+  and journals the optional `coordinatorDoneWhen` field on
+  `code.thread-updated@1` (backward-compatible so older journals without it
+  replay cleanly). Only a person at a local window or a device the host's own
+  person paired may set or clear it; agents, routines, hub-roster devices, and
+  agent-grant sessions are refused. **Stop coordinating** drops it with the
+  role, and a new thread creation command may not carry it.
+- **Host-checked schedule with backoff.** The host evaluates each active
+  coordinator's condition on a per-coordinator schedule starting at 30 seconds
+  and backing off exponentially up to 15 minutes while the same items remain
+  unmet (resetting to 30 seconds when the unmet set changes). Multiple items on
+  the same pull request coalesce into one read-only forge check. Checking stops
+  immediately once every item holds, or if the condition is cleared or the
+  coordinator stops coordinating or is archived. Because the condition is
+  journaled on the coordinator's thread record and satisfaction is journaled
+  against that condition (`coordinator.done-when-satisfied@1` /
+  `coordinator.done-when-reset@1`), an unmet condition survives a host restart
+  while an already-satisfied condition never re-arms across restarts unless
+  edited or cleared and re-set. Recovering an open done-when wake after restart
+  re-evaluates the condition live so a stale wake drops if the condition now
+  holds.
+- **Wakes under existing bounds and never starts workers.** Each unmet check
+  wakes the coordinator through its ordinary wake path and bounds (hourly wake
+  cap, round bound, single turn at a time, and the thread's wake switch),
+  carrying only closed-set host facts for the unmet items (never PR titles,
+  comments, check logs, or agent-written thread titles, so checking does not
+  mark the coordinator). The host never starts or proposes workers itself.
+- **Controls.** A running coordinator's pane header offers **Done when**
+  (showing the configured count) beside **Workers**, opening **Coordinator
+  limits** where the person views, adds, removes, or clears done-when items
+  alongside the coordinator's bounds.
+
 ## Questions and approvals
 
 The main signal moves from "a thread finished" to "something needs you", and it
@@ -645,4 +693,10 @@ worker's live state; and an open worker not being added to the sidebar. Rendered
 checks cover the sidebar section, the Workers panel at desktop and phone width,
 the composer's worker requests, the worker request rows in the
 thread view, and the dock's worker rows and
-graphs.
+graphs. For host-checked done-when conditions: strict decoding of the closed
+set and rejection of unknown/duplicate/oversized items; waking the coordinator
+with only the unmet items under backoff and wake bounds; surviving host
+restart; stopping checks once all items hold or the condition is cleared; never
+starting a worker; refusing non-person principals; replaying older journals
+without the field alongside updates that set and clear it; and component tests
+for viewing, adding, removing, and clearing items in the coordinator controls.

@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Exit, Scope, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { appToolHostLines } from "./appToolHostLines";
 import { makePiDriver, type PiClientPort } from "./piDriver";
 import { piToolCatalogAttestation, type PiProcessPort, type PiRpcConnection } from "./piProcess";
 import { createPiManagedToolsBridge, type PiManagedToolsBridge } from "./piManagedTools";
@@ -1167,8 +1168,20 @@ describe("Pi provider driver", () => {
       const bridge = starts.at(-1)?.toolBridge as { url: string; token: string } | undefined;
       expect(bridge).toBeDefined();
       const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+      const [line] = appToolHostLines([tool]);
+      if (line === undefined) throw new Error("Missing Browser guide");
       await Effect.runPromise(
-        connection.send({ sessionId, prompt: "use the browser", attachments: [], tools: [tool] }),
+        connection.send({
+          sessionId,
+          prompt: "use the browser",
+          attachments: [],
+          tools: [tool],
+          context: [{ kind: "instructions", ...line }],
+        }),
+      );
+      expect(client.request).toHaveBeenCalledWith(
+        "prompt",
+        expect.objectContaining({ message: expect.stringContaining(line.text) }),
       );
       client.emit({
         type: "tool_execution_start",
@@ -1551,6 +1564,80 @@ describe("Pi provider driver", () => {
     expect((await launched("code"))?.readOnlyFolders).toEqual([attachmentsFolder]);
     expect((await launched("chat"))?.readOnlyFolders).toBeUndefined();
   });
+
+  it.each([
+    ["the Pi process disconnects", "disconnect", false],
+    ["Pi breaks its protocol", "protocol", false],
+    ["Pi breaks its protocol after a request without usage", "protocol", true],
+  ] as const)(
+    "reports the usage a turn spent before it failed because %s, and none when a request's counts are missing",
+    async (_label, cause, missing) => {
+      const client = new FakeClient();
+      const processExit = deferredExit();
+      const processPort: PiProcessPort = {
+        start: () =>
+          Effect.acquireRelease(
+            Effect.succeed({
+              version: "0.80.10",
+              pid: 703,
+              root,
+              rpc: {} as PiRpcConnection["rpc"],
+              exited: processExit.exited,
+            }),
+            () => Effect.void,
+          ),
+      };
+      const driver = makePiDriver({
+        instanceId,
+        binaryPath: "/opt/homebrew/bin/pi",
+        piHome: "/managed/pi",
+        process: processPort,
+        runtimeRegistry: new ProviderRuntimeRegistry(),
+        clientFactory: () => client,
+        clock: () => "2026-07-18T06:00:00.000Z",
+        correlationId: () => "80000000-0000-4000-8000-000000000703",
+      });
+      const scope = await Effect.runPromise(Scope.make());
+      const connection = await Effect.runPromise(
+        driver
+          .acquire({ instanceId, projectRoot: root, mode: "code" })
+          .pipe(Effect.provideService(Scope.Scope, scope)),
+      );
+      await Effect.runPromise(
+        connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+      await Effect.runPromise(
+        connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
+      );
+      client.emit({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          usage: { input: 20, output: 5, cacheRead: 10, cacheWrite: 0, cost: { total: 0.01 } },
+        },
+      });
+      if (missing) client.emit({ type: "message_end", message: { role: "assistant" } });
+      if (cause === "disconnect") processExit.reject(new Error("disconnected"));
+      else client.emit({ type: "tool_execution_start", toolName: "read" });
+      const events = await collected;
+      if (missing) {
+        // A request that reported nothing leaves the turn's counts partial,
+        // which would understate it; the turn stays unreported instead.
+        expect(events.map((event) => event.kind)).toEqual(["failed"]);
+      } else {
+        expect(events.map((event) => event.kind)).toEqual(["usage", "failed"]);
+        expect(events[0]).toMatchObject({
+          inputTokens: 30,
+          outputTokens: 5,
+          cacheReadInputTokens: 10,
+          cacheWriteInputTokens: 0,
+          costUsd: 0.01,
+        });
+      }
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+    },
+  );
 
   it("fails an active turn exactly once when the owned Pi process disconnects", async () => {
     const client = new FakeClient();

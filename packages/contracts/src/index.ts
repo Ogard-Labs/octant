@@ -189,6 +189,7 @@ export * from "./usageDashboard";
 export * from "./spendCeiling";
 export * from "./providerUsageHistory";
 export * from "./imageGeneration";
+export * from "./serviceOffers";
 export * from "./agentProfile";
 export * from "./agentRun";
 export * from "./agentRunCanvas";
@@ -227,6 +228,7 @@ export * from "./threadWakeups";
 export * from "./codeSessions";
 export * from "./workSessions";
 export * from "./providerNativeSession";
+export * from "./importedSessionHistory";
 export * from "./agentObservation";
 export * from "./hostAnswer";
 export * from "./terminalSessions";
@@ -238,7 +240,7 @@ export * from "./browserCredentialUse";
 
 export * from "./browserPageScript";
 
-export * from "./ownerBrowser";
+export * from "./pairedBrowserControl";
 
 export * from "./childWorktreeSources";
 
@@ -251,3 +253,4 @@ export * from "./codeProviderFileReview";
 export * from "./persistentBrowserOwner";
 
 export * from "./hostResourcePolicy";
+export * from "./providerFolderScan";

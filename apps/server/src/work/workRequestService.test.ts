@@ -22,6 +22,7 @@ import { EventActor } from "@octant/contracts/events";
 import { WorkRequestProjection } from "./workRequestProjection";
 import {
   WorkRequestService,
+  type WorkApprovalNotDeliverable,
   type WorkRequestLevelChangePort,
   type WorkRequestProjectPort,
 } from "./workRequestService";
@@ -62,7 +63,7 @@ function createService(
         readonly sessionId: string;
         readonly requestId: string;
         readonly approved: boolean;
-      }) => Promise<void>;
+      }) => Promise<void | WorkApprovalNotDeliverable>;
       answerUserInput: (input: {
         readonly sessionId: string;
         readonly requestId: string;
@@ -1803,6 +1804,86 @@ describe("owner Work approval admission", () => {
       }
     },
   );
+});
+
+describe("an answer the agent cannot take as asked", () => {
+  it("tells the person why, keeps the request pending, and records no approval", async () => {
+    let runtime: WorkRequestRuntime | undefined;
+    const refusal =
+      "The agent only offers Always allow here. Approve it for this session, or deny it.";
+    const answerApproval = vi.fn((input: { readonly approved: boolean }) =>
+      input.approved
+        ? Effect.fail({ category: "unsupported" as const, message: refusal })
+        : Effect.void,
+    );
+    const { service, projection } = createService({
+      providerSessions: {
+        answerApproval: async (input) => {
+          if (runtime === undefined) throw new Error("Runtime unavailable.");
+          return runtime.answerApproval({
+            ...input,
+            sessionId: decodeProviderSessionId(input.sessionId),
+          });
+        },
+      },
+    });
+    runtime = new WorkRequestRuntime({ requests: service, uuid: () => String(ids.request) });
+    const input = {
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      sessionId: ids.session,
+      projectRoot: "/work",
+      connection: {
+        answerApproval,
+        answerUserInput: () => Effect.void,
+        interrupt: () => Effect.void,
+        subscribe: Effect.die("No subscription needed for the deterministic fixture."),
+      },
+    };
+    const release = runtime.register(input);
+    try {
+      await Effect.runPromise(
+        runtime.observe(
+          input,
+          decodeProviderRuntimeEvent({
+            kind: "approval-request",
+            instanceId: ids.provider,
+            sessionId: ids.session,
+            sequence: 1,
+            correlationId: ids.request,
+            occurredAt: clockNow,
+            requestId: "always-only",
+            action: "Edit",
+            description: "Edit a.txt",
+          }),
+        ),
+      );
+      const recorded = projection.lookup(ids.request)?.request;
+      if (recorded === undefined) throw new Error("Missing recorded request.");
+      const answer = (approved: boolean, expectedVersion: WorkRequest["version"]) =>
+        service.resolve({
+          kind: "resolve-work-request",
+          requestId: recorded.requestId,
+          expectedVersion,
+          resolution: { kind: "approval", approved },
+        });
+      expect(await answer(true, recorded.version)).toEqual({
+        status: "failure",
+        failure: { code: "unavailable", message: refusal },
+      });
+      const pending = projection.lookup(ids.request)?.request;
+      if (pending === undefined) throw new Error("Missing pending request.");
+      expect(pending).toMatchObject({ status: "pending" });
+      expect(pending.delivery).toBeUndefined();
+      expect(await answer(false, pending.version)).toMatchObject({
+        status: "ok",
+        request: { status: "resolved", resolution: { kind: "approval", approved: false } },
+      });
+    } finally {
+      release();
+    }
+  });
 });
 
 describe("an agent's ask to plan first or to leave Plan", () => {

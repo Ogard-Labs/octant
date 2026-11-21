@@ -1,8 +1,9 @@
 import type { PendingRequestClient } from "@octant/client-runtime/pending-request-client";
-import type {
-  PendingRequest,
-  PendingRequestList,
-  WaitingAsk,
+import {
+  decodeWaitingAsk,
+  type PendingRequest,
+  type PendingRequestList,
+  type WaitingAsk,
 } from "@octant/contracts/pending-requests";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -149,6 +150,55 @@ async function findCard() {
 }
 
 describe("the Needs you card", () => {
+  it("finds an offer in its thread, then removes the row with a note after a restart", async () => {
+    const ask = decodeWaitingAsk({
+      kind: "service-offer",
+      mode: "chat",
+      askId: "00000000-0000-4000-8000-000000000911",
+      threadId: "00000000-0000-4000-8000-000000000912",
+      threadTitle: "Trip images",
+      requestedAt: at(1),
+      text: "Generate an image?",
+    });
+    const onOpenAsk = vi.fn();
+    const list = vi
+      .fn<PendingRequestClient["list"]>()
+      .mockResolvedValueOnce({
+        requests: [],
+        truncated: false,
+        asks: [ask],
+        offerHostRun: "before",
+      })
+      .mockResolvedValue({ requests: [], truncated: false, offerHostRun: "after" });
+    const beforeRecovery = { list };
+    const afterRecovery = { list };
+    const options = source({ onOpenAsk });
+    const dashboard = (feedRevision: number, modes: NeedsYouCardSource["modes"] = ["chat"]) => (
+      <HomeDashboard
+        cards={[
+          createNeedsYouCard({
+            ...options,
+            feedRevision,
+            modes,
+            pendingRequestClient: feedRevision === 0 ? beforeRecovery : afterRecovery,
+          }),
+        ]}
+        customization={{ order: [], visibility: [] }}
+        onCustomizationChange={vi.fn()}
+      />
+    );
+    const screenRender = render(dashboard(0));
+    const row = await screen.findByRole("group", { name: "Trip images is waiting for you" });
+    expect(within(row).queryByRole("button", { name: "Generate" })).toBeNull();
+    await userEvent.click(within(row).getByRole("button", { name: "Open thread" }));
+    expect(onOpenAsk).toHaveBeenCalledWith(ask);
+    screenRender.rerender(dashboard(1));
+    expect(await screen.findByText("A waiting offer ended when the host restarted.")).toBeVisible();
+    expect(screen.queryByText("Generate an image?")).toBeNull();
+    screenRender.rerender(dashboard(1, ["code"]));
+    expect(screen.queryByText("A waiting offer ended when the host restarted.")).toBeNull();
+  });
+
   it("lists each waiting approval and question with its thread, Project, wait, and text", async () => {
     renderCard(
       createNeedsYouCard(

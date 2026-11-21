@@ -321,21 +321,30 @@ export class CodeUsageProjection implements Projection {
     // must reproduce the ledger, not re-price it against today's rate table.
     // Code reports replace the turn's previous totals, just as its transcript
     // does. The operation id keeps live updates and replay on the same row.
+    // Cache and reasoning figures fill the same columns Chat and Work fill; a
+    // report without one leaves it NULL (unreported), never zero. Rows
+    // projected before these columns were filled for Code keep NULL: the
+    // projection is not rebuilt for them, since a purged thread's operation
+    // events are gone and a rebuild would drop its de-linked spend.
     connection
       .prepare(`
       INSERT INTO usage_record_projection (
         reconciliation_id, subject_type, subject_id, provider_instance_id,
         model_id, request_shape, quality, input_tokens, output_tokens,
+        reasoning_tokens, cache_read_input_tokens, cache_write_input_tokens,
         cost_usd_micros, cost_kind,
         planned_input_tokens, variance_tokens, schema_version,
         attribution_json, observed_at, last_sequence, host_id, planning_available,
         ran_at_full_access
-      ) VALUES (?, 'code-thread', ?, ?, ?, 'code-provider-turn', 'exact', ?, ?, ?, ?, 0, 0, ?, '[]', ?, ?, ?, 0, ?)
+      ) VALUES (?, 'code-thread', ?, ?, ?, 'code-provider-turn', 'exact', ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, '[]', ?, ?, ?, 0, ?)
       ON CONFLICT (reconciliation_id) DO UPDATE SET
         quality = excluded.quality,
         ran_at_full_access = excluded.ran_at_full_access,
         input_tokens = excluded.input_tokens,
         output_tokens = excluded.output_tokens,
+        reasoning_tokens = excluded.reasoning_tokens,
+        cache_read_input_tokens = excluded.cache_read_input_tokens,
+        cache_write_input_tokens = excluded.cache_write_input_tokens,
         cost_usd_micros = excluded.cost_usd_micros,
         cost_kind = excluded.cost_kind,
         observed_at = excluded.observed_at,
@@ -349,6 +358,9 @@ export class CodeUsageProjection implements Projection {
         String(started.event.modelId),
         usage.inputTokens,
         usage.outputTokens,
+        usage.reasoningTokens ?? null,
+        usage.cacheReadInputTokens ?? null,
+        usage.cacheWriteInputTokens ?? null,
         usage.cost?.usdMicros ?? null,
         usage.cost?.kind ?? null,
         USAGE_PROJECTION_SCHEMA_VERSION,
@@ -462,10 +474,17 @@ const PROJECT_THREADS = [
     mode: "work",
     subjectType: "work-thread",
     threads: (match: (projectColumn: string) => string) => `
-      SELECT aggregate_id FROM event_journal
-      WHERE aggregate_type = 'work-thread'
-        AND event_name = 'work.thread-created@1'
-        AND ${match("json_extract(payload_json, '$.thread.projectId')")}`,
+      SELECT w.aggregate_id FROM event_journal w
+      WHERE w.aggregate_type = 'work-thread'
+        AND w.event_name IN ('work.thread-created@1', 'work.thread-updated@1')
+        AND w.aggregate_version = (
+          SELECT MAX(w2.aggregate_version)
+          FROM event_journal w2
+          WHERE w2.aggregate_type = 'work-thread'
+            AND w2.aggregate_id = w.aggregate_id
+            AND w2.event_name IN ('work.thread-created@1', 'work.thread-updated@1')
+        )
+        AND ${match("json_extract(w.payload_json, '$.thread.projectId')")}`,
   },
 ] as const;
 
@@ -505,8 +524,9 @@ function projectBearingSubjectTerms(
     ),
     // An image job made in a thread is that thread's spend: its queued event
     // names the thread kind and the thread. A library job names no thread.
-    // Only the dashboard attributes them: a spend ceiling selects its rows
-    // through the same predicate and must keep counting what it always has.
+    // The dashboard and monetary spend ceilings pass `includeImageJobs: true`;
+    // token ceilings leave it false so image providers that report no tokens
+    // do not trip token ceilings as unavailable.
     ...(includeImageJobs ? PROJECT_THREADS : []).map(
       ({ subjectType, threads }) => `(subject_type = 'image-job'
     AND subject_id IN (
@@ -520,7 +540,7 @@ function projectBearingSubjectTerms(
   ];
 }
 
-/** `includeImageJobs` places an image job under its thread's Project; only the dashboard asks. */
+/** `includeImageJobs` places an image job under its thread's Project (used by Usage and monetary ceilings). */
 export interface UsageScopeOptions {
   readonly includeImageJobs?: boolean;
 }

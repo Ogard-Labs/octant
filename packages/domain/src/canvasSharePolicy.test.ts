@@ -40,14 +40,34 @@ import { designBriefExample, launchGanttExample } from "./canvasLayoutExamples";
 import { metricExamples } from "./canvasMetricExamples";
 import { mockupExamples } from "./canvasMockupExamples";
 import { treemapExamples } from "./canvasTreemapExamples";
+import type { UtcTimestamp } from "@octant/contracts/events";
 import {
   buildCanvasPublicShareDocument,
   buildCanvasStaticExportDocument,
-  buildCanvasStaticExportReceipt,
   CanvasSharePolicyRejected,
-  CANVAS_SHARE_THREAT_MODEL,
+  CANVAS_SHARE_THREAT_MODEL_ID,
   validateCanvasStaticExportRequest,
+  type CanvasSharePolicyContext,
 } from "./canvasSharePolicy";
+
+function exportStaticDocument(input: {
+  readonly request: unknown;
+  readonly current: unknown;
+  readonly context: CanvasSharePolicyContext;
+}) {
+  const version = decodeCanvasVersion(input.current);
+  const validated = validateCanvasStaticExportRequest({
+    request: input.request,
+    current: version,
+    context: input.context,
+  });
+  const document = buildCanvasStaticExportDocument({
+    request: validated,
+    current: version,
+    exportedAt: input.context.nowIso as UtcTimestamp,
+  });
+  return { document, consent: validated.consent, note: validated.note };
+}
 
 const ids = {
   exportId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -148,9 +168,9 @@ function shareDenial(share: () => unknown): string | undefined {
 
 describe("Canvas share policy", () => {
   it("builds a sanitized static export when consent and scope match", () => {
-    const receipt = buildCanvasStaticExportReceipt({ request, current, context });
+    const receipt = exportStaticDocument({ request, current, context });
     expect(receipt.consent).toEqual(request.consent);
-    expect(receipt.document.threatModelId).toBe(CANVAS_SHARE_THREAT_MODEL.id);
+    expect(receipt.document.threatModelId).toBe(CANVAS_SHARE_THREAT_MODEL_ID);
     expect(receipt.document.provenance).toEqual({
       hostId: "local",
       projectId: ids.project,
@@ -203,7 +223,7 @@ describe("Canvas share policy", () => {
         },
       ],
     } as const;
-    const receipt = buildCanvasStaticExportReceipt({
+    const receipt = exportStaticDocument({
       request,
       current: { ...current, definition: { ...current.definition, blocks: [plan] } },
       context,
@@ -227,7 +247,7 @@ describe("Canvas share policy", () => {
       ],
       rows: [{ id: "acme", cells: ["Acme", 12] }, ["Globex", 9]],
     } as const;
-    const receipt = buildCanvasStaticExportReceipt({
+    const receipt = exportStaticDocument({
       request,
       current: decodeCanvasVersion({
         ...current,
@@ -255,7 +275,7 @@ describe("Canvas share policy", () => {
 
   it("shares a funnel, a radar, and a sankey with every stage, axis, and flow", () => {
     const blocks = [signupFunnelExample, serviceProfileRadarExample, trafficSankeyExample];
-    const receipt = buildCanvasStaticExportReceipt({
+    const receipt = exportStaticDocument({
       request,
       current: decodeCanvasVersion({
         ...current,
@@ -290,7 +310,7 @@ describe("Canvas share policy", () => {
         { nodeId: "first", parentId: "window", component: "instance", label: "Row", defId: "row" },
       ],
     };
-    const receipt = buildCanvasStaticExportReceipt({
+    const receipt = exportStaticDocument({
       request,
       current: decodeCanvasVersion({
         ...current,
@@ -340,7 +360,7 @@ describe("Canvas share policy", () => {
         { slideId: "two", blockId: "trend" },
       ],
     };
-    const receipt = buildCanvasStaticExportReceipt({
+    const receipt = exportStaticDocument({
       request,
       current: decodeCanvasVersion({
         ...current,
@@ -367,7 +387,7 @@ describe("Canvas share policy", () => {
 
   it("shares a dashboard with the blocks it places, so a reader draws the same grid", () => {
     const blocks = [...opsDashboardExample];
-    const receipt = buildCanvasStaticExportReceipt({
+    const receipt = exportStaticDocument({
       request,
       current: decodeCanvasVersion({
         ...current,
@@ -433,7 +453,7 @@ describe("Canvas share policy", () => {
         ],
       },
     ];
-    const receipt = buildCanvasStaticExportReceipt({
+    const receipt = exportStaticDocument({
       request,
       current: {
         ...current,
@@ -461,7 +481,7 @@ describe("Canvas share policy", () => {
       ],
       sections: [{ id: "access", title: "Access", intro: "Who may set it", questionIds: ["who"] }],
     });
-    const receipt = buildCanvasStaticExportReceipt({
+    const receipt = exportStaticDocument({
       request,
       current: decodeCanvasVersion({
         ...current,
@@ -501,7 +521,7 @@ describe("Canvas share policy", () => {
       releaseMindmapExample,
       ...mockupExamples,
     ];
-    const receipt = buildCanvasStaticExportReceipt({
+    const receipt = exportStaticDocument({
       request,
       current: atCurrentVersion(examples),
       context,
@@ -526,10 +546,10 @@ describe("Canvas share policy", () => {
       // when the sharer has said they know it leaves as written.
       expect(
         shareDenial(() =>
-          buildCanvasStaticExportReceipt({ request, current: atCurrentVersion([design]), context }),
+          exportStaticDocument({ request, current: atCurrentVersion([design]), context }),
         ),
       ).toBe("consent-required");
-      const shared = buildCanvasStaticExportReceipt({
+      const shared = exportStaticDocument({
         request: acknowledged,
         current: atCurrentVersion([design]),
         context,
@@ -548,7 +568,7 @@ describe("Canvas share policy", () => {
       ...onboardingFlowExample,
       assets: [{ assetId: "shot", source: { kind: "project-file", path: "screens/home.png" } }],
     };
-    const shared = buildCanvasStaticExportReceipt({
+    const shared = exportStaticDocument({
       request: {
         ...request,
         consent: { ...request.consent, acknowledgedMarkupSharedAsWritten: true },
@@ -590,7 +610,7 @@ describe("Canvas share policy", () => {
       ],
     };
     const share = (blocks: ReadonlyArray<unknown>) =>
-      buildCanvasStaticExportReceipt({
+      exportStaticDocument({
         request: {
           ...request,
           consent: { ...request.consent, acknowledgedMarkupSharedAsWritten: true },
@@ -627,7 +647,7 @@ describe("Canvas share policy", () => {
   it("refuses a brand value that could load something, and never lets private notes block or leave with a share", () => {
     const share = (design: unknown) =>
       shareDenial(() =>
-        buildCanvasStaticExportReceipt({
+        exportStaticDocument({
           request: {
             ...request,
             consent: { ...request.consent, acknowledgedMarkupSharedAsWritten: true },
@@ -651,7 +671,7 @@ describe("Canvas share policy", () => {
         brand: { "color-primary": "url(https://example.test/a.png)" },
       }),
     ).toBe("unsafe-payload");
-    const receipt = buildCanvasStaticExportReceipt({
+    const receipt = exportStaticDocument({
       request: {
         ...request,
         consent: { ...request.consent, acknowledgedMarkupSharedAsWritten: true },
@@ -683,7 +703,7 @@ describe("Canvas share policy", () => {
   it("refuses an acknowledged design whose own id or frame id reads as a credential", () => {
     const share = (design: unknown) =>
       shareDenial(() =>
-        buildCanvasStaticExportReceipt({
+        exportStaticDocument({
           request: {
             ...request,
             consent: { ...request.consent, acknowledgedMarkupSharedAsWritten: true },
@@ -731,7 +751,7 @@ describe("Canvas share policy", () => {
     };
     expect(
       shareDenial(() =>
-        buildCanvasStaticExportReceipt({
+        exportStaticDocument({
           request: {
             ...request,
             consent: { ...request.consent, acknowledgedMarkupSharedAsWritten: true },
@@ -795,7 +815,7 @@ describe("Canvas share policy", () => {
 
   it("rejects stale versions and secret-shaped block payloads", () => {
     expect(() =>
-      buildCanvasStaticExportReceipt({
+      exportStaticDocument({
         request: { ...request, expectedSequence: 1 },
         current,
         context,
@@ -803,7 +823,7 @@ describe("Canvas share policy", () => {
     ).toThrowError(/stale/i);
 
     expect(() =>
-      buildCanvasStaticExportReceipt({
+      exportStaticDocument({
         request,
         current: {
           ...current,
@@ -826,7 +846,7 @@ describe("Canvas share policy", () => {
 
   it("rejects credential-bearing URLs embedded in export fields", () => {
     expect(() =>
-      buildCanvasStaticExportReceipt({
+      exportStaticDocument({
         request,
         current: {
           ...current,
@@ -848,7 +868,7 @@ describe("Canvas share policy", () => {
     ).toThrowError(CanvasSharePolicyRejected);
 
     try {
-      buildCanvasStaticExportReceipt({
+      exportStaticDocument({
         request,
         current: {
           ...current,
@@ -882,7 +902,7 @@ describe("Canvas share policy", () => {
       "Basic dXNlcjpwYXNzd29yZA==",
     ]) {
       expect(() =>
-        buildCanvasStaticExportReceipt({
+        exportStaticDocument({
           request,
           current: {
             ...current,
@@ -906,7 +926,7 @@ describe("Canvas share policy", () => {
 
   it("rejects embedded credential-bearing URLs in prose and absolute host paths", () => {
     expect(() =>
-      buildCanvasStaticExportReceipt({
+      exportStaticDocument({
         request,
         current: {
           ...current,
@@ -927,7 +947,7 @@ describe("Canvas share policy", () => {
     ).toThrowError(CanvasSharePolicyRejected);
 
     expect(() =>
-      buildCanvasStaticExportReceipt({
+      exportStaticDocument({
         request,
         current: {
           ...current,
@@ -939,6 +959,7 @@ describe("Canvas share policy", () => {
                 schemaVersion: 1,
                 kind: "file-reference",
                 label: "Plan",
+                sourceId: ids.source,
                 detail: "/Volumes/Private/plan.md",
               },
             ],
@@ -962,12 +983,10 @@ describe("Canvas share policy", () => {
       context,
     });
     const started = performance.now();
-    expect(() =>
-      buildCanvasStaticExportReceipt(rich("A".repeat(CANVAS_MAX_TEXT_LENGTH))),
-    ).not.toThrow();
+    expect(() => exportStaticDocument(rich("A".repeat(CANVAS_MAX_TEXT_LENGTH)))).not.toThrow();
     expect(performance.now() - started).toBeLessThan(500);
     expect(() =>
-      buildCanvasStaticExportReceipt(
+      exportStaticDocument(
         rich(`${"A".repeat(20_000)} see 1https://example.test/file?token=opaque-secret`),
       ),
     ).toThrowError(CanvasSharePolicyRejected);
@@ -1008,7 +1027,7 @@ describe("Canvas share policy", () => {
 
   it("rejects secret-bearing model labels and non-http credential URLs", () => {
     expect(() =>
-      buildCanvasStaticExportReceipt({
+      exportStaticDocument({
         request,
         current: {
           ...current,
@@ -1025,7 +1044,7 @@ describe("Canvas share policy", () => {
     ).toThrowError(CanvasSharePolicyRejected);
 
     expect(() =>
-      buildCanvasStaticExportReceipt({
+      exportStaticDocument({
         request,
         current: {
           ...current,
@@ -1047,7 +1066,7 @@ describe("Canvas share policy", () => {
   });
 
   it("preserves optional operator notes on receipts", () => {
-    const receipt = buildCanvasStaticExportReceipt({
+    const receipt = exportStaticDocument({
       request: { ...request, note: "Offline board pack for review" },
       current,
       context,
@@ -1055,19 +1074,9 @@ describe("Canvas share policy", () => {
     expect(receipt.note).toBe("Offline board pack for review");
   });
 
-  it("records the static-export threat model surface", () => {
-    expect(CANVAS_SHARE_THREAT_MODEL.threats.map((threat) => threat.id)).toEqual([
-      "T1",
-      "T2",
-      "T3",
-      "T4",
-      "T5",
-    ]);
-  });
-
   it("rejects filesystem URLs and absolute host paths outside the old root allowlist", () => {
     expect(() =>
-      buildCanvasStaticExportReceipt({
+      exportStaticDocument({
         request,
         current: {
           ...current,
@@ -1088,7 +1097,7 @@ describe("Canvas share policy", () => {
     ).toThrowError(CanvasSharePolicyRejected);
 
     expect(() =>
-      buildCanvasStaticExportReceipt({
+      exportStaticDocument({
         request,
         current: {
           ...current,
@@ -1111,7 +1120,7 @@ describe("Canvas share policy", () => {
 
   it("rejects OAuth-style code and session query parameters in export payloads", () => {
     expect(() =>
-      buildCanvasStaticExportReceipt({
+      exportStaticDocument({
         request,
         current: {
           ...current,
@@ -1146,7 +1155,7 @@ describe("Canvas share of tabs, columns, diagram styles, and the Gantt view", ()
   });
 
   it("round-trips the tabs, columns, every block they name, the styled diagrams, and the Gantt plan", () => {
-    const receipt = buildCanvasStaticExportReceipt({ request, current: brief, context });
+    const receipt = exportStaticDocument({ request, current: brief, context });
     expect(receipt.document.schemaVersion).toBeGreaterThanOrEqual(
       CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION,
     );
@@ -1161,7 +1170,7 @@ describe("Canvas share of tabs, columns, diagram styles, and the Gantt view", ()
   });
 
   it("is refused by a decoder that declares the previous share version", () => {
-    const receipt = buildCanvasStaticExportReceipt({ request, current: brief, context });
+    const receipt = exportStaticDocument({ request, current: brief, context });
     // The same diagram without its styles is one an older decoder reads...
     const plainLoop = receipt.document.blocks
       .filter((block) => block.blockId === "loop")

@@ -820,9 +820,21 @@ describe("BrowserToolApprovalService for a phone-started turn", () => {
     approvals.close();
   });
 
-  it("never shows a local window's signed-in approval to a paired device", () => {
-    const approvals = service();
-    void approvals.request({
+  it("never shows a local window's signed-in approval to a restricted paired device, while a person-paired device sees and answers profile approvals and sign-in cards", async () => {
+    const restrictedPhone = "50000000-0000-4000-8000-000000000077" as never;
+    const personPhone = "50000000-0000-4000-8000-000000000088" as never;
+    const remembered: Array<{ readonly origin: string; readonly profile: unknown }> = [];
+    const approvals = new BrowserToolApprovalService({
+      uuid: () => "40000000-0000-4000-8000-000000000009",
+      now: () => Date.parse("2026-10-31T10:00:00.000Z"),
+      authorityIsCurrent: () => true,
+      rememberOrigin: (origin, _windowId, profile) => remembered.push({ origin, profile }),
+      isHostScope: isRoutineHostScope,
+      isLocalWindow: (scope) => String(scope) === String(windowId),
+      isRestrictedDevice: (scope) => String(scope) === String(restrictedPhone),
+    });
+
+    const pendingProfile = approvals.request({
       windowId,
       threadId,
       authority,
@@ -830,8 +842,18 @@ describe("BrowserToolApprovalService for a phone-started turn", () => {
       profile: personal,
     });
 
-    expect(approvals.list(phone)).toEqual([]);
+    expect(approvals.list(restrictedPhone)).toEqual([]);
+    expect(approvals.list(personPhone)).toHaveLength(1);
     expect(approvals.list(windowId)).toHaveLength(1);
+    expect(
+      approvals.decide(personPhone, {
+        approvalId: "40000000-0000-4000-8000-000000000009" as never,
+        decision: "approved",
+        remember: true,
+      }),
+    ).toBe(true);
+    await expect(pendingProfile).resolves.toBe("approved");
+    expect(remembered).toEqual([{ origin: "https://github.com", profile: personal }]);
     approvals.close();
   });
 });

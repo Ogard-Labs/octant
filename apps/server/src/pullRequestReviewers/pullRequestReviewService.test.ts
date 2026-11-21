@@ -29,6 +29,7 @@ import {
   type PullRequestReviewTarget,
   type TurnUsage,
 } from "@octant/contracts";
+import { settleSpendCeilingReservation } from "@octant/domain";
 import { Effect, Schema, Stream } from "effect";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { afterEach, describe, expect, it } from "vitest";
@@ -243,6 +244,7 @@ function createHarness(options?: {
   const notifications: Array<{ readonly threadId: string; readonly reason: string }> = [];
   const recordedUsages: Array<{ readonly threadId: string; readonly usage?: TurnUsage }> = [];
   const ceilingEvents: string[] = [];
+  const settledTokens: Array<number | undefined> = [];
   let turnCalls = 0;
 
   const runtime: PullRequestReviewHostRuntimePort = {
@@ -303,8 +305,9 @@ function createHarness(options?: {
         ceilingEvents.push(`admit:${decision.status}`);
         return decision as never;
       },
-      settle: () => {
+      settle: (input) => {
         ceilingEvents.push("settle");
+        settledTokens.push(input.observedTokens);
       },
       abandon: () => {
         ceilingEvents.push("abandon");
@@ -366,6 +369,7 @@ function createHarness(options?: {
     notifications,
     recordedUsages,
     ceilingEvents,
+    settledTokens,
     getTurnCalls: () => turnCalls,
     setPluginActive: (active: boolean) => {
       pluginActive = active;
@@ -811,6 +815,44 @@ describe("second-model pull request reviewer service", () => {
     expect(h.ceilingEvents).toEqual(["admit:admitted", "settle"]);
     expect(h.recordedUsages).toEqual([
       { threadId: String(THREAD_ID), usage: { inputTokens: 450, outputTokens: 60 } },
+    ]);
+  });
+
+  it("records no overrun for a review whose output, thinking included, fits its reservation", async () => {
+    // A provider reports thinking as part of output, so 1,000 input and 400
+    // output (300 of it thinking) is 1,400 tokens, inside a 1,500 reservation.
+    const h = createHarness({
+      executeReadOnlyTurn: async () => ({
+        status: "completed",
+        sessionId: "review-session-reasoning",
+        text: JSON.stringify({ findings: [] }),
+        usage: { inputTokens: 1000, outputTokens: 400, reasoningTokens: 300 },
+      }),
+    });
+    await h.service.updateProjectSettings(
+      WINDOW_ID,
+      { projectId: PROJECT_ID, enabled: true, route: REVIEWER_ROUTE, postSummaryComment: false },
+      "local-window",
+      LOCAL_ACTOR,
+    );
+
+    await h.service.reviewPullRequestHead({
+      target: TARGET,
+      threadId: THREAD_ID,
+      headSha: HEAD_1,
+      baseRef: "origin/main",
+      state: "open",
+    });
+
+    expect(h.settledTokens).toEqual([1400]);
+    expect(settleSpendCeilingReservation({ reservedTokens: 1500, observedTokens: 1400 }).kind).toBe(
+      "committed",
+    );
+    expect(h.recordedUsages).toEqual([
+      {
+        threadId: String(THREAD_ID),
+        usage: { inputTokens: 1000, outputTokens: 400, reasoningTokens: 300 },
+      },
     ]);
   });
 

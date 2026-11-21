@@ -1,9 +1,9 @@
 import { Schema } from "effect";
 import {
-  decodeOwnerBrowserNativeCommand,
-  decodeOwnerBrowserNativeResult,
-  MAX_OWNER_BROWSER_FRAME_BYTES,
-} from "@octant/contracts/owner-browser";
+  decodePairedBrowserNativeCommand,
+  decodePairedBrowserNativeResult,
+  MAX_PAIRED_BROWSER_FRAME_BYTES,
+} from "@octant/contracts/paired-browser-control";
 import {
   decodeBrowserPageScriptNativeCommand,
   decodeBrowserPageScriptPreparation,
@@ -62,11 +62,12 @@ const ROUTES = new Set([
   "/v1/contexts/describe-point",
   "/v1/contexts/gone",
   "/v1/contexts/person-input",
+  "/v1/contexts/paired-control-reclaimed",
   "/v1/contexts/act",
   "/v1/contexts/peek",
   "/v1/contexts/credential-fill",
   "/v1/contexts/page-script",
-  "/v1/contexts/owner-control",
+  "/v1/contexts/paired-control",
   "/v1/contexts/download-claim",
   "/v1/contexts/download-discard",
   "/v1/contexts/close",
@@ -84,6 +85,7 @@ const IMPORT_BODY_LIMIT = 2 * 1_024 * 1_024;
 interface BrokerEvents {
   readonly gone: Set<string>;
   readonly personInput: Set<string>;
+  readonly pairedControlReclaimed: Set<string>;
 }
 
 export interface BrowserRuntimeBroker {
@@ -99,10 +101,17 @@ export async function startBrowserRuntimeBroker(
 ): Promise<BrowserRuntimeBroker> {
   await host.persistentOwner?.restart();
   const token = randomBytes(32).toString("base64url");
-  const events: BrokerEvents = { gone: new Set<string>(), personInput: new Set<string>() };
+  const events: BrokerEvents = {
+    gone: new Set<string>(),
+    personInput: new Set<string>(),
+    pairedControlReclaimed: new Set<string>(),
+  };
   const removeGoneListener = host.onContextGone((contextId) => events.gone.add(contextId));
   const removePersonInputListener = host.onPersonInput((contextId) =>
     events.personInput.add(contextId),
+  );
+  const removePairedReclaimedListener = host.onPairedControlReclaimed((contextId) =>
+    events.pairedControlReclaimed.add(contextId),
   );
   let brokerUrl: string | undefined;
   const server = createServer((incoming, outgoing) => {
@@ -127,7 +136,11 @@ export async function startBrowserRuntimeBroker(
     closing ??= Promise.resolve().then(async () => {
       const failures: Array<unknown> = [];
       if (sweep !== undefined) clearInterval(sweep);
-      for (const unsubscribe of [removeGoneListener, removePersonInputListener]) {
+      for (const unsubscribe of [
+        removeGoneListener,
+        removePersonInputListener,
+        removePairedReclaimedListener,
+      ]) {
         try {
           unsubscribe();
         } catch (error) {
@@ -266,6 +279,11 @@ async function handleBrokerRequest(
     events.personInput.clear();
     return Response.json({ contextIds });
   }
+  if (url.pathname === "/v1/contexts/paired-control-reclaimed") {
+    const contextIds = [...events.pairedControlReclaimed];
+    events.pairedControlReclaimed.clear();
+    return Response.json({ contextIds });
+  }
   const body = await jsonBody(request);
   if (body === undefined) return failure("invalid-request", 400);
   try {
@@ -368,22 +386,22 @@ async function handleBrokerRequest(
       if (target === undefined || cookies === undefined) return failure("invalid-request", 400);
       return Response.json(await profiles.importCookies(target, cookies));
     }
-    if (url.pathname === "/v1/contexts/owner-control") {
+    if (url.pathname === "/v1/contexts/paired-control") {
       const command = (() => {
         try {
-          return decodeOwnerBrowserNativeCommand(body);
+          return decodePairedBrowserNativeCommand(body);
         } catch {
           return undefined;
         }
       })();
       if (command === undefined) return failure("invalid-request", 400);
-      const result = decodeOwnerBrowserNativeResult(
-        await host.ownerControl(command, signal ?? request.signal),
+      const result = decodePairedBrowserNativeResult(
+        await host.pairedControl(command, signal ?? request.signal),
       );
       const json = JSON.stringify(result);
       if (
         Buffer.byteLength(json, "utf8") >
-        Math.ceil((MAX_OWNER_BROWSER_FRAME_BYTES * 4) / 3) + 1024
+        Math.ceil((MAX_PAIRED_BROWSER_FRAME_BYTES * 4) / 3) + 1024
       )
         return Response.json({ status: "refused" }, { headers: { "cache-control": "no-store" } });
       return new Response(json, {

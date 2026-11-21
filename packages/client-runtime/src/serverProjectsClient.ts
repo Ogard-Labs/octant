@@ -32,7 +32,7 @@ export interface ServerProjectsClient {
   check?(input: RemoteSetupCheckInput, signal?: AbortSignal): Promise<RemoteSetupCheckResult>;
   previewRead?(projectId: string): Promise<ServerPreviewView | null>;
   previewCommand?(command: ServerPreviewCommand): Promise<ServerPreviewResult>;
-  /** Machines in the person's cloud account; refused off this computer. */
+  /** Machines in the person's cloud account; admitted for local windows and person-paired devices. */
   cloudMachinesRead?(signal?: AbortSignal): Promise<CloudMachinesView>;
   cloudMachinesCommand?(command: CloudMachinesCommand): Promise<CloudMachinesCommandResult>;
   command(

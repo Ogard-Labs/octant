@@ -150,8 +150,19 @@ export function slotWithCandidates(
   candidates: ReadonlyArray<NativeHarnessSlotCandidate>,
 ): NativeHarnessSlot | undefined {
   if (candidates.length === 0) return undefined;
-  const base: NativeHarnessSlot = saved ?? { id: id as NativeHarnessSlotId, candidates };
-  return { ...base, candidates: candidates.slice(0, MAX_NATIVE_HARNESS_SLOT_CANDIDATES) };
+  const nextCandidates = candidates.slice(0, MAX_NATIVE_HARNESS_SLOT_CANDIDATES);
+  const base: NativeHarnessSlot = saved ?? {
+    id: id as NativeHarnessSlotId,
+    candidates: nextCandidates,
+  };
+  if (
+    base.overflowPromotion !== undefined &&
+    hasCandidate(nextCandidates, base.overflowPromotion)
+  ) {
+    const { overflowPromotion: _dropped, ...withoutPromotion } = base;
+    return { ...withoutPromotion, candidates: nextCandidates };
+  }
+  return { ...base, candidates: nextCandidates };
 }
 
 export type RoleFlag = "askBeforeUsing" | "continueOnFallback";

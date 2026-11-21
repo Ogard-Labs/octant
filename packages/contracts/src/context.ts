@@ -582,7 +582,10 @@ export const UsageReconciliation = Schema.Struct({
         return false;
       }
       const imageGeneration = reconciliation.requestShape === "image-generation";
-      if (imageGeneration) return reconciliation.imageUnits !== undefined;
+      // An image job has no context plan. One that completed counts its
+      // images; one that failed after its provider answered delivered none,
+      // and carries no units rather than a count of zero.
+      if (imageGeneration) return reconciliation.planId === undefined;
       if (
         reconciliation.requestShape === AGENT_RUN_TURN_REQUEST_SHAPE ||
         reconciliation.requestShape === SHIELD_REVIEW_REQUEST_SHAPE ||
@@ -945,18 +948,6 @@ export const CONTEXT_COMPACTION_EVENT_NAMES = {
   completed: "context.compaction-completed@1",
   failed: "context.compaction-failed@1",
 } as const;
-
-export const CONTEXT_EVENT_NAMES = [
-  "context.manifest-created@1",
-  "context.overrides-updated@1",
-  "context.plan-created@1",
-  "context.summary-created@1",
-  "context.usage-reconciled@1",
-  "context.capacity-reservation-updated@1",
-  CONTEXT_COMPACTION_EVENT_NAMES.requested,
-  CONTEXT_COMPACTION_EVENT_NAMES.completed,
-  CONTEXT_COMPACTION_EVENT_NAMES.failed,
-] as const;
 
 export const decodeContextManifestId = Schema.decodeUnknownSync(ContextManifestId);
 export const decodeContextPlanId = Schema.decodeUnknownSync(ContextPlanId);

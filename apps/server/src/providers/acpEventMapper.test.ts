@@ -857,3 +857,162 @@ describe("ACP event normalization", () => {
     });
   });
 });
+
+describe("an agent that sends stray updates", () => {
+  const update = (sessionUpdate: Readonly<Record<string, unknown>>, session = "acp-session-1") =>
+    ({
+      kind: "notification",
+      method: "session/update",
+      params: { sessionId: session, update: sessionUpdate },
+    }) as const;
+
+  it("ignores updates after its turn ended and a subagent's own session, where a strict agent fails", () => {
+    const strict = context({ terminal: true });
+    expect(mapAcpNotification(strict, update({ sessionUpdate: "usage_update" }))[0]?.kind).toBe(
+      "protocol-failure",
+    );
+    const tolerant = context({ terminal: true, toleratesStrayUpdates: true });
+    expect(mapAcpNotification(tolerant, update({ sessionUpdate: "usage_update" }))).toEqual([
+      { kind: "ignored" },
+    ]);
+    const live = context({ toleratesStrayUpdates: true });
+    expect(
+      mapAcpNotification(
+        live,
+        update(
+          { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "x" } },
+          "subagent-session",
+        ),
+      ),
+    ).toEqual([{ kind: "ignored" }]);
+  });
+
+  it("starts a call it only ever updated, reads a repeated start as an update, and ignores a repeated finish", () => {
+    const state = context({ toleratesStrayUpdates: true });
+    const finished = mapAcpNotification(
+      state,
+      update({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "view-1",
+        title: "client_view_file",
+        status: "completed",
+      }),
+    );
+    expect(finished.map((item) => (item.kind === "event" ? item.event.kind : item.kind))).toEqual([
+      "tool-start",
+      "tool-success",
+    ]);
+    expect(
+      mapAcpNotification(
+        state,
+        update({ sessionUpdate: "tool_call_update", toolCallId: "view-1", status: "completed" }),
+      ),
+    ).toEqual([{ kind: "ignored" }]);
+    const repeated = mapAcpNotification(
+      state,
+      update({ sessionUpdate: "tool_call", toolCallId: "view-1", title: "again" }),
+    );
+    expect(repeated.every((item) => item.kind !== "protocol-failure")).toBe(true);
+  });
+
+  it("asks a permission request with neither allow nor reject options as a question, and offers allow-always where the agent does", () => {
+    const state = context({
+      toleratesStrayUpdates: true,
+      unnamedPermissionDescription: "Asking before it continues.",
+    });
+    const question = mapAcpPermissionRequest(state, {
+      kind: "request",
+      id: "interaction-1",
+      method: "session/request_permission",
+      params: {
+        sessionId: "acp-session-1",
+        toolCall: { toolCallId: "interaction_1", title: "Which branch?" },
+        options: [
+          { optionId: "a", name: "main", kind: "allow_once" },
+          { optionId: "b", name: "dev", kind: "allow_once" },
+          { optionId: "skip", name: "Skip", kind: "reject_once" },
+        ],
+      },
+    });
+    // Two allow-once answers still pair with a reject, so this is an approval…
+    expect(question.kind).toBe("approval");
+    const asked = mapAcpPermissionRequest(state, {
+      kind: "request",
+      id: "interaction-2",
+      method: "session/request_permission",
+      params: {
+        sessionId: "acp-session-1",
+        toolCall: { toolCallId: "interaction_2", title: "Which branch?" },
+        options: [
+          { optionId: "a", name: "main", kind: "allow_once" },
+          { optionId: "b", name: "dev", kind: "allow_always" },
+        ],
+      },
+    });
+    // …and allow options with no reject are never answers to choose among,
+    // since choosing one would grant what no approval checked.
+    expect(asked.kind).toBe("protocol-failure");
+    const free = mapAcpPermissionRequest(state, {
+      kind: "request",
+      id: "interaction-3",
+      method: "session/request_permission",
+      params: {
+        sessionId: "acp-session-1",
+        toolCall: { toolCallId: "interaction_3", title: "Which branch?" },
+        options: [
+          { optionId: "a", name: "main", kind: "choice" },
+          { optionId: "b", name: "dev", kind: "choice" },
+          { optionId: "skip", name: "Skip", kind: "reject_once" },
+        ],
+      },
+    });
+    expect(free).toMatchObject({
+      kind: "question",
+      skipOptionId: "skip",
+      event: {
+        kind: "user-input-request",
+        prompt: "Which branch?",
+        options: [{ label: "main" }, { label: "dev" }],
+      },
+    });
+    const approval = mapAcpPermissionRequest(state, {
+      kind: "request",
+      id: "edit-1",
+      method: "session/request_permission",
+      params: {
+        sessionId: "acp-session-1",
+        toolCall: { toolCallId: "edit-1", title: "Edit file" },
+        options: [
+          { optionId: "once", name: "Allow", kind: "allow_once" },
+          { optionId: "always", name: "Always allow", kind: "allow_always" },
+          { optionId: "no", name: "Reject", kind: "reject_once" },
+        ],
+      },
+    });
+    expect(approval).toMatchObject({ kind: "approval", allowAlwaysOptionId: "always" });
+  });
+
+  it("asks an allow-always and reject offer as an approval, never as a question", () => {
+    const state = context({ toleratesStrayUpdates: true });
+    const mapped = mapAcpPermissionRequest(state, {
+      kind: "request",
+      id: "edit-2",
+      method: "session/request_permission",
+      params: {
+        sessionId: "acp-session-1",
+        toolCall: { toolCallId: "edit-2", title: "Edit file" },
+        options: [
+          { optionId: "always", name: "Always allow", kind: "allow_always" },
+          { optionId: "no", name: "Reject", kind: "reject_once" },
+        ],
+      },
+    });
+    expect(mapped).toMatchObject({
+      kind: "approval",
+      allowAlwaysOptionId: "always",
+      rejectOptionId: "no",
+      event: { kind: "approval-request" },
+    });
+    expect(mapped.kind === "approval" ? mapped.allowOptionId : "none").toBeUndefined();
+  });
+});

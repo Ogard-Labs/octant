@@ -399,7 +399,10 @@ a delayed notification cannot charge the preceding turn again. Context is
 included only when the latest valid snapshot's token totals match that receipt;
 otherwise the older occupancy is omitted. A missing baseline or final receipt,
 or a malformed, partial or regressing snapshot, leaves usage unavailable for that turn.
-Later valid updates cannot repair an invalidated turn. Late snapshots update
+Later valid updates cannot repair an invalidated turn. A turn that fails
+before its reply (a rejected prompt or a failure raised mid-turn) reports the
+counters its latest valid snapshot added since the baseline, with that
+snapshot's context, before the failure. Late snapshots update
 the next turn's baseline without producing a turn event. Startup captures at
 most one native identity; mixed or mismatched identities leave no baseline.
 Other releases remain unsupported until their wire semantics are verified.
@@ -1416,6 +1419,47 @@ resumed again, and the thread's next turn starts a fresh one, as a Code thread
 rewound to its first message does. Its picker and details row
 are Code's, above the Work composer.
 
+#### Imported history
+
+A thread started from a session begun outside Octant shows that session's
+earlier conversation in its own history (maintainer decision, 2026-11-20;
+built): the person's messages and the agent's replies, each tool call named
+rather than replayed. The driver reads it through the provider SDK's optional
+`nativeSessions.history`, from what its runtime already stores, read-only,
+after `adopt` claims the session and before the commit checks, which do not
+yield. The host bounds it (`nativeSessionHistory.ts`): the newest 200
+messages within 256 KiB of text, each message clipped to 8 KiB and marked
+when clipped, at most 16 tool names a message; the earlier messages it leaves
+out are counted (`omittedMessages`) and the thread says how many. The read
+never refuses an adoption: a driver without the read imports none as
+`unsupported`, a session with no messages as `empty`, and a read that fails,
+dies, or runs past 30 seconds as `unreadable`, and the thread says which.
+
+The host journals what it keeps once, in the same unit as the adoption
+(Code's two operation events; Work's `work.thread-updated@1`), as
+`native-session.history-imported@1` under an aggregate of its own,
+`native-session-history`, keyed by the thread id. No turn, handoff, fork,
+compaction, or usage read folds that aggregate, so the imported messages are
+the thread's record only: the provider already holds them and is never sent
+them again, they cost nothing, and a provider-switch handoff or a fork does
+not carry them (a recorded gap). Replay reads the journaled record: the
+thread's native-session read (`adopted.history`) answers it after the same
+access checks as the session id, and the thread shows it above the composer
+in the details row as "Imported from the provider's session", collapsed, each
+message marked by speaker. Thread search indexes it as the thread's prompt,
+reply, and tool text under a turn of its own with no anchor, so a hit opens
+the thread and is marked Imported; it is journaled before any turn, so a
+rewind never removes it, and a thread purge erases it with the thread's other
+records (its payload names the thread).
+
+| Runtime                                           | What the history read uses                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code                                       | The session transcript the resume record names, through the Agent SDK's `getSessionMessages` under the account's configuration folder; tool results and subagent messages left out                                                                                                                                                                                                                                                                                                                                                  |
+| Codex                                             | `thread/read` with `includeTurns` on a catalog app-server, which reads the stored rollout without loading the thread; a server that returns no turns imports none as `unsupported`. The protocol has no tail or limit for this read, so a session whose reply exceeds the RPC reader's 1 MiB line limit imports none as `unreadable` and the adoption still records                                                                                                                                                                 |
+| OpenCode                                          | The session's messages (`session.messages`) on the folder's catalog server; OpenCode 2's message shape is not one Octant reads, so it imports none as `unsupported`                                                                                                                                                                                                                                                                                                                                                                 |
+| Pi                                                | The person's own JSONL that adopting copied, the current branch from its last entry back to the root; tool results left out                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ACP agents that list sessions (`importsSessions`) | `session/load` in a readiness-check process of its own, collecting the replayed `user_message_chunk`, `agent_message_chunk`, and `tool_call` updates, then closing it; it drops every other update (thoughts, plans, tool-call progress) before counting, so a tool-heavy session keeps its recent conversation, keeps the newest 20,000 of those updates, counts the earlier messages as omitted (a message cut by that bound is left out whole), and an agent that does not advertise `loadSession` imports none as `unsupported` |
+
 #### Wake-ups the model schedules
 
 `ScheduleWakeup` (a delay, held to one minute to one hour), `CronCreate` (a
@@ -1853,8 +1897,9 @@ every mode there. On Linux 2.x runs turns in every mode too (maintainer
 decision, 2026-11-16, replacing the 2026-11-14 refusal of Chat and Plan): its
 Chat and Plan launches start processes inside a read-only capsule with the
 same stand-in first on `PATH`, and the probe attests that capsule
-([Plan and Chat tool parity](../architecture.md#security-and-authority)). A
-host that is neither macOS nor Linux refuses a 2.x Chat or Plan launch before
+([Plan and Chat tool parity](../architecture.md#security-and-authority)). On Windows
+2.x runs turns in every mode outside Strict without an Octant jail (below). A
+host that is neither macOS, Linux, nor Windows refuses a 2.x Chat or Plan launch before
 it starts with a sentence naming why and reports `turnModes` with Chat and
 Plan unsupported (`host-confinement`), which the provider's Settings page
 shows as where it runs turns. Rationale: there the jail Chat and Plan need can
@@ -1880,8 +1925,16 @@ OpenCode's own settings for the repository, where clearing it is the way to
 revoke it. OpenCode then makes later matching edits without asking and
 settles other pending requests the grant covers, so the files an `always`
 answer names, and those of a request OpenCode settled by itself, stay
-admitted by the file-change check for that Project root while the host runs;
-after a host restart such an edit fails the turn until it is approved again. Approval-gated on
+admitted by the file-change check while the native process that earned them
+runs; the admission is a ledger of that process's generation, retired with
+it, so a later connection of the same Project admits nothing the earlier
+process remembered, and after a host restart or process exit such an edit
+fails the turn until it is approved again. The ledger holds at most 1,024
+file names per process and fails closed: a request whose new names would not
+fit whole is answered `once` instead of being remembered by half, and a
+request OpenCode settles by itself cannot be re-answered, so the same full
+ledger leaves it the one-use admission a `once` answer gives rather than
+nothing. Approval-gated on
 2.x honours permission grants the person saved in OpenCode itself for the
 same repository: OpenCode keys them by the repository's root commit, keeps
 them in its own data store (shared with the person's own use because
@@ -2013,7 +2066,17 @@ reports through the same events as a prompt. A command route that fails
 after the context was admitted leaves that context queued in the session,
 where the next run would read it stale beside the next turn's own; the turn
 fails as `stale-resume` and the driver never resumes that session again (in
-this host process), so the thread starts on a new session. Such a turn runs
+this host process), so the thread starts on a new session. The denial is a
+tombstone the driver keeps for the host's whole life rather than a list it
+can evict, and a `session.deleted` the provider reports clears the session's
+own tombstone — a deletion is an ending, not a doubt. The tombstones are
+bounded to 4,096; a 4,097th distinct denial cannot be represented, so
+refusal latches for every resume — an id the cap dropped or one never seen
+— until the host restarts, while a new session may still start. The tool catalogue a
+session's resume may reuse is bounded to 128 catalogues held for 30 minutes
+each, dropped oldest-first past that; a resume that misses simply installs
+no app tools rather than another session's, and a deleted or stale session's
+catalogue is dropped with it. Such a turn runs
 in every mode, Chat and Plan included (maintainer decision, 2026-11-16;
 built). A command may run a shell before the model sees it: a configured
 command's template expands `` !`…` `` through OpenCode's shell, which asks no
@@ -2404,16 +2467,81 @@ Full access are as they were.
   or the Project's `.grok/sandbox.toml`, neither of which Octant writes; no
   per-command grant reaching an ACP client could be read from the release.
 
+### Usage an ACP agent reports
+
+Every ACP agent records its usage in Octant (maintainer decision,
+2026-11-20). A profile that pins a reviewed reading (`usageVersions`:
+Mistral Vibe 3.0.3, whose figures are cumulative, under
+[Mistral Vibe surface](#mistral-vibe-surface)) is read only by that rule
+and only on those releases. Every other agent, built-in or added, is read
+by ACP's standard usage, and its probe declares `usage: "supported"`
+(`acpTurnUsage` and `finishAcpReportedTurn` in
+`apps/server/src/providers/acpUsage.ts`). The schema is ACP's unstable
+`Usage`, `UsageUpdate` and `Cost` as published in
+`@agentclientprotocol/sdk` 2.8.0 (`schema/v1/schema.unstable.json`).
+
+- **Tokens.** The `session/prompt` reply's `usage` is "token usage for this
+  turn" and is the turn's figure, emitted once, before the turn's terminal
+  event. Its `totalTokens` is the "sum of all token types", and the schema
+  does not say whether `inputTokens` already counts `cachedReadTokens` and
+  `cachedWriteTokens`, or whether `outputTokens` already counts
+  `thoughtTokens`. The total decides: Octant takes the first reading whose
+  parts add up to it, every type disjoint first (as the schema's sum
+  describes), then cache inside input and thought inside output, then each
+  mixed nesting. Octant's input is all input, cached or not, kept also as
+  cache reads and writes, and its output counts thinking, with
+  `thoughtTokens` kept as its reasoning part (`reasoningTokens`), as every
+  provider's usage reads it: a spend reservation settles at input plus
+  output and never adds reasoning a second time. A reply whose
+  parts fit no reading, or with no total (the schema requires one) and no
+  reviewed rule for that (`turnUsageWithoutTotal`), reports nothing.
+- **Context.** A `usage_update`'s `used` of `size` during the turn becomes
+  the turn's context reading; an update from an earlier turn is not carried
+  into a later one.
+- **Cost.** `cost` is the session's cumulative cost. A turn is charged what
+  it grew by since the last settled turn, so an update that arrives after a
+  reply is charged to the next turn rather than lost. A turn with no cost
+  update since the last settlement is left without a provider cost rather
+  than charged zero, so the ledger estimates it. The next cost update then
+  grows across that turn as well, and charging it to one turn would count
+  the estimated turn twice: that turn is left without a provider cost too
+  (it is estimated), its update only resets the baseline, and exact
+  charging resumes on the turn after it. An update restating the same
+  total charges zero. A
+  session Octant opened
+  with `session/new` starts from zero; one it loaded or resumed is priced
+  from the second cost it sees, and a cost the agent reports while
+  `session/load` or `session/resume` runs counts as the first (Octant reads
+  usage updates from before it opens the session). Only `currency: "USD"` becomes `costUsd`;
+  another currency or unit ("credits"), a cost that fell or a changed unit
+  leaves the turn without a provider cost, so the ledger estimates it or
+  refuses a money ceiling as unknown spend.
+- **No report.** A reply without whole counts records the turn as
+  unreported. Because the capability is supported, a money or token
+  ceiling refuses after such a turn as unknown spend, as for any measuring
+  provider, where it used to leave ACP turns out as Not measured.
+- **Failed turns.** A turn's consumer stops reading at its failure, so a
+  failure the driver raises mid-turn (a protocol fault, a refused question,
+  an undeliverable form answer) or a rejected prompt first offers the usage
+  observed so far. Only a pinned reading has any before the reply (its
+  cumulative snapshots since the turn began, and none until the agent sends
+  a snapshot after the turn began, so a turn that failed first records
+  unreported rather than zero); a standard agent's failed
+  turn records unreported, and its reply, if one still comes, settles the
+  session cost so the next turn is charged only its own share.
+
+Not verified: the schema also calls these figures "total ... across all
+turns", and Mistral Vibe's reply is cumulative. An unpinned agent whose
+reply is cumulative would be over-counted, and the usage contracts carry no
+confidence marker to flag that per row; a profile pins its reading once a
+probe shows otherwise. Each built-in profile's reply shape remains a
+live-probe check.
+
 ### What an ACP agent cannot do
 
-The protocol leaves three things to the agent, and the driver reports them as
+The protocol leaves two things to the agent, and the driver reports them as
 absent rather than imitating them:
 
-- **No usage window.** A prompt result carries only a stop reason, so the
-  driver declares `usage: "unsupported"`. The runtime card reads **Context
-  window: Not reported**, a Code, Work, or Chat thread's context meter says
-  the runtime reports no usage instead of waiting for a figure, and a spend
-  ceiling leaves the turns out.
 - **No compaction request.** The driver declares no `sessionCompaction`, so
   the host refuses compaction as `runtime-cannot-compact`. The runtime card
   reads **Compaction: Not available**, and the context popover and inspector
@@ -2463,8 +2591,10 @@ takes documents (text, PDF and office files), and each goes as an embedded
 text and it is not a PDF or office file, otherwise its bytes as
 `BlobResourceContents` (a PDF stays bytes even when they decode), under an
 `attachment:<id>/<name>` URI that names the attachment, not a path. ACP states
-these for the agent, not per model. The probe reports `nativeAttachments`
-supported when either is advertised. In Work and Code any other file (an
+these for the agent, not per model. With `promptCapabilities.audio` every
+listed model takes audio, and each recording goes as an ACP `audio` block
+with its bytes in base64 (built, 2026-11-20). The probe reports
+`nativeAttachments` supported when any of the three is advertised. In Work and Code any other file (an
 archive, a binary, or a document to an agent without embedded context) is
 named by its path in the thread's attachments folder, which the agent's launch
 confinement reads and never writes, at every level; an ACP `resource_link`
@@ -2472,7 +2602,18 @@ block is not sent, since the path in the message already reaches every agent.
 In Chat a file the agent does not take natively follows Chat's rule
 ([Plan and Chat tool parity](../architecture.md#security-and-authority)). An
 attachment of a kind the agent advertised no block for is refused rather than
-dropped. Audio is not sent.
+dropped; audio to an agent without the `audio` block goes as an embedded
+resource where it advertises embedded context.
+
+A turn's `session/prompt` has a budget of silence, not of total time (built,
+2026-11-20): ten minutes, restarted by every message the agent sends, and
+standing still while the agent waits on an answer from Octant (an approval,
+a question, a client request). A turn that keeps streaming is never cut;
+before, a fixed ten minutes failed long agentic turns that were still
+working. A session config option that is not a `select` (ACP also defines a
+boolean toggle) is left out of what Octant reads, since Octant sets none,
+instead of failing the whole `session/new`, load or update reply that
+carried it.
 
 ### Registry coverage
 
@@ -2498,7 +2639,7 @@ distribution.
 | `mistral-vibe`            | Mistral Vibe       | `vibe-acp` (binary)                                    | Shipped (`mistral-vibe`)                                                                            |
 | `qwen-code`               | Qwen Code          | `npx @qwen-code/qwen-code --acp --experimental-skills` | Shipped (`qwen`; Octant does not pass `--experimental-skills`)                                      |
 | `opencode`, `opencode-v2` | OpenCode           | `opencode acp` (binary)                                | Shipped as the native OpenCode driver, not an ACP profile                                           |
-| `antigravity-acp`         | Google Antigravity | `agy_acp_server.par` (binary)                          | Listed for adding as any ACP agent; profile needs the probe                                         |
+| `antigravity-acp`         | Google Antigravity | `agy_acp_server.par` (binary)                          | Shipped as `antigravity` on the official `agy` CLI; the registry server stays listed for adding     |
 | `junie`                   | Junie              | `junie --acp=true` (binary inside `junie.app`)         | Listed for adding as any ACP agent; profile needs the probe                                         |
 | `amp-acp`                 | Amp                | `amp-acp` (binary)                                     | Listed for adding as any ACP agent; profile needs the probe                                         |
 | `auggie`                  | Auggie CLI         | `npx @augmentcode/auggie --acp`                        | Listed for adding as any ACP agent; profile needs the probe                                         |
@@ -2530,7 +2671,8 @@ distribution.
 | `qoder`                   | Qoder CLI          | `npx @qoder-ai/qodercli --acp`                         | Blocked: registry quarantine (initialize fails)                                                     |
 | `vtcode`                  | VT Code            | `vtcode acp` (binary)                                  | Blocked: registry quarantine (missing Windows builds) until it is lifted                            |
 
-Decided (maintainer decision, 2026-11-16; designed, not built): the probe
+Decided (maintainer decision, 2026-11-16; Google Antigravity built, the
+rest designed, not built): the probe
 next agents Google Antigravity, Factory Droid, Junie, Amp and Auggie, and
 Kiro, Trae and Muse (not in the snapshot above), are to become first-class
 profiles, each through the probe below; Cursor's block is to be rechecked
@@ -2538,7 +2680,7 @@ against the current release and lifted if its reason no longer holds. Every
 other agent can be added as [any ACP agent](#any-acp-agent).
 
 Rechecked against the registry's source at commit `131167e` (2026-11-16):
-none of these has a profile yet, because none has the signed-in probe below
+apart from Google Antigravity (below), none of these has a profile yet, because none has the signed-in probe below
 on record and the registry entry gives only a command, not the
 `agentInfo.name`, modes, sign-in folder or Project entries a profile pins.
 They are listed for adding as any ACP agent instead (`ACP_REGISTRY_AGENTS`),
@@ -2576,6 +2718,174 @@ secret. `WITHHELD_BUNDLED_PROVIDER_DRIVERS` in
 `packages/plugin-host/src/bundledProviderDrivers.ts` holds no driver; an entry
 there keeps a driver out of the activation ladder while stored instances and
 threads stay.
+
+### Google Antigravity
+
+Built (maintainer decision, 2026-11-20): Google Antigravity is a shipped ACP
+profile, `antigravity`, on Google's official CLI, `agy`, run unmodified as
+`agy acp --process-per-session --disable-telemetry` with
+`AGY_CLI_DISABLE_AUTO_UPDATE=1`, in the project directory.
+
+It stays inside Google's terms (read 2026-11-20). The Antigravity Additional
+Terms of Service (`antigravity.google/terms`) make "using third party
+software, tools, or services to access the Service (e.g. using OpenClaw with
+Antigravity OAuth)" a breach that may suspend the account. Google's own
+guide (`antigravity.google/docs/ide/extensions/acp`) is the sanctioned path:
+"Any ACP client can launch Antigravity CLI. Configure it to run this command
+with the project directory as the working directory: `agy acp`", with the
+agent, its tools, sign-in and settings coming from the CLI itself. Octant is
+that ACP client and does nothing outside the guide: it never reads, copies or
+replays the CLI's OAuth credentials, sends no other client's identity (the
+guide offers third-party models only to some named editors, so Octant gets
+Gemini models alone), passes only flags the guide lists, and never uses
+`--dangerously-skip-permissions`. The FAQ (`antigravity.google/docs/faq`)
+says headless mode (`agy -p`) "is intended for direct scripting and CI
+workflows. Wrapping agy inside third-party coding agents or applications, or
+automating account rotation, is not supported under consumer plans", so
+Octant never runs `agy -p` (not even for `/usage`) and never rotates or
+switches Antigravity accounts by itself; one person's own sign-in serves
+their own threads. `--process-per-session` is the guide's flag "required for
+HTTP MCP servers that your editor configures", which is how Octant offers its
+tools. Discovery finds `agy` on the
+PATH. It speaks standard ACP over stdio, and Octant does nothing to the CLI's
+identity or sign-in: no spoofed `clientInfo`, no faked environment that moves
+where the CLI keeps its sign-in, and no call to Google's internal endpoints
+with the person's token. The CLI talks to Google itself.
+
+- **No sandbox in Work and Code outside Strict.** There the CLI starts as the
+  person's own terminal would start it, at every level: no Octant sandbox, no
+  network allowlist, the person's whole environment, and its own sign-in read
+  as it reads it (`confinement: provider-approvals-outside-strict`). This is
+  the rule Windows already applies to ACP agents below Full access: the CLI's
+  `default` mode asks Octant before every edit and command, so the thread's
+  level holds through Octant's approvals rather than the OS. Rationale: other
+  ACP clients of the CLI run it this way, and the person asked for the same
+  reach. Cost: below Full access the process itself may read and write
+  anything the person can, and Octant's protected files and network limits do
+  not bind it; only the approvals it asks for do.
+- **Where the sandbox stays.** A readiness check, Chat (which has no folder),
+  Plan (which writes nothing), Strict, an explicit sandbox policy, and a Full
+  access thread that keeps the sandbox start inside Octant's deny-default
+  sandbox. Under Strict, Network limits still reach only Google's sign-in and
+  model hosts (`cloudcode-pa.googleapis.com`,
+  `daily-cloudcode-pa.googleapis.com`, `oauth2.googleapis.com`,
+  `www.googleapis.com`, `accounts.google.com`, `antigravity.google`).
+- **Sign-in.** The person runs `agy` in a terminal and signs in with their
+  own Google account; Octant reuses that sign-in as the CLI reads it, in
+  threads and in Automations alike: Octant runs only `agy acp`, so a routine
+  drives the same ACP session a thread does (maintainer decision, 2026-11-21).
+  On macOS the CLI keeps it in the login
+  keychain and reads it by running `/usr/bin/security`. Unconfined, that read
+  needs nothing from Octant. A sandboxed launch sets `readsLoginKeychain`: the
+  grant Claude Code's runtime measured as the least that reads a keychain
+  sign-in (exec of `/usr/bin/security`, the `com.apple.SecurityServer` and
+  `com.apple.securityd.xpc` lookups, a literal read of
+  `~/Library/Keychains/login.keychain-db`, and process-fork, which Chat and
+  Plan otherwise deny). The rules follow the built-in secret-file denials, so
+  a path the person protects in Settings still wins; nothing grants a Keychain
+  write, no other file in that folder is readable, and no other profile gets
+  the grant. Unlike Claude Code's, it is not held to the runtime alone:
+  commands the agent runs in-process share its sandbox. Octant never reads the
+  keychain item itself.
+- **Own setup.** Nothing of the CLI's own setup is held back, at any level or
+  under Strict: it reads and writes `~/.gemini` (`GEMINI_HOME` names it), and
+  loads the person's `AGENTS.md`, `GEMINI.md` and skills there and a Project's
+  `.agents/skills` and `.gemini/skills` as it does on its own. Its own-setup
+  switches report nothing, and Strict has no Project code to ask about for it.
+- **Release and identity.** The version is the first `x.y.z` anywhere in
+  `agy --version`; releases before 1.5.0 are refused, as other ACP clients of
+  the CLI refuse them. Any `agentInfo.name` is accepted (1.1.x reported
+  `antigravity-acp`, 1.5.x `Antigravity ACP Server`), and `initialize` may
+  report protocol version 1 or 2 (1.1.1 reported 2 with version 1 shapes);
+  every other profile accepts exactly 1.
+- **Modes, approvals and questions.** The CLI offers `default`, `auto_edit`,
+  `yolo` and, for some accounts, `auto`, and refuses `auto_edit` and `yolo`
+  from an ACP client. The profile selects no mode (`selectsNoMode`): the
+  session keeps `default` and Octant answers its approvals for the thread's
+  level, Full access included. Where the CLI offers its own `allow_always`
+  and the person keeps approvals for the session, an approval chooses it, so
+  the CLI remembers the answer (`forwardsAllowAlways`); a one-call answer (an
+  automatic reviewer's, or one on a child run's behalf) never does. Its
+  questions arrive as permission requests whose tool call id starts with
+  `interaction_`: one with no allow option is asked as a question whose
+  answers are its other options, and a reject option among them is not an
+  answer but what skipping the question sends. An allow option beside a
+  reject is an approval, so Plan and the approval policy apply to it. An
+  allow option is never a question's answer, and allow options with no
+  reject fail the turn. Offered `allow_always` with no
+  `allow_once`, an approval chooses it only where approvals hold for the
+  session. Any other approval is refused as unsupported and nothing reaches
+  the CLI, so no approval is recorded that the CLI never got: the request
+  stays pending, and Code keeps the ask open for a denial, which sends the
+  reject; Work keeps the request pending and shows the person the agent's
+  reason. A helper run's answers hold for one call (its sessions start with
+  `answersOncePerCall`), so no answer could approve such a request there: it
+  is denied on arrival, the agent gets the reject and carries on, no one is
+  asked and nothing is recorded approved, and the call shows "<agent> only
+  offers Always allow, which a helper run can't grant; denied."
+- **Turns that do not fail on stray updates** (`toleratesStrayUpdates`).
+  Updates after the prompt answered (usage, background-command replies,
+  scheduled wakes), a subagent's updates under its own session id, a repeated
+  tool start, a repeated finish and an update for a call never started are
+  ignored or read as the start they imply, as other ACP clients of the CLI
+  accept them; a call still running when the turn ends (a subagent's read
+  the CLI never finishes) is marked done with it. A late update that
+  reaches the process parked between turns is dropped rather than closing
+  it; a request there still closes it. Every other profile keeps the strict
+  mapper and closes a parked process on any message. A turn the CLI ends with `refusal` says the account's
+  usage limit may be reached (`refusalMessage`).
+- **Prompts.** A prompt that opens with `/` is one of the CLI's own commands
+  (`/plan`, `/goal`, `/compact`), which it runs only from the start of the
+  prompt: the command goes as the first text block and Octant's context as
+  the next (`commandLeadsPrompt`). Octant does not offer it `fs/write_text_file`
+  (`withholdsClientWrites`): offered it, the CLI rewrites whole files through
+  it instead of making its own edits, which its edit approvals already ask
+  for. Octant's instructions reach it in the prompt as they reach every
+  agent, not through the `_meta.antigravity.systemPrompt.append` it
+  advertises, because Octant's context arrives with each turn, after
+  `session/new`.
+- **Sessions.** A follow-up reattaches with `session/resume`, because
+  `session/load` replays the whole history; no `session/close` is sent, since
+  `initialize` does not advertise it. The process stays open between turns on
+  every release (`retainsSessions`), as other clients keep it, since each
+  launch unpacks the CLI again before it answers. A thread may start from
+  one of the CLI's own sessions for its folder, listed through `session/list`
+  when `initialize` advertises it, leaving out any an Octant thread holds
+  (`importsSessions`). Octant follows the list's `nextCursor` through its
+  pages, up to 20 pages and 2,000 sessions and stopping at a cursor it has
+  already followed, before it filters by folder and held sessions and offers
+  the newest 50. A read that stops at one of those bounds with sessions left
+  unread cannot tell a missing session from one it never reached, so
+  adopting a session it did not find then says the session is past what
+  Octant can read and to open it in the CLI, rather than that it is not the
+  folder's. Its earlier conversation is imported by loading it once in a
+  separate readiness-check process over `agy acp`, which replays it, and
+  closing that process ([Imported history](#imported-history)).
+- **Usage and limits.** The `session/prompt` reply's `usage` is that turn's
+  own, read as [any ACP agent's](#usage-an-acp-agent-reports); a reply
+  without `totalTokens` is read by the reviewed rule that its `inputTokens`
+  leaves out cached reads, so Octant's input is input plus
+  `cachedReadTokens`, kept also as cache reads (`turnUsageWithoutTotal`). The
+  account's 5-hour and weekly windows are not read: the CLI answers `/usage`
+  only through headless mode, which Google does not support wrapping inside
+  another application on consumer plans, so its limits report as
+  `runtime-does-not-report`.
+
+Kept, where other ACP clients of the CLI differ: the self-update guard (other
+clients both set and leave it), `--disable-telemetry`, Strict and Network
+limits as the person sets them, and Chat and Plan, which those clients do not
+have. A prompt sent while a turn runs is refused as for every ACP agent;
+the CLI steers a running turn with it, which Octant does not offer yet.
+
+Not built yet, each pending the signed-in probe on a Mac with a personal
+subscription: whether the sandboxed keychain read signs in as measured for
+Claude Code, the model and thinking option ids, the exact shape of a question
+and of `session/list`, the `/usage` answer on a real account, mid-turn
+steering, and a pinned compaction release. Google's guide says the server
+speaks protocol version 1, offers elicitation forms for questions, supports
+`session/close`, and treats a prompt sent during a turn as steering; Octant
+asks questions through the permission channel, sends no `session/close`, and
+refuses a mid-turn prompt until each is built against a live run.
 
 ### Any ACP agent
 
@@ -2698,9 +3008,10 @@ advertises. The model is set in the spelling the session reported
 session already opened on that model. No mode is selected (`selectsNoMode`), since no mapping of
 Chat, Work, Code and Plan onto the agent's own modes was read; Plan's
 read-only wall and the level's approvals are Octant's sandbox and approval
-bridge. It pins no exact-release feature (usage, compaction, file review,
-forms, warm reuse, unadvertised HTTP tools), so none is offered at any
-level, and the Full access "unverified" rule has nothing to offer it. An
+bridge. It pins no exact-release feature (compaction, file review, forms, warm
+reuse, unadvertised HTTP tools), so none is offered at any level, and the
+Full access "unverified" rule has nothing to offer it. Its usage is read as
+[any ACP agent's](#usage-an-acp-agent-reports). An
 agent whose session lists no model has nothing to select and cannot start a
 thread.
 
@@ -2813,9 +3124,8 @@ Nothing is inferred from the registry entry alone.
    integration reports tools unavailable. Where resume is advertised, a
    follow-up reopens the agent's session.
 
-For the shortlist the probe must also settle: for Google Antigravity, how
-`agy_acp_server` authenticates outside its IDE extension and whether it runs
-without the IDE (the registry's Linux entry passes `--uid=`); for Junie,
+For the shortlist the probe must also settle: for Google Antigravity, the
+signed-in items listed under [Google Antigravity](#google-antigravity); for Junie,
 whether the executable inside `junie.app` launches under Seatbelt from its
 bundle path, and which JetBrains account state it reads.
 
@@ -2978,23 +3288,25 @@ its status are in
   launch carries no sandbox settings at all (the SDK port refuses one that
   does): one asking for that sandbox with `failIfUnavailable` would leave
   every command unable to run.
-- **Chat** outside Strict starts unconfined on a family told natively that
-  it has no folder or shell (`chatWithoutFolderOrShell`): Codex with no
-  execution environment and its shell, image, plugin and app features off;
-  Pi with `--no-tools`, no extension and none of the person's resources; and
-  Claude with no file or shell tool in its session's tool list
-  (`claudeExecutionOptions` leaves out `Read`, `Grep`, `Glob`, `LS`, `Edit`,
-  `Write`, `NotebookEdit`, `Bash` and the task tools on Windows). OpenCode
-  and the ACP agents stay refused by name in Chat: OpenCode's permission
-  rules can deny its file and shell tools, but its command templates run
-  shell substitutions and its plugins run code in its own process outside
-  those rules, and an ACP agent's client capabilities decide only whether it
-  uses Octant's file and terminal methods, never its own built-in tools,
-  which no reviewed profile can be told to drop.
-- **Refused by name:** Strict at every level ("Strict needs a sandbox
-  Windows doesn't have yet"), Full access with the sandbox kept, and a Chat
-  launch on OpenCode or an ACP agent. A launch that does not carry its Strict
-  value is Strict.
+- **Chat** outside Strict starts unconfined on every provider family (maintainer
+  decision, 2026-11-19: outside Strict, the provider's own rules apply and
+  Octant adds none of its own): Codex with no execution environment and its
+  shell, image, plugin and app features off; Pi with `--no-tools`, no extension
+  and none of the person's resources; Claude with no file or shell tool in its
+  session's tool list (`claudeExecutionOptions` leaves out `Read`, `Grep`,
+  `Glob`, `LS`, `Edit`, `Write`, `NotebookEdit`, `Bash` and the task tools on
+  Windows); OpenCode with a deny-everything Chat permission ruleset of its own
+  (`*` denied, keeping only Octant's session tool bridge and 2.x `question`
+  open, with no Octant isolation); and ACP agents on their own permission
+  handling with no Octant isolation. Both the provider card and Settings
+  capability wording state honestly that outside Strict on Windows OpenCode's
+  own permission rules, not Octant, keep its file and shell tools off in Chat
+  (and its command templates and plugins run as they do in OpenCode itself),
+  and that an ACP agent's own permission handling, not Octant confinement,
+  applies in Chat.
+- **Refused by name:** Strict at every level, Chat included ("Strict needs a
+  sandbox Windows doesn't have yet"), and Full access with the sandbox kept. A
+  launch that does not carry its Strict value is Strict.
 - **Version and catalog reads.** An admitted launch reads its version
   unconfined. A read that serves no one thread (Codex's catalog lease,
   OpenCode's or an ACP agent's readiness check) runs unconfined only while the host's new

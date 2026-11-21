@@ -745,6 +745,19 @@ export interface ClaudeAgentSdkPort {
     readonly projectRoot: string;
     readonly configDirectory?: string;
   }) => Effect.Effect<ReadonlyArray<ClaudeSessionMetadata>, ProviderFailure>;
+  /**
+   * A session's conversation as the runtime's transcript holds it: its
+   * user and assistant messages on the current chain, oldest first, each the
+   * raw API message. Read-only. Absent on a port that cannot read one.
+   */
+  readonly sessionMessages?: (input: {
+    readonly sessionId: string;
+    readonly projectRoot: string;
+    readonly configDirectory?: string;
+  }) => Effect.Effect<
+    ReadonlyArray<{ readonly type: string; readonly message: unknown }>,
+    ProviderFailure
+  >;
 }
 
 // Mutable because the SDK's `SDKUserMessage` content is; the port builds a
@@ -1051,6 +1064,11 @@ export interface ClaudeAgentSdkBridge {
     readonly dir: string;
     readonly includeWorktrees: false;
   }) => Promise<unknown>;
+  /** The SDK's own transcript read; absent on a bridge that cannot read one. */
+  readonly getSessionMessages?: (
+    sessionId: string,
+    options: { readonly dir: string },
+  ) => Promise<unknown>;
   /** The SDK's own session copy; absent on a bridge that cannot make one. */
   readonly forkSession?: (
     sessionId: string,
@@ -1463,6 +1481,8 @@ function liveBridge(): ClaudeAgentSdkBridge {
       });
     },
     listSessions: (options) => claudeSdkModule().listSessions(options),
+    getSessionMessages: (sessionId, options) =>
+      claudeSdkModule().getSessionMessages(sessionId, { dir: options.dir }),
     forkSession: (sessionId, options) =>
       claudeSdkModule().forkSession(sessionId, {
         dir: options.dir,
@@ -1536,6 +1556,7 @@ function killAndConfirmExit(
 export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): ClaudeAgentSdkPort {
   const sdk = options.sdk ?? liveBridge();
   const copySession = sdk.forkSession;
+  const readMessages = sdk.getSessionMessages;
   const inputCapacity = options.inputCapacity ?? DEFAULT_INPUT_CAPACITY;
   const platform = options.platform ?? process.platform;
 
@@ -2379,6 +2400,31 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
         },
         catch: (error) => sanitizeFailure(error, "session lookup"),
       }),
+    ...(readMessages === undefined
+      ? {}
+      : {
+          sessionMessages: ({ sessionId, projectRoot, configDirectory }) =>
+            Effect.tryPromise({
+              try: async () => {
+                const read: unknown = await withClaudeAccountDirectory(configDirectory, () =>
+                  readMessages(sessionId, { dir: projectRoot }),
+                );
+                if (!Array.isArray(read)) throw new Error("Claude did not list the messages.");
+                return read.flatMap((entry: unknown) =>
+                  typeof entry === "object" &&
+                  entry !== null &&
+                  "type" in entry &&
+                  typeof entry.type === "string" &&
+                  "message" in entry &&
+                  // A subagent's messages belong to the call that started it.
+                  (!("parent_tool_use_id" in entry) || entry.parent_tool_use_id === null)
+                    ? [{ type: entry.type, message: entry.message }]
+                    : [],
+                );
+              },
+              catch: (error) => sanitizeFailure(error, "session lookup"),
+            }),
+        }),
     ...(copySession === undefined
       ? {}
       : {

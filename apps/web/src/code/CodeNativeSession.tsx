@@ -6,6 +6,78 @@ import type { ThreadSessionClient } from "./codeSessionClient";
 import "./code-native-session.css";
 
 type Listed = Awaited<ReturnType<NonNullable<ThreadSessionClient<string>["nativeSessions"]>>>;
+type ImportedHistory = NonNullable<NonNullable<Listed["adopted"]>["history"]>;
+
+const NOT_IMPORTED: Readonly<
+  Record<Extract<ImportedHistory, { status: "none" }>["reason"], string>
+> = {
+  unsupported: "This provider does not let Octant read the session's earlier messages.",
+  empty: "The session had no earlier messages.",
+  unreadable: "The session's earlier messages could not be read.",
+};
+
+/**
+ * The earlier conversation of the session the thread was started from, as
+ * its adoption imported it: kept apart from the thread's own turns and
+ * marked as imported, since the provider holds it and Octant never sent it.
+ */
+function ImportedSessionHistory(props: { readonly history: ImportedHistory }) {
+  const [open, setOpen] = useState(false);
+  const { history } = props;
+  if (history.status === "none")
+    return <p className="code-native-session__message">{NOT_IMPORTED[history.reason]}</p>;
+  const count = history.messages.length;
+  return (
+    <div className="code-native-session__imported">
+      <div className="code-native-session__row">
+        <span className="code-native-session__label">
+          Imported from the provider's session ·{" "}
+          {count === 1 ? "1 message" : `${String(count)} messages`}
+        </span>
+        <OctantButton
+          type="button"
+          size="sm"
+          variant="ghost"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
+          {open ? "Hide" : "Show"}
+        </OctantButton>
+      </div>
+      {open ? (
+        <ol aria-label="Imported earlier conversation" className="code-native-session__history">
+          {history.omittedMessages === undefined ? null : (
+            <li className="code-native-session__omitted">
+              {history.omittedMessages === 1
+                ? "1 earlier message was not imported."
+                : `${String(history.omittedMessages)} earlier messages were not imported.`}
+            </li>
+          )}
+          {history.messages.map((message, index) => (
+            <li
+              key={index}
+              className="code-native-session__imported-message"
+              data-role={message.role}
+            >
+              <span className="code-native-session__speaker">
+                {message.role === "person" ? "You" : "Agent"}
+              </span>
+              {message.text.length === 0 ? null : (
+                <p className="code-native-session__text">
+                  {message.text}
+                  {message.clipped === true ? " … (cut short)" : ""}
+                </p>
+              )}
+              {message.tools === undefined ? null : (
+                <p className="code-native-session__tools">Used {message.tools.join(", ")}</p>
+              )}
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </div>
+  );
+}
 
 const lastWritten = (milliseconds: number) =>
   new Date(milliseconds).toLocaleString(undefined, {
@@ -95,6 +167,9 @@ export function CodeNativeSession<Id extends string>(props: {
             Copy
           </OctantButton>
         </div>
+        {adopted.history === undefined ? null : (
+          <ImportedSessionHistory history={adopted.history} />
+        )}
       </section>
     );
   }

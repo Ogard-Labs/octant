@@ -67,6 +67,7 @@ import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
+import { attachedImageSources, workspaceImageSources } from "../image/threadImageSourcePorts";
 import { INHERITED_MARK_REFUSAL } from "../context/inheritedExternalContentMark";
 import {
   createCodeProfileSkillResolver,
@@ -103,6 +104,7 @@ import {
   codeSiblingThreadState,
 } from "../siblingThreads/codeSiblingThreadSource";
 import { CoordinatorService } from "../coordinator/coordinatorService";
+import { createCoordinatorThreadDoneEvaluator } from "../coordinator/coordinatorDoneWhenEvidence";
 import type { ThreadWakeupModePort } from "../wakeups/threadWakeupService";
 import { createCoordinatorWakeJournal } from "../coordinator/coordinatorWakeJournal";
 import { createCoordinatorCountStore } from "../coordinator/coordinatorCountStore";
@@ -351,6 +353,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<HarnessWiring, "shieldServerStore"> &
   Pick<
     AuthorityWiring,
+    | "browserCaptures"
     | "browserModelBindings"
     | "agentRunPersistence"
     | "androidInputGrants"
@@ -457,7 +460,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "productFeedbackService"
     | "resolveFeedbackThread"
   > &
-  Pick<CanvasWiring, "canvasAgentToolPort"> &
+  Pick<CanvasWiring, "canvasAgentToolPort" | "threadProjectAssetRoot"> &
   Pick<
     HarnessWiring,
     | "hostShield"
@@ -506,6 +509,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     appleToolchainService,
     bindDeviceApprovals,
     browserAuthority,
+    browserCaptures,
     browserModelBindings,
     bindTerminalBrowserSessions,
     terminalBrowserTools,
@@ -516,6 +520,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     buildCodeService,
     canAccessCodeProject,
     canvasAgentToolPort,
+    threadProjectAssetRoot,
     codeActiveTurns,
     codeApprovalStore,
     codeAttachments,
@@ -717,6 +722,42 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         kept: keptImageChoices,
         fullAccess: () => level() === "full-access",
         jobs: imageJobService,
+        imageSources: {
+          latestAttachments: () =>
+            codeAttachments === undefined
+              ? []
+              : attachedImageSources(
+                  codeBoardEventStore.latestPersonTurnAttachments(thread.id),
+                  (attachment) => codeAttachments.read(thread.id, attachment),
+                ),
+          ...workspaceImageSources({
+            threadId: decodeBrowserThreadId(String(thread.id)),
+            browserCaptures,
+            root: async () => {
+              const current = persistence.readCodeThread(thread.id);
+              const checkout = await threadProjectAssetRoot({
+                mode: "code",
+                threadId: String(thread.id),
+                projectId: String(thread.projectId),
+              });
+              const project = persistence.readProject(thread.projectId);
+              if (checkout === undefined || current === undefined || project?.type !== "code") {
+                return undefined;
+              }
+              const selected = approvedWorkingFolderRoot(
+                project,
+                current.workingFolderId,
+                checkout,
+              );
+              if (selected === undefined) return undefined;
+              const root = await resolveThreadWorkingDirectory(
+                selected,
+                current.workingDirectory ?? decodeThreadWorkingDirectory("."),
+              ).catch(() => undefined);
+              return root === checkoutRoot ? root : undefined;
+            },
+          }),
+        },
         listInstances: () => persistence.readProviderInstances(),
         readImageGenerationCustomSources: () =>
           (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration
@@ -1498,12 +1539,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             ? "download-needs-this-computer"
             : undefined,
         browserSignIn: {
-          // A routine's or subagent's turn has nobody to sign in, and a paired
-          // device cannot see the page.
+          // A routine's or subagent's turn has nobody to sign in, and a
+          // hub-introduced/restricted device cannot hold the Browser page.
           refusal: (windowId) =>
             browserToolApprovalService.isUnattendedScope(windowId)
               ? "sign-in-needs-a-person"
-              : browserToolApprovalService.isPairedDevice(windowId)
+              : browserToolApprovalService.isRestrictedDevice(windowId)
                 ? "sign-in-needs-this-computer"
                 : undefined,
           request: (input) => browserToolApprovalService.request(input),
@@ -1872,6 +1913,19 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             port: canvasAgentToolPort,
           }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+        resolvePullRequestLineNotesAuthorship: async ({ projectId, source, signal }) => {
+          const pullRequestAuthor = projectPullRequestService.observedAuthor({
+            projectId,
+            repositoryOwner: source.repositoryOwner,
+            repositoryName: source.repositoryName,
+            number: source.number,
+          });
+          if (pullRequestAuthor === undefined) {
+            return { pullRequestAuthor: undefined, viewerLogin: undefined };
+          }
+          const viewerLogin = await projectPullRequestService.observeViewerLogin(signal);
+          return { pullRequestAuthor, viewerLogin };
+        },
         outsideContentMarks: runtimeOutsideContentMarks,
         forgeChanges: runtimeForgeChanges,
         readThreadExternalContentTaint: (threadId) =>
@@ -2142,6 +2196,51 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       rechooseAsBuilder: (coordinatorThreadId, filters) =>
         coordinatorService.rechooseAsBuilder(coordinatorThreadId, filters),
     });
+    // Merge when ready, Auto-fix, and coordinator done-when checks. The forge
+    // calls run through the host's own `gh`; with none installed every check
+    // answers unavailable.
+    const pullRequestSwitchForge = (() => {
+      if (options.ghExecutable === undefined) return undefined;
+      try {
+        return new GhPullRequestSwitchPort({
+          command: createGhCommandPort({ ghPath: options.ghExecutable }),
+        });
+      } catch {
+        return undefined;
+      }
+    })();
+    const coordinatorDoneWhenAbort = new AbortController();
+    const doneWhenSignal = () =>
+      AbortSignal.any([coordinatorDoneWhenAbort.signal, AbortSignal.timeout(15_000)]);
+    const doneWhenProbePath = decodeCodeRelativePath("package.json");
+    const isCoordinatorDoneWhenThreadDone = createCoordinatorThreadDoneEvaluator({
+      readThread: (threadId) => persistence.readCodeThread(threadId),
+      readCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
+      projectExists: (projectId) => persistence.readProject(projectId) !== undefined,
+      resolveCheckoutRoot: async (thread, checkout, signal) => {
+        const resolved = await roots.resolve(
+          ROUTINE_HOST_SCOPE_ID,
+          thread,
+          checkout,
+          doneWhenProbePath,
+          signal,
+        );
+        return resolved?.rootPath;
+      },
+      git: gitObservationPort,
+      history: { read: (threadId) => codeBoardEventStore.summaryForThread(threadId) },
+      pullRequestLinks: pullRequestLinkService,
+      ...(pullRequestSwitchForge === undefined
+        ? {}
+        : {
+            observePullRequest: (request, signal) =>
+              pullRequestSwitchForge.observe(request, signal, {
+                failures: false,
+                activity: false,
+              }),
+          }),
+      createSignal: doneWhenSignal,
+    });
     // Coordinator threads and message wakes (docs/design/coordinator-threads.md):
     // a worker is created through the ordinary Code command path and started,
     // like a wake turn, as an agent-initiated host turn under the routine host
@@ -2322,6 +2421,19 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       },
       counts: createCoordinatorCountStore(persistence.connection),
       wakes: coordinatorWakes,
+      observePullRequest: async (target, readOptions) => {
+        if (pullRequestSwitchForge === undefined) return { status: "unavailable" };
+        return await pullRequestSwitchForge.observePullRequestCondition(
+          {
+            owner: target.repositoryOwner,
+            name: target.repositoryName,
+            number: target.number,
+          },
+          readOptions,
+          doneWhenSignal(),
+        );
+      },
+      isThreadDone: isCoordinatorDoneWhenThreadDone,
       uuid: randomUUID,
       now: () => Date.now(),
       onError: (message, error) => console.error(`[coordinators] ${message}`, error),
@@ -2336,6 +2448,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
         unsubscribeCoordinator();
+        coordinatorDoneWhenAbort.abort();
         coordinatorService.stop();
       }),
     );
@@ -2520,18 +2633,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         return board.query(query);
       },
     );
-    // Merge when ready and Auto-fix. The forge calls run through the host's
-    // own `gh`; with none installed every switch answers unavailable.
-    const pullRequestSwitchForge = (() => {
-      if (options.ghExecutable === undefined) return undefined;
-      try {
-        return new GhPullRequestSwitchPort({
-          command: createGhCommandPort({ ghPath: options.ghExecutable }),
-        });
-      } catch {
-        return undefined;
-      }
-    })();
+    // Merge when ready and Auto-fix reuse `pullRequestSwitchForge` created above.
     const pullRequestSwitchService = new CodeProjectPullRequestSwitchService({
       limits: () => {
         const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();

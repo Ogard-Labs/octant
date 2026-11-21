@@ -278,6 +278,11 @@ import {
 } from "../canvas/canvasDeliveryInstructions";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
 import { appToolHostLines } from "../providers/appToolHostLines";
+import {
+  nativeSessionHistoryAppend,
+  readImportedSessionHistory,
+  readJournaledSessionHistory,
+} from "../providers/nativeSessionHistory";
 import { STOP_CONFIRMATION_MS } from "../stopConfirmation";
 
 type Awaitable<T> = T | Promise<T>;
@@ -933,6 +938,7 @@ export interface CodeOperationRuntimeOptions {
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
   readonly resolveSideChatReturns?: CodeOperationServiceOptions["resolveSideChatReturns"];
+  readonly resolvePullRequestLineNotesAuthorship?: CodeOperationServiceOptions["resolvePullRequestLineNotesAuthorship"];
   /** Reads the `@file` mentions a turn names against this thread's bound root. */
   readonly resolveFileMentionContext?: CodeOperationServiceOptions["resolveFileMentionContext"];
   /** Takes the notes the user pointed at the running product into the next turn. */
@@ -1696,6 +1702,9 @@ export function createCodeOperationRuntime(
     ...(options.resolveSideChatReturns === undefined
       ? {}
       : { resolveSideChatReturns: options.resolveSideChatReturns }),
+    ...(options.resolvePullRequestLineNotesAuthorship === undefined
+      ? {}
+      : { resolvePullRequestLineNotesAuthorship: options.resolvePullRequestLineNotesAuthorship }),
     ...(options.resolveThreadMentionContext === undefined
       ? {}
       : { resolveThreadMentionContext: options.resolveThreadMentionContext }),
@@ -1781,6 +1790,17 @@ export function createCodeOperationRuntime(
    * synchronously so a caller can act on the answer before another turn is
    * admitted.
    */
+  const adoptedWithHistory = (threadId: CodeThreadId, nativeSessionId: string) => {
+    const history = readJournaledSessionHistory(
+      options.persistence.journal,
+      String(threadId),
+      "code",
+    );
+    return {
+      nativeSessionId: decodeCodeNativeSessionId(nativeSessionId),
+      ...(history === undefined ? {} : { history }),
+    };
+  };
   const conversationRefusal = (
     thread: CodeThread,
   ): { readonly message: string; readonly adopted?: string } | undefined => {
@@ -2442,7 +2462,7 @@ export function createCodeOperationRuntime(
             unavailable: target.message,
             ...(target.adopted === undefined
               ? {}
-              : { adopted: { nativeSessionId: target.adopted } }),
+              : { adopted: adoptedWithHistory(threadId, target.adopted) }),
           };
         const listed = await Effect.runPromise(
           Effect.either(
@@ -2506,6 +2526,14 @@ export function createCodeOperationRuntime(
           // back, or the session could never be offered or adopted again.
           let committed = false;
           try {
+            // Read before the commit checks below, which must not yield. The
+            // read never fails the adoption: a runtime without readable
+            // history, or a read that fails, imports none and says why.
+            const history = await readImportedSessionHistory(target.nativeSessions, {
+              instanceId: target.thread.providerInstanceId,
+              projectRoot: target.projectRoot,
+              nativeSessionId,
+            });
             // The thread must still be empty when the adoption commits. Nothing
             // yields from here to the journal appends, so no turn slips in.
             const occupied = conversationRefusal(target.thread);
@@ -2573,6 +2601,21 @@ export function createCodeOperationRuntime(
                   resumeCursor: cursor,
                 },
               });
+              // The session's earlier conversation, as the thread's own record:
+              // never prompt context, since the provider already holds it.
+              options.persistence.journal.append(
+                nativeSessionHistoryAppend({
+                  threadId: String(thread.id),
+                  mode: "code",
+                  providerInstanceId: thread.providerInstanceId,
+                  nativeSessionId,
+                  history,
+                  eventId: options.uuid(),
+                  correlationId: options.uuid(),
+                  actor: options.actor,
+                  occurredAt: options.clock(),
+                }),
+              );
             });
             committed = true;
             return { kind: "code-native-session-adopted", threadId, nativeSessionId };
@@ -4251,16 +4294,57 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return refuseRevokedAdmission();
     }
     // Feedback stays pending through every preparation refusal. Consuming it
-    // here does not yield between the final admission check and owning the turn.
-    let feedback: ReturnType<NonNullable<typeof input.takeProductFeedback>> | undefined;
-    try {
-      feedback = input.takeProductFeedback?.(MAX_PROVIDER_ATTACHMENTS - originalInputCount);
-    } catch {
+    // here does not yield between the final admission check and owning the turn;
+    // any pull-request outside-content mark returns a value inside the same
+    // delivery transaction so a feedback refusal never taints the thread and a
+    // provenance refusal rolls back pending feedback notes without throwing.
+    const recordOutsideContent = input.recordOutsideContent;
+    let outsideContentRecorded = false;
+    let feedback:
+      | Extract<
+          ReturnType<NonNullable<typeof input.takeProductFeedback>>,
+          { readonly status: "taken" }
+        >["delivery"]
+      | undefined;
+    if (input.takeProductFeedback !== undefined) {
+      const taken = input.takeProductFeedback(
+        MAX_PROVIDER_ATTACHMENTS - originalInputCount,
+        recordOutsideContent === undefined
+          ? undefined
+          : () => {
+              if (!recordOutsideContent()) return { status: "refused" };
+              outsideContentRecorded = true;
+              return { status: "accepted" };
+            },
+      );
+      if (taken.status === "claim-refused") {
+        await serverTools?.close?.().catch(() => undefined);
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return {
+          ...failStart(
+            "Could not record outside-content provenance for pull-request line notes. Nothing was sent.",
+          ),
+          admission: "refused" as const,
+        };
+      }
+      if (taken.status === "feedback-changed") {
+        await serverTools?.close?.().catch(() => undefined);
+        await input.extensionTools?.close?.().catch(() => undefined);
+        return {
+          ...failStart(
+            "Product-note delivery changed while preparing the message. Refresh notes before sending again.",
+          ),
+          admission: "refused" as const,
+        };
+      }
+      feedback = taken.delivery;
+    }
+    if (recordOutsideContent !== undefined && !outsideContentRecorded && !recordOutsideContent()) {
       await serverTools?.close?.().catch(() => undefined);
       await input.extensionTools?.close?.().catch(() => undefined);
       return {
         ...failStart(
-          "Product-note delivery changed while preparing the message. Refresh notes before sending again.",
+          "Could not record outside-content provenance for pull-request line notes. Nothing was sent.",
         ),
         admission: "refused" as const,
       };
@@ -5488,11 +5572,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const once =
       ownerCurrent !== undefined ||
       active.thread.permissionPersistence !== input.thread.permissionPersistence;
+    const askedUnder = active.approvalPostures.get(input.approvalId);
     if (ownerCurrent === undefined) {
       active.approvals.delete(input.approvalId);
       active.approvalPostures.delete(input.approvalId);
     }
-    await Effect.runPromise(
+    const refused = await Effect.runPromise(
       Effect.suspend(() => {
         if (ownerCurrent !== undefined && !ownerCurrent())
           return Effect.die(new Error("Owner approval target changed before delivery."));
@@ -5513,8 +5598,25 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           approved: input.decision === "approved",
           ...(once ? { scope: "once" as const } : {}),
         });
-      }),
+      }).pipe(
+        Effect.as(undefined),
+        Effect.catchIf(
+          (failure) => failure.category === "unsupported",
+          (failure) => Effect.succeed(failure),
+        ),
+      ),
     );
+    // A runtime that cannot take the answer as asked (an agent offering only
+    // an allow that would outlast a one-call approval) heard nothing and still
+    // waits, so the ask stays open for a denial and nothing is journaled.
+    if (refused !== undefined) {
+      active.approvals.set(input.approvalId, providerRequestId);
+      if (askedUnder !== undefined) active.approvalPostures.set(input.approvalId, askedUnder);
+      // The person is waiting again, so the time from their refused answer
+      // until their next one is their wait, not the call's run time.
+      active.turnTiming.approvalReopened({ approvalId: input.approvalId });
+      return turnState("failed", { category: "failed", message: refused.message });
+    }
     // An owner's answer journals `owner-approval-settled` instead.
     if (ownerCurrent === undefined)
       this.#recordApprovalAnswered(active, input.approvalId, input.decision);
@@ -7847,6 +7949,7 @@ function normalizedOperationEvent(
       ...(event.cacheWriteInputTokens === undefined
         ? {}
         : { cacheWriteInputTokens: event.cacheWriteInputTokens }),
+      ...(event.reasoningTokens === undefined ? {} : { reasoningTokens: event.reasoningTokens }),
 
       ...(event.contextWindow === undefined ? {} : { contextWindow: event.contextWindow }),
       ...(event.contextTokens === undefined ? {} : { contextTokens: event.contextTokens }),

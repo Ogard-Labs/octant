@@ -26,6 +26,7 @@ import {
 const PROXY_SESSION_COOKIE = "__Secure-octant-server-proxy-session";
 const PROXY_ROUTE_PREFIX = "/api/server-proxy/";
 const GRANTS_PATH = "/api/server-proxy/grants";
+const GRANT_ID_PATTERN = /^rsg_[0-9a-f]{64}$/;
 const SAFE_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD"]);
 const METHOD_PATTERN = /^[A-Z][A-Z0-9-]{0,15}$/;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -92,12 +93,25 @@ export type RemoteServerRelaySigning =
       readonly reason: "grant-not-held" | "outside-grant" | "invalid-request";
     };
 
+export type RemoteServerProxyAdoption =
+  | { readonly status: "adopted" }
+  | {
+      readonly status: "refused";
+      readonly reason: "device-revoked" | "host-unreachable" | "invalid-grant";
+      readonly message: string;
+    };
+
 export interface RemoteServerProxyClient {
   /** Asks the host for a grant to one listed server, minting a proxy session first when needed. */
   readonly openGrant: (
     source: RemoteServerGrantSource,
     signal?: AbortSignal,
   ) => Promise<RemoteServerProxyOpening>;
+  /**
+   * Registers a server-Project preview grant minted by `/api/server-project-preview`
+   * under this client's proxy session so the forwarder can sign its requests.
+   */
+  readonly adoptGrant: (grantId: string) => Promise<RemoteServerProxyAdoption>;
   /** Signs one relayed request for a grant this client holds, and nothing else. */
   readonly signRelayRequest: (
     request: RemoteServerRelayRequest,
@@ -256,8 +270,37 @@ export function createRemoteServerProxyClient(
     };
   };
 
+  const adoptGrant = async (grantId: string): Promise<RemoteServerProxyAdoption> => {
+    if (!GRANT_ID_PATTERN.test(grantId)) {
+      return {
+        status: "refused",
+        reason: "invalid-grant",
+        message: "That preview grant identifier is invalid.",
+      };
+    }
+    let current: Awaited<ReturnType<typeof ensureSession>>;
+    try {
+      current = await ensureSession();
+    } catch (error) {
+      return error instanceof RemoteConnectionError && error.category === "unauthorized"
+        ? {
+            status: "refused",
+            reason: "device-revoked",
+            message: `This computer no longer has access to ${options.hostName}. Pair it again to open servers there.`,
+          }
+        : {
+            status: "refused",
+            reason: "host-unreachable",
+            message: `Can't reach ${options.hostName}. Check that it's on and on the same network.`,
+          };
+    }
+    current.grants.add(grantId);
+    return { status: "adopted" };
+  };
+
   return {
     openGrant,
+    adoptGrant,
     signRelayRequest,
     forget: () => {
       session = undefined;

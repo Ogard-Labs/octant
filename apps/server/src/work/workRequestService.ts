@@ -60,14 +60,25 @@ export interface WorkRequestEventStorePort {
       };
 }
 
+/**
+ * The runtime cannot take the answer as asked (an agent offering only an
+ * allow that would outlast this one): it heard nothing and still waits, and
+ * the message tells the person what it can take.
+ */
+export interface WorkApprovalNotDeliverable {
+  readonly status: "not-deliverable";
+  readonly message: string;
+}
+
 export interface WorkRequestProviderSessionPort {
+  /** Rejects when the session could not be reached; resolves with a refusal it can explain. */
   answerApproval(input: {
     readonly providerInstanceId: ProviderInstanceId;
     readonly sessionId: ProviderSessionId;
     readonly requestId: string;
     readonly approved: boolean;
     readonly ownerCurrent?: () => boolean;
-  }): Promise<void>;
+  }): Promise<void | WorkApprovalNotDeliverable>;
   answerUserInput(input: {
     readonly providerInstanceId: ProviderInstanceId;
     readonly sessionId: ProviderSessionId;
@@ -437,7 +448,19 @@ export class WorkRequestService {
     // driver can hold it to Plan, before the agent hears the answer; leaving
     // Plan, or a driver without that change, ends the turn.
     let levelChangeApplied: "in-place" | "next-turn" | undefined;
+    // The level moves back and the request is left as it was: a retry
+    // applies the change again and delivers it, rather than finding the
+    // thread already moved.
+    const undoLevelChange = () => {
+      if (levelChange === undefined) return;
+      this.#levelChanges?.change({
+        threadId: entry.request.threadId,
+        kind: levelChange.to === "plan" ? "exit-plan" : "enter-plan",
+        actor: answeredBy,
+      });
+    };
     try {
+      let notDeliverable: WorkApprovalNotDeliverable | undefined;
       try {
         if (levelChange !== undefined) {
           const inPlace =
@@ -455,13 +478,14 @@ export class WorkRequestService {
             this.#levelChanges?.enteredPlanInPlace?.(entry.request.threadId);
         }
         if (command.resolution.kind === "approval") {
-          await this.#providerSessions.answerApproval({
-            providerInstanceId: prepared.request.providerInstanceId,
-            sessionId: prepared.request.providerSessionId,
-            requestId: providerCallbackId(entry),
-            approved: command.resolution.approved,
-            ...(ownerCurrent === undefined ? {} : { ownerCurrent }),
-          });
+          notDeliverable =
+            (await this.#providerSessions.answerApproval({
+              providerInstanceId: prepared.request.providerInstanceId,
+              sessionId: prepared.request.providerSessionId,
+              requestId: providerCallbackId(entry),
+              approved: command.resolution.approved,
+              ...(ownerCurrent === undefined ? {} : { ownerCurrent }),
+            })) ?? undefined;
         } else {
           await this.#providerSessions.answerUserInput({
             providerInstanceId: prepared.request.providerInstanceId,
@@ -471,17 +495,20 @@ export class WorkRequestService {
           });
         }
       } catch {
-        // The provider never heard the answer, so the level moves back and the
-        // request is left as it was: a retry applies the change again and
-        // delivers it, rather than finding the thread already moved.
-        if (levelChange !== undefined) {
-          this.#levelChanges?.change({
-            threadId: entry.request.threadId,
-            kind: levelChange.to === "plan" ? "exit-plan" : "enter-plan",
-            actor: answeredBy,
-          });
-        }
+        // The provider never heard the answer.
+        undoLevelChange();
         return this.#deliveryFailure(prepared.request, "resolution", answeredBy);
+      }
+      if (notDeliverable !== undefined) {
+        // Nor did it here, but it said why, and the person can act on that:
+        // the request stays pending for an answer the agent can take.
+        undoLevelChange();
+        return this.#deliveryFailure(
+          prepared.request,
+          "resolution",
+          answeredBy,
+          notDeliverable.message,
+        );
       }
       const confirmed = this.#confirmDelivery(prepared.request, answeredBy);
       if (confirmed.status !== "ok") return confirmed;
@@ -925,6 +952,8 @@ export class WorkRequestService {
     current: WorkRequest,
     action: "resolution" | "cancellation",
     actor: typeof EventActor.Type,
+    /** The provider's own reason, shown in place of the generic one. */
+    reason?: string,
   ) {
     const { delivery: _delivery, ...withoutDelivery } = current;
     const released = decodeWorkRequest({
@@ -950,7 +979,7 @@ export class WorkRequestService {
     this.#projection.apply(frame);
     return failure(
       "unavailable",
-      `The provider session could not receive the Work request ${action}.`,
+      reason ?? `The provider session could not receive the Work request ${action}.`,
     );
   }
 

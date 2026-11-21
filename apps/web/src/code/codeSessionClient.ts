@@ -8,6 +8,7 @@ import {
   type CodeNativeSession,
   type CodeNativeSessionId,
   type CodeThreadId,
+  type ImportedSessionHistory,
 } from "@octant/contracts";
 
 /**
@@ -21,7 +22,12 @@ export interface ThreadSessionClient<Id extends string> {
   }>;
   readonly stopLiveTasks: (threadId: Id) => Promise<{ readonly stopped: boolean }>;
   readonly nativeSessions?: (threadId: Id) => Promise<{
-    readonly adopted?: { readonly nativeSessionId: CodeNativeSessionId } | undefined;
+    readonly adopted?:
+      | {
+          readonly nativeSessionId: CodeNativeSessionId;
+          readonly history?: ImportedSessionHistory | undefined;
+        }
+      | undefined;
     readonly sessions: ReadonlyArray<CodeNativeSession>;
     readonly unavailable?: string | undefined;
   }>;

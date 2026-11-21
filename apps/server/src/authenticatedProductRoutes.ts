@@ -15,6 +15,7 @@ export interface AuthenticatedProductDispatchHandoff {
   readonly request: Request;
   readonly principal: ClientPrincipal;
   readonly abortSignal?: AbortSignal;
+  readonly sessionNow?: () => number;
   readonly freshness?: "current" | "rotation-due";
   readonly requestFacts?: unknown;
 }
@@ -53,6 +54,7 @@ export function createAuthenticatedProductDispatch(
       request: handoff.request,
       principal: handoff.principal,
       ...(handoff.abortSignal === undefined ? {} : { abortSignal: handoff.abortSignal }),
+      ...(handoff.sessionNow === undefined ? {} : { sessionNow: handoff.sessionNow }),
     });
     bindPrincipalRouteContext(handoff.request, context);
     const cleaned = await withoutImageMetadata(handoff.request, handoff.principal);
@@ -315,7 +317,8 @@ export function classifyProductAction(request: Request): string | undefined {
     // with a local window.
     if (method === "POST" && path === "/api/benchmarks/cells/rate") return "benchmark.rate-cell";
     return method === "POST" &&
-      (path === "/api/benchmarks/suites/list" ||
+      (path === "/api/benchmarks/advice" ||
+        path === "/api/benchmarks/suites/list" ||
         path === "/api/benchmarks/runs/list" ||
         path === "/api/benchmarks/runs/read" ||
         path === "/api/benchmarks/suites/history" ||

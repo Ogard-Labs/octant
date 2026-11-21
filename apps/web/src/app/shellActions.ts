@@ -291,6 +291,7 @@ export type ShellActions = {
   readonly selectWorkThread: (threadId: string) => void;
   readonly sendBackChatTurn: ChatController["sendBackTurn"];
   readonly sendBackCodeTurn: CodeController["sendBackTurn"];
+  readonly sendPullRequestLineNotes: CodeController["sendPullRequestLineNotes"];
   readonly setAgentsCenterOpen: Dispatch<SetStateAction<boolean>>;
   readonly setArchiveOpen: Dispatch<SetStateAction<boolean>>;
   readonly setArtifactLibraryOpen: Dispatch<SetStateAction<boolean>>;

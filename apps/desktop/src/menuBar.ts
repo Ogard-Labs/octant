@@ -29,7 +29,20 @@ export function decodeMenuBarOpenThread(value: unknown): MenuBarOpenThread | und
   return { mode: value.mode, threadId: value.threadId };
 }
 
+export function openMenuBarOffer<T>(
+  owner: string,
+  windows: ReadonlyArray<{ readonly windowId: string; readonly window: T }>,
+  ready: (window: T) => boolean,
+  open: (window: T) => void,
+): "opened" | "offer-window-unavailable" {
+  const window = windows.find((context) => context.windowId === owner)?.window;
+  if (window === undefined || !ready(window)) return "offer-window-unavailable";
+  open(window);
+  return "opened";
+}
+
 export interface MenuBarFleetThread {
+  readonly offerWindowId?: string;
   readonly mode: MenuBarThreadMode;
   readonly threadId: string;
   readonly title: string;
@@ -47,6 +60,9 @@ function fleetThread(
   return {
     mode: thread.mode,
     threadId: thread.threadId,
+    ...(state === "needs-you" && thread.offerWindowId !== undefined
+      ? { offerWindowId: thread.offerWindowId }
+      : {}),
     title: thread.title,
     ...(thread.projectName === undefined ? {} : { projectName: thread.projectName }),
     state,

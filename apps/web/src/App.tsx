@@ -412,6 +412,7 @@ import { decodeStableHostId } from "@octant/contracts/remote-access";
 import { TodoListHostSettingsContext } from "./todos/TodoListHostSettings";
 import { TodoQuickAddDialog, useNewTodoShortcut } from "./todos/TodoQuickAddDialog";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
+import { coordinatorDoneWhenEqual } from "@octant/domain";
 import { CoordinatorBoundsDialog } from "./projects/CoordinatorBoundsDialog";
 import {
   ProjectActionRunDialog,
@@ -429,6 +430,7 @@ import {
 } from "./projects/serverProjectEntries";
 import { useProviderController } from "./providers/useProviderController";
 import { ModelToolVerificationContext } from "./providers/ModelToolVerificationContext";
+import { BenchmarkAdviceContext } from "./usage/benchmarks/BenchmarkAdviceContext";
 import { useDiscoveryController } from "./providers/useDiscoveryController";
 import { useProviderBootstrap } from "./providers/useProviderBootstrap";
 import { useArchivedChatThreadSearch } from "./chat/useArchivedChatThreadSearch";
@@ -2455,6 +2457,50 @@ function LaunchedShell(
       );
     };
   }, [runningServicesRemoteHost, remoteServerLiveOpener, federation, pairedComputerFetch]);
+  const openRelayedServerProjectPreview = useMemo(() => {
+    const host = runningServicesRemoteHost;
+    const opener = remoteServerLiveOpener;
+    const registry = federation?.registry;
+    const deviceKeyStore = federation?.deviceKeyStore;
+    if (host === undefined || host.status !== "ready" || opener === undefined) return undefined;
+    if (registry === undefined || deviceKeyStore === undefined) return undefined;
+    return async (view: {
+      readonly projectId: string;
+      readonly remotePort: number;
+      readonly grantId?: string | undefined;
+    }): Promise<RemoteOpenOutcome> => {
+      if (view.grantId === undefined) {
+        return { kind: "refused", message: "That preview has no relay grant." };
+      }
+      const credential = (await registry.get(host.hostId))?.credential;
+      const connection = host.bridge.connection();
+      if (credential === undefined || connection === undefined) {
+        return {
+          kind: "refused",
+          message: `Can't reach ${host.hostName}. Check that it's on and on the same network.`,
+        };
+      }
+      const deviceKey = createPairingDeviceKeyAdapter(deviceKeyStore, credential.keyId);
+      return opener.openServerProjectPreview(
+        {
+          hostId: host.hostId,
+          hostName: host.hostName,
+          origin: host.origin,
+          issueSession: () => connection.issueServerProxySession(),
+          sign: (payload) => deviceKey.sign(payload),
+          ...(pairedComputerFetch === undefined || !isRemotePairingOrigin(host.origin)
+            ? {}
+            : { fetch: pairedComputerFetch }),
+        },
+        {
+          projectId: view.projectId,
+          remotePort: view.remotePort,
+          grantId: view.grantId,
+        },
+        "octant-browser",
+      );
+    };
+  }, [runningServicesRemoteHost, remoteServerLiveOpener, federation, pairedComputerFetch]);
   useEffect(() => {
     if (hosts.length === 0) return;
     const result = preselectCreateHost({
@@ -4017,6 +4063,35 @@ function LaunchedShell(
       lifecycle: project.lifecycle,
     }),
   );
+  const firstRunHostStrict =
+    codeController.bootstrap?.settings.defaultStrict === true ||
+    workSettings.settings?.defaultStrict === true;
+  const firstRunProviderFolderScan = useMemo(() => {
+    if (
+      projectController.client.scanProviderFolders === undefined ||
+      projectController.client.importProviderFolders === undefined
+    ) {
+      return undefined;
+    }
+    return {
+      strict: firstRunHostStrict,
+      scan: (signal?: AbortSignal) =>
+        projectController.scanProviderFolders(signal) ??
+        Promise.resolve({ status: "hidden" as const, reason: "strict" as const }),
+      importFolders: async (
+        folderIds: Parameters<typeof projectController.importProviderFolders>[0],
+      ) =>
+        (await projectController.importProviderFolders(folderIds)) ?? {
+          status: "completed" as const,
+          results: [],
+        },
+    };
+  }, [
+    firstRunHostStrict,
+    projectController.client,
+    projectController.importProviderFolders,
+    projectController.scanProviderFolders,
+  ]);
 
   const codeProviderGroups = useMemo(
     () =>
@@ -5882,6 +5957,7 @@ function LaunchedShell(
       selectWorkThread,
       sendBackChatTurn: chatController.sendBackTurn,
       sendBackCodeTurn: codeController.sendBackTurn,
+      sendPullRequestLineNotes: codeController.sendPullRequestLineNotes,
       setAgentsCenterOpen,
       setArchiveOpen,
       setArtifactLibraryOpen,
@@ -8545,6 +8621,9 @@ function LaunchedShell(
           controller.closeSettings();
           void openDraftInKnownProject(project.id, project.mode ?? "code", project.name);
         }}
+        {...(openRelayedServerProjectPreview === undefined
+          ? {}
+          : { onOpenRelayedServerProjectPreview: openRelayedServerProjectPreview })}
         projectTerminalClient={projectTerminalClient}
         projectActionStoragePrefix={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:server-settings`}
         actions={actions}
@@ -9206,6 +9285,9 @@ function LaunchedShell(
               workSettings.status === "unsupported" ? rawDraftSelection : firstRunWorkModel,
             codeModel: rawDraftSelection,
             projects: firstRunProjects,
+            ...(firstRunProviderFolderScan === undefined
+              ? {}
+              : { providerFolderScan: firstRunProviderFolderScan }),
             onCreateProject: (mode) => openProjectCreate(mode),
             onStartThread: ({ mode, projectId }) => {
               const project = firstRunProjects.find(
@@ -9307,19 +9389,70 @@ function LaunchedShell(
         );
         // A thread that stopped coordinating, or left the list, has no limits to change.
         if (coordinator === undefined || coordinator.coordinator !== true) return null;
+        const project = projectController.allProjects.find(
+          (candidate) => String(candidate.id) === String(coordinator.projectId),
+        );
+        const defaultRepository =
+          project?.type !== "code" || project.connectedRepository === undefined
+            ? undefined
+            : `${project.connectedRepository.owner}/${project.connectedRepository.repository}`;
+        const plannerThreadIds = new Set(
+          (codeController.bootstrap?.plannerThreadIds ?? []).map(String),
+        );
+        const doneWhenThreads = (codeController.bootstrap?.threads ?? [])
+          .filter(
+            (candidate) =>
+              String(candidate.projectId) === String(coordinator.projectId) &&
+              candidate.lifecycle === "active" &&
+              candidate.coordinator !== true &&
+              !(
+                candidate.coordinatorThreadId === undefined &&
+                plannerThreadIds.has(String(candidate.id))
+              ) &&
+              String(candidate.id) !== String(coordinator.id),
+          )
+          .map((candidate) => ({ id: candidate.id, title: candidate.title }));
         return (
           <CoordinatorBoundsDialog
             bounds={coordinator.coordinatorBounds}
+            doneWhen={{
+              value: coordinator.coordinatorDoneWhen,
+              threads: doneWhenThreads,
+              defaultRepository,
+              onSave: (bounds, nextDoneWhen) => {
+                setCoordinatorBoundsThreadId(undefined);
+                const boundsChanged =
+                  coordinator.coordinatorBounds?.wakesPerHour !== bounds.wakesPerHour ||
+                  coordinator.coordinatorBounds?.rounds !== bounds.rounds ||
+                  coordinator.coordinatorBounds?.startsPerHour !== bounds.startsPerHour;
+                const doneWhenChanged = !coordinatorDoneWhenEqual(
+                  coordinator.coordinatorDoneWhen,
+                  nextDoneWhen,
+                );
+                void (async () => {
+                  if (boundsChanged) {
+                    const outcome = await codeController.setThreadCoordinatorBounds(
+                      coordinator.id,
+                      bounds,
+                    );
+                    if (outcome.status === "refused") {
+                      setThreadExportNotice(outcome.message);
+                      return;
+                    }
+                  }
+                  if (doneWhenChanged) {
+                    const outcome = await codeController.setThreadCoordinatorDoneWhen(
+                      coordinator.id,
+                      nextDoneWhen,
+                    );
+                    if (outcome.status === "refused") setThreadExportNotice(outcome.message);
+                  }
+                })();
+              },
+            }}
             key={String(coordinator.id)}
             onClose={() => setCoordinatorBoundsThreadId(undefined)}
-            onSave={(bounds) => {
-              setCoordinatorBoundsThreadId(undefined);
-              void codeController
-                .setThreadCoordinatorBounds(coordinator.id, bounds)
-                .then((outcome) => {
-                  if (outcome.status === "refused") setThreadExportNotice(outcome.message);
-                });
-            }}
+            onSave={() => setCoordinatorBoundsThreadId(undefined)}
             title={coordinator.title}
           />
         );
@@ -9628,7 +9761,16 @@ function LaunchedShell(
                                                                   <PaneDockToolsContext.Provider
                                                                     value={paneDockTools}
                                                                   >
-                                                                    {shell}
+                                                                    <BenchmarkAdviceContext.Provider
+                                                                      value={{
+                                                                        client:
+                                                                          launchedClients.benchmarksClient,
+                                                                        projects:
+                                                                          projectController.allProjects,
+                                                                      }}
+                                                                    >
+                                                                      {shell}
+                                                                    </BenchmarkAdviceContext.Provider>
                                                                   </PaneDockToolsContext.Provider>
                                                                 </QuestionnaireDraftsProvider>
                                                               </CodeDebugWindowProvider>

@@ -195,6 +195,8 @@ export interface GhActivePullRequestRow {
   readonly baseBranch: string;
   readonly headBranch: string;
   readonly updatedAt: string;
+  /** When the pull request was opened; absent when the read did not carry a usable time. */
+  readonly createdAt?: string;
   readonly url: string;
   readonly checks: "unknown" | "pending" | "passing" | "failing";
   readonly review: "unknown" | "none" | "pending" | "approved" | "changes-requested";
@@ -247,6 +249,7 @@ const ACTIVE_PR_LIST_FIELDS = [
   "state",
   "mergeable",
   "author",
+  "createdAt",
   "updatedAt",
   "url",
   "baseRefName",
@@ -279,6 +282,8 @@ const BASE_REPOSITORY_IDENTITY_QUERY =
 
 const ISSUE_CLOSURE_QUERY =
   "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){number title timelineItems(last:25,itemTypes:[CLOSED_EVENT]){pageInfo{hasPreviousPage} nodes{... on ClosedEvent{createdAt closer{... on PullRequest{number repository{owner{login} name}}}}}}}}}";
+
+const VIEWER_LOGIN_QUERY = "query{viewer{login}}";
 
 const MAX_ISSUE_CLOSURE_EVENTS = 25;
 
@@ -1014,6 +1019,36 @@ export class GhPullRequestPort {
   }
 
   /**
+   * Read-only lookup of the signed-in `gh` viewer login. Fails closed to
+   * `undefined` when `gh` is unavailable, unauthenticated, timed out, or
+   * returns an unreadable response.
+   */
+  async observeViewerLogin(signal: AbortSignal): Promise<string | undefined> {
+    if (signal.aborted) return undefined;
+    let result: GhCommandResult;
+    try {
+      result = await this.#command.run(
+        ["api", "graphql", "-f", `query=${VIEWER_LOGIN_QUERY}`],
+        { environment: this.#environment, stdin: undefined },
+        signal,
+      );
+    } catch {
+      return undefined;
+    }
+    if (result.timedOut === true || result.exitCode !== 0) return undefined;
+    let value: unknown;
+    try {
+      value = JSON.parse(result.stdout);
+    } catch {
+      return undefined;
+    }
+    const data = isRecord(value) ? value.data : undefined;
+    const viewer = isRecord(data) ? data.viewer : undefined;
+    const login = isRecord(viewer) && typeof viewer.login === "string" ? viewer.login.trim() : "";
+    return login.length > 0 ? login : undefined;
+  }
+
+  /**
    * Confirms a closure the pull request's own metadata named: the issue's
    * `ClosedEvent` is proof only when its closer is this exact pull request in
    * this exact repository. Anything else — a reference, a closed flag, a
@@ -1508,6 +1543,13 @@ function decodeActivePullRequests(
       return undefined;
     }
     const pullRequestNodeId = validNodeId(item.id);
+    // An unreadable opening time only costs the creation-time sorts their
+    // place for this row; it does not make the rest of the row untrustworthy.
+    const createdAt =
+      typeof item.createdAt === "string" &&
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(item.createdAt)
+        ? item.createdAt
+        : undefined;
     rows.push({
       number,
       title,
@@ -1518,6 +1560,7 @@ function decodeActivePullRequests(
       baseBranch,
       headBranch,
       updatedAt,
+      ...(createdAt === undefined ? {} : { createdAt }),
       url,
       checks: summarizeChecks(item.statusCheckRollup),
       review: summarizeReview(item.reviewDecision),
@@ -2003,6 +2046,9 @@ async function runGh(
       errorChunks.push(Buffer.from(next));
       errorLength += next.length;
     });
+    child.stdout.on("error", () => undefined);
+    child.stderr.on("error", () => undefined);
+    child.stdin.on("error", () => undefined);
     child.once("error", () => finish(1));
     child.once("close", (code) => finish(code ?? 1));
     if (options.stdin === undefined) child.stdin.end();

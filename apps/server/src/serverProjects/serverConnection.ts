@@ -79,6 +79,21 @@ export interface ServerConnectionOptions {
   readonly refuses?: (server: ServerAddress) => string | undefined;
 }
 
+/** Shown to a paired device when a server's SSH key requires local confirmation or hardware touch. */
+export const SSH_KEY_CONFIRMATION_MESSAGE =
+  "This server's key needs a confirmation at this computer.";
+
+/**
+ * Whether OpenSSH failed because the person's SSH agent or hardware security key
+ * needs an interactive confirmation or touch at this computer, which cannot be
+ * answered from a paired device under `BatchMode=yes`.
+ */
+export function sshNeedsHostKeyConfirmation(errorText: string): boolean {
+  return /agent refused operation|confirm user presence|user presence|requires? confirmation|confirmation required|touch.*key|sk_sign.*refused/i.test(
+    errorText,
+  );
+}
+
 /** The name a pinned server's keys are recorded under, so its alias never has to be a host pattern. */
 const PINNED_HOST_KEY_ALIAS = "octant-pinned-host";
 

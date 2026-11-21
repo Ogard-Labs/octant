@@ -2303,7 +2303,7 @@ describe("BrowserWorkspace", () => {
       expect(screen.getByRole("img", { name: /You have the page/ })).toBeInTheDocument();
     });
 
-    it("names the active owner and reclaims locally without handing the page back to the agent", async () => {
+    it("names the active paired device and reclaims locally without handing the page back to the agent", async () => {
       const browser = holdingClient();
       const local = decodeBrowserAutomationSnapshot({
         status: "running",
@@ -2312,11 +2312,14 @@ describe("BrowserWorkspace", () => {
         evidence: [],
         waitingForPerson: "take-over",
       });
+      const leaseId = "90000000-0000-4000-8000-000000000099";
       vi.mocked(browser.inspectThread).mockResolvedValue(
         decodeBrowserAutomationSnapshot({
           ...local,
-          ownerController: {
-            name: "Synthetic owner phone",
+          remoteHolder: {
+            deviceId: "device-phone-1",
+            deviceName: "Synthetic paired phone",
+            leaseId,
             expiresAt: "2026-11-04T12:01:00.000Z",
           },
         }),
@@ -2327,9 +2330,9 @@ describe("BrowserWorkspace", () => {
       });
       await renderHeadless(browser);
       expect(
-        await screen.findByRole("img", { name: /Owner: Synthetic owner phone/ }),
+        await screen.findByRole("img", { name: /Held from Synthetic paired phone/ }),
       ).toBeInTheDocument();
-      // The one action the person needs while a remote owner holds the page is
+      // The one action the person needs while a paired device holds the page is
       // the trailing button; Hand back is in the more menu.
       expect(screen.queryByRole("button", { name: "Hand back" })).toBeNull();
       expect(await moreActionNames()).toContain("Hand back");
@@ -2337,6 +2340,62 @@ describe("BrowserWorkspace", () => {
       expect(browser.takeOver).toHaveBeenCalledWith({ threadId });
       expect(await screen.findByRole("img", { name: /You have the page/ })).toBeInTheDocument();
       expect(browser.handBack).not.toHaveBeenCalled();
+    });
+
+    it("opens the paired hold stage when take over returns a paired lease and offers Sign in here under sign-in", async () => {
+      const stream = vi.fn(async () => ({ status: "ended" as const }));
+      const pairedControl = {
+        send: vi.fn(),
+        sendInput: vi.fn(),
+        release: vi.fn(),
+        handBack: vi.fn(),
+        uploadFile: vi.fn(),
+        stream,
+      };
+      const browser = {
+        ...holdingClient(),
+        pairedControl,
+      };
+      const signInSnap = decodeBrowserAutomationSnapshot({
+        status: "running",
+        threadId,
+        context,
+        evidence: [],
+        waitingForPerson: "sign-in",
+      });
+      const leaseId = "90000000-0000-4000-8000-000000000098";
+      const leased = decodeBrowserAutomationSnapshot({
+        status: "running",
+        threadId,
+        context,
+        evidence: [],
+        waitingForPerson: "sign-in",
+        remoteHolder: {
+          deviceId: "device-phone-1",
+          deviceName: "My iPhone",
+          leaseId,
+          expiresAt: "2026-11-04T12:01:00.000Z",
+        },
+        pairedLease: {
+          leaseId,
+          expiresAt: "2026-11-04T12:01:00.000Z",
+          target: {
+            threadId,
+            contextId: context.contextId,
+            tabId: "tab-1",
+            documentVersion: "a".repeat(64),
+            profileKind: "private",
+            originPolicyVersion: "v1",
+          },
+        },
+      });
+      vi.mocked(browser.inspectThread).mockResolvedValue(signInSnap);
+      browser.takeOver = vi.fn(async () => leased);
+      await renderHeadless(browser);
+      const signInButton = await screen.findByRole("button", { name: "Sign in here" });
+      await userEvent.click(signInButton);
+      expect(await screen.findByLabelText("Paired remote Browser control")).toBeInTheDocument();
+      expect(stream).toHaveBeenCalledTimes(1);
     });
 
     it("offers no Take over without a page, with a client that cannot, or under the agent's sign-in ask", async () => {

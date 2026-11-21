@@ -1,6 +1,12 @@
 import { createProductFeedbackThreadScope } from "../browser/productFeedbackThreadScope";
 import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
-import { HubMemberId, ProductFeedbackUpdated, decodeProject } from "@octant/contracts";
+import {
+  ContentIngestedPayload,
+  HubMemberId,
+  ProductFeedbackUpdated,
+  THREAD_EXTERNAL_CONTENT_EVENT_NAMES,
+  decodeProject,
+} from "@octant/contracts";
 import { providerApprovalCall } from "../providers/providerApprovalCall";
 import { makeCodexDriver, type CodexClientPort } from "../providers/codexDriver";
 import type { CodexAppServerConnection } from "../providers/codexProcess";
@@ -79,6 +85,8 @@ import {
   type ProviderResumeCursor,
   type ProviderRuntimeEvent,
   type WindowId,
+  NATIVE_SESSION_HISTORY_IMPORTED_EVENT,
+  NativeSessionHistoryImported,
 } from "@octant/contracts";
 import { Deferred, Effect, Queue, Schema, Stream } from "effect";
 import type {
@@ -136,7 +144,10 @@ import { AgentMessageBodyStore } from "../agentMessage/agentMessageBodyStore";
 import { admittedParentCodeContext } from "../agentRun/agentRunParentContext";
 import { EXTERNAL_CONTENT_FRAME_OPEN_PREFIX } from "../context/externalContentFraming";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
-import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import {
+  ExternalContentTaintProjection,
+  readThreadExternalContentTaint,
+} from "../context/externalContentTaintProjection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import type { CompatibleFetch } from "../providers/openAiCompatibleEndpoint";
 import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
@@ -6236,6 +6247,180 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("counts the person's wait through an allow the agent refused, until their later deny", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    let clockNow = "2026-07-21T13:00:00.000Z";
+    const at = (seconds: number) =>
+      new Date(Date.parse("2026-07-21T13:00:00.000Z") + seconds * 1_000).toISOString();
+    const connection = {
+      ...providerConnection(queue),
+      answerApproval: vi.fn((input: { readonly approved: boolean }) => {
+        if (!input.approved) return Effect.void;
+        // The agent takes three seconds to refuse the allow.
+        clockNow = at(8);
+        return Effect.fail({
+          category: "unsupported" as const,
+          message: "The agent only offers Always allow here.",
+        });
+      }),
+    };
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      clock: () => clockNow,
+    });
+    const startOperation = operationId(35);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      const offer = (value: Parameters<typeof providerEvent>[0]) =>
+        Effect.runPromise(Queue.offer(queue, providerEvent(value)));
+      await offer({
+        kind: "tool-start",
+        toolCallId: "call-1",
+        toolName: "Edit",
+        occurredAt: at(0),
+      });
+      clockNow = at(2);
+      await offer({
+        kind: "approval-request",
+        requestId: "ask-always-only",
+        toolCallId: "call-1",
+        action: "Edit",
+        description: "Edit src/a.ts",
+      });
+      let approvalId: string | undefined;
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        approvalId = events
+          .find((event) => event.kind === "approval-requested")
+          ?.approvalId.toString();
+        expect(approvalId).toBeDefined();
+      });
+      const answer = (decision: "approved" | "denied", operation: number) =>
+        fixture.runtime.execute(windowId, {
+          kind: "answer-provider-approval",
+          operationId: operationId(operation),
+          threadId,
+          checkoutId,
+          approvalId: approvalId as never,
+          decision,
+        });
+      clockNow = at(5);
+      await expect(answer("approved", 96)).resolves.toMatchObject({ kind: "provider-turn-state" });
+      clockNow = at(20);
+      await answer("denied", 97);
+      await offer({
+        kind: "tool-success",
+        toolCallId: "call-1",
+        summary: "done",
+        occurredAt: at(40),
+      });
+      await vi.waitFor(async () => {
+        const completed = (await operationEvents(fixture.runtime, startOperation)).find(
+          (event) =>
+            event.kind === "tool-activity" &&
+            event.toolCallId === "call-1" &&
+            event.state === "completed",
+        );
+        // Asked at :02, the allow at :05 refused at :08 put the ask back,
+        // denied at :20: all eighteen seconds are the person's wait.
+        expect(completed).toMatchObject({
+          timing: { startedAt: at(0), endedAt: at(40), approvalWaitMs: 18_000 },
+        });
+      });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("keeps an approval the agent cannot take as asked pending, journals no approval, and still takes a denial", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const refusal =
+      "The agent only offers Always allow here. Approve it for this session, or deny it.";
+    const connection = {
+      ...providerConnection(queue),
+      answerApproval: vi.fn((input: { readonly approved: boolean }) =>
+        input.approved
+          ? Effect.fail({ category: "unsupported" as const, message: refusal })
+          : Effect.void,
+      ),
+    };
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(34);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId: "ask-always-only",
+            action: "Edit",
+            description: "Edit src/a.ts",
+          }),
+        ),
+      );
+      let approvalId: string | undefined;
+      await vi.waitFor(async () => {
+        const events = await operationEvents(fixture.runtime, startOperation);
+        approvalId = events
+          .find((event) => event.kind === "approval-requested")
+          ?.approvalId.toString();
+        expect(approvalId).toBeDefined();
+      });
+      const answer = (decision: "approved" | "denied", operation: number) =>
+        fixture.runtime.execute(windowId, {
+          kind: "answer-provider-approval",
+          operationId: operationId(operation),
+          threadId,
+          checkoutId,
+          approvalId: approvalId as never,
+          decision,
+        });
+      await expect(answer("approved", 94)).resolves.toMatchObject({
+        failure: { message: refusal },
+      });
+      expect(
+        (await operationEvents(fixture.runtime, startOperation)).some(
+          (event) => event.kind === "approval-answered",
+        ),
+      ).toBe(false);
+      await expect(answer("denied", 95)).resolves.toMatchObject({
+        kind: "provider-turn-state",
+        state: "running",
+      });
+      expect(connection.answerApproval).toHaveBeenLastCalledWith({
+        sessionId,
+        requestId: "ask-always-only",
+        approved: false,
+      });
+      expect(
+        (await operationEvents(fixture.runtime, startOperation)).filter(
+          (event) => event.kind === "approval-answered",
+        ),
+      ).toMatchObject([{ kind: "approval-answered", decision: "denied" }]);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it("journals no timing for a call whose bounds a batch stamped", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -6878,6 +7063,97 @@ describe("CodeOperationRuntime", () => {
       expect(connection.start).not.toHaveBeenCalled();
       expect(await sessions.adopt(windowId, threadId, outside)).toMatchObject({
         kind: "code-native-session-refused",
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("journals the adopted session's earlier conversation as imported history the thread replays without sending it to the provider", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const outside = decodeCodeNativeSessionId("outside-session-history");
+    const history = vi.fn(() =>
+      Effect.succeed({
+        status: "read" as const,
+        messages: [
+          { role: "person" as const, text: "Rename the login handler" },
+          { role: "agent" as const, text: "Renamed it to signIn.", tools: ["Edit"] },
+        ],
+      }),
+    );
+    const provider: ProviderDriver = {
+      ...providerDriver(connection),
+      nativeSessions: {
+        list: () => Effect.succeed([]),
+        adopt: () => Effect.succeed<ProviderResumeCursor>({ driverKind: "codex", value: outside }),
+        history,
+      },
+    };
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: [] },
+    }));
+    const fixture = runtimeFixture({ provider, recordExternalContentIngestion });
+    try {
+      const sessions = fixture.runtime.nativeSessions!;
+      expect(await sessions.adopt(windowId, threadId, outside)).toMatchObject({
+        kind: "code-native-session-adopted",
+      });
+      expect(history).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: outside }));
+      // Read back from the journal, as a reopened thread or a restart reads it.
+      expect(await sessions.list(windowId, threadId)).toMatchObject({
+        adopted: {
+          nativeSessionId: outside,
+          history: {
+            status: "imported",
+            messages: [
+              { role: "person", text: "Rename the login handler" },
+              { role: "agent", text: "Renamed it to signIn.", tools: ["Edit"] },
+            ],
+          },
+        },
+      });
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1386),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalled());
+      // The provider already holds the session: nothing imported rides along.
+      const sent = JSON.stringify([
+        vi.mocked(connection.resume).mock.calls,
+        vi.mocked(connection.send).mock.calls,
+      ]);
+      expect(sent).not.toContain("Rename the login handler");
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("imports no history from a provider that keeps none it can read, and says so", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const outside = decodeCodeNativeSessionId("outside-session-silent");
+    const provider: ProviderDriver = {
+      ...providerDriver(providerConnection(queue)),
+      nativeSessions: {
+        list: () => Effect.succeed([]),
+        adopt: () => Effect.succeed<ProviderResumeCursor>({ driverKind: "codex", value: outside }),
+      },
+    };
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: [] },
+    }));
+    const fixture = runtimeFixture({ provider, recordExternalContentIngestion });
+    try {
+      const sessions = fixture.runtime.nativeSessions!;
+      await sessions.adopt(windowId, threadId, outside);
+      expect(await sessions.list(windowId, threadId)).toMatchObject({
+        adopted: { nativeSessionId: outside, history: { status: "none", reason: "unsupported" } },
       });
     } finally {
       fixture.close();
@@ -13192,6 +13468,10 @@ function runtimeFixture(options: {
   recordExternalContentIngestion?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["recordExternalContentIngestion"];
+  useSharedExternalContentStore?: true;
+  resolvePullRequestLineNotesAuthorship?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["resolvePullRequestLineNotesAuthorship"];
   forkProviderSession?: Parameters<typeof createCodeOperationRuntime>[0]["forkProviderSession"];
   supportsSessionRollback?: Parameters<
     typeof createCodeOperationRuntime
@@ -13214,12 +13494,25 @@ function runtimeFixture(options: {
       .register("code.review-finding-updated@1", 1, CodeReviewFindingUpdated)
       .register("feedback.note-captured@1", 1, ProductFeedbackCaptured)
       .register("feedback.note-delivered@1", 1, ProductFeedbackDelivered)
-      .register("feedback.note-updated@1", 1, ProductFeedbackUpdated),
+      .register(NATIVE_SESSION_HISTORY_IMPORTED_EVENT, 1, NativeSessionHistoryImported)
+      .register("feedback.note-updated@1", 1, ProductFeedbackUpdated)
+      .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested, 1, ContentIngestedPayload),
     projections: new ProjectionRegistry()
       .register(new AggregateHeadsProjection())
       .register(new CodeProjection())
-      .register(new ProductFeedbackProjection()),
+      .register(new ProductFeedbackProjection())
+      .register(new ExternalContentTaintProjection()),
     clock: options.clock ?? (() => now),
+  });
+  const sharedExternalContentStore = new ExternalContentIngestionStore({
+    journal,
+    connection,
+    uuid: randomUUID,
+    clock: options.clock ?? (() => now),
+    actor: {
+      kind: "system",
+      actorId: Schema.decodeUnknownSync(ActorId)("90000000-0000-4000-8000-0000000000ff"),
+    },
   });
   if (options.failRuntimeWorkJournal === true) {
     const append = journal.append.bind(journal);
@@ -13543,9 +13836,18 @@ function runtimeFixture(options: {
     ...(options.forkMergeBackContext === "none"
       ? {}
       : { forkMergeBackContext: options.forkMergeBackContext ?? selectForkMergeBack }),
-    ...(options.recordExternalContentIngestion === undefined
+    ...(options.recordExternalContentIngestion !== undefined
+      ? { recordExternalContentIngestion: options.recordExternalContentIngestion }
+      : options.useSharedExternalContentStore === true
+        ? {
+            recordExternalContentIngestion: (input) => sharedExternalContentStore.record(input),
+          }
+        : {}),
+    ...(options.resolvePullRequestLineNotesAuthorship === undefined
       ? {}
-      : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
+      : {
+          resolvePullRequestLineNotesAuthorship: options.resolvePullRequestLineNotesAuthorship,
+        }),
     ...(options.forkProviderSession === undefined
       ? {}
       : { forkProviderSession: options.forkProviderSession }),
@@ -13725,6 +14027,7 @@ function runtimeFixture(options: {
       gitObservationReadHook = hook;
     },
     reviewFindings: () => readCodeReviewFindings(connection, threadId),
+    readExternalContentTaint: () => readThreadExternalContentTaint(connection, String(threadId)),
     /** Journal a runtime work record directly, as an earlier process left it. */
     appendRuntimeWork: (work: Record<string, unknown> & { readonly id: string }) =>
       journal.append({
@@ -19266,6 +19569,332 @@ describe("continuing a Code turn a restart cut off", () => {
       expect(next.connection.send).not.toHaveBeenCalled();
     } finally {
       for (const host of hosts) host.close();
+    }
+  });
+});
+
+describe("pull request line notes runtime admission", () => {
+  it("does not record an outside-content mark when a busy thread refuses pull request line notes, and records it once admitted", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: ["pull-request-line-notes"] },
+    }));
+    const host = runtimeFixture({
+      provider: providerDriver(connection),
+      recordExternalContentIngestion,
+      resolvePullRequestLineNotesAuthorship: async () => ({
+        pullRequestAuthor: "outside-contributor",
+        viewerLogin: "octocat",
+      }),
+    });
+    const source = {
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+    } as const;
+    try {
+      await expect(
+        host.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(71),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: evidence(40),
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+
+      // While the first turn is still running, sending outside-author PR line
+      // notes must be refused without permanently marking the thread.
+      await expect(
+        host.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(72),
+          threadId,
+          checkoutId,
+          sessionId: decodeProviderSessionId("b0000000-0000-4000-8000-000000000072"),
+          prompt: evidence(40),
+          pullRequestLineNotesSource: source,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "failed" });
+      expect(recordExternalContentIngestion).not.toHaveBeenCalled();
+
+      // Finish the first turn so the thread can admit the line-notes follow-up.
+      await expect(
+        host.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(73),
+          threadId,
+          checkoutId,
+        }),
+      ).resolves.toMatchObject({ state: "interrupted" });
+
+      await expect(
+        host.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(74),
+          threadId,
+          checkoutId,
+          sessionId: decodeProviderSessionId("b0000000-0000-4000-8000-000000000074"),
+          prompt: evidence(40),
+          pullRequestLineNotesSource: source,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      expect(recordExternalContentIngestion).toHaveBeenCalledTimes(1);
+      expect(recordExternalContentIngestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadId,
+          provenance: { origin: "external-content", sourceLabel: "pull-request-line-notes" },
+          correlationId: operationId(74),
+          authorized: true,
+        }),
+      );
+    } finally {
+      host.close();
+    }
+  });
+
+  it("does not record outside-content provenance when product feedback changes before delivery", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const entered = Promise.withResolvers<void>();
+    const credential = Promise.withResolvers<string>();
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: ["pull-request-line-notes"] },
+    }));
+    const host = runtimeFixture({
+      provider: providerDriver(connection),
+      recordExternalContentIngestion,
+      resolvePullRequestLineNotesAuthorship: async () => ({
+        pullRequestAuthor: "outside-contributor",
+        viewerLogin: "octocat",
+      }),
+      credentialReferences: [{ environmentName: "TOKEN", reference: "token" }],
+      credentialResolver: {
+        resolve: () => {
+          entered.resolve();
+          return credential.promise;
+        },
+      },
+    });
+    const source = {
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+    } as const;
+    try {
+      const captured = await host.feedback.execute(windowId, {
+        kind: "capture-product-feedback",
+        threadId,
+        mode: "code",
+        contextId: operationId(40),
+        point: { x: 0.3, y: 0.5 },
+        comment: "Original product note",
+      });
+      if (captured.kind !== "feedback-captured") throw Error("Fixture capture refused");
+
+      const pending = host.runtime.execute(
+        windowId,
+        {
+          kind: "start-provider-turn",
+          operationId: operationId(75),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: evidence(40),
+          pullRequestLineNotesSource: source,
+        },
+        { initiator: "user" },
+      );
+      await entered.promise;
+      expect(
+        await host.feedback.execute(
+          windowId,
+          {
+            kind: "update-product-feedback",
+            noteId: captured.note.id,
+            expectedVersion: captured.note.version,
+            comment: "Edited while turn prepared",
+          },
+          { admissionCurrent: () => true },
+        ),
+      ).toMatchObject({ kind: "feedback-updated" });
+
+      credential.resolve("credential-value");
+      await expect(pending).resolves.toMatchObject({ admission: "refused", state: "failed" });
+      expect(connection.send).not.toHaveBeenCalled();
+      expect(recordExternalContentIngestion).not.toHaveBeenCalled();
+      expect(host.feedback.pendingForTurn(threadId)).toMatchObject([
+        { comment: "Edited while turn prepared", version: 2 },
+      ]);
+    } finally {
+      credential.resolve("credential-value");
+      host.close();
+    }
+  });
+
+  it("refuses fail-closed and keeps pending product feedback intact when outside-content provenance recording fails", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "refused" as const,
+      reason: "malformed" as const,
+    }));
+    const host = runtimeFixture({
+      provider: providerDriver(connection),
+      recordExternalContentIngestion,
+      resolvePullRequestLineNotesAuthorship: async () => ({
+        pullRequestAuthor: "outside-contributor",
+        viewerLogin: "octocat",
+      }),
+    });
+    const source = {
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+    } as const;
+    try {
+      const captured = await host.feedback.execute(windowId, {
+        kind: "capture-product-feedback",
+        threadId,
+        mode: "code",
+        contextId: operationId(40),
+        point: { x: 0.3, y: 0.5 },
+        comment: "Must survive provenance failure",
+      });
+      if (captured.kind !== "feedback-captured") throw Error("Fixture capture refused");
+
+      await expect(
+        host.runtime.execute(
+          windowId,
+          {
+            kind: "start-provider-turn",
+            operationId: operationId(76),
+            threadId,
+            checkoutId,
+            sessionId,
+            prompt: evidence(40),
+            pullRequestLineNotesSource: source,
+          },
+          { initiator: "user" },
+        ),
+      ).resolves.toMatchObject({ admission: "refused", state: "failed" });
+      expect(connection.send).not.toHaveBeenCalled();
+      expect(recordExternalContentIngestion).toHaveBeenCalledTimes(1);
+      expect(host.feedback.pendingForTurn(threadId)).toMatchObject([
+        { comment: "Must survive provenance failure", version: 1 },
+      ]);
+    } finally {
+      host.close();
+    }
+  });
+
+  it("commits product feedback delivery and outside-content provenance together in the shared journal, and leaves neither on refusal", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const entered = Promise.withResolvers<void>();
+    const credential = Promise.withResolvers<string>();
+    let pauseCredentials = true;
+    const host = runtimeFixture({
+      provider: providerDriver(connection),
+      useSharedExternalContentStore: true,
+      resolvePullRequestLineNotesAuthorship: async () => ({
+        pullRequestAuthor: "outside-contributor",
+        viewerLogin: "octocat",
+      }),
+      credentialReferences: [{ environmentName: "TOKEN", reference: "token" }],
+      credentialResolver: {
+        resolve: () => {
+          if (pauseCredentials) {
+            entered.resolve();
+            return credential.promise;
+          }
+          return Promise.resolve("credential-value");
+        },
+      },
+    });
+    const source = {
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+    } as const;
+    try {
+      const captured = await host.feedback.execute(windowId, {
+        kind: "capture-product-feedback",
+        threadId,
+        mode: "code",
+        contextId: operationId(40),
+        point: { x: 0.3, y: 0.5 },
+        comment: "Shared journal note",
+      });
+      if (captured.kind !== "feedback-captured") throw Error("Fixture capture refused");
+
+      // Changing the note while preparing refuses the turn with neither record persisted.
+      const refused = host.runtime.execute(
+        windowId,
+        {
+          kind: "start-provider-turn",
+          operationId: operationId(77),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: evidence(40),
+          pullRequestLineNotesSource: source,
+        },
+        { initiator: "user" },
+      );
+      await entered.promise;
+      expect(
+        await host.feedback.execute(
+          windowId,
+          {
+            kind: "update-product-feedback",
+            noteId: captured.note.id,
+            expectedVersion: captured.note.version,
+            comment: "Shared journal note v2",
+          },
+          { admissionCurrent: () => true },
+        ),
+      ).toMatchObject({ kind: "feedback-updated" });
+      credential.resolve("credential-value");
+      await expect(refused).resolves.toMatchObject({ admission: "refused", state: "failed" });
+      expect(host.readExternalContentTaint().externalContentIngested).toBe(false);
+      expect(host.feedback.pendingForTurn(threadId)).toMatchObject([
+        { comment: "Shared journal note v2", version: 2 },
+      ]);
+
+      // Retrying cleanly commits both the feedback delivery and the provenance record together.
+      pauseCredentials = false;
+      await expect(
+        host.runtime.execute(
+          windowId,
+          {
+            kind: "start-provider-turn",
+            operationId: operationId(78),
+            threadId,
+            checkoutId,
+            sessionId: decodeProviderSessionId("b0000000-0000-4000-8000-000000000078"),
+            prompt: evidence(40),
+            pullRequestLineNotesSource: source,
+          },
+          { initiator: "user" },
+        ),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      expect(host.readExternalContentTaint()).toMatchObject({
+        externalContentIngested: true,
+        ingestedSources: ["pull-request-line-notes"],
+      });
+      expect(host.feedback.pendingForTurn(threadId)).toEqual([]);
+      expect(await host.feedback.list(windowId, threadId)).toMatchObject([
+        { comment: "Shared journal note v2", lifecycle: "delivered", version: 3 },
+      ]);
+    } finally {
+      credential.resolve("credential-value");
+      host.close();
     }
   });
 });

@@ -92,6 +92,7 @@ import { createFolderBrowseRouteHandler } from "../folderBrowseRoutes";
 import { FolderBrowseService } from "../folderBrowseService";
 import { createProjectIconReader } from "../projectIcon";
 import { ProjectCustomIconStore } from "../projectIconStore";
+import { ProviderFolderScanService } from "../providerFolderScanService";
 import { ProjectService } from "../projectService";
 import { CodeProjectAccess } from "../codeProjectAccess";
 import type { CodeOperationRuntime } from "../code/codeOperationRuntime";
@@ -570,6 +571,7 @@ export function createProjectPullRequestPorts(ghExecutable: string | undefined):
       detail: {
         observeReviewByIdentity: (request, signal) => port.observeReviewByIdentity(request, signal),
         observeIssueClosure: (request, signal) => port.observeIssueClosure(request, signal),
+        observeViewerLogin: (signal) => port.observeViewerLogin(signal),
       },
       merge: {
         mergeByIdentity: (request, signal) => port.mergeByIdentity(request, signal),
@@ -638,6 +640,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "codeBoardEventStore"
     | "codeEvidence"
     | "isProjectPolicyTargetAllowed"
+    | "resolveHostStrict"
     | "selectCodeConversation"
   > &
   Pick<
@@ -647,6 +650,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "managedWorktreeRefsList"
     | "managedWorktreeSourcePreview"
     | "probeProviderForThreads"
+    | "providerFolderDiscoveryPorts"
     | "refreshStandaloneSkills"
   > & {
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
@@ -684,7 +688,9 @@ export function wireCode(deps: CodeDependencies) {
     probeProviderForThreads,
     projectRootPort,
     projectService,
+    providerFolderDiscoveryPorts,
     refreshStandaloneSkills,
+    resolveHostStrict,
     selectCodeConversation,
     serverConnection,
     serverProjectStore,
@@ -864,6 +870,21 @@ export function wireCode(deps: CodeDependencies) {
     const projectCustomIcons = new ProjectCustomIconStore({
       dataDirectory: persistence.dataDirectory,
     });
+    const providerFolderScan = new ProviderFolderScanService({
+      homeDirectory: homedir(),
+      env: process.env,
+      discoveryPorts: providerFolderDiscoveryPorts,
+      readProviderInstances: () => persistence.readProviderInstances(),
+      readActiveCodeProjects: () => persistence.readProjects({ type: "code", lifecycle: "active" }),
+      isHostStrict: resolveHostStrict,
+      requireGitRepository: () =>
+        persistence.readCodeSettings()?.settings.requireGitRepository ?? true,
+      bindingReceiptStore,
+      projectRootPort,
+      projectService,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
     const projectRoutes = createProjectRouteHandler({
       service: projectService,
       environmentService,
@@ -871,6 +892,7 @@ export function wireCode(deps: CodeDependencies) {
       icons: createProjectIconReader({ projects: projectService, custom: projectCustomIcons }),
       customIcons: projectCustomIcons,
       memoryProposals: deps.projectMemoryAccess.proposals,
+      providerFolderScan,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
     const agentProfileService = new AgentProfileService({

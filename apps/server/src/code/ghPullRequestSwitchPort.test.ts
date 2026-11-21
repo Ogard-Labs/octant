@@ -345,4 +345,1068 @@ describe("forge switch port", () => {
     expect(passed).toMatchObject({ checks: "passed", failedChecks: [] });
     expect(passed?.reviewDecision).toBeUndefined();
   });
+
+  it("reads only merge state and optional required checks for a coordinator done-when condition", async () => {
+    const { port: forge, run } = port((args) =>
+      args[1] === "checks"
+        ? {
+            exitCode: 0,
+            stdout: JSON.stringify([{ name: "test", bucket: "pass", link: "" }]),
+          }
+        : {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              state: "MERGED",
+              baseRefName: "main",
+              mergeStateStatus: "CLEAN",
+            }),
+          },
+    );
+
+    const stateOnly = await forge.observePullRequestCondition(
+      request,
+      { requiredChecks: false },
+      signal,
+    );
+    expect(stateOnly).toEqual({ status: "observed", state: "merged" });
+    expect(run).toHaveBeenCalledTimes(1);
+
+    const withChecks = await forge.observePullRequestCondition(
+      request,
+      { requiredChecks: true },
+      signal,
+    );
+    expect(withChecks).toEqual({
+      status: "observed",
+      state: "merged",
+      requiredChecks: "green",
+    });
+    expect(run).toHaveBeenCalledTimes(3);
+
+    const rollupResponse = (
+      headNodes: ReadonlyArray<unknown>,
+      mergeNodes?: ReadonlyArray<unknown>,
+    ) => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              commits: {
+                nodes: [
+                  {
+                    commit: {
+                      oid: "1".repeat(40),
+                      statusCheckRollup: {
+                        contexts: {
+                          nodes: headNodes,
+                          pageInfo: { hasNextPage: false, endCursor: null },
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+              potentialMergeCommit:
+                mergeNodes === undefined
+                  ? null
+                  : {
+                      oid: "2".repeat(40),
+                      statusCheckRollup: {
+                        contexts: {
+                          nodes: mergeNodes,
+                          pageInfo: { hasNextPage: false, endCursor: null },
+                        },
+                      },
+                    },
+            },
+          },
+        },
+      }),
+    });
+
+    // Unreported required checks stay pending when the base branch requires checks.
+    const unreported = port((args) => {
+      if (args[1] === "checks") {
+        return {
+          exitCode: 1,
+          stdout: "",
+          stderr: "no required checks reported on the 'feature/x' branch",
+        };
+      }
+      if (args[0] === "api" && args[1] === "graphql") {
+        return rollupResponse([]);
+      }
+      if (args[0] === "api" && args.some((arg) => arg.includes("/rules/branches/main"))) {
+        return { exitCode: 0, stdout: JSON.stringify([[]]) };
+      }
+      if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            protected: true,
+            protection: {
+              enabled: true,
+              required_status_checks: { contexts: ["test"], checks: [{ context: "test" }] },
+            },
+          }),
+        };
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          state: "OPEN",
+          baseRefName: "main",
+          mergeStateStatus: "BLOCKED",
+        }),
+      };
+    }).port;
+    expect(
+      await unreported.observePullRequestCondition(request, { requiredChecks: true }, signal),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+
+    // Partially reported required checks stay pending until every required context has passed.
+    const partialChecks = (
+      reported: ReadonlyArray<{ readonly name: string; readonly bucket: string }>,
+    ) =>
+      port((args) => {
+        if (args[1] === "checks") {
+          return { exitCode: 0, stdout: JSON.stringify(reported) };
+        }
+        if (args[0] === "api" && args[1] === "graphql") {
+          return rollupResponse(
+            reported.map((entry) => ({
+              __typename: "CheckRun",
+              name: entry.name,
+              status: "COMPLETED",
+              conclusion: "SUCCESS",
+              checkSuite: { app: { databaseId: 15368 } },
+            })),
+          );
+        }
+        if (
+          args[0] === "api" &&
+          args.includes("--paginate") &&
+          args.includes("--slurp") &&
+          args.some((arg) => arg.includes("/rules/branches/main"))
+        ) {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify([
+              [{ type: "pull_request", parameters: { required_approving_review_count: 1 } }],
+              [
+                {
+                  type: "required_status_checks",
+                  parameters: {
+                    required_status_checks: [{ context: "lint" }, { context: "test" }],
+                  },
+                },
+              ],
+            ]),
+          };
+        }
+        if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+          return { exitCode: 0, stdout: JSON.stringify({ protected: false }) };
+        }
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            state: "OPEN",
+            baseRefName: "main",
+            mergeStateStatus: "BLOCKED",
+          }),
+        };
+      }).port;
+    expect(
+      await partialChecks([{ name: "lint", bucket: "pass" }]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    expect(
+      await partialChecks([
+        { name: "lint", bucket: "pass" },
+        { name: "test", bucket: "pass" },
+      ]).observePullRequestCondition(request, { requiredChecks: true }, signal),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
+
+    // A review-blocked PR whose required checks all pass on the test merge commit reports green,
+    // while passing checks split across head and test-merge commits are never mixed.
+    const testMergePort = (headNodes: ReadonlyArray<unknown>, mergeNodes: ReadonlyArray<unknown>) =>
+      port((args) => {
+        if (args[1] === "checks") {
+          return { exitCode: 0, stdout: JSON.stringify([{ name: "lint", bucket: "pass" }]) };
+        }
+        if (args[0] === "api" && args[1] === "graphql") {
+          return rollupResponse(headNodes, mergeNodes);
+        }
+        if (
+          args[0] === "api" &&
+          args.includes("--paginate") &&
+          args.includes("--slurp") &&
+          args.some((arg) => arg.includes("/rules/branches/main"))
+        ) {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify([
+              [
+                {
+                  type: "required_status_checks",
+                  parameters: {
+                    required_status_checks: [{ context: "lint" }, { context: "integration" }],
+                  },
+                },
+              ],
+            ]),
+          };
+        }
+        if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+          return { exitCode: 0, stdout: JSON.stringify({ protected: false }) };
+        }
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            state: "OPEN",
+            baseRefName: "main",
+            mergeStateStatus: "BLOCKED",
+          }),
+        };
+      }).port;
+    const passRun = (name: string, appId = 15368) => ({
+      __typename: "CheckRun",
+      name,
+      status: "COMPLETED",
+      conclusion: "SUCCESS",
+      checkSuite: { app: { databaseId: appId } },
+    });
+    const failRun = (name: string, appId = 15368) => ({
+      __typename: "CheckRun",
+      name,
+      status: "COMPLETED",
+      conclusion: "FAILURE",
+      checkSuite: { app: { databaseId: appId } },
+    });
+    expect(
+      await testMergePort(
+        [passRun("lint")],
+        [passRun("lint"), passRun("integration")],
+      ).observePullRequestCondition(request, { requiredChecks: true }, signal),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
+    expect(
+      await testMergePort([passRun("lint")], [passRun("integration")]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    expect(
+      await testMergePort(
+        [passRun("lint")],
+        [passRun("lint"), failRun("integration")],
+      ).observePullRequestCondition(request, { requiredChecks: true }, signal),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "failing" });
+
+    // When the test-merge commit reports statuses, it is authoritative even if all required
+    // checks passed on the head commit.
+    const testMergeAuthoritativePort = port((args) => {
+      if (args[1] === "checks") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { name: "lint", bucket: "pass" },
+            { name: "integration", bucket: "pass" },
+          ]),
+        };
+      }
+      if (args[0] === "api" && args[1] === "graphql") {
+        return rollupResponse([passRun("lint"), passRun("integration")], [passRun("lint")]);
+      }
+      if (
+        args[0] === "api" &&
+        args.includes("--paginate") &&
+        args.includes("--slurp") &&
+        args.some((arg) => arg.includes("/rules/branches/main"))
+      ) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            [
+              {
+                type: "required_status_checks",
+                parameters: {
+                  required_status_checks: [{ context: "lint" }, { context: "integration" }],
+                },
+              },
+            ],
+          ]),
+        };
+      }
+      if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+        return { exitCode: 0, stdout: JSON.stringify({ protected: false }) };
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          state: "OPEN",
+          baseRefName: "main",
+          mergeStateStatus: "BLOCKED",
+        }),
+      };
+    }).port;
+    expect(
+      await testMergeAuthoritativePort.observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+
+    // Same-name required checks from distinct GitHub Apps must each pass under their pinned app.
+    const multiAppPort = (headNodes: ReadonlyArray<unknown>) =>
+      port((args) => {
+        if (args[1] === "checks") {
+          return { exitCode: 0, stdout: JSON.stringify([{ name: "ci", bucket: "pass" }]) };
+        }
+        if (args[0] === "api" && args[1] === "graphql") {
+          return rollupResponse(headNodes);
+        }
+        if (
+          args[0] === "api" &&
+          args.includes("--paginate") &&
+          args.includes("--slurp") &&
+          args.some((arg) => arg.includes("/rules/branches/main"))
+        ) {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify([
+              [
+                {
+                  type: "required_status_checks",
+                  parameters: {
+                    required_status_checks: [
+                      { context: "ci", integration_id: 100 },
+                      { context: "ci", integration_id: 200 },
+                    ],
+                  },
+                },
+              ],
+            ]),
+          };
+        }
+        if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+          return { exitCode: 0, stdout: JSON.stringify({ protected: false }) };
+        }
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            state: "OPEN",
+            baseRefName: "main",
+            mergeStateStatus: "BLOCKED",
+          }),
+        };
+      }).port;
+    expect(
+      await multiAppPort([passRun("ci", 100)]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    expect(
+      await multiAppPort([passRun("ci", 100), passRun("ci", 200)]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
+
+    // An app-pinned StatusContext passes only when GitHub marks it isRequired on the PR.
+    const statusContextPort = (isRequired: boolean) =>
+      port((args) => {
+        if (args[1] === "checks") {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify([{ name: "deploy-check", bucket: "pass" }]),
+          };
+        }
+        if (args[0] === "api" && args[1] === "graphql") {
+          return rollupResponse([
+            {
+              __typename: "StatusContext",
+              context: "deploy-check",
+              state: "SUCCESS",
+              createdAt: "2026-11-21T10:00:00Z",
+              isRequired,
+            },
+          ]);
+        }
+        if (
+          args[0] === "api" &&
+          args.includes("--paginate") &&
+          args.includes("--slurp") &&
+          args.some((arg) => arg.includes("/rules/branches/main"))
+        ) {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify([
+              [
+                {
+                  type: "required_status_checks",
+                  parameters: {
+                    required_status_checks: [{ context: "deploy-check", integration_id: 300 }],
+                  },
+                },
+              ],
+            ]),
+          };
+        }
+        if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+          return { exitCode: 0, stdout: JSON.stringify({ protected: false }) };
+        }
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            state: "OPEN",
+            baseRefName: "main",
+            mergeStateStatus: "BLOCKED",
+          }),
+        };
+      }).port;
+    expect(
+      await statusContextPort(true).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
+    expect(
+      await statusContextPort(false).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+
+    // A newer passing rerun supersedes an older failed CheckRun of the same check identity.
+    const rerunPort = (headNodes: ReadonlyArray<unknown>) =>
+      port((args) => {
+        if (args[1] === "checks") {
+          return { exitCode: 0, stdout: JSON.stringify([{ name: "ci", bucket: "pass" }]) };
+        }
+        if (args[0] === "api" && args[1] === "graphql") {
+          return rollupResponse(headNodes);
+        }
+        if (
+          args[0] === "api" &&
+          args.includes("--paginate") &&
+          args.includes("--slurp") &&
+          args.some((arg) => arg.includes("/rules/branches/main"))
+        ) {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify([
+              [
+                {
+                  type: "required_status_checks",
+                  parameters: {
+                    required_status_checks: [{ context: "ci", integration_id: 15368 }],
+                  },
+                },
+              ],
+            ]),
+          };
+        }
+        if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+          return { exitCode: 0, stdout: JSON.stringify({ protected: false }) };
+        }
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            state: "OPEN",
+            baseRefName: "main",
+            mergeStateStatus: "BLOCKED",
+          }),
+        };
+      }).port;
+    const oldFail = {
+      __typename: "CheckRun",
+      databaseId: 101,
+      name: "ci",
+      status: "COMPLETED",
+      conclusion: "FAILURE",
+      startedAt: "2026-11-21T10:00:00Z",
+      completedAt: "2026-11-21T10:01:00Z",
+      checkSuite: {
+        id: "CS_1",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
+    };
+    const newPass = {
+      __typename: "CheckRun",
+      databaseId: 102,
+      name: "ci",
+      status: "COMPLETED",
+      conclusion: "SUCCESS",
+      startedAt: "2026-11-21T10:05:00Z",
+      completedAt: "2026-11-21T10:06:00Z",
+      checkSuite: {
+        id: "CS_2",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
+    };
+    expect(
+      await rerunPort([oldFail, newPass]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
+    expect(
+      await rerunPort([newPass, oldFail]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
+
+    // A queued rerun without startedAt/completedAt stays pending over an earlier passing run.
+    const queuedRerun = {
+      __typename: "CheckRun",
+      databaseId: 103,
+      name: "ci",
+      status: "QUEUED",
+      conclusion: null,
+      startedAt: null,
+      completedAt: null,
+      checkSuite: {
+        id: "CS_3",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
+    };
+    expect(
+      await rerunPort([newPass, queuedRerun]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    expect(
+      await rerunPort([queuedRerun, newPass]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    const undatedPass = {
+      __typename: "CheckRun",
+      name: "ci",
+      status: "COMPLETED",
+      conclusion: "SUCCESS",
+      startedAt: "2026-11-21T10:05:00Z",
+      completedAt: "2026-11-21T10:06:00Z",
+      checkSuite: {
+        id: "CS_4",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
+    };
+    const undatedQueued = {
+      __typename: "CheckRun",
+      name: "ci",
+      status: "QUEUED",
+      conclusion: null,
+      startedAt: null,
+      completedAt: null,
+      checkSuite: {
+        id: "CS_5",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
+    };
+    expect(
+      await rerunPort([undatedPass, undatedQueued]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    expect(
+      await rerunPort([undatedQueued, undatedPass]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+
+    // Without databaseId, every permutation of [undated queued, older failure, newer pass]
+    // resolves identically to pending (transitive, order-independent fallback).
+    const undatedOlderFail = {
+      __typename: "CheckRun",
+      name: "ci",
+      status: "COMPLETED",
+      conclusion: "FAILURE",
+      startedAt: "2026-11-21T10:00:00Z",
+      completedAt: "2026-11-21T10:01:00Z",
+      checkSuite: {
+        id: "CS_6",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
+    };
+    const idLessTriplet = [undatedQueued, undatedOlderFail, undatedPass] as const;
+    const permutations = [
+      [0, 1, 2],
+      [0, 2, 1],
+      [1, 0, 2],
+      [1, 2, 0],
+      [2, 0, 1],
+      [2, 1, 0],
+    ] as const;
+    for (const [i, j, k] of permutations) {
+      expect(
+        await rerunPort([
+          idLessTriplet[i],
+          idLessTriplet[j],
+          idLessTriplet[k],
+        ]).observePullRequestCondition(request, { requiredChecks: true }, signal),
+      ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    }
+    // Mixed ID and ID-less attempts also remain permutation-invariant.
+    const mixedTriplet = [undatedQueued, oldFail, newPass] as const;
+    for (const [i, j, k] of permutations) {
+      expect(
+        await rerunPort([
+          mixedTriplet[i],
+          mixedTriplet[j],
+          mixedTriplet[k],
+        ]).observePullRequestCondition(request, { requiredChecks: true }, signal),
+      ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    }
+
+    // Without run IDs, a dated pass never hides an undated failure in either order.
+    const undatedFail = {
+      __typename: "CheckRun",
+      name: "ci",
+      status: "COMPLETED",
+      conclusion: "FAILURE",
+      startedAt: null,
+      completedAt: null,
+      checkSuite: {
+        id: "CS_7",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
+    };
+    expect(
+      await rerunPort([undatedPass, undatedFail]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "failing" });
+    expect(
+      await rerunPort([undatedFail, undatedPass]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "failing" });
+
+    // An older ID-less attempt never makes run ID order between identified attempts fall back
+    // to completion timestamps: run 102 (failing at 10:20) beats run 101 (passing at 10:30).
+    const olderIdLess = {
+      __typename: "CheckRun",
+      name: "ci",
+      status: "COMPLETED",
+      conclusion: "SUCCESS",
+      startedAt: "2026-11-21T09:55:00Z",
+      completedAt: "2026-11-21T10:00:00Z",
+      checkSuite: {
+        id: "CS_8",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
+    };
+    const run101LatePass = {
+      __typename: "CheckRun",
+      databaseId: 101,
+      name: "ci",
+      status: "COMPLETED",
+      conclusion: "SUCCESS",
+      startedAt: "2026-11-21T10:05:00Z",
+      completedAt: "2026-11-21T10:30:00Z",
+      checkSuite: {
+        id: "CS_9",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
+    };
+    const run102EarlierFail = {
+      __typename: "CheckRun",
+      databaseId: 102,
+      name: "ci",
+      status: "COMPLETED",
+      conclusion: "FAILURE",
+      startedAt: "2026-11-21T10:15:00Z",
+      completedAt: "2026-11-21T10:20:00Z",
+      checkSuite: {
+        id: "CS_10",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_ci" } },
+      },
+    };
+    const reversedFinishTriplet = [olderIdLess, run101LatePass, run102EarlierFail] as const;
+    for (const [i, j, k] of permutations) {
+      expect(
+        await rerunPort([
+          reversedFinishTriplet[i],
+          reversedFinishTriplet[j],
+          reversedFinishTriplet[k],
+        ]).observePullRequestCondition(request, { requiredChecks: true }, signal),
+      ).toEqual({ status: "observed", state: "open", requiredChecks: "failing" });
+    }
+
+    // Distinct workflows with different workflow ids never hide each other's failures.
+    const workflowAFail = {
+      __typename: "CheckRun",
+      databaseId: 201,
+      name: "ci",
+      status: "COMPLETED",
+      conclusion: "FAILURE",
+      startedAt: "2026-11-21T10:00:00Z",
+      completedAt: "2026-11-21T10:01:00Z",
+      checkSuite: {
+        id: "CS_a",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_1" } },
+      },
+    };
+    const workflowBPass = {
+      __typename: "CheckRun",
+      databaseId: 202,
+      name: "ci",
+      status: "COMPLETED",
+      conclusion: "SUCCESS",
+      startedAt: "2026-11-21T10:05:00Z",
+      completedAt: "2026-11-21T10:06:00Z",
+      checkSuite: {
+        id: "CS_b",
+        app: { databaseId: 15368 },
+        workflowRun: { workflow: { id: "W_2" } },
+      },
+    };
+    expect(
+      await rerunPort([workflowAFail, workflowBPass]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "failing" });
+
+    // When a context has both an any-source rule and an app-pinned rule, an isRequired
+    // StatusContext satisfies only the any-source rule and leaves the app pin pending.
+    const overlappingRulesPort = (headNodes: ReadonlyArray<unknown>) =>
+      port((args) => {
+        if (args[1] === "checks") {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify([{ name: "deploy-check", bucket: "pass" }]),
+          };
+        }
+        if (args[0] === "api" && args[1] === "graphql") {
+          return rollupResponse(headNodes);
+        }
+        if (
+          args[0] === "api" &&
+          args.includes("--paginate") &&
+          args.includes("--slurp") &&
+          args.some((arg) => arg.includes("/rules/branches/main"))
+        ) {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify([
+              [
+                {
+                  type: "required_status_checks",
+                  parameters: {
+                    required_status_checks: [
+                      { context: "deploy-check" },
+                      { context: "deploy-check", integration_id: 300 },
+                    ],
+                  },
+                },
+              ],
+            ]),
+          };
+        }
+        if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+          return { exitCode: 0, stdout: JSON.stringify({ protected: false }) };
+        }
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            state: "OPEN",
+            baseRefName: "main",
+            mergeStateStatus: "BLOCKED",
+          }),
+        };
+      }).port;
+    const statusOnly = {
+      __typename: "StatusContext",
+      context: "deploy-check",
+      state: "SUCCESS",
+      createdAt: "2026-11-21T10:00:00Z",
+      isRequired: true,
+    };
+    expect(
+      await overlappingRulesPort([statusOnly]).observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+    expect(
+      await overlappingRulesPort([
+        statusOnly,
+        passRun("deploy-check", 300),
+      ]).observePullRequestCondition(request, { requiredChecks: true }, signal),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
+
+    // Multi-page commit rollups paginate through pullRequest(number:) so fork head commits work.
+    const paginatedQueries: string[] = [];
+    const paginatedPort = port((args) => {
+      if (args[1] === "checks") {
+        return { exitCode: 0, stdout: JSON.stringify([{ name: "lint", bucket: "pass" }]) };
+      }
+      if (args[0] === "api" && args[1] === "graphql") {
+        const queryArg = args.find((arg) => arg.startsWith("query=")) ?? "";
+        paginatedQueries.push(queryArg);
+        const isPageTwo = args.includes("cursor=cursor-1");
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            data: {
+              repository: {
+                pullRequest: {
+                  commits: {
+                    nodes: [
+                      {
+                        commit: {
+                          oid: "1".repeat(40),
+                          statusCheckRollup: {
+                            contexts: {
+                              nodes: [isPageTwo ? passRun("integration") : passRun("lint")],
+                              pageInfo: isPageTwo
+                                ? { hasNextPage: false, endCursor: null }
+                                : { hasNextPage: true, endCursor: "cursor-1" },
+                            },
+                          },
+                        },
+                      },
+                    ],
+                  },
+                  potentialMergeCommit: null,
+                },
+              },
+            },
+          }),
+        };
+      }
+      if (
+        args[0] === "api" &&
+        args.includes("--paginate") &&
+        args.includes("--slurp") &&
+        args.some((arg) => arg.includes("/rules/branches/main"))
+      ) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            [
+              {
+                type: "required_status_checks",
+                parameters: {
+                  required_status_checks: [{ context: "lint" }, { context: "integration" }],
+                },
+              },
+            ],
+          ]),
+        };
+      }
+      if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+        return { exitCode: 0, stdout: JSON.stringify({ protected: false }) };
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          state: "OPEN",
+          baseRefName: "main",
+          mergeStateStatus: "BLOCKED",
+        }),
+      };
+    }).port;
+    expect(
+      await paginatedPort.observePullRequestCondition(request, { requiredChecks: true }, signal),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
+    expect(paginatedQueries).toHaveLength(2);
+    expect(paginatedQueries[1]).not.toContain("object(oid:");
+    expect(paginatedQueries[1]).toContain("pullRequest(number:");
+
+    // A branch requiring only review approval (BLOCKED) with zero required checks reports green.
+    const reviewOnlyBlocked = port((args) => {
+      if (args[1] === "checks") {
+        return { exitCode: 0, stdout: "[]" };
+      }
+      if (
+        args[0] === "api" &&
+        args.includes("--paginate") &&
+        args.includes("--slurp") &&
+        args.some((arg) => arg.includes("/rules/branches/main"))
+      ) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            [{ type: "pull_request", parameters: { required_approving_review_count: 1 } }],
+          ]),
+        };
+      }
+      if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            protected: true,
+            protection: {
+              enabled: true,
+              required_status_checks: { contexts: [], checks: [] },
+            },
+          }),
+        };
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          state: "OPEN",
+          baseRefName: "main",
+          mergeStateStatus: "BLOCKED",
+        }),
+      };
+    }).port;
+    expect(
+      await reviewOnlyBlocked.observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
+
+    // Ruleset-required check on a later rules page still keeps unreported checks pending.
+    const rulesetUnreported = port((args) => {
+      if (args[1] === "checks") return { exitCode: 0, stdout: "[]" };
+      if (args[0] === "api" && args[1] === "graphql") return rollupResponse([]);
+      if (
+        args[0] === "api" &&
+        args.includes("--paginate") &&
+        args.includes("--slurp") &&
+        args.some((arg) => arg.includes("/rules/branches/main"))
+      ) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            [{ type: "pull_request", parameters: { required_approving_review_count: 1 } }],
+            [
+              {
+                type: "required_status_checks",
+                parameters: { required_status_checks: [{ context: "ci" }] },
+              },
+            ],
+          ]),
+        };
+      }
+      if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+        return { exitCode: 0, stdout: JSON.stringify({ protected: false }) };
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          state: "OPEN",
+          baseRefName: "main",
+          mergeStateStatus: "BLOCKED",
+        }),
+      };
+    }).port;
+    expect(
+      await rulesetUnreported.observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "pending" });
+
+    // A malformed rules page fails closed as unavailable rather than reporting green.
+    const malformedRulesPage = port((args) => {
+      if (args[1] === "checks") return { exitCode: 0, stdout: "[]" };
+      if (
+        args[0] === "api" &&
+        args.includes("--paginate") &&
+        args.includes("--slurp") &&
+        args.some((arg) => arg.includes("/rules/branches/main"))
+      ) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            [{ type: "pull_request", parameters: { required_approving_review_count: 1 } }],
+            { unexpected: true },
+          ]),
+        };
+      }
+      if (args[0] === "api" && args[1]?.includes("/branches/main")) {
+        return { exitCode: 0, stdout: JSON.stringify({ protected: false }) };
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          state: "OPEN",
+          baseRefName: "main",
+          mergeStateStatus: "BLOCKED",
+        }),
+      };
+    }).port;
+    expect(
+      await malformedRulesPage.observePullRequestCondition(
+        request,
+        { requiredChecks: true },
+        signal,
+      ),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "unavailable" });
+
+    // Empty check array with CLEAN merge state confirms no required checks are missing.
+    const noRequiredClean = port((args) =>
+      args[1] === "checks"
+        ? { exitCode: 0, stdout: "[]" }
+        : {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              state: "OPEN",
+              baseRefName: "main",
+              mergeStateStatus: "CLEAN",
+            }),
+          },
+    ).port;
+    expect(
+      await noRequiredClean.observePullRequestCondition(request, { requiredChecks: true }, signal),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "green" });
+
+    // Unknown check bucket fails closed as unavailable.
+    const unknownBucket = port((args) =>
+      args[1] === "checks"
+        ? { exitCode: 0, stdout: JSON.stringify([{ name: "ci", bucket: "mystery" }]) }
+        : { exitCode: 0, stdout: JSON.stringify({ state: "OPEN", mergeStateStatus: "UNSTABLE" }) },
+    ).port;
+    expect(
+      await unknownBucket.observePullRequestCondition(request, { requiredChecks: true }, signal),
+    ).toEqual({ status: "observed", state: "open", requiredChecks: "unavailable" });
+  });
 });

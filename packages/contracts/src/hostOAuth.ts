@@ -110,6 +110,20 @@ export const decodeMcpOAuthClientRegistration = Schema.decodeUnknownSync(
 export const HostOAuthFlow = Schema.Literal("authorization-code-pkce", "device-code");
 export type HostOAuthFlow = typeof HostOAuthFlow.Type;
 
+export const HostOAuthJournalFlow = Schema.Literal(
+  "authorization-code-pkce",
+  "device-code",
+  "relay",
+);
+export type HostOAuthJournalFlow = typeof HostOAuthJournalFlow.Type;
+
+const VerificationHost = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9.-]{1,253}(?::\d{1,5})?$/));
+const GOOGLE_WORKSPACE_MCP_RESOURCES: ReadonlySet<string> = new Set([
+  "https://gmailmcp.googleapis.com/mcp/v1",
+  "https://drivemcp.googleapis.com/mcp/v1",
+  "https://calendarmcp.googleapis.com/mcp/v1",
+]);
+
 /**
  * A vendor wire dialect that is close to OAuth but not identical. The dialect
  * is what lets a catalog entry declare a flow the generic runner cannot
@@ -183,6 +197,10 @@ export const HostOAuthDescriptor = Schema.Struct({
   /** Absent only for the directory dialect, whose authority the broker builds. */
   tokenEndpoint: Schema.optional(Endpoint),
   deviceAuthorizationEndpoint: Schema.optional(Endpoint),
+  /** MCP device-code flow only: hosts from the issuer's metadata allowed in verification URIs. */
+  verificationHosts: Schema.optional(
+    Schema.Array(VerificationHost).pipe(Schema.minItems(1), Schema.maxItems(16)),
+  ),
   scopes: Schema.Array(Scope).pipe(Schema.maxItems(16)),
   termsId: TermsId,
   /**
@@ -247,12 +265,24 @@ export const HostOAuthDescriptor = Schema.Struct({
             descriptor.tokenEndpoint === "https://github.com/login/oauth/access_token")
         )
           return false;
-        // The directory dialect speaks standard device authorization against
-        // the tenant's own authority; every other dialect's wire shape is
-        // not OAuth's, so none pairs with a device code.
+        if (
+          descriptor.verificationHosts !== undefined &&
+          (descriptor.dialect !== "mcp-authorization" || descriptor.flow !== "device-code")
+        ) {
+          return false;
+        }
+        // The directory dialect and generic MCP authorization speak standard
+        // RFC 8628 device authorization; closed vendor dialects (Google
+        // Workspace, Slack, GitHub, OpenRouter, ChatGPT plan, issuer-oidc)
+        // exclude device authorization and keep their PKCE profiles.
         if (
           descriptor.dialect !== undefined &&
           descriptor.dialect !== "directory-oidc" &&
+          !(
+            descriptor.dialect === "mcp-authorization" &&
+            (descriptor.resource === undefined ||
+              !GOOGLE_WORKSPACE_MCP_RESOURCES.has(descriptor.resource))
+          ) &&
           descriptor.flow !== "authorization-code-pkce"
         ) {
           return false;
@@ -351,6 +381,16 @@ export const HostOAuthDescriptor = Schema.Struct({
               descriptor.scopes[0] !== "search:read.public")
           )
             return false;
+          if (
+            descriptor.dialect === "mcp-authorization" &&
+            descriptor.flow === "device-code" &&
+            (descriptor.deviceAuthorizationEndpoint === undefined ||
+              descriptor.redirectPort !== undefined ||
+              descriptor.redirectHostname !== undefined ||
+              (descriptor.resource !== undefined &&
+                GOOGLE_WORKSPACE_MCP_RESOURCES.has(descriptor.resource)))
+          )
+            return false;
           return (
             descriptor.clientId !== undefined &&
             descriptor.resource !== undefined &&
@@ -429,6 +469,7 @@ export const HostOAuthSignInState = Schema.Union(
     descriptorId: DescriptorId,
     flow: Schema.Literal("device-code"),
     verificationUri: Endpoint,
+    verificationUriComplete: Schema.optional(Endpoint),
     userCode: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9-]{1,64}$/)),
     expiresAt: UtcTimestamp,
   }).annotations(strict),
@@ -491,13 +532,14 @@ export const HostOAuthJournalRecord = Schema.Union(
     name: Schema.Literal("host-oauth.sign-in-started"),
     descriptorId: DescriptorId,
     attemptId: AttemptId,
-    flow: HostOAuthFlow,
+    flow: HostOAuthJournalFlow,
   }).annotations(strict),
   Schema.Struct({
     name: Schema.Literal("host-oauth.sign-in-completed"),
     descriptorId: DescriptorId,
     attemptId: AttemptId,
     credentialRef: CredentialRef,
+    flow: Schema.optional(HostOAuthJournalFlow),
   }).annotations(strict),
   Schema.Struct({
     name: Schema.Literal("host-oauth.sign-in-again"),
@@ -510,6 +552,13 @@ export const HostOAuthJournalRecord = Schema.Union(
     descriptorId: DescriptorId,
     attemptId: Schema.optional(AttemptId),
     reason: Schema.String.pipe(Schema.pattern(/^[a-z][a-z0-9-]{0,63}$/)),
+    flow: Schema.optional(HostOAuthJournalFlow),
+  }).annotations(strict),
+  Schema.Struct({
+    name: Schema.Literal("host-oauth.sign-in-cancelled"),
+    descriptorId: DescriptorId,
+    attemptId: AttemptId,
+    flow: Schema.optional(HostOAuthJournalFlow),
   }).annotations(strict),
   Schema.Struct({
     name: Schema.Literal("host-oauth.signed-out"),

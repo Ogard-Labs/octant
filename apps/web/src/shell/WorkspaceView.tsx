@@ -1,3 +1,4 @@
+import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import type { PreparationTarget } from "../projects/WorktreePreparationDialog";
 import type { SandboxRestrictionsScope } from "@octant/contracts/sandbox-policy";
 import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-restrictions-client";
@@ -617,6 +618,7 @@ export interface WorkspaceViewProps {
   readonly previewClient?: PreviewClient;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  readonly serviceOfferClient?: ServiceOfferClient;
   /** Every image profile, custom image sources included, computed once by the shell. */
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly onOpenCanvas?: (entry: CanvasInventoryEntry) => void;
@@ -1745,6 +1747,9 @@ function renderCodeTab(
         {...(props.imageGenerationClient === undefined
           ? {}
           : { imageGenerationClient: props.imageGenerationClient })}
+        {...(props.serviceOfferClient === undefined
+          ? {}
+          : { serviceOfferClient: props.serviceOfferClient })}
         {...(props.imageGenerationProfiles === undefined
           ? {}
           : { imageGenerationProfiles: props.imageGenerationProfiles })}
@@ -2388,6 +2393,9 @@ function renderNonCodeTab(
         {...(props.imageGenerationClient === undefined
           ? {}
           : { imageGenerationClient: props.imageGenerationClient })}
+        {...(props.serviceOfferClient === undefined
+          ? {}
+          : { serviceOfferClient: props.serviceOfferClient })}
         {...(props.imageGenerationProfiles === undefined
           ? {}
           : { imageGenerationProfiles: props.imageGenerationProfiles })}
@@ -2540,6 +2548,9 @@ function renderNonCodeTab(
                     {...(props.imageGenerationClient === undefined
                       ? {}
                       : { imageGenerationClient: props.imageGenerationClient })}
+                    {...(props.serviceOfferClient === undefined
+                      ? {}
+                      : { serviceOfferClient: props.serviceOfferClient })}
                     {...(props.imageGenerationProfiles === undefined
                       ? {}
                       : { imageGenerationProfiles: props.imageGenerationProfiles })}
@@ -3441,6 +3452,7 @@ function ChatThreadWorkspace(props: {
   readonly projectWindowCapability?: string;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  readonly serviceOfferClient?: ServiceOfferClient;
   /** Every image profile, custom image sources included, computed once by the shell. */
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly onOpenImageSettings?: () => void;
@@ -3558,6 +3570,9 @@ function ChatThreadWorkspace(props: {
             {...(props.imageGenerationClient === undefined
               ? {}
               : { imageGenerationClient: props.imageGenerationClient })}
+            {...(props.serviceOfferClient === undefined
+              ? {}
+              : { serviceOfferClient: props.serviceOfferClient })}
             {...(props.imageGenerationProfiles === undefined
               ? {}
               : { imageGenerationProfiles: props.imageGenerationProfiles })}

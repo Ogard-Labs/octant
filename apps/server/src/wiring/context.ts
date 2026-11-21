@@ -32,6 +32,8 @@ import {
 } from "@octant/contracts";
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
 import { chatImageScopeAllowedForWindow } from "../image/imageScopeAuthority";
+import { principalActsAsHostPerson, type ClientPrincipal } from "../clientPrincipal";
+import { assertReadableChatThread } from "../chat/chatService";
 import { windowAdmitsProject } from "@octant/domain/shell-policy";
 import { SessionCompactionService } from "../context/sessionCompaction";
 import { IdleCompactions } from "../context/idleCompaction";
@@ -89,6 +91,9 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
     | "browserProfileService"
     | "browserToolApprovalService"
     | "liveProjectBrowsers"
+    | "pairedBrowserControlService"
+    | "resolvePairedDeviceName"
+    | "isPairedDeviceSessionCurrent"
   > &
   Pick<CodeRuntimeWiring, "codeOperationRuntime" | "routeCodeService"> &
   Pick<ChatWiring, "chatService"> &
@@ -124,6 +129,9 @@ export function wireContext(deps: ContextDependencies) {
     configuredDriverOptions,
     contextHarness,
     liveProjectBrowsers,
+    pairedBrowserControlService,
+    resolvePairedDeviceName,
+    isPairedDeviceSessionCurrent,
     browserExtensionService,
     browserFlowService,
     browserProfileService,
@@ -151,9 +159,19 @@ export function wireContext(deps: ContextDependencies) {
     windowId: WindowId,
     threadKind: "chat-thread" | "work-thread" | "code-thread",
     threadId: string,
+    principal?: ClientPrincipal,
   ): Promise<boolean> => {
     try {
       if (threadKind === "chat-thread") {
+        // A paired browser has no desktop layout. Read the same thread that its authenticated Chat Open admits.
+        if (principal?.kind === "remote-device") {
+          if (
+            !principalActsAsHostPerson(principal) ||
+            String(principal.deviceId) !== String(windowId)
+          )
+            return false;
+          return assertReadableChatThread(persistence, decodeChatThreadId(threadId)) !== undefined;
+        }
         const view = chatService.read(decodeChatThreadId(threadId));
         const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
         return chatImageScopeAllowedForWindow({
@@ -999,6 +1017,9 @@ export function wireContext(deps: ContextDependencies) {
     profiles: browserProfileService,
     flows: browserFlowService,
     flowRuns,
+    pairedBrowserControl: pairedBrowserControlService,
+    resolvePairedDeviceName,
+    isPairedDeviceSessionCurrent,
     extensions: browserExtensionService,
     authority: browserAuthority,
     approvals: browserToolApprovalService,

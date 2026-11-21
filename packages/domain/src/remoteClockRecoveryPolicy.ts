@@ -1,5 +1,3 @@
-import { REMOTE_REQUEST_CLOCK_SKEW_MS } from "./remoteAccessPolicy";
-
 /**
  * Phase 14H — monotonic remote expiry and clock recovery.
  *
@@ -83,13 +81,21 @@ export function evaluateMonotonicNow(input: {
   readonly toleranceMs?: number;
   /**
    * Elapsed time on a steady, restart-local monotonic clock (e.g.
-   * `performance.now()`) since the prior evaluation. When provided, a forward
-   * wall-clock step larger than this elapsed time plus `forwardToleranceMs` is
-   * treated as an implausible discontinuity. Omit on the first observation of a
-   * process lifetime, where no monotonic baseline exists yet.
+   * `performance.now()`) since `forwardBaselineMs` (or the prior evaluation).
+   * When provided, a forward wall-clock step larger than this elapsed time plus
+   * `forwardToleranceMs` is treated as an implausible discontinuity. Omit on
+   * the first observation of a process lifetime, where no monotonic baseline
+   * exists yet.
    */
   readonly monotonicElapsedMs?: number;
   readonly forwardToleranceMs?: number;
+  /**
+   * Trusted wall-clock baseline from which `monotonicElapsedMs` was measured.
+   * Keeping this anchored to the last trusted observation prevents repeated
+   * observations during one forward discontinuity from stacking
+   * `forwardToleranceMs` on every call. Defaults to `highWaterMarkMs`.
+   */
+  readonly forwardBaselineMs?: number;
 }): MonotonicNowEvaluation {
   const tolerance =
     input.toleranceMs !== undefined && Number.isFinite(input.toleranceMs) && input.toleranceMs >= 0
@@ -110,7 +116,6 @@ export function evaluateMonotonicNow(input: {
   }
 
   if (input.wallClockMs >= prior) {
-    const forwardStepMs = input.wallClockMs - prior;
     const monotonicElapsedMs =
       input.monotonicElapsedMs !== undefined &&
       Number.isFinite(input.monotonicElapsedMs) &&
@@ -118,6 +123,11 @@ export function evaluateMonotonicNow(input: {
         ? input.monotonicElapsedMs
         : undefined;
     if (monotonicElapsedMs !== undefined) {
+      const forwardBaseline =
+        input.forwardBaselineMs === undefined
+          ? prior
+          : Math.min(prior, normalizeHighWaterMark(input.forwardBaselineMs));
+      const forwardStepMs = input.wallClockMs - forwardBaseline;
       const forwardTolerance =
         input.forwardToleranceMs !== undefined &&
         Number.isFinite(input.forwardToleranceMs) &&
@@ -126,13 +136,12 @@ export function evaluateMonotonicNow(input: {
           : REMOTE_CLOCK_FORWARD_JUMP_TOLERANCE_MS;
       const plausibleForwardMs = monotonicElapsedMs + forwardTolerance;
       if (forwardStepMs > plausibleForwardMs) {
-        // Implausible forward discontinuity: advance the bound only by the
-        // plausible monotonic amount, never by the raw jump. This keeps expired
-        // authority from reviving while ensuring the guard is not frozen far in
-        // the future once the wall clock is corrected. Floor to whole
-        // milliseconds because the monotonic elapsed measurement may be
-        // fractional but epoch bounds are integers.
-        const boundedMark = Math.floor(prior + plausibleForwardMs);
+        // Implausible forward discontinuity: advance the bound only to the
+        // plausible monotonic limit from the trusted baseline, never by the raw
+        // jump and never by stacking tolerance across repeated observations.
+        // Floor to whole milliseconds because the monotonic elapsed measurement
+        // may be fractional while epoch bounds are integers.
+        const boundedMark = Math.max(prior, Math.floor(forwardBaseline + plausibleForwardMs));
         return {
           effectiveNowMs: boundedMark,
           highWaterMarkMs: boundedMark,
@@ -147,7 +156,7 @@ export function evaluateMonotonicNow(input: {
     return {
       effectiveNowMs: input.wallClockMs,
       highWaterMarkMs: input.wallClockMs,
-      advanced: forwardStepMs > 0,
+      advanced: input.wallClockMs > prior,
       rollbackMs: 0,
       forwardJumpMs: 0,
       posture: "ok",
@@ -197,33 +206,4 @@ export function deriveClockHighWaterMark(input: {
     }
   }
   return mark;
-}
-
-export type ClientTimestampTrust =
-  | { readonly kind: "accepted" }
-  | { readonly kind: "rejected"; readonly reason: "future-skew" | "past-skew" | "malformed" };
-
-/**
- * A client-supplied timestamp is only ever used to bound freshness, never to
- * extend trust. A future timestamp beyond the skew window is rejected so a
- * client clock ahead of the host cannot keep authority alive.
- */
-export function evaluateClientTimestampTrust(input: {
-  readonly clientTimestampMs: number;
-  readonly serverNowMs: number;
-  readonly skewToleranceMs?: number;
-}): ClientTimestampTrust {
-  if (!Number.isFinite(input.clientTimestampMs) || !Number.isFinite(input.serverNowMs)) {
-    return { kind: "rejected", reason: "malformed" };
-  }
-  const skew =
-    input.skewToleranceMs !== undefined &&
-    Number.isFinite(input.skewToleranceMs) &&
-    input.skewToleranceMs >= 0
-      ? input.skewToleranceMs
-      : REMOTE_REQUEST_CLOCK_SKEW_MS;
-  const delta = input.clientTimestampMs - input.serverNowMs;
-  if (delta > skew) return { kind: "rejected", reason: "future-skew" };
-  if (-delta > skew) return { kind: "rejected", reason: "past-skew" };
-  return { kind: "accepted" };
 }

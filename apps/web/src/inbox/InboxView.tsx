@@ -9,7 +9,7 @@ import { pullRequestStateMark } from "../code/pullRequestState";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
 import { PendingRequestRow } from "../pendingRequests/PendingRequestRow";
-import { WaitingAskRow } from "../pendingRequests/WaitingAskRow";
+import { OFFER_RESTART_NOTICE, WaitingAskRow } from "../pendingRequests/WaitingAskRow";
 import {
   canAnswerWaitingAsk,
   isFindOnlyPendingRequest,
@@ -180,7 +180,14 @@ export function InboxView(props: InboxViewProps) {
 
   const externalSectionsPresent = loadGithub !== undefined || loadLinear !== undefined;
   const decisions = props.decisions;
-  const { rows: requestRows, answer, defer, asks, answerAsk } = usePendingRequestRows(decisions);
+  const {
+    rows: requestRows,
+    answer,
+    defer,
+    asks,
+    answerAsk,
+    offerLostInRestart,
+  } = usePendingRequestRows(decisions);
   // Questions use their exact pending request so attention deferral does not
   // hide an execution approval or create a duplicate thread attention row.
   const decisionRows = (requestRows ?? []).filter(
@@ -280,6 +287,11 @@ export function InboxView(props: InboxViewProps) {
           }
           label="Needs you"
         >
+          {!offerLostInRestart ? null : (
+            <p className="oct-row-detail inbox-card__note" role="status">
+              {OFFER_RESTART_NOTICE}
+            </p>
+          )}
           {groups.length === 0 ? (
             <div className="inbox-card__empty" role="status">
               <p className="oct-row-detail">{activeFilter?.empty}</p>

@@ -573,11 +573,6 @@ export const ThemeFailure = Schema.Union(
 );
 export type ThemeFailure = typeof ThemeFailure.Type;
 
-export const THEME_EVENT_NAMES = [
-  "theme.settings-updated@1",
-  "theme.sidebar-background-updated@1",
-] as const;
-
 export const MAX_SIDEBAR_BACKGROUND_BYTES = 8_388_608;
 export const SIDEBAR_BACKGROUND_MAX_WIDTH = 4096;
 export const SIDEBAR_BACKGROUND_MAX_HEIGHT = 4096;

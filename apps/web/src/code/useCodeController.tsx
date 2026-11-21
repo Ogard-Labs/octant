@@ -1,8 +1,10 @@
 import { createEditorDraftStore } from "../editor/editorDraftStore";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import type {
+  CodePullRequestLineNotesSource,
   CodeReviewFindingReference,
   CoordinatorBounds,
+  CoordinatorDoneWhen,
   CoordinatorOpenWorkerLimit,
   CoordinatorStartingByProject,
   CoordinatorStartingChoice,
@@ -41,6 +43,7 @@ import {
   type CodeConversationWindow,
   type ProviderContextBreakdown,
 } from "@octant/contracts";
+import type { CodeLineNotesSendResult } from "./CodeLineNotes";
 import { prependEarlierTurns } from "@octant/domain";
 import { waitForReconnect } from "../lib/waitForReconnect";
 import {
@@ -129,6 +132,7 @@ import {
   reopenCodeThread,
   setCodeThreadCoordinator,
   setCodeThreadCoordinatorBounds,
+  setCodeThreadCoordinatorDoneWhen,
   setCodeThreadCoordinatorWake,
   setCodeThreadMessageWake,
   setCodeThreadRestartContinuation,
@@ -2270,6 +2274,10 @@ export function useCodeController(options: CodeControllerOptions) {
             ? await client.execute(command)
             : await client.execute(command, signal);
         if (!mounted.current) return undefined;
+        // Update the ref immediately so a sequential command awaited right
+        // after this one (such as saving bounds and done-when in one dialog
+        // click) reads the committed thread version before React re-renders.
+        bootstrapRef.current = applyResult(bootstrapRef.current, result);
         setBootstrap((current) => applyResult(current, result));
         setActiveView((current) => withUpdatedThread(current, result));
         const currentThreadId = activeThreadId.current;
@@ -2310,6 +2318,7 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
       readonly sideChatReturns?: ReadonlyArray<SideChatDraftReturnReference>;
       readonly reviewFindingReferences?: ReadonlyArray<CodeReviewFindingReference>;
+      readonly pullRequestLineNotesSource?: CodePullRequestLineNotesSource;
       /**
        * Images this turn carries. Ids only: the host holds the bytes it
        * accepted and reads them itself, so the renderer never re-sends an
@@ -2357,6 +2366,9 @@ export function useCodeController(options: CodeControllerOptions) {
         input.reviewFindingReferences.length === 0
           ? {}
           : { reviewFindingReferences: [...input.reviewFindingReferences] }),
+        ...(input.pullRequestLineNotesSource === undefined
+          ? {}
+          : { pullRequestLineNotesSource: input.pullRequestLineNotesSource }),
         ...(input.sideChatReturns === undefined || input.sideChatReturns.length === 0
           ? {}
           : { sideChatReturns: [...input.sideChatReturns] }),
@@ -2763,6 +2775,11 @@ export function useCodeController(options: CodeControllerOptions) {
       restCommand(threadId, (thread) => setCodeThreadCoordinatorBounds(thread, bounds)),
     [restCommand],
   );
+  const setThreadCoordinatorDoneWhen = useCallback(
+    (threadId: CodeThreadId, doneWhen: CoordinatorDoneWhen | undefined) =>
+      restCommand(threadId, (thread) => setCodeThreadCoordinatorDoneWhen(thread, doneWhen)),
+    [restCommand],
+  );
   const setThreadMessageWake = useCallback(
     (threadId: CodeThreadId, wake: boolean) =>
       restCommand(threadId, (thread) => setCodeThreadMessageWake(thread, wake)),
@@ -2943,7 +2960,11 @@ export function useCodeController(options: CodeControllerOptions) {
        * its turn; the returned boolean also reports how that turn ended, and a
        * turn that later waits, stops or fails must not read as a refused send.
        */
-      fromOutsideComposer?: { readonly onAccepted: () => void },
+      fromOutsideComposer?: {
+        readonly onAccepted: () => void;
+        readonly onRefused?: (message: string) => void;
+        readonly pullRequestLineNotesSource?: CodePullRequestLineNotesSource;
+      },
     ): Promise<boolean> => {
       const outsideComposer = fromOutsideComposer !== undefined;
       const trimmed = prompt.trim();
@@ -3017,6 +3038,9 @@ export function useCodeController(options: CodeControllerOptions) {
           threadMentionIds,
           sideChatReturns,
           reviewFindingReferences: reviewReferences,
+          ...(fromOutsideComposer?.pullRequestLineNotesSource === undefined
+            ? {}
+            : { pullRequestLineNotesSource: fromOutsideComposer.pullRequestLineNotesSource }),
           attachmentIds: attachments.map((attachment) => attachment.attachmentId),
           fileMentionPaths,
           ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
@@ -3033,14 +3057,16 @@ export function useCodeController(options: CodeControllerOptions) {
           setTurnUsageLimit(started.failure.usageLimit);
           setLatestProviderTurnOperationId(undefined);
           restoreFailedPrompt();
+          fromOutsideComposer?.onRefused?.(started.failure.message);
           return false;
         }
         if (started.kind !== "provider-turn-state" || started.state !== "running") {
           setTurnStatus("failed");
           const refusal =
             started.kind === "provider-turn-state" ? started.failure?.message : undefined;
+          const message = refusal ?? "The provider turn could not be started.";
           setTurnError(
-            refusal ?? "The provider turn could not be started.",
+            message,
             started.kind === "provider-turn-state" && started.failure !== undefined
               ? { category: started.failure.category }
               : undefined,
@@ -3052,6 +3078,7 @@ export function useCodeController(options: CodeControllerOptions) {
             );
           }
           restoreFailedPrompt();
+          fromOutsideComposer?.onRefused?.(message);
           return false;
         }
         // The running turn's identity is what Stop names, so a Stop that lands
@@ -3312,11 +3339,117 @@ export function useCodeController(options: CodeControllerOptions) {
         setTurnStatus("failed");
         setTurnError(failure.message);
         restoreFailedPrompt();
+        fromOutsideComposer?.onRefused?.(failure.message);
         failCommand(error);
         return false;
       }
     },
     [activeView, beginProviderTurn, clearFailure, client, failCommand, turnStatus],
+  );
+
+  /**
+   * Sends line notes written on a pull request's diff to one linked Code
+   * thread as an ordinary follow-up turn. When the linked thread is open in
+   * this controller it reuses `sendFollowUp` (keeping the composer draft
+   * untouched); otherwise it dispatches directly through `beginProviderTurn`
+   * so the person does not have to leave the pull request view first.
+   */
+  const sendPullRequestLineNotes = useCallback(
+    async (
+      threadId: CodeThreadId,
+      prompt: string,
+      source: CodePullRequestLineNotesSource,
+    ): Promise<CodeLineNotesSendResult> => {
+      const text = prompt.trim();
+      if (text.length === 0) {
+        return { status: "refused", message: "Write a note first." };
+      }
+      if (
+        activeView !== undefined &&
+        String(activeView.thread.id) === String(threadId) &&
+        activeThreadId.current === activeView.thread.id
+      ) {
+        if (turnStatus === "sending" || turnStatus === "running") {
+          return {
+            status: "refused",
+            message: "Send when the current turn finishes.",
+          };
+        }
+        return new Promise((resolve) => {
+          let settled = false;
+          const accept = () => {
+            if (settled) return;
+            settled = true;
+            resolve({ status: "sent" });
+          };
+          const refuse = (message: string) => {
+            if (settled) return;
+            settled = true;
+            resolve({ status: "refused", message });
+          };
+          sendFollowUp(
+            text,
+            [],
+            [],
+            [],
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            [],
+            undefined,
+            [],
+            false,
+            undefined,
+            {
+              onAccepted: accept,
+              onRefused: refuse,
+              pullRequestLineNotesSource: source,
+            },
+          )
+            .then((sent) => {
+              if (settled) return;
+              if (sent) accept();
+              else refuse("The thread did not accept the notes; its reason shows there.");
+            })
+            .catch((error) => {
+              if (!settled) refuse(codeFailure(error).message);
+            });
+        });
+      }
+      let checkoutId = findCodeThread(bootstrapRef.current?.threads, threadId)?.checkoutId;
+      if (checkoutId === undefined) {
+        try {
+          const view = await client.thread(threadId);
+          checkoutId = view.checkout.id;
+        } catch (error) {
+          return { status: "refused", message: codeFailure(error).message };
+        }
+      }
+      try {
+        const { started } = await beginProviderTurn({
+          threadId,
+          checkoutId,
+          prompt: text,
+          pullRequestLineNotesSource: source,
+        });
+        if (started.kind === "operation-failed") {
+          return { status: "refused", message: started.failure.message };
+        }
+        if (started.kind !== "provider-turn-state" || started.state !== "running") {
+          const refusal =
+            started.kind === "provider-turn-state" ? started.failure?.message : undefined;
+          return {
+            status: "refused",
+            message: refusal ?? "The provider turn could not be started.",
+          };
+        }
+        return { status: "sent" };
+      } catch (error) {
+        return { status: "refused", message: codeFailure(error).message };
+      }
+    },
+    [activeView, beginProviderTurn, client, sendFollowUp, turnStatus],
   );
 
   const answerProviderRequest = useCallback(
@@ -3531,6 +3664,7 @@ export function useCodeController(options: CodeControllerOptions) {
     pinThread,
     setThreadCoordinator,
     setThreadCoordinatorBounds,
+    setThreadCoordinatorDoneWhen,
     setThreadCoordinatorWake,
     setThreadMessageWake,
     setThreadRestartContinuation,
@@ -3550,6 +3684,7 @@ export function useCodeController(options: CodeControllerOptions) {
     retry,
     conversationHistory,
     sendFollowUp,
+    sendPullRequestLineNotes,
     setPendingDraft,
     setPendingDraftCaret,
     showTurnRefusal,

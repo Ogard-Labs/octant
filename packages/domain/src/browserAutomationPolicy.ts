@@ -3,7 +3,6 @@ import type {
   BrowserActionRequest,
   BrowserContextPolicy,
   BrowserContextRecord,
-  BrowserObservation,
   ToolActionAuthority,
 } from "@octant/contracts";
 import {
@@ -178,18 +177,6 @@ const SUPPORTED_BROWSER_KEYS = new Set([
   "PageDown",
 ]);
 
-export function canRecordBrowserObservation(
-  observation: BrowserObservation,
-  context: BrowserContextRecord,
-): boolean {
-  return (
-    observation.contextId === context.contextId &&
-    observation.actionId === context.actionId &&
-    observation.correlationId === context.correlationId &&
-    sameToolActionAuthority(observation.authority, context.authority)
-  );
-}
-
 /** Host-observed activity; previews and refused calls never update it. */
 export interface BrowserContextActivity {
   readonly lastActivityAt: number;
@@ -213,13 +200,6 @@ export function isContextExpired(
 ): boolean {
   if (context.state !== "active" && context.state !== "creating") return false;
   return now >= browserContextExpiresAt(context, activity);
-}
-
-export function shouldProtectCredentialField(
-  context: BrowserContextRecord,
-  _fieldType: "password" | "otp" | "credit-card" | "ssn",
-): boolean {
-  return context.policy.credentialFieldProtection;
 }
 
 function normalizeOrigin(value: string): string | undefined {

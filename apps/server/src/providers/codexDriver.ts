@@ -106,6 +106,8 @@ import {
   decodeThreadForkResult,
   decodeThreadListResult,
   decodeThreadReadResult,
+  decodeThreadTurnsReadResult,
+  type CodexThreadTurnsReadResult,
   decodeThreadResumeResult,
   decodeThreadStartResult,
   decodeThreadCompactStartResult,
@@ -652,6 +654,8 @@ export interface CodexClientPort {
   threadRead?(input: {
     readonly threadId: string;
   }): Promise<{ readonly thread: CodexStoredThread }>;
+  /** One stored thread with its turns and their items, read without loading it. */
+  threadReadTurns?(input: { readonly threadId: string }): Promise<CodexThreadTurnsReadResult>;
   /**
    * Copies a stored thread into a new one through `lastTurnId` (codex-cli
    * 0.143.0 and later). The copy stays loaded in the app-server that made it.
@@ -1859,6 +1863,12 @@ export function makeCodexClient(connection: CodexAppServerConnection): CodexClie
     pluginInstalled: (input) => rpc.request("plugin/installed", input, decodePluginInstalledResult),
     threadList: (input) => rpc.request("thread/list", input, decodeThreadListResult),
     threadRead: (input) => rpc.request("thread/read", input, decodeThreadReadResult),
+    threadReadTurns: (input) =>
+      rpc.request(
+        "thread/read",
+        { threadId: input.threadId, includeTurns: true },
+        decodeThreadTurnsReadResult,
+      ),
     threadFork: (input) => rpc.request("thread/fork", input, decodeThreadForkResult),
     threadStart: (input) => rpc.request("thread/start", input, decodeThreadStartResult),
     threadResume: (input) => rpc.request("thread/resume", input, decodeThreadResumeResult),

@@ -1,8 +1,8 @@
 import type {
-  ImageGenerationOffer,
   OctantMode,
   ProjectMemoryProposal,
   RoutineAgentRequest,
+  ServiceOffer,
 } from "@octant/contracts";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
 import type { ExtensionToolApproval } from "@octant/contracts/extension-rpc";
@@ -32,7 +32,7 @@ export interface WaitingAskViews {
   readonly browserApprovals: ReadonlyArray<BrowserToolApproval>;
   readonly memoryProposals: ReadonlyArray<ProjectMemoryProposal>;
   readonly routineProposals: ReadonlyArray<RoutineAgentRequest>;
-  readonly imageOffers: ReadonlyArray<ImageGenerationOffer>;
+  readonly serviceOffers: ReadonlyArray<ServiceOffer>;
 }
 
 interface AskWords {
@@ -66,7 +66,7 @@ export function waitingAsksFrom(
     ...views.browserApprovals.map(browserApprovalWords),
     ...views.memoryProposals.map(memoryProposalWords),
     ...views.routineProposals.map(routineProposalWords),
-    ...views.imageOffers.map(imageOfferWords),
+    ...views.serviceOffers.map(serviceOfferWords),
   ];
   const asks: WaitingAsk[] = [];
   for (const ask of words) {
@@ -238,25 +238,25 @@ function routineProposalWords(request: RoutineAgentRequest): AskWords {
   return { ...base, text: `Create the routine ${request.displayName}?` };
 }
 
-function imageOfferWords(offer: ImageGenerationOffer): AskWords {
-  const base = {
-    kind: "image-offer" as const,
+function serviceOfferWords(offer: ServiceOffer): AskWords {
+  return {
+    kind: "service-offer",
     askId: String(offer.offerId),
     threadId: String(offer.scopeId),
     requestedAt: offer.requestedAt,
-    // Generating takes the person's choice of model; saving names a path the
-    // card shows beside the picture.
+    text: serviceOfferText(offer),
   };
-  return offer.kind === "save"
-    ? { ...base, text: `Save a generated image as ${offer.relativePath}?` }
-    : {
-        ...base,
-        text:
-          offer.variantCount === 1
-            ? "Generate an image?"
-            : `Generate ${String(offer.variantCount)} images?`,
-        detail: offer.prompt,
-      };
+}
+
+function serviceOfferText(offer: ServiceOffer): string {
+  switch (offer.kind) {
+    case "save":
+      return "Save a generated image?";
+    case "generate":
+      return offer.variantCount === 1
+        ? "Generate an image?"
+        : `Generate ${String(offer.variantCount)} images?`;
+  }
 }
 
 function lines(...parts: ReadonlyArray<string | undefined>): string {

@@ -13,8 +13,10 @@ import {
   formatHostRuntimeError,
   HostRuntimeOwnershipError,
   HostRuntimePathError,
+  installProcessErrorNet,
   probeHostPlatformCapabilities,
   readHostRuntimeProcessStart,
+  recordHostCrashSync,
   decodeKeychainServiceFamily,
   DEFAULT_FOLDER_ENVIRONMENT,
   KEYCHAIN_SERVICE_FAMILY_ENVIRONMENT,
@@ -43,12 +45,37 @@ import { watchDesktopParent } from "./desktopParentWatch";
 import { configureSecretGuardLocations } from "./process/secretGuard";
 import { redactHostSecrets, redactHostSecretsInValue } from "./process/secretRedaction";
 
+const abortController = new AbortController();
+let ownerPaths: HostRuntimePaths | undefined;
+const processErrorNet = installProcessErrorNet({
+  processName: "host",
+  redact: redactHostSecrets,
+  isShuttingDown: () => abortController.signal.aborted,
+  onFatal: (event) => {
+    // A watching desktop writes the host crash record from stderr on exit so
+    // the record is never doubled. An unwatched POSIX host keeps its own
+    // bounded synchronous record before exiting.
+    if (
+      process.env.OCTANT_DESKTOP_PARENT_WATCH !== "1" &&
+      process.platform !== "win32" &&
+      ownerPaths !== undefined
+    ) {
+      recordHostCrashSync(ownerPaths.dataDirectory, {
+        recordedAt: event.timestamp,
+        process: "host",
+        exitReason: event.kind,
+        lastLines: event.line.split("\n"),
+        homeDirectory: homedir(),
+      });
+    }
+  },
+});
+
 // Validate launch config before loading server modules that transitively
 // import native dependencies (node-pty). This makes the packaged-runtime
 // dev-bootstrap guard observable in the real built artifact, even in
 // environments where node-pty's NAPI module crashes Bun at import time.
 const launchConfig = parseServerLaunchConfig(process.env);
-const abortController = new AbortController();
 const stop = () => abortController.abort();
 const stopWatchingDesktopParent = watchDesktopParent({
   enabled: process.env.OCTANT_DESKTOP_PARENT_WATCH === "1",
@@ -58,7 +85,6 @@ const stopWatchingDesktopParent = watchDesktopParent({
 process.once("SIGINT", stop);
 process.once("SIGTERM", stop);
 let owner: HostRuntimeOwner | undefined;
-let ownerPaths: HostRuntimePaths | undefined;
 let diagnostics: (() => HostRuntimeDiagnostics) | undefined;
 let ownerBackup: ((label?: string) => HostRuntimeBackupOutcome) | undefined;
 let serviceLogs: Pick<BoundedHostLogStore, "append" | "read"> | undefined;
@@ -295,6 +321,7 @@ try {
     }).catch(() => undefined);
     await owner.release();
   }
+  processErrorNet.uninstall();
 }
 
 // A start-up that failed on purpose has already reported and cleaned up, but it

@@ -127,7 +127,7 @@ export function readUsageDashboard(
   });
 }
 
-/** The dashboard attributes image jobs to their thread's Project; ceilings do not. */
+/** The dashboard and monetary ceilings attribute image jobs to their thread's Project. */
 const dashboardScope = { includeImageJobs: true } as const;
 
 function selectRows(
@@ -260,14 +260,16 @@ function resolveProjectId(
   const ownership: Record<string, string | undefined> = {
     "chat-thread": "SELECT project_id FROM chat_thread_projection WHERE thread_id = ?",
     "code-thread": "SELECT project_id FROM code_thread_projection WHERE thread_id = ?",
-    // A Work thread has no SQL projection; its required, immutable Project is
-    // recorded on the create event the in-memory projection hydrates from.
+    // A Work thread has no SQL projection; its latest Project is recorded on
+    // the most recent create or update event the in-memory projection hydrates from.
     "work-thread": `
       SELECT json_extract(payload_json, '$.thread.projectId') AS project_id
       FROM event_journal
       WHERE aggregate_type = 'work-thread'
         AND aggregate_id = ?
-        AND event_name = 'work.thread-created@1'`,
+        AND event_name IN ('work.thread-created@1', 'work.thread-updated@1')
+      ORDER BY aggregate_version DESC
+      LIMIT 1`,
   };
 
   const imageThread =

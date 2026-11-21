@@ -910,21 +910,6 @@ function foldersOverlap(left: string, right: string): boolean {
   return folderContainsPath(left, right) || folderContainsPath(right, left);
 }
 
-/**
- * The folders a bound Project grants, main folder first. Every question of
- * the form "is this path inside the Project?" asks it of this list: an extra
- * folder gets exactly the access the main folder gets at a thread's level.
- */
-export function projectFolderRoots(project: {
-  readonly binding: CanonicalProjectBinding;
-  readonly extraFolders?: ReadonlyArray<Pick<ProjectExtraFolder, "canonicalRoot">> | undefined;
-}): ReadonlyArray<string> {
-  return [
-    project.binding.canonicalRoot,
-    ...(project.extraFolders ?? []).map((folder) => folder.canonicalRoot),
-  ];
-}
-
 /** The extra folders alone, as the paths a launch or a driver is handed. */
 export function projectExtraFolderRoots(project: {
   readonly extraFolders?: ReadonlyArray<Pick<ProjectExtraFolder, "canonicalRoot">> | undefined;
@@ -946,14 +931,6 @@ export function projectExtraFoldersInstructions(
     ...extraFolders.map((folder) => `- ${folder}`),
     "You may read and change files in them exactly as in the main folder, naming them by absolute path. Commands, Git and checkouts start in the main folder; the extra folders are plain folders.",
   ].join("\n");
-}
-
-/** Whether a canonical absolute path lies in one of a Project's folders. */
-export function isPathInProjectFolders(
-  folders: ReadonlyArray<string>,
-  canonicalPath: string,
-): boolean {
-  return folders.some((folder) => folderContainsPath(folder, canonicalPath));
 }
 
 /**

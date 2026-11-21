@@ -17,6 +17,10 @@ import {
   type ExtensionClient,
 } from "@octant/client-runtime/extension-client";
 import { createChatClient, type ChatClient } from "@octant/client-runtime/chat-client";
+import {
+  createThreadImageResults,
+  type ThreadImageResults,
+} from "@octant/client-runtime/image-generation-client";
 import { createCanvasClient, type CanvasClient } from "@octant/client-runtime/canvas-client";
 import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
@@ -50,10 +54,18 @@ import {
   type WorkThreadClient,
 } from "@octant/client-runtime/work-thread-client";
 import {
+  createServerProjectsClient,
+  type ServerProjectsClient,
+} from "@octant/client-runtime/server-projects-client";
+import {
   createReplicaSyncStatusClient,
   type ReplicaSyncStatusClient,
 } from "@octant/client-runtime/replica-sync-status-client";
 import { createWorkTurnClient, type WorkTurnClient } from "@octant/client-runtime/work-turn-client";
+import {
+  createServiceOfferClient,
+  type ServiceOfferClient,
+} from "@octant/client-runtime/service-offer-client";
 import {
   createReplyDetailClient,
   type ReplyDetailClient,
@@ -66,6 +78,8 @@ import type { ProviderOAuthCommand } from "../providers/ProviderOAuthSignIn";
 
 export interface RemoteProductClients {
   readonly conversationInputs?: ConversationInputClient;
+  readonly serviceOffers?: ServiceOfferClient;
+  readonly imageResults?: ThreadImageResults;
   readonly chat: ChatClient;
   readonly canvas: CanvasClient;
   readonly code: CodeClient;
@@ -84,10 +98,12 @@ export interface RemoteProductClients {
    * a device its own person paired; the shell offers it to no other session.
    */
   readonly canvasImportHtml: NonNullable<CanvasClient["importHtml"]>;
-  /** The device's own shell in a local Project; the host refuses any other session. */
+  /** The device's own shell in a local or server Project; the host refuses any other session. */
   readonly projectTerminal: ProjectTerminalClient;
   /** The device's own Private page for a Project; a profile page stays at a window. */
   readonly projectBrowser: ProjectBrowserClient;
+  /** Server Projects catalog, setup checks, relayed previews, and cloud machines. */
+  readonly serverProjects?: ServerProjectsClient;
 }
 
 // The Work and Code clients refuse a non-loopback base URL because the window
@@ -177,6 +193,8 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
   const canvas = createCanvasClient(port);
   return {
     conversationInputs: createConversationInputClient(port),
+    serviceOffers: createServiceOfferClient(port),
+    imageResults: createThreadImageResults(port),
     chat: createChatClient(port),
     // Reading a Canvas never grants a paired browser the host's export,
     // credential, editing or share-management authority.
@@ -214,5 +232,6 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
       canvas.importHtml?.(request) ?? Promise.reject(new Error("Import is unavailable.")),
     projectTerminal: createProjectTerminalClient(port),
     projectBrowser: createProjectBrowserClient(port),
+    serverProjects: createServerProjectsClient(port),
   };
 }

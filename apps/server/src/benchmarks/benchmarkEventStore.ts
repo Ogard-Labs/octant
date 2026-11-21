@@ -13,7 +13,10 @@ import {
   BenchmarkRunPurged,
   BenchmarkRunStarted,
   BenchmarkSuiteDeleted,
-  BenchmarkSuiteSaved,
+  type BenchmarkSuiteSaved,
+  BenchmarkSuiteSavedV1,
+  BenchmarkSuiteSavedV2,
+  DEFAULT_BENCHMARK_PASS_THRESHOLD,
   CorrelationId,
   EventActor,
   EventId,
@@ -30,9 +33,29 @@ const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 
+const PersistedBenchmarkSuiteSavedV1 = Schema.transform(
+  BenchmarkSuiteSavedV1,
+  BenchmarkSuiteSavedV2,
+  {
+    strict: true,
+    decode: ({ suite }) => ({
+      suite: { ...suite, kind: "chat" as const, passThreshold: DEFAULT_BENCHMARK_PASS_THRESHOLD },
+    }),
+    encode: (
+      _encoded,
+      { suite: { kind: _kind, passThreshold: _threshold, projectId: _project, ...suite } },
+    ) => ({
+      suite,
+    }),
+  },
+);
+
 export function registerBenchmarkEvents(registry: EventRegistry): EventRegistry {
   return registry
-    .register(BENCHMARK_EVENT_NAMES.suiteSaved, 1, BenchmarkSuiteSaved)
+    .register(BENCHMARK_EVENT_NAMES.suiteSaved, 1, BenchmarkSuiteSavedV1, {
+      persistedSchema: PersistedBenchmarkSuiteSavedV1,
+    })
+    .register(BENCHMARK_EVENT_NAMES.suiteSaved, 2, BenchmarkSuiteSavedV2)
     .register(BENCHMARK_EVENT_NAMES.suiteDeleted, 1, BenchmarkSuiteDeleted)
     .register(BENCHMARK_EVENT_NAMES.runStarted, 1, BenchmarkRunStarted)
     .register(BENCHMARK_EVENT_NAMES.cellStarted, 1, BenchmarkCellStarted)
@@ -79,6 +102,7 @@ export class BenchmarkEventStore {
       BENCHMARK_EVENT_NAMES.suiteSaved,
       payload,
       actor,
+      2,
     );
   }
 
@@ -139,6 +163,7 @@ export class BenchmarkEventStore {
     eventName: string,
     payload: unknown,
     actor: typeof EventActor.Type = this.#actor,
+    eventVersion = 1,
   ): void {
     const { journal, connection, uuid, clock } = this.#options;
     journal.append({
@@ -150,7 +175,7 @@ export class BenchmarkEventStore {
         {
           eventId: decodeEventId(uuid()),
           eventName,
-          eventVersion: 1,
+          eventVersion,
           correlationId: decodeCorrelationId(uuid()),
           actor,
           occurredAt: clock(),

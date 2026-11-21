@@ -3957,6 +3957,8 @@ function providerTurnFixture(
       | "evidence"
       | "pullRequests"
       | "pullRequestLinks"
+      | "recordReviewContent"
+      | "resolvePullRequestLineNotesAuthorship"
     >
   > & {
     readonly thread?: CodeThread;
@@ -3976,7 +3978,20 @@ function providerTurnFixture(
   } = options;
   const activeThread = threadOverride ?? thread();
   const turns = {
-    start: vi.fn<CodeOperationServiceOptions["turns"]["start"]>(async () => ({ state: "running" })),
+    start: vi.fn<CodeOperationServiceOptions["turns"]["start"]>(async (input) => {
+      if (input.recordOutsideContent !== undefined && !input.recordOutsideContent()) {
+        return {
+          state: "failed",
+          admission: "refused",
+          failure: {
+            category: "unavailable",
+            message:
+              "Could not record outside-content provenance for pull-request line notes. Nothing was sent.",
+          },
+        };
+      }
+      return { state: "running" };
+    }),
     answerInput: vi.fn(),
     answerApproval: vi.fn(),
     cancel: vi.fn(),
@@ -5569,4 +5584,145 @@ it("revalidates a returned Side Chat reference at the Code turn boundary and ref
     }),
   ).toMatchObject({ kind: "operation-failed", failure: { category: "unavailable" } });
   expect(valid.turns.start).toHaveBeenCalledTimes(1);
+});
+
+describe("pull request line notes outside-content marking", () => {
+  const pullRequestLineNotesSource = {
+    repositoryOwner: "octant",
+    repositoryName: "octant",
+    number: 12,
+  } as const;
+  const recordedOutsideContent = {
+    kind: "recorded" as const,
+    taint: { externalContentIngested: true, ingestedSources: ["pull-request-line-notes"] },
+  };
+
+  it("notes on another author's pull request are sent marked as outside content", async () => {
+    const order: string[] = [];
+    const recordReviewContent = vi.fn(() => {
+      order.push("mark");
+      return recordedOutsideContent;
+    });
+    const fixture = providerTurnFixture({
+      recordReviewContent,
+      resolvePullRequestLineNotesAuthorship: async () => ({
+        pullRequestAuthor: "outside-contributor",
+        viewerLogin: "octocat",
+      }),
+    });
+    fixture.turns.start.mockImplementation(async (input) => {
+      if (input.recordOutsideContent !== undefined && !input.recordOutsideContent()) {
+        return { state: "failed", admission: "refused" };
+      }
+      order.push("start");
+      return { state: "running" };
+    });
+
+    const result = await fixture.service.execute(ids.window, {
+      ...startProviderTurn,
+      pullRequestLineNotesSource,
+    });
+
+    expect(result).toMatchObject({ kind: "provider-turn-state", state: "running" });
+    expect(recordReviewContent).toHaveBeenCalledTimes(1);
+    expect(recordReviewContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: ids.thread,
+        provenance: { origin: "external-content", sourceLabel: "pull-request-line-notes" },
+        correlationId: startProviderTurn.operationId,
+        authorized: true,
+      }),
+    );
+    expect(order).toEqual(["mark", "start"]);
+  });
+
+  it("notes on the person's own pull request are sent as plain person text", async () => {
+    const recordReviewContent = vi.fn(() => recordedOutsideContent);
+    const fixture = providerTurnFixture({
+      recordReviewContent,
+      resolvePullRequestLineNotesAuthorship: async () => ({
+        pullRequestAuthor: "OctoCat",
+        viewerLogin: "octocat",
+      }),
+    });
+
+    const result = await fixture.service.execute(ids.window, {
+      ...startProviderTurn,
+      pullRequestLineNotesSource,
+    });
+
+    expect(result).toMatchObject({ kind: "provider-turn-state", state: "running" });
+    expect(recordReviewContent).not.toHaveBeenCalled();
+    expect(fixture.turns.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("notes when pull request authorship or signed-in user cannot be read are sent marked as outside content", async () => {
+    const missingAuthorRecord = vi.fn(() => recordedOutsideContent);
+    const missingAuthor = providerTurnFixture({
+      recordReviewContent: missingAuthorRecord,
+      resolvePullRequestLineNotesAuthorship: async () => ({
+        pullRequestAuthor: undefined,
+        viewerLogin: "octocat",
+      }),
+    });
+    expect(
+      await missingAuthor.service.execute(ids.window, {
+        ...startProviderTurn,
+        pullRequestLineNotesSource,
+      }),
+    ).toMatchObject({ kind: "provider-turn-state", state: "running" });
+    expect(missingAuthorRecord).toHaveBeenCalledTimes(1);
+
+    const missingViewerRecord = vi.fn(() => recordedOutsideContent);
+    const missingViewer = providerTurnFixture({
+      recordReviewContent: missingViewerRecord,
+      resolvePullRequestLineNotesAuthorship: async () => ({
+        pullRequestAuthor: "octocat",
+        viewerLogin: undefined,
+      }),
+    });
+    expect(
+      await missingViewer.service.execute(ids.window, {
+        ...startProviderTurn,
+        operationId: decodeCodeOperationId("4a4a4a4a-4a4a-4a4a-8a4a-4a4a4a4a4a4a"),
+        pullRequestLineNotesSource,
+      }),
+    ).toMatchObject({ kind: "provider-turn-state", state: "running" });
+    expect(missingViewerRecord).toHaveBeenCalledTimes(1);
+
+    const refusedMark = providerTurnFixture({
+      recordReviewContent: () => ({ kind: "refused" as const, reason: "unauthorized" }),
+      resolvePullRequestLineNotesAuthorship: async () => ({
+        pullRequestAuthor: "outside-contributor",
+        viewerLogin: "octocat",
+      }),
+    });
+    expect(
+      await refusedMark.service.execute(ids.window, {
+        ...startProviderTurn,
+        operationId: decodeCodeOperationId("4b4b4b4b-4b4b-4b4b-8b4b-4b4b4b4b4b4b"),
+        pullRequestLineNotesSource,
+      }),
+    ).toMatchObject({ kind: "provider-turn-state", state: "failed" });
+
+    // A start refused by the turn runtime (such as a busy thread) must not
+    // permanently taint the thread.
+    const busyRecord = vi.fn(() => recordedOutsideContent);
+    const busy = providerTurnFixture({
+      recordReviewContent: busyRecord,
+      resolvePullRequestLineNotesAuthorship: async () => ({
+        pullRequestAuthor: "outside-contributor",
+        viewerLogin: "octocat",
+      }),
+    });
+    busy.turns.start.mockResolvedValueOnce({ state: "failed" });
+    expect(
+      await busy.service.execute(ids.window, {
+        ...startProviderTurn,
+        operationId: decodeCodeOperationId("4c4c4c4c-4c4c-4c4c-8c4c-4c4c4c4c4c4c"),
+        pullRequestLineNotesSource,
+      }),
+    ).toMatchObject({ kind: "provider-turn-state", state: "failed" });
+    expect(busyRecord).not.toHaveBeenCalled();
+  });
 });

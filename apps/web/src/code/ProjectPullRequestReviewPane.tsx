@@ -35,6 +35,8 @@ import {
   safeGithubUrl,
 } from "./ProjectPullRequestSupport";
 import { ProjectPullRequestPage } from "./ProjectPullRequestPage";
+import { PullRequestDiffWithNotes } from "./ProjectPullRequestDiff";
+import type { CodeLineNotesSendResult } from "./CodeLineNotes";
 import {
   ProjectPullRequestActions,
   type ProjectPullRequestPersonAction,
@@ -71,6 +73,10 @@ export interface ProjectPullRequestReviewPaneProps {
     enabled: boolean,
     threadId: CodeThreadId,
   ) => Promise<CodeProjectPullRequestSwitchOutcome | OwnerUnlockNotGiven>;
+  readonly onSendLineNotes?: (
+    threadId: CodeThreadId,
+    message: string,
+  ) => Promise<CodeLineNotesSendResult>;
   readonly pullRequestReviewClient?: PullRequestReviewClient;
   readonly pullRequestTarget?: PullRequestReviewTarget;
   /**
@@ -482,18 +488,15 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
           <h2>Diff</h2>
           {stale("diff") ? <StaleTag section="diff" /> : null}
         </header>
-        {detail.diffTruncated ? (
-          <p className="code-pr-review__notice" role="note">
-            This diff is truncated and is not complete.
-          </p>
-        ) : null}
-        {detail.diff.length === 0 ? (
-          <p role="status">No diff observed.</p>
-        ) : (
-          <div className="code-pr-review__diff">
-            <CodeBlock code={detail.diff} language="diff" />
-          </div>
-        )}
+        <PullRequestDiffWithNotes
+          diff={detail.diff}
+          diffTruncated={detail.diffTruncated}
+          linkedThreads={props.linkedThreads}
+          noticeClassName="code-pr-review__notice"
+          {...(props.onSendLineNotes === undefined
+            ? {}
+            : { onSendLineNotes: props.onSendLineNotes })}
+        />
       </section>
 
       <PullRequestConversation

@@ -143,14 +143,14 @@ function seenFromWindowOn(windowPlatform: string) {
 }
 
 describe("ProviderCatalogView", () => {
-  it("lists all 22 bundled drivers as installed and trusted, split into runtimes and endpoints", () => {
+  it("lists all 23 bundled drivers as installed and trusted, split into runtimes and endpoints", () => {
     render(<ProviderCatalogView {...props()} />);
     const runtimes = screen.getByRole("list", { name: "Agent runtimes" });
     const endpoints = screen.getByRole("list", { name: "Model endpoints" });
-    expect(within(runtimes).getAllByRole("listitem")).toHaveLength(17);
+    expect(within(runtimes).getAllByRole("listitem")).toHaveLength(18);
     expect(within(endpoints).getAllByRole("listitem")).toHaveLength(5);
     expect(screen.getByRole("status", { name: "Provider catalog summary" }).textContent).toBe(
-      "22 drivers · 0 ready · 0 need you",
+      "23 drivers · 0 ready · 0 need you",
     );
     expect(screen.getByText(/each is already installed and trusted/)).toBeDefined();
   });
@@ -482,7 +482,7 @@ describe("ProviderCatalogView outside drivers", () => {
     expect(row.textContent).toContain("Model endpoint · Outside driver");
     expect(row.textContent).not.toContain("Bundled");
     expect(screen.getByRole("status", { name: "Provider catalog summary" }).textContent).toBe(
-      "23 drivers · 0 ready · 0 need you",
+      "24 drivers · 0 ready · 0 need you",
     );
     expect(screen.getByText(/Outside drivers are listed once you have trusted/)).toBeDefined();
   });

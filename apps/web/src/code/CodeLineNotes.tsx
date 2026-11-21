@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -34,11 +34,16 @@ export function lineNoteExcerpt(text: string): string {
   return line.length <= EXCERPT_LIMIT ? line : `${line.slice(0, EXCERPT_LIMIT - 1)}…`;
 }
 
+function singleLineNotePath(path: string): string {
+  return path.replace(/\r/g, "\\r").replace(/\n/g, "\\n");
+}
+
 function lineNoteAnchorLabel(note: Pick<CodeLineNote, "path" | "side" | "startLine" | "endLine">) {
   const side = note.side === "modified" ? "new" : "old";
+  const path = singleLineNotePath(note.path);
   return note.endLine > note.startLine
-    ? `${note.path}, ${side} lines ${note.startLine}–${note.endLine}`
-    : `${note.path}, ${side} line ${note.startLine}`;
+    ? `${path}, ${side} lines ${note.startLine}–${note.endLine}`
+    : `${path}, ${side} line ${note.startLine}`;
 }
 
 /**
@@ -77,6 +82,8 @@ export function CodeLineNotes(props: {
   readonly onSend?: (message: string) => Promise<CodeLineNotesSendResult>;
   /** Why sending is not possible right now; the notes stay either way. */
   readonly sendUnavailable?: string;
+  /** Optional compact control rendered directly under the Send notes button. */
+  readonly sendFooter?: ReactNode;
 }) {
   const [notes, setNotes] = useState<ReadonlyArray<CodeLineNote>>([]);
   const [draft, setDraft] = useState<Draft>();
@@ -278,6 +285,7 @@ export function CodeLineNotes(props: {
           >
             {sending ? "Sending…" : pendingLabel}
           </OctantButton>
+          {props.sendFooter === undefined ? null : props.sendFooter}
           {sendHeld === undefined ? null : (
             <p className="code-line-notes__hint" role="status">
               {sendHeld}

@@ -190,7 +190,9 @@ halves instead ("waited 4m · ran 2s"): the wait is the journaled ask-to-answer
 span of the approval that gated that call alone, never time a neighbouring
 call waited. Chat and Work calls carry the same recorded bounds as Code's; a
 call the host ran itself is timed from its own start and finish, and a settle
-that no person made (an automated review, an expiry) is never wait time. A
+that no person made (an automated review, an expiry) is never wait time. An
+answer the agent refused and Code put back (an allow it cannot take as asked)
+does not end the wait; it runs on to the person's next answer. A
 call still running, and any call whose bounds are missing or cannot be
 trusted, shows no time rather than an invented one. The preview is drawn, not read: the detail under the row
 stays the one place the summary's words are, and clicking the row opens it as

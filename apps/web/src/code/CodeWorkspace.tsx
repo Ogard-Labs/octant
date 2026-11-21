@@ -1,3 +1,4 @@
+import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { checkoutUnreadableReason } from "./checkoutUnreadableReason";
 import { filesCloseTabScope } from "./filesCloseGuard";
@@ -175,6 +176,7 @@ export interface CodeWorkspaceProps {
   readonly tab: CodeTab;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  readonly serviceOfferClient?: ServiceOfferClient;
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly browserAutomationClient?: BrowserAutomationClient;
   readonly onOpenSettings?: () => void;
@@ -287,6 +289,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.imageGenerationClient === undefined
           ? {}
           : { imageGenerationClient: props.imageGenerationClient })}
+        {...(props.serviceOfferClient === undefined
+          ? {}
+          : { serviceOfferClient: props.serviceOfferClient })}
         {...(props.imageGenerationProfiles === undefined
           ? {}
           : { imageGenerationProfiles: props.imageGenerationProfiles })}

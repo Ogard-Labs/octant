@@ -1,6 +1,7 @@
 import { probeLocalHost, type LocalHostProbe } from "./localHostProbe";
 export { probeLocalHost, type LocalHostProbe } from "./localHostProbe";
 import { createServer, type AddressInfo } from "node:net";
+import type { Readable, Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import { watch, type FSWatcher } from "node:fs";
 import { basename, dirname } from "node:path";
@@ -282,6 +283,53 @@ export function createStderrTail(): StderrTail {
         .slice(-STDERR_TAIL_MAX_CHARS);
     },
   };
+}
+
+/**
+ * Forwards a managed child's stderr to the parent's stderr while copying every
+ * chunk into a bounded crash tail. While `destination` is healthy, `pipe()`
+ * honours backpressure. If `destination` closes or emits an error (such as
+ * EPIPE when a launching terminal or log reader exits, which the process error
+ * net absorbs on `process.stderr`), Node's `pipe()` unpipes and pauses
+ * `source`; resuming `source` switches to tail-only mode so later crash output
+ * still reaches `tail` and the child's stderr pipe cannot fill and stall.
+ */
+export function forwardStderrWithTail(
+  source: Readable,
+  destination: Writable,
+  tail: StderrTail,
+): void {
+  let detached = false;
+  const detachForwarding = () => {
+    if (detached) return;
+    detached = true;
+    destination.off("error", detachForwarding);
+    destination.off("close", detachForwarding);
+    source.unpipe(destination);
+    if (!source.destroyed && !source.readableEnded) {
+      source.resume();
+    }
+  };
+  const cleanup = () => {
+    destination.off("error", detachForwarding);
+    destination.off("close", detachForwarding);
+    tail.end();
+  };
+
+  source.on("data", (chunk: Buffer | string) => tail.append(chunk));
+  source.once("end", cleanup);
+  source.once("close", cleanup);
+  source.on("error", cleanup);
+  if (destination.destroyed || destination.writableEnded) {
+    detached = true;
+    source.resume();
+    return;
+  }
+  // Attach after `pipe()` so we run after Node's own `pipe()` error/unpipe
+  // handler pauses `source` and immediately resume it in tail-only mode.
+  source.pipe(destination, { end: false });
+  destination.on("error", detachForwarding);
+  destination.on("close", detachForwarding);
 }
 
 /** The managed child ended before it answered, so waiting longer cannot help. */

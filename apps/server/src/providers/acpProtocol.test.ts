@@ -163,6 +163,8 @@ describe("ACP protocol boundary", () => {
               name: "Model",
               type: "select",
             },
+            // A toggle Octant never sets is left out instead of failing the reply.
+            { type: "boolean", id: "web_search", name: "Web search", currentValue: true },
           ],
           models: {
             availableModels: [
@@ -619,6 +621,62 @@ describe("ACP protocol boundary", () => {
     } finally {
       clearTimeout(reply);
       await client.close();
+    }
+  });
+
+  it("keeps a turn that goes on streaming past its budget, and stands still while the agent waits on an answer", async () => {
+    vi.useFakeTimers();
+    try {
+      const { client, stdout } = transport({
+        limits: { requestTimeoutMs: 30, turnTimeoutMs: 100 },
+      });
+      let settled = false;
+      const observed = client.prompt("session-1", "a long task").finally(() => {
+        settled = true;
+      });
+      const chunk = () =>
+        stdout.write(
+          `${JSON.stringify({
+            jsonrpc: "2.0",
+            method: "session/update",
+            params: {
+              sessionId: "session-1",
+              update: {
+                sessionUpdate: "agent_message_chunk",
+                content: { type: "text", text: "." },
+              },
+            },
+          })}\n`,
+        );
+      for (let step = 0; step < 5; step += 1) {
+        await vi.advanceTimersByTimeAsync(80);
+        chunk();
+      }
+      // Four hundred milliseconds in, well past the budget, the turn is alive.
+      await vi.advanceTimersByTimeAsync(80);
+      expect(settled).toBe(false);
+      stdout.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: "ask-1",
+          method: "session/request_permission",
+          params: {
+            sessionId: "session-1",
+            toolCall: { toolCallId: "t" },
+            options: [{ optionId: "a", name: "Allow", kind: "allow_once" }],
+          },
+        })}\n`,
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(settled).toBe(false);
+      await client.respondPermission("ask-1", "a");
+      stdout.write(
+        `${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { stopReason: "end_turn" } })}\n`,
+      );
+      await expect(observed).resolves.toMatchObject({ stopReason: "end_turn" });
+      await client.close();
+    } finally {
+      vi.useRealTimers();
     }
   });
 

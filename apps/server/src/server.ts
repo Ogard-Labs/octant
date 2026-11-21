@@ -275,6 +275,7 @@ export function startOctantServer(
       extensionToolApprovalService,
       isPairedDeviceScope,
       isRestrictedDeviceScope,
+      isPersonPairedDeviceCurrent,
       liveTurns,
       machineChangeFeed,
       onAgentRunExecutionAccepted,
@@ -295,6 +296,7 @@ export function startOctantServer(
       processAuthorityTime,
       routineProposalService,
       imageGenerationOffers,
+      serviceOffers,
       simulatorInputGrants,
       unsubscribeMachineChanges,
       unsubscribeThreadArchivals,
@@ -587,6 +589,7 @@ export function startOctantServer(
       providerOAuthRoutes,
       providerRoutes,
       providerService,
+      providerFolderDiscoveryPorts,
       providerUsageLimitsRoutes,
       providerUsageLimitsService,
       refreshStandaloneSkills,
@@ -622,6 +625,7 @@ export function startOctantServer(
       persistence,
       processAuthorityNow,
       processAuthorityTime,
+      spendCeilingService,
       version,
       windowAuthorityStore,
       workThreadProjection,
@@ -664,6 +668,7 @@ export function startOctantServer(
       resolveThreadStrict,
       providerAvailabilityMarks,
       isProjectPolicyTargetAllowed,
+      isPersonPairedDeviceCurrent,
       toolEffectLedger,
       hostResourceBudget,
       serverAttachmentCleanup,
@@ -752,12 +757,14 @@ export function startOctantServer(
       codeBoardEventStore,
       codeEvidence,
       isProjectPolicyTargetAllowed,
+      resolveHostStrict,
       selectCodeConversation,
       managedCodeThreadCreation,
       managedWorktreeRefsList,
       managedWorktreeService,
       managedWorktreeSourcePreview,
       probeProviderForThreads,
+      providerFolderDiscoveryPorts,
       refreshStandaloneSkills,
       onGithubPullRequestsUnreadable,
       onWindowRevoked,
@@ -795,6 +802,7 @@ export function startOctantServer(
       replicaArtifactSync,
       resolveCanvasWorkspace,
       snapshotCanvas,
+      threadProjectAssetRoot,
     } = wireCanvas({
       claudePublishes: makeClaudeLibraryPublishes({
         workThreads: () =>
@@ -875,6 +883,9 @@ export function startOctantServer(
       browserProfileService,
       browserToolApprovalService,
       liveProjectBrowsers,
+      pairedBrowserControlService,
+      resolvePairedDeviceName,
+      isPairedDeviceSessionCurrent,
       productFeedbackRoutes,
       nativeBrowserPresentationRoutes,
       productFeedbackService,
@@ -893,6 +904,7 @@ export function startOctantServer(
       onThreadArchived,
       onWaitingAsk,
       onWindowRevoked,
+      isRestrictedDeviceScope,
       browserCaptures,
       codeEvidence,
       externalContentIngestionStore,
@@ -986,8 +998,10 @@ export function startOctantServer(
       buildCodeService,
       appleToolchainService,
       browserAuthority,
+      browserCaptures,
       canAccessCodeProject,
       canvasAgentToolPort,
+      threadProjectAssetRoot,
       codeActiveTurns,
       codeApprovalStore,
       codeAttachments,
@@ -1092,6 +1106,8 @@ export function startOctantServer(
       onWindowRevoked,
       isPairedDeviceScope,
       isRestrictedDeviceScope,
+      isPersonPairedDeviceCurrent,
+      serverPreviewTunnels,
       desktopLeases,
       installDesktopPreviewRequest,
       workThreadProjection,
@@ -1404,6 +1420,9 @@ export function startOctantServer(
       contextHarness,
       hostShield,
       liveProjectBrowsers,
+      pairedBrowserControlService,
+      resolvePairedDeviceName,
+      isPairedDeviceSessionCurrent,
       nativeHarnessHooks,
       observeTurnEnded,
       persistence,
@@ -1422,6 +1441,7 @@ export function startOctantServer(
     });
     const {
       imageRoutes,
+      serviceOfferRoutes,
       previewHandoffBridgeRoutes,
       previewRoutes,
       speechRoutes,
@@ -1432,7 +1452,7 @@ export function startOctantServer(
       workResearchRoutes,
     } = wireWorkFiles({
       credentialResolver,
-      imageGenerationOffers,
+      serviceOffers,
       keptImageChoices,
       imageJobService,
       options,
@@ -1440,6 +1460,7 @@ export function startOctantServer(
       projectService,
       providerDataDirectory,
       routeCodeService,
+      roots,
       serverConnection,
       serverProjectStore,
       shellService,
@@ -1554,7 +1575,8 @@ export function startOctantServer(
       agentRunInteractions,
       browserToolApprovalService,
       extensionToolApprovalService,
-      imageGenerationOffers,
+      serviceOffers,
+      windowCanOpenThread,
       projectMemoryAccess,
       routineProposalService,
       decisionReviewModelPort,
@@ -1881,6 +1903,7 @@ export function startOctantServer(
       windowAuthorityStore,
       spendCeilingService,
       configuredDriverOptions,
+      isPersonPairedDeviceCurrent,
       ...(options.allowedRendererHttpOrigin === undefined
         ? {}
         : { allowedRendererHttpOrigin: options.allowedRendererHttpOrigin }),
@@ -1934,6 +1957,7 @@ export function startOctantServer(
       goalLoopRoutes,
       goalRoutes,
       imageRoutes,
+      serviceOfferRoutes,
       integrationRoutes,
       latencyStats,
       launchSessionRoutes,
@@ -2007,7 +2031,6 @@ export function startOctantServer(
       zenRoutes,
     });
     const {
-      ownerBrowserControlService,
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
@@ -2150,8 +2173,6 @@ export function startOctantServer(
           nextDueAt: definition.nextDueAt,
         })),
     });
-
-    yield* Effect.addFinalizer(() => Effect.promise(() => ownerBrowserControlService.close()));
     let remoteListenerError: PrivateListenerFailureCode | undefined;
     // Retained so shutdown can settle warming before the runtime registry
     // closes: an acquisition that lands after `closeAll()` would leave a warm
@@ -2479,7 +2500,7 @@ export function startOctantServer(
             shutdownFailure ??= error;
           }
           browserToolApprovalService?.close();
-          imageGenerationOffers.close();
+          serviceOffers.close();
           try {
             stopComputerSettingsWatch();
             stopDesktopLeases();

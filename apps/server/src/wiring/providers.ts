@@ -31,12 +31,14 @@ import {
 } from "../providers/accountSessionCarry";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
+  decodeChatThreadId,
   decodeCodeCheckoutId,
   decodeCodeRepositoryId,
   decodeCodeThreadId,
   decodeCodeWorktreeRef,
   decodeCodeWorktreeSourcePreview,
   decodeWindowId,
+  decodeWorkThreadId,
   type DiscoveryCandidate,
   type EventActor,
   LOCAL_HOST_ID,
@@ -55,10 +57,12 @@ import {
 import type { McpPlanServerProvider } from "@octant/contracts/mcp-plan-read-only";
 import type { BlockableToolProvider } from "@octant/contracts/blocked-tools";
 import { ExtensionProviderFamily } from "@octant/contracts/extensions";
-import type {
-  HarnessEndpointDriver,
-  ProviderDriver,
-  ProviderLocalUsageHistorySource,
+import {
+  collectProviderProjectFolderDiscoveryPorts,
+  type HarnessEndpointDriver,
+  type ProviderDriver,
+  type ProviderLocalUsageHistorySource,
+  type ProviderProjectFolderDiscoveryPort,
 } from "@octant/provider-sdk";
 import { Effect, Schema } from "effect";
 import { admittedBundledProviderDriverKinds } from "@octant/plugin-host";
@@ -191,6 +195,7 @@ import {
   createLocalUsageHistorySourceForDriver,
   localUsageHistorySourceKey,
 } from "../providers/providerUsageHistorySources";
+import { BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS } from "../providers/providerFolderDiscoveryAdapters";
 import { createExtensionRouteHandler } from "../extensionRoutes";
 import { createProviderToolingRouteHandler } from "../providerToolingRoutes";
 import { createMcpPlanReadOnlyRouteHandler } from "../mcpPlanReadOnlyRoutes";
@@ -280,6 +285,7 @@ import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
 import type { WorkRequestStateWiring } from "./workRequestState";
+import type { WorkspaceWiring } from "./workspace";
 import { protectedAtLevel, secretGuardEntries } from "../process/secretGuard";
 import type { OpenCodeProtectedPaths } from "../providers/openCodeDriver";
 
@@ -739,6 +745,7 @@ export type ProvidersDependencies = Pick<
   Pick<IntegrationsWiring, "githubExtensionSnapshot" | "providerRuntimeNetwork"> &
   Pick<ComputerUseWiring, "computerUseProcess"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
+  Pick<WorkspaceWiring, "spendCeilingService"> &
   Pick<
     FoundationsWiring,
     "providerRuntimeRegistry" | "workThreadProjection" | "resolveThreadStrict" | "resolveHostStrict"
@@ -765,6 +772,7 @@ export function wireProviders(deps: ProvidersDependencies) {
     providerRuntimeRegistry,
     serverProjectStore,
     serverRegistry,
+    spendCeilingService,
     version,
     windowAuthorityStore,
     workThreadProjection,
@@ -1479,18 +1487,28 @@ export function wireProviders(deps: ProvidersDependencies) {
           signInOrUnavailable(extensionId, componentId, (signIn) =>
             signIn.configureForServer(extensionId, componentId, registration, principalKind),
           ),
-        status: (extensionId, componentId, principalKind) =>
+        status: (extensionId, componentId, principalKind, device) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
-            signIn.status(extensionId, componentId, principalKind),
+            signIn.status(extensionId, componentId, principalKind, device),
           ),
-        begin: (extensionId, componentId, principalKind, actor) =>
+        begin: (extensionId, componentId, principalKind, actor, device) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
-            signIn.begin(extensionId, componentId, principalKind, actor),
+            signIn.begin(extensionId, componentId, principalKind, actor, device),
           ),
-        poll: (extensionId, componentId, attemptId, principalKind) =>
+        poll: (extensionId, componentId, attemptId, principalKind, device) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
-            signIn.poll(extensionId, componentId, attemptId, principalKind),
+            signIn.poll(extensionId, componentId, attemptId, principalKind, device),
           ),
+        relay: async (input) => {
+          if (mcpServerSignInHolder.current === undefined) {
+            return {
+              kind: "refused",
+              reason: "unavailable",
+              message: "Signing in needs the credential broker.",
+            };
+          }
+          return mcpServerSignInHolder.current.relay(input);
+        },
         signOut: (extensionId, componentId, principalKind, actor) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
             signIn.signOut(extensionId, componentId, principalKind, actor),
@@ -2462,6 +2480,24 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
       clock: () => new Date().toISOString(),
     });
+    const providerFolderDiscoveryPorts = (): ReadonlyArray<ProviderProjectFolderDiscoveryPort> => {
+      const contributed: ProviderProjectFolderDiscoveryPort[] = [
+        ...BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
+      ];
+      for (const instance of persistence.readProviderInstances()) {
+        if (!instance.enabled) continue;
+        let driver: ProviderDriver;
+        try {
+          driver = makeConfiguredProviderDriver(instance, configuredDriverOptions);
+        } catch {
+          continue;
+        }
+        if (driver.projectFolderDiscovery !== undefined) {
+          contributed.push(driver.projectFolderDiscovery);
+        }
+      }
+      return collectProviderProjectFolderDiscoveryPorts(contributed);
+    };
     // The last reading of each instance, so the usage rings have something
     // to show before the first turn of a new run reports. Loading it asks no
     // provider anything.
@@ -2584,6 +2620,19 @@ export function wireProviders(deps: ProvidersDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      spendCeiling: spendCeilingService,
+      resolveThreadProjectId: ({ threadType, threadId }) => {
+        if (threadType === "chat-thread") {
+          const projectId = persistence.readChatThread(decodeChatThreadId(threadId))?.projectId;
+          return projectId === undefined ? undefined : String(projectId);
+        }
+        if (threadType === "code-thread") {
+          const projectId = persistence.readCodeThread(decodeCodeThreadId(threadId))?.projectId;
+          return projectId === undefined ? undefined : String(projectId);
+        }
+        const projectId = workThreadProjection.read(decodeWorkThreadId(threadId))?.projectId;
+        return projectId === undefined ? undefined : String(projectId);
+      },
     });
     yield* Effect.promise(() => imageJobService.reconcileInterruptedJobs());
     return {
@@ -2631,6 +2680,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       probeProviderForThreads,
       verifyModelToolsOnFirstUse,
       providerDataDirectory,
+      providerFolderDiscoveryPorts,
       providerOAuthRoutes,
       providerRoutes,
       providerService,

@@ -79,6 +79,41 @@ describe("Gemini image adapter", () => {
     expect(JSON.stringify(result)).not.toContain(SECRET);
   });
 
+  it("reports the prompt tokens as input and the image and thinking tokens as output", async () => {
+    const fetch = vi.fn(async () =>
+      Response.json({
+        candidates: [
+          {
+            content: { parts: [{ inlineData: { mimeType: "image/png", data: pngB64 } }] },
+            finishReason: "STOP",
+          },
+        ],
+        usageMetadata: {
+          promptTokenCount: 12,
+          candidatesTokenCount: 1290,
+          thoughtsTokenCount: 40,
+          totalTokenCount: 1342,
+        },
+      }),
+    );
+
+    const result = await adapter(fetch).generate({ instanceId, modelId, prompt: "a fox" });
+    expect(result).toMatchObject({
+      status: "completed",
+      usage: { inputTokens: 12, outputTokens: 1330 },
+    });
+  });
+
+  it("reports no usage when the response carries no token counts", async () => {
+    const result = await adapter(vi.fn(async () => inlineResponse(pngB64))).generate({
+      instanceId,
+      modelId,
+      prompt: "a fox",
+    });
+    expect(result.status).toBe("completed");
+    expect(result).not.toHaveProperty("usage");
+  });
+
   it("asks for the requested variant count and rejects extra inline images before completion", async () => {
     const fetch = vi.fn(async (_url, init) => {
       const body = JSON.parse(String(init?.body)) as {

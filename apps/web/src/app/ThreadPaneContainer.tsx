@@ -16,7 +16,11 @@ import type {
   CreateHostViewScope,
   listEligibleImageProfiles,
 } from "@octant/domain";
-import { CoordinatorWorkersToggle, WorkerOfStrip } from "../code/CoordinatorWorkersPanel";
+import {
+  CoordinatorDoneWhenButton,
+  CoordinatorWorkersToggle,
+  WorkerOfStrip,
+} from "../code/CoordinatorWorkersPanel";
 import { threadRowActivity } from "../shell/navigationModel";
 import { memo, useMemo, type ReactNode, type RefObject } from "react";
 import type { useAgentProfiles } from "../agentProfile/useAgentProfiles";
@@ -472,14 +476,25 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     if (row === undefined) return undefined;
     if (row.coordinator === true) {
       const workers = rows.filter((thread) => thread.coordinatorThreadId === row.threadId);
+      const thread = codeController.bootstrap?.threads.find(
+        (candidate) => String(candidate.id) === String(row.threadId),
+      );
       return (
-        <CoordinatorWorkersToggle
-          coordinatorThreadId={row.threadId}
-          needsYouCount={
-            workers.filter((thread) => threadRowActivity(thread) === "attention").length
-          }
-          workerCount={workers.length}
-        />
+        <span className="coordinator-header-controls">
+          {thread?.coordinator === true ? (
+            <CoordinatorDoneWhenButton
+              count={thread.coordinatorDoneWhen?.items.length ?? 0}
+              onClick={() => actions.editCodeThreadCoordinatorBounds(thread.id)}
+            />
+          ) : null}
+          <CoordinatorWorkersToggle
+            coordinatorThreadId={row.threadId}
+            needsYouCount={
+              workers.filter((candidate) => threadRowActivity(candidate) === "attention").length
+            }
+            workerCount={workers.length}
+          />
+        </span>
       );
     }
     const coordinator =
@@ -517,6 +532,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     goalClient,
     goalLoopClient,
     imageGenerationClient,
+    serviceOfferClient,
     nativeHarnessClient,
     planClient,
     previewClient,
@@ -913,6 +929,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   previewClient={previewClient}
                   canvasClient={canvasClient}
                   imageGenerationClient={imageGenerationClient}
+                  serviceOfferClient={serviceOfferClient}
                   {...(imageGenerationProfiles === undefined ? {} : { imageGenerationProfiles })}
                   onOpenCanvasInSidebar={openCanvasInSidebar}
                   onOpenCanvasReference={(card) =>

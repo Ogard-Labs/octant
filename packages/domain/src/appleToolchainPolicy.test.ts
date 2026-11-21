@@ -3,12 +3,7 @@ import * as ApplePolicy from "./appleToolchainPolicy";
 import {
   evaluateAppleBuildRequest,
   evaluateAppleSimulatorRequest,
-  canUseSimulator,
-  isSimulatorReady,
-  canRecordAppleBuildEvidence,
-  requiresSimulatorForAction,
   isCoreAppleCapability,
-  isToolchainAvailable,
   isAppleSimulatorInputKind,
   isAppleSimulatorOpenInputKind,
   appleActionOpensInputGrant,
@@ -17,7 +12,6 @@ import {
   DEVICE_LOG_BUDGET,
 } from "./appleToolchainPolicy";
 import type {
-  AppleBuildEvidence,
   AppleBuildRequest,
   AppleSimulatorRecord,
   AppleToolchainDiscovery,
@@ -201,90 +195,6 @@ describe("evaluateAppleBuildRequest", () => {
         [simulator],
       ),
     ).toMatchObject({ kind: "denied", reason: "invalid-destination" });
-  });
-});
-
-describe("canUseSimulator", () => {
-  const sim: AppleSimulatorRecord = {
-    simulatorId: "00000000-0000-4000-8000-000000000010" as any,
-    name: "iPhone 16",
-    platform: "ios",
-    runtimeVersion: "18.0",
-    state: "booted",
-    udid: "ABCD-1234",
-  };
-
-  it("returns true for matching platform", () => {
-    expect(canUseSimulator(sim, "ios")).toBe(true);
-  });
-
-  it("returns false for wrong platform", () => {
-    expect(canUseSimulator(sim, "macos")).toBe(false);
-  });
-
-  it("returns false for unavailable simulator", () => {
-    expect(canUseSimulator({ ...sim, state: "unavailable" }, "ios")).toBe(false);
-  });
-});
-
-describe("isSimulatorReady", () => {
-  it("returns true for booted", () => {
-    const sim: AppleSimulatorRecord = {
-      simulatorId: "00000000-0000-4000-8000-000000000010" as any,
-      name: "iPhone 16",
-      platform: "ios",
-      runtimeVersion: "18.0",
-      state: "booted",
-      udid: "ABCD-1234",
-    };
-    expect(isSimulatorReady(sim)).toBe(true);
-  });
-
-  it("returns false for shutdown", () => {
-    const sim: AppleSimulatorRecord = {
-      simulatorId: "00000000-0000-4000-8000-000000000010" as any,
-      name: "iPhone 16",
-      platform: "ios",
-      runtimeVersion: "18.0",
-      state: "shutdown",
-      udid: "ABCD-1234",
-    };
-    expect(isSimulatorReady(sim)).toBe(false);
-  });
-});
-
-describe("canRecordAppleBuildEvidence", () => {
-  const request = makeRequest();
-  it("returns true for matching evidence", () => {
-    const evidence: AppleBuildEvidence = {
-      actionId: request.actionId,
-      correlationId: request.correlationId,
-      authority,
-      kind: "build",
-      outcome: "succeeded",
-      diagnostics: [],
-      artifacts: [],
-      cleanup: "not-required",
-      durationMs: 1000,
-      completedAt: "2026-07-24T12:01:00.000Z" as any,
-    };
-    expect(canRecordAppleBuildEvidence(evidence, request)).toBe(true);
-  });
-
-  it("returns false for mismatched kind", () => {
-    const evidence: AppleBuildEvidence = {
-      actionId: request.actionId,
-      correlationId: request.correlationId,
-      authority,
-      kind: "test",
-      outcome: "succeeded",
-      diagnostics: [],
-      artifacts: [],
-      cleanup: "not-required",
-      durationMs: 1000,
-      completedAt: "2026-07-24T12:01:00.000Z" as any,
-    };
-    expect(canRecordAppleBuildEvidence(evidence, request)).toBe(false);
   });
 });
 
@@ -633,38 +543,9 @@ describe("Simulator frame input", () => {
   });
 });
 
-describe("requiresSimulatorForAction", () => {
-  it("returns true for run on ios", () => {
-    expect(requiresSimulatorForAction("run", "ios")).toBe(true);
-  });
-
-  it("returns true for test on ios", () => {
-    expect(requiresSimulatorForAction("test", "ios")).toBe(true);
-  });
-
-  it("returns false for build on ios", () => {
-    expect(requiresSimulatorForAction("build", "ios")).toBe(false);
-  });
-
-  it("returns false for any action on macos", () => {
-    expect(requiresSimulatorForAction("run", "macos")).toBe(false);
-    expect(requiresSimulatorForAction("test", "macos")).toBe(false);
-  });
-});
-
 describe("isCoreAppleCapability", () => {
   it("returns true", () => {
     expect(isCoreAppleCapability()).toBe(true);
-  });
-});
-
-describe("isToolchainAvailable", () => {
-  it("returns true for available toolchain", () => {
-    expect(isToolchainAvailable(availableToolchain)).toBe(true);
-  });
-
-  it("returns false for unavailable toolchain", () => {
-    expect(isToolchainAvailable(unavailableToolchain)).toBe(false);
   });
 });
 

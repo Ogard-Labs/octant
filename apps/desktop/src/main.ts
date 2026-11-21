@@ -1,5 +1,6 @@
 import { storedBrowserProfileOfPartitionFolder } from "@octant/domain";
 import { createDesktopBrowserCredentialFill } from "./desktopBrowserCredentialFill";
+import { configureDesktopProcessErrorNet } from "./desktopProcessErrorNet";
 import { createDesktopClientLifetime } from "./desktopClientLifetime";
 import {
   confirmUnresponsiveFilesClose,
@@ -274,6 +275,7 @@ import {
   probeHostInfoReceipt,
   probeLocalHost,
   createStderrTail,
+  forwardStderrWithTail,
   ServerExitedBeforeReady,
   type StderrTail,
   reserveLoopbackPort,
@@ -300,6 +302,7 @@ import {
   decodeMenuBarShutdownProgress,
   MenuBarFleet,
   menuBarTitle,
+  openMenuBarOffer,
   type MenuBarOpenThread,
   type MenuBarShutdownProgress,
 } from "./menuBar";
@@ -1500,6 +1503,10 @@ let quitPrepared = false;
 let quitAccepted = false;
 let browserQuitCleanup: Promise<"closed" | "unconfirmed"> | undefined;
 let preparingQuit = false;
+configureDesktopProcessErrorNet({
+  ...(desktopWindowsHost === undefined ? { dataDirectory: desktopDataDirectory } : {}),
+  isShuttingDown: () => preparingQuit || quitAccepted || quitPrepared,
+});
 // The active-work confirmation only applies to quits the user starts inside
 // the app (menu, Cmd+Q). Signal- or event-driven termination (SIGTERM,
 // AppleScript "quit", logout) cannot answer a dialog and must still proceed.
@@ -2263,11 +2270,13 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
         });
       },
     });
-    // pipe() honours backpressure from a slow parent stderr; the tail
-    // listener only keeps a bounded copy.
-    child.stderr.pipe(process.stderr, { end: false });
-    child.stderr.on("data", (chunk: Buffer) => serverStderr.append(chunk));
-    child.stderr.once("end", serverStderr.end);
+    // Route child spawn/pipe errors to this launch's teardown instead of the
+    // process error net; a server that failed to spawn ends the stderr drain.
+    child.on("error", () => serverStderr.end());
+    child.stdin.on("error", () => undefined);
+    // pipe() honours backpressure while process.stderr is healthy and falls
+    // back to tail-only draining if process.stderr closes with EPIPE.
+    forwardStderrWithTail(child.stderr, process.stderr, serverStderr);
     credentialBroker = broker;
     browserRuntimeBroker = nextBrowserRuntimeBroker;
     computerUseService = nextComputerService;
@@ -3272,7 +3281,18 @@ function sendMenuBarOpen(window: BrowserWindow, thread: MenuBarOpenThread): void
   window.webContents.send(IPC_CHANNELS.menuBarTask, thread);
 }
 
-async function openMenuBarThread(thread: MenuBarOpenThread): Promise<void> {
+async function openMenuBarThread(
+  thread: MenuBarOpenThread,
+  offerWindowId?: string,
+): Promise<"opened" | "queued" | "offer-window-unavailable"> {
+  if (offerWindowId !== undefined) {
+    return openMenuBarOffer(
+      offerWindowId,
+      desktopWindows.active(),
+      (window) => menuBarOpenThreads.has(window.id),
+      (window) => sendMenuBarOpen(window, thread),
+    );
+  }
   menuBarFleet.looked(thread);
   updateHostTray();
   const ready =
@@ -3281,7 +3301,7 @@ async function openMenuBarThread(thread: MenuBarOpenThread): Promise<void> {
       : undefined;
   if (ready !== undefined) {
     sendMenuBarOpen(ready, thread);
-    return;
+    return "opened";
   }
   // No window can take it yet: open one, and hand it the thread once its
   // renderer reports it is ready to open threads.
@@ -3289,6 +3309,7 @@ async function openMenuBarThread(thread: MenuBarOpenThread): Promise<void> {
   await ensureMenuWindow();
   mainWindow?.show();
   mainWindow?.focus();
+  return "queued";
 }
 
 function updateHostTray(): void {
@@ -3309,13 +3330,25 @@ function updateHostTray(): void {
         enabled: item.enabled,
         ...(item.toolTip === undefined ? {} : { toolTip: item.toolTip }),
         click: () => {
-          void openMenuBarThread({ mode: thread.mode, threadId: thread.threadId }).catch(() => {
-            showNoticeWithoutBlocking(
-              mainWindow,
-              "Octant could not open that thread",
-              "Open Octant and choose the thread from the sidebar.",
-            );
-          });
+          void openMenuBarThread(
+            { mode: thread.mode, threadId: thread.threadId },
+            thread.offerWindowId,
+          )
+            .then((result) => {
+              if (result === "offer-window-unavailable")
+                showNoticeWithoutBlocking(
+                  mainWindow,
+                  "Octant could not open that thread",
+                  "The window that raised this offer is no longer available.",
+                );
+            })
+            .catch(() => {
+              showNoticeWithoutBlocking(
+                mainWindow,
+                "Octant could not open that thread",
+                "Open Octant and choose the thread from the sidebar.",
+              );
+            });
         },
       };
     return {

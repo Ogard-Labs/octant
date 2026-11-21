@@ -10,6 +10,8 @@ import {
 } from "@octant/contracts/server-projects";
 import { serverCodeCheckout } from "./serverProjectThreads";
 import { serverWorkBindingRevisionId } from "./serverWorkThreads";
+import { principalActsAsHostPerson } from "../clientPrincipal";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateRoutePrincipal, boundPrincipalIsRestricted } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -108,6 +110,7 @@ export function createServerProjectRouteHandler(dependencies: ServerProjectRoute
       }
     }
     let principal: ServerProjectPrincipal;
+    let signal = request.signal;
     try {
       const context = authenticateRoutePrincipal({
         request,
@@ -115,9 +118,19 @@ export function createServerProjectRouteHandler(dependencies: ServerProjectRoute
         now: now(),
         ...(body === undefined ? {} : { body }),
       });
-      // Only a principal that names a local window may change the catalog;
-      // any other kind is held to the paired device's refusal.
-      principal = context.principal.kind === "local-window" ? "local-window" : "remote-device";
+      if (context.abortSignal !== undefined) {
+        signal = AbortSignal.any([signal, context.abortSignal]);
+      }
+      principal =
+        context.principal.kind === "local-window"
+          ? "local-window"
+          : principalActsAsHostPerson(context.principal)
+            ? {
+                kind: "person-paired-device",
+                credentialGeneration: context.principal.credentialGeneration,
+                actor: eventActorForPrincipal(context.principal),
+              }
+            : "remote-device";
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failure("Server Project request is unauthorized.", 401, origin);
@@ -133,6 +146,17 @@ export function createServerProjectRouteHandler(dependencies: ServerProjectRoute
       return json(
         { view: catalogView(dependencies.store.projects(), dependencies.cloudMachineOf) },
         200,
+        origin,
+      );
+    }
+    if (boundPrincipalIsRestricted(request)) {
+      return json(
+        {
+          kind: "server-projects-refused",
+          reason: "needs-person",
+          message: MESSAGES["needs-person"],
+        } satisfies ServerProjectsCommandResult,
+        403,
         origin,
       );
     }
@@ -185,6 +209,7 @@ export function createServerProjectRouteHandler(dependencies: ServerProjectRoute
                   folder: command.folder,
                   mode: command.mode,
                   principal,
+                  signal,
                 })
               : dependencies.store.rename({
                   projectId: String(command.projectId),
@@ -204,7 +229,15 @@ export function createServerProjectRouteHandler(dependencies: ServerProjectRoute
             reason: change.reason,
             message: change.message ?? MESSAGES[change.reason],
           };
-    return json(result, result.kind === "server-projects-updated" ? 200 : 409, origin);
+    return json(
+      result,
+      result.kind === "server-projects-updated"
+        ? 200
+        : result.reason === "needs-person"
+          ? 403
+          : 409,
+      origin,
+    );
   };
 }
 
@@ -241,6 +274,7 @@ function codeBindingOf(project: ServerProject): ServerProjectCodeBinding {
 }
 
 const MESSAGES: Readonly<Record<ServerProjectsRefusalReason, string>> = {
+  "needs-person": "Only this host's own person can change server Projects.",
   "needs-local-window": "Server Projects can be changed only at this computer.",
   "server-not-registered": "That server is not registered in Settings › Permissions › Servers.",
   "server-unreachable": "The server could not be reached, so nothing was bound.",

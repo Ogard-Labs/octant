@@ -24,6 +24,7 @@ import type {
   ProviderNativeSetup,
 } from "@octant/contracts";
 import type { AcpInitializeResult } from "./acpProtocol";
+import type { AcpTurnUsageWithoutTotal } from "./acpUsage";
 
 /**
  * Every ACP agent, plus OpenCode, whose 2.x turns run on this stack, and any
@@ -61,7 +62,13 @@ export type AcpHostAuthentication =
 
 export type AcpConfinementStrategy =
   /** Shared deny-default Seatbelt profile; explicit Full access runs unconfined. */
-  { readonly kind: "deny-default-seatbelt" };
+  | { readonly kind: "deny-default-seatbelt" }
+  /**
+   * Work and Code outside Strict start unconfined at every level, the agent's
+   * own mode asking Octant before each side effect; everything else takes
+   * the deny-default profile.
+   */
+  | { readonly kind: "provider-approvals-outside-strict" };
 
 export interface AcpProcessProfile {
   /** `agentInfo.name` the ACP `initialize` response must report. */
@@ -99,6 +106,20 @@ export interface AcpProcessProfile {
    * keychain path.
    */
   readonly readsSystemKeychain?: boolean;
+  /**
+   * The CLI keeps the person's own sign-in in the macOS login keychain and
+   * reads it by running `/usr/bin/security`. On macOS a sandboxed launch
+   * below Full access may then fork, run that one program, reach the two
+   * security-server services and read `login.keychain-db`; nothing grants a
+   * Keychain write or any other file in that folder. Octant never reads the
+   * item itself.
+   */
+  readonly readsLoginKeychain?: boolean;
+  /**
+   * ACP protocol versions the `initialize` reply may report. Absent means
+   * exactly 1, the version every other profile speaks.
+   */
+  readonly protocolVersions?: ReadonlyArray<number>;
   readonly environment: (input: {
     readonly managedHome: string;
     readonly executionPolicy: ProviderExecutionPolicy;
@@ -163,7 +184,12 @@ export interface AcpSessionMetaReasoning {
 }
 
 export interface AcpProviderProfile {
-  /** Exact releases whose cumulative usage/context update semantics were verified. */
+  /**
+   * Exact releases whose cumulative usage/context update semantics were
+   * verified. A profile that pins them is read only by that reviewed rule;
+   * every other agent's usage is read by ACP's standard schema
+   * (`acpTurnUsage`, `finishAcpReportedTurn`).
+   */
   readonly usageVersions?: ReadonlyArray<string>;
   /** Exact releases whose signed-in supplementary read and cold-resume semantics passed. */
   readonly fileReviewVersions?: ReadonlyArray<string>;
@@ -171,6 +197,11 @@ export interface AcpProviderProfile {
   readonly compactionVersions?: ReadonlyArray<string>;
   /** Exact releases whose native session lifecycle has passed warm-reuse evidence. */
   readonly retainedSessionVersions?: ReadonlyArray<string>;
+  /**
+   * The process stays open between turns on every release, as other ACP
+   * clients of the agent keep it, without a pinned one.
+   */
+  readonly retainsSessions?: true;
   /** Verified HTTP MCP implementations that omit, rather than deny, negotiation. */
   readonly unadvertisedHttpMcpVersions?: ReadonlyArray<string>;
   readonly kind: AcpProviderKind;
@@ -197,9 +228,10 @@ export interface AcpProviderProfile {
     autoReview?: boolean,
   ) => string;
   /**
-   * No mode is selected: an added agent's own modes were never mapped onto
-   * Chat, Work, Code and Plan, so its session keeps the mode it opens with
-   * and Octant's sandbox and approvals hold the thread's level.
+   * No mode is selected: the session keeps the mode it opens with and
+   * Octant's sandbox and approvals hold the thread's level. An added agent's
+   * own modes were never mapped onto Chat, Work, Code and Plan; Google
+   * Antigravity refuses every mode but its asking `default` from a client.
    */
   readonly selectsNoMode?: true;
   /**
@@ -227,6 +259,46 @@ export interface AcpProviderProfile {
    * read outside content, since that agent may have done so unseen.
    */
   readonly unseenChildCalls?: { readonly readOnlyAgents: ReadonlyArray<string> };
+  /**
+   * The agent sends updates the strict mapper would fail a turn on, as other
+   * ACP clients of it accept: updates after the prompt answered (usage,
+   * background replies), a subagent's updates under its own session id, a
+   * tool update for a call never started or already finished. They are
+   * ignored or read as the start they imply, a call left running is done
+   * when its turn is, an update reaching a process parked between turns
+   * leaves it warm, and a permission request with neither allow nor reject
+   * options is asked as a question. An allow option is never a question's
+   * answer: `allow_always` beside a reject, with no `allow_once`, is an
+   * approval that chooses allow-always only where approvals hold for the
+   * session and otherwise rejects.
+   */
+  readonly toleratesStrayUpdates?: true;
+  /** The agent's own allow-always option is chosen when approvals hold for the session. */
+  readonly forwardsAllowAlways?: true;
+  /** What a turn the agent ends with `refusal` says. */
+  readonly refusalMessage?: string;
+  /**
+   * A prompt that opens with `/` is the agent's own command, which it runs
+   * only from the start of the prompt: the command goes first and Octant's
+   * context in the following text block.
+   */
+  readonly commandLeadsPrompt?: true;
+  /**
+   * Octant does not offer the agent its `fs/write_text_file`: offered it, the
+   * agent rewrites whole files through it instead of making its own edits,
+   * which its own edit approvals already ask for.
+   */
+  readonly withholdsClientWrites?: true;
+  /**
+   * How to read a `session/prompt` reply whose usage leaves out ACP's
+   * required `totalTokens`, as reviewed on the agent (`acpTurnUsage`).
+   */
+  readonly turnUsageWithoutTotal?: AcpTurnUsageWithoutTotal;
+  /**
+   * A thread may start from one of the agent's own sessions, which it lists
+   * through `session/list` when its `initialize` advertises it.
+   */
+  readonly importsSessions?: true;
   /**
    * The agent answers a mode it does not offer with success and keeps its
    * previous mode, so a renamed or dropped mode would leave a turn running
@@ -1702,6 +1774,103 @@ const kimiProfile: AcpProviderProfile = {
   },
 };
 
+/**
+ * Google Antigravity's official CLI, `agy`, run unmodified as `agy acp`, the
+ * way other ACP clients run it (maintainer decision, 2026-11-20).
+ *
+ * In Work and Code outside Strict it starts with no Octant sandbox at every
+ * level, as Windows starts ACP agents below Full access: its `default` mode
+ * asks Octant before every edit and command, so the thread's level holds
+ * through approvals rather than the OS. The person's own environment, network
+ * and setup reach it as in their own terminal. Chat and Plan, Strict, an
+ * explicit sandbox and a Full access thread that keeps the sandbox still
+ * start inside Octant's sandbox.
+ *
+ * It signs in with the person's own Google account and keeps that sign-in in
+ * the macOS login keychain, so the launch keeps the real HOME, and a
+ * sandboxed launch gets the narrow keychain read Claude Code's runtime has
+ * (`readsLoginKeychain`). Octant sends no spoofed client identity, no faked
+ * environment to move the sign-in, and calls none of Google's internal
+ * endpoints: the CLI talks to Google itself.
+ *
+ * Its modes are `default`, `auto_edit`, `yolo` and, for some accounts, `auto`.
+ * The CLI refuses `auto_edit` and `yolo` from an ACP client (observed by other
+ * ACP clients of 1.5.x), so the session stays in `default` and Octant answers
+ * its approvals for the thread's level, Full access included.
+ */
+const antigravityProfile: AcpProviderProfile = {
+  kind: "antigravity",
+  displayName: "Google Antigravity",
+  reasoningOptionId: "thinking",
+  sessionMode: () => "default",
+  selectsNoMode: true,
+  chatSessionRoot: "managed-home",
+  // Its questions arrive as permission requests whose tool call id starts
+  // with `interaction_`; options with neither an allow nor a reject kind are
+  // asked as a question (`toleratesStrayUpdates`), and an allow beside a
+  // reject as an approval.
+  userQuestions: "supported",
+  unnamedPermissionDescription: "Google Antigravity is asking before it continues.",
+  toleratesStrayUpdates: true,
+  forwardsAllowAlways: true,
+  // Each launch unpacks the CLI again before it answers, so a cold start per
+  // turn costs far more than for any other agent; other clients keep it open.
+  retainsSessions: true,
+  commandLeadsPrompt: true,
+  withholdsClientWrites: true,
+  turnUsageWithoutTotal: "input-excludes-cache-reads",
+  importsSessions: true,
+  // The CLI ends a turn with `refusal` when the account's quota is used up.
+  refusalMessage:
+    "Google Antigravity stopped: your account's usage limit may be reached. Check your plan, then retry.",
+  // `session/load` replays the whole history into the turn; `session/resume`
+  // reattaches without it, and `initialize` advertises `resume`.
+  resumeMethod: "session/resume",
+  // `initialize` advertises `list` and `resume` but no `close`.
+  closesSessions: false,
+  authenticateOnProbe: false,
+  authentication: { kind: "provider-owned" },
+  unauthenticatedMessage:
+    "Google Antigravity is not signed in. Run agy (or agy acp --login) in your terminal and sign in with your Google account, then retry.",
+  // Nothing of its own setup is held back, so no switch reports anything.
+  nativeSetupSupport: acpOwnSetupSupport([]),
+  process: {
+    agentName: "Antigravity ACP Server",
+    // Any agent name is accepted, as other ACP clients of the CLI accept it:
+    // the name changed between releases (`antigravity-acp` on 1.1.x).
+    verifyAgentInfo: () => true,
+    // The first `x.y.z` anywhere in `agy --version`, whatever prefix or later
+    // lines the release prints (`agy_acp_server_1.1.1` on the bundled server).
+    versionPattern: /\b(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)/,
+    // Releases before 1.5.0 offered only some models to unlisted clients and
+    // had no mid-turn steering; other ACP clients require 1.5.0 or later.
+    minimumVersion: [1, 5, 0],
+    // 1.1.1 reported protocol version 2 while sending version 1 shapes
+    // (recorded `initialize` reply); later releases may still.
+    protocolVersions: [1, 2],
+    passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    guards: { NO_COLOR: "1", AGY_CLI_DISABLE_AUTO_UPDATE: "1" },
+    environment: () => ({}),
+    // Google's ACP guide: `--process-per-session` serves each session from an
+    // isolated worker and is required for HTTP MCP servers the client
+    // configures, which is how Octant offers its tools; `--disable-telemetry`
+    // is the CLI's own switch.
+    args: () => ["acp", "--process-per-session", "--disable-telemetry"],
+    managedFiles: () => [],
+    readsLoginKeychain: true,
+    // The CLI keeps its settings, conversations, instructions and skills
+    // under ~/.gemini and loads all of them, as it does on its own.
+    hostAuthentication: {
+      kind: "directory",
+      defaultPath: join(homedir(), ".gemini"),
+      loginHint:
+        "Run agy (or agy acp --login) in your terminal and sign in with your Google account, then retry.",
+      environment: (path) => ({ GEMINI_HOME: path }),
+    },
+    confinement: { kind: "provider-approvals-outside-strict" },
+  },
+};
+
 export const acpProviderProfiles: Readonly<
   Record<Exclude<AcpProviderKind, "acp-agent">, AcpProviderProfile>
 > = {
@@ -1718,6 +1887,7 @@ export const acpProviderProfiles: Readonly<
   cline: clineProfile,
   qwen: qwenProfile,
   fx: fxProfile,
+  antigravity: antigravityProfile,
 };
 
 export function isAcpProviderKind(kind: ProviderDriverKind): kind is AcpProviderKind {

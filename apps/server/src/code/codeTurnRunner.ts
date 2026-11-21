@@ -220,6 +220,7 @@ export interface CodeTurnEvent {
   readonly inputTokens?: number;
   readonly cacheReadInputTokens?: number;
   readonly cacheWriteInputTokens?: number;
+  readonly reasoningTokens?: number;
 
   readonly outputTokens?: number;
   readonly costUsd?: number;
@@ -1399,6 +1400,7 @@ function normalizeProviderEvent(
         ...(event.cacheWriteInputTokens === undefined
           ? {}
           : { cacheWriteInputTokens: event.cacheWriteInputTokens }),
+        ...(event.reasoningTokens === undefined ? {} : { reasoningTokens: event.reasoningTokens }),
 
         ...(event.contextWindow === undefined ? {} : { contextWindow: event.contextWindow }),
         ...(event.contextTokens === undefined ? {} : { contextTokens: event.contextTokens }),

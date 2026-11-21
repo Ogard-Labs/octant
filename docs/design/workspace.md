@@ -483,9 +483,10 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   most people keep the defaults, and the box for the work came after them. A thread's row menu keeps its everyday actions on top (Pin in pane, Pin, Rename; Mark as read or unread, Mark done, Put away, Snooze; the pull-request destinations) and files the rest under **More**, with Archive last and alone (maintainer request, 2026-11-16). A Code thread's row menu has **Make coordinator**, a submenu
   with the same worker-level choice, or **Stop
   coordinating** on a coordinator (never on a worker); on a coordinator
-  **Coordinator limits…**, which opens the same dialog with the three bounds
-  and Save, without the workers' level, since the host refuses a later change
-  to it; the **Wake when a message
+  **Coordinator limits…**, which opens the same dialog with the three bounds,
+  the coordinator's host-checked **Done when** conditions (view, add, remove,
+  clear), and Save, without the workers' level, since the host refuses a later
+  change to it; the **Wake when a message
   arrives** checkbox, on a worker the **Wake for coordinator** checkbox, and
   the **Continue after restart** checkbox, on until a person turns it off for
   that thread ([Architecture: Persistence](../architecture.md#persistence)).
@@ -513,7 +514,9 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   `coordinatorWorkerListingByProject`). It carries no authority: it never
   changes what a worker may do or who sees its requests, and only a person,
   at a local window, changes it.
-- **Workers panel.** A coordinator's pane header has a **Workers** button
+- **Workers panel.** A coordinator's pane header has a **Done when** button
+  (showing the configured condition count and opening **Coordinator limits**)
+  beside its **Workers** button
   (with the worker count, and a screen-reader note of how many need you) that
   opens a panel beside the transcript, and a sheet over it on a narrow window.
   Sections, in order: **Needs you**, **Working**, **In review** (delivered
@@ -1366,24 +1369,36 @@ clearing the imported draft or preparing a truthful replacement, not silently
 retaining the excerpt as trusted plain prose.
 
 Line notes are the lighter way to answer a turn from its change view
-(maintainer decision, 2026-11-14). In Review opened from a turn's changed-file
-row, the line-number button on either side of the diff also opens a note
-anchored to that file, side (new or old) and line; the note may extend through
-a later line on the same side. Notes stay pending in that view, where the
-person edits or removes each one. They are this window's unsent drafts: they
-journal nothing and close with the view. **Send notes** sends them together as
-one ordinary follow-up message in the owning thread through the normal send
-path, so mode, access level, Plan and every host check apply unchanged. The
-message lists each note with its file, side and line or lines, the first
-line's text quoted and cut to 120 characters, then the note. Send waits while
-the thread runs a turn or a pending note is being edited. Notes count as sent
-once the host accepts the message, whatever its turn then does, so a turn that
-waits, stops or fails never invites sending them twice; only a refusal keeps
-them. A line note
-carries no finding reference: its message is plain person text, the same as
-typing the quoted line into the composer, so the outside-content record that a
-correction draft's references take does not apply. Local findings and their
-correction draft stay the path for review that is tracked and resolved.
+(maintainer decision, 2026-11-14) or a pull request from its diff
+(maintainer decision, 2026-11-21). In Review opened from a turn's changed-file
+row, and in a pull request's diff (Review › pull request › Changes and the
+dock's pull-request review), the line-number button on either side of the diff
+opens a note anchored to that file, side (new or old) and line; the note may
+extend through a later line on the same side. Notes stay pending in that view,
+where the person edits or removes each one. They are this window's unsent
+drafts: they journal nothing and close with the view. **Send notes** sends them
+together as one ordinary follow-up message through the normal send path, so
+mode, access level, Plan and every host check apply unchanged. On a pull
+request's diff a small thread picker under **Send notes** chooses which linked
+Code thread receives the message, defaulting to the first linked thread (as
+Auto-fix does); with no thread linked, notes can still be written and **Send
+notes** is disabled with "Link a Code thread to send notes". Sending line notes
+never posts comments or reviews to GitHub, which stays a separate explicit
+action. The message lists each note with its file, side and line or lines, the
+first line's text quoted and cut to 120 characters, then the note. Send waits
+while the thread runs a turn or a pending note is being edited. Notes count as
+sent once the host accepts the message, whatever its turn then does, so a turn
+that waits, stops or fails never invites sending them twice; only a refusal
+keeps them. On a turn's change view, a line note carries no finding reference:
+its message is plain person text, the same as typing the quoted line into the
+composer, so the outside-content record that a correction draft's references
+take does not apply. On a pull request's diff, the host checks the observed
+pull request's author against the signed-in `gh` user before starting the turn:
+when they match, the message is sent as plain person text; when they differ or
+either cannot be read, the host marks the thread as having read outside content
+first (the same mechanism Auto-fix uses) and refuses the send if that mark
+cannot be recorded. Local findings and their correction draft stay the path for
+review that is tracked and resolved.
 
 After a correction, Refresh reads the new comparison and latest recorded checks.
 Checks that lack a comparison binding are labeled as such. An agent reply never
@@ -1421,7 +1436,8 @@ menu holding Close or Reopen pull request. Under it, the state pill with
 "repository #number", the title in the page-title role (26px, 600), one meta
 line (author, age, head → base) and, on Summary, the description as markdown at
 13px with a 720px measure; Summary holds no form. Changes lists commits, changed
-files and the diff. Timeline lists the reviews and comments, newest last, then
+files and the diff (with clickable line numbers and window-local line notes sent
+to a linked Code thread). Timeline lists the reviews and comments, newest last, then
 the labels, review-thread replies, the comment form and the review form
 (Approve, Request changes with a note) at the end. The status column (260px,
 sticky) has small captions in the navigation-group role: Merge status (one
@@ -2139,14 +2155,23 @@ Review tool opens it as before).
 
 Sort offers Recently updated (the default), Least recently updated, Newest,
 Oldest and Repository, and a **Group by repository** check item. Newest and
-Oldest order by creation time, which the snapshot carries beside each
-pull request's last update. Filter offers Status (any, open, draft), Involvement
-(anyone, involving me, review requested, authored by me; only when the
-signed-in GitHub login is known, and answered from the row's author and
-requested reviewers), Review (needs review, changes
-requested, approved), Checks (passing, failing, pending) and **Mine**, which
-keeps the pull requests whose author is the signed-in GitHub account
-(maintainer request, 2026-11-12). Not built yet: today the snapshot carries no
+Oldest order by when the pull request was opened, which the snapshot carries
+beside each pull request's last update, read in the same list read. A row
+without that time (a snapshot from before it was recorded, or a pull request
+known only from a thread) goes last under both, in update order. Filter offers
+Status (any, open, draft), Involvement (anyone, involving me, review requested,
+authored by me; only when the signed-in GitHub login is known, and answered from
+the row's author and requested reviewers), Review (needs review, changes
+requested, approved) and Checks (passing, failing, pending). "Mine", the pull
+requests whose author is the signed-in GitHub account, is the Involvement
+filter's **Authored by me** (maintainer request, 2026-11-12; maintainer
+decision, 2026-11-21). Sort, grouping, the status choice and the
+repositories are remembered in this window's local storage; Involvement, Review
+and Checks last for the visit only, because kept across visits they hid every row
+behind chips that counted the unfiltered list. A filter that is narrowing the
+list marks its button, and an empty list names the choices that are narrowing it
+beside Clear filters.
+
 The **Repository** control is a menu in the list header, at one fixed width, on
 the count's row. It lists every repository the list spans, each with how many
 rows it holds under the other choices, as check items: **All repositories** (the
@@ -2158,13 +2183,6 @@ this window's local storage. Issues share the control's place and look. Grouping
 is a **Group by repository** check item in the Sort menu: each group head is the
 repository's name at 12px in the meta ink with its count at the right edge.
 
-creation time and the author is not compared with the account, so Newest,
-Oldest and Mine are not offered. Sort, grouping, the status choice and the
-repositories are remembered in this window's local storage; Involvement, Review
-and Checks last for the visit only, because kept across visits they hid every row
-behind chips that counted the unfiltered list. A filter that is narrowing the
-list marks its button, and an empty list names the choices that are narrowing it
-beside Clear filters.
 Searching is unchanged and covers the title, author, branches, repository,
 number and linked threads.
 

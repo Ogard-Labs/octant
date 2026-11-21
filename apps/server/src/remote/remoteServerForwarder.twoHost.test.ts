@@ -178,7 +178,14 @@ function makeSigning() {
 }
 
 /** The host computer: its gateway, the listing it re-observes, and whether the port is still held. */
-async function startHost(devPort: number) {
+async function startHost(
+  devPort: number,
+  options: {
+    readonly serverProjectPreviews?: ConstructorParameters<
+      typeof RemoteServerGrantService
+    >[0]["serverProjectPreviews"];
+  } = {},
+) {
   const directory = mkdtempSync(join(tmpdir(), "octant-two-host-"));
   cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
   const connection = openSqlite(join(directory, "store.sqlite3"));
@@ -246,6 +253,9 @@ async function startHost(devPort: number) {
     }),
     uuid: randomUUID,
     clock: () => nowIso,
+    ...(options.serverProjectPreviews === undefined
+      ? {}
+      : { serverProjectPreviews: options.serverProjectPreviews }),
   });
   let captured:
     | ((request: Request, facts?: RequestTransportFacts) => Promise<Response>)
@@ -287,6 +297,9 @@ async function startHost(devPort: number) {
             credentialGeneration: input.principal.credentialGeneration,
             sessionIdDigest: input.sessionIdDigest,
             origin: input.principal.origin,
+            ...(input.principal.admittedBy === undefined
+              ? {}
+              : { admittedBy: input.principal.admittedBy }),
           },
           scopeId: decodeWindowId(String(input.principal.deviceId)),
           grantId: input.grantId,
@@ -304,6 +317,9 @@ async function startHost(devPort: number) {
             credentialGeneration: input.principal.credentialGeneration,
             sessionIdDigest: input.sessionIdDigest,
             origin: input.principal.origin,
+            ...(input.principal.admittedBy === undefined
+              ? {}
+              : { admittedBy: input.principal.admittedBy }),
           },
           scopeId: decodeWindowId(String(input.principal.deviceId)),
           grantId: input.grantId,
@@ -771,5 +787,72 @@ describe("live reload from a dev server on another paired computer", () => {
 
     client.forwarder.closeHost(String(hostId));
     expect(await socket.closed).toBe(1006);
+  });
+
+  it("relays a server Project preview end-to-end through the signed forwarder for documents, subresources, and WebSockets while refusing unsigned direct links", async () => {
+    const dev = await startDevServer();
+    const previewGrantId = decodeRemoteServerGrantId(`rsg_${"ab".repeat(32)}`);
+    let previewDeviceId = "";
+    const host = await startHost(dev.port, {
+      serverProjectPreviews: {
+        hasRelayGrant: (id) => id === String(previewGrantId),
+        openRelayStream: (id, caller) => {
+          if (
+            id !== String(previewGrantId) ||
+            caller.admittedBy !== "host-person" ||
+            caller.deviceId !== previewDeviceId ||
+            caller.credentialGeneration !== 1
+          ) {
+            return { kind: "refused", reason: "grant-closed" };
+          }
+          const socket = connectTcp(dev.port, "127.0.0.1");
+          return {
+            kind: "opened",
+            port: dev.port,
+            stream: socket,
+            onActivity: () => undefined,
+          };
+        },
+      },
+    });
+    const client = await startClient(host);
+    previewDeviceId = client.deviceId;
+
+    // A raw unsigned browser GET to /api/server-proxy/<grantId>/ (e.g. a plain link) is refused 401.
+    const unsigned = await host.fetch(
+      new Request(`${ORIGIN}/api/server-proxy/${String(previewGrantId)}/`),
+    );
+    expect(unsigned.status).toBe(401);
+
+    // Adopting the preview grant in RemoteServerProxyClient + opening via RemoteServerForwarder
+    // signs every document navigation, subresource, and WebSocket upgrade with the proxy session.
+    expect(await client.proxy.adoptGrant(String(previewGrantId))).toEqual({ status: "adopted" });
+    const page = client.forwarder.open({
+      hostId: String(hostId),
+      hostName: "Studio Mac",
+      listenerOrigin: ORIGIN,
+      grant: {
+        grantId: previewGrantId,
+        threadId,
+        port: decodeLocalServerPort(dev.port),
+      },
+    });
+    const pageHost = new URL(page.pageOrigin).host;
+    const access = client.forwarder.accessFor(page.pageOrigin);
+    if (access === undefined) throw new Error("Expected forwarder access token.");
+
+    const doc = await pageGet(client.port, pageHost, access, "/");
+    expect(doc.status).toBe(200);
+    const asset = await pageGet(client.port, pageHost, access, "/app.js");
+    expect(asset.status).toBe(200);
+
+    const socket = opened(await pageSocket(client.port, pageHost, access, "/hmr?preview=1"));
+    socket.send("ping-preview");
+    expect(await socket.next()).toBe("ping-preview");
+
+    // Revoking the device cuts the active preview WebSocket and refuses further navigation.
+    host.gateway.localDeviceAdministration()?.revokeDevice({ deviceId: client.deviceId });
+    expect(await socket.closed).toBe(1008);
+    expect((await pageGet(client.port, pageHost, access, "/")).status).toBe(403);
   });
 });

@@ -236,6 +236,42 @@ describe("search across modes", () => {
     }
   });
 
+  it("finds a thread by the earlier conversation its adopted session imported, marks the hit imported, and survives a rewind and a rebuild", () => {
+    const store = openStore();
+    try {
+      store.thread(ids.thread, "Adopted", now);
+      store.importedHistory(ids.thread, [
+        { role: "person", text: "Migrate the billing tables" },
+        { role: "agent", text: "Wrote the billing migration.", tools: ["apply_patch"] },
+      ]);
+      store.turn(ids.thread, operation(1), "carry on", []);
+      store.rewind(ids.thread, operation(2), operation(1), "conversation");
+      const visible = [code(ids.thread)];
+      const answer = () =>
+        searchThreads(store.connection, "billing migration", visible, 50).matches.map((match) => ({
+          field: match.field,
+          anchorId: match.anchorId,
+          imported: match.imported,
+        }));
+
+      expect(answer()).toEqual([{ field: "reply", anchorId: "", imported: true }]);
+      expect(
+        searchThreads(store.connection, "apply_patch", visible, 50).matches.map((m) => m.field),
+      ).toEqual(["tool"]);
+      const projection = store.registries.projections.get("thread-search");
+      if (projection === undefined) throw new Error("Thread search must be registered");
+      rebuildProjection({
+        connection: store.connection,
+        journal: store.journal,
+        projection,
+        clock: () => now,
+      });
+      expect(answer()).toEqual([{ field: "reply", anchorId: "", imported: true }]);
+    } finally {
+      store.connection.close();
+    }
+  });
+
   it("drops turns a rewind removed and rebuilds to the same index", () => {
     const store = openStore();
     try {
@@ -348,6 +384,27 @@ function openStore() {
           updatedAt,
         },
       });
+    },
+    importedHistory(
+      threadId: string,
+      messages: ReadonlyArray<{
+        readonly role: "person" | "agent";
+        readonly text: string;
+        readonly tools?: ReadonlyArray<string>;
+      }>,
+    ) {
+      append(
+        { aggregateType: "native-session-history", aggregateId: threadId },
+        0,
+        "native-session.history-imported@1",
+        {
+          threadId,
+          mode: "code",
+          providerInstanceId: ids.provider,
+          nativeSessionId: "outside-session",
+          history: { status: "imported", messages },
+        },
+      );
     },
     turn(threadId: string, operationId: string, prompt: string, reply: ReadonlyArray<string>) {
       frame(threadId, operationId, 1, {

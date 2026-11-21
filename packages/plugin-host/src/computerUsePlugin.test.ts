@@ -14,9 +14,10 @@ describe("Computer use selection", () => {
 });
 
 describe("Computer host line", () => {
-  it("names the tool and its ask-first rule within 40 tokens", () => {
+  it("names the tool and its conditional approval rule within 40 tokens", () => {
     expect(COMPUTER_TOOL_HOST_LINE).toContain("octant_computer");
-    expect(COMPUTER_TOOL_HOST_LINE).toContain("asks the person first");
+    expect(COMPUTER_TOOL_HOST_LINE).toContain("Octant may ask the person before acting on an app");
+    expect(COMPUTER_TOOL_HOST_LINE).not.toContain("first action on each app asks");
     expect(Math.ceil(COMPUTER_TOOL_HOST_LINE.length / 4)).toBeLessThanOrEqual(40);
   });
 });

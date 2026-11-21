@@ -1,6 +1,5 @@
 import type {
   ComputerUseActionRequest,
-  ComputerUseObservation,
   ComputerUseSessionRecord,
   ComputerUseSensitiveFieldKind,
   ProjectId,
@@ -130,35 +129,9 @@ export function evaluateComputerUseAction(
   return { kind: "allowed" };
 }
 
-export function isSessionExpired(session: ComputerUseSessionRecord, now: number): boolean {
-  if (session.state !== "active" && session.state !== "requesting-approval") return false;
-  const createdAt = new Date(session.createdAt).getTime();
-  return now - createdAt >= session.policy.maxSessionDurationMs;
-}
-
-export function canRecordComputerUseObservation(
-  observation: ComputerUseObservation,
-  session: ComputerUseSessionRecord,
-): boolean {
-  return (
-    observation.sessionId === session.sessionId &&
-    observation.actionId === session.actionId &&
-    observation.correlationId === session.correlationId &&
-    sameToolActionAuthority(observation.authority, session.authority)
-  );
-}
-
 export function isSensitiveFieldProtectionEnabled(
   session: ComputerUseSessionRecord,
   _fieldKind: ComputerUseSensitiveFieldKind,
 ): boolean {
   return session.policy.sensitiveFieldProtection;
-}
-
-export function requiresVisibleStop(session: ComputerUseSessionRecord): boolean {
-  return session.policy.visibleStopControl;
-}
-
-export function requiresProcessOwnership(session: ComputerUseSessionRecord): boolean {
-  return session.policy.processOwnershipRequired;
 }
