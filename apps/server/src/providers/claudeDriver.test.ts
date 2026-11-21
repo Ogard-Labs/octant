@@ -1690,6 +1690,33 @@ describe("Claude execution policy", () => {
     }
   });
 
+  it("keeps Claude's telemetry and self-update closed outside Strict for a thread that keeps its sandbox, whatever the person's provider switches say", async () => {
+    const launchedWith = async (fullAccessSandbox: boolean) => {
+      const seen: Array<ClaudeEnvironmentScopeOptions | undefined> = [];
+      const f = harness("subscription", "current-session", {
+        makeEnvironmentScope: (_selected, options) => {
+          seen.push(options);
+          return Effect.succeed({ environment: { PATH: "/usr/bin" } });
+        },
+      });
+      const acquired = await acquire(f.driver);
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "full-access",
+          fullAccessSandbox,
+          strict: false,
+          ownChannels: { telemetry: true, selfUpdate: true },
+        }),
+      );
+      await acquired.close();
+      return seen[0]?.ownChannels;
+    };
+    expect(await launchedWith(false)).toEqual({ telemetry: true, selfUpdate: true });
+    expect(await launchedWith(true)).toEqual({ telemetry: false, selfUpdate: false });
+  });
+
   it("passes the gate for calls made after a cd into a subfolder and refuses a cd out of the Project", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);

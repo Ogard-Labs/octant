@@ -135,8 +135,8 @@ export function ProviderOwnMemorySetting(props: ProviderOwnMemorySettingProps) {
           {props.instance.driverKind === "claude"
             ? "In Plan and in Chat it reads its memory and cannot change it."
             : "Under Strict it stays off in Plan and in Chat, because it writes its memory in the background."}{" "}
-          Octant’s Project memory and its memory of you work with this off. {name}’s telemetry and
-          self-update stay off either way.
+          Octant’s Project memory and its memory of you work with this off. This switch does not
+          change {name}’s telemetry or self-update; those follow Provider channels in Settings.
         </>
       }
       label={`Use ${name}’s own memory`}

@@ -262,7 +262,7 @@ own settings decide its usage metrics, error reports and feedback uploads) and *
 themselves** (off by default: Octant keeps each provider's self-update guard
 set, since it installs and updates provider CLIs itself; **Update CLI** is
 unaffected). Strict keeps every telemetry and self-update guard set whatever
-the switches say. Which guards each provider takes is in
+the switches say, and so does a thread that keeps or chose a sandbox. Which guards each provider takes is in
 [Provider runtimes](provider-runtimes.md#provider-channel-switches) and the rule
 in [Decisions and requirements](decisions.md#provider-telemetry-and-self-update-are-the-persons-switches).
 

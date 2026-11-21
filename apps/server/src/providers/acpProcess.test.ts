@@ -2524,6 +2524,15 @@ describe("ACP agents launch without Octant's sandbox in Work and Code outside St
     expect(seatbeltProfile(launch)).toContain("login.keychain-db");
   });
 
+  const ownSetup = {
+    subagents: true,
+    webTools: true,
+    skills: true,
+    toolServers: true,
+    hooks: true,
+    projectCode: true,
+  } as const;
+
   it("runs every profile without Octant's sandbox in Code outside Strict, unless its shell never asks", async () => {
     for (const profile of [...profiles, { ...kilo, shellWithoutRequest: true as const }]) {
       if (profile.refuses?.("code", "approval-gated") !== undefined) continue;
@@ -2542,6 +2551,7 @@ describe("ACP agents launch without Octant's sandbox in Work and Code outside St
           mode: "code",
           executionPolicy: "approval-gated",
           strict: false,
+          nativeSetup: ownSetup,
           environment: { PATH: "/usr/bin" },
         }),
       );
@@ -2549,6 +2559,35 @@ describe("ACP agents launch without Octant's sandbox in Work and Code outside St
         profile.shellWithoutRequest !== true,
       );
     }
+  });
+
+  it("keeps the sandbox and its hold-backs in Code outside Strict when the person turned Kimi Code's own setup off", async () => {
+    const target = fixture(kimi);
+    const prepare = (nativeSetup?: ProviderNativeSetup) =>
+      Effect.runPromise(
+        makeAcpConfinementLive({
+          platform: "darwin",
+          sandboxPath: target.sandboxPath,
+          temporaryDirectory: join(target.canonicalRoot, "tmp"),
+          hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+        }).prepare({
+          profile: kimi,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome: join(target.canonicalRoot, "managed-home"),
+          mode: "code",
+          executionPolicy: "approval-gated",
+          strict: false,
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
+          environment: { PATH: "/usr/bin" },
+        }),
+      );
+    expect((await prepare(ownSetup)).command).toBe(target.binaryPath);
+    const setupOff = await prepare();
+    expect(setupOff.command).not.toBe(target.binaryPath);
+    expect(seatbeltProfile(setupOff)).toContain(
+      `(deny file-read* (subpath "${join(target.canonicalRoot, ".mcp.json")}"))`,
+    );
   });
 });
 

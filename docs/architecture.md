@@ -10202,7 +10202,14 @@ access: maintainer decision, 2026-11-19, "count it at full access"). The
 ledger therefore records no level: an upgrade drops the per-turn Full access
 column and its replay boundary that the earlier rule read, keeping every other
 column of each row, and the turn's level stays in the `executionPolicy` its
-`conversation-turn-started` event journals. A provider that
+`conversation-turn-started` event journals. The upgrade first keeps the ids of
+the unreported turns the earlier rule read below Full access
+(`usage_unreported_guarded_turn`, which a rebuild keeps): such a turn stays
+left out while its instance's observed release keeps its usage reading
+unverified, because that release read usage at Full access only when the turn
+ran and no report of it exists, so counting it would make a lifetime ceiling
+refuse forever. An unreported Full access turn from then still refuses, as
+does any such turn once the instance runs a reviewed release. A provider that
 can report usage keeps the rule above, so its failed, cancelled, or
 interrupted turn that reported nothing still refuses `unknown-spend`; counting
 it as nothing would make an interrupted turn free. An instance that no longer
@@ -16668,8 +16675,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
     Windows, and the provider's own approvals hold the thread's level
     (`providerHoldsLevelWithoutSandbox` in the domain's `guardrailPolicy.ts`):
     an ACP agent asks through its `session/request_permission` (one whose
-    shell never asks keeps the sandbox, and an untrusted added agent starts
-    under Strict);
+    shell never asks keeps the sandbox, an untrusted added agent starts
+    under Strict, and a session whose person turned the agent's own setup
+    off keeps the sandbox wherever its profile holds setup back, since the
+    sandbox's deny rules are that hold-back: unwrapped, Kimi Code started a
+    trusted Project's `.mcp.json` server with no approval asked);
     OpenCode's permission rules ask Octant, as the level says, before an edit, shell command
     or outside folder below Full access, and Pi's approval bridge asks
     before every `bash`, `edit` and `write` call. Such a launch takes no egress

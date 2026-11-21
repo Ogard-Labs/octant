@@ -583,7 +583,11 @@ function acpWallPolicy(input: {
  * agent's own mode asks Octant before each side effect
  * (`providerHoldsLevelWithoutSandbox`). An agent whose shell runs without
  * asking cannot hold a level that way, so it keeps the sandbox; an added agent
- * the person has not trusted is started under Strict, so it does too.
+ * the person has not trusted is started under Strict, so it does too. So does
+ * a session whose person turned the agent's own setup off while the profile
+ * holds entries back: the sandbox's deny rules are the only hold-back, and
+ * without them Kimi Code 0.38.0 started the stdio server a trusted Project's
+ * `.mcp.json` declares at `session/new`, with no approval asked.
  */
 function acpStartsUnconfinedBelowFullAccess(input: {
   readonly profile: AcpProviderProfile;
@@ -593,9 +597,12 @@ function acpStartsUnconfinedBelowFullAccess(input: {
   readonly purpose?: "probe" | "session";
   readonly fullAccessSandbox?: boolean;
   readonly sandboxPolicy?: SandboxPolicySelection;
+  readonly nativeSetup?: ProviderNativeSetup;
 }): boolean {
   return (
     input.profile.shellWithoutRequest !== true &&
+    (acpLoadsAllOwnSetup({ strict: input.strict, setup: input.nativeSetup }) ||
+      !acpHoldsSetupBack(input.profile)) &&
     providerHoldsLevelWithoutSandbox({
       mode: input.mode,
       executionPolicy: input.executionPolicy,
@@ -604,6 +611,17 @@ function acpStartsUnconfinedBelowFullAccess(input: {
       sandboxPolicySelected: input.sandboxPolicy !== undefined,
       purpose: input.purpose,
     })
+  );
+}
+
+/** Whether the profile's launch denies any of the agent's own setup. */
+function acpHoldsSetupBack(profile: AcpProviderProfile): boolean {
+  const hostAuthentication = profile.process.hostAuthentication;
+  return (
+    (profile.process.forbiddenRootEntries?.length ?? 0) > 0 ||
+    (profile.process.hostDeniedEntries?.length ?? 0) > 0 ||
+    (hostAuthentication?.kind === "directory" &&
+      (hostAuthentication.forbiddenEntries?.length ?? 0) > 0)
   );
 }
 

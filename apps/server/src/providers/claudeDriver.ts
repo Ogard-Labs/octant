@@ -3986,9 +3986,16 @@ function makeConnection(
         // runtime gets the host's environment, and its telemetry and
         // self-update follow the person's provider switches.
         const strict = input.strict !== false;
+        // A thread that keeps or chose a sandbox keeps the provider's own
+        // channels closed as Strict does, as an ACP agent's launch does: the
+        // person's switches open them only where Octant adds nothing of its own.
+        const ownChannels = launchOwnChannels(
+          strict || input.fullAccessSandbox === true || options.sandboxPolicy !== undefined,
+          input.ownChannels,
+        );
         // Whether the launch carries Octant's telemetry guards, which decides
         // how the host's own opt-outs are read and what Claude artifacts lift.
-        const telemetryGuarded = !launchOwnChannels(strict, input.ownChannels).telemetry;
+        const telemetryGuarded = !ownChannels.telemetry;
         const environment = await runSetupEffect(
           environmentFactory(options.authentication, {
             ...(apiKey !== undefined ? { apiKey } : {}),
@@ -3998,12 +4005,7 @@ function makeConnection(
             ...(options.configDirectory === undefined
               ? {}
               : { configDirectory: options.configDirectory }),
-            ...(strict
-              ? {}
-              : {
-                  strict: false,
-                  ...(input.ownChannels === undefined ? {} : { ownChannels: input.ownChannels }),
-                }),
+            ...(strict ? {} : { strict: false, ownChannels }),
           }).pipe(Effect.provideService(Scope.Scope, scope)),
           signal,
         );
