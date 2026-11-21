@@ -8,6 +8,43 @@ and the composer are in [DESIGN.md](../../DESIGN.md#composer-row).
 Update this specification with an approved change, following the
 [design workflow](README.md#changing-the-design).
 
+## First-run provider folder scan
+
+On first run, the **Project** step (in Code mode) offers a host-side, read-only
+scan of folders the person already used with Claude Code, Codex, OpenCode, and
+Pi, so they can tick existing folders and import them as Code Projects in one
+click (continuing existing sessions is already built per provider).
+
+- **Scope and sources.** The scan reads only session metadata on the host from
+  registered provider homes and extra account directories: `~/.claude`,
+  `CLAUDE_CONFIG_DIR`, `~/.claude-accounts/*`, `~/.codex`, `CODEX_HOME`,
+  `~/.codex-accounts/*`, OpenCode's data directories (`OPENCODE_DATA`,
+  `$XDG_DATA_HOME/opencode`, `~/.local/share/opencode`, SQLite and legacy JSON
+  sessions), and Pi's session directories (`PI_CODING_AGENT_SESSION_DIR`,
+  `$PI_CODING_AGENT_DIR/sessions`, `~/.pi/agent/sessions`). It never writes to
+  another tool's files and never sends data off the machine.
+- **Entry shape and privacy.** Each entry reports a credential-free
+  `owner/name` repository label when its Git remote names one (or the safe
+  single-segment folder name when none), which providers used it, its session
+  count, and its last activity. Clones of the same remote are grouped together.
+  Linked Git worktrees, `Downloads` (and subfolders inside it), the home
+  directory itself, and the filesystem root are excluded. Only opaque
+  window-bound IDs and safe display labels reach the renderer; raw host paths
+  never leave the host during discovery.
+- **Bounded scan.** The host enforces explicit file/row, distinct-folder, and
+  wall-clock time limits (2,000 files/rows, 200 entries, 5 seconds by default)
+  and reports explicitly when the scan stopped early, naming the limit reached.
+- **Import and authority.** Discovery grants no authority and ticks nothing by
+  default. Importing ticked opaque IDs re-validates each directory on the host,
+  issues one-time folder receipts, and creates Code Projects at the first-run
+  access level (`current-session`, inheriting Settings defaults and trusting no
+  native providers) through the existing `create-code-project` path. Already
+  imported Code Projects are marked and never duplicated. Only a local window
+  may scan or import; remote and paired sessions are refused.
+- **Strict.** When Strict is active on the host, the server hides the scan
+  without reading provider files, refuses import requests, and the UI omits the
+  scan section.
+
 ## Optional capability card in Your first task
 
 The existing first-run readiness view, **Your first task**, includes an optional

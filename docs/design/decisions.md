@@ -55,7 +55,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Updates and development](#updates-and-development)                                   | 5         | 5       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
 | [Workspace](#workspace)                                                               | 19        | 14      | 5            | 0                   |
-| [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
+| [Start screen](#start-screen)                                                         | 4         | 4       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 12        | 5       | 7            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
 | [Browser](#browser)                                                                   | 8         | 4       | 4            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **289**   | **175** | **109**      | **5**               |
+| **All areas**                                                                         | **290**   | **176** | **109**      | **5**               |
 
 ## Principles and hard lines
 
@@ -3185,6 +3185,16 @@ Under the Code composer, the start screen is an agent home of work to pick up.
 - Picking an item fills the prompt and attaches the issue as the thread's Create-from context.
 
 Status: Built. Since: —. Detail: [Start screen: Code agent home](start-screen.md#code-agent-home).
+
+### First-run provider folder scan
+
+On first run, the Project step lists folders the person already used with Claude Code, Codex, OpenCode, and Pi via a bounded host-side read-only scan and imports only the ticked ones as Code Projects in one click through the existing Project create path and folder receipts.
+
+- Scans registered provider homes and extra account directories (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `~/.claude-accounts/*`, `~/.codex-accounts/*`, OpenCode data directories, and Pi session directories) without writing to any provider's files or leaving the machine.
+- Reports credential-free `owner/name` repository labels (or safe single-segment folder names), providers, session counts, and last activity, groups clones of one remote, excludes linked worktrees and `Downloads`, sends only opaque window-bound IDs to the renderer, and says when file, entry, or time bounds stopped the scan early.
+- Discovery grants no authority; importing creates Code Projects at the first-run access level via folder receipts; Strict hides the scan and refuses import on the server and in the UI.
+
+Status: Built. Since: 2026-11-21. Detail: [Start screen: First-run provider folder scan](start-screen.md#first-run-provider-folder-scan).
 
 ## Canvas
 

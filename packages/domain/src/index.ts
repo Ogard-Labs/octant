@@ -271,3 +271,4 @@ export * from "./routineSchedule";
 export * from "./turnActivityTiming";
 export * from "./pullRequestIdentityPolicy";
 export * from "./editDiagnosticsPolicy";
+export * from "./providerFolderScanPolicy";

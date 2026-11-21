@@ -4033,6 +4033,35 @@ function LaunchedShell(
       lifecycle: project.lifecycle,
     }),
   );
+  const firstRunHostStrict =
+    codeController.bootstrap?.settings.defaultStrict === true ||
+    workSettings.settings?.defaultStrict === true;
+  const firstRunProviderFolderScan = useMemo(() => {
+    if (
+      projectController.client.scanProviderFolders === undefined ||
+      projectController.client.importProviderFolders === undefined
+    ) {
+      return undefined;
+    }
+    return {
+      strict: firstRunHostStrict,
+      scan: (signal?: AbortSignal) =>
+        projectController.scanProviderFolders(signal) ??
+        Promise.resolve({ status: "hidden" as const, reason: "strict" as const }),
+      importFolders: async (
+        folderIds: Parameters<typeof projectController.importProviderFolders>[0],
+      ) =>
+        (await projectController.importProviderFolders(folderIds)) ?? {
+          status: "completed" as const,
+          results: [],
+        },
+    };
+  }, [
+    firstRunHostStrict,
+    projectController.client,
+    projectController.importProviderFolders,
+    projectController.scanProviderFolders,
+  ]);
 
   const codeProviderGroups = useMemo(
     () =>
@@ -9211,6 +9240,9 @@ function LaunchedShell(
               workSettings.status === "unsupported" ? rawDraftSelection : firstRunWorkModel,
             codeModel: rawDraftSelection,
             projects: firstRunProjects,
+            ...(firstRunProviderFolderScan === undefined
+              ? {}
+              : { providerFolderScan: firstRunProviderFolderScan }),
             onCreateProject: (mode) => openProjectCreate(mode),
             onStartThread: ({ mode, projectId }) => {
               const project = firstRunProjects.find(

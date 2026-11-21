@@ -92,6 +92,7 @@ import { createFolderBrowseRouteHandler } from "../folderBrowseRoutes";
 import { FolderBrowseService } from "../folderBrowseService";
 import { createProjectIconReader } from "../projectIcon";
 import { ProjectCustomIconStore } from "../projectIconStore";
+import { ProviderFolderScanService } from "../providerFolderScanService";
 import { ProjectService } from "../projectService";
 import { CodeProjectAccess } from "../codeProjectAccess";
 import type { CodeOperationRuntime } from "../code/codeOperationRuntime";
@@ -638,6 +639,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "codeBoardEventStore"
     | "codeEvidence"
     | "isProjectPolicyTargetAllowed"
+    | "resolveHostStrict"
     | "selectCodeConversation"
   > &
   Pick<
@@ -685,6 +687,7 @@ export function wireCode(deps: CodeDependencies) {
     projectRootPort,
     projectService,
     refreshStandaloneSkills,
+    resolveHostStrict,
     selectCodeConversation,
     serverConnection,
     serverProjectStore,
@@ -864,6 +867,18 @@ export function wireCode(deps: CodeDependencies) {
     const projectCustomIcons = new ProjectCustomIconStore({
       dataDirectory: persistence.dataDirectory,
     });
+    const providerFolderScan = new ProviderFolderScanService({
+      homeDirectory: homedir(),
+      env: process.env,
+      readProviderInstances: () => persistence.readProviderInstances(),
+      readActiveCodeProjects: () => persistence.readProjects({ type: "code", lifecycle: "active" }),
+      isHostStrict: resolveHostStrict,
+      bindingReceiptStore,
+      projectRootPort,
+      projectService,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
     const projectRoutes = createProjectRouteHandler({
       service: projectService,
       environmentService,
@@ -871,6 +886,7 @@ export function wireCode(deps: CodeDependencies) {
       icons: createProjectIconReader({ projects: projectService, custom: projectCustomIcons }),
       customIcons: projectCustomIcons,
       memoryProposals: deps.projectMemoryAccess.proposals,
+      providerFolderScan,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
     const agentProfileService = new AgentProfileService({
