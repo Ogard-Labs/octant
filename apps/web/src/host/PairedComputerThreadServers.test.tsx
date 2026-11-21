@@ -177,6 +177,29 @@ describe("a thread's servers on another computer", () => {
     await waitFor(() => expect(screen.queryByText("vite on port 5173")).toBeNull());
   });
 
+  it("keeps the last rows and says so when a later read of that computer fails", async () => {
+    let calls = 0;
+    render(
+      <PairedComputerThreadServers
+        client={client(async () => {
+          calls += 1;
+          if (calls === 1) return listed(THREAD, [listener({ id: LISTENER, port: 5173 })]);
+          throw new Error("Studio is not answering.");
+        })}
+        hostName="Studio"
+        inOwnWorktree
+        open={vi.fn()}
+        projectId={PROJECT}
+        threadId={THREAD}
+      />,
+    );
+    // The next read is the controller's regular refresh, five seconds on.
+    expect(await screen.findByRole("status", {}, { timeout: 8_000 })).toHaveTextContent(
+      "Couldn't list this thread's servers on Studio.",
+    );
+    expect(screen.getByText("vite on port 5173")).toBeTruthy();
+  }, 12_000);
+
   it("says when that computer could not list the thread's servers", async () => {
     render(
       <PairedComputerThreadServers

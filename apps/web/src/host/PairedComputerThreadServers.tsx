@@ -53,14 +53,20 @@ export function PairedComputerThreadServers(props: {
   const listeners = (snapshot?.currentCheckout ?? []).filter(
     (listener) => listener.openAvailable && listener.health === "listening",
   );
+  // A failed first read sets an error status; a failed poll after a good one
+  // keeps the last rows and only records the message, so both are shown.
+  const listingFailure =
+    controller.errorMessage === undefined ? null : (
+      <p className="local-servers__state" role="status">
+        {`Couldn't list this thread's servers on ${props.hostName}. ${controller.errorMessage}`}
+      </p>
+    );
   if (listeners.length === 0) {
-    return controller.status === "error" && controller.errorMessage !== undefined ? (
+    return listingFailure === null ? null : (
       <section aria-label={`Servers on ${props.hostName}`} className="local-servers">
-        <p className="local-servers__state" role="status">
-          {`Couldn't list this thread's servers on ${props.hostName}. ${controller.errorMessage}`}
-        </p>
+        {listingFailure}
       </section>
-    ) : null;
+    );
   }
   // The same facts the host's grant policy refuses on, so a row never offers
   // a control that is certain to fail; the host still decides every grant.
@@ -133,6 +139,7 @@ export function PairedComputerThreadServers(props: {
         })}
       </ul>
       <p className="local-servers__state">{REMOTE_OPEN_LIMITS}</p>
+      {listingFailure}
       {message === undefined ? null : (
         <p className="local-servers__state" role="status">
           {message}
