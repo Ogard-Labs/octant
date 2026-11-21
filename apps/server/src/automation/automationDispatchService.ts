@@ -164,10 +164,13 @@ export class AutomationDispatchService implements AutomationDispatchPort {
       if (run === undefined) return;
     }
 
+    // Moved to dispatching first, so the lease recovery offers it again:
+    // left queued, the scheduler would not offer it until a restart. A run
+    // that already holds its thread but waited for provider capacity is held
+    // here too: turn admission would refuse its first turn during a drain, and
+    // that refusal fails the run for good.
+    if (this.#refusesNewRuns?.() === true) return;
     if (run.dispatchIntent === undefined) {
-      // Moved to dispatching first, so the lease recovery offers it again:
-      // left queued, the scheduler would not offer it until a restart.
-      if (this.#refusesNewRuns?.() === true) return;
       const revalidation = revalidateAutomationAuthority({
         definition,
         run,

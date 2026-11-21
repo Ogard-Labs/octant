@@ -94,9 +94,11 @@ function service(
   code: ThreadWakeupModePort,
   hostStartedAt = new Date(time.now()),
   limits?: ThreadWakeupLimits,
+  refusesNewTurns?: () => boolean,
 ) {
   return new ThreadWakeupService({
     ...(limits === undefined ? {} : { limits: () => limits }),
+    ...(refusesNewTurns === undefined ? {} : { refusesNewTurns }),
     journal,
     clock: () => new Date(time.now()),
     uuid: () => crypto.randomUUID(),
@@ -272,6 +274,34 @@ describe("thread wake-ups", () => {
     await time.advanceTo(START + 10 * 60_000);
     expect(code.startTurn).toHaveBeenCalledTimes(2);
     expect(wakeups.list("code", threadId)).toEqual([]);
+  });
+
+  it("keeps a wake-up that comes due while the host drains, and fires it once the drain lifts", async () => {
+    const time = fakeTime();
+    const { journal } = openJournal(time.now);
+    let draining = true;
+    const code = port({
+      startTurn: vi.fn(async () =>
+        draining
+          ? { status: "refused" as const, message: "The host is draining." }
+          : { status: "started" as const, turnId: "turn-1" },
+      ),
+    });
+    const wakeups = service(time, journal, code, new Date(time.now()), undefined, () => draining);
+    wakeups.start();
+    await wakeups.forSession("code", threadId).schedule({
+      kind: "delay",
+      providerToolName: "ScheduleWakeup",
+      delaySeconds: 60,
+      prompt: "Check again.",
+    });
+    await time.advanceTo(START + 60_000);
+    expect(code.startTurn).not.toHaveBeenCalled();
+    expect(wakeups.list("code", threadId)).toHaveLength(1);
+    draining = false;
+    await time.advanceTo(START + 60_000 + 15_000);
+    expect(code.startTurn).toHaveBeenCalledOnce();
+    expect(journaledChanges(journal)).toEqual(["scheduled", "fired"]);
   });
 
   it("ends a recurring wake-up that outlived its seven days while its thread was busy, without starting a turn", async () => {

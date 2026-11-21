@@ -573,14 +573,19 @@ export class MemberUpkeepService {
             note = `${turnsStill(drained.running)} after ${minutesOf(drain.minutes)}; Octant stopped ${drained.running === 1 ? "it" : "them"}, and ${drained.running === 1 ? "it continues" : "they continue"} once ${plan.alias} starts again.`;
           }
         }
-        const call = await this.#call(server, {
-          script: DRAIN_SCRIPT,
-          args: [cli],
-          timeoutMs: SHORT_STEP_TIMEOUT_MS,
-        });
-        // A stop that failed may have stopped the member anyway, so it is
-        // started again on the version it runs.
-        if (!call.ok) return { ...call, rollBack: true };
+        // `octant server upgrade` takes the pre-migration backup through the
+        // running owner's control socket and then stops it gracefully itself,
+        // so a migrating update leaves the owner up for that backup.
+        if (!plan.storeMigration) {
+          const call = await this.#call(server, {
+            script: DRAIN_SCRIPT,
+            args: [cli],
+            timeoutMs: SHORT_STEP_TIMEOUT_MS,
+          });
+          // A stop that failed may have stopped the member anyway, so it is
+          // started again on the version it runs.
+          if (!call.ok) return { ...call, rollBack: true };
+        }
         return note === undefined ? { ok: true } : { ok: true, note };
       },
       swap: async () => {

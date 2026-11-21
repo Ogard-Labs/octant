@@ -1287,6 +1287,7 @@ export function startOctantServer(
       shieldServerStore,
     });
     const { restartRecovery } = yield* wireContinuation({
+      hostDrain,
       threadWakeups,
       workThreadWakeupPort,
       codeThreadWakeupPort,

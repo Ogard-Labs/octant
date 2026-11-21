@@ -1121,6 +1121,44 @@ describe("AutomationDispatchService", () => {
     }
   });
 
+  it("holds a routine run that already has its thread while the host drains, then starts it", async () => {
+    const session = openSession();
+    const definition = codeDefinition();
+    const run = claimQueuedRun(session, definition);
+    const code = createCodePort();
+    let capacity: "waiting" | "admit" = "waiting";
+    let draining = false;
+    const dispatcher = new AutomationDispatchService({
+      store: session.store,
+      projection: session.projection,
+      code: code.port,
+      work: unavailableAutomationWorkDispatchPort(),
+      capacity: {
+        admit: (input) =>
+          capacity === "waiting"
+            ? { kind: "waiting", message: "Provider capacity exhausted." }
+            : alwaysAdmit().admit(input),
+      },
+      refusesNewRuns: () => draining,
+      resolveFacts: () => matchingFacts(definition),
+      now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+    });
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(session.projection.getRun(run.id)?.dispatchIntent).toBeDefined();
+
+    capacity = "admit";
+    draining = true;
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(code.launch).not.toHaveBeenCalled();
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("dispatching");
+
+    draining = false;
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(code.launch).toHaveBeenCalledTimes(1);
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("running");
+    session.connection.close();
+  });
+
   it("waits on provider capacity without accepting a first turn", async () => {
     const session = openSession();
     const definition = codeDefinition();

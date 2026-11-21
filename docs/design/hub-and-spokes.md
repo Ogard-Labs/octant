@@ -677,7 +677,12 @@ request, then runs over the same connection:
    drain and starts the member on the version it runs. Octant never stops a
    member asked to wait without that wait first; a member whose installed CLI
    cannot drain fails the step and is rolled back, and the person can update it
-   with Stop now.
+   with Stop now. A routine run waiting for provider capacity, a due thread
+   wake-up, and a usage-limit continuation are held rather than refused while
+   the member drains, and are offered again once it lifts or the member
+   restarts. An update that migrates the store skips the `octant server stop`:
+   `octant server upgrade` takes its verified backup through the running owner
+   and then stops it gracefully itself.
 3. **Swap.** The installed copy's `octant server upgrade --artifact …
 --install-root …`, so the user service it rewrites keeps naming the
    install's `current` link. It checks the signature again, stages the new
