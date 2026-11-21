@@ -15218,19 +15218,24 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     provider runtime's call only under Strict, and at Full access a
     provider's command runs unasked and is journaled
     (`shield-forge-changes.observed@1`) with the hard line it crossed.
-  - **Provider channels.** Telemetry, error reports, `/bug`, `/feedback`
-    and marketplace installs follow the person's own provider settings.
-    Self-update stays off, because Octant installs and updates provider
-    CLIs itself. Strict turns every channel off, as today. Octant itself
+  - **Provider channels.** Marketplace installs follow the person's own
+    provider settings. Telemetry, error reports, `/bug` and `/feedback` stay
+    off unless the person turns provider telemetry on, and self-update stays
+    off unless the person lets providers update themselves, because Octant
+    installs and updates provider CLIs itself (below). Strict turns every
+    channel off, as today. Octant itself
     still sends nothing. Built for Claude Code, Pi, Mistral Vibe, Grok Build,
     Kilo, Google Antigravity and Kimi Code; Codex and OpenCode set no
     telemetry guard of Octant's.
   - **Provider telemetry and self-update switches.** Two host switches in
     Settings › Providers & Models replace the hard line that kept both off
     (maintainer decision, 2026-11-21): **Let providers send their own
-    telemetry**, on by default (the rule above), and **Let providers update
-    themselves**, off by default. Telemetry off sets the provider's telemetry
-    guards on every launch outside Strict; self-update on leaves its
+    telemetry** and **Let providers update themselves**, both off by default,
+    for every provider and for a store saved before the switches existed.
+    Telemetry off keeps the provider's telemetry guards on every launch
+    outside Strict, as every launch carried them before the switch, in line
+    with Octant's local-first stance; on, its telemetry guards are left out
+    and the provider's own settings decide. Self-update on leaves its
     self-update guards out. Strict keeps both kinds set whatever the switches
     say, the version read always keeps them, a host's own opt-out always
     wins, and Octant's own **Update CLI** is unaffected. Each switch is read
@@ -16651,13 +16656,14 @@ approval-gated` command that undoes it. The terminal shows no one-time
   in place of any host `ANTHROPIC_BASE_URL`. It sets the auto-memory and
   built-in-agents switches, the self-update switch unless the person lets
   providers update themselves, and the telemetry, error-report, `/bug`,
-  `/feedback` and survey switches only while the person keeps provider
-  telemetry off (`openClaudeLaunchGuards`); otherwise those follow the
-  person's own Claude Code settings, as marketplace auto-install always
-  does, and the Claude artifacts switch below lifts nothing, because nothing
-  of Octant's sits on telemetry there. With provider telemetry off it lifts
-  only `DISABLE_TELEMETRY`, as under Strict, and the host's own opt-out is
-  kept as `DO_NOT_TRACK=1`. Pi's telemetry and the ACP agents' telemetry
+  `/feedback` and survey switches unless the person turns provider telemetry
+  on (`openClaudeLaunchGuards`; off by default). With provider telemetry off,
+  the default, the Claude artifacts switch below lifts only
+  `DISABLE_TELEMETRY`, as under Strict, and the host's own opt-out is kept as
+  `DO_NOT_TRACK=1`. With it on, those switches follow the person's own Claude
+  Code settings, as marketplace auto-install always does, and the Claude
+  artifacts switch lifts nothing, because nothing of Octant's sits on
+  telemetry there. Pi's telemetry and the ACP agents' telemetry
   guards (Mistral Vibe, Grok Build, Kilo, Kimi Code; `channelGuards`, and
   Google Antigravity's `--disable-telemetry`) follow the same switch, their
   self-update guards (`selfUpdateGuards`, Pi's release check) the other, and

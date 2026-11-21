@@ -640,13 +640,13 @@ tool keeps every action, so Claude Design's `/design` and `/slides` run as
 in Claude Code: `quickstart`, publishing from a type with no local file,
 `read`, `list` and updates. A publish naming a local file follows the
 thread's file rules. Chat and Plan launches offer the read-only actions and
-refuse publishing. The telemetry guard follows the person's own provider
-settings outside Strict, so the switch no longer lifts it (built: outside
-Strict the launch carries no telemetry guard of Octant's, the switch only
-opts the runtime in with `CLAUDE_CODE_ARTIFACT`, and a host's own telemetry
-opt-out keeps the tool off; where the person turned provider telemetry off,
-the launch carries Octant's telemetry guards and lifts only `DISABLE_TELEMETRY`,
-as under Strict, the host's own opt-out still kept as `DO_NOT_TRACK=1`). Built too (`claudeOffersArtifacts` and
+refuse publishing. The telemetry guard follows the person's provider
+telemetry switch outside Strict (built: with it off, the default, the launch
+carries Octant's telemetry guards and lifts only `DISABLE_TELEMETRY`, as under
+Strict, the host's own opt-out still kept as `DO_NOT_TRACK=1`; with it on, the
+launch carries no telemetry guard of Octant's, the switch only opts the runtime
+in with `CLAUDE_CODE_ARTIFACT`, and a host's own telemetry opt-out keeps the
+tool off). Built too (`claudeOffersArtifacts` and
 `claudeArtifactCallRefusal` with Strict off): the offer on the switch alone in
 every mode, every action in Work and Code, a publish naming a local file asking
 outside the session's folders below Full access as a `Write` would (the login
@@ -3230,16 +3230,18 @@ next start.
 | OpenCode (ACP, 1.x) | none                                                                                                                                     | `OPENCODE_DISABLE_AUTOUPDATE`                     |
 | Pi                  | `PI_TELEMETRY`                                                                                                                           | `PI_SKIP_VERSION_CHECK`                           |
 
-Telemetry is on by default, keeping the earlier rule that outside Strict the
-provider's own settings decide it; self-update is off by default, since Octant
+Telemetry is off by default, for every provider and for a store saved before
+the switch existed (maintainer decision, 2026-11-21), so a launch outside Strict
+keeps its telemetry guards as every launch did before the switch; self-update
+is off by default, since Octant
 installs and updates provider CLIs itself through **Update CLI** below, which
 the switch does not touch. Marketplace auto-install, memory and the built-in
 subagents keep their own rules. Codex's app server takes neither kind of guard
 from Octant, and an added ACP agent's registry environment (Factory Droid's and
 Auggie's update switches) is the registry entry's own, so the switches change
-nothing for either. Kilo's telemetry guard and Antigravity's
-`--disable-telemetry` were set outside Strict before the switch existed; they
-now follow it like every other telemetry guard.
+nothing for either. Telemetry guards that were set outside Strict before the switch existed,
+Kilo's and Antigravity's `--disable-telemetry` among them, stay set by default
+and are lifted only when the person turns the switch on.
 
 ## Runtime updates
 

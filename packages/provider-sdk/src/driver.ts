@@ -147,8 +147,8 @@ export interface ProviderSessionStart {
    * Which of the provider's own channels to its vendor the person lets it
    * use, from Settings › Providers & Models. Read only outside Strict: under
    * Strict every telemetry and self-update guard stays set whatever this
-   * says. Absent outside Strict keeps the default: telemetry follows the
-   * provider's own settings and self-update stays off.
+   * says. Absent outside Strict keeps the default: both stay off, every
+   * telemetry and self-update guard set.
    */
   readonly ownChannels?: ProviderOwnChannels;
   /**

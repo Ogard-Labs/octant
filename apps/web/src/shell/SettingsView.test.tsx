@@ -806,7 +806,7 @@ describe("SettingsView", () => {
     });
   });
 
-  it("leaves provider telemetry to each provider and keeps self-update off by default, and saves either switch the person turns", async () => {
+  it("keeps provider telemetry and self-update off by default, and saves either switch the person turns", async () => {
     const user = userEvent.setup();
     const { props } = renderSettings({
       providerController: providerControllerFixture(),
@@ -817,10 +817,10 @@ describe("SettingsView", () => {
       name: "Let providers send their own telemetry",
     });
     const selfUpdate = screen.getByRole("switch", { name: "Let providers update themselves" });
-    expect(telemetry).toBeChecked();
+    expect(telemetry).not.toBeChecked();
     expect(selfUpdate).not.toBeChecked();
     await user.click(telemetry);
-    expect(props.onSettingsChange).toHaveBeenCalledWith({ providerTelemetry: false });
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ providerTelemetry: true });
     await user.click(selfUpdate);
     expect(props.onSettingsChange).toHaveBeenCalledWith({ providerSelfUpdate: true });
   });
