@@ -583,7 +583,10 @@ otherwise.
   stays theirs. A member the roster drops leaves the window's list at its
   next read (on opening and every five minutes), and its device there is
   revoked with the roster; a member's window leaves the roster with that
-  member, and a newer window of the same member replaces the older one. The
+  member, also when a standby removed that member and handed the removal
+  back, and a newer window of the same member replaces the older one. A
+  window guest the hub removed is not listed again when that window asks
+  next. The
   hub itself is not listed for a spoke's window: it has no Act item of its
   own to bound a device it introduced to itself. Not built yet: answering
   approvals and Stop held to the Act item, and the hub as one of a spoke

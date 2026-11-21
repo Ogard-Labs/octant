@@ -957,12 +957,18 @@ function assembleServices(
     admitIntroducedDevice: (input) => lifecycle.admitIntroducedDevice(input),
     endDeviceSessions: (deviceIds, reasonCode) => {
       for (const deviceId of deviceIds) {
-        credentialLifecycle.endDeviceSessions({
+        const ended = credentialLifecycle.endDeviceSessions({
           commandId: uuid(),
           hostId: identity.hostId,
           deviceId,
           reasonCode,
         });
+        // A device with no product session open is skipped there, so the
+        // invalidation hook never ran for it; a server proxy session it holds
+        // without one must end too, or its grants outlive the change.
+        if (ended === undefined) {
+          proxySessions?.endDevice(deviceId, proxySessionEndReasonForCredentialChange(reasonCode));
+        }
       }
     },
   };

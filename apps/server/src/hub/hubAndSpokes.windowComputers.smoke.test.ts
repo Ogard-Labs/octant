@@ -471,4 +471,25 @@ describe("a desktop window on a hub member", () => {
     ).toBe(false);
     expect(windowDevices(b, fingerprint).map((device) => device.state)).toEqual(["revoked"]);
   }, 60_000);
+
+  it("a window guest the hub removed stays off the roster when the window asks again", async () => {
+    const { network, hub, a, b } = await startWorld();
+    const desktop = desktopWindow(a, network);
+    await desktop.sync();
+    const [asked] = desktop.introductions;
+    if (asked === undefined) throw new Error("The window asked for no introduction.");
+    const fingerprint = publicKeyFingerprint(asked.devicePublicKey);
+
+    expect((await hub.hub.removeMember({ memberId: String(asked.memberId) }, window)).status).toBe(
+      "removed",
+    );
+    await desktop.sync();
+
+    expect(
+      hub.hub
+        .status()
+        .roster?.roster.members.some((member) => member.identityKeyFingerprint === fingerprint),
+    ).toBe(false);
+    expect(windowDevices(b, fingerprint).every((device) => device.state === "revoked")).toBe(true);
+  }, 60_000);
 });

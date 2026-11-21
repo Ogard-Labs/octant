@@ -179,7 +179,12 @@ export type WindowGuestOutcome =
   | { readonly status: "unchanged" }
   | {
       readonly status: "refused";
-      readonly kind: "hub-role-off" | "not-a-member" | "already-member" | "key-invalid";
+      readonly kind:
+        | "hub-role-off"
+        | "not-a-member"
+        | "already-member"
+        | "key-invalid"
+        | "removed-from-hub";
     };
 
 /** The most removals the hub remembers for merging a standby's changes back. */
@@ -687,6 +692,14 @@ export class HubService {
     }
     if (!isUnlockPublicKey(input.devicePublicKey))
       return { status: "refused", kind: "key-invalid" };
+    // A window guest the operator removed stays out: the window asks again on
+    // every refresh, and accepting it put it straight back on the roster for
+    // accepting members to give fresh credentials.
+    if (
+      (hub.removals ?? []).some((removal) => String(removal.memberId) === String(input.memberId))
+    ) {
+      return { status: "refused", kind: "removed-from-hub" };
+    }
     const fingerprint = publicKeyFingerprint(input.devicePublicKey);
     const listed = roster.members.find(
       (member) => String(member.memberId) === String(input.memberId),
@@ -921,7 +934,7 @@ export class HubService {
         key: entry.identityPublicKey,
       });
     }
-    const merged = mergeStandInMembership({
+    const mergedByStandby = mergeStandInMembership({
       hub: roster,
       hubRemovedSinceBase: (hub.removals ?? [])
         .filter((removal) => removal.sequence > handback.baseSequence)
@@ -932,6 +945,31 @@ export class HubService {
         removed: handback.removed,
       },
     });
+    // A spoke's desktop window was listed as a guest because of it, and goes
+    // with it, as it does when the hub itself removes the spoke: the standby
+    // only names the spoke, so without this its window kept its device here.
+    const leftByStandby = new Set(
+      roster.members
+        .filter(
+          (member) =>
+            !mergedByStandby.members.some(
+              (each) => String(each.memberId) === String(member.memberId),
+            ),
+        )
+        .map((member) => String(member.memberId)),
+    );
+    const merged = {
+      ...mergedByStandby,
+      members: mergedByStandby.members.filter(
+        (member) =>
+          !hub.members.some(
+            (record) =>
+              String(record.memberId) === String(member.memberId) &&
+              record.introducedBy !== undefined &&
+              leftByStandby.has(String(record.introducedBy)),
+          ),
+      ),
+    };
     const kept = (memberId: string) =>
       merged.members.some((member) => String(member.memberId) === memberId);
     const dropped = roster.members.filter((member) => !kept(String(member.memberId)));

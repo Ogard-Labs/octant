@@ -4,6 +4,7 @@
 // time. The standby adds and removes members, the hub returns, and the
 // standby's changes merge back with a removal winning.
 
+import { generateKeyPairSync } from "node:crypto";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -415,8 +416,20 @@ describe("a hand-back from a named standby", () => {
     expect(hub.records.map((record) => record.change)).toContain("stand-in-refused");
   });
 
-  it("still merges a hand-back that removes a plain spoke", async () => {
+  it("still merges a hand-back that removes a plain spoke, and the spoke's desktop window goes with it", async () => {
     const { hub, standby, member } = await startNamed();
+    const windowKey = generateKeyPairSync("ec", { namedCurve: "prime256v1" })
+      .publicKey.export({ format: "der", type: "spki" })
+      .toString("base64url");
+    const introduced = await hub.hub.introduceWindowGuest(
+      {
+        memberId: decodeMemberId(crypto.randomUUID()),
+        devicePublicKey: windowKey,
+        introducedBy: member.hostId,
+      },
+      window,
+    );
+    expect(introduced.status).toBe("introduced");
     const before = hub.hub.status().roster;
     if (before === undefined) throw new Error("The hub holds no roster.");
 
