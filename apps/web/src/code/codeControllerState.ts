@@ -120,6 +120,8 @@ export interface CodeConversationMessage {
   readonly forkMergeBacks?: ReadonlyArray<CodeForkMergeBack>;
   /** On a reply: finished subagents' results the host steered into its turn while it ran. */
   readonly steeredResults?: CodeConversationTurn["steeredResults"];
+  /** On a reply: the person's messages the runtime took into its turn while it ran. */
+  readonly steeredMessages?: CodeConversationTurn["steeredMessages"];
 }
 
 function providerRequestFromEvent(event: CodeOperationEvent): CodeProviderRequest | undefined {
@@ -607,6 +609,7 @@ async function projectConversationTurns(
       ...(turn.stallNotice === undefined ? {} : { stallNotice: turn.stallNotice }),
       ...(turn.forkMergeBacks === undefined ? {} : { forkMergeBacks: turn.forkMergeBacks }),
       ...(turn.steeredResults === undefined ? {} : { steeredResults: turn.steeredResults }),
+      ...(turn.steeredMessages === undefined ? {} : { steeredMessages: turn.steeredMessages }),
     });
     const steps = turn.steps ?? [];
     if (steps.length === 0 && turn.stepsTruncated !== true && turn.reasoningMs === undefined)

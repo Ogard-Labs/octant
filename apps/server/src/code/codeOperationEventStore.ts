@@ -37,11 +37,15 @@ import {
   type ProviderResumeCursor,
   type ProviderSessionId,
 } from "@octant/contracts";
-import type { AgentResultSteered } from "@octant/contracts";
+import type { AgentResultSteered, ThreadMessageSteered } from "@octant/contracts";
 import {
   agentResultsSteeredInto,
   readAgentResultsSteered,
 } from "../agentRun/agentResultSteeredRecord";
+import {
+  readThreadMessagesSteered,
+  threadMessagesSteeredInto,
+} from "../messageQueue/threadMessageSteeredRecord";
 import { foldCodeTurnUsage } from "@octant/domain";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
@@ -1391,10 +1395,11 @@ export class CodeOperationEventStore {
       .map((entry) => entry.limit);
 
     const steered = turns.length === 0 ? [] : readAgentResultsSteered(this.#journal, threadId);
+    const messages = turns.length === 0 ? [] : readThreadMessagesSteered(this.#journal, threadId);
     return decodeCodeConversationPage({
       version: 3,
       threadId,
-      turns: turns.map((builder) => withSteeredResults(finishTurn(builder), steered)),
+      turns: turns.map((builder) => withSteeredResults(finishTurn(builder), steered, messages)),
       nextCursor: turns.at(-1)?.startCursor ?? input.afterCursor,
       hasMore,
       ...(currentLimits.length === 0 ? {} : { limits: currentLimits.slice(0, 8) }),
@@ -1603,9 +1608,10 @@ export class CodeOperationEventStore {
     let bytes = 0;
     let included = 0;
     const steered = starts.length === 0 ? [] : readAgentResultsSteered(this.#journal, threadId);
+    const messages = starts.length === 0 ? [] : readThreadMessagesSteered(this.#journal, threadId);
     for (const { envelope, builder } of starts.slice(0, request.limit)) {
       this.#foldTurn(envelope, builder, decode);
-      const turn = withSteeredResults(finishTurn(builder), steered);
+      const turn = withSteeredResults(finishTurn(builder), steered, messages);
       const size = Buffer.byteLength(JSON.stringify(turn), "utf8");
       if (included > 0 && bytes + size > CODE_CONVERSATION_WINDOW_BYTES) break;
       bytes += size;
@@ -2013,16 +2019,27 @@ function startTurn(
 }
 
 /**
- * The turn with the children's results the host steered into it while it ran.
- * Those records are journaled apart from the turn's own operation, so its
- * writers never contend with them, and are read beside the turn.
+ * The turn with the children's results and the person's messages the runtime
+ * took into it while it ran. Those records are journaled apart from the turn's
+ * own operation, so its writers never contend with them, and are read beside
+ * the turn.
  */
 function withSteeredResults(
   turn: CodeConversationTurn,
   records: ReadonlyArray<AgentResultSteered>,
+  messages: ReadonlyArray<ThreadMessageSteered>,
 ): CodeConversationTurn {
   const steeredResults = agentResultsSteeredInto(records, String(turn.operationId));
-  return steeredResults.length === 0 ? turn : { ...turn, steeredResults };
+  const steeredMessages = threadMessagesSteeredInto(
+    messages.filter((record) => record.mode === "code"),
+    String(turn.operationId),
+  );
+  if (steeredResults.length === 0 && steeredMessages.length === 0) return turn;
+  return {
+    ...turn,
+    ...(steeredResults.length === 0 ? {} : { steeredResults }),
+    ...(steeredMessages.length === 0 ? {} : { steeredMessages }),
+  };
 }
 
 /** The turn as a page or a window carries it. */

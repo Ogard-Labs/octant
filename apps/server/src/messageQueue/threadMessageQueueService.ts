@@ -20,6 +20,7 @@ import {
   type ThreadMessageQueueRefusalReason,
   type ThreadMessageQueueResult,
   type ThreadMessageQueueScope,
+  type ThreadQueueMessageId,
   type WindowId,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -92,6 +93,8 @@ export class ThreadMessageQueueService {
   >();
   readonly #revoked = new Set<string>();
   readonly #purging = new Set<string>();
+  /** Messages a running turn's runtime refused to take; each waits for a turn of its own. */
+  readonly #unsteerable = new Set<string>();
   #disposed = false;
   constructor(options: ThreadMessageQueueServiceOptions) {
     this.#clock = options.clock ?? (() => new Date().toISOString());
@@ -317,6 +320,7 @@ export class ThreadMessageQueueService {
         );
         if (outcome === "applied") {
           this.#authorized.delete(item.messageId);
+          this.#unsteerable.delete(item.messageId);
           if (content !== undefined) await this.#release(content, "removed", true);
         }
         return outcome === "unavailable" ? refused("storage-unavailable") : result(outcome);
@@ -626,7 +630,12 @@ export class ThreadMessageQueueService {
       head = state.items[0];
       if (head === undefined) return;
     }
-    if (inspection.status === "busy") return;
+    if (inspection.status === "busy") {
+      if (await this.#steer(scope, state, head.messageId, content, auth.windowId))
+        await this.#tick(scope);
+      return;
+    }
+    this.#unsteerable.delete(head.messageId);
     const codeOperationId = scope.mode === "code" ? decodeCodeOperationId(randomUUID()) : undefined;
     if (
       this.#store.write({
@@ -681,6 +690,45 @@ export class ThreadMessageQueueService {
         ),
       });
     } else this.#hold(state, "delivery-unknown");
+  }
+  /**
+   * Hands the queue's next message to the turn already running, where its
+   * runtime steers. Only the head is offered, so a message that cannot be
+   * steered keeps every later one behind it in order. The message is not
+   * marked as dispatching first: a restart while the runtime takes it also
+   * ends the turn that took it, and the message still queued is then sent
+   * again under the ordinary restart rules rather than lost.
+   */
+  async #steer(
+    scope: ThreadMessageQueueScope,
+    state: QueueState,
+    messageId: ThreadQueueMessageId,
+    content: QueueContent,
+    windowId: WindowId,
+  ): Promise<boolean> {
+    if (this.#port.steer === undefined || this.#unsteerable.has(messageId)) return false;
+    let outcome: "steered" | "refused" | "unavailable";
+    try {
+      outcome = await this.#port.steer({ scope, messageId, payload: content.payload, windowId });
+    } catch {
+      outcome = "refused";
+    }
+    if (this.#disposed) return false;
+    // A runtime that would not take this message is not asked again for it:
+    // the recovery pass runs every second and would otherwise ask each time.
+    if (outcome === "refused") this.#unsteerable.add(messageId);
+    if (outcome !== "steered") return false;
+    const written = this.#store.write(
+      {
+        ...state,
+        items: state.items.filter((item) => String(item.messageId) !== String(messageId)),
+      },
+      { settled: { messageId, status: "steered" } },
+    );
+    if (written !== "applied") return false;
+    this.#authorized.delete(messageId);
+    await this.#release(content, "accepted", true);
+    return true;
   }
   /**
    * Lifts the hold a clean restart left, once, under the authority each
@@ -827,6 +875,7 @@ export class ThreadMessageQueueService {
       if (identity?.status === "removed") await this.#release(content, "removed", true);
       else if (
         identity?.status === "completed" ||
+        identity?.status === "steered" ||
         identity?.status === "failed" ||
         identity?.status === "cancelled"
       )

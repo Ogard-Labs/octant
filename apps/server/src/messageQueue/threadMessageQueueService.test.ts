@@ -70,7 +70,10 @@ function port() {
     },
   };
 }
-function fixture(p = port(), path?: string) {
+function fixture(
+  p: ReturnType<typeof port> & Pick<ThreadMessageQueueModePort, "steer"> = port(),
+  path?: string,
+) {
   const directory =
     path === undefined ? mkdtempSync(join(tmpdir(), "octant-thread-queue-")) : undefined;
   if (directory) dirs.push(directory);
@@ -847,6 +850,61 @@ describe("durable ordinary thread queue", () => {
       });
     },
   );
+  it("delivers messages sent while a turn runs into that turn when its runtime steers, instead of queuing them for turns of their own", async () => {
+    const steer = vi.fn<NonNullable<ThreadMessageQueueModePort["steer"]>>(async () => "steered");
+    const f = fixture({ ...port(), steer });
+    f.p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "running", status: "active" },
+    });
+    const first = enqueue(0, randomUUID(), "look at the failing test first");
+    const second = enqueue(1, randomUUID(), "then rerun it");
+    await f.service.execute(windowId, first);
+    await f.service.execute(windowId, second);
+    await f.service.tick();
+    expect(steer.mock.calls.map(([input]) => [input.messageId, input.payload.prompt])).toEqual([
+      [first.messageId, "look at the failing test first"],
+      [second.messageId, "then rerun it"],
+    ]);
+    expect(steer.mock.calls[0]?.[0].windowId).toBe(windowId);
+    expect((await snapshot(f.service)).items).toEqual([]);
+    const settled = f.connection
+      .prepare("SELECT status FROM thread_message_queue_identity WHERE message_id IN (?, ?)")
+      .all(first.messageId, second.messageId);
+    expect(settled).toEqual([{ status: "steered" }, { status: "steered" }]);
+    f.p.setInspection({
+      status: "ready",
+      binding: "authorized-target",
+      tail: { id: "running", status: "completed" },
+    });
+    await f.service.tick();
+    expect(f.p.admit).not.toHaveBeenCalled();
+  });
+  it("keeps a message its running turn would not take queued for the next turn, and offers it to that turn only once", async () => {
+    const steer = vi.fn<NonNullable<ThreadMessageQueueModePort["steer"]>>(async () => "refused");
+    const f = fixture({ ...port(), steer });
+    f.p.setInspection({
+      status: "busy",
+      binding: "authorized-target",
+      tail: { id: "running", status: "active" },
+    });
+    const message = enqueue();
+    await f.service.execute(windowId, message);
+    await f.service.tick();
+    await f.service.tick();
+    expect(steer).toHaveBeenCalledTimes(1);
+    expect(f.p.admit).not.toHaveBeenCalled();
+    expect((await snapshot(f.service)).items.map((item) => item.status)).toEqual(["queued"]);
+    f.p.setInspection({
+      status: "ready",
+      binding: "authorized-target",
+      tail: { id: "running", status: "completed" },
+    });
+    await f.service.tick();
+    expect(f.p.admit).toHaveBeenCalledTimes(1);
+    expect(f.p.admit.mock.calls[0]?.[0].messageId).toBe(message.messageId);
+  });
   it("keeps paused and busy queues idle until explicit resume and ordinary mode readiness", async () => {
     const f = fixture();
     await f.service.execute(windowId, enqueue());

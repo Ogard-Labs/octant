@@ -729,6 +729,14 @@ resending it. Queue controls remain keyboard accessible and wrap at narrow
 widths. A running-turn steering control is separate and appears only where the
 runtime supports it.
 
+In Work and Code a message sent while the turn runs is steered into that
+turn where its runtime steers (maintainer decision, 2026-11-21;
+[Architecture](../architecture.md#persistence)): it passes through the queue,
+leaves it once the runtime takes it, and shows inside the running turn, after
+its reply, as the person's message headed "Sent while the turn ran", with its
+time. The queue shows no separate steered state; a message the runtime does
+not take stays in the queue for the next turn.
+
 ## Scheduled wake-ups
 
 A Work or Code thread whose agent scheduled a wake-up shows one row per

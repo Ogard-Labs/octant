@@ -8,7 +8,9 @@ import {
   type CodeThread,
   type OctantMode,
   type ProjectId,
+  type ThreadMessageQueuePayload,
   type ThreadMessageQueueScope,
+  type ThreadQueueMessageId,
   type WindowId,
   type WorkThread,
   type WorkThreadId,
@@ -16,8 +18,10 @@ import {
   type WorkTurnState,
 } from "@octant/contracts";
 import { activeChatTurns, parkedStopReleased } from "@octant/domain";
+import { Effect } from "effect";
 import type { ChatService, ChatServiceExecutionContext } from "../chat/chatService";
 import type { CodeRouteService } from "../codeRoutes";
+import type { LiveTurnConnection } from "../liveTurn/liveTurnRegistry";
 import type { Journal } from "../persistence/journal";
 import type { PersistenceService } from "../persistence/persistenceService";
 import { queueHoldReason } from "./threadMessageQueuePort";
@@ -74,6 +78,42 @@ export interface ThreadMessageQueuePortDependencies {
   readonly attachments: Pick<ThreadMessageQueueModePort, "retain" | "commit" | "release"> & {
     readonly prepare: (input: ThreadMessageQueueResource) => Promise<boolean>;
   };
+  /**
+   * Steering a Work or Code message into the turn already running. Without
+   * it every message waits for a turn of its own.
+   */
+  readonly steering?: {
+    readonly liveTurn: (threadId: string) => LiveTurnConnection | undefined;
+    /**
+     * Whether the scope is a person's own window at this host. A paired
+     * device's message keeps the limits of a turn the device sends itself,
+     * which a turn a window admitted does not carry, and the host's own
+     * scope speaks for no one, so neither is steered.
+     */
+    readonly isPersonWindow: (windowId: WindowId) => boolean;
+    /** Records the message on the running turn once the runtime took it. */
+    readonly recordSteered: (input: {
+      readonly scope: ThreadMessageQueueScope;
+      readonly messageId: ThreadQueueMessageId;
+      readonly body: string;
+    }) => void;
+  };
+}
+
+/**
+ * Whether a queued message is text alone. Anything else it carries
+ * (attachments, mentions, selections, a returned Side Chat draft, a review
+ * finding, an execution policy) is resolved by turn admission, which a steered
+ * note skips. A prompt that opens with `/` names a command only admission
+ * reviews.
+ */
+function steerableText(payload: ThreadMessageQueuePayload): string | undefined {
+  const { mode: _mode, prompt, contextInputPolicy: _policy, ...rest } = payload;
+  if (prompt.trim().length === 0 || prompt.trimStart().startsWith("/")) return undefined;
+  const carriesMore = Object.values(rest).some(
+    (value) => value !== undefined && !(Array.isArray(value) && value.length === 0),
+  );
+  return carriesMore ? undefined : prompt;
 }
 
 function tailStatus(status: string): ThreadMessageQueueTail["status"] {
@@ -363,9 +403,53 @@ export function createThreadMessageQueuePort(
     return { status: "unknown" };
   };
 
+  const steering = deps.steering;
+  const steer: ThreadMessageQueueModePort["steer"] =
+    steering === undefined
+      ? undefined
+      : async ({ scope, messageId, payload, windowId }) => {
+          // Chat is not steered; its next message is a turn of its own.
+          if (scope.mode === "chat" || scope.mode !== payload.mode) return "unavailable";
+          if (!steering.isPersonWindow(windowId)) return "unavailable";
+          const text = steerableText(payload);
+          if (text === undefined) return "unavailable";
+          if (
+            deps.compacting?.(scope) === true ||
+            deps.recoveryRequired?.(String(scope.threadId)) === true
+          )
+            return "unavailable";
+          const facts = readFacts(deps, scope, windowId);
+          const live = steering.liveTurn(String(scope.threadId));
+          const steerTurn = live?.connection.steer;
+          // The turn must be running on the thread's own provider: a message
+          // queued under the current binding never reaches a turn admitted
+          // under an earlier one.
+          if (
+            facts === undefined ||
+            live === undefined ||
+            steerTurn === undefined ||
+            String(live.providerInstanceId) !== String(facts.thread.providerInstanceId)
+          )
+            return "unavailable";
+          const outcome = await Effect.runPromise(
+            steerTurn({ sessionId: live.sessionId, message: text, source: "person" }).pipe(
+              Effect.catchAll(() => Effect.succeed("unsupported" as const)),
+            ),
+          );
+          if (outcome !== "steered") return "refused";
+          try {
+            steering.recordSteered({ scope, messageId, body: text });
+          } catch {
+            // The runtime already took the message; reporting it unsteered
+            // now would send it a second time as a turn of its own.
+          }
+          return "steered";
+        };
+
   return {
     inspect: async (input) => inspect(input),
     reconcile,
+    ...(steer === undefined ? {} : { steer }),
     retain: deps.attachments.retain,
     commit: deps.attachments.commit,
     release: deps.attachments.release,
