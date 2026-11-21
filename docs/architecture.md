@@ -7759,7 +7759,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   folder, then an exclusive create through the proved parent), so a path that
   leaves the folder, a symlinked component, or an existing file is refused.
   Chat threads have no folder and are never offered it. A person's Save to
-  Project uses the same confined write under the Project's folder.
+  Project uses the same confined write: in Work it saves under the bound
+  Project folder, and in Code it saves under the thread's checkout, including
+  its own worktree. A Code thread in Plan cannot save an image.
   With no image profile ready the icon opens Settings › Voice & images
   instead, and it is absent where the host serves no image generation. Work and
   Code keep their existing saves of a result: a Save click is the consent in
