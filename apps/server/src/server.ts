@@ -1573,6 +1573,7 @@ export function startOctantServer(
       browserToolApprovalService,
       extensionToolApprovalService,
       serviceOffers,
+      windowCanOpenThread,
       projectMemoryAccess,
       routineProposalService,
       decisionReviewModelPort,

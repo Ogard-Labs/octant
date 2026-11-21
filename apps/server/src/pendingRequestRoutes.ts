@@ -1,9 +1,12 @@
-import { principalActsAsHostPerson } from "./clientPrincipal";
+import { principalActsAsHostPerson, type ClientPrincipal } from "./clientPrincipal";
 import { eventActorForPrincipal } from "./principalEventActor";
 import { Schema } from "effect";
 import type { PrincipalKind } from "@octant/domain/remote-access-policy";
 import type { EventActor } from "@octant/contracts";
-import { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
+import {
+  PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE,
+  PendingQuestionDeferral,
+} from "@octant/contracts/pending-requests";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import {
@@ -25,7 +28,11 @@ export interface PendingRequestRouteDependencies {
       current: () => boolean,
       actor?: EventActor,
     ) => Promise<boolean>;
-    readonly list: (windowId: WindowId, reader?: PrincipalKind) => Promise<PendingRequestList>;
+    readonly list: (
+      windowId: WindowId,
+      reader?: PrincipalKind,
+      principal?: ClientPrincipal,
+    ) => Promise<PendingRequestList>;
   };
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
@@ -44,8 +51,24 @@ export function createPendingRequestRouteHandler(dependencies: PendingRequestRou
     path: PENDING_REQUESTS_PATH,
     noun: "Pending request",
     plural: "Pending requests",
-    read: async (windowId, reader) =>
-      decodePendingRequestList(await dependencies.service.list(windowId, reader)),
+    read: async (windowId, reader, request, principal) => {
+      const list = await dependencies.service.list(windowId, reader, principal);
+      if (request.headers.get("accept") === PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE) {
+        return decodePendingRequestList(list);
+      }
+      // Only image offers are served on the legacy pending-list representation.
+      const { offerHostRun: _offerHostRun, asks, ...rest } = list;
+      return decodePendingRequestList({
+        ...rest,
+        ...(asks === undefined
+          ? {}
+          : {
+              asks: asks.map((ask) =>
+                ask.kind === "service-offer" ? { ...ask, kind: "image-offer" } : ask,
+              ),
+            }),
+      });
+    },
     decodeFailure: decodePendingRequestFailure,
     windowAuthorityStore: dependencies.windowAuthorityStore,
     ...(dependencies.now === undefined ? {} : { now: dependencies.now }),

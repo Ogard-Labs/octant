@@ -10,7 +10,7 @@ import {
   pendingRequestKey,
   waitingAskKey,
 } from "../pendingRequests/pendingRequests";
-import { WaitingAskRow } from "../pendingRequests/WaitingAskRow";
+import { OFFER_RESTART_NOTICE, WaitingAskRow } from "../pendingRequests/WaitingAskRow";
 import {
   usePendingRequestRows,
   type PendingRequestRowsSource,
@@ -67,7 +67,8 @@ export function createNeedsYouCard(source: NeedsYouCardSource): HomeListCardDefi
 function useNeedsYouListRows(source: NeedsYouCardSource): HomeListRead {
   const { onOpenThread, onOpenInbox } = source;
   const now = useMinuteNow(source.now);
-  const { rows, answer, defer, asks, answerAsk } = usePendingRequestRows(source);
+  const { rows, answer, defer, asks, answerAsk, offerLostInRestart } =
+    usePendingRequestRows(source);
   if (rows === undefined) return { status: "loading" };
   return {
     status: "ready",
@@ -123,6 +124,19 @@ function useNeedsYouListRows(source: NeedsYouCardSource): HomeListRead {
           />
         ),
       })),
+      ...(offerLostInRestart
+        ? [
+            {
+              id: "offer-restart",
+              section: "needs-you" as const,
+              glyph: "ask" as const,
+              tone: "neutral" as const,
+              label: "Offer ended",
+              title: OFFER_RESTART_NOTICE,
+              meta: [],
+            },
+          ]
+        : []),
     ],
   };
 }

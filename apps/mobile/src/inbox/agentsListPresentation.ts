@@ -3,6 +3,7 @@ import type { MobileInboxRow } from "@octant/client-runtime";
 export type AgentSection = "attention" | "working" | "review" | "read";
 
 export function sectionForAgentRow(row: MobileInboxRow): AgentSection {
+  if (row.waitingOfferText !== undefined) return "attention";
   if (row.reviewState === "changes-requested") return "attention";
   if (row.reviewState === "pending" || row.reviewState === "approved") return "review";
   const lower = row.status.toLowerCase();

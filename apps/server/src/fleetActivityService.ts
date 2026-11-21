@@ -13,6 +13,9 @@ import {
 } from "@octant/contracts";
 import { admissionSet } from "@octant/domain/shell-policy";
 import { enabledModes } from "@octant/domain";
+import type { PrincipalKind } from "@octant/domain/remote-access-policy";
+import type { WaitingAsk } from "@octant/contracts/pending-requests";
+import type { ClientPrincipal } from "./clientPrincipal";
 
 /**
  * The windows the menu bar's fleet read asks about waiting subagents: one saved
@@ -87,13 +90,18 @@ interface FleetRow {
   readonly projectName?: string;
   readonly state: "needs-you" | "working";
   readonly activitySource: FleetActivitySource;
+  readonly offerWindowId?: WindowId;
   readonly since?: string;
 }
 
 export interface FleetActivitySources {
   readonly readSettings: () => ProductSurfaceSettings;
   /** The same read `/api/pending-requests` serves this window. */
-  readonly pending: (windowId: WindowId) => Promise<PendingRequestList>;
+  readonly pending: (
+    windowId: WindowId,
+    reader: PrincipalKind,
+    principal?: ClientPrincipal,
+  ) => Promise<PendingRequestList>;
   /** Running threads from each mode's own navigation read, under that read's access check. */
   readonly chat: () => ReadonlyArray<FleetRunningThread>;
   readonly work: (windowId: WindowId) => Promise<ReadonlyArray<FleetRunningThread>>;
@@ -115,16 +123,27 @@ export interface FleetActivitySources {
   readonly boundProjectWindows: () => ReadonlyArray<WindowId>;
   /** Child approvals and questions this window could open. Answering stays on the session route. */
   readonly childPending: (windowId: WindowId) => Promise<ReadonlyArray<PendingRequest>>;
+  /**
+   * Persisted local windows that may hold a waiting service offer (Chat, Work,
+   * or Code). A service offer belongs to the window whose turn raised it, and
+   * the menu bar's own window raises none, so its offer rows gather each saved
+   * local window's waiting offers. Unlike Code and subagent reads, offers are
+   * keyed by window, so two windows bound to the same Project are not
+   * collapsed into one.
+   */
+  readonly offerWindows: () => ReadonlyArray<WindowId>;
+  /** Waiting service offers this local window could still open and answer. */
+  readonly offerPending: (windowId: WindowId) => Promise<ReadonlyArray<WaitingAsk>>;
   readonly projectName: (projectId: ProjectId) => string | undefined;
 }
 
 /**
  * Which threads need the person and which are running, across modes, for the
  * menu bar. It adds no authority and no state of its own: needs-you is the
- * pending-request read, plus the Code requests and the subagent waits each
- * persisted local window could already open. Working is each mode's journaled
- * run state, and a thread that is both is listed once as needs-you, because a
- * held turn is still running while it waits on an answer.
+ * pending-request read, plus the Code requests, subagent waits, and waiting
+ * service offers each persisted local window could already open. Working is
+ * each mode's journaled run state, and a thread that is both is listed once as
+ * needs-you, because a held turn is still running while it waits on an answer.
  */
 export class FleetActivityService {
   readonly #sources: FleetActivitySources;
@@ -133,16 +152,34 @@ export class FleetActivityService {
     this.#sources = sources;
   }
 
-  async list(windowId: WindowId): Promise<FleetActivity> {
+  async list(
+    windowId: WindowId,
+    reader: PrincipalKind = "local-window",
+    principal?: ClientPrincipal,
+    includeOfferWindows = false,
+  ): Promise<FleetActivity> {
     const modes = enabledModes(this.#sources.readSettings());
-    const [pending, boundCode, boundChildren, work, code] = await Promise.all([
-      this.#sources.pending(windowId),
-      Promise.all(
-        this.#sources.boundCodeWindows().map((bound) => this.#sources.codePending(bound)),
-      ),
-      Promise.all(
-        this.#sources.boundProjectWindows().map((bound) => this.#sources.childPending(bound)),
-      ),
+    const [pending, boundCode, boundChildren, boundOffers, work, code] = await Promise.all([
+      this.#sources.pending(windowId, reader, principal),
+      reader === "local-window"
+        ? Promise.all(
+            this.#sources.boundCodeWindows().map((bound) => this.#sources.codePending(bound)),
+          )
+        : [],
+      reader === "local-window"
+        ? Promise.all(
+            this.#sources.boundProjectWindows().map((bound) => this.#sources.childPending(bound)),
+          )
+        : [],
+      reader === "local-window"
+        ? Promise.all(
+            this.#sources
+              .offerWindows()
+              .map(async (bound) =>
+                (await this.#sources.offerPending(bound)).map((offer) => ({ offer, owner: bound })),
+              ),
+          )
+        : [],
       modes.includes("work") ? this.#sources.work(windowId) : [],
       this.#sources.code(windowId),
     ]);
@@ -166,6 +203,39 @@ export class FleetActivityService {
           state: "needs-you",
           activitySource: pendingRequestSource(request),
           since: request.requestedAt,
+        }),
+      );
+    }
+    const offers = [
+      ...(pending.asks ?? []).map((offer) => ({ offer, owner: windowId })),
+      ...boundOffers.flat(),
+    ]
+      .filter(({ offer }) => offer.kind === "service-offer" && modes.includes(offer.mode))
+      .toSorted(
+        ({ offer: left }, { offer: right }) =>
+          left.requestedAt.localeCompare(right.requestedAt) ||
+          left.askId.localeCompare(right.askId),
+      );
+    for (const { offer, owner } of offers) {
+      const key = `${offer.mode}:${String(offer.threadId)}`;
+      const destination = includeOfferWindows ? { offerWindowId: owner } : {};
+      const existing = rows.get(key);
+      if (existing !== undefined) {
+        if (existing.offerWindowId === undefined && includeOfferWindows)
+          rows.set(key, { ...existing, ...destination });
+        continue;
+      }
+      rows.set(
+        key,
+        this.#row({
+          ...destination,
+          mode: offer.mode,
+          threadId: String(offer.threadId),
+          title: offer.threadTitle,
+          ...(offer.projectId === undefined ? {} : { projectId: offer.projectId }),
+          state: "needs-you",
+          activitySource: "session",
+          since: offer.requestedAt,
         }),
       );
     }
@@ -207,6 +277,7 @@ export class FleetActivityService {
       input.projectId === undefined ? undefined : this.#sources.projectName(input.projectId),
     );
     return {
+      ...(input.offerWindowId === undefined ? {} : { offerWindowId: input.offerWindowId }),
       mode: input.mode,
       threadId: input.threadId,
       title: bounded(input.title) ?? "Untitled",
