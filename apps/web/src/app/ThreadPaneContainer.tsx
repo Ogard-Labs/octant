@@ -840,7 +840,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   }
                   onSelectPullRequest={selectProjectPullRequestIdentity}
                   onOpenPullRequests={() => setCodePullRequestsOpen(true)}
-                  onOpenCodeSurface={(kind, threadId, title, terminalId) =>
+                  onOpenCodeSurface={(kind, threadId, title, terminalId, program) =>
                     void openCodeSurface(
                       kind === "code-terminal"
                         ? {
@@ -848,6 +848,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                             threadId,
                             title,
                             ...(terminalId === undefined ? {} : { terminalId }),
+                            ...(program === undefined ? {} : { program }),
                           }
                         : { kind, threadId, title },
                     )

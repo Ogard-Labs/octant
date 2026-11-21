@@ -406,6 +406,15 @@ function newerRelease(candidate: string, than: string): boolean {
   return false;
 }
 
+/**
+ * The guards that exist only to keep the piped ACP JSON-RPC stream clean, left
+ * out of a person's interactive provider terminal, which is a TTY. `NO_COLOR`
+ * is the only one: every other guard a profile sets closes a vendor channel,
+ * a self-update, or a source of configuration and holds there too; no profile
+ * sets `TERM`, `CI` or another TTY guard; and the terminal sets its own `TERM`.
+ */
+export const PROTOCOL_STREAM_GUARDS: ReadonlyArray<string> = ["NO_COLOR"];
+
 export const HOST_PASSTHROUGH_VARIABLES: ReadonlyArray<string> = [
   "COLORTERM",
   "HOME",

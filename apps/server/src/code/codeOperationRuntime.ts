@@ -468,6 +468,8 @@ export interface CodeOperationRuntimeOptions {
     TerminalBrowserGrantService,
     "open" | "abandon" | "switchOff" | "terminalClosed" | "resolveCredential" | "liveGrant"
   >;
+  /** The program a thread's provider terminal opens; see CodeOperationServiceOptions. */
+  readonly providerTerminal?: CodeOperationServiceOptions["providerTerminal"];
   readonly resolvePullRequestTarget: (
     threadId: CodeThreadId,
   ) => Promise<GhDeliveryTarget | undefined>;
@@ -1611,6 +1613,9 @@ export function createCodeOperationRuntime(
     ...(options.terminalBrowserGrants === undefined
       ? {}
       : { terminalBrowserGrants: options.terminalBrowserGrants }),
+    ...(options.providerTerminal === undefined
+      ? {}
+      : { providerTerminal: options.providerTerminal }),
     repositoryTests,
     ...(scaffolds === undefined ? {} : { scaffolds }),
     git,

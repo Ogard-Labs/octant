@@ -1375,6 +1375,8 @@ const CodeTerminalWorkspaceTab = Schema.Struct({
    * own, which stays bound to the thread's original terminal.
    */
   terminalId: Schema.optional(CodeTerminalId),
+  /** The tab runs the thread's provider's own command-line program rather than a shell. */
+  program: Schema.optional(Schema.Literal("provider")),
 }).annotations(strict);
 const CodeTestWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("code-test"),

@@ -1,5 +1,5 @@
 import { decodeCodeThreadId } from "@octant/contracts/code";
-import { decodeWorkThreadId, type CodeOperationId } from "@octant/contracts";
+import { decodeWorkThreadId, type CodeOperationId, type ProjectId } from "@octant/contracts";
 import { memo, Suspense, useCallback, useMemo, type ReactNode } from "react";
 import type { createLaunchedShellClients } from "./createLaunchedShellClients";
 import type { useNavigatorAssistant } from "../navigator/useNavigatorAssistant";
@@ -49,6 +49,11 @@ export interface ZenContainerProps {
   readonly workspace: NonNullable<ReturnType<typeof useShellController>["workspace"]>;
   readonly zen: ReturnType<typeof useZenController>;
   readonly zenLiveThreadClients: ZenLiveThreadClients;
+  /**
+   * The window's Work task's provider program, when it has one a terminal can
+   * open, and the Project that task belongs to.
+   */
+  readonly workProviderTerminal?: { readonly projectId: ProjectId; readonly name: string };
 }
 
 /**
@@ -275,14 +280,34 @@ export const ZenContainer = memo(function ZenContainer(props: ZenContainerProps)
                     live={activity.activity === "live"}
                     onRestart={async () => {
                       // The new shell is pinned before the ended one's card
-                      // goes, so a refused start leaves the card as it was.
-                      const started = await actions.addZenProjectTerminal(element.projectId);
+                      // goes, so a refused start leaves the card as it was. A
+                      // provider card asks for its program again, which the
+                      // host decides afresh.
+                      const started = await actions.addZenProjectTerminal(
+                        element.projectId,
+                        undefined,
+                        element.program,
+                      );
                       if (started === undefined) return false;
                       await zen.removeElement(element.elementId);
                       return true;
                     }}
                     projectId={element.projectId}
                     terminalId={element.terminalId}
+                    {...(props.workProviderTerminal === undefined ||
+                    String(props.workProviderTerminal.projectId) !== String(element.projectId)
+                      ? {}
+                      : {
+                          onOpenProviderTerminal: {
+                            name: props.workProviderTerminal.name,
+                            open: () =>
+                              void actions.addZenProjectTerminal(
+                                element.projectId,
+                                undefined,
+                                "provider",
+                              ),
+                          },
+                        })}
                   />
                 </Suspense>
               )}
