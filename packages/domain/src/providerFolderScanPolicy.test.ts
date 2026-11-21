@@ -50,6 +50,18 @@ describe("providerFolderScanPolicy", () => {
     expect(safeDiscoveredFolderName("/Users/alice/code/notes")).toBe("notes");
     expect(safeDiscoveredFolderName("/")).toBeUndefined();
     expect(safeDiscoveredFolderName("/Users/alice/..")).toBeUndefined();
+
+    // Truncating right after an interior space trims the trailing space cleanly.
+    const spaced = `${"a".repeat(127)} backup`;
+    const truncatedSpaced = safeDiscoveredFolderName(`/Users/alice/code/${spaced}`);
+    expect(truncatedSpaced).toBe("a".repeat(127));
+    expect(truncatedSpaced?.length).toBeLessThanOrEqual(128);
+
+    // Supplementary Unicode characters stay within 128 UTF-16 code units without splitting surrogates.
+    const emojis = "🚀".repeat(100);
+    const truncatedEmojis = safeDiscoveredFolderName(`/Users/alice/code/${emojis}`);
+    expect(truncatedEmojis).toBe("🚀".repeat(64));
+    expect(truncatedEmojis?.length).toBe(128);
   });
 
   it("excludes Downloads, nested Downloads folders, home, and filesystem root", () => {
@@ -80,6 +92,7 @@ describe("providerFolderScanPolicy", () => {
         providers: ["claude", "codex"],
         sessionCount: 4,
         lastActivityAt: "2026-11-21T09:00:00.000Z" as UtcTimestamp,
+        isGitRepository: true,
         alreadyImported: false,
       },
       {
@@ -89,6 +102,7 @@ describe("providerFolderScanPolicy", () => {
         providers: ["pi", "claude"],
         sessionCount: 2,
         lastActivityAt: "2026-11-21T10:00:00.000Z" as UtcTimestamp,
+        isGitRepository: true,
         alreadyImported: false,
       },
       {
@@ -97,6 +111,7 @@ describe("providerFolderScanPolicy", () => {
         providers: ["opencode"],
         sessionCount: 3,
         lastActivityAt: "2026-11-21T08:00:00.000Z" as UtcTimestamp,
+        isGitRepository: false,
         alreadyImported: true,
       },
     ]);
@@ -115,6 +130,7 @@ describe("providerFolderScanPolicy", () => {
           providers: ["claude", "pi"],
           sessionCount: 2,
           lastActivityAt: "2026-11-21T10:00:00.000Z",
+          isGitRepository: true,
           alreadyImported: false,
         },
         {
@@ -123,6 +139,7 @@ describe("providerFolderScanPolicy", () => {
           providers: ["claude", "codex"],
           sessionCount: 4,
           lastActivityAt: "2026-11-21T09:00:00.000Z",
+          isGitRepository: true,
           alreadyImported: false,
         },
       ],
@@ -139,6 +156,7 @@ describe("providerFolderScanPolicy", () => {
           providers: ["opencode"],
           sessionCount: 3,
           lastActivityAt: "2026-11-21T08:00:00.000Z",
+          isGitRepository: false,
           alreadyImported: true,
         },
       ],

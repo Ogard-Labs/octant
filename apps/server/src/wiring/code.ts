@@ -873,6 +873,8 @@ export function wireCode(deps: CodeDependencies) {
       readProviderInstances: () => persistence.readProviderInstances(),
       readActiveCodeProjects: () => persistence.readProjects({ type: "code", lifecycle: "active" }),
       isHostStrict: resolveHostStrict,
+      requireGitRepository: () =>
+        persistence.readCodeSettings()?.settings.requireGitRepository ?? true,
       bindingReceiptStore,
       projectRootPort,
       projectService,

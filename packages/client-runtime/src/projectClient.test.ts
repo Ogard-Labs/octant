@@ -320,11 +320,13 @@ describe("ProjectClient", () => {
                   providers: ["claude"],
                   sessionCount: 2,
                   lastActivityAt: "2026-11-21T10:00:00.000Z",
+                  isGitRepository: true,
                   alreadyImported: false,
                 },
               ],
             },
           ],
+          requireGitRepository: true,
           stoppedEarly: false,
           scannedAt: "2026-11-21T10:01:00.000Z",
         });

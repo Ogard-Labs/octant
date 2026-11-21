@@ -3,8 +3,10 @@ import {
   mkdirSync,
   mkdtempSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -485,6 +487,7 @@ describe("ProviderFolderScanService", () => {
     if (fileResult.status === "ready") {
       expect(fileResult.stoppedEarly).toBe(true);
       expect(fileResult.stoppedEarlyReason).toBe("file-limit");
+      expect(fileResult.groups.length).toBeGreaterThan(0);
     }
 
     const entryBounded = new ProviderFolderScanService({
@@ -503,7 +506,7 @@ describe("ProviderFolderScanService", () => {
     if (entryResult.status === "ready") {
       expect(entryResult.stoppedEarly).toBe(true);
       expect(entryResult.stoppedEarlyReason).toBe("entry-limit");
-      expect(entryResult.groups.length).toBeLessThanOrEqual(2);
+      expect(entryResult.groups.length).toBe(2);
     }
 
     let ticks = 0;
@@ -642,5 +645,269 @@ describe("ProviderFolderScanService", () => {
     expect(result.groups[0]?.providers).toEqual(["opencode"]);
     expect(result.groups[1]?.providers).toEqual(["codex"]);
     expect(result.groups[2]?.providers).toEqual(["pi"]);
+  });
+
+  it("refuses importing plain non-Git folders when Code requires Git and allows them when Git is optional", async () => {
+    const home = makeTempDir("octant-plain-git-");
+    const plainDir = join(home, "notes");
+    mkdirSync(plainDir, { recursive: true });
+    writeClaudeSession(
+      join(home, ".claude"),
+      plainDir,
+      "11111111-1111-4111-8111-111111111111",
+      "2026-11-21T10:00:00.000Z",
+    );
+
+    const receipts = new BindingReceiptStore();
+    const fakeProjects = createFakeProjectService(receipts);
+    let requireGit = true;
+    const scanner = new ProviderFolderScanService({
+      homeDirectory: home,
+      env: {},
+      readProviderInstances: () => [],
+      readActiveCodeProjects: () => fakeProjects.activeCodeProjects(),
+      isHostStrict: () => false,
+      requireGitRepository: () => requireGit,
+      bindingReceiptStore: receipts,
+      projectRootPort: new ProjectRootPort(),
+      projectService: fakeProjects.service,
+    });
+
+    const windowId = decodeWindowId(randomUUID());
+    const scanned = await scanner.scan(windowId);
+    expect(scanned.status).toBe("ready");
+    if (scanned.status !== "ready") return;
+    expect(scanned.requireGitRepository).toBe(true);
+    const folder = scanned.groups[0]?.folders[0];
+    expect(folder?.isGitRepository).toBe(false);
+    if (folder === undefined) return;
+
+    const refused = await scanner.importFolders(windowId, { folderIds: [folder.id] });
+    expect(refused.status).toBe("completed");
+    if (refused.status === "completed") {
+      expect(refused.results[0]).toMatchObject({ status: "refused", reason: "requires-git" });
+    }
+    expect(fakeProjects.created).toHaveLength(0);
+
+    requireGit = false;
+    const allowed = await scanner.importFolders(windowId, { folderIds: [folder.id] });
+    expect(allowed.status).toBe("completed");
+    if (allowed.status === "completed") {
+      expect(allowed.results[0]?.status).toBe("created");
+    }
+    expect(fakeProjects.created).toHaveLength(1);
+  });
+
+  it("keeps an initialized Git submodule as its own candidate instead of binding the parent repo", async () => {
+    const home = makeTempDir("octant-submodule-");
+    const parentRepo = join(home, "product");
+    const submoduleDir = join(parentRepo, "vendor", "library");
+    const moduleGitDir = join(parentRepo, ".git", "modules", "vendor", "library");
+    createGitRepo(parentRepo, "https://github.com/acme/product.git");
+    mkdirSync(moduleGitDir, { recursive: true });
+    writeFileSync(
+      join(moduleGitDir, "config"),
+      `[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n\turl = git@github.com:acme/library.git\n`,
+    );
+    mkdirSync(submoduleDir, { recursive: true });
+    writeFileSync(join(submoduleDir, ".git"), `gitdir: ${moduleGitDir}\n`);
+
+    writeClaudeSession(
+      join(home, ".claude"),
+      submoduleDir,
+      "11111111-1111-4111-8111-111111111111",
+      "2026-11-21T10:00:00.000Z",
+    );
+
+    const receipts = new BindingReceiptStore();
+    const fakeProjects = createFakeProjectService(receipts);
+    const scanner = new ProviderFolderScanService({
+      homeDirectory: home,
+      env: {},
+      readProviderInstances: () => [],
+      readActiveCodeProjects: () => fakeProjects.activeCodeProjects(),
+      isHostStrict: () => false,
+      bindingReceiptStore: receipts,
+      projectRootPort: new ProjectRootPort(),
+      projectService: fakeProjects.service,
+    });
+
+    const windowId = decodeWindowId(randomUUID());
+    const scanned = await scanner.scan(windowId);
+    expect(scanned.status).toBe("ready");
+    if (scanned.status !== "ready") return;
+    expect(scanned.groups).toHaveLength(1);
+    expect(scanned.groups[0]?.label).toBe("acme/library");
+    const folderId = scanned.groups[0]?.folders[0]?.id;
+    expect(folderId).toBeDefined();
+    if (folderId === undefined) return;
+
+    const imported = await scanner.importFolders(windowId, { folderIds: [folderId] });
+    expect(imported.status).toBe("completed");
+    expect(fakeProjects.created.map((entry) => entry.canonicalRoot)).toEqual([submoduleDir]);
+  });
+
+  it("discovers folders whose Codex sessions live in archived_sessions without double counting", async () => {
+    const home = makeTempDir("octant-codex-archive-");
+    const archivedRepo = join(home, "code", "archived-widget");
+    createGitRepo(archivedRepo, "https://github.com/acme/archived-widget.git");
+    const codexHome = join(home, ".codex");
+    const sessionUuid = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const archiveDir = join(codexHome, "archived_sessions");
+    mkdirSync(archiveDir, { recursive: true });
+    writeFileSync(
+      join(archiveDir, `rollout-2026-11-20T08-00-00-${sessionUuid}.jsonl`),
+      `${JSON.stringify({
+        type: "session_meta",
+        payload: { id: sessionUuid, cwd: archivedRepo, timestamp: "2026-11-20T08:00:00.000Z" },
+      })}\n`,
+    );
+    // Same session ID also in active sessions must deduplicate to 1 session.
+    writeCodexSession(
+      codexHome,
+      archivedRepo,
+      sessionUuid,
+      ["2026", "11", "20"],
+      "2026-11-20T08:00:00.000Z",
+    );
+
+    const receipts = new BindingReceiptStore();
+    const fakeProjects = createFakeProjectService(receipts);
+    const scanner = new ProviderFolderScanService({
+      homeDirectory: home,
+      env: {},
+      readProviderInstances: () => [],
+      readActiveCodeProjects: () => [],
+      isHostStrict: () => false,
+      bindingReceiptStore: receipts,
+      projectRootPort: new ProjectRootPort(),
+      projectService: fakeProjects.service,
+    });
+
+    const scanned = await scanner.scan(decodeWindowId(randomUUID()));
+    expect(scanned.status).toBe("ready");
+    if (scanned.status !== "ready") return;
+    expect(scanned.groups).toHaveLength(1);
+    expect(scanned.groups[0]?.label).toBe("acme/archived-widget");
+    expect(scanned.groups[0]?.sessionCount).toBe(1);
+  });
+
+  it("stops an in-flight scan or import when Strict turns on mid-operation", async () => {
+    const home = makeTempDir("octant-strict-race-");
+    const repoOne = join(home, "code", "one");
+    const repoTwo = join(home, "code", "two");
+    createGitRepo(repoOne, "https://github.com/acme/one.git");
+    createGitRepo(repoTwo, "https://github.com/acme/two.git");
+    writeClaudeSession(
+      join(home, ".claude"),
+      repoOne,
+      "11111111-1111-4111-8111-111111111111",
+      "2026-11-21T10:00:00.000Z",
+    );
+    writeClaudeSession(
+      join(home, ".claude"),
+      repoTwo,
+      "22222222-2222-4222-8222-222222222222",
+      "2026-11-21T09:00:00.000Z",
+    );
+
+    const receipts = new BindingReceiptStore();
+    const fakeProjects = createFakeProjectService(receipts);
+    let strictChecks = 0;
+    const midScanStrict = new ProviderFolderScanService({
+      homeDirectory: home,
+      env: {},
+      readProviderInstances: () => [],
+      readActiveCodeProjects: () => [],
+      isHostStrict: () => {
+        strictChecks += 1;
+        return strictChecks > 2;
+      },
+      bindingReceiptStore: receipts,
+      projectRootPort: new ProjectRootPort(),
+      projectService: fakeProjects.service,
+    });
+    const scanResult = await midScanStrict.scan(decodeWindowId(randomUUID()));
+    expect(scanResult).toEqual({ status: "hidden", reason: "strict" });
+
+    // Enabling Strict during importFolders refuses remaining folders without creating Projects.
+    let strict = false;
+    const projectRootPort: Pick<ProjectRootPort, "validate"> = {
+      validate: async (projectType, candidate) => {
+        const result = await new ProjectRootPort().validate(projectType, candidate);
+        strict = true;
+        return result;
+      },
+    };
+    const midImportScanner = new ProviderFolderScanService({
+      homeDirectory: home,
+      env: {},
+      readProviderInstances: () => [],
+      readActiveCodeProjects: () => [],
+      isHostStrict: () => strict,
+      bindingReceiptStore: receipts,
+      projectRootPort,
+      projectService: fakeProjects.service,
+    });
+    const windowId = decodeWindowId(randomUUID());
+    const ready = await midImportScanner.scan(windowId);
+    expect(ready.status).toBe("ready");
+    if (ready.status !== "ready") return;
+    const ids = ready.groups.flatMap((group) => group.folders.map((folder) => folder.id));
+    const [first, ...rest] = ids;
+    expect(first).toBeDefined();
+    if (first === undefined) return;
+    const importResult = await midImportScanner.importFolders(windowId, {
+      folderIds: [first, ...rest],
+    });
+    expect(importResult).toMatchObject({ status: "refused", reason: "strict" });
+    expect(fakeProjects.created).toHaveLength(0);
+  });
+
+  it("refuses importing a folder that was replaced by a symlink or swapped before import", async () => {
+    const home = makeTempDir("octant-toctou-");
+    const scannedRepo = join(home, "code", "target-repo");
+    const movedAside = join(home, "code", "moved-aside");
+    const unselectedRepo = join(home, "code", "unselected-secret");
+    createGitRepo(scannedRepo, "https://github.com/acme/target.git");
+    createGitRepo(unselectedRepo, "https://github.com/acme/secret.git");
+    writeClaudeSession(
+      join(home, ".claude"),
+      scannedRepo,
+      "11111111-1111-4111-8111-111111111111",
+      "2026-11-21T10:00:00.000Z",
+    );
+
+    const receipts = new BindingReceiptStore();
+    const fakeProjects = createFakeProjectService(receipts);
+    const scanner = new ProviderFolderScanService({
+      homeDirectory: home,
+      env: {},
+      readProviderInstances: () => [],
+      readActiveCodeProjects: () => [],
+      isHostStrict: () => false,
+      bindingReceiptStore: receipts,
+      projectRootPort: new ProjectRootPort(),
+      projectService: fakeProjects.service,
+    });
+
+    const windowId = decodeWindowId(randomUUID());
+    const scanned = await scanner.scan(windowId);
+    expect(scanned.status).toBe("ready");
+    if (scanned.status !== "ready") return;
+    const folderId = scanned.groups[0]?.folders[0]?.id;
+    expect(folderId).toBeDefined();
+    if (folderId === undefined) return;
+
+    // Replace the discovered directory with a symlink to an unselected directory.
+    renameSync(scannedRepo, movedAside);
+    symlinkSync(unselectedRepo, scannedRepo);
+
+    const imported = await scanner.importFolders(windowId, { folderIds: [folderId] });
+    expect(imported.status).toBe("completed");
+    if (imported.status === "completed") {
+      expect(imported.results[0]).toMatchObject({ status: "refused", reason: "unavailable" });
+    }
+    expect(fakeProjects.created).toHaveLength(0);
   });
 });

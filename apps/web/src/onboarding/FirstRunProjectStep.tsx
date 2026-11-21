@@ -1,9 +1,11 @@
 import {
+  MAX_IMPORTED_PROVIDER_FOLDERS,
   type DiscoveredFolderProvider,
   type DiscoveredProviderFolder,
   type DiscoveredProviderFolderGroup,
   type DiscoveredProviderFolderId,
   type ImportProviderFoldersResult,
+  type ImportedProviderFolderOutcome,
   type ProjectId,
   type ProviderFolderScanResult,
   type ProviderFolderScanStopReason,
@@ -14,7 +16,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import type { FirstRunHandoffProject, FirstRunTaskMode } from "./firstRunHandoffModel";
 
 export interface FirstRunProviderFolderScan {
@@ -93,14 +95,39 @@ function formatLastActivity(isoTimestamp: string): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function formatFolderMeta(folder: DiscoveredProviderFolder): string {
+function formatFolderMeta(folder: DiscoveredProviderFolder, requireGitRepository: boolean): string {
   const parts: string[] = [];
-  if (folder.alreadyImported) parts.push("Already added");
+  if (folder.alreadyImported) {
+    parts.push("Already added");
+  } else if (requireGitRepository && !folder.isGitRepository) {
+    parts.push("Not a Git repository — use Choose a folder… to initialize Git");
+  }
   parts.push(formatProviders(folder.providers));
   parts.push(formatSessionCount(folder.sessionCount));
   const activity = formatLastActivity(folder.lastActivityAt);
   if (activity !== "") parts.push(activity);
   return parts.join(" · ");
+}
+
+/**
+ * Give clones inside one remote group unique display labels when multiple
+ * clones share the same directory basename, without exposing host paths.
+ */
+function cloneDisplayLabels(
+  folders: ReadonlyArray<DiscoveredProviderFolder>,
+): ReadonlyArray<string> {
+  const totals = new Map<string, number>();
+  for (const folder of folders) {
+    totals.set(folder.folderName, (totals.get(folder.folderName) ?? 0) + 1);
+  }
+  const seen = new Map<string, number>();
+  return folders.map((folder) => {
+    const count = totals.get(folder.folderName) ?? 1;
+    if (count <= 1) return folder.folderName;
+    const ordinal = (seen.get(folder.folderName) ?? 0) + 1;
+    seen.set(folder.folderName, ordinal);
+    return `${folder.folderName} (${String(ordinal)})`;
+  });
 }
 
 function stoppedEarlyCopy(reason: ProviderFolderScanStopReason | undefined): string {
@@ -130,6 +157,18 @@ function markFoldersImported(
   });
 }
 
+function batchFolderIds(
+  ids: ReadonlyArray<DiscoveredProviderFolderId>,
+): ReadonlyArray<readonly [DiscoveredProviderFolderId, ...DiscoveredProviderFolderId[]]> {
+  const batches: Array<readonly [DiscoveredProviderFolderId, ...DiscoveredProviderFolderId[]]> = [];
+  for (let offset = 0; offset < ids.length; offset += MAX_IMPORTED_PROVIDER_FOLDERS) {
+    const slice = ids.slice(offset, offset + MAX_IMPORTED_PROVIDER_FOLDERS);
+    const [first, ...rest] = slice;
+    if (first !== undefined) batches.push([first, ...rest]);
+  }
+  return batches;
+}
+
 /**
  * The folder the first task works in.
  *
@@ -143,6 +182,7 @@ function markFoldersImported(
  * IDs as Code Projects through the existing Project create path and receipts.
  */
 export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
+  const metaPrefix = useId();
   const modes: ReadonlyArray<FirstRunTaskMode> = props.workEnabled ? ["work", "code"] : ["code"];
   const hasProjects = props.projects.length > 0;
   const providerScan = props.providerFolderScan;
@@ -203,33 +243,53 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
 
   async function handleImport(): Promise<void> {
     if (providerScan === undefined || scanState.status !== "ready" || importing) return;
+    const requireGit = scanState.result.requireGitRepository;
     const allFolders = scanState.result.groups.flatMap((group) => group.folders);
     const chosen = allFolders
-      .filter((folder) => !folder.alreadyImported && tickedIds.has(String(folder.id)))
+      .filter(
+        (folder) =>
+          !folder.alreadyImported &&
+          (!requireGit || folder.isGitRepository) &&
+          tickedIds.has(String(folder.id)),
+      )
       .map((folder) => folder.id);
-    const [first, ...rest] = chosen;
-    if (first === undefined) return;
+    const batches = batchFolderIds(chosen);
+    if (batches.length === 0) return;
 
     setImporting(true);
     setImportNotice(undefined);
     try {
-      const outcome = await providerScan.importFolders([first, ...rest]);
-      if (outcome.status === "refused") {
-        if (outcome.reason === "strict") {
+      const aggregated: ImportedProviderFolderOutcome[] = [];
+      let strictRefused = false;
+      for (const batch of batches) {
+        const outcome = await providerScan.importFolders(batch);
+        if (outcome.status === "refused") {
+          if (outcome.reason === "strict") {
+            strictRefused = true;
+            setScanState({ status: "hidden" });
+            setTickedIds(new Set());
+          } else {
+            setImportNotice(outcome.message);
+          }
+          break;
+        }
+        aggregated.push(...outcome.results);
+        if (outcome.results.some((item) => item.status === "refused" && item.reason === "strict")) {
+          strictRefused = true;
           setScanState({ status: "hidden" });
           setTickedIds(new Set());
-        } else {
-          setImportNotice(outcome.message);
+          break;
         }
-        return;
       }
+      if (strictRefused || aggregated.length === 0) return;
+
       const importedIds = new Set(
-        outcome.results
+        aggregated
           .filter((item) => item.status === "created" || item.status === "already-imported")
           .map((item) => String(item.folderId)),
       );
-      const createdCount = outcome.results.filter((item) => item.status === "created").length;
-      const refusedCount = outcome.results.filter((item) => item.status === "refused").length;
+      const createdCount = aggregated.filter((item) => item.status === "created").length;
+      const refusedCount = aggregated.filter((item) => item.status === "refused").length;
 
       setScanState((previous) =>
         previous.status === "ready"
@@ -258,7 +318,7 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
           `Imported ${String(createdCount)} Code ${createdCount === 1 ? "Project" : "Projects"}; ${String(refusedCount)} could not be imported.`,
         );
       } else if (refusedCount > 0) {
-        const firstRefusal = outcome.results.find((item) => item.status === "refused");
+        const firstRefusal = aggregated.find((item) => item.status === "refused");
         setImportNotice(
           firstRefusal?.status === "refused"
             ? firstRefusal.message
@@ -273,6 +333,8 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
   }
 
   const readyGroups = scanState.status === "ready" ? scanState.result.groups : [];
+  const requireGitRepository =
+    scanState.status === "ready" ? scanState.result.requireGitRepository : true;
   const showScanSection =
     scanAllowed &&
     (scanState.status === "scanning" ||
@@ -405,26 +467,30 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
                   {readyGroups.map((group) => {
                     const single = group.folders.length === 1 ? group.folders[0] : undefined;
                     if (single !== undefined) {
+                      const needsGit = requireGitRepository && !single.isGitRepository;
                       const checked = single.alreadyImported || tickedIds.has(String(single.id));
+                      const metaId = `${metaPrefix}-${String(single.id)}`;
                       return (
                         <li className="setrow first-run__discovered-row" key={String(single.id)}>
                           <label className="first-run__discovered-choice">
                             <OctantCheckbox
+                              aria-describedby={metaId}
                               aria-label={group.label}
                               checked={checked}
-                              disabled={single.alreadyImported || importing}
+                              disabled={single.alreadyImported || needsGit || importing}
                               onChange={(event) => toggleFolder(single.id, event.target.checked)}
                             />
                             <span className="first-run__discovered-text">
                               <span className="first-run__discovered-title">{group.label}</span>
-                              <span className="first-run__discovered-meta">
-                                {formatFolderMeta(single)}
+                              <span className="first-run__discovered-meta" id={metaId}>
+                                {formatFolderMeta(single, requireGitRepository)}
                               </span>
                             </span>
                           </label>
                         </li>
                       );
                     }
+                    const cloneLabels = cloneDisplayLabels(group.folders);
                     return (
                       <li
                         className="setrow first-run__discovered-group"
@@ -440,26 +506,30 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
                           aria-label={`Clones of ${group.label}`}
                           className="first-run__discovered-clones"
                         >
-                          {group.folders.map((clone) => {
+                          {group.folders.map((clone, index) => {
+                            const displayName = cloneLabels[index] ?? clone.folderName;
+                            const needsGit = requireGitRepository && !clone.isGitRepository;
                             const checked =
                               clone.alreadyImported || tickedIds.has(String(clone.id));
+                            const metaId = `${metaPrefix}-${String(clone.id)}`;
                             return (
                               <li className="first-run__discovered-clone" key={String(clone.id)}>
                                 <label className="first-run__discovered-choice">
                                   <OctantCheckbox
-                                    aria-label={`${group.label} (${clone.folderName})`}
+                                    aria-describedby={metaId}
+                                    aria-label={`${group.label} (${displayName})`}
                                     checked={checked}
-                                    disabled={clone.alreadyImported || importing}
+                                    disabled={clone.alreadyImported || needsGit || importing}
                                     onChange={(event) =>
                                       toggleFolder(clone.id, event.target.checked)
                                     }
                                   />
                                   <span className="first-run__discovered-text">
                                     <span className="first-run__discovered-clone-name">
-                                      {clone.folderName}
+                                      {displayName}
                                     </span>
-                                    <span className="first-run__discovered-meta">
-                                      {formatFolderMeta(clone)}
+                                    <span className="first-run__discovered-meta" id={metaId}>
+                                      {formatFolderMeta(clone, requireGitRepository)}
                                     </span>
                                   </span>
                                 </label>
@@ -477,8 +547,8 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
                   {stoppedEarlyCopy(scanState.result.stoppedEarlyReason)}
                 </p>
               ) : null}
-              {readyGroups.length > 0 ? (
-                <div className="first-run__discovered-footer">
+              <div className="first-run__discovered-footer">
+                {readyGroups.length > 0 ? (
                   <OctantButton
                     disabled={tickedCount === 0 || importing}
                     onClick={() => void handleImport()}
@@ -486,13 +556,21 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
                   >
                     {importButtonLabel}
                   </OctantButton>
-                  {importNotice === undefined ? null : (
-                    <p className="first-run__caveat" role="status">
-                      {importNotice}
-                    </p>
-                  )}
-                </div>
-              ) : null}
+                ) : null}
+                <OctantButton
+                  disabled={importing}
+                  onClick={() => void runScan()}
+                  type="button"
+                  variant="ghost"
+                >
+                  Scan again
+                </OctantButton>
+                {importNotice === undefined ? null : (
+                  <p className="first-run__caveat" role="status">
+                    {importNotice}
+                  </p>
+                )}
+              </div>
             </>
           ) : null}
         </section>
