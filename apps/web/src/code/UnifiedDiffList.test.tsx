@@ -172,6 +172,37 @@ describe("UnifiedDiffList", () => {
     expect(within(deletedSection).queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
   });
 
+  it("omits Open and Provider checkpoint buttons when a diff file has a non-UTF-8 path", () => {
+    const files = parseUnifiedDiff(
+      [
+        'diff --git "a/file-\\303.txt" "b/file-\\303.txt"',
+        '--- "a/file-\\303.txt"',
+        '+++ "b/file-\\303.txt"',
+        "@@ -1 +1 @@",
+        "-a",
+        "+b",
+        'diff --git "a/file-\\357\\277\\275.txt" "b/file-\\357\\277\\275.txt"',
+        '--- "a/file-\\357\\277\\275.txt"',
+        '+++ "b/file-\\357\\277\\275.txt"',
+        "@@ -1 +1 @@",
+        "-c",
+        "+d",
+      ].join("\n"),
+    );
+
+    render(<UnifiedDiffList files={files} onOpenFile={vi.fn()} onReadProviderFile={vi.fn()} />);
+
+    const invalidSection = screen.getByRole("region", { name: "file-\\303.txt" });
+    expect(within(invalidSection).queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
+    expect(
+      within(invalidSection).queryByRole("button", { name: "Provider checkpoint" }),
+    ).not.toBeInTheDocument();
+
+    const validSection = screen.getByRole("region", { name: "file-\uFFFD.txt" });
+    expect(within(validSection).getByRole("button", { name: "Open" })).toBeVisible();
+    expect(within(validSection).getByRole("button", { name: "Provider checkpoint" })).toBeVisible();
+  });
+
   it("virtualizes large single-file diffs to bounded DOM rows while scrolling", () => {
     const lines = Array.from(
       { length: 600 },

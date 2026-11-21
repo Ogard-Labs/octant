@@ -70,6 +70,11 @@ export interface ParsedDiffFile {
    * binary or non-empty blob content change.
    */
   readonly emptyFile?: true;
+  /**
+   * True when Git quoted a path whose octal byte escapes were not valid UTF-8,
+   * so `path` retains the escaped form rather than substituting U+FFFD.
+   */
+  readonly nonUtf8Path?: true;
   readonly change: DiffFileChange;
   readonly additions: number;
   readonly deletions: number;
@@ -99,6 +104,8 @@ interface HunkAccumulator {
 interface FileAccumulator {
   oldPath?: string;
   newPath?: string;
+  oldPathNonUtf8: boolean;
+  newPathNonUtf8: boolean;
   oldMode?: string;
   newMode?: string;
   fileMode?: string;
@@ -137,6 +144,8 @@ function isEmptyFileIndexPair(oldOid: string, newOid: string): boolean {
 
 function newAccumulator(): FileAccumulator {
   return {
+    oldPathNonUtf8: false,
+    newPathNonUtf8: false,
     change: "modified",
     additions: 0,
     deletions: 0,
@@ -148,8 +157,13 @@ function newAccumulator(): FileAccumulator {
   };
 }
 
+interface DecodedPath {
+  readonly value: string;
+  readonly nonUtf8: boolean;
+}
+
 const UTF8_ENCODER = new TextEncoder();
-const UTF8_DECODER = new TextDecoder("utf-8");
+const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 
 const C_ESCAPES: Readonly<Record<string, number>> = {
   a: 0x07,
@@ -163,9 +177,11 @@ const C_ESCAPES: Readonly<Record<string, number>> = {
   "\\": 0x5c,
 };
 
-function unquote(path: string): string {
+function unquotePath(path: string): DecodedPath {
   const trimmed = path.trim();
-  if (!trimmed.startsWith('"') || !trimmed.endsWith('"') || trimmed.length < 2) return trimmed;
+  if (!trimmed.startsWith('"') || !trimmed.endsWith('"') || trimmed.length < 2) {
+    return { value: trimmed, nonUtf8: false };
+  }
   const inner = trimmed.slice(1, -1);
   const bytes: number[] = [];
   let cursor = 0;
@@ -198,13 +214,19 @@ function unquote(path: string): string {
     for (const byte of UTF8_ENCODER.encode(next)) bytes.push(byte);
     cursor = slash + 2;
   }
-  return UTF8_DECODER.decode(new Uint8Array(bytes));
+  try {
+    return { value: UTF8_DECODER.decode(new Uint8Array(bytes)), nonUtf8: false };
+  } catch {
+    // Keep the original escaped bytes intact instead of replacing invalid
+    // bytes with U+FFFD, which could collide with a real file containing U+FFFD.
+    return { value: inner, nonUtf8: true };
+  }
 }
 
-function stripPrefix(path: string): string {
-  const unquoted = unquote(path);
-  if (unquoted === "/dev/null") return unquoted;
-  return unquoted.replace(/^[abciow]\//, "");
+function stripPrefix(path: string): DecodedPath {
+  const unquoted = unquotePath(path);
+  if (unquoted.value === "/dev/null") return unquoted;
+  return { value: unquoted.value.replace(/^[abciow]\//, ""), nonUtf8: unquoted.nonUtf8 };
 }
 
 function readQuotedEnd(text: string, start: number): number | undefined {
@@ -223,7 +245,7 @@ function readQuotedEnd(text: string, start: number): number | undefined {
 
 function parseDiffGitHeader(
   line: string,
-): { readonly oldPath: string; readonly newPath: string } | undefined {
+): { readonly oldPath: DecodedPath; readonly newPath: DecodedPath } | undefined {
   const rest = line.slice("diff --git ".length);
   if (rest.startsWith('"')) {
     const firstEnd = readQuotedEnd(rest, 0);
@@ -261,7 +283,10 @@ function parseDiffGitHeader(
         left.slice(2) === right.slice(2)
       ) {
         const path = left.slice(2);
-        return { oldPath: path, newPath: path };
+        return {
+          oldPath: { value: path, nonUtf8: false },
+          newPath: { value: path, nonUtf8: false },
+        };
       }
     }
   }
@@ -303,6 +328,11 @@ function finish(accumulator: FileAccumulator, index: number): ParsedDiffFile | u
     !accumulator.sawHunk &&
     !accumulator.sawBinaryContent &&
     (change === "created" || change === "deleted");
+  const primaryNonUtf8 =
+    newPath !== undefined && newPath !== "/dev/null"
+      ? accumulator.newPathNonUtf8
+      : accumulator.oldPathNonUtf8;
+  const nonUtf8Path = primaryNonUtf8 || (renamed && accumulator.oldPathNonUtf8);
   return {
     id: `${String(index)}:${path}`,
     path,
@@ -311,6 +341,7 @@ function finish(accumulator: FileAccumulator, index: number): ParsedDiffFile | u
     ...(accumulator.fileMode === undefined ? {} : { fileMode: accumulator.fileMode }),
     ...(modeOnly ? { modeOnly: true as const } : {}),
     ...(emptyFile ? { emptyFile: true as const } : {}),
+    ...(nonUtf8Path ? { nonUtf8Path: true as const } : {}),
     change,
     additions: accumulator.additions,
     deletions: accumulator.deletions,
@@ -354,12 +385,42 @@ export function parseUnifiedDiff(
       // hunks are absent, such as a binary or pure-mode change.
       const paths = parseDiffGitHeader(line);
       if (paths !== undefined) {
-        accumulator.oldPath = paths.oldPath;
-        accumulator.newPath = paths.newPath;
+        accumulator.oldPath = paths.oldPath.value;
+        accumulator.oldPathNonUtf8 = paths.oldPath.nonUtf8;
+        accumulator.newPath = paths.newPath.value;
+        accumulator.newPathNonUtf8 = paths.newPath.nonUtf8;
       }
       continue;
     }
     if (accumulator === undefined) continue;
+    if (!accumulator.sawHunk && line.startsWith("rename from ")) {
+      const decoded = unquotePath(line.slice("rename from ".length));
+      accumulator.oldPath = decoded.value;
+      accumulator.oldPathNonUtf8 = decoded.nonUtf8;
+      accumulator.change = "renamed";
+      continue;
+    }
+    if (!accumulator.sawHunk && line.startsWith("rename to ")) {
+      const decoded = unquotePath(line.slice("rename to ".length));
+      accumulator.newPath = decoded.value;
+      accumulator.newPathNonUtf8 = decoded.nonUtf8;
+      accumulator.change = "renamed";
+      continue;
+    }
+    if (!accumulator.sawHunk && line.startsWith("copy from ")) {
+      const decoded = unquotePath(line.slice("copy from ".length));
+      accumulator.oldPath = decoded.value;
+      accumulator.oldPathNonUtf8 = decoded.nonUtf8;
+      accumulator.change = "renamed";
+      continue;
+    }
+    if (!accumulator.sawHunk && line.startsWith("copy to ")) {
+      const decoded = unquotePath(line.slice("copy to ".length));
+      accumulator.newPath = decoded.value;
+      accumulator.newPathNonUtf8 = decoded.nonUtf8;
+      accumulator.change = "renamed";
+      continue;
+    }
     if (!accumulator.sawHunk && line.startsWith("old mode ")) {
       const mode = line.slice("old mode ".length).trim();
       if (mode.length > 0) accumulator.oldMode = mode;
@@ -399,11 +460,15 @@ export function parseUnifiedDiff(
       }
     }
     if (!accumulator.sawHunk && line.startsWith("--- ")) {
-      accumulator.oldPath = stripPrefix(line.slice(4));
+      const decoded = stripPrefix(line.slice(4));
+      accumulator.oldPath = decoded.value;
+      accumulator.oldPathNonUtf8 = decoded.nonUtf8;
       continue;
     }
     if (!accumulator.sawHunk && line.startsWith("+++ ")) {
-      accumulator.newPath = stripPrefix(line.slice(4));
+      const decoded = stripPrefix(line.slice(4));
+      accumulator.newPath = decoded.value;
+      accumulator.newPathNonUtf8 = decoded.nonUtf8;
       continue;
     }
     const range = HUNK.exec(line);

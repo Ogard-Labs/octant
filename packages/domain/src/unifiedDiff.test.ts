@@ -249,3 +249,55 @@ it("preserves unquoted paths with spaces for empty deleted and added files", () 
   });
   expect(files[1]?.previousPath).toBeUndefined();
 });
+
+it("keeps invalid UTF-8 quoted paths distinct from literal replacement characters and flags nonUtf8Path", () => {
+  const patch = [
+    'diff --git "a/file-\\303.txt" "b/file-\\303.txt"',
+    '--- "a/file-\\303.txt"',
+    '+++ "b/file-\\303.txt"',
+    "@@ -1 +1 @@",
+    "-old invalid",
+    "+new invalid",
+    'diff --git "a/file-\\357\\277\\275.txt" "b/file-\\357\\277\\275.txt"',
+    '--- "a/file-\\357\\277\\275.txt"',
+    '+++ "b/file-\\357\\277\\275.txt"',
+    "@@ -1 +1 @@",
+    "-old replacement",
+    "+new replacement",
+  ].join("\n");
+
+  const files = parseUnifiedDiff(patch);
+  expect(files).toHaveLength(2);
+  expect(files[0]?.path).toBe("file-\\303.txt");
+  expect(files[0]?.nonUtf8Path).toBe(true);
+  expect(files[1]?.path).toBe("file-\uFFFD.txt");
+  expect(files[1]?.nonUtf8Path).toBeUndefined();
+  expect(files[0]?.path).not.toBe(files[1]?.path);
+});
+
+it("preserves rename and copy paths containing spaces from rename/copy headers", () => {
+  const patch = [
+    "diff --git a/old name.txt b/new name.txt",
+    "similarity index 100%",
+    "rename from old name.txt",
+    "rename to new name.txt",
+    "diff --git a/source doc.md b/copied doc.md",
+    "similarity index 100%",
+    "copy from source doc.md",
+    "copy to copied doc.md",
+  ].join("\n");
+
+  const files = parseUnifiedDiff(patch);
+  expect(files[0]).toMatchObject({
+    path: "new name.txt",
+    previousPath: "old name.txt",
+    change: "renamed",
+    binary: true,
+  });
+  expect(files[1]).toMatchObject({
+    path: "copied doc.md",
+    previousPath: "source doc.md",
+    change: "renamed",
+    binary: true,
+  });
+});

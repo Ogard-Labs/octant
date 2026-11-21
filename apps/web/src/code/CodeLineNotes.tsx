@@ -34,11 +34,16 @@ export function lineNoteExcerpt(text: string): string {
   return line.length <= EXCERPT_LIMIT ? line : `${line.slice(0, EXCERPT_LIMIT - 1)}…`;
 }
 
+function singleLineNotePath(path: string): string {
+  return path.replace(/\r/g, "\\r").replace(/\n/g, "\\n");
+}
+
 function lineNoteAnchorLabel(note: Pick<CodeLineNote, "path" | "side" | "startLine" | "endLine">) {
   const side = note.side === "modified" ? "new" : "old";
+  const path = singleLineNotePath(note.path);
   return note.endLine > note.startLine
-    ? `${note.path}, ${side} lines ${note.startLine}–${note.endLine}`
-    : `${note.path}, ${side} line ${note.startLine}`;
+    ? `${path}, ${side} lines ${note.startLine}–${note.endLine}`
+    : `${path}, ${side} line ${note.startLine}`;
 }
 
 /**

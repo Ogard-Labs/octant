@@ -500,7 +500,7 @@ function renderFileSection(input: {
           <span className="unified-diff__mode">new mode {file.fileMode}</span>
         ) : null}
         <span className="unified-diff__change">{CHANGE_LABELS[file.change]}</span>
-        {input.onReadProviderFile === undefined ? null : (
+        {input.onReadProviderFile === undefined || file.nonUtf8Path === true ? null : (
           <OctantButton
             type="button"
             size="sm"
@@ -516,7 +516,9 @@ function renderFileSection(input: {
             <span className="unified-diff__deletions">−{file.deletions.toLocaleString("en")}</span>
           </span>
         )}
-        {input.onOpenFile === undefined || file.change === "deleted" ? null : (
+        {input.onOpenFile === undefined ||
+        file.change === "deleted" ||
+        file.nonUtf8Path === true ? null : (
           <OctantButton
             onClick={() => input.onOpenFile?.(file.path)}
             size="sm"
