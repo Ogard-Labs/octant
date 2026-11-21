@@ -25,4 +25,18 @@ describe("a provider question asking for a secret", () => {
     await user.click(screen.getByRole("button", { name: "Submit" }));
     expect(onAnswer).toHaveBeenCalledExactlyOnceWith("hunter2");
   });
+
+  it("sends a secret with its leading and trailing spaces, but not a blank one", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi.fn();
+    render(<ProviderQuestionCard onAnswer={onAnswer} options={[]} prompt="Passphrase?" secret />);
+    const field = screen.getByLabelText("Your secret answer");
+    const submit = screen.getByRole("button", { name: "Submit" });
+    await user.type(field, "   ");
+    expect(submit).toBeDisabled();
+    await user.clear(field);
+    await user.type(field, " three words ");
+    await user.click(submit);
+    expect(onAnswer).toHaveBeenCalledExactlyOnceWith(" three words ");
+  });
 });

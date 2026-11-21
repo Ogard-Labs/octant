@@ -58,9 +58,15 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
   const custom = selected === CUSTOM;
   const count = props.questionCount ?? 1;
   const index = props.questionIndex ?? 1;
+  // A secret goes to the agent exactly as typed: spaces at either end can be
+  // part of a passphrase, so only a plain answer is trimmed. Either way a
+  // blank answer cannot be sent.
   const answer = custom
-    ? customAnswer.trim()
+    ? secret
+      ? customAnswer
+      : customAnswer.trim()
     : (props.options.find((o) => o.label === selected)?.label ?? "");
+  const blank = custom ? customAnswer.trim().length === 0 : answer.length === 0;
   const last = index >= count;
   return (
     <section
@@ -157,7 +163,7 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
           </OctantButton>
         )}
         <OctantButton
-          disabled={answer.length === 0}
+          disabled={blank}
           onClick={() => props.onAnswer(answer)}
           size="sm"
           type="button"
