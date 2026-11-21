@@ -55,18 +55,18 @@ const CODE_LEVELS: ReadonlyArray<PermissionMode> = [
   "plan",
   "full-access",
 ];
-// Work shares Code's levels, Plan included; Plan is a Work thread's own level
-// and never where a Work Project or the Work default starts new threads.
-const WORK_DEFAULT_LEVELS = CODE_LEVELS.filter((level) => level !== "plan");
 
 /** The levels a thread can be moved to: every level, in Work as in Code. */
 export function mobileThreadLevelChoices(): ReadonlyArray<PermissionMode> {
   return CODE_LEVELS;
 }
 
-/** The levels a Project or the host default can start new threads at. */
-export function mobileDefaultLevelChoices(mode: "code" | "work"): ReadonlyArray<PermissionMode> {
-  return mode === "work" ? WORK_DEFAULT_LEVELS : CODE_LEVELS;
+/**
+ * The levels a Project or the host default can start new threads at: every
+ * level, in Work as in Code, Plan included.
+ */
+export function mobileDefaultLevelChoices(): ReadonlyArray<PermissionMode> {
+  return CODE_LEVELS;
 }
 
 export function mobileThreadLevel(subject: MobileThreadLevelSubject): PermissionMode {
@@ -172,7 +172,6 @@ export async function changeMobileProjectLevel(input: {
   readonly level: PermissionMode | undefined;
 }): Promise<MobileThreadLevelChange> {
   const { project, level } = input;
-  if (project.type === "work" && level === "plan") return PROJECT_REFUSED;
   return sendLevelCommand(
     input.transport,
     "/api/projects/commands",

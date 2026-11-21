@@ -4179,7 +4179,10 @@ at most one new thread (target policy `new-thread`) and runs its first turn
 through the ordinary thread and turn services; a routine cannot do anything the
 thread it creates could not do. The one exception is a follow-up (target
 policy `same-thread`, below), which creates no thread and sends one turn into
-the thread it came from.
+the thread it came from. A Chat run's turn, a follow-up's included, is sent as
+the host with no window, as a child's result delivery and a usage-limit retry
+into Chat are, so it carries none of the app-managed tools a Chat turn takes
+from the window that sends it (Browser, Canvas, Computer and the rest).
 
 - **File arrivals.** A person configures the existing main Work or Code Project root,
   a relative existing input directory, included suffixes, excluded directories,
