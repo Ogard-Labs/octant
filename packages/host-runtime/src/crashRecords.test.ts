@@ -8,6 +8,7 @@ import {
   keepUncleanStopCrashRecord,
   readHostCrashRecords,
   recordHostCrash,
+  recordHostCrashSync,
 } from "./crashRecords";
 
 async function dataDirectory(): Promise<string> {
@@ -91,5 +92,35 @@ describe("host crash records", () => {
 
   it("reads a host that never crashed as no records", async () => {
     expect(await readHostCrashRecords(await dataDirectory())).toEqual([]);
+  });
+
+  it("writes a redacted synchronous desktop crash record without masking a host unclean stop", async () => {
+    const data = await dataDirectory();
+    const outcome = recordHostCrashSync(data, {
+      recordedAt: "2026-11-21T10:00:00.000Z",
+      process: "desktop",
+      exitReason: "uncaughtException",
+      lastLines: ["[octant:desktop] fatal at /Users/ada/app token=sk-secret99999999"],
+      homeDirectory: "/Users/ada",
+    });
+    expect(outcome).toEqual({ status: "recorded" });
+
+    // A desktop crash record must not be reused as the host's own unclean-stop record.
+    const hostRecord = await keepUncleanStopCrashRecord(data, {
+      lastSeenAt: "2026-11-21T09:59:00.000Z",
+      recordedAt: "2026-11-21T10:01:00.000Z",
+      lastLines: ["last reading normal, 200 MB"],
+    });
+    expect(hostRecord).toMatchObject({
+      process: "host",
+      exitReason: "stopped without a clean exit",
+    });
+
+    const records = await readHostCrashRecords(data);
+    expect(records).toHaveLength(2);
+    const desktopRecord = records.find((record) => record.process === "desktop");
+    expect(desktopRecord?.lastLines[0]).toContain("~/app");
+    expect(JSON.stringify(desktopRecord)).not.toContain("/Users/ada");
+    expect(JSON.stringify(desktopRecord)).not.toContain("sk-secret99999999");
   });
 });

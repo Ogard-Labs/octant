@@ -1279,13 +1279,14 @@ function acquireConnection(
     const cleanup = () => {
       cleanupPromise ??= (async () => {
         const suppressStdinError = () => undefined;
+        const removeStdinErrorSuppression = () => child.stdin.off("error", suppressStdinError);
         child.stdin.on("error", suppressStdinError);
+        child.stdin.once("close", removeStdinErrorSuppression);
         try {
           await acp.close().catch(() => undefined);
           await Promise.race([childExited, wait(25)]);
           await terminateGroup();
         } finally {
-          child.stdin.off("error", suppressStdinError);
           child.stdin.destroy();
         }
       })();

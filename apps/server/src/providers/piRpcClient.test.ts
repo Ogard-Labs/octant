@@ -95,4 +95,27 @@ describe("PiRpcClient", () => {
     );
     await expect(unsupported.client.exited).rejects.toMatchObject({ kind: "protocol" });
   });
+
+  it("a stdin EPIPE on a dead child reaches its owner, not the net", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const client = makePiRpcClient({ stdin, stdout });
+    const exited = client.exited.catch((error: unknown) => error);
+
+    // Simulate a dead child whose write callback fails before Node emits the
+    // asynchronous EPIPE 'error' event on stdin.
+    const epipe = Object.assign(new Error("write EPIPE"), { code: "EPIPE", syscall: "write" });
+    stdin.write = ((_chunk: unknown, callback?: (error?: Error | null) => void) => {
+      callback?.(epipe);
+      queueMicrotask(() => stdin.emit("error", epipe));
+      return false;
+    }) as typeof stdin.write;
+
+    await expect(client.send({ type: "prompt", message: "hello" })).rejects.toBeInstanceOf(
+      PiRpcFailure,
+    );
+    // Let the asynchronous stdin 'error' event fire: it must NOT throw as an unhandled error event.
+    await tick();
+    expect(await exited).toBeInstanceOf(PiRpcFailure);
+  });
 });

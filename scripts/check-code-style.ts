@@ -25,7 +25,8 @@ export type CodeStyleRule =
   | "non-null-assertion"
   | "as-unknown-as"
   | "tracker-id"
-  | "window-lead-read";
+  | "window-lead-read"
+  | "process-error-listener";
 
 export interface CodeStyleFinding {
   readonly rule: CodeStyleRule;
@@ -55,6 +56,9 @@ const TRACKER_ID = /\b(?:OCT|BOOT)-\d+\b/g;
 const AS_UNKNOWN_AS = /\bas\s+unknown\s+as\b/g;
 const WINDOW_LEAD_READ = /\bcontextByMode\b/g;
 const SERVER_SOURCE = /^apps\/server\//;
+/** Only the shared process error net may register process-level crash listeners. */
+export const PROCESS_ERROR_NET_OWNER = "packages/host-runtime/src/processErrorNet.ts";
+const PROCESS_ERROR_LISTENER = /(["'`])(?:uncaughtException(?:Monitor)?|unhandledRejection)\1/g;
 
 const SOURCE_EXTENSION = /\.(?:ts|tsx|mts|cts)$/;
 
@@ -96,6 +100,11 @@ export function findTextFindings(
     for (const match of source.matchAll(TRACKER_ID)) {
       findings.push({ rule: "tracker-id", file, line: lineAt(source, match.index) });
     }
+    if (file !== PROCESS_ERROR_NET_OWNER) {
+      for (const match of source.matchAll(PROCESS_ERROR_LISTENER)) {
+        findings.push({ rule: "process-error-listener", file, line: lineAt(source, match.index) });
+      }
+    }
     if (!SERVER_SOURCE.test(file)) continue;
     for (const match of source.matchAll(WINDOW_LEAD_READ)) {
       findings.push({ rule: "window-lead-read", file, line: lineAt(source, match.index) });
@@ -136,6 +145,7 @@ export function countFindings(
     "as-unknown-as": {},
     "tracker-id": {},
     "window-lead-read": {},
+    "process-error-listener": {},
   };
   for (const finding of findings) {
     const byFile = counts[finding.rule];
@@ -158,9 +168,11 @@ export function compareWithBaseline(
 ): ReadonlyArray<BaselineProblem> {
   const counts = countFindings(findings);
   const problems: BaselineProblem[] = [];
-  for (const file of Object.keys(counts["tracker-id"]).sort()) {
-    const current = counts["tracker-id"][file] ?? 0;
-    problems.push({ kind: "exceeded", rule: "tracker-id", file, recorded: 0, current });
+  for (const rule of ["tracker-id", "process-error-listener"] as const) {
+    for (const file of Object.keys(counts[rule]).sort()) {
+      const current = counts[rule][file] ?? 0;
+      problems.push({ kind: "exceeded", rule, file, recorded: 0, current });
+    }
   }
   for (const rule of RATCHETED_RULES) {
     const recorded = baseline[rule] ?? {};
@@ -210,6 +222,8 @@ const REMEDY: Readonly<Record<CodeStyleRule, string>> = {
     "remove the tracker identifier; say what the rule means instead (AGENTS.md: tracker ids stay in Linear)",
   "window-lead-read":
     "ask `windowAdmitsProject` (or `activePaneContext`) instead of reading the window's lead Project; a window shows panes of several Projects",
+  "process-error-listener":
+    "do not register `uncaughtException` or `unhandledRejection` in shipped code; route errors to their owner or use `@octant/host-runtime/process-error-net`",
 };
 
 function shippedFiles(root: string): ReadonlyArray<string> {

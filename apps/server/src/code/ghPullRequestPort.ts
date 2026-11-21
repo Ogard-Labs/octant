@@ -2003,6 +2003,9 @@ async function runGh(
       errorChunks.push(Buffer.from(next));
       errorLength += next.length;
     });
+    child.stdout.on("error", () => undefined);
+    child.stderr.on("error", () => undefined);
+    child.stdin.on("error", () => undefined);
     child.once("error", () => finish(1));
     child.once("close", (code) => finish(code ?? 1));
     if (options.stdin === undefined) child.stdin.end();
