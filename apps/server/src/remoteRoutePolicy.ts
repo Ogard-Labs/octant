@@ -763,6 +763,19 @@ const DEFAULT_SERVER_PROXY_ROUTES: readonly RemoteRouteDefinition[] = [
     maxResponseBytes: 4_096,
   },
   {
+    // A port forward opens here; its connections then travel on
+    // `/api/server-proxy/<forward id>` under the relay prefix below.
+    id: "server-proxy-forwards",
+    match: { kind: "exact", path: "/api/server-proxy/forwards" },
+    surface: "server-proxy",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 4_096,
+    maxResponseBytes: 4_096,
+  },
+  {
     // `/api/server-proxy/<grant id>/<the dev server's path>`. Matched after the
     // grants route, so that exact path never reaches a dev server.
     id: "server-proxy-relay",

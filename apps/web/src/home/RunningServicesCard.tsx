@@ -11,6 +11,8 @@ import {
   NOT_OWNED_LABEL,
   REMOTE_OPEN_LIMITS,
   remoteOpenOffer,
+  remoteForwardNote,
+  type RemoteForwardOutcome,
   type RemoteOpenMode,
   type RemoteOpenOutcome,
   runningServiceHealthLabel,
@@ -43,6 +45,12 @@ export interface RunningServicesCardSource {
    * keep their picture of the page. The host judges every request again.
    */
   readonly openLive?: (service: RunningService, mode: RemoteOpenMode) => Promise<RemoteOpenOutcome>;
+  /**
+   * Forwards a server's port on another computer to this computer's loopback,
+   * as raw TCP, for tools that are not a browser. Absent where this window
+   * cannot; the host refuses a device its own person did not pair.
+   */
+  readonly forwardPort?: (service: RunningService) => Promise<RemoteForwardOutcome>;
 }
 
 /**
@@ -108,7 +116,7 @@ function RunningServiceListItem(props: {
 }) {
   const { controller, service, source } = props;
   const [confirming, setConfirming] = useState(false);
-  const { host, openLive } = source;
+  const { host, openLive, forwardPort } = source;
   return (
     <>
       <RunningServiceRow
@@ -131,6 +139,9 @@ function RunningServiceListItem(props: {
                 openLive: (mode: RemoteOpenMode) => openLive(service, mode),
               },
             })}
+        {...(forwardPort === undefined || host === undefined || service.health !== "listening"
+          ? {}
+          : { forwardPort: () => forwardPort(service) })}
         service={service}
         {...(host === undefined ? {} : { host })}
       />
@@ -167,6 +178,8 @@ function RunningServiceRow(props: {
     readonly offer: ReturnType<typeof remoteOpenOffer>;
     readonly openLive: (mode: RemoteOpenMode) => Promise<RemoteOpenOutcome>;
   };
+  /** Present when this window can forward the server's port from another computer. */
+  readonly forwardPort?: () => Promise<RemoteForwardOutcome>;
   readonly onOpen: () => Promise<void>;
   readonly onStop: () => void;
 }) {
@@ -175,6 +188,22 @@ function RunningServiceRow(props: {
   const [liveRefusal, setLiveRefusal] = useState<string>();
   const [liveNotice, setLiveNotice] = useState<string>();
   const [liveBusy, setLiveBusy] = useState(false);
+  const [forwardedPort, setForwardedPort] = useState<number>();
+  const forwardPort = props.forwardPort;
+  const forward = async () => {
+    if (forwardPort === undefined) return;
+    setLiveRefusal(undefined);
+    setLiveBusy(true);
+    try {
+      const outcome = await forwardPort();
+      if (outcome.kind === "refused") setLiveRefusal(outcome.message);
+      else setForwardedPort(outcome.localPort);
+    } catch {
+      setLiveRefusal("Octant could not forward this port.");
+    } finally {
+      setLiveBusy(false);
+    }
+  };
   const live = props.remote?.offer?.kind === "live" ? props.remote : undefined;
   const openLive = async (mode: RemoteOpenMode) => {
     if (live === undefined) return;
@@ -234,6 +263,13 @@ function RunningServiceRow(props: {
         {live === undefined ? null : (
           <span className="oct-meta running-services__detail">
             <span className="running-services__detail-text">{REMOTE_OPEN_LIMITS}</span>
+          </span>
+        )}
+        {forwardedPort === undefined ? null : (
+          <span className="oct-meta running-services__detail">
+            <span className="running-services__detail-text">
+              {remoteForwardNote(forwardedPort)}
+            </span>
           </span>
         )}
         {liveNotice === undefined ? null : (
@@ -302,6 +338,19 @@ function RunningServiceRow(props: {
             <span>Open</span>
           </OctantButton>
         ) : null}
+        {forwardPort === undefined ? null : (
+          <OctantButton
+            aria-label={`Forward port ${String(service.port)} of ${name} to this computer`}
+            className="window-no-drag"
+            disabled={props.busy || liveBusy}
+            onClick={() => void forward()}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <span>Forward port</span>
+          </OctantButton>
+        )}
         {service.stop.status === "available" ? (
           <OctantButton
             aria-label={`Stop ${name} on port ${String(service.port)}`}

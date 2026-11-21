@@ -153,6 +153,7 @@ export const DESKTOP_IPC_CHANNELS = {
   remoteServerPageSign: "octant:remote-server-page:sign",
   remoteServerPageSigned: "octant:remote-server-page:signed",
   remoteServerPageForgetHost: "octant:remote-server-page:forget-host",
+  remotePortForwardOpen: "octant:remote-port-forward:open",
 } as const;
 
 /**

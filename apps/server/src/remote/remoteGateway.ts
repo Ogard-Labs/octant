@@ -16,6 +16,7 @@
 // cancellation leaves the gateway in a typed `failed` state with admission
 // closed and the listener still bound so a retry can complete finalization.
 
+import type { RemotePortForwardService } from "./remotePortForwardService";
 import { randomUUID as defaultRandomUUID } from "node:crypto";
 import { Schema } from "effect";
 import type { PairedDeviceLifetime, StableHostId } from "@octant/contracts/remote-access";
@@ -199,6 +200,8 @@ export interface RemoteGatewayServices {
    * and every proxy route answer unavailable.
    */
   readonly remoteServerGrants?: RemoteServerGrantGatewayPort;
+  /** Ports a device its own person paired reaches as raw TCP, under the same proxy session. */
+  readonly remotePortForwards?: RemotePortForwardService;
 }
 
 export interface RemoteGatewayConfig {
@@ -607,10 +610,14 @@ function assembleServices(
           proofs: proof,
           now,
           uuid,
-          onSessionEnded: (ended) =>
-            remoteServerGrants.closeSession(ended.sessionIdDigest, ended.reason),
+          onSessionEnded: (ended) => {
+            remoteServerGrants.closeSession(ended.sessionIdDigest, ended.reason);
+            // A forward lives no longer than the proxy session it was opened under.
+            options.remotePortForwards?.closeSession(ended.sessionIdDigest);
+          },
           holdsOpenSockets: (sessionIdDigest) =>
-            remoteServerGrants.holdsOpenSockets(sessionIdDigest),
+            remoteServerGrants.holdsOpenSockets(sessionIdDigest) ||
+            options.remotePortForwards?.holdsOpenConnections(sessionIdDigest) === true,
         });
 
   // A device that lost its standing in a past run (a revoke that committed
@@ -789,7 +796,15 @@ function assembleServices(
     ...(options.productDispatch === undefined ? {} : { productDispatch: options.productDispatch }),
     ...(proxySessions === undefined || remoteServerGrants === undefined
       ? {}
-      : { serverProxy: { sessions: proxySessions, grants: remoteServerGrants } }),
+      : {
+          serverProxy: {
+            sessions: proxySessions,
+            grants: remoteServerGrants,
+            ...(options.remotePortForwards === undefined
+              ? {}
+              : { forwards: options.remotePortForwards }),
+          },
+        }),
   });
 
   // Route policy — exact origin from the listener config so policy identity

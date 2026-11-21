@@ -1,4 +1,5 @@
 import { ownerApprovalContext } from "../hub/ownerApprovalFile";
+import { RemotePortForwardService } from "../remote/remotePortForwardService";
 import { createOwnerApprovalHost } from "../hub/ownerApprovalHost";
 import { createOwnerApprovalJournal } from "../hub/ownerApprovalJournal";
 import type { WorkRequestStateWiring } from "./workRequestState";
@@ -495,6 +496,22 @@ export function wireRemote(deps: RemoteDependencies) {
   // so a disabled-by-default server never touches host-identity key material.
   // The controller is always constructed so the packaged host controls reach a
   // real lifecycle authority instead of a 503 from an undefined controller.
+  // Ports a device its own person paired reaches on this computer's loopback
+  // as raw TCP. They live in memory, bound to a proxy session, so a starting
+  // host records closed whatever a past run left open.
+  const remotePortForwards = new RemotePortForwardService({
+    journal: persistence.journal,
+    hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+    now: Date.now,
+  });
+  try {
+    remotePortForwards.closeLeftOpen();
+  } catch {
+    console.warn("Octant could not record that a past run's port forwards ended.");
+  }
+  setInterval(() => remotePortForwards.sweep(), 60_000).unref();
   const injectedRemoteListenerServices = options.remoteListener?.services;
   const resolveRemoteGatewayServices = (): Omit<RemoteGatewayServices, "config" | "serve"> => {
     if (injectedRemoteListenerServices !== undefined) return injectedRemoteListenerServices;
@@ -530,6 +547,7 @@ export function wireRemote(deps: RemoteDependencies) {
       },
       pushTokenStore: pushNotificationTokenStore,
       remoteServerGrants: remoteServerGrantGatewayPort,
+      remotePortForwards,
     };
   };
   // The private gateway is rebuilt on every enable, so the newest generation
@@ -597,6 +615,7 @@ export function wireRemote(deps: RemoteDependencies) {
               return webOrigin === undefined ? [] : [webOrigin];
             })),
         remoteServerGrants: services.remoteServerGrants ?? remoteServerGrantGatewayPort,
+        remotePortForwards: services.remotePortForwards ?? remotePortForwards,
         agentAccess: (request, facts) => agentAccessListenerRoutes(request, facts),
         serve: options.remoteServe ?? serve,
         config,
