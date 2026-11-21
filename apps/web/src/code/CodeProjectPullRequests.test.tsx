@@ -341,6 +341,8 @@ describe("CodeProjectPullRequests", () => {
     expect((await screen.findAllByRole("menuitemradio")).map((item) => item.textContent)).toEqual([
       "Recently updated",
       "Least recently updated",
+      "Newest",
+      "Oldest",
       "Repository",
     ]);
     await user.click(await screen.findByRole("menuitemradio", { name: "Least recently updated" }));
@@ -350,6 +352,60 @@ describe("CodeProjectPullRequests", () => {
     await user.click(await screen.findByRole("menuitemradio", { name: "Repository" }));
     // aurora sorts before octant; inside a repository the newest comes first.
     expect(titlesInOrder()).toEqual(["Middle in aurora", "Newest in octant", "Oldest in octant"]);
+  });
+
+  it("orders Newest and Oldest by creation time rather than last update", async () => {
+    const user = userEvent.setup();
+    const base = view().rows[0];
+    if (base === undefined) throw new Error("fixture has a row");
+    // Creation order (Opened third > Opened second > Opened first) disagrees
+    // with update order (Opened first > Opened third > Opened second).
+    const rows = [
+      {
+        ...base,
+        number: 1,
+        title: "Opened first, updated last",
+        createdAt: "2026-08-18T07:00:00.000Z",
+        updatedAt: "2026-08-22T09:00:00.000Z",
+      },
+      {
+        ...base,
+        number: 2,
+        title: "Opened second, updated first",
+        createdAt: "2026-08-19T07:00:00.000Z",
+        updatedAt: "2026-08-20T09:00:00.000Z",
+      },
+      {
+        ...base,
+        number: 3,
+        title: "Opened third, updated middle",
+        createdAt: "2026-08-21T07:00:00.000Z",
+        updatedAt: "2026-08-21T09:00:00.000Z",
+      },
+    ];
+    renderWorkspace({ load: async () => ({ ...view(), rows }) });
+    await screen.findByText("Opened first, updated last");
+    expect(titlesInOrder()).toEqual([
+      "Opened first, updated last",
+      "Opened third, updated middle",
+      "Opened second, updated first",
+    ]);
+
+    await openMenu(user, "Sort pull requests");
+    await user.click(await screen.findByRole("menuitemradio", { name: "Newest" }));
+    expect(titlesInOrder()).toEqual([
+      "Opened third, updated middle",
+      "Opened second, updated first",
+      "Opened first, updated last",
+    ]);
+
+    await openMenu(user, "Sort pull requests");
+    await user.click(await screen.findByRole("menuitemradio", { name: "Oldest" }));
+    expect(titlesInOrder()).toEqual([
+      "Opened first, updated last",
+      "Opened second, updated first",
+      "Opened third, updated middle",
+    ]);
   });
 
   it("remembers the sort, grouping and filters the next time the page opens", async () => {

@@ -772,6 +772,7 @@ describe("GhPullRequestPort active list", () => {
     title: "List active pull requests",
     isDraft: false,
     author: { login: "octocat" },
+    createdAt: "2026-08-20T07:00:00Z",
     updatedAt: "2026-08-22T07:00:00Z",
     url: "https://github.com/octant/octant/pull/12",
     baseRefName: "development",
@@ -807,6 +808,7 @@ describe("GhPullRequestPort active list", () => {
           author: "octocat",
           baseBranch: "development",
           headBranch: "feature/manual-refresh",
+          createdAt: "2026-08-20T07:00:00Z",
           updatedAt: "2026-08-22T07:00:00Z",
           url: activeRow.url,
           checks: "passing",
@@ -825,6 +827,7 @@ describe("GhPullRequestPort active list", () => {
           author: "octocat",
           baseBranch: "development",
           headBranch: "feature/manual-refresh",
+          createdAt: "2026-08-20T07:00:00Z",
           updatedAt: "2026-08-22T07:00:00Z",
           url: activeRow.url,
           checks: "passing",
@@ -846,7 +849,7 @@ describe("GhPullRequestPort active list", () => {
       "--limit",
       "100",
       "--json",
-      "id,number,title,isDraft,state,mergeable,author,updatedAt,url,baseRefName,headRefName,isCrossRepository,statusCheckRollup,reviewDecision,reviewRequests,additions,deletions,autoMergeRequest",
+      "id,number,title,isDraft,state,mergeable,author,createdAt,updatedAt,url,baseRefName,headRefName,isCrossRepository,statusCheckRollup,reviewDecision,reviewRequests,additions,deletions,autoMergeRequest",
     ]);
     expect(vi.mocked(command.run).mock.calls.some(([args]) => args.includes("merge"))).toBe(false);
   });

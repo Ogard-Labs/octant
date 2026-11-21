@@ -159,6 +159,23 @@ describe("Code Project pull-request contracts", () => {
     ).toThrow();
   });
 
+  it("keeps creation time when the list recorded it, still reads an older row without one, and refuses an invalid timestamp", () => {
+    const withCreatedAt = {
+      ...connectedView,
+      rows: [{ ...connectedView.rows[0], createdAt: "2026-08-20T09:00:00.000Z" }],
+    };
+    expect(decodeCodeProjectPullRequestView(withCreatedAt).rows[0]?.createdAt).toBe(
+      "2026-08-20T09:00:00.000Z",
+    );
+    expect(decodeCodeProjectPullRequestView(connectedView).rows[0]?.createdAt).toBe(undefined);
+    expect(() =>
+      decodeCodeProjectPullRequestView({
+        ...connectedView,
+        rows: [{ ...connectedView.rows[0], createdAt: "yesterday" }],
+      }),
+    ).toThrow();
+  });
+
   it("keeps failing checks the list recorded, and still reads a row that did not", () => {
     const withFailure = {
       ...connectedView,

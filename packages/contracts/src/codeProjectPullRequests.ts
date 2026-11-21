@@ -609,6 +609,12 @@ export const CodeProjectPullRequestRow = Schema.Struct({
   author: boundedNonEmptyText(128),
   baseBranch: branchName,
   headBranch: branchName,
+  /**
+   * When the pull request was opened, from the same list read as `updatedAt`.
+   * Absent on a snapshot taken before creation time was recorded, or on a row
+   * known only from a linked thread.
+   */
+  createdAt: Schema.optional(githubUpdatedAt),
   updatedAt: githubUpdatedAt,
   checks: CodeProjectPullRequestChecksSummary,
   review: CodeProjectPullRequestReviewSummary,

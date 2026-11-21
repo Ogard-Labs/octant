@@ -2140,13 +2140,13 @@ Review tool opens it as before).
 Sort offers Recently updated (the default), Least recently updated, Newest,
 Oldest and Repository, and a **Group by repository** check item. Newest and
 Oldest order by creation time, which the snapshot carries beside each
-pull request's last update. Filter offers Status (any, open, draft), Involvement
-(anyone, involving me, review requested, authored by me; only when the
-signed-in GitHub login is known, and answered from the row's author and
-requested reviewers), Review (needs review, changes
-requested, approved), Checks (passing, failing, pending) and **Mine**, which
-keeps the pull requests whose author is the signed-in GitHub account
-(maintainer request, 2026-11-12). Not built yet: today the snapshot carries no
+pull request's last update (falling back to last update on a cached snapshot
+taken before creation time was recorded). Filter offers Status (any, open,
+draft), Involvement (anyone, involving me, review requested, authored by me —
+which answers "mine"; only when the signed-in GitHub login is known, and
+answered from the row's author and requested reviewers), Review (needs review,
+changes requested, approved) and Checks (passing, failing, pending).
+
 The **Repository** control is a menu in the list header, at one fixed width, on
 the count's row. It lists every repository the list spans, each with how many
 rows it holds under the other choices, as check items: **All repositories** (the
@@ -2158,8 +2158,7 @@ this window's local storage. Issues share the control's place and look. Grouping
 is a **Group by repository** check item in the Sort menu: each group head is the
 repository's name at 12px in the meta ink with its count at the right edge.
 
-creation time and the author is not compared with the account, so Newest,
-Oldest and Mine are not offered. Sort, grouping, the status choice and the
+Sort, grouping, the status choice and the
 repositories are remembered in this window's local storage; Involvement, Review
 and Checks last for the visit only, because kept across visits they hid every row
 behind chips that counted the unfiltered list. A filter that is narrowing the

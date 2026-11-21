@@ -1647,6 +1647,7 @@ export class CodeProjectPullRequestService {
       author: row.author,
       baseBranch: row.baseBranch,
       headBranch: row.headBranch,
+      ...(row.createdAt === undefined ? {} : { createdAt: row.createdAt }),
       updatedAt: row.updatedAt,
       checks: row.checks,
       review: row.review,

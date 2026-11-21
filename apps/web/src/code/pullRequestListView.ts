@@ -1,11 +1,11 @@
 import type { CodeProjectPullRequestRow } from "@octant/contracts";
 
 /**
- * The page's ordering and narrowing of the cached rows. The rows carry the time
- * of the last update and no creation time, so the orders offered are the ones
- * the row's own age can answer.
+ * The page's ordering and narrowing of the cached rows. Creation time comes
+ * from the same list read as `updatedAt` (falling back to `updatedAt` on a
+ * cached snapshot recorded before creation time existed).
  */
-export type PullRequestSort = "updated" | "stalest" | "repository";
+export type PullRequestSort = "updated" | "stalest" | "newest" | "oldest" | "repository";
 export type PullRequestStateFilter = "any" | "open" | "draft";
 export type PullRequestReviewFilter = "any" | "approved" | "changes-requested" | "needs-review";
 export type PullRequestChecksFilter = "any" | "passing" | "failing" | "pending";
@@ -32,6 +32,8 @@ export const PULL_REQUEST_SORT_OPTIONS: ReadonlyArray<{
 }> = [
   { value: "updated", label: "Recently updated" },
   { value: "stalest", label: "Least recently updated" },
+  { value: "newest", label: "Newest" },
+  { value: "oldest", label: "Oldest" },
   { value: "repository", label: "Repository" },
 ];
 
@@ -88,9 +90,13 @@ export function activeFilterCount(filters: PullRequestFilters): number {
   );
 }
 
-function timeOf(row: CodeProjectPullRequestRow): number {
-  const parsed = Date.parse(row.updatedAt);
+function timestampOf(value: string): number {
+  const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function createdTimeOf(row: CodeProjectPullRequestRow): number {
+  return timestampOf(row.createdAt ?? row.updatedAt);
 }
 
 function repositoryName(row: CodeProjectPullRequestRow): string {
@@ -161,18 +167,22 @@ export function sortPullRequests(
   rows: ReadonlyArray<CodeProjectPullRequestRow>,
   sort: PullRequestSort,
 ): ReadonlyArray<CodeProjectPullRequestRow> {
+  const recentlyUpdatedFirst = (a: CodeProjectPullRequestRow, b: CodeProjectPullRequestRow) =>
+    timestampOf(b.updatedAt) - timestampOf(a.updatedAt) || b.number - a.number;
   const newestFirst = (a: CodeProjectPullRequestRow, b: CodeProjectPullRequestRow) =>
-    timeOf(b) - timeOf(a) || b.number - a.number;
+    createdTimeOf(b) - createdTimeOf(a) || b.number - a.number;
   const copy = [...rows];
-  if (sort === "stalest") return copy.sort((a, b) => -newestFirst(a, b));
+  if (sort === "stalest") return copy.sort((a, b) => -recentlyUpdatedFirst(a, b));
+  if (sort === "newest") return copy.sort(newestFirst);
+  if (sort === "oldest") return copy.sort((a, b) => -newestFirst(a, b));
   if (sort === "repository") {
     return copy.sort(
       (a, b) =>
         repositoryName(a).localeCompare(repositoryName(b), undefined, { sensitivity: "base" }) ||
-        newestFirst(a, b),
+        recentlyUpdatedFirst(a, b),
     );
   }
-  return copy.sort(newestFirst);
+  return copy.sort(recentlyUpdatedFirst);
 }
 
 function sameLogin(a: string, b: string): boolean {

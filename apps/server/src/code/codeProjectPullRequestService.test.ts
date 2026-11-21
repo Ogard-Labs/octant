@@ -1777,7 +1777,12 @@ describe("CodeProjectPullRequestService", () => {
     const { service, listActive } = serviceFixture({
       list: async () => ({
         status: "ok",
-        rows: [ghRow({ reviewRequestedFrom: ["reviewer"] })],
+        rows: [
+          ghRow({
+            createdAt: "2026-08-20T09:00:00Z",
+            reviewRequestedFrom: ["reviewer"],
+          }),
+        ],
       }),
     });
 
@@ -1785,6 +1790,7 @@ describe("CodeProjectPullRequestService", () => {
     const callsAfterRefresh = listActive.mock.calls.length;
     const view = await service.query(windowId, { version: 1 });
 
+    expect(view.rows[0]?.createdAt).toBe("2026-08-20T09:00:00Z");
     expect(view.rows[0]?.reviewRequestedFrom).toEqual(["reviewer"]);
     expect(listActive.mock.calls.length).toBe(callsAfterRefresh);
   });
