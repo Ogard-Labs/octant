@@ -123,6 +123,8 @@ jobs:
           bun scripts/sign-headless-artifact.ts \
             --tarball "${RUNNER_TEMP}/headless/${name}" \
             --ring "$RING" \
+            --version "$VERSION" \
+            --target "$TARGET" \
             --out "${RUNNER_TEMP}/signed/${name}"
       - name: Attach it to the release
         env:

@@ -1,6 +1,14 @@
 import { execFile } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -121,6 +129,46 @@ describe("signing a headless build for release", () => {
     });
     expect(result).toMatchObject({ status: "refused" });
     expect(readdirSync(built.artifactRoot)).not.toContain(HEADLESS_ARTIFACT_SIGNATURE_FILENAME);
+  });
+
+  it("refuses to write the signature through a link the build supplied", async () => {
+    const built = await builtArtifact();
+    const ringKey = keyPair();
+    const outside = join(temporaryRoot("octant-headless-outside-"), "victim.txt");
+    writeFileSync(outside, "untouched");
+    symlinkSync(outside, join(built.artifactRoot, HEADLESS_ARTIFACT_SIGNATURE_FILENAME));
+    const result = await signHeadlessArtifactDirectory({
+      artifactRoot: built.artifactRoot,
+      ring: "preview",
+      privateKeyBase64: ringKey.privateKeyBase64,
+      trustedKeys: previewTrust(ringKey.publicKeyBase64),
+    });
+    expect(result).toMatchObject({ status: "refused" });
+    expect(readFileSync(outside, "utf8")).toBe("untouched");
+  });
+
+  it("refuses a build labelled for another version or target than the release slot", async () => {
+    const built = await builtArtifact();
+    const ringKey = keyPair();
+    const sign = (expected: { readonly version: string; readonly target: string }) =>
+      signHeadlessArtifactDirectory({
+        artifactRoot: built.artifactRoot,
+        ring: "preview",
+        privateKeyBase64: ringKey.privateKeyBase64,
+        trustedKeys: previewTrust(ringKey.publicKeyBase64),
+        expected,
+      });
+    expect(await sign({ version: "1.2.4", target: "linux-arm64" })).toMatchObject({
+      status: "refused",
+    });
+    expect(await sign({ version: "1.2.3", target: "linux-x64" })).toMatchObject({
+      status: "refused",
+    });
+    expect(readdirSync(built.artifactRoot)).not.toContain(HEADLESS_ARTIFACT_SIGNATURE_FILENAME);
+    expect(await sign({ version: "1.2.3", target: "linux-arm64" })).toEqual({
+      status: "signed",
+      version: "1.2.3",
+    });
   });
 
   it("repacks a signed tarball that carries the signature beside the manifest", async () => {

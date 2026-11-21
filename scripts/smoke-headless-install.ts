@@ -1,10 +1,19 @@
 import { execFile } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  createReleaseFeedVerifier,
+  decodeHeadlessArtifactManifest,
+  HEADLESS_ARTIFACT_MANIFEST_FILENAME,
+  HEADLESS_ARTIFACT_SIGNATURE_FILENAME,
+  inspectHeadlessArtifact,
+  type ReleaseRing,
+  verifyHeadlessArtifactSignature,
+} from "@octant/host-runtime";
 import { hostHeadlessTarget } from "./package-headless";
 
 // Installs a built headless artifact into an empty prefix and drives the
@@ -152,6 +161,104 @@ function parseArguments(argv: readonly string[]): {
   return parsed;
 }
 
+export type DownloadedBuildCheck =
+  | { readonly status: "verified" }
+  | { readonly status: "refused"; readonly reason: string };
+
+/**
+ * Checks an unpacked build against this checkout's release keys before the
+ * smoke runs anything from it. The install command would check the signature
+ * too, but that command is the build's own CLI: a replaced download would
+ * already be running as the operator by the time it reported.
+ */
+export async function verifyDownloadedBuild(
+  artifactRoot: string,
+  trustedKeys?: Readonly<Record<ReleaseRing, ReadonlyArray<string>>>,
+): Promise<DownloadedBuildCheck> {
+  let manifestText: string;
+  try {
+    manifestText = await readFile(join(artifactRoot, HEADLESS_ARTIFACT_MANIFEST_FILENAME), "utf8");
+  } catch {
+    return { status: "refused", reason: "the build has no readable manifest" };
+  }
+  let declared;
+  try {
+    declared = decodeHeadlessArtifactManifest(manifestText);
+  } catch {
+    return { status: "refused", reason: "the build's manifest is malformed" };
+  }
+  const inspection = await inspectHeadlessArtifact({
+    artifactRoot,
+    runtime: {
+      platform: declared.target.platform,
+      arch: declared.target.arch,
+      wireVersion: declared.wireVersion,
+    },
+  });
+  if (!inspection.ok) {
+    return {
+      status: "refused",
+      reason: `the build does not match its manifest (${inspection.rejection.code})`,
+    };
+  }
+  const unlisted = await firstUnlistedEntry(
+    artifactRoot,
+    new Set([
+      HEADLESS_ARTIFACT_MANIFEST_FILENAME,
+      HEADLESS_ARTIFACT_SIGNATURE_FILENAME,
+      ...inspection.manifest.components.map((component) => component.path),
+    ]),
+  );
+  if (unlisted !== undefined) {
+    return {
+      status: "refused",
+      reason: `the build carries ${unlisted}, which its manifest does not list`,
+    };
+  }
+  let signatureText: string | undefined;
+  try {
+    signatureText = await readFile(
+      join(artifactRoot, HEADLESS_ARTIFACT_SIGNATURE_FILENAME),
+      "utf8",
+    );
+  } catch {
+    signatureText = undefined;
+  }
+  const check = verifyHeadlessArtifactSignature({
+    manifest: inspection.manifest,
+    signatureText,
+    verifier: createReleaseFeedVerifier(trustedKeys),
+  });
+  return check.status === "refused"
+    ? { status: "refused", reason: `the signature is ${check.reason}` }
+    : { status: "verified" };
+}
+
+/**
+ * The first entry under `root` that is neither a listed file nor a directory
+ * holding one. The signature covers listed files only, and the launcher runs
+ * from this tree, so an unlisted module beside them could be loaded unsigned.
+ */
+async function firstUnlistedEntry(
+  root: string,
+  listed: ReadonlySet<string>,
+  prefix = "",
+): Promise<string | undefined> {
+  for (const name of await readdir(join(root, prefix))) {
+    const path = prefix === "" ? name : `${prefix}/${name}`;
+    const entry = await lstat(join(root, path));
+    if (entry.isDirectory()) {
+      const holdsListed = [...listed].some((listedPath) => listedPath.startsWith(`${path}/`));
+      if (!holdsListed) return path;
+      const nested = await firstUnlistedEntry(root, listed, path);
+      if (nested !== undefined) return nested;
+    } else if (!listed.has(path)) {
+      return path;
+    }
+  }
+  return undefined;
+}
+
 async function smokeHeadlessInstall(argv: readonly string[]): Promise<void> {
   const options = parseArguments(argv);
   const tarball = options.tarball ?? defaultTarball();
@@ -190,6 +297,12 @@ async function smokeHeadlessInstall(argv: readonly string[]): Promise<void> {
   const artifactRoot = join(extracted, artifactName);
   const installRoot = join(prefix, "install");
   const installed = join(installRoot, "current", "bin", "octant");
+  if (!options.selfBuilt) {
+    const check = await verifyDownloadedBuild(artifactRoot);
+    if (check.status === "refused") {
+      throw new Error(`Refusing to run ${artifactName}: ${check.reason}.`);
+    }
+  }
 
   await expectSuccess(
     "octant server install",

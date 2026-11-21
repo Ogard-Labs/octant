@@ -1,6 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { generateKeyPairSync } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { buildHeadlessArtifact, type HeadlessComponentSource } from "./package-headless";
+import { signHeadlessArtifactDirectory } from "./sign-headless-artifact";
 import {
   findNodeModulesAncestor,
+  verifyDownloadedBuild,
   installedCliEnvironment,
   serviceDescriptorPath,
 } from "./smoke-headless-install";
@@ -41,6 +48,91 @@ describe("headless install smoke isolation", () => {
       OCTANT_DATA_DIR: "/tmp/prefix/data",
       OCTANT_SERVER_PORT: "14001",
       XDG_RUNTIME_DIR: "/run/user/1000",
+    });
+  });
+});
+
+describe("headless install smoke on a downloaded build", () => {
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const root of roots.splice(0)) rmSync(root, { force: true, recursive: true });
+  });
+
+  async function builtArtifact() {
+    const base = mkdtempSync(join(tmpdir(), "octant-headless-smoke-check-"));
+    roots.push(base);
+    const files: ReadonlyArray<readonly [HeadlessComponentSource["role"], string]> = [
+      ["server", "lib/server/main.mjs"],
+      ["cli", "bin/octant"],
+      ["web-assets", "share/web/index.html"],
+      ["native-module", "lib/native/better_sqlite3.node"],
+      ["migrations", "share/migrations.json"],
+      ["notices", "share/NOTICES.txt"],
+      ["service-template", "share/service/octant.service.template"],
+    ];
+    const components = files.map(([role, path]) => {
+      const source = join(base, "sources", path.replaceAll("/", "_"));
+      mkdirSync(dirname(source), { recursive: true });
+      writeFileSync(source, `${role}\n`);
+      return { role, path, source };
+    });
+    return await buildHeadlessArtifact({
+      version: "1.2.3",
+      target: { platform: "linux", arch: "arm64" },
+      wireVersion: "1",
+      storeVersion: 1,
+      components,
+      outputDirectory: join(base, "out"),
+    });
+  }
+
+  it("refuses to run a downloaded build that the release keys did not sign", async () => {
+    const built = await builtArtifact();
+    expect(await verifyDownloadedBuild(built.artifactRoot)).toMatchObject({ status: "refused" });
+  });
+
+  it("accepts a downloaded build signed by a key trusted for its ring", async () => {
+    const built = await builtArtifact();
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+    const trust = {
+      stable: [],
+      preview: [publicKey.export({ format: "der", type: "spki" }).toString("base64")],
+      candidate: [],
+    };
+    await signHeadlessArtifactDirectory({
+      artifactRoot: built.artifactRoot,
+      ring: "preview",
+      privateKeyBase64: privateKey.export({ format: "der", type: "pkcs8" }).toString("base64"),
+      trustedKeys: trust,
+    });
+    expect(await verifyDownloadedBuild(built.artifactRoot, trust)).toEqual({ status: "verified" });
+  });
+
+  it("refuses a signed build that carries files its manifest does not list", async () => {
+    const built = await builtArtifact();
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+    const trust = {
+      stable: [],
+      preview: [publicKey.export({ format: "der", type: "spki" }).toString("base64")],
+      candidate: [],
+    };
+    await signHeadlessArtifactDirectory({
+      artifactRoot: built.artifactRoot,
+      ring: "preview",
+      privateKeyBase64: privateKey.export({ format: "der", type: "pkcs8" }).toString("base64"),
+      trustedKeys: trust,
+    });
+    mkdirSync(join(built.artifactRoot, "lib", "server", "node_modules"), { recursive: true });
+    writeFileSync(join(built.artifactRoot, "lib", "server", "node_modules", "planted.js"), "x");
+    expect(await verifyDownloadedBuild(built.artifactRoot, trust)).toMatchObject({
+      status: "refused",
+    });
+    rmSync(join(built.artifactRoot, "lib", "server", "node_modules"), { recursive: true });
+    expect(await verifyDownloadedBuild(built.artifactRoot, trust)).toEqual({ status: "verified" });
+    // A stray file beside listed ones, in a directory the manifest names.
+    writeFileSync(join(built.artifactRoot, "lib", "server", "planted.mjs"), "x");
+    expect(await verifyDownloadedBuild(built.artifactRoot, trust)).toMatchObject({
+      status: "refused",
     });
   });
 });
