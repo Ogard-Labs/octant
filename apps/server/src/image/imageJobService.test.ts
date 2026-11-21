@@ -2129,6 +2129,226 @@ describe("image job spend ceilings", () => {
       projectRemaining: { ceilingUsdCents: 4, usedUsdCents: 4, remainingUsdCents: 0 },
     });
   });
+
+  it("refuses an ordinary queued job without calling the provider when a monetary ceiling is installed before dispatch", async () => {
+    let releaseBlocker: (() => void) | undefined;
+    const blockerPaused = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+    const dispatchedPrompts: Array<string> = [];
+    const adapter: ImageGenerationAdapter = {
+      generate: async (request) => {
+        dispatchedPrompts.push(request.prompt);
+        if (request.prompt === "occupies the single slot") {
+          await blockerPaused;
+        }
+        return {
+          status: "completed",
+          images: [{ bytes: png, mediaType: "image/png" as const }],
+          usage: { inputTokens: 0, outputTokens: 0 },
+        };
+      },
+    };
+    const directory = mkdtempSync(join(tmpdir(), "octant-image-job-installed-ceiling-"));
+    directories.push(directory);
+    const connection = openSqlite(join(directory, "octant.sqlite3"));
+    applyMigrations(connection, MIGRATIONS, () => now);
+    const runtime = createPhase1RuntimeRegistries();
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => now,
+    });
+    const spendCeiling = new SpendCeilingService({
+      connection,
+      journal,
+      clock: () => now,
+      uuid: () => crypto.randomUUID(),
+      threadExists: () => true,
+      projectExists: () => true,
+    });
+    const otherProject = "a3000000-0000-4000-8000-000000000089";
+    const otherThread = decodeImageGenerationScopeId("a3000000-0000-4000-8000-000000000088");
+    seedChatThreadProject(connection, String(scopeId), projectId);
+    seedChatThreadProject(connection, String(otherThread), otherProject);
+
+    const service = new ImageJobService({
+      journal,
+      projection: runtime.imageJobProjection,
+      attachments: new GeneratedImageStore(directory),
+      readProviderInstance: (id) => (String(id) === String(bflId) ? bflInstance() : undefined),
+      readImageGenerationCustomSources: () => [],
+      credentialResolver: { has: async () => true, resolve: async () => "sk-test" },
+      uuid: () => crypto.randomUUID(),
+      clock: () => now,
+      actor,
+      createAdapter: () => adapter,
+      concurrency: 1,
+      spendCeiling,
+      resolveThreadProjectId: ({ threadId }) =>
+        threadId === String(scopeId) ? projectId : otherProject,
+    });
+
+    const blocker = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId: otherThread,
+      profileInstanceId: bflId,
+      modelId: bflModelId,
+      prompt: "occupies the single slot",
+    });
+    // Queued on scopeId while neither the thread nor its Project has a monetary ceiling.
+    const queuedJob = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: bflId,
+      modelId: bflModelId,
+      prompt: "queued 4-cent FLUX job",
+    });
+
+    // Install a 2-cent ceiling on the unchanged Project before queuedJob dispatches.
+    spendCeiling.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "project", projectId: decodeProjectId(projectId) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 2 },
+      window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    });
+
+    releaseBlocker?.();
+    expect((await service.whenTerminal(blocker.id)).status).toBe("completed");
+    const queuedResult = await service.whenTerminal(queuedJob.id);
+    expect(queuedResult.status).toBe("failed");
+    expect(queuedResult.failure?.message).toMatch(/Project's money ceiling/i);
+    expect(dispatchedPrompts).toEqual(["occupies the single slot"]);
+    expect(spendCeiling.snapshot({ principalKind: "local-window", projectId })).toMatchObject({
+      projectRemaining: { ceilingUsdCents: 2, usedUsdCents: 0, remainingUsdCents: 2 },
+    });
+  });
+
+  it("preserves FIFO reservations for queued jobs when a monetary ceiling was already active at enqueue", async () => {
+    let releaseBlocker: (() => void) | undefined;
+    const blockerPaused = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+    const dispatchedPrompts: Array<string> = [];
+    const adapter: ImageGenerationAdapter = {
+      generate: async (request) => {
+        dispatchedPrompts.push(request.prompt);
+        if (request.prompt === "occupies the single slot") {
+          await blockerPaused;
+        }
+        return {
+          status: "completed",
+          images: [{ bytes: png, mediaType: "image/png" as const }],
+          usage: { inputTokens: 0, outputTokens: 0 },
+        };
+      },
+    };
+    const directory = mkdtempSync(join(tmpdir(), "octant-image-job-active-fifo-"));
+    directories.push(directory);
+    const connection = openSqlite(join(directory, "octant.sqlite3"));
+    applyMigrations(connection, MIGRATIONS, () => now);
+    const runtime = createPhase1RuntimeRegistries();
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => now,
+    });
+    const spendCeiling = new SpendCeilingService({
+      connection,
+      journal,
+      clock: () => now,
+      uuid: () => crypto.randomUUID(),
+      threadExists: () => true,
+      projectExists: () => true,
+    });
+    const otherProject = "a3000000-0000-4000-8000-000000000087";
+    const otherThread = decodeImageGenerationScopeId("a3000000-0000-4000-8000-000000000086");
+    seedChatThreadProject(connection, String(scopeId), projectId);
+    seedChatThreadProject(connection, String(otherThread), otherProject);
+
+    // 11-cent ceiling fits two 5.3-cent gpt-image-2 high square images (10.6 cents), not three (15.9 cents).
+    spendCeiling.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "project", projectId: decodeProjectId(projectId) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { costBudgetUsdCents: 11 },
+      window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    });
+
+    const service = new ImageJobService({
+      journal,
+      projection: runtime.imageJobProjection,
+      attachments: new GeneratedImageStore(directory),
+      readProviderInstance: (id) => (String(id) === String(profileId) ? imageProfile() : undefined),
+      readImageGenerationCustomSources: () => [],
+      credentialResolver: { has: async () => true, resolve: async () => "sk-test" },
+      uuid: () => crypto.randomUUID(),
+      clock: () => now,
+      actor,
+      createAdapter: () => adapter,
+      concurrency: 1,
+      spendCeiling,
+      resolveThreadProjectId: ({ threadId }) =>
+        threadId === String(scopeId) ? projectId : otherProject,
+    });
+
+    const blocker = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId: otherThread,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "occupies the single slot",
+      quality: "high",
+      size: "1024x1024",
+    });
+    const first = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "first queued 5.3-cent job",
+      quality: "high",
+      size: "1024x1024",
+    });
+    const second = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "second queued 5.3-cent job",
+      quality: "high",
+      size: "1024x1024",
+    });
+
+    // Both queued jobs hold active reservations (10.6 cents), so a third refuses immediately at enqueue.
+    await expect(
+      service.enqueue({
+        threadKind: "chat-thread",
+        scopeId,
+        profileInstanceId: profileId,
+        modelId,
+        prompt: "third over-ceiling job",
+        quality: "high",
+        size: "1024x1024",
+      }),
+    ).rejects.toThrow(/Project's money ceiling/i);
+
+    releaseBlocker?.();
+    expect((await service.whenTerminal(blocker.id)).status).toBe("completed");
+    expect((await service.whenTerminal(first.id)).status).toBe("completed");
+    expect((await service.whenTerminal(second.id)).status).toBe("completed");
+    expect(dispatchedPrompts).toEqual([
+      "occupies the single slot",
+      "first queued 5.3-cent job",
+      "second queued 5.3-cent job",
+    ]);
+    expect(spendCeiling.snapshot({ principalKind: "local-window", projectId })).toMatchObject({
+      projectRemaining: { ceilingUsdCents: 11, usedUsdCents: 10, remainingUsdCents: 0 },
+    });
+  });
 });
 
 function appendToStatus(input: unknown): string | undefined {

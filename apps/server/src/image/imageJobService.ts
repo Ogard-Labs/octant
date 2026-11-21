@@ -174,8 +174,6 @@ interface QueuedImageWork {
   readonly references: NonNullable<ImageAdapterRequest["references"]>;
   readonly variantCount: number;
   readonly estimatedCostUsdMicros: number | "unknown";
-  readonly admittedProjectId?: string;
-  readonly needsReadmission?: boolean;
   readonly quality?: OpenAiImageQuality;
   readonly size?: OpenAiImageSize;
   readonly aspectRatio?: GeminiImageAspectRatio;
@@ -389,10 +387,9 @@ export class ImageJobService {
     });
     const estimatedCostUsdMicros: number | "unknown" =
       estimate.kind === "api-estimate" ? estimate.usdMicros : "unknown";
-    let admittedProjectId: string | undefined;
     let reservationId: SpendCeilingReservationId | undefined;
     if (this.#spendCeiling !== undefined && input.threadKind !== "image-library") {
-      admittedProjectId = this.#resolveThreadProjectId?.({
+      const admittedProjectId = this.#resolveThreadProjectId?.({
         threadType: input.threadKind,
         threadId: String(scopeId),
       });
@@ -449,7 +446,6 @@ export class ImageJobService {
       references,
       variantCount,
       estimatedCostUsdMicros,
-      ...(admittedProjectId === undefined ? {} : { admittedProjectId }),
       ...(effectiveOptions.quality === undefined ? {} : { quality: effectiveOptions.quality }),
       ...(effectiveOptions.size === undefined ? {} : { size: effectiveOptions.size }),
       ...(effectiveOptions.aspectRatio === undefined
@@ -459,7 +455,7 @@ export class ImageJobService {
         ? {}
         : { resolution: effectiveOptions.resolution }),
     });
-    this.#pump();
+    this.#pump(job.id);
     return job;
   }
 
@@ -627,7 +623,7 @@ export class ImageJobService {
     throw new ImageJobServiceError("ineligible", "The selected provider is not an image profile.");
   }
 
-  #pump(): void {
+  #pump(justAdmittedJobId?: ImageJobId): void {
     if (this.#pumping) return;
     this.#pumping = true;
     try {
@@ -639,8 +635,10 @@ export class ImageJobService {
           this.#finishSpendReservation(jobId, "abandon");
           continue;
         }
+        const recheckSpendCeiling =
+          justAdmittedJobId === undefined || String(jobId) !== String(justAdmittedJobId);
         this.#running += 1;
-        void this.#run(job)
+        void this.#run(job, recheckSpendCeiling)
           .catch((error: unknown) => {
             this.#recordUnhandledFailure(job, error);
           })
@@ -654,7 +652,7 @@ export class ImageJobService {
     }
   }
 
-  async #run(queued: ImageJob): Promise<void> {
+  async #run(queued: ImageJob, recheckSpendCeiling: boolean): Promise<void> {
     const work = this.#work.get(String(queued.id));
     if (work === undefined) {
       const failed = this.#transition(queued, "failed", {
@@ -683,27 +681,32 @@ export class ImageJobService {
         this.#resolve(failed);
         return;
       }
-      // If the thread moved to a different Project while this job waited in the
-      // queue (or an earlier FIFO reconciliation deferred its re-admission),
-      // reconcile stale queued reservations in FIFO order before dispatching so
-      // a later oversized job cannot block an affordable earlier one.
-      if (this.#spendCeiling !== undefined && running.threadKind !== "image-library") {
+      // Any job that waited in `#pending` is re-admitted before provider
+      // dispatch so newly installed/tightened ceilings or thread Project moves
+      // always gate billed work, while reconciling queued peers in FIFO order.
+      if (
+        recheckSpendCeiling &&
+        this.#spendCeiling !== undefined &&
+        running.threadKind !== "image-library"
+      ) {
         const currentProjectId = this.#resolveThreadProjectId?.({
           threadType: running.threadKind,
           threadId: String(running.scopeId),
         });
-        if (work.needsReadmission === true || currentProjectId !== work.admittedProjectId) {
-          const readmission = this.#reconcileMovedQueuedJobs(running, work, currentProjectId);
-          if (readmission.status === "refused") {
-            const failed = this.#transition(running, "failed", {
-              failure: {
-                category: "unauthorized",
-                message: readmission.refusal.message,
-              },
-            });
-            this.#resolve(failed);
-            return;
-          }
+        const readmission = this.#reconcileQueuedJobsBeforeDispatch(
+          running,
+          work,
+          currentProjectId,
+        );
+        if (readmission.status === "refused") {
+          const failed = this.#transition(running, "failed", {
+            failure: {
+              category: "unauthorized",
+              message: readmission.refusal.message,
+            },
+          });
+          this.#resolve(failed);
+          return;
         }
       }
       const adapter = this.#createAdapter(instance);
@@ -1128,33 +1131,15 @@ export class ImageJobService {
     }
   }
 
-  #updateWorkAdmission(
-    jobId: ImageJobId,
-    work: QueuedImageWork,
-    admittedProjectId: string | undefined,
-    needsReadmission: boolean,
-  ): void {
-    const {
-      admittedProjectId: _previousProjectId,
-      needsReadmission: _previousReadmission,
-      ...rest
-    } = work;
-    this.#work.set(String(jobId), {
-      ...rest,
-      ...(admittedProjectId === undefined ? {} : { admittedProjectId }),
-      ...(needsReadmission ? { needsReadmission: true } : {}),
-    });
-  }
-
   /**
-   * Re-admits a moved queued job and any later stale queued jobs targeting the
-   * same destination Project (or same thread) in FIFO order. All stale source
-   * reservations are released before re-admission starts so a later oversized
-   * job cannot consume the destination budget and block an affordable earlier
-   * job. Any later job that cannot currently fit remains queued with no
-   * reservation and `needsReadmission: true` so it re-checks when dequeued.
+   * Re-admits a queued job about to dispatch together with any later queued
+   * jobs targeting the same current Project (or same thread) in FIFO order.
+   * Releasing their existing queued reservations first ensures neither a later
+   * oversized job nor a stale pre-move reservation can consume budget ahead of
+   * an affordable earlier job, and ensures ceilings installed or tightened
+   * while work waited in `#pending` gate dispatch before any provider call.
    */
-  #reconcileMovedQueuedJobs(
+  #reconcileQueuedJobsBeforeDispatch(
     running: ImageJob,
     work: QueuedImageWork,
     currentProjectId: string | undefined,
@@ -1185,9 +1170,6 @@ export class ImageJobService {
         threadType: pendingJob.threadKind,
         threadId: String(pendingJob.scopeId),
       });
-      const stale =
-        pendingWork.needsReadmission === true || pendingProjectId !== pendingWork.admittedProjectId;
-      if (!stale) continue;
       const sameProject = currentProjectId !== undefined && pendingProjectId === currentProjectId;
       const sameThread =
         pendingJob.threadKind === running.threadKind &&
@@ -1202,11 +1184,10 @@ export class ImageJobService {
       }
     }
 
-    // Release every stale queued reservation before re-admitting in FIFO order.
+    // Release queued reservations on the affected scope before re-admitting in FIFO order.
     this.#finishSpendReservation(running.id, "abandon");
     for (const entry of affectedPending) {
       this.#finishSpendReservation(entry.job.id, "abandon");
-      this.#updateWorkAdmission(entry.job.id, entry.work, entry.work.admittedProjectId, true);
     }
 
     const runningReservationId = decodeSpendCeilingReservationId(this.#uuid());
@@ -1222,7 +1203,6 @@ export class ImageJobService {
     });
     if (runningAdmission.status === "admitted") {
       this.#spendReservations.set(String(running.id), runningReservationId);
-      this.#updateWorkAdmission(running.id, work, currentProjectId, false);
     }
 
     for (const entry of affectedPending) {
@@ -1239,10 +1219,6 @@ export class ImageJobService {
       });
       if (pendingAdmission.status === "admitted") {
         this.#spendReservations.set(String(entry.job.id), pendingReservationId);
-        // Keep `needsReadmission` true while this moved job remains queued so
-        // its reservation stays provisional and is rechecked against any
-        // ceiling installed or tightened before it actually dispatches.
-        this.#updateWorkAdmission(entry.job.id, entry.work, entry.projectId, true);
       }
     }
 

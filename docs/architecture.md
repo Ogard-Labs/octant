@@ -10138,10 +10138,10 @@ overstate available budget. If the
 model, option, or custom source has no known rate, admission fails closed with
 `unknown-spend` without calling the provider. Live monetary reservations track
 the thread's current Project dynamically (including Work threads moved via
-`work.thread-updated@1`), and queued jobs whose thread moved Projects before
-dispatch are reconciled and re-admitted in FIFO order against the destination
-Project before calling the provider so a later oversized job cannot block an
-affordable earlier one. Whenever the provider returns generated images — even if
+`work.thread-updated@1`), and any job that waited in the queue is reconciled
+and re-admitted in FIFO order against the current thread and Project ceilings
+before calling the provider so newly installed ceilings or Project moves gate
+dispatch and a later oversized job cannot block an affordable earlier one. Whenever the provider returns generated images — even if
 local artifact storage fails or cancellation arrives after the provider already
 responded — the job journals its estimated `api-estimate` cost in micro-dollars
 on `context.usage-reconciled@1` before settling the reservation, and monetary
