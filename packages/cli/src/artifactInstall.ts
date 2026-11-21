@@ -2,11 +2,15 @@ import { randomBytes } from "node:crypto";
 import { cp, lstat, mkdir, readFile, readlink, rename, rm, symlink } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import {
+  createReleaseFeedVerifier,
   decodeHeadlessArtifactManifest,
   HEADLESS_ARTIFACT_MANIFEST_FILENAME,
+  HEADLESS_ARTIFACT_SIGNATURE_FILENAME,
   inspectHeadlessArtifact,
+  verifyHeadlessArtifactSignature,
   type HeadlessArtifactManifest,
   type HeadlessArtifactRuntimeFacts,
+  type ReleaseFeedVerifier,
 } from "@octant/host-runtime";
 
 // Coordinates headless install, upgrade, rollback, uninstall, and data
@@ -17,6 +21,7 @@ import {
 
 export type HeadlessInstallErrorCode =
   | "artifact-rejected"
+  | "artifact-unsigned"
   | "version-already-installed"
   | "not-installed"
   | "incompatible-downgrade"
@@ -65,10 +70,21 @@ export interface HeadlessUpgradePorts {
   readonly restoreStore: (backupPath: string) => Promise<void>;
 }
 
+/**
+ * Whose word the build's bytes rest on. A published build must carry a
+ * signature from the release keys of the ring it names; the person may install
+ * a build they made themselves only by saying so, because an unsigned build
+ * proves nothing about who produced it.
+ */
+export type HeadlessArtifactSignaturePolicy =
+  | { readonly kind: "release-keys"; readonly verifier?: ReleaseFeedVerifier }
+  | { readonly kind: "self-built" };
+
 export interface StageHeadlessArtifactOptions {
   readonly artifactRoot: string;
   readonly installRoot: string;
   readonly runtime: HeadlessArtifactRuntimeFacts;
+  readonly signature: HeadlessArtifactSignaturePolicy;
 }
 
 export interface StagedHeadlessArtifact {
@@ -139,7 +155,7 @@ const STAGING_DIRECTORY = "staging";
 export async function stageHeadlessArtifact(
   options: StageHeadlessArtifactOptions,
 ): Promise<StagedHeadlessArtifact> {
-  const manifest = await inspectOrReject(options.artifactRoot, options.runtime);
+  const manifest = await inspectOrReject(options.artifactRoot, options.runtime, options.signature);
   const versionRoot = join(options.installRoot, VERSIONS_DIRECTORY, manifest.artifactVersion);
   if (await pathExists(versionRoot)) {
     throw new HeadlessInstallError(
@@ -166,9 +182,16 @@ export async function stageHeadlessArtifact(
       join(stagingRoot, HEADLESS_ARTIFACT_MANIFEST_FILENAME),
       { dereference: false },
     );
+    if (options.signature.kind === "release-keys") {
+      await cp(
+        join(options.artifactRoot, HEADLESS_ARTIFACT_SIGNATURE_FILENAME),
+        join(stagingRoot, HEADLESS_ARTIFACT_SIGNATURE_FILENAME),
+        { dereference: false },
+      );
+    }
     // Re-verify the staged copy so a mid-copy mutation of the source cannot
     // promote unverified bytes.
-    await inspectOrReject(stagingRoot, options.runtime);
+    await inspectOrReject(stagingRoot, options.runtime, options.signature);
     await mkdir(dirname(versionRoot), { recursive: true });
     await rename(stagingRoot, versionRoot);
   } finally {
@@ -316,6 +339,7 @@ export async function removeHeadlessUserData(
 async function inspectOrReject(
   artifactRoot: string,
   runtime: HeadlessArtifactRuntimeFacts,
+  signature: HeadlessArtifactSignaturePolicy,
 ): Promise<HeadlessArtifactManifest> {
   const inspection = await inspectHeadlessArtifact({ artifactRoot, runtime });
   if (!inspection.ok) {
@@ -324,7 +348,40 @@ async function inspectOrReject(
       `Octant artifact inspection rejected this artifact: ${inspection.rejection.code}.`,
     );
   }
+  if (signature.kind === "self-built") return inspection.manifest;
+  // The manifest records every component's digest, and inspection has just
+  // matched the files to it, so a signature over the manifest covers them all.
+  const check = verifyHeadlessArtifactSignature({
+    manifest: inspection.manifest,
+    signatureText: await readOptionalText(join(artifactRoot, HEADLESS_ARTIFACT_SIGNATURE_FILENAME)),
+    verifier: signature.verifier ?? createReleaseFeedVerifier(),
+  });
+  if (check.status === "refused") {
+    throw new HeadlessInstallError("artifact-unsigned", unsignedArtifactMessage(check.reason));
+  }
   return inspection.manifest;
+}
+
+function unsignedArtifactMessage(reason: "missing" | "malformed" | "unverified"): string {
+  const finding =
+    reason === "missing"
+      ? `has no ${HEADLESS_ARTIFACT_SIGNATURE_FILENAME}`
+      : reason === "malformed"
+        ? `has a ${HEADLESS_ARTIFACT_SIGNATURE_FILENAME} this version cannot read`
+        : "is not signed by the Octant release keys for the ring it names";
+  return (
+    `This Octant build ${finding}, so it was not installed. ` +
+    "Download it again from the release page, or pass --self-built if you built it yourself."
+  );
+}
+
+async function readOptionalText(path: string): Promise<string | undefined> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if ((error as { readonly code?: unknown }).code === "ENOENT") return undefined;
+    throw error;
+  }
 }
 
 async function readCurrentInstallation(
