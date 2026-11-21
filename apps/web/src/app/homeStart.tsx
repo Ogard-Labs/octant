@@ -122,7 +122,12 @@ export interface HomeStartInput {
   readonly runningServicesClient: ReturnType<typeof createLocalServerClient> | undefined;
   readonly runningServicesRemoteHost:
     | { readonly status: "disconnected"; readonly hostName: string }
-    | { readonly status: "ready"; readonly hostName: string }
+    | {
+        readonly status: "ready";
+        readonly hostName: string;
+        /** That computer admitted this device because the hub introduced it. */
+        readonly throughHub?: boolean;
+      }
     | undefined;
   readonly serverUrl: string;
   readonly settings: ShellController["settings"];
@@ -327,6 +332,10 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
           ...(forwardRunningServicePort === undefined
             ? {}
             : { forwardPort: forwardRunningServicePort }),
+          ...(runningServicesRemoteHost.status === "ready" &&
+          runningServicesRemoteHost.throughHub === true
+            ? { forwardsThreadServersOnly: true }
+            : {}),
         }),
     createPullRequestsCard({
       available: pullRequestCardAvailable({

@@ -51,6 +51,12 @@ export interface RunningServicesCardSource {
    * cannot; the host refuses a device its own person did not pair.
    */
   readonly forwardPort?: (service: RunningService) => Promise<RemoteForwardOutcome>;
+  /**
+   * Set where that computer admitted this device because the hub introduced
+   * it: it forwards only a running server of a thread, so a row without one
+   * offers no Forward port. That computer still checks its Act item.
+   */
+  readonly forwardsThreadServersOnly?: true;
 }
 
 /**
@@ -139,7 +145,10 @@ function RunningServiceListItem(props: {
                 openLive: (mode: RemoteOpenMode) => openLive(service, mode),
               },
             })}
-        {...(forwardPort === undefined || host === undefined || service.health !== "listening"
+        {...(forwardPort === undefined ||
+        host === undefined ||
+        service.health !== "listening" ||
+        (source.forwardsThreadServersOnly === true && service.thread === undefined)
           ? {}
           : { forwardPort: () => forwardPort(service) })}
         service={service}

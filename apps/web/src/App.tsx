@@ -2367,12 +2367,16 @@ function LaunchedShell(
       hostName: slot.displayName,
       origin: slot.origin,
       bridge: slot.bridge,
+      throughHub:
+        hostFederationLifecycle?.list().find((snapshot) => snapshot.hostId === hostId)?.through ===
+        "hub",
     };
     // The transport slot changes in place; the revision says when to look again.
   }, [
     remoteServerLiveOpener,
     createHostViewScope,
     hostFederationTransports,
+    hostFederationLifecycle,
     federationRevision,
     environmentNames,
   ]);
@@ -2464,7 +2468,11 @@ function LaunchedShell(
             ? {}
             : { fetch: pairedComputerFetch }),
         },
-        Number(service.port),
+        // A computer that admitted this device through the hub forwards only a
+        // thread's running server, and takes the port from its own listing.
+        host.throughHub
+          ? { surface: "running-services", listenerId: service.listenerId }
+          : Number(service.port),
       );
     };
   }, [runningServicesRemoteHost, remoteServerLiveOpener, federation, pairedComputerFetch]);

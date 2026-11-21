@@ -19336,14 +19336,28 @@ approval-gated` command that undoes it. The terminal shows no one-time
     session's end closes it from the host, and closing the host's pages or
     stopping the forwarder closes it here. Any other answer reaches the page as
     the request's failure status, and no frame is sent.
-  - **Port forwards.** A device the host's own person paired may forward one
-    port on the host's loopback to its own computer as raw TCP, for tools that
-    are not a browser (a database client, a debugger), under the same proxy
-    session. `POST /api/server-proxy/forwards` names only the port; the host
-    reads whether the device's pairing was approved by its person from its own
-    record, never from the session, and refuses `not-the-person` for a
-    hub-introduced device, a restricted device, and an agent grant (the Act
-    item names Projects, not ports, so no item grants a forward yet). A forward
+  - **Port forwards.** A paired device may forward one port on the host's
+    loopback to its own computer as raw TCP, for tools that are not a browser
+    (a database client, a debugger), under the same proxy session.
+    `POST /api/server-proxy/forwards` names either a port or a thread's listed
+    server, as a grant names it (a thread's Local servers row, or a Running
+    services row), never both. The host reads who the device is from its own
+    record, never from the session. A device the host's own person paired may
+    name any port. A device only the hub introduced must name a server
+    (`source-required` otherwise), and the Act item grants it a forward only
+    for a running server of a thread in a Project the item names (maintainer
+    decision, 2026-11-21): the host checks the item for the thread's Project
+    (from its own record of the thread; `outside-act` otherwise, and on a host
+    in no hub), then re-observes the server exactly as a grant request is
+    observed (thread readable, listener listed for it, Octant-owned, in that
+    thread's own worktree, answering, and opening under the thread's Open
+    rule; the same refusal reasons, and `unavailable` when it could not look),
+    and forwards the port it saw that server hold, never one the client sent.
+    An agent grant is refused `not-the-person`. A forward of a thread's server
+    is checked again at every connection: the Act item for that Project, and
+    that the thread's server still holds the port; failing either closes the
+    forward (`outside-act` or `server-gone`) and refuses the connection, while
+    a host that could not look refuses only the connection (503). A forward
     `rpf_<64 hex>` lasts an hour; a device holds four and a host sixteen
     (`forward-limit`). Each connection is a signed `GET` WebSocket upgrade at
     `/api/server-proxy/<forward id>`, carrying binary messages only (a text
@@ -19355,8 +19369,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     connections with 1008. Opening (actor: the device) and closing (actor: the
     host) are journaled as `remote-server.forward-opened@1` and
     `remote-server.forward-closed@1` with the forward, device, and port, never
-    an address or what travels, and a starting host records closed
-    (`host-stopped`) every forward the journal still shows open. On the device
+    an address or what travels; a forward of a thread's server opens as
+    `remote-server.forward-opened@2`, which also names the thread and its
+    Project. A starting host records closed (`host-stopped`) every forward the
+    journal still shows open, of either version. On the device
     only the desktop app forwards: its main process listens on `127.0.0.1`
     alone, on the host's port number when it is free and another free port
     otherwise, asks the window that opened the forward to sign each

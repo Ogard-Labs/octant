@@ -290,6 +290,34 @@ describe("the Running services card", () => {
       ).toBeInTheDocument();
     });
 
+    it("offers Forward port only for a thread's running server on a computer that admitted this device through the hub", async () => {
+      const { client } = fakeClient(() =>
+        listed([
+          service(1, { thread: { threadId, title: "Fix the header" } }),
+          service(2, { framework: "postgres" }),
+        ]),
+      );
+      const forwardPort = vi.fn(async (_service: RunningService) => ({
+        kind: "forwarded" as const,
+        localPort: 5171,
+      }));
+      renderCard(
+        createRunningServicesCard(
+          source(client, { host: "Studio", forwardPort, forwardsThreadServersOnly: true }),
+        ),
+      );
+      await screen.findByText("postgres");
+      expect(
+        screen.queryByRole("button", { name: "Forward port 5172 of postgres to this computer" }),
+      ).toBeNull();
+      await userEvent
+        .setup()
+        .click(screen.getByRole("button", { name: "Forward port 5171 of vite to this computer" }));
+      expect(forwardPort).toHaveBeenCalledWith(
+        expect.objectContaining({ listenerId: `lsn_${"0".repeat(31)}1` }),
+      );
+    });
+
     it("shows the host's refusal of a forward on the row", async () => {
       const { client } = fakeClient(() => listed([service(1)]));
       const message =

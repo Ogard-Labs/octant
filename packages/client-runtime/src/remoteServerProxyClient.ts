@@ -9,8 +9,10 @@
 // given, so the channel can never sign a product request.
 //
 // A port forward rides the same session: the host opens it for a port on its
-// own loopback, and this client then signs only the WebSocket upgrade of each
-// connection the desktop carries for it, at the forward's exact path.
+// own loopback (one the person picked, or the one a thread's listed server
+// holds, which the host reads itself), and this client then signs only the
+// WebSocket upgrade of each connection the desktop carries for it, at the
+// forward's exact path.
 
 import {
   decodeHostAnswer,
@@ -78,7 +80,12 @@ export type RemotePortForwardOpening =
   | { readonly status: "opened"; readonly forward: RemotePortForward }
   | {
       readonly status: "refused";
-      readonly reason: RemoteServerProxyRefusalReason | "not-the-person" | "forward-limit";
+      readonly reason:
+        | RemoteServerProxyRefusalReason
+        | Extract<
+            RemotePortForwardResult,
+            { readonly kind: "remote-port-forward-refused" }
+          >["reason"];
       readonly message: string;
     };
 
@@ -122,8 +129,16 @@ export interface RemoteServerProxyClient {
     source: RemoteServerGrantSource,
     signal?: AbortSignal,
   ) => Promise<RemoteServerProxyOpening>;
-  /** Asks the host to forward one port on its own loopback to this device. */
-  readonly openForward: (port: number, signal?: AbortSignal) => Promise<RemotePortForwardOpening>;
+  /**
+   * Asks the host to forward one port on its own loopback to this device: a
+   * port the person picked, or a thread's listed server, whose port the host
+   * reads from its own listing. A computer that admitted this device through
+   * the hub forwards only the latter.
+   */
+  readonly openForward: (
+    target: number | RemoteServerGrantSource,
+    signal?: AbortSignal,
+  ) => Promise<RemotePortForwardOpening>;
   /**
    * Registers a server-Project preview grant minted by `/api/server-project-preview`
    * under this client's proxy session so the forwarder can sign its requests.
@@ -292,12 +307,14 @@ export function createRemoteServerProxyClient(
   };
 
   const openForward = async (
-    port: number,
+    target: number | RemoteServerGrantSource,
     signal?: AbortSignal,
   ): Promise<RemotePortForwardOpening> => {
     const answer = await askHost(
       FORWARDS_PATH,
-      { kind: "open-remote-port-forward", requestId: randomUuid(), port },
+      typeof target === "number"
+        ? { kind: "open-remote-port-forward", requestId: randomUuid(), port: target }
+        : { kind: "open-remote-port-forward", requestId: randomUuid(), source: target },
       decodeHostAnswer(RemotePortForwardResult),
       signal,
     );

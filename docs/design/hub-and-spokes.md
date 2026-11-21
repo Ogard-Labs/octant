@@ -558,7 +558,11 @@ otherwise.
   within the member's **Act** hub-grant item: the Projects it names, and
   there three things: starting threads (Code included), answering their
   approvals and questions, and Stop (maintainer decision, 2026-11-20); never
-  more than the member's own level allows. Approvals stay on the member, as
+  more than the member's own level allows. The item also grants a port
+  forward for the Projects it names: such a device may forward the port of a
+  running server of a thread in such a Project (that thread's Local servers
+  row, or its Running services row), and no other port (maintainer decision,
+  2026-11-21). Approvals stay on the member, as
   [What the hub may do on a spoke](#what-the-hub-may-do-on-a-spoke) says.
   Built for starting threads (slice 16): while a host is a hub member, a
   device only the hub introduced starts a Code or Work thread there only in
@@ -581,7 +585,20 @@ otherwise.
   Browser prompts of a Code or Work thread. A thread the route cannot find
   names no Project and is refused. A local window, a device the member's own
   person paired, an agent grant's session, and a host in no hub keep their
-  own rules and never read the Act item. Built (slice
+  own rules and never read the Act item. Built for port forwards: such a
+  device names the thread's listed server, never a port; the member checks
+  the Act item for that thread's Project and observes the server as it would
+  for a grant, takes the port from what it saw, and checks both again at
+  every connection, closing the forward when Act no longer names the Project
+  or the server no longer holds the port. Any other port is refused with a
+  reason. The forward stays on the private listener, lasts an hour, and is
+  journaled with the thread and Project ([Architecture: port
+  forwards](../architecture.md#security-and-authority)); a device the
+  member's own person paired still forwards any port, an agent grant none,
+  and a host in no hub forwards nothing for such a device. A desktop window
+  offers Forward port on a hub member's Running services only for a server
+  in a thread; a paired computer's thread view lists no Local servers yet,
+  so it offers none there. Built (slice
   16): a desktop window on a member, or on the hub, lists the hub's other
   spokes and standbys as its computers. The window makes a device key of its
   own; its host asks the hub to list that key as a guest (the hub's own

@@ -81,6 +81,35 @@ describe("forwarding another computer's port from this window", () => {
     expect(signing.status).toBe("signed");
   });
 
+  it("names a thread's running server instead of a port, and listens on the port the host forwarded", async () => {
+    const forward = { forwardId: `rpf_${"ef".repeat(32)}`, port: 5173, expiresAt: 3_600_000 };
+    const bodies: unknown[] = [];
+    const openRemotePortForward = vi.fn(async (_request: unknown) => ({
+      kind: "listening" as const,
+      port: 5173,
+    }));
+    const opener = createRemoteServerLiveOpener(
+      { ...bridge(), openRemotePortForward },
+      async (_input, init) => {
+        if (init?.body instanceof Uint8Array) {
+          bodies.push(JSON.parse(new TextDecoder().decode(init.body)));
+        }
+        return Response.json({
+          kind: "remote-port-forward-opened",
+          requestId: "33333333-3333-4333-8333-333333333333",
+          forward,
+        });
+      },
+    );
+    const source = { surface: "running-services", listenerId: SERVICE.listenerId } as const;
+    expect(await opener.openForward?.(HOST, source)).toEqual({
+      kind: "forwarded",
+      localPort: 5173,
+    });
+    expect(bodies).toEqual([expect.objectContaining({ kind: "open-remote-port-forward", source })]);
+    expect(openRemotePortForward).toHaveBeenCalledWith(expect.objectContaining({ forward }));
+  });
+
   it("offers no forward where the desktop cannot listen for one", () => {
     expect(createRemoteServerLiveOpener(bridge()).openForward).toBeUndefined();
   });

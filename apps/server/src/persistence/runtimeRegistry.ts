@@ -250,6 +250,7 @@ import {
   REMOTE_PUSH_REGISTRATION_EVENT_NAMES,
   REMOTE_PORT_FORWARD_CLOSED,
   REMOTE_PORT_FORWARD_OPENED,
+  REMOTE_PORT_FORWARD_OPENED_V2,
   REMOTE_SERVER_GRANT_CLOSED,
   REMOTE_SERVER_GRANT_OPENED,
   RemotePushDeliveryRecordedV1,
@@ -258,6 +259,7 @@ import {
   RemotePushRegistrationRecordedV1,
   RemotePortForwardClosedPayload,
   RemotePortForwardOpenedPayload,
+  RemotePortForwardOpenedPayloadV2,
   RemoteServerGrantClosedPayload,
   RemoteServerGrantOpenedPayload,
   BROWSER_EXTENSION_EVENT_NAMES,
@@ -943,6 +945,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(REMOTE_SERVER_GRANT_OPENED, 1, RemoteServerGrantOpenedPayload)
     .register(REMOTE_SERVER_GRANT_CLOSED, 1, RemoteServerGrantClosedPayload)
     .register(REMOTE_PORT_FORWARD_OPENED, 1, RemotePortForwardOpenedPayload)
+    .register(REMOTE_PORT_FORWARD_OPENED_V2, 1, RemotePortForwardOpenedPayloadV2)
     .register(REMOTE_PORT_FORWARD_CLOSED, 1, RemotePortForwardClosedPayload)
     .register(THREAD_CHECKPOINT_MARKED, 1, ThreadCheckpointMarked)
     .register(THREAD_CHECKPOINT_FORGOTTEN, 1, ThreadCheckpointForgotten)

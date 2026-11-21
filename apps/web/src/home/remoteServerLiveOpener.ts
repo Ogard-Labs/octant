@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { RunningService } from "@octant/contracts";
+import type { RemoteServerGrantSource, RunningService } from "@octant/contracts";
 import { LocalServerClientFailure, type LocalServerClient } from "@octant/client-runtime";
 import type { RemoteSessionFacts } from "@octant/client-runtime";
 import {
@@ -63,7 +63,7 @@ export interface RemoteServerLiveOpener {
    */
   readonly openForward?: (
     host: RemoteServerLiveHost,
-    port: number,
+    target: number | RemoteServerGrantSource,
   ) => Promise<RemoteForwardOutcome>;
   /**
    * Opens a relayed server Project preview through the desktop's isolated
@@ -115,8 +115,11 @@ export function createRemoteServerLiveOpener(
     ...(openRemotePortForward === undefined
       ? {}
       : {
-          openForward: async (host: RemoteServerLiveHost, port: number) => {
-            const opening = await clientFor(host).openForward(port);
+          openForward: async (
+            host: RemoteServerLiveHost,
+            target: number | RemoteServerGrantSource,
+          ) => {
+            const opening = await clientFor(host).openForward(target);
             if (opening.status === "refused") return { kind: "refused", message: opening.message };
             const listening = await openRemotePortForward({
               hostId: host.hostId,
