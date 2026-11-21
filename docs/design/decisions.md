@@ -2370,11 +2370,12 @@ Status: Partly built. Since: —. Detail: [Architecture: Security and authority,
 A person can run a thread's provider's own command-line program, in its own interface, in a terminal tab of that thread (maintainer decision, 2026-11-21). It is a person-operated terminal: its keystrokes reach the provider directly, past Octant's approvals, so the thread claims nothing that happens in it.
 
 - **Open <provider> terminal** sits beside New terminal in a Code thread's terminal actions, for a provider with such a program (built for Claude Code and Codex).
-- The host resolves the program from the thread's provider by the rules its own launch uses: the account's binary, its folder (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) and its launch environment, telemetry guards included. The command names none of them. It starts in the thread's folder under the same confinement as an Octant terminal at the thread's level, not widened; Plan, a Project on a server, and a provider with no such program are refused, and it lends no Browser.
+- The host resolves the program from the thread's provider by the rules its own launch uses: the account's binary, its folder (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) and its launch environment, telemetry guards included. The command names none of them. Plan, a Project on a server, and a provider with no such program are refused, and it lends no Browser.
+- It runs the way the thread's turns do (maintainer decision, 2026-11-21), by the same rule (`providerHoldsLevelWithoutSandbox`): outside Strict and outside Plan, with no kept Full-access sandbox and no chosen sandbox policy, it starts in the thread's folder with no confinement wall and no egress proxy, on the provider's own approvals. Under Strict, or where the thread kept its sandbox or a turn holds a chosen sandbox policy, it starts under the confinement an ordinary Code terminal has at the thread's level, not widened: an account folder outside the thread's folders stays unwritable, so a program that must write there can fail to sign in.
 - Only the person opens one or types into it, from their own window or a device they paired; the host refuses every agent and other remote principal, whatever an approval would allow.
 - Its output stays out of the thread's transcript and usage; the tab says the provider's own session is outside Octant's record.
 - The terminal carries no secret: an account that signs in through its folder starts signed in, while an API-key or gateway account's key is not passed, so that program asks for its own sign-in.
-- Not built yet: the tab for a Work thread with developer tools on, ACP agents and the other providers with a program, and a decision on binding the account folder where confinement keeps it unwritable.
+- Not built yet: the tab for a Work thread with developer tools on, and for ACP agents and the other providers with a program.
 
 Status: Partly built. Since: 2026-11-21. Detail: [Workspace: provider terminal](workspace.md).
 

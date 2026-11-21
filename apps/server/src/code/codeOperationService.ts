@@ -115,7 +115,10 @@ import {
   turnBlocksInPlaceRestore,
   type CodeOperation,
 } from "@octant/domain/code-policy";
-import { hostProviderTurnRefusal } from "@octant/domain/guardrail-policy";
+import {
+  hostProviderTurnRefusal,
+  providerHoldsLevelWithoutSandbox,
+} from "@octant/domain/guardrail-policy";
 import {
   coordinatorTurnPosture,
   decideRunMerge,
@@ -158,6 +161,7 @@ import type { ProjectForgeChoices } from "./standingMergeAllowance";
 
 import type { ServerTerminalLogin, ServerTerminalRefusal } from "../serverProjects/serverTerminal";
 import type { ProviderTerminalLaunch } from "../providers/providerTerminal";
+import { activeSandboxPolicy } from "../process/sandboxRuntimePolicy";
 
 type Awaitable<T> = T | Promise<T>;
 
@@ -4095,11 +4099,17 @@ export class CodeOperationService {
           }
         }
         // A provider terminal runs the thread's provider's own program in the
-        // thread's folder, confined exactly as the shell would be. The host
-        // names the program and its account environment; the command cannot.
-        // It lends no Browser: the program is the provider's, not a CLI the
-        // person pointed at `octant mcp`.
+        // thread's folder. The host names the program and its account
+        // environment; the command cannot. It lends no Browser: the program is
+        // the provider's, not a CLI the person pointed at `octant mcp`.
         let providerProgram: Extract<ProviderTerminalLaunch, { status: "resolved" }> | undefined;
+        // The program runs the way the thread's turns do (maintainer decision,
+        // 2026-11-21): where a turn runs without Octant's sandbox and the
+        // provider's own approvals hold the level, so does its terminal, with
+        // no confinement wall and no egress proxy. Under Strict, or where the
+        // thread kept its sandbox or a turn holds a chosen sandbox policy, it
+        // stays confined as an ordinary Code terminal is.
+        let providerProgramUnconfined = false;
         if (command.program === "provider") {
           if (command.browserGrant === "on")
             return this.#failed(
@@ -4107,10 +4117,11 @@ export class CodeOperationService {
               "invalid",
               "A provider terminal does not use the Browser.",
             );
+          const strict = this.#options.threadStrict?.(thread) ?? true;
           const launch = this.#options.providerTerminal?.({
             thread,
             shell: root.shell,
-            strict: this.#options.threadStrict?.(thread) ?? true,
+            strict,
           }) ?? {
             status: "refused",
             message: "This host does not open provider terminals.",
@@ -4118,6 +4129,14 @@ export class CodeOperationService {
           if (launch.status === "refused")
             return this.#failed(command.operationId, "unavailable", launch.message);
           providerProgram = launch;
+          providerProgramUnconfined = providerHoldsLevelWithoutSandbox({
+            mode: "code",
+            executionPolicy: thread.executionPolicy,
+            strict,
+            fullAccessSandbox: thread.fullAccessSandbox,
+            sandboxPolicySelected: turnHoldsSandboxPolicy(thread.id),
+            purpose: "session",
+          });
         }
         const allowed = new Set(command.credentialRefs);
         const credentialReferences = root.credentialReferences.filter((credential) =>
@@ -4219,7 +4238,7 @@ export class CodeOperationService {
             : {}),
           ...(serverLogin === undefined ? {} : { server: serverLogin }),
           executionPolicy: thread.executionPolicy,
-          ...this.#windowsStrict(thread),
+          ...(providerProgramUnconfined ? { strict: false } : this.#windowsStrict(thread)),
         });
         owner.starting = starting;
         this.#terminalOwners.set(command.terminalId, owner);
@@ -7967,4 +7986,17 @@ function isSelectedHunkCommand(command: CodeOperationCommand): boolean {
     command.kind === "unstage-git-hunks" ||
     command.kind === "reverse-git-hunks"
   );
+}
+
+/**
+ * Whether a running turn of the thread holds a chosen sandbox policy. A folder
+ * that changed identity under that policy makes the read throw; the answer is
+ * then yes, so the terminal stays confined rather than opening wider.
+ */
+function turnHoldsSandboxPolicy(threadId: CodeThreadId): boolean {
+  try {
+    return activeSandboxPolicy(String(threadId)) !== undefined;
+  } catch {
+    return true;
+  }
 }
