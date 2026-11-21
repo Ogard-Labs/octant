@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -391,6 +391,7 @@ describe("FirstRunProjectStep provider folder scan", () => {
     const user = userEvent.setup();
     const signals: Array<AbortSignal | undefined> = [];
     let resolveManualScan: ((result: ProviderFolderScanResult) => void) | undefined;
+    let manualScanPromise: Promise<ProviderFolderScanResult> | undefined;
 
     const initialResult: ProviderFolderScanResult = {
       status: "ready",
@@ -450,9 +451,10 @@ describe("FirstRunProjectStep provider folder scan", () => {
       signals.push(signal);
       if (signals.length === 1) return initialResult;
       if (signals.length === 2) {
-        return await new Promise<ProviderFolderScanResult>((resolve) => {
+        manualScanPromise = new Promise<ProviderFolderScanResult>((resolve) => {
           resolveManualScan = resolve;
         });
+        return await manualScanPromise;
       }
       return latestResult;
     });
@@ -482,18 +484,21 @@ describe("FirstRunProjectStep provider folder scan", () => {
     await user.click(screen.getByRole("radio", { name: "Code" }));
     expect(await screen.findByText("acme/latest")).toBeInTheDocument();
 
-    // Even if the superseded manual request still resolves with an empty listing, ignore it.
-    resolveManualScan?.({
-      status: "ready",
-      requireGitRepository: true,
-      groups: [],
-      stoppedEarly: false,
-      scannedAt: "2026-11-21T10:06:00.000Z" as UtcTimestamp,
+    // Resolve the superseded manual request with an empty listing and flush React
+    // microtasks so any stale state write would have committed before asserting.
+    await act(async () => {
+      resolveManualScan?.({
+        status: "ready",
+        requireGitRepository: true,
+        groups: [],
+        stoppedEarly: false,
+        scannedAt: "2026-11-21T10:06:00.000Z" as UtcTimestamp,
+      });
+      await manualScanPromise;
+      await Promise.resolve();
     });
 
-    await waitFor(() => {
-      expect(screen.getByText("acme/latest")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Scan again" })).toBeEnabled();
-    });
+    expect(screen.getByText("acme/latest")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Scan again" })).toBeEnabled();
   });
 });
