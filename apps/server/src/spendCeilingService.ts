@@ -115,9 +115,9 @@ export interface SpendCeilingServiceOptions {
  * Whether a ledger row's provider is left out of token and money ceilings,
  * decided by provider and the level the row's turn ran at: by the instance's
  * runtime usage capability at that level as the host observes it now, for
- * old rows too. A turn at Full access reads `atFullAccess.usage` where the
- * probe gives Full access its own value (an ACP release newer than the one
- * Octant reviewed measures usage there only); every other turn, and a row
+ * old rows too. A turn at Full access reads `atFullAccess.usage` where a
+ * probe gives Full access its own value (none does since a newer ACP release
+ * keeps its usage at every level); every other turn, and a row
  * that recorded no level, reads `usage`. A removed or disabled instance, or
  * one with no observation yet, counts, so its unreported turns keep refusing.
  * Disabling a provider with a live session leaves its last observation in

@@ -59,9 +59,8 @@ export type AppToolCapabilities = Pick<
  * unwrapped shell there, so the tools are offered and labelled rather than
  * withheld. A thread that keeps the sandbox at Full access is launched as the
  * guarded levels are, so a runtime that proves exclusivity there keeps it.
- * A release newer than the one Octant reviewed its tool transport against
- * carries them at Full access only (`atFullAccess`), where the pin no longer
- * holds.
+ * A runtime that gives Full access its own value (`atFullAccess`) is read
+ * there; none does since a newer release keeps its tools at every level.
  */
 export function threadAppToolSupport(
   capabilities: AppToolCapabilities,

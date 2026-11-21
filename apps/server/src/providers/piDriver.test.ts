@@ -607,31 +607,37 @@ describe("Pi provider driver", () => {
     expect(f.active()).toBe(0);
   });
 
-  it("closes a settled Pi 1.1.0 process instead of retaining it, because warm reuse is verified only on 0.85.1", async () => {
-    const f = fixture("1.1.0");
-    try {
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const connection = yield* f.driver.acquire({
-              instanceId,
-              projectRoot: root,
-              mode: "code",
-            });
-            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-            const collected = terminal(yield* connection.subscribe);
-            yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
-            f.client.emit({ type: "agent_settled" });
-            expect((yield* Effect.promise(() => collected)).at(-1)?.kind).toBe("completed");
-            yield* connection.stop(sessionId);
-          }),
-        ),
-      );
-      expect(f.active()).toBe(0);
-    } finally {
-      await f.registry.closeAll();
-    }
-  });
+  it.each([
+    ["retains", "1.1.0", 1],
+    ["closes", "0.80.10", 0],
+  ] as const)(
+    "%s a settled Pi %s process, judged against 0.85.1, the release warm reuse was reviewed on",
+    async (_verb, version, retained) => {
+      const f = fixture(version);
+      try {
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* f.driver.acquire({
+                instanceId,
+                projectRoot: root,
+                mode: "code",
+              });
+              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+              const collected = terminal(yield* connection.subscribe);
+              yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+              f.client.emit({ type: "agent_settled" });
+              expect((yield* Effect.promise(() => collected)).at(-1)?.kind).toBe("completed");
+              yield* connection.stop(sessionId);
+            }),
+          ),
+        );
+        expect(f.active()).toBe(retained);
+      } finally {
+        await f.registry.closeAll();
+      }
+    },
+  );
 
   it.each(["authority", "catalogue", "Strict"] as const)(
     "closes an incompatible warm process before resuming the same history after a %s change",
@@ -923,7 +929,7 @@ describe("Pi provider driver", () => {
     ["0.85.1", "supported"],
     ["1.1.0", "supported"],
     ["0.80.10", "unsupported"],
-    ["1.0.4", "unsupported"],
+    ["1.0.4", "supported"],
     ["1.1.1", "supported"],
     ["1.3.0", "supported"],
     ["not-a-version", "unsupported"],
@@ -934,11 +940,12 @@ describe("Pi provider driver", () => {
     expect(result.capabilities.appManagedTools).toBe(expected);
   });
 
-  it("starts an app-managed session on a Pi release at or above the verified floor and refuses it below the verified floor", async () => {
+  it("starts an app-managed session on a Pi release at or above the earliest reviewed one and refuses it below that release", async () => {
     const tools = [{ name: "octant_browser", inputSchema: { type: "object", properties: {} } }];
     for (const [version, accepted] of [
       ["1.3.0", true],
-      ["1.0.4", false],
+      ["1.0.4", true],
+      ["0.84.9", false],
     ] as const) {
       const { driver } = fixture(version);
       const scope = await Effect.runPromise(Scope.make());
@@ -951,10 +958,26 @@ describe("Pi provider driver", () => {
         connection.start({ sessionId, modelId, executionPolicy: "approval-gated", tools }),
       );
       if (accepted) await expect(started).resolves.toBeDefined();
-      else await expect(started).rejects.toThrow(/not verified/);
+      else await expect(started).rejects.toThrow(/older than 0.85.1/);
       await Effect.runPromise(Scope.close(scope, Exit.void));
     }
   });
+
+  it.each([
+    [
+      "1.0.4",
+      "Pi 1.0.4 keeps Octant's tools, unverified: Octant reviewed them on another release.",
+    ],
+    ["0.85.1", undefined],
+    ["1.3.0", undefined],
+  ] as const)(
+    "says on the runtime card whether Pi %s keeps its tools unverified",
+    async (version, message) => {
+      const { driver } = fixture(version);
+      const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+      expect(result.message).toBe(message);
+    },
+  );
 
   it("carries a read-only app-managed tool through a Plan turn on a verified Pi release", async () => {
     const tools = [{ name: "octant_code", inputSchema: { type: "object", properties: {} } }];
@@ -997,7 +1020,7 @@ describe("Pi provider driver", () => {
           ],
         }),
       ),
-    ).rejects.toThrow(/not verified/);
+    ).rejects.toThrow(/older than 0.85.1/);
     await Effect.runPromise(Scope.close(scope, Exit.void));
   });
 
