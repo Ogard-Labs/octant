@@ -12,7 +12,7 @@ import {
 import { Schema } from "effect";
 import type { CloudMachineTarget } from "@octant/plugin-api/cloud-machine-target";
 import { offeredCloudMachineTargets } from "@octant/plugin-host/cloud-machine-targets";
-import { decodeWindowId } from "@octant/contracts";
+import { decodeEventActor, decodeWindowId } from "@octant/contracts";
 import { Journal } from "../persistence/journal";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { createServerProjectRouteHandler } from "../serverProjects/serverProjectRoutes";
@@ -186,27 +186,23 @@ describe("machines in the person's cloud account", () => {
     expect(restarted.machines.view().machines).toEqual([machine]);
   });
 
-  it("refuses an agent, a routine and a paired device, and asks the provider for nothing", async () => {
+  it("refuses an agent, a routine and a restricted device, and asks the provider for nothing", async () => {
     const journal = openJournal();
     const fake = fakeCloudMachineTarget();
     const { machines, handles } = host(journal, fake.target);
 
-    for (const principal of ["agent", "routine"] as const) {
+    for (const principal of ["agent", "routine", "remote-device"] as const) {
       expect(await machines.create({ ...createInput, principal })).toMatchObject({
         kind: "refused",
         reason: "needs-person",
       });
     }
-    expect(await machines.create({ ...createInput, principal: "remote-device" })).toMatchObject({
-      kind: "refused",
-      reason: "needs-local-window",
-    });
 
     const created = await machines.create({ ...createInput, principal: "local-window" });
     if (created.kind !== "changed" || created.machine === undefined)
       throw Error("Expected fixture");
     const machineId = String(created.machine.id);
-    for (const principal of ["agent", "routine"] as const) {
+    for (const principal of ["agent", "routine", "remote-device"] as const) {
       expect(await machines.suspend({ machineId, principal })).toMatchObject({
         reason: "needs-person",
       });
@@ -219,6 +215,108 @@ describe("machines in the person's cloud account", () => {
     }
     expect(fake.calls.map((call) => call.act)).toEqual(["create"]);
     expect(handles).toHaveLength(1);
+  });
+
+  it("lets a person-paired device create, operate and destroy a machine with v2 records and session-bound confirmation", async () => {
+    const journal = openJournal();
+    const fake = fakeCloudMachineTarget();
+    const { machines, projects } = host(journal, fake.target);
+    const deviceId = "71000000-0000-4000-8000-0000000000de";
+    const deviceActor = decodeEventActor({
+      kind: "remote-device",
+      actorId: deviceId,
+      deviceId,
+    });
+    const deviceSessionA = {
+      kind: "person-paired-device" as const,
+      deviceId,
+      sessionId: "sess-a",
+      credentialGeneration: 3,
+      actor: deviceActor,
+    };
+    const deviceSessionB = {
+      ...deviceSessionA,
+      sessionId: "sess-b",
+    };
+
+    const created = await machines.create({ ...createInput, principal: deviceSessionA });
+    expect(created.kind).toBe("changed");
+    if (created.kind !== "changed" || created.machine === undefined)
+      throw Error("Expected machine");
+    const machineId = String(created.machine.id);
+    expect(projects.projects()).toHaveLength(1);
+
+    expect((await machines.suspend({ machineId, principal: deviceSessionA })).kind).toBe("changed");
+    expect((await machines.resume({ machineId, principal: deviceSessionA })).kind).toBe("changed");
+
+    // Confirmation issued to session A is refused from session B and from a local window.
+    const askOther = machines.requestDestroy({ machineId, principal: deviceSessionA });
+    if (askOther.kind !== "confirm") throw Error("Expected confirmation");
+    expect(
+      await machines.destroy({
+        machineId,
+        confirmation: askOther.confirmation,
+        principal: deviceSessionB,
+      }),
+    ).toMatchObject({ kind: "refused", reason: "confirmation-required" });
+
+    const askLocal = machines.requestDestroy({ machineId, principal: deviceSessionA });
+    if (askLocal.kind !== "confirm") throw Error("Expected confirmation");
+    expect(
+      await machines.destroy({
+        machineId,
+        confirmation: askLocal.confirmation,
+        principal: "local-window",
+      }),
+    ).toMatchObject({ kind: "refused", reason: "confirmation-required" });
+
+    // Confirmation issued to session A succeeds from session A.
+    const ask = machines.requestDestroy({ machineId, principal: deviceSessionA });
+    if (ask.kind !== "confirm") throw Error("Expected confirmation");
+    const destroyed = await machines.destroy({
+      machineId,
+      confirmation: ask.confirmation,
+      principal: deviceSessionA,
+    });
+    expect(destroyed.kind).toBe("changed");
+
+    const machineEvents = journal.replayAggregateType({
+      aggregateType: "cloud-machines",
+      afterSequence: 0,
+      limit: 50,
+    });
+    expect(machineEvents.map((event) => event.eventName)).toEqual([
+      "cloud-machines.creation-requested@2",
+      "cloud-machines.created@1",
+      "cloud-machines.project-bound@2",
+      "cloud-machines.state-changed@2",
+      "cloud-machines.state-changed@2",
+      "cloud-machines.destroyed@2",
+    ]);
+    for (const event of machineEvents) {
+      expect(event.actor).toEqual(deviceActor);
+    }
+    expect(machineEvents[0]?.payload).toMatchObject({
+      principal: { kind: "person-paired-device", credentialGeneration: 3 },
+    });
+
+    const projectEvents = journal.replayAggregateType({
+      aggregateType: "server-projects",
+      afterSequence: 0,
+      limit: 50,
+    });
+    expect(projectEvents.map((event) => event.eventName)).toEqual(["server-projects.bound@2"]);
+    expect(projectEvents[0]?.actor).toEqual(deviceActor);
+    expect(projectEvents[0]?.payload).toMatchObject({
+      principal: { kind: "person-paired-device", credentialGeneration: 3 },
+    });
+
+    // Replay rebuilds from v2 records without calling the provider.
+    const restarted = host(journal, fake.target);
+    expect(restarted.machines.view().machines[0]).toMatchObject({
+      id: created.machine.id,
+      lifecycle: "destroyed",
+    });
   });
 
   it("destroys a machine only with the person's one confirmation for that machine", async () => {

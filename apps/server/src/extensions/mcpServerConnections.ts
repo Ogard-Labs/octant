@@ -101,6 +101,12 @@ export function describeMcpServerConnection(input: {
     return { state: "needs-sign-in", reason: signIn.message, ...at };
   if (signIn.kind === "awaiting-consent")
     return { state: "needs-sign-in", reason: "Finish signing in in the browser.", ...at };
+  if (signIn.kind === "awaiting-device-code")
+    return {
+      state: "needs-sign-in",
+      reason: "Finish signing in with the verification code.",
+      ...at,
+    };
   if (observation?.state === "connected") return { state: "connected", ...at };
   if (observation?.state === "connecting") return { state: "connecting", ...at };
   if (observation?.state === "failed")

@@ -13,11 +13,13 @@ export type RemoteSetupCheckInput = typeof RemoteSetupCheckInput.Type;
 
 export const RemoteSetupCheckReason = Schema.Literal(
   "ready",
+  "needs-person",
   "needs-local-window",
   "server-not-registered",
   "registration-changed",
   "missing-agent",
   "authentication-refused",
+  "key-confirmation-required",
   "kept-key-unsupported",
   "unknown-identity",
   "changed-identity",

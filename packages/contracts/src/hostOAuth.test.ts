@@ -253,7 +253,7 @@ describe("host OAuth contracts", () => {
     ).toThrow();
   });
 
-  it("lets only the directory dialect pair with a device-code sign-in, still naming no URL", () => {
+  it("lets directory and generic MCP authorization pair with device-code, while excluding closed vendor profiles", () => {
     const directory = {
       descriptorId: "azure-foundry-directory",
       dialect: "directory-oidc",
@@ -273,18 +273,65 @@ describe("host OAuth contracts", () => {
         deviceAuthorizationEndpoint: "https://login.example/devicecode",
       }),
     ).toThrow();
-    // Every other dialect's wire shape is not OAuth's, so none pairs with a device code.
-    expect(() =>
-      decodeHostOAuthDescriptor({
+    // Generic MCP authorization accepts RFC 8628 device authorization with allowed verification hosts.
+    const mcpDevice = {
+      descriptorId: "mcp-server",
+      dialect: "mcp-authorization",
+      flow: "device-code",
+      clientId: "public-client",
+      tokenEndpoint: "https://idp.example/token",
+      deviceAuthorizationEndpoint: "https://idp.example/device",
+      verificationHosts: ["idp.example", "verify.idp.example"],
+      resource: "https://mcp.example/",
+      scopes: [],
+      termsId: "mcp-terms-1",
+    } as const;
+    expect(decodeHostOAuthDescriptor(mcpDevice)).toEqual(mcpDevice);
+    // Closed profiles (Google Workspace, GitHub OAuth App, Slack) keep excluding device authorization.
+    for (const excluded of [
+      { ...mcpDevice, resource: "https://gmailmcp.googleapis.com/mcp/v1" },
+      { ...mcpDevice, resource: "https://drivemcp.googleapis.com/mcp/v1" },
+      { ...mcpDevice, resource: "https://calendarmcp.googleapis.com/mcp/v1" },
+      { ...mcpDevice, dialect: "github-mcp-oauth-app" },
+      { ...mcpDevice, dialect: "slack-mcp-user" },
+      { ...mcpDevice, dialect: "openrouter-pkce" },
+    ]) {
+      expect(() => decodeHostOAuthDescriptor(excluded)).toThrow();
+    }
+    // Journal records carry relay and device-code flows plus cancellation without any code or token.
+    const attemptId = "66000000-0000-4000-8000-000000000001";
+    const credentialRef = "66000000-0000-4000-8000-000000000002";
+    expect(
+      decodeHostOAuthJournalRecord({
+        name: "host-oauth.sign-in-started",
         descriptorId: "mcp-server",
-        dialect: "mcp-authorization",
+        attemptId,
+        flow: "relay",
+      }),
+    ).toMatchObject({ name: "host-oauth.sign-in-started", flow: "relay" });
+    expect(
+      decodeHostOAuthJournalRecord({
+        name: "host-oauth.sign-in-completed",
+        descriptorId: "mcp-server",
+        attemptId,
+        credentialRef,
         flow: "device-code",
-        clientId: "public-client",
-        tokenEndpoint: "https://idp.example/token",
-        deviceAuthorizationEndpoint: "https://idp.example/device",
-        resource: "https://mcp.example/",
-        scopes: [],
-        termsId: "mcp-terms-1",
+      }),
+    ).toMatchObject({ name: "host-oauth.sign-in-completed", flow: "device-code" });
+    expect(
+      decodeHostOAuthJournalRecord({
+        name: "host-oauth.sign-in-cancelled",
+        descriptorId: "mcp-server",
+        attemptId,
+        flow: "relay",
+      }),
+    ).toMatchObject({ name: "host-oauth.sign-in-cancelled", flow: "relay" });
+    expect(() =>
+      decodeHostOAuthJournalRecord({
+        name: "host-oauth.sign-in-cancelled",
+        descriptorId: "mcp-server",
+        attemptId,
+        code: "must-never-journal",
       }),
     ).toThrow();
   });

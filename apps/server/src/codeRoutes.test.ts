@@ -842,11 +842,21 @@ describe("Code routes", () => {
       scopeId: remoteDeviceId as never,
     });
     await route(pairedRequest);
-    expect(execute).toHaveBeenLastCalledWith(remoteDeviceId, "local-window", command, {
-      kind: "remote-device",
-      actorId: remoteDeviceId,
-      deviceId: remoteDeviceId,
-    });
+    expect(execute).toHaveBeenLastCalledWith(
+      remoteDeviceId,
+      "local-window",
+      command,
+      {
+        kind: "remote-device",
+        actorId: remoteDeviceId,
+        deviceId: remoteDeviceId,
+      },
+      {
+        deviceId: remoteDeviceId,
+        sessionId: "00000000-0000-4000-8000-000000000924",
+        credentialGeneration: 1,
+      },
+    );
   });
 
   it("reports Project terminals unavailable on a host without them", async () => {

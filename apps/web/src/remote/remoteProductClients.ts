@@ -50,6 +50,10 @@ import {
   type WorkThreadClient,
 } from "@octant/client-runtime/work-thread-client";
 import {
+  createServerProjectsClient,
+  type ServerProjectsClient,
+} from "@octant/client-runtime/server-projects-client";
+import {
   createReplicaSyncStatusClient,
   type ReplicaSyncStatusClient,
 } from "@octant/client-runtime/replica-sync-status-client";
@@ -84,10 +88,12 @@ export interface RemoteProductClients {
    * a device its own person paired; the shell offers it to no other session.
    */
   readonly canvasImportHtml: NonNullable<CanvasClient["importHtml"]>;
-  /** The device's own shell in a local Project; the host refuses any other session. */
+  /** The device's own shell in a local or server Project; the host refuses any other session. */
   readonly projectTerminal: ProjectTerminalClient;
   /** The device's own Private page for a Project; a profile page stays at a window. */
   readonly projectBrowser: ProjectBrowserClient;
+  /** Server Projects catalog, setup checks, relayed previews, and cloud machines. */
+  readonly serverProjects?: ServerProjectsClient;
 }
 
 // The Work and Code clients refuse a non-loopback base URL because the window
@@ -214,5 +220,6 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
       canvas.importHtml?.(request) ?? Promise.reject(new Error("Import is unavailable.")),
     projectTerminal: createProjectTerminalClient(port),
     projectBrowser: createProjectBrowserClient(port),
+    serverProjects: createServerProjectsClient(port),
   };
 }

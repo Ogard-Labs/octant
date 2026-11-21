@@ -117,7 +117,16 @@ interface Harness {
 }
 
 function setup(
-  options: { readonly perHost?: number; readonly connection?: SqliteConnection } = {},
+  options: {
+    readonly perHost?: number;
+    readonly connection?: SqliteConnection;
+    readonly socketLimits?: ConstructorParameters<
+      typeof RemoteServerGrantService
+    >[0]["socketLimits"];
+    readonly serverProjectPreviews?: ConstructorParameters<
+      typeof RemoteServerGrantService
+    >[0]["serverProjectPreviews"];
+  } = {},
 ): Harness {
   let connection = options.connection;
   if (connection === undefined) {
@@ -162,6 +171,10 @@ function setup(
     uuid: randomUUID,
     clock: () => now,
     ...(options.perHost === undefined ? {} : { limits: { perHost: options.perHost } }),
+    ...(options.socketLimits === undefined ? {} : { socketLimits: options.socketLimits }),
+    ...(options.serverProjectPreviews === undefined
+      ? {}
+      : { serverProjectPreviews: options.serverProjectPreviews }),
   });
   return { connection, journal, grants, targets, threads, readable, observed, gates };
 }
@@ -847,5 +860,176 @@ describe("RemoteServerGrantService", () => {
         .prepare("SELECT COUNT(*) AS count FROM remote_server_grant_projection")
         .get(),
     ).toEqual({ count: 0 });
+  });
+
+  it("relays a person-paired device's server Project preview over its SSH stream and refuses hub-introduced or mismatched callers", async () => {
+    const { Duplex } = await import("node:stream");
+    const grantId = `rsg_${"f".repeat(64)}`;
+    let openedCount = 0;
+    const harness = setup({
+      serverProjectPreviews: {
+        hasRelayGrant: (id) => id === grantId,
+        openRelayStream: (id, caller) => {
+          if (
+            id !== grantId ||
+            caller.admittedBy !== "host-person" ||
+            caller.deviceId !== String(deviceA) ||
+            caller.credentialGeneration !== 1
+          ) {
+            return { kind: "refused", reason: "grant-closed" };
+          }
+          openedCount += 1;
+          let responded = false;
+          const stream = Object.assign(
+            new Duplex({
+              read() {},
+              write(_chunk, _enc, cb) {
+                if (!responded) {
+                  responded = true;
+                  this.push(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\nConnection: close\r\n\r\nhello preview",
+                  );
+                  this.push(null);
+                }
+                cb();
+              },
+            }),
+            {
+              setTimeout: () => stream,
+              setNoDelay: () => stream,
+            },
+          );
+          return { kind: "opened", port: 5173, stream, onActivity: () => undefined };
+        },
+      },
+    });
+
+    const abort = new AbortController();
+    const relayBase = {
+      deviceId: String(deviceA),
+      credentialGeneration: 1,
+      sessionIdDigest: sessionA,
+      origin: "https://host.example",
+    };
+    const refusedHub = await harness.grants.relay({
+      principal: { ...relayBase, admittedBy: "hub-roster" },
+      scopeId: scopeA,
+      grantId,
+      method: "GET",
+      pathQuery: "/index.txt",
+      headers: [],
+      body: undefined,
+      signal: abort.signal,
+      stillAuthorized: () => true,
+    });
+    expect(refusedHub).toMatchObject({ kind: "refused" });
+    expect(openedCount).toBe(0);
+
+    const relayed = await harness.grants.relay({
+      principal: { ...relayBase, admittedBy: "host-person" },
+      scopeId: scopeA,
+      grantId,
+      method: "GET",
+      pathQuery: "/index.txt",
+      headers: [],
+      body: undefined,
+      signal: abort.signal,
+      stillAuthorized: () => true,
+    });
+    expect(relayed.kind).toBe("relayed");
+    if (relayed.kind !== "relayed") throw new Error("Expected relayed response");
+    expect(relayed.response.status).toBe(200);
+    expect(await relayed.response.text()).toBe("hello preview");
+    expect(openedCount).toBe(1);
+  });
+
+  it("counts open server Project preview WebSockets against a device's per-device socket cap when opening an ordinary grant socket", async () => {
+    const { Duplex } = await import("node:stream");
+    const { webSocketAcceptFor } = await import("../webSocketRelay");
+    const previewGrantId = `rsg_${"c".repeat(64)}`;
+    const streams: Array<import("node:stream").Duplex> = [];
+    const harness = setup({
+      socketLimits: { perGrant: 4, perDevice: 1 },
+      serverProjectPreviews: {
+        hasRelayGrant: (id) => id === previewGrantId,
+        openRelayStream: () => {
+          let upgraded = false;
+          const stream = Object.assign(
+            new Duplex({
+              read() {},
+              write(chunk: Buffer, _enc, cb) {
+                if (!upgraded) {
+                  upgraded = true;
+                  const match = /sec-websocket-key:\s*([^\r\n]+)/i.exec(chunk.toString("latin1"));
+                  const accept = webSocketAcceptFor(match?.[1]?.trim() ?? "");
+                  this.push(
+                    `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+                  );
+                }
+                cb();
+              },
+            }),
+            {
+              setTimeout: () => stream,
+              setNoDelay: () => stream,
+            },
+          );
+          streams.push(stream);
+          return { kind: "opened", port: 5173, stream, onActivity: () => undefined };
+        },
+      },
+    });
+    harness.targets.set(listenerId(1), listed(1));
+    const ordinary = grantOf(
+      await harness.grants.open({
+        principal: device(),
+        scopeId: scopeA,
+        request: fromLocalServers(1),
+      }),
+    );
+
+    const abort = new AbortController();
+    const relayPrincipal = {
+      deviceId: String(deviceA),
+      credentialGeneration: 1,
+      sessionIdDigest: sessionA,
+      origin: "https://host.example",
+      admittedBy: "host-person" as const,
+    };
+    const previewSocket = await harness.grants.relayUpgrade({
+      principal: relayPrincipal,
+      scopeId: scopeA,
+      grantId: previewGrantId,
+      pathQuery: "/hmr",
+      headers: [
+        ["upgrade", "websocket"],
+        ["connection", "Upgrade"],
+        ["sec-websocket-version", "13"],
+        ["sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="],
+      ],
+      signal: abort.signal,
+      stillAuthorized: () => true,
+    });
+    expect(previewSocket.kind).toBe("upgraded");
+
+    // Ordinary grant WebSocket on the same device must be refused as busy because the combined device cap (1) is full.
+    const ordinarySocket = await harness.grants.relayUpgrade({
+      principal: relayPrincipal,
+      scopeId: scopeA,
+      grantId: String(ordinary.grantId),
+      pathQuery: "/hmr",
+      headers: [
+        ["upgrade", "websocket"],
+        ["connection", "Upgrade"],
+        ["sec-websocket-version", "13"],
+        ["sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="],
+      ],
+      signal: abort.signal,
+      stillAuthorized: () => true,
+    });
+    expect(ordinarySocket).toEqual({ kind: "busy" });
+
+    harness.grants.closeDevice(deviceA, "device-revoked");
+    for (const stream of streams) stream.destroy();
   });
 });

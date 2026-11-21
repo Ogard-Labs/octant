@@ -37,6 +37,7 @@ export function googleWorkspaceMcpScopeMatches(
 }
 
 export function isGoogleWorkspaceMcpDescriptorBinding(value: {
+  readonly flow?: string;
   readonly resource?: string;
   readonly authorizationEndpoint?: string;
   readonly tokenEndpoint?: string;
@@ -48,6 +49,7 @@ export function isGoogleWorkspaceMcpDescriptorBinding(value: {
   readonly mcpTransportUrl?: string;
 }): boolean {
   return (
+    (value.flow === undefined || value.flow === "authorization-code-pkce") &&
     googleWorkspaceMcpScopes(value.resource) !== undefined &&
     value.authorizationEndpoint === GOOGLE_WORKSPACE_MCP_OAUTH.authorizationEndpoint &&
     value.tokenEndpoint === GOOGLE_WORKSPACE_MCP_OAUTH.tokenEndpoint &&

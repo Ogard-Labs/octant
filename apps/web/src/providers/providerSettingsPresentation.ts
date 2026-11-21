@@ -90,6 +90,26 @@ export function turnModesLabel(
     : `${where}.`;
 }
 
+/**
+ * Honest Windows Chat capability notice for OpenCode and ACP agents. Outside
+ * Strict on Windows they run in Chat without an Octant sandbox, under their
+ * own permission handling; Strict stays refused until Windows has an Octant
+ * sandbox. Returns undefined on macOS, Linux, and other providers.
+ */
+export function windowsChatBoundaryLabel(
+  driverKind: ProviderInstance["driverKind"],
+  hostPlatform: HostPlatform | undefined,
+): string | undefined {
+  if (hostPlatform !== "win32") return undefined;
+  if (driverKind === "opencode") {
+    return "Outside Strict on Windows, OpenCode’s own permission rules—not Octant—keep its file and shell tools off in Chat; its command templates and plugins run as they do in OpenCode itself. Strict stays refused until Windows has an Octant sandbox.";
+  }
+  if (isAcpAgentKind(driverKind) || driverKind === "acp-agent") {
+    return "Outside Strict on Windows, this agent’s own permission handling—not Octant confinement—applies in Chat; Octant adds no sandbox around its built-in tools. Strict stays refused until Windows has an Octant sandbox.";
+  }
+  return undefined;
+}
+
 export function sessionRollbackLabel(capabilities: ProviderObservedState["capabilities"]): string {
   return capabilities.sessionRollback === "supported"
     ? "Supported. A rewound thread continues its own session from the kept turns."

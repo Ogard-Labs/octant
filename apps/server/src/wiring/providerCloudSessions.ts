@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { ProviderCloudSessionService } from "../cloud/providerCloudSessionService";
 import { ProviderCloudSessionStore } from "../cloud/providerCloudSessionStore";
 import { createProviderCloudSessionRoutes } from "../cloud/providerCloudSessionRoutes";
@@ -9,6 +10,12 @@ import type { CodeProjectAccess } from "../codeProjectAccess";
 import type { CodeSessionAuthorityStore } from "../code/codeSessionAuthorityStore";
 import type { SpendCeilingService } from "../spendCeilingService";
 import type { WindowAuthorityStore } from "../windowAuthorityStore";
+import {
+  readDeviceApprovedByPerson,
+  readDeviceRegistration,
+  readRemoteSessionInvalidation,
+} from "../persistence/remoteAccessProjection";
+import { isDeviceRegistrationCurrent } from "../extensions/pairedDeviceApprovalAuthority";
 
 export function wireProviderCloudSessions(
   input: Pick<ServerStart, "persistence"> & {
@@ -18,6 +25,11 @@ export function wireProviderCloudSessions(
     readonly spendCeilingService: SpendCeilingService;
     readonly credentialResolver: ProviderCredentialResolver | undefined;
     readonly configuredDriverOptions: ProvidersWiring["configuredDriverOptions"];
+    readonly isPersonPairedDeviceCurrent?: (
+      deviceId: string,
+      credentialGeneration: number,
+      sessionId?: string,
+    ) => boolean;
     readonly allowedRendererHttpOrigin?: string | null;
   },
 ) {
@@ -30,6 +42,26 @@ export function wireProviderCloudSessions(
   });
   const local = (windowId: Parameters<CodeProjectAccess["canAccessProject"]>[0]) =>
     input.windowAuthorityStore.listWindowIds().some((id) => String(id) === String(windowId));
+  const deviceCurrent =
+    input.isPersonPairedDeviceCurrent ??
+    ((deviceId: string, credentialGeneration: number, sessionId?: string): boolean => {
+      const registration = readDeviceRegistration(persistence.connection, deviceId);
+      if (
+        registration === undefined ||
+        !isDeviceRegistrationCurrent(registration, Date.now()) ||
+        registration.credentialGeneration !== credentialGeneration ||
+        !readDeviceApprovedByPerson(persistence.connection, deviceId)
+      ) {
+        return false;
+      }
+      if (sessionId !== undefined) {
+        const digest = createHash("sha256").update(sessionId).digest("hex");
+        if (readRemoteSessionInvalidation(persistence.connection, digest) !== undefined) {
+          return false;
+        }
+      }
+      return true;
+    });
   const cloudDriver = (instance: ReturnType<typeof persistence.readProviderInstances>[number]) => {
     if (
       instance.driverKind === "outside-harness-endpoint" &&
@@ -60,8 +92,18 @@ export function wireProviderCloudSessions(
         return instance.configuration.modelIds;
       return [];
     },
-    canManageProvider: local,
-    adapter: (instance, intent, admission = () => true, onCreated) =>
+    canManageProvider: (windowId, principal) => {
+      if (principal === undefined || principal.kind === "local-window") return local(windowId);
+      if (principal.kind === "person-paired-device") {
+        return deviceCurrent(
+          principal.deviceId,
+          principal.credentialGeneration,
+          principal.sessionId,
+        );
+      }
+      return false;
+    },
+    adapter: (instance, intent, admission = () => true, onCreated, options) =>
       (cloudDriver(instance) ?? unavailableDriver).create({
         instanceId: instance.id,
         ports:
@@ -77,6 +119,12 @@ export function wireProviderCloudSessions(
                 credentialResolver: input.credentialResolver,
                 admission,
                 intent,
+                ...(options?.principalKind === undefined
+                  ? {}
+                  : { principalKind: options.principalKind }),
+                ...(options?.onCredentialUnlockRequired === undefined
+                  ? {}
+                  : { onCredentialUnlockRequired: options.onCredentialUnlockRequired }),
                 ...(onCreated === undefined ? {} : { onCreated }),
                 ...(intent.kind === "create"
                   ? {
@@ -89,29 +137,53 @@ export function wireProviderCloudSessions(
                   : {}),
               }),
       }),
-    context: (windowId, threadId, signal) => {
+    context: (windowId, threadId, signal, principal) => {
       const stored = persistence.readCodeThread(threadId);
-      if (stored === undefined || stored.lifecycle !== "active" || !local(windowId))
+      if (stored === undefined || stored.lifecycle !== "active") return undefined;
+      if (principal?.kind === "remote-device") return undefined;
+      const isDevice = principal?.kind === "person-paired-device";
+      if (isDevice) {
+        if (
+          !deviceCurrent(principal.deviceId, principal.credentialGeneration, principal.sessionId)
+        ) {
+          return undefined;
+        }
+      } else if (!local(windowId)) {
         return undefined;
+      }
       const projectId = stored.projectId;
-      const current = () =>
-        input.codeProjectAccess.standingAuthority(projectId, () => {
-          if (
-            signal?.aborted === true ||
-            !local(windowId) ||
-            !input.codeProjectAccess.canAccessProject(windowId, projectId)
-          )
-            return false;
-          const next = persistence.readCodeThread(threadId);
-          return (
-            next !== undefined &&
-            next.lifecycle === "active" &&
-            String(next.projectId) === String(projectId) &&
-            String(next.bindingRevisionId) === String(stored.bindingRevisionId) &&
-            String(next.checkoutId) === String(stored.checkoutId)
-          );
-        });
+      const threadUnchanged = () => {
+        const next = persistence.readCodeThread(threadId);
+        return (
+          next !== undefined &&
+          next.lifecycle === "active" &&
+          String(next.projectId) === String(projectId) &&
+          String(next.bindingRevisionId) === String(stored.bindingRevisionId) &&
+          String(next.checkoutId) === String(stored.checkoutId)
+        );
+      };
+      const current = isDevice
+        ? () =>
+            signal?.aborted !== true &&
+            deviceCurrent(
+              principal.deviceId,
+              principal.credentialGeneration,
+              principal.sessionId,
+            ) &&
+            input.codeProjectAccess.hasActiveCodeProject(projectId) &&
+            threadUnchanged()
+        : () =>
+            input.codeProjectAccess.standingAuthority(projectId, () => {
+              if (
+                signal?.aborted === true ||
+                !local(windowId) ||
+                !input.codeProjectAccess.canAccessProject(windowId, projectId)
+              )
+                return false;
+              return threadUnchanged();
+            });
       if (!current()) return undefined;
+      const principalKind = isDevice ? "person-paired-device" : "local-window";
       return {
         threadId,
         projectId,
@@ -127,7 +199,7 @@ export function wireProviderCloudSessions(
           .executionPolicy,
         requiresUnsupportedBound: () => {
           const budget = input.spendCeilingService.snapshot({
-            principalKind: "local-window",
+            principalKind,
             threadId,
             threadType: "code-thread",
             projectId,
@@ -142,6 +214,7 @@ export function wireProviderCloudSessions(
     routes: createProviderCloudSessionRoutes({
       service,
       windowAuthorityStore: input.windowAuthorityStore,
+      isPersonPairedDeviceCurrent: deviceCurrent,
       ...(input.allowedRendererHttpOrigin === undefined
         ? {}
         : { allowedRendererHttpOrigin: input.allowedRendererHttpOrigin }),

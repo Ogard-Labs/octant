@@ -16,6 +16,8 @@ import type { RemoteSetupIntent } from "./RemoteSetupGuide";
 const REMEDIES: Readonly<Record<RemoteSetupCheckReason, string>> = {
   ready:
     "The read-only SSH check completed. This proves this connection only; no task was started.",
+  "needs-person":
+    "Run server checks at this computer or from a device its person paired. Restricted sessions cannot probe servers.",
   "needs-local-window":
     "Run server checks in the Octant window on the host. A paired client cannot administer its servers.",
   "server-not-registered": "Register this server under Permissions › Servers before checking it.",
@@ -25,6 +27,7 @@ const REMEDIES: Readonly<Record<RemoteSetupCheckReason, string>> = {
     "No SSH agent is available to Octant. Start or unlock your agent on the Octant host and load the intended key, then check again.",
   "authentication-refused":
     "SSH could not authenticate. Check the agent's loaded key and the registered login user on the Octant host. Never paste a private key into a task.",
+  "key-confirmation-required": "This server's key needs a confirmation at this computer.",
   "kept-key-unsupported":
     "This check uses the host's SSH agent. It cannot verify a key Octant keeps. Use the existing server key controls; no key was created or changed.",
   "unknown-identity":

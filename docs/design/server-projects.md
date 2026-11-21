@@ -110,10 +110,10 @@ checks never change registry/configuration or journal state.
 
 ### Binding
 
-- Only a person, at a local window or a paired device, binds, renames, or
-  removes a server Project; a routine and an agent are refused (maintainer decision, 2026-11-12).
-  Not built yet: today a paired device is refused
-  `needs-local-window` too; the design is [Paired devices](#paired-devices).
+- Only a person, at a local window or a device the host's own person paired,
+  binds, renames, or removes a server Project; a hub-introduced or restricted
+  device, a routine, and an agent are refused `needs-person` (maintainer
+  decision, 2026-11-12; built under [Paired devices](#paired-devices)).
 - A binding names a registered server and an absolute folder path. Before it
   is journaled, the host connects and resolves the folder on the server to its
   real path (`cd` then `pwd -P`); a folder that does not exist, is not a
@@ -675,12 +675,12 @@ Project's connection, under the same levels, approvals, and journal.
 
 ## Paired devices
 
-Designed, not built (maintainer request, 2026-11-18). A device the host's own
-person paired already reads the catalog and a server's load. This design
-lets it do what a local window does with a server Project: bind, rename and
-remove one, edit and run its saved actions, switch a Work Project's Developer
-tools, run the read-only setup check, open the Project's own terminal, open a
-dev-server preview, and act on machines in the person's cloud account.
+Built (maintainer request, 2026-11-18). A device the host's own person paired
+reads the catalog and a server's load and does what a local window does with a
+server Project: bind, rename and remove one, edit and run its saved actions,
+switch a Work Project's Developer tools, run the read-only setup check, open
+the Project's own terminal, open a dev-server preview, and act on machines in
+the person's cloud account.
 
 - **Who.** A `person-paired-device` principal over its signed session. A
   device the hub's roster introduced, an agent grant's session, a routine, an
@@ -804,12 +804,11 @@ service stays out of scope
   that target and act; the target names the handle and never sees the value.
   The journal records the reference, never a value or a handle.
 - **Every act is the person's.** Creating, binding, refreshing, suspending,
-  resuming and destroying are the person's acts at a local window
-  (`/api/cloud-machines`). An agent and a routine are refused `needs-person`
-  before any target or broker is asked. The design also lets a device the
-  host's own person paired act; not built yet, it is refused
-  `needs-local-window`, as binding a server Project still is
-  ([Paired devices](#paired-devices)).
+  resuming and destroying are the person's acts at a local window or a device
+  the host's own person paired (`/api/cloud-machines`; built under
+  [Paired devices](#paired-devices)). A hub-introduced or restricted device, an
+  agent, and a routine are refused `needs-person` before any target or broker
+  is asked.
 - **Destroy asks once.** Destroying is irreversible and ends what the
   person's account pays for, so it needs a confirmation the host issues for
   exactly that machine (`request-cloud-machine-destroy`). The confirmation is

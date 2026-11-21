@@ -95,7 +95,9 @@ export function browserProfilePartitionFolder(profile: StoredBrowserProfile): st
 export type BrowserProfileCaller =
   /** The person at a local window. */
   | "person"
-  /** A paired device. */
+  /** A device the host's own person paired; acts as the person on profile pages. */
+  | "person-paired-device"
+  /** A hub-introduced or restricted remote device. */
   | "remote-device"
   /** A routine, goal loop, or subagent turn: nobody is at the machine. */
   | "unattended"

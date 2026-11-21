@@ -239,7 +239,7 @@ export * from "./browserCredentialUse";
 
 export * from "./browserPageScript";
 
-export * from "./ownerBrowser";
+export * from "./pairedBrowserControl";
 
 export * from "./childWorktreeSources";
 

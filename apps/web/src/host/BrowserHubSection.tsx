@@ -34,7 +34,6 @@ import {
   type BrowserGuestStore,
 } from "./browserHubGuest";
 import { BrowserOwnerSection } from "./BrowserOwnerSection";
-import { OwnerBrowserSection } from "./OwnerBrowserSection";
 import { platformPasskeys, registerOwnerPasskey, type PasskeyCredentials } from "./ownerPasskey";
 
 const POLL_MS = 3_000;
@@ -441,19 +440,6 @@ export function BrowserHubSection(props: BrowserHubSectionProps) {
         hubAdministration={props.hubAdministration}
         spokes={spokes}
       />
-      {props.hubAdministration === undefined
-        ? spokes.flatMap((spoke) =>
-            spoke.browser === undefined || spoke.openAt !== undefined
-              ? []
-              : [
-                  <OwnerBrowserSection
-                    key={spoke.memberId}
-                    client={spoke.browser}
-                    hostName={spoke.name}
-                  />,
-                ],
-          )
-        : null}
     </>
   );
 }

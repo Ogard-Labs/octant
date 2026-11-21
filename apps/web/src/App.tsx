@@ -2467,6 +2467,50 @@ function LaunchedShell(
       );
     };
   }, [runningServicesRemoteHost, remoteServerLiveOpener, federation, pairedComputerFetch]);
+  const openRelayedServerProjectPreview = useMemo(() => {
+    const host = runningServicesRemoteHost;
+    const opener = remoteServerLiveOpener;
+    const registry = federation?.registry;
+    const deviceKeyStore = federation?.deviceKeyStore;
+    if (host === undefined || host.status !== "ready" || opener === undefined) return undefined;
+    if (registry === undefined || deviceKeyStore === undefined) return undefined;
+    return async (view: {
+      readonly projectId: string;
+      readonly remotePort: number;
+      readonly grantId?: string | undefined;
+    }): Promise<RemoteOpenOutcome> => {
+      if (view.grantId === undefined) {
+        return { kind: "refused", message: "That preview has no relay grant." };
+      }
+      const credential = (await registry.get(host.hostId))?.credential;
+      const connection = host.bridge.connection();
+      if (credential === undefined || connection === undefined) {
+        return {
+          kind: "refused",
+          message: `Can't reach ${host.hostName}. Check that it's on and on the same network.`,
+        };
+      }
+      const deviceKey = createPairingDeviceKeyAdapter(deviceKeyStore, credential.keyId);
+      return opener.openServerProjectPreview(
+        {
+          hostId: host.hostId,
+          hostName: host.hostName,
+          origin: host.origin,
+          issueSession: () => connection.issueServerProxySession(),
+          sign: (payload) => deviceKey.sign(payload),
+          ...(pairedComputerFetch === undefined || !isRemotePairingOrigin(host.origin)
+            ? {}
+            : { fetch: pairedComputerFetch }),
+        },
+        {
+          projectId: view.projectId,
+          remotePort: view.remotePort,
+          grantId: view.grantId,
+        },
+        "octant-browser",
+      );
+    };
+  }, [runningServicesRemoteHost, remoteServerLiveOpener, federation, pairedComputerFetch]);
   useEffect(() => {
     if (hosts.length === 0) return;
     const result = preselectCreateHost({
@@ -8549,6 +8593,9 @@ function LaunchedShell(
         controller.closeSettings();
         void openDraftInKnownProject(project.id, project.mode ?? "code", project.name);
       }}
+      {...(openRelayedServerProjectPreview === undefined
+        ? {}
+        : { onOpenRelayedServerProjectPreview: openRelayedServerProjectPreview })}
       projectTerminalClient={projectTerminalClient}
       projectActionStoragePrefix={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:server-settings`}
       actions={actions}

@@ -264,7 +264,7 @@ export * from "./browserCredentialUsePolicy";
 
 export * from "./browserPageScriptPolicy";
 
-export * from "./ownerBrowserPolicy";
+export * from "./pairedBrowserPolicy";
 export * from "./listenerKeyTransition";
 export * from "./routineSchedule";
 export * from "./turnActivityTiming";
