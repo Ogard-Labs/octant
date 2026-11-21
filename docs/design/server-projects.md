@@ -917,6 +917,22 @@ The effective local URL and remote port are visible. Where a paired Octant
 host already owns the dev server, use its existing paired-host preview. An SSH
 alias is not evidence of a paired-host identity.
 
+The panel lists what the SSH login serves from the Project's folder: the
+login's own listening TCP sockets, read on the server with `lsof` or `ss` over
+the pinned connection, kept when the process works inside the folder, with only
+the port and the process's short name returned (never a command line or another
+login's process). **Preview** on a row starts the preview for that port. Only a
+local window reads the list, under the same rule as starting a preview, and a
+server with neither tool says so.
+
+The forward is raw TCP, so any service works, not only web pages: a database on
+the server is reached at the local address with its own client. The local
+address is `127.0.0.1` on this computer, and the panel says who can reach it
+(maintainer decision, 2026-11-20): agents' guarded tool commands can't, since
+Octant's egress proxy refuses loopback unless the person adds a `localServices`
+grant for that port and thread; a Full access thread, and a provider runtime not
+routed through the proxy, can, as they can reach any local service.
+
 The plain SSH path owns a private loopback TCP listener and at most eight
 concurrent, dedicated `ssh -W` stdio streams. This carries HTTP and WebSocket
 upgrades unchanged. It uses no shared command socket, starts no remote program,

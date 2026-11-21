@@ -11,9 +11,12 @@ import {
   ServerProjectsView,
   ServerPreviewResult,
   ServerPreviewView,
+  ServerProjectListenerList,
   type ServerPreviewCommand,
 } from "@octant/contracts/server-projects";
 import { bindFetchPort } from "./bindFetchPort";
+
+const SERVER_PROJECT_LISTENERS_PATH = "/api/server-project-listeners";
 
 /**
  * The Code Projects bound to a folder on one of the person's registered
@@ -32,6 +35,8 @@ export interface ServerProjectsClient {
   check?(input: RemoteSetupCheckInput, signal?: AbortSignal): Promise<RemoteSetupCheckResult>;
   previewRead?(projectId: string): Promise<ServerPreviewView | null>;
   previewCommand?(command: ServerPreviewCommand): Promise<ServerPreviewResult>;
+  /** The TCP ports the login serves from the Project's folder on its server; a window on this computer only. */
+  listeners?(projectId: string): Promise<ServerProjectListenerList>;
   /** Machines in the person's cloud account; admitted for local windows and person-paired devices. */
   cloudMachinesRead?(signal?: AbortSignal): Promise<CloudMachinesView>;
   cloudMachinesCommand?(command: CloudMachinesCommand): Promise<CloudMachinesCommandResult>;
@@ -119,6 +124,14 @@ export function createServerProjectsClient(
         await send(
           { method: "POST", body: JSON.stringify(command) },
           "/api/server-project-preview",
+        ),
+      );
+    },
+    async listeners(projectId) {
+      return decodeHostAnswer(ServerProjectListenerList)(
+        await send(
+          { method: "GET" },
+          `${SERVER_PROJECT_LISTENERS_PATH}?projectId=${encodeURIComponent(projectId)}`,
         ),
       );
     },
