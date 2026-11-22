@@ -98,9 +98,13 @@ describe("drawn design asset references", () => {
           '<p>Example: src="octant-asset:in-text"</p>',
           '<img alt="Example: src=octant-asset:in-alt" src="octant-asset:shown">',
           '<a title="url(octant-asset:in-title)" href="#home">Home</a>',
+          // A backslash does not escape a quote in HTML: the comment after this still hides.
+          '<p title="C:\\">Drive</p><!-- <img src=octant-asset:old> -->',
+          // A custom element named like a script holds HTML.
+          '<script-preview><code>// Example</code><img src="octant-asset:in-custom"></script-preview>',
         ].join(""),
         "html",
       ),
-    ).toEqual(["shown"]);
+    ).toEqual(["shown", "in-custom"]);
   });
 });

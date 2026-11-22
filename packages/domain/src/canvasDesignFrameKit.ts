@@ -787,7 +787,9 @@ function scriptComments(text: string, start: number, end: number, into: Array<[n
   }
 }
 
-const RAW_TEXT_OPEN = /<(style|script)\b[^>]*>/iy;
+// The element name ends at a tag delimiter: `<script-preview>` is a custom
+// element whose children are HTML, not a script.
+const RAW_TEXT_OPEN = /<(style|script)(?=[\t\n\f\r />])[^>]*>/iy;
 const TAG_NAME = /<[A-Za-z][^\s/>]*/y;
 const ATTRIBUTE = /[\s/]*([^\s=/>][^\s=>]*)(?:\s*=\s*("[^"]*"?|'[^']*'?|[^\s>]*))?/y;
 /** Attributes whose value a browser loads as an image. */
