@@ -206,6 +206,8 @@ export interface RemoteRequestRegistrationPort {
   readonly deviceId: string;
   readonly sessionIdDigest: string;
   readonly cancel: () => void;
+  /** The request's own abort signal, which names it to `cancelByDevice`'s exception. */
+  readonly request?: AbortSignal;
 }
 
 export interface RemoteRequestRegistryPort {
@@ -214,7 +216,11 @@ export interface RemoteRequestRegistryPort {
     canceled: number;
     cancelHookFailures: number;
   };
-  readonly cancelByDevice: (input: { readonly hostId: string; readonly deviceId: string }) => {
+  readonly cancelByDevice: (input: {
+    readonly hostId: string;
+    readonly deviceId: string;
+    readonly exceptRequest?: AbortSignal;
+  }) => {
     canceled: number;
     cancelHookFailures: number;
   };
@@ -619,36 +625,45 @@ export function createRemoteHttpAuthentication(
         options.proofService,
         route,
       );
-      // Who let the device on, and its level, are read from the host's own
-      // record at each request, never from the session or the client. Without
-      // the port the principal carries no admission and stays held to the
-      // catalogue.
-      const handoff = { ...verified, principal: markAdmission(verified.principal) };
-
       // S1: Create the registry abort controller before registration. The
       // combined signal merges client-disconnect (request.signal) with the
       // registry cancellation so revoke/rotate during an in-flight dispatch
-      // aborts the handler synchronously, not just the response stream.
+      // aborts the handler synchronously, not just the response stream. It is
+      // also this request's identity in the registry, so a change the request
+      // itself makes can end the device's other work and leave its own reply.
       const registryAbort = new AbortController();
+      const combinedSignal = combineAbortSignals(request.signal, registryAbort.signal);
       const sessionIdDigest = sha256Hex(sessionId);
       const isSelfServiceRoute = route !== undefined && SELF_SERVICE_ROUTE_IDS.has(route.id);
       const isOwnDeviceRoute = route?.id === REMOTE_AUTH_ROUTE_IDS.device;
       const isPushTokenRoute = route !== undefined && PUSH_TOKEN_ROUTE_IDS.has(route.id);
 
-      if (options.requestRegistry !== undefined && handoff.principal.kind === "remote-device") {
-        const remotePrincipal = handoff.principal;
+      if (options.requestRegistry !== undefined && verified.principal.kind === "remote-device") {
+        const remotePrincipal = verified.principal;
         try {
           registryRelease = options.requestRegistry.register({
             hostId: remotePrincipal.hostId,
             deviceId: remotePrincipal.deviceId,
             sessionIdDigest,
             cancel: () => registryAbort.abort(),
+            request: combinedSignal,
           });
         } catch {
           // Registry capacity exhausted — fail closed.
           throw new RemoteHttpAuthFailure(503, "unavailable");
         }
       }
+
+      // Read again once the body has arrived and the request is registered: a
+      // pause or a level change made while a body was still uploading found no
+      // registry entry to cancel, so it is judged here instead. From here on
+      // either change cancels this request through its entry.
+      if (options.remoteAccessPaused?.() === true) throw pausedFailure();
+      // Who let the device on, and its level, are read from the host's own
+      // record at each request, never from the session or the client. Without
+      // the port the principal carries no admission and stays held to the
+      // catalogue.
+      const handoff = { ...verified, principal: markAdmission(verified.principal) };
 
       // F2: Revalidate the session immediately before dispatch/effect to close
       // the verify-vs-revoke TOCTOU. A session revoked between proof verification
@@ -694,7 +709,6 @@ export function createRemoteHttpAuthentication(
       // S1: Bind the combined client-disconnect + registry abort signal into
       // the handoff request before dispatch. The handler observes this signal
       // and must stop work when it aborts.
-      const combinedSignal = combineAbortSignals(request.signal, registryAbort.signal);
       const dispatchHandoff: RemoteClientPrincipalHandoff = {
         ...handoff,
         request: bindAbortSignal(handoff.request, combinedSignal),

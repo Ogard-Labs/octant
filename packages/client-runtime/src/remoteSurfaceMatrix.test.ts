@@ -184,6 +184,28 @@ describe("what a session that acts as the host's own person reaches", () => {
     ).toEqual(["chat", "browser"]);
   });
 
+  it("lets a device paired Read only watch every surface and act on none", () => {
+    const readOnly = { actsAsHostPerson: false, accessLevel: "read-only" as const };
+    expect(listRemoteThreadSurfacesByReach("interactive", readOnly)).toEqual([]);
+    expect(
+      listRemoteThreadSurfacesByReach("read-only", readOnly).map((surface) => surface.id),
+    ).toEqual(["chat", "browser", "terminal", "simulator", "canvas", "preview"]);
+    // Sending a turn is not watching, so the modes' composers are not offered.
+    expect(
+      listRemoteShellSurfacesByAvailability("remote", readOnly).map((surface) => surface.id),
+    ).toEqual(["preview", "provider-models", "settings-read"]);
+  });
+
+  it("gives a device paired at Approve and steer what the catalogue gives a restricted session", () => {
+    const steer = { actsAsHostPerson: false, accessLevel: "approve-and-steer" as const };
+    expect(
+      listRemoteThreadSurfacesByReach("interactive", steer).map((surface) => surface.id),
+    ).toEqual(["chat", "browser"]);
+    expect(listRemoteShellSurfacesByAvailability("remote", steer)).toEqual(
+      listRemoteShellSurfacesByAvailability("remote", restricted),
+    );
+  });
+
   it("reads the session's standing from the host's own-device answer and nothing else", async () => {
     const device = {
       deviceId: "22222222-2222-4222-8222-222222222222",

@@ -90,11 +90,14 @@ export interface LocalDeviceAdministrationPort {
     readonly deviceId: string;
     readonly accessLevel: DeviceAccessLevel;
     readonly actor: EventActor;
+    /** The device request making the change, left to finish its reply while the rest ends. */
+    readonly askingRequest?: AbortSignal;
   }) => { readonly previousLevel: DeviceAccessLevel; readonly accessLevel: DeviceAccessLevel };
   readonly remoteAccessPaused: () => boolean;
   readonly setRemoteAccessPaused: (input: {
     readonly paused: boolean;
     readonly actor: EventActor;
+    readonly askingRequest?: AbortSignal;
   }) => boolean;
 }
 
@@ -179,11 +182,19 @@ export function createLocalDeviceAdministrationRouteHandler(
     const control = typeof options.control === "function" ? options.control() : options.control;
     // The device named as a change's actor, and the device a pairing request
     // may not be its own; absent for the host's own caller.
-    let asking: { readonly deviceId: string; readonly actor: EventActor } | undefined;
+    let asking:
+      | {
+          readonly deviceId: string;
+          readonly actor: EventActor;
+          /** This request, which a change it makes leaves running to reply. */
+          readonly request: AbortSignal | undefined;
+        }
+      | undefined;
     if (deviceRoute !== undefined) {
       // The bound principal is the whole authority here: the product dispatch
       // set it from the device's verified session.
-      const principal = readPrincipalRouteContext(request)?.principal;
+      const context = readPrincipalRouteContext(request);
+      const principal = context?.principal;
       if (
         principal === undefined ||
         principal.kind !== "remote-device" ||
@@ -196,6 +207,7 @@ export function createLocalDeviceAdministrationRouteHandler(
       asking = {
         deviceId: String(principal.deviceId),
         actor: eventActorForPrincipal(principal),
+        request: context?.abortSignal,
       };
     } else {
       if (options.desktopBridgeSecret === undefined || control === undefined) {
@@ -225,6 +237,7 @@ export function createLocalDeviceAdministrationRouteHandler(
     // Level and pause changes always name who made them: the asking device,
     // or the local person at a window on the host.
     const changedBy = asking?.actor ?? eventActorForPrincipal(undefined);
+    const askingRequest = asking?.request === undefined ? {} : { askingRequest: asking.request };
 
     if (route === ROUTES.pending) {
       if (request.method !== "GET") return failure("invalid", 400);
@@ -315,7 +328,13 @@ export function createLocalDeviceAdministrationRouteHandler(
         case ROUTES.accessLevel: {
           const body = decodeAccessLevelBody(decoded.value);
           return Response.json(
-            { change: control.setDeviceAccessLevel({ ...body, actor: changedBy }) },
+            {
+              change: control.setDeviceAccessLevel({
+                ...body,
+                actor: changedBy,
+                ...askingRequest,
+              }),
+            },
             { status: 201 },
           );
         }
@@ -327,7 +346,13 @@ export function createLocalDeviceAdministrationRouteHandler(
           });
           if (decision.kind === "deny") return failure("unauthorized", 401);
           return Response.json(
-            { paused: control.setRemoteAccessPaused({ paused: body.paused, actor: changedBy }) },
+            {
+              paused: control.setRemoteAccessPaused({
+                paused: body.paused,
+                actor: changedBy,
+                ...askingRequest,
+              }),
+            },
             { status: 201 },
           );
         }
