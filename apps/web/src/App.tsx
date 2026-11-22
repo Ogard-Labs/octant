@@ -384,6 +384,7 @@ import {
 } from "./onboarding/useFirstRunOnboardingController";
 import { projectPullRequestKey } from "./code/projectPullRequestKey";
 import { OctantToast } from "./ui/base/OctantToast";
+import { describeNotice, useChangeNotices } from "./host/ChangeNotices";
 import { OctantDialogPresence } from "./ui/base/OctantDialogPresence";
 import { useProjectController } from "./projects/useProjectController";
 import { countTodos, todoListIsReadOnly } from "./todos/todoListModel";
@@ -1956,6 +1957,14 @@ function LaunchedShell(
     finishedReceiptClient,
   } = launchedClients;
   const machineChanges = useMachineChangeFeed(machineChangeClient);
+  // A paired device or an agent raised a thread's level or changed a
+  // provider key: the newest is told here, and Settings › Remote access
+  // holds Undo and revoke for each.
+  const changeNotices = useChangeNotices(
+    launchedClients.accessActivityClient,
+    machineChanges.changeNotices,
+  );
+  const newestChangeNotice = changeNotices.notices[0];
   // Which bundled plugins (GitHub, the board) the person has switched on,
   // re-read when the host reports an extension change.
   const firstPartyPluginsEffective = useHostFirstPartyPluginsEffective(
@@ -9047,6 +9056,10 @@ function LaunchedShell(
         }
       >
         <SettingsContainer
+          accessActivityRevisions={{
+            activity: machineChanges.accessActivity,
+            notices: machineChanges.changeNotices,
+          }}
           onOpenServerProject={(project) => {
             controller.closeSettings();
             void openDraftInKnownProject(project.id, project.mode ?? "code", project.name);
@@ -9917,8 +9930,26 @@ function LaunchedShell(
       updateReadyNotice ||
       quitHintVisible ||
       hostMemoryNotice !== undefined ||
-      hostRestartNotice !== undefined ? (
+      hostRestartNotice !== undefined ||
+      newestChangeNotice !== undefined ? (
         <div className="toast-stack">
+          {newestChangeNotice === undefined ? null : (
+            <OctantToast
+              action={{
+                label: "Review",
+                onSelect: () => void controller.openSettings({ section: "remote-access" }),
+              }}
+              detail={
+                newestChangeNotice.kind === "provider-key-replaced"
+                  ? "Revoke who did it in Settings › Remote access. A replaced key has no Undo."
+                  : "Undo it or revoke who did it in Settings › Remote access."
+              }
+              key={newestChangeNotice.noticeId}
+              onDismiss={() => void changeNotices.act("dismiss", newestChangeNotice.noticeId)}
+              title={describeNotice(newestChangeNotice)}
+              tone="warning"
+            />
+          )}
           {hostRestartNotice === undefined ? null : (
             <OctantToast
               {...(hostRestartNotice.open === undefined

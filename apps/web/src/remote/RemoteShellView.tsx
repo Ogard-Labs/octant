@@ -25,6 +25,7 @@ import { RemoteDeviceSelfPanel } from "./RemoteDeviceSelfPanel";
 import {
   createRemoteAgentGrantClient,
   createRemoteExtensionClient,
+  createRemoteAccessActivityClient,
   createRemoteNewDeviceAlertsClient,
   createRemotePairedDeviceAdministrationClient,
   createRemoteProductClients,
@@ -32,6 +33,7 @@ import {
   createRemoteProviderOAuth,
 } from "./remoteProductClients";
 import { NewDeviceAlerts } from "../host/NewDeviceAlerts";
+import { ChangeNotices } from "../host/ChangeNotices";
 import { RemoteHostSettings } from "./RemoteHostSettings";
 import { RemoteWorkspace } from "./RemoteWorkspace";
 import { useRemoteSession } from "./useRemoteSession";
@@ -105,6 +107,10 @@ export function RemoteShellView(props: RemoteShellViewProps) {
   );
   const newDeviceAlerts = useMemo(
     () => createRemoteNewDeviceAlertsClient(props.bridge),
+    [props.bridge],
+  );
+  const accessActivity = useMemo(
+    () => createRemoteAccessActivityClient(props.bridge),
     [props.bridge],
   );
   const providerKeys = useMemo(
@@ -213,6 +219,8 @@ export function RemoteShellView(props: RemoteShellViewProps) {
       ) : null}
 
       <NewDeviceAlerts client={newDeviceAlerts} />
+      {/* The host answers only a device paired at Full; any other shows none. */}
+      {standing.actsAsHostPerson ? <ChangeNotices client={accessActivity} /> : null}
 
       <ContinuityScreenContext.Provider
         value={{

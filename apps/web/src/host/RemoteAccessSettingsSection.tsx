@@ -1,5 +1,8 @@
 import type { NewDeviceAlertsClient } from "@octant/client-runtime/new-device-alerts-client";
 import { NewDeviceAlerts } from "./NewDeviceAlerts";
+import { AccessActivityList } from "./AccessActivityList";
+import { ChangeNotices } from "./ChangeNotices";
+import type { AccessActivityClient } from "@octant/client-runtime/access-activity-client";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import {
   buildPairingCode,
@@ -77,6 +80,14 @@ export interface RemoteAccessSettingsSectionProps {
   readonly onPairedDeviceLifetimeChange?: ((lifetime: PairedDeviceLifetime) => void) | undefined;
   /** Alerts for devices that paired with this host, which every connected device is shown. */
   readonly newDeviceAlerts?: NewDeviceAlertsClient | undefined;
+  readonly accessActivity?: AccessActivitySettings | undefined;
+}
+
+/** Settings' access activity and change notices, refreshed when the change feed moves. */
+export interface AccessActivitySettings {
+  readonly client: AccessActivityClient;
+  readonly activityRevision: number;
+  readonly noticesRevision: number;
 }
 
 const PAIRED_DEVICE_LIFETIME_LABELS: Readonly<Record<PairedDeviceLifetime, string>> = {
@@ -150,6 +161,7 @@ export function RemoteAccessSettingsSection({
   pairedDeviceLifetime,
   onPairedDeviceLifetimeChange,
   newDeviceAlerts,
+  accessActivity,
   projectNames,
 }: RemoteAccessSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
@@ -869,6 +881,22 @@ export function RemoteAccessSettingsSection({
               />
             </SettingRow>
           </div>
+        </SettingsSection>
+      )}
+
+      {accessActivity === undefined ? null : (
+        <SettingsSection
+          description="Devices added, removed or given another level, newest first, and who did it. Changes a paired device or an agent made to a thread's level or a provider key are listed above it, with Undo."
+          title="Access activity"
+        >
+          <ChangeNotices
+            changeRevision={accessActivity.noticesRevision}
+            client={accessActivity.client}
+          />
+          <AccessActivityList
+            changeRevision={accessActivity.activityRevision}
+            client={accessActivity.client}
+          />
         </SettingsSection>
       )}
 

@@ -1,4 +1,5 @@
 import type { NewDeviceAlertsClient } from "@octant/client-runtime/new-device-alerts-client";
+import type { AccessActivitySettings } from "../host/RemoteAccessSettingsSection";
 import { SandboxRestrictionsSettings } from "../settings/SandboxRestrictionsSettings";
 import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-restrictions-client";
 import type { SandboxSettingsScope } from "../settings/SandboxRestrictionsSettings";
@@ -303,6 +304,8 @@ export interface SettingsViewProps {
   readonly protectedFilesClient?: ProtectedFilesClient;
   /** The host's new-device alerts, read and cleared from this window. */
   readonly newDeviceAlertsClient?: NewDeviceAlertsClient;
+  /** Access activity and change notices, with the change feed's revisions for each. */
+  readonly accessActivity?: AccessActivitySettings;
   readonly blockedToolsClient?: BlockedToolsClient;
   readonly sandboxRestrictionsClient?: SandboxRestrictionsClient;
   readonly sandboxInitialScope?:
@@ -1554,6 +1557,7 @@ function ActiveSectionContent({
             projectNames={props.actProjectNames ?? NO_PROJECT_NAMES}
             pairedDeviceLifetime={props.settings.pairedDeviceLifetime}
             newDeviceAlerts={props.newDeviceAlertsClient}
+            accessActivity={props.accessActivity}
           />
           {agentAccess}
         </div>
