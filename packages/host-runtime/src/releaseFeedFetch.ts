@@ -67,7 +67,11 @@ export function resolveUpdateFeedBaseUrl(
       `${UPDATE_FEED_BASE_URL_ENVIRONMENT_VARIABLE} must be an https URL; Octant will not check for updates over an insecure endpoint.`,
     );
   }
-  return configured.replace(/\/+$/, "");
+  // Trailing slashes are trimmed by index rather than a `/+$` pattern, which
+  // backtracks polynomially on a long run of slashes (flagged by CodeQL).
+  let end = configured.length;
+  while (end > 0 && configured[end - 1] === "/") end -= 1;
+  return configured.slice(0, end);
 }
 
 export function isHttpsUrl(value: string): boolean {
