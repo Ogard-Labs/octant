@@ -2778,6 +2778,167 @@ describe("Agent Plugin MCP session manager", () => {
     });
   });
 
+  describe("a turn with two connectors selected while one call's approval waits", () => {
+    const minute = 60_000;
+
+    /**
+     * Two connectors selected for one Chat turn: the first's call waits for
+     * its approval, the second answers unasked. Both sessions open together,
+     * so the second's idle period runs out while the first's approval waits.
+     */
+    async function twoConnectors() {
+      const initializations = new Map<string, number>();
+      const toolCalls = new Map<string, number>();
+      const answers: Array<(approved: boolean) => void> = [];
+      const fetchImpl = (async (input, init) => {
+        const server = String(input).endsWith("/second") ? "second" : "first";
+        if ((init?.method ?? "GET") === "DELETE") return new Response(null, { status: 204 });
+        const body = JSON.parse(String(init?.body ?? "{}")) as { method?: string; id?: number };
+        if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+        if (body.method === "initialize")
+          initializations.set(server, (initializations.get(server) ?? 0) + 1);
+        if (body.method === "tools/call") toolCalls.set(server, (toolCalls.get(server) ?? 0) + 1);
+        return Response.json(
+          {
+            jsonrpc: "2.0",
+            id: body.id,
+            result:
+              body.method === "tools/list"
+                ? { tools: [{ name: "echo", inputSchema: { type: "object" } }] }
+                : body.method === "tools/call"
+                  ? { content: [{ type: "text", text: `${server} echoed` }] }
+                  : {
+                      protocolVersion: "2025-03-26",
+                      capabilities: {},
+                      serverInfo: { name: server, version: "1.0.0" },
+                    },
+          },
+          { headers: { "mcp-session-id": server } },
+        );
+      }) as typeof fetch;
+      const manager = new AgentPluginMcpSessionManager({
+        store: {
+          contentRoot: () => "/tmp/plugin",
+          pluginDataRoot: () => "/tmp/plugin-data",
+          readVerifiedConfiguration: async () =>
+            JSON.stringify({
+              $schema: AGENT_PLUGINS_MCP_SCHEMA,
+              mcpServers: {
+                first: { type: "streamable-http", url: "https://example.test/first" },
+                second: { type: "streamable-http", url: "https://example.test/second" },
+              },
+            }),
+        },
+        fetch: fetchImpl,
+        authorizeToolCall: (call: { readonly serverName: string }) =>
+          call.serverName === "second"
+            ? Promise.resolve(true)
+            : new Promise<boolean>((resolve) => {
+                answers.push(resolve);
+              }),
+        recordExternalContentIngestion: () => ({
+          kind: "recorded",
+          taint: { externalContentIngested: true, ingestedSources: ["mcp-tool"] },
+        }),
+      } as never);
+      const single = effectiveMcpSnapshot("mcp-first", "first", {
+        mode: "chat",
+        threadId: "15000000-0000-4000-8000-000000000004" as never,
+      });
+      const effective: ExtensionEffectiveSnapshot = {
+        ...single,
+        packages: single.packages.map((pkg) => {
+          const first = pkg.components[0];
+          if (first === undefined) throw new Error("The fixture has no first component.");
+          return {
+            ...pkg,
+            components: [
+              first,
+              {
+                ...first,
+                component: { ...first.component, id: "mcp-second" as never, displayName: "second" },
+              },
+            ],
+          };
+        }),
+      };
+      await manager.reconcile(effective);
+      const packageId = String(effective.packages[0]?.packageId);
+      // The tool names the turn's tool set was built with, at its start.
+      const names = new Map(
+        ["first", "second"].map((server) => [
+          server,
+          manager.toolDefinitionsFor(packageId, `mcp-${server}`, effective.scope)[0]?.name ??
+            "missing-tool",
+        ]),
+      );
+      const invoke = (server: string) =>
+        manager.createToolExecutionPort().execute({
+          windowId: "17000000-0000-4000-8000-000000000097" as never,
+          thread: { id: String(effective.scope.threadId) } as never,
+          name: names.get(server) ?? "missing-tool",
+          inputJson: "{}",
+        });
+      const firstCall = invoke("first");
+      await vi.advanceTimersByTimeAsync(0);
+      const answer = answers[0];
+      if (answer === undefined) throw new Error("The first call never asked for approval.");
+      return {
+        manager,
+        firstCall,
+        answer,
+        invoke,
+        initializations: (server: string) => initializations.get(server) ?? 0,
+        toolCalls: (server: string) => toolCalls.get(server) ?? 0,
+      };
+    }
+
+    it("reconnects the other connector once when the turn calls it after its idle period ran out", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const fixture = await twoConnectors();
+        await vi.advanceTimersByTimeAsync(6 * minute);
+        // The second connector idled out while the first's approval waited.
+        expect(fixture.manager.sessions()).toHaveLength(1);
+        fixture.answer(true);
+        expect((await fixture.firstCall).isError).not.toBe(true);
+
+        const second = await fixture.invoke("second");
+        expect(second.isError).not.toBe(true);
+        expect(fixture.initializations("second")).toBe(2);
+        expect(fixture.toolCalls("second")).toBe(1);
+        expect(fixture.manager.sessions()).toHaveLength(2);
+        await fixture.manager.drainAll();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("still refuses a call to a connector whose authentication changed after it idled out", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const fixture = await twoConnectors();
+        await vi.advanceTimersByTimeAsync(6 * minute);
+        await fixture.manager.invalidateAuthentication(
+          "15000000-0000-4000-8000-000000000001",
+          "mcp-second",
+        );
+
+        expect(await fixture.invoke("second")).toMatchObject({
+          isError: true,
+          result: { error: "extension-tool-unavailable" },
+        });
+        expect(fixture.initializations("second")).toBe(1);
+        expect(fixture.toolCalls("second")).toBe(0);
+        fixture.answer(false);
+        await fixture.firstCall;
+        await fixture.manager.drainAll();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it("connects effective servers, exposes tools, and isolates sibling failures", async () => {
     const contentRoot = await mkdtemp(join(tmpdir(), "octant-agent-plugins-content-"));
     const pluginDataRoot = await mkdtemp(join(tmpdir(), "octant-agent-plugins-data-"));

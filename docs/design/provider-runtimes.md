@@ -528,9 +528,12 @@ approval the call asks before it is dispatched waits for its person, and runs
 on from where it stood once the person answers. An unanswered approval waits
 in Needs you and never turns into a refusal by timing out; Stop still ends the
 wait. For the same reason an MCP session with a call waiting for approval
-does not idle out under it, while an authentication change still retires the
-session and refuses the call. Work and Code have no per-call deadline; their
-app-managed calls pause the stalled-turn limit instead.
+does not idle out under it, and another connector the turn selected that idled
+out meanwhile reconnects once when the turn next calls it, since the turn's
+tool set was fixed at its start. An authentication change or an authority
+reconciliation still retires a session and refuses the call. Work and Code
+have no per-call deadline; their app-managed calls pause the stalled-turn
+limit instead.
 
 ### Loop detection and provider tool inputs
 
