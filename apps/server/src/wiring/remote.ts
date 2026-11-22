@@ -136,7 +136,7 @@ import {
 import { stopAgentTurn } from "@octant/cli/agent-tools";
 import { createHubOwnerRouteHandler } from "../hub/hubOwnerRoutes";
 import { createNewDeviceAlertRouteHandler } from "../hub/newDeviceAlertRoutes";
-import { PairedDeviceAlerts } from "../remote/pairedDeviceAlerts";
+import { PairedDeviceAlerts, type PairedDevice } from "../remote/pairedDeviceAlerts";
 import { OwnerCredentialCopyService } from "../hub/ownerCredentialCopy";
 import { createProviderCredentialCopyBroker } from "../hub/ownerCredentialBroker";
 import { createOwnerPostureHost } from "../hub/ownerPostureHost";
@@ -604,16 +604,7 @@ export function wireRemote(deps: RemoteDependencies) {
       journal: persistence.journal,
       registrationLifetime: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).pairedDeviceLifetime,
-      onDevicePaired: (device) => {
-        const alert = pairedDeviceAlerts.raise(device);
-        deps.threadNotifications.notifyDeviceJoined({
-          alertId: String(alert.alertId),
-          deviceName: alert.name,
-          ...(alert.privateAddress === undefined ? {} : { privateAddress: alert.privateAddress }),
-          joined: "host",
-          newDeviceId: alert.deviceId,
-        });
-      },
+      onDevicePaired: (device) => alertNewDevice(device),
       onDeviceRemoved: (deviceId) => pairedDeviceAlerts.dropDevice(deviceId),
       hostId: identity.hostId,
       displayName: identity.displayName,
@@ -743,6 +734,18 @@ export function wireRemote(deps: RemoteDependencies) {
     uuid: randomUUID,
     now: Date.now,
   });
+  // A device this host paired, or a member's window it admitted as the hub:
+  // every device connected here is told, and every phone paired here pushed.
+  const alertNewDevice = (device: PairedDevice): void => {
+    const alert = pairedDeviceAlerts.raise(device);
+    deps.threadNotifications.notifyDeviceJoined({
+      alertId: String(alert.alertId),
+      deviceName: alert.name,
+      ...(alert.privateAddress === undefined ? {} : { privateAddress: alert.privateAddress }),
+      joined: "host",
+      newDeviceId: alert.deviceId,
+    });
+  };
   let ownerBrowserAuthorityChanged: (() => void) | undefined;
   const writeHubMembership = createHubMembershipJournal({
     journal: persistence.journal,
@@ -810,6 +813,7 @@ export function wireRemote(deps: RemoteDependencies) {
     pairing: hubPairing,
     transport: hubTransport,
     record: recordHubMembership,
+    onWindowAdmitted: alertNewDevice,
     now: Date.now,
   });
   // Making a registered server an Octant computer: installed over its SSH

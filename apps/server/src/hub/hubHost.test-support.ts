@@ -88,6 +88,7 @@ import {
 } from "./threadMoveService";
 import { createThreadMoveStateStore } from "./threadMoveStateStore";
 import { HUB_ACT_WITHDRAWN_REASON } from "../remoteCredentialLifecycleService";
+import { PairedDeviceAlerts } from "../remote/pairedDeviceAlerts";
 
 /** What a test host's services did for applied offers. */
 export interface ProvisionedByOffer {
@@ -184,6 +185,8 @@ export interface HubTestHost {
   readonly administration: LocalDeviceAdministrationPort;
   readonly gateway: RemoteGateway;
   readonly hub: HubService;
+  /** The new-device alerts this host raised for devices it paired or admitted itself. */
+  readonly pairedDeviceAlerts: PairedDeviceAlerts;
   readonly spoke: SpokeLinkService;
   readonly failover: FailoverService;
   /** The hub side of the wake service, and what a standing-in standby wakes with. */
@@ -423,6 +426,15 @@ export async function startHubTestHost(input: {
         administration.listDevices().find((device) => device.deviceId === deviceId)?.origin,
     };
   };
+  const pairedDeviceAlerts = new PairedDeviceAlerts({
+    state,
+    journal,
+    connection,
+    hostId: () => String(hostId),
+    localActorId: randomUUID(),
+    uuid: randomUUID,
+    now: Date.now,
+  });
   const hub = new HubService({
     state,
     rosterKey: createRosterSigningKeyStore(directory),
@@ -432,6 +444,9 @@ export async function startHubTestHost(input: {
     transport: input.hubTransport?.(transport) ?? transport,
     record: (change) => {
       records.push(change);
+    },
+    onWindowAdmitted: (device) => {
+      pairedDeviceAlerts.raise(device);
     },
     now: Date.now,
   });
@@ -881,6 +896,7 @@ export async function startHubTestHost(input: {
       signing: identity.signing,
       webAssets: () => Promise.resolve(new Response("web", { status: 200 })),
       hubLink,
+      onDeviceRemoved: (deviceId) => pairedDeviceAlerts.dropDevice(deviceId),
       ...(input.productDispatch === undefined ? {} : { productDispatch: input.productDispatch }),
       serve,
       clock: isoNow,
@@ -944,6 +960,7 @@ export async function startHubTestHost(input: {
     administration,
     gateway,
     hub,
+    pairedDeviceAlerts,
     spoke,
     failover,
     wake,
