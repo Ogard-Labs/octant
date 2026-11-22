@@ -3196,7 +3196,7 @@ not bypass its settings. The selected target and routing decisions remain
 visible. Off, paused, and unauthorized parents cannot start helpers. A parent
 that read outside content can: at Full access delegation is not refused and
 the mark follows into the child; below Full access the person is asked once
-per thread and their yes is journaled for the thread
+per thread, in every mode, and their yes is journaled for the thread
 (`thread.standing-answer-recorded@1`, erased with the thread), so later
 helpers start unasked and a waiting helper is kept; Plan stays refused
 (maintainer decision, 2026-11-13). The level is the one the turn runs at.
@@ -3337,12 +3337,13 @@ child cannot continue, and unsupported continuation never becomes a silent
 fresh start. The prior result must first reach its parent or be explicitly
 collected; a refused follow-up keeps that result available. Status reads do not
 consume replies. Only complete replies that fit the tool response bound are
-consumed, by `wait`. A reply `wait` hands back from a child that was itself
-marked marks the parent as having read
-outside content first, as a delivered reply does, because the child may relay
-what it fetched; a mark that cannot be recorded keeps the reply owed
-(maintainer request, 2026-11-12; not built yet: today every child reply marks
-its parent).
+consumed, by `wait`. Under Strict a reply `wait` hands back from a child that
+was itself marked marks the parent as having read outside content first, as a
+delivered reply does, because the child may relay what it fetched; a reply from
+an unmarked child leaves the parent unmarked, and a child whose own mark cannot
+be read counts as marked. Outside Strict every reply `wait` hands back marks the
+parent, which adds no ask there. A mark that cannot be recorded keeps the reply
+owed (maintainer request, 2026-11-12, scoped to Strict on 2026-11-22).
 
 Managed Claude children persist the identity written by the adapter in private,
 purgeable child content, bound to the admitted child and saved session. This

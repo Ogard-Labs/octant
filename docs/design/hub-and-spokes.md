@@ -1589,8 +1589,9 @@ has read outside content meets the same rule as a helper on its own host
 below Full access it needs its person's one answer for the thread, the same
 journaled `delegation` answer (`thread.standing-answer-recorded@1`) a helper on
 A asks for, so one answer covers both kinds of helper; Plan stays refused
-(`parent-tainted`). A Work thread cannot yet ask its person below Full access,
-so there it is still refused, as for a helper on A. B then:
+(`parent-tainted`). A Work thread below Full access asks through the host's
+approval card, as for a helper on A; a Work routine run, which nobody can
+answer, is still refused. B then:
 
 1. checks the peer grant and clamps the request to the smaller of the peer
    grant and B's own Project authority (equal or narrower, as for any child
