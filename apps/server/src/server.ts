@@ -2113,6 +2113,7 @@ export function startOctantServer(
       browserCaptures,
       canvasService,
       imageJobService,
+      evictGeneratedImageScope: (scopeId) => imageRoutes.evictScope(scopeId),
       liveTurns,
       managedWorktreeReceipts,
       movedThreadHistory,
@@ -2559,6 +2560,7 @@ export function startOctantServer(
           }
           browserToolApprovalService?.close();
           serviceOffers.close();
+          imageRoutes.close();
           try {
             stopComputerSettingsWatch();
             stopDesktopLeases();
