@@ -528,23 +528,26 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
           ? "No Code threads on this host yet. Start one here or from the host."
           : "No Code threads on this host yet. Start one from the host; it will appear here."
       }
+      // A device that does not act as the host's person, such as one only the
+      // hub introduced, is offered the form too: the host lists it only the
+      // Code Projects the member's Act item names and refuses a start
+      // anywhere else, so with none named the form draws nothing.
       start={
-        props.actsAsHostPerson ? (
-          <RemoteCodeThreadStart
-            codeClient={props.clients.code}
-            connected={props.connected}
-            controller={controller}
-            {...(props.clients.folderBrowse === undefined
-              ? {}
-              : { folderBrowse: props.clients.folderBrowse })}
-            onCreated={(thread) => {
-              props.onNavigate();
-              setActiveThreadId(thread.id);
-            }}
-            projectClient={props.clients.project}
-            providerGroups={props.providerGroups}
-          />
-        ) : undefined
+        <RemoteCodeThreadStart
+          actsAsHostPerson={props.actsAsHostPerson}
+          codeClient={props.clients.code}
+          connected={props.connected}
+          controller={controller}
+          {...(props.actsAsHostPerson && props.clients.folderBrowse !== undefined
+            ? { folderBrowse: props.clients.folderBrowse }
+            : {})}
+          onCreated={(thread) => {
+            props.onNavigate();
+            setActiveThreadId(thread.id);
+          }}
+          projectClient={props.clients.project}
+          providerGroups={props.providerGroups}
+        />
       }
     >
       {activeThreadId === undefined ? null : (

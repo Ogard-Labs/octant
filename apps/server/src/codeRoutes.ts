@@ -801,14 +801,18 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
     };
 
     // Where a hub-introduced device may start a thread: a Project the member's
-    // Act item names, read at this start. A fork's Project is its source's,
-    // which this route does not read, so a fork from such a device is refused
-    // while this host is in a hub.
+    // Act item names, read at this start. Preparing the Project's checkout and
+    // reading its remotes are the start's first steps, so they are held to the
+    // same item; otherwise such a device could observe any Project's checkout.
+    // A fork's Project is its source's, which this route does not read, so a
+    // fork from such a device is refused while this host is in a hub.
     const hubActStartRefusal = (command: CodeCommand | undefined): string | undefined => {
       const projectId =
         command?.kind === "create-code-thread"
           ? String(command.thread.projectId)
-          : command?.kind === "create-managed-code-thread"
+          : command?.kind === "create-managed-code-thread" ||
+              command?.kind === "prepare-code-project-checkout" ||
+              command?.kind === "get-worktree-remote-facts"
             ? String(command.projectId)
             : command?.kind === "fork-code-thread"
               ? ""
@@ -817,7 +821,8 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
       return hubActRefusal(dependencies.hubActScope?.(), projectId, "start");
     };
 
-    // Answering a thread's approval or question, and Stop, likewise: only in a
+    // Answering a thread's approval or question, sending a turn (a started
+    // thread's first message included), and Stop, likewise: only in a
     // Project the member's Act item names, read at this request. The Project
     // is the thread's own, read under this caller's scope; a thread it cannot
     // read names no Project, so the request is refused while this host is in a
@@ -831,7 +836,9 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           : operation.kind === "cancel-provider-turn" ||
               operation.kind === "force-stop-provider-turn"
             ? "stop"
-            : undefined;
+            : operation.kind === "start-provider-turn"
+              ? "turn"
+              : undefined;
       const scope = dependencies.hubActScope?.();
       if (action === undefined || scope === undefined) return undefined;
       let projectId: string | undefined;
