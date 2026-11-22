@@ -78,6 +78,10 @@ import {
   createNewDeviceAlertsClient,
   type NewDeviceAlertsClient,
 } from "@octant/client-runtime/new-device-alerts-client";
+import {
+  createAccessActivityClient,
+  type AccessActivityClient,
+} from "@octant/client-runtime/access-activity-client";
 import { createBrowserHostRegistryStorage } from "../host/browserHostRegistryStorage";
 import { browserOwnerMergeUnlock, createBrowserGuestStore } from "../host/browserHubGuest";
 import { platformPasskeys } from "../host/ownerPasskey";
@@ -148,6 +152,16 @@ export function createRemoteNewDeviceAlertsClient(
   bridge: RemoteSessionBridge,
 ): NewDeviceAlertsClient {
   return createNewDeviceAlertsClient({
+    baseUrl: REMOTE_CLIENT_BASE_URL,
+    fetch: createRemoteProductFetch({ bridge }),
+  });
+}
+
+/** Access activity and change notices, for a device paired at Full. */
+export function createRemoteAccessActivityClient(
+  bridge: RemoteSessionBridge,
+): AccessActivityClient {
+  return createAccessActivityClient({
     baseUrl: REMOTE_CLIENT_BASE_URL,
     fetch: createRemoteProductFetch({ bridge }),
   });

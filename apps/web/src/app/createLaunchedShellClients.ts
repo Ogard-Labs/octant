@@ -4,6 +4,10 @@ import {
   type NewDeviceAlertsClient,
 } from "@octant/client-runtime/new-device-alerts-client";
 import {
+  createAccessActivityClient,
+  type AccessActivityClient,
+} from "@octant/client-runtime/access-activity-client";
+import {
   createSandboxRestrictionsClient,
   type SandboxRestrictionsClient,
 } from "@octant/client-runtime/sandbox-restrictions-client";
@@ -273,6 +277,7 @@ export interface LaunchedShellClients {
   readonly agentGrantClient: ReturnType<typeof createAgentGrantClient>;
   readonly protectedFilesClient: ProtectedFilesClient;
   readonly newDeviceAlertsClient: NewDeviceAlertsClient;
+  readonly accessActivityClient: AccessActivityClient;
   readonly blockedToolsClient: BlockedToolsClient;
   readonly sandboxRestrictionsClient: SandboxRestrictionsClient;
   readonly archivedWorktreesClient: ArchivedWorktreesClient;
@@ -457,6 +462,7 @@ export function createLaunchedShellClients(
     agentGrantClient: createAgentGrantClient(port),
     protectedFilesClient: createProtectedFilesClient(port),
     newDeviceAlertsClient: createNewDeviceAlertsClient(port),
+    accessActivityClient: createAccessActivityClient(port),
     blockedToolsClient: createBlockedToolsClient(port),
     sandboxRestrictionsClient: createSandboxRestrictionsClient(port),
     archivedWorktreesClient: createArchivedWorktreesClient(port),
