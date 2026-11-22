@@ -14,7 +14,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderToolDefinition,
 } from "@octant/contracts";
-import { Effect, Exit, Fiber, Scope, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, Scope, Stream } from "effect";
 import {
   PROVIDER_CONTEXT_RESTATED,
   renderProviderContextSections,
@@ -3215,6 +3215,42 @@ describe("Codex execution authority and approvals", () => {
     const older = await guardedOnServer("0.168.0");
     expect(Exit.isFailure(older.started)).toBe(true);
     expect(older.thread).toBeUndefined();
+  });
+
+  it("refuses Plan for Codex on a server, whose read-only sandbox cannot deny the login's other sign-ins", async () => {
+    const f = fixture({
+      version: "0.170.0",
+      serverSignIns: { denied: ["/home/build/.claude/.credentials.json"], allowed: [] },
+    });
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      makeCodexDriver(f.options({ platform: "linux" }))
+        .acquire({
+          instanceId,
+          projectRoot,
+          mode: "code",
+          serverPlacement: {
+            serverName: "devbox",
+            start: () => ({ status: "unreachable", message: "Not reached." }),
+            run: async () => ({ status: "unreachable", message: "Not reached." }),
+          },
+        })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    const started = await Effect.runPromiseExit(
+      connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "plan",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    expect(Exit.isFailure(started)).toBe(true);
+    expect(String(Exit.isFailure(started) ? Cause.pretty(started.cause) : "")).toContain(
+      "Plan can't run Codex on devbox",
+    );
+    expect(f.calls.find(({ method }) => method === "thread/start")).toBeUndefined();
   });
 
   it("tells Codex its sandbox has network when the launch took no egress proxy", () => {

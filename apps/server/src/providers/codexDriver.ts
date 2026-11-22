@@ -2929,23 +2929,39 @@ function makeConnection(
       };
     };
     /**
-     * Fails a Guarded or Accept edits session on a server whose Codex cannot
-     * carry the deny paths for the server login's other provider sign-ins (a
-     * release before permission profiles): Codex's built-in workspace sandbox
-     * has no deny field and would leave them readable.
+     * Fails a session on a server whose Codex cannot carry the deny paths for
+     * the server login's other provider sign-ins, rather than leave them
+     * readable. At Guarded and Accept edits that is a release before
+     * permission profiles: Codex's built-in workspace sandbox has no deny
+     * field. Plan always: its built-in read-only sandbox has no deny field
+     * either, and the only profile Octant has measured Codex taking extends
+     * `:workspace`, which can write the folder, so no read-only profile can
+     * carry the list.
      */
     const refuseServerUnprotectedSignIns = (input: {
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly fullAccessSandbox?: boolean;
       readonly strict?: boolean;
-    }) =>
-      serverPlacement !== undefined &&
-      sessionSandbox(input).kind === "native" &&
-      input.fullAccessSandbox !== true &&
-      (input.executionPolicy === "approval-gated" ||
+    }) => {
+      if (
+        serverPlacement === undefined ||
+        sessionSandbox(input).kind !== "native" ||
+        input.fullAccessSandbox === true ||
+        (leasedServerSignIns?.denied.length ?? 0) === 0
+      ) {
+        return Effect.void;
+      }
+      if (input.executionPolicy === "plan") {
+        return Effect.fail(
+          failure(
+            "incompatible",
+            `Plan can't run Codex on ${serverPlacement.serverName}: Codex's read-only sandbox can't keep other providers' sign-ins there out of its reach. Use Guarded instead.`,
+          ),
+        );
+      }
+      return (input.executionPolicy === "approval-gated" ||
         input.executionPolicy === "auto-accept-edits") &&
-      (leasedServerSignIns?.denied.length ?? 0) > 0 &&
-      nativeProfile(input) === undefined
+        nativeProfile(input) === undefined
         ? Effect.fail(
             failure(
               "incompatible",
@@ -2953,6 +2969,7 @@ function makeConnection(
             ),
           )
         : Effect.void;
+    };
     /** Fails a Strict session whose Project holds Codex configuration the person has not allowed. */
     const refuseStrictProjectConfig = (input: {
       readonly executionPolicy: ProviderExecutionPolicy;

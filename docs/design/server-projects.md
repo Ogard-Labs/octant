@@ -272,7 +272,7 @@ app-server --listen stdio://` after `codex --version` there; for Claude Code,
     runs on that server with no sandbox, as it would there on its own. Plan runs
     in the provider's own read-only plan mode; Claude Code's Plan there has no
     shell, since the sandbox that keeps Plan's commands read-only on this host
-    cannot run there.
+    cannot run there. Codex's Plan there is refused (see below).
   - At Guarded and Accept edits, Codex's own workspace sandbox on the server
     refuses the other providers' sign-ins there, as Octant refuses them on this
     host: before the program starts, the host reads the login's home (`$HOME`,
@@ -287,8 +287,11 @@ app-server --listen stdio://` after `codex --version` there; for Claude Code,
     _Rationale:_ Codex's built-in workspace sandbox limits writes but has no
     deny field, so under the same login it could read another provider's
     sign-in. Full access carries no such list, as Full access is no sandbox.
-    Plan on the server runs Codex's built-in read-only sandbox, which takes no
-    profile, so it does not yet carry the list.
+    Plan refuses Codex on a server whenever the list is not empty, saying why
+    and pointing to Guarded: Codex's built-in read-only sandbox has no deny
+    field, and the only profile Octant has measured Codex taking extends
+    `:workspace`, which can write the folder, so nothing read-only can carry
+    the list.
   - Before a turn starts the program, the host runs the provider's own status
     command on the server as that login (`codex login status`, whose exit
     status answers; `claude auth status --json`, whose `loggedIn` answers) and
