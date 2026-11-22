@@ -173,10 +173,13 @@ activation ladder.
      every removal would fail and be retried without end. The expiry header
      works with any key. With request history off, fal keeps a queue result
      for one hour, so the fal driver's resume window is one hour.
-   - Each endpoint's options are read from its published queue schema, and
-     its price from fal's pricing API (a per-second unit is a per-second rate,
-     a per-video unit a flat rate for the endpoint's default clip, anything
-     else unpublished).
+   - Each endpoint's options are read from its published queue schema — a
+     `num_frames` field at a fixed frame rate becomes the whole-second
+     lengths that rate makes, and `first_frame_url`/`last_frame_url` map to
+     the seam's frames — and its price from fal's pricing API (a per-second
+     unit is a per-second rate only when no option changes the billing, a
+     per-video unit a flat rate for the endpoint's default clip, anything
+     else unpublished, which the dollar ceiling refuses).
 
 Between them, these three reach every live model family in the survey except
 Pika's own models. Runway also resells MiniMax H3, which fal does not host.
