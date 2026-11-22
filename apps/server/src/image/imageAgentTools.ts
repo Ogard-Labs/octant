@@ -39,7 +39,7 @@ import type {
   ImageGenerationOfferOutcome,
   ImageGenerationOfferService,
 } from "./imageGenerationOfferService";
-import type { CreatedFileReceipt } from "./generatedImageSave";
+import type { CreatedFileReceipt, IconFileWrite } from "./generatedImageSave";
 import { webIconSnippets, type IconSetRenderOutcome } from "./iconSetRenderer";
 import type { EnqueueImageJobInput, ImageJobService } from "./imageJobService";
 import type { KeptImageGenerationChoices } from "./keptImageGenerationChoices";
@@ -122,8 +122,11 @@ export interface ImageIconSetPort {
   readonly check: (
     relativePath: string,
   ) => Promise<{ readonly status: "ok" } | { readonly status: "refused"; readonly reason: string }>;
-  /** Which object a file this call just wrote is; undefined when it cannot be proved. */
-  readonly receipt: (relativePath: string) => Promise<CreatedFileReceipt | undefined>;
+  /**
+   * Writes one icon file as new under the turn's folder, confined and
+   * exclusive, with the receipt of the object it made, from its own handle.
+   */
+  readonly write: (relativePath: string, bytes: Uint8Array) => Promise<IconFileWrite>;
   /**
    * Removes a file this call created, when the set stops part way, only while
    * it is still the object its receipt names; false when it was left.
@@ -525,43 +528,30 @@ async function executeHostIconSet(
       return { status: "refused", error: "Plan mode cannot save files." };
     }
   }
-  const written: Array<{
-    readonly relativePath: string;
-    readonly receipt: CreatedFileReceipt | undefined;
-  }> = [];
+  const written: Array<{ readonly relativePath: string; readonly receipt: CreatedFileReceipt }> =
+    [];
   // A set stopped part way removes the files this call created, so the
   // folder is left as it was: a stopped turn drops its tool result, and files
   // nobody was shown would only block the next try at the same directory. A
-  // file is removed only while it is still the object written; one edited or
-  // replaced since, or one whose identity could not be proved, is kept and
-  // named.
-  const undo = async (reason: string, incomplete?: string): Promise<MediaImageIconSetOutcome> => {
+  // file is removed only while it is still the object its own write handle
+  // reported; one edited or replaced since is kept and named.
+  const undo = async (
+    reason: string,
+    partial?: { readonly relativePath: string; readonly receipt: CreatedFileReceipt },
+  ): Promise<MediaImageIconSetOutcome> => {
     const kept: string[] = [];
-    for (const file of written) {
-      const removed =
-        file.receipt !== undefined && (await iconSets.remove(file.relativePath, file.receipt));
-      if (!removed) kept.push(file.relativePath);
+    for (const file of partial === undefined ? written : [...written, partial]) {
+      if (!(await iconSets.remove(file.relativePath, file.receipt))) kept.push(file.relativePath);
     }
-    // A failed write can leave a partly written file; it is never removed,
-    // since this call cannot prove it created it, but it is named.
-    if (incomplete !== undefined) kept.push(incomplete);
     return kept.length === 0
       ? { status: "refused", error: `${reason} Nothing was kept.` }
-      : {
-          status: "failed",
-          error:
-            incomplete === undefined
-              ? `${reason} These files were left in place.`
-              : `${reason} These files were left in place; the last may be incomplete.`,
-          written: kept,
-        };
+      : { status: "failed", error: `${reason} These files were left in place.`, written: kept };
   };
   for (const file of files) {
     // Each write is awaited, so the level and the turn's Stop are read again
-    // before the next one starts: a thread moved to Plan or stopped mid-set
-    // writes no further file.
-    // A level lowered to one that asks, when nobody was asked, also stops the
-    // set: the earlier level's consent does not carry over.
+    // before the next one starts. A drop to Plan, or to a level that asks
+    // when nobody was asked, stops the set: the earlier level's consent does
+    // not carry over.
     const posture = save.posture();
     const stopped =
       request.signal?.aborted === true
@@ -572,14 +562,17 @@ async function executeHostIconSet(
             ? "The thread now asks before edits; ask the person before saving the icon set."
             : undefined;
     if (stopped !== undefined) return await undo(stopped);
-    const saved = await save.write(file.relativePath, file.bytes);
+    const saved = await iconSets.write(file.relativePath, file.bytes);
     if (saved.status !== "saved") {
-      return await undo(`${file.relativePath}: ${saved.reason}`, file.relativePath);
+      // Only a file this call's exclusive open created is its own to remove.
+      return await undo(
+        `${file.relativePath}: ${saved.reason}`,
+        saved.created === undefined
+          ? undefined
+          : { relativePath: file.relativePath, receipt: saved.created },
+      );
     }
-    written.push({
-      relativePath: saved.relativePath,
-      receipt: await iconSets.receipt(saved.relativePath),
-    });
+    written.push({ relativePath: saved.relativePath, receipt: saved.receipt });
   }
   return {
     status: "saved",

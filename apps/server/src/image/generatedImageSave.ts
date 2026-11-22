@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   decodeCodeRelativePath,
   type CodeThreadView,
@@ -254,56 +255,90 @@ export async function checkNewFileUnder(
 }
 
 /**
- * What an icon set records about each file right after writing it: where it
- * is and which object it is. Any edit changes the change time, and a
+ * Which object an icon set created, taken from the write's own handle: once
+ * the exclusive open succeeds, its device and inode; once the bytes are in,
+ * also its size and change time. Any edit changes the change time and a
  * replacement changes the inode, so rollback can tell its own output from a
  * file someone touched since.
  */
 export interface CreatedFileReceipt {
   readonly device: string;
   readonly inode: string;
-  readonly size: number;
-  readonly changedAt: bigint;
+  readonly size?: number;
+  readonly changedAt?: bigint;
+  /**
+   * The SHA-256 of the bytes written, for a complete write. A filesystem can
+   * hand a freed inode straight to a new file and keep change times coarse,
+   * so a same-size replacement is told apart by its content.
+   */
+  readonly sha256?: string;
 }
 
-async function existingFileUnder(
-  input: { readonly root: string; readonly relativePath: string },
-  filesystem: WorkFilesystemPort,
-): Promise<{ readonly absolutePath: string; readonly receipt: CreatedFileReceipt } | undefined> {
-  const resolution = await new WorkResolutionService(filesystem).resolveForCreate({
-    binding: {
-      canonicalRoot: input.root,
-      knownCanonicalRoot: input.root,
-      availability: "available",
-      bindingSuperseded: false,
-    },
-    relativePath: canonicalizeWorkRelativePath(input.relativePath),
-  });
-  if (resolution.status !== "resolved-for-create" || resolution.remaining.length !== 1) {
-    return undefined;
-  }
-  const stat = await filesystem.lstat(resolution.absolutePath);
-  if (!stat.isFile || stat.isSymbolicLink || stat.changedAt === undefined) return undefined;
-  return {
-    absolutePath: resolution.absolutePath,
-    receipt: {
-      device: stat.device,
-      inode: stat.inode,
-      size: stat.size,
-      changedAt: stat.changedAt,
-    },
-  };
-}
+export type IconFileWrite =
+  | {
+      readonly status: "saved";
+      readonly relativePath: string;
+      readonly receipt: CreatedFileReceipt;
+    }
+  /**
+   * `created` is present only when the exclusive open succeeded before the
+   * failure, so a part-written file exists and is this call's own.
+   */
+  | {
+      readonly status: "failed";
+      readonly reason: string;
+      readonly created?: CreatedFileReceipt;
+    };
 
-/** The receipt of a file just written under `root`; undefined when it cannot be proved. */
-export async function createdFileReceiptUnder(
-  input: { readonly root: string; readonly relativePath: string },
+/**
+ * Writes one icon file as new under `root` through the same confined,
+ * exclusive-create path as any new file, and returns the receipt of the
+ * object it made, so a set stopped part way can remove exactly its own files.
+ */
+export async function writeIconFileUnder(
+  input: { readonly root: string; readonly relativePath: string; readonly bytes: Uint8Array },
   filesystem: WorkFilesystemPort = liveWorkFilesystem,
-): Promise<CreatedFileReceipt | undefined> {
+): Promise<IconFileWrite> {
+  let opened: CreatedFileReceipt | undefined;
+  let written: CreatedFileReceipt | undefined;
   try {
-    return (await existingFileUnder(input, filesystem))?.receipt;
+    const check = await checkConfinedNewFileUnder(input, filesystem);
+    if (check.status !== "ok") return { status: "failed", reason: check.reason };
+    const ok = await writeConfinedWorkFile({
+      filesystem,
+      canonicalPath: check.absolutePath,
+      allowCreate: true,
+      parent: {
+        absolutePath: check.parentAbsolute,
+        identity: check.parentIdentity,
+        remaining: check.remaining,
+      },
+      bytes: input.bytes,
+      onCreated: (stat, phase) => {
+        const receipt = {
+          device: stat.device,
+          inode: stat.inode,
+          size: stat.size,
+          ...(stat.changedAt === undefined ? {} : { changedAt: stat.changedAt }),
+        };
+        if (phase === "opened") opened = { device: stat.device, inode: stat.inode };
+        else written = { ...receipt, sha256: sha256Of(input.bytes) };
+      },
+    });
+    if (ok && written !== undefined) {
+      return { status: "saved", relativePath: check.relativePath, receipt: written };
+    }
+    return {
+      status: "failed",
+      reason: "The file could not be saved.",
+      ...(opened === undefined ? {} : { created: written ?? opened }),
+    };
   } catch {
-    return undefined;
+    return {
+      status: "failed",
+      reason: "The file could not be saved.",
+      ...(opened === undefined ? {} : { created: written ?? opened }),
+    };
   }
 }
 
@@ -311,9 +346,10 @@ export async function createdFileReceiptUnder(
  * Removes a file this host itself just created under `root`, for an icon set
  * stopped part way, so the folder is left as it was rather than holding files
  * nobody was shown. The parent is proved inside the root as for a create, and
- * only the very object the receipt names (same device, inode, size and change
- * time) is removed, through the confined unlink that acts on the proved
- * directory; a file edited or replaced since is left alone.
+ * only the very object the receipt names (same device and inode, and same
+ * size and change time where the receipt has them) is removed, through the
+ * confined unlink that acts on the proved directory; a file edited or
+ * replaced since is left alone.
  */
 export async function removeCreatedFileUnder(
   input: {
@@ -324,19 +360,43 @@ export async function removeCreatedFileUnder(
   filesystem: WorkFilesystemPort = liveWorkFilesystem,
 ): Promise<boolean> {
   try {
-    const found = await existingFileUnder(input, filesystem);
+    const resolution = await new WorkResolutionService(filesystem).resolveForCreate({
+      binding: {
+        canonicalRoot: input.root,
+        knownCanonicalRoot: input.root,
+        availability: "available",
+        bindingSuperseded: false,
+      },
+      relativePath: canonicalizeWorkRelativePath(input.relativePath),
+    });
+    if (resolution.status !== "resolved-for-create" || resolution.remaining.length !== 1) {
+      return false;
+    }
+    const stat = await filesystem.lstat(resolution.absolutePath);
+    const { receipt } = input;
     if (
-      found === undefined ||
-      found.receipt.device !== input.receipt.device ||
-      found.receipt.inode !== input.receipt.inode ||
-      found.receipt.size !== input.receipt.size ||
-      found.receipt.changedAt !== input.receipt.changedAt
+      !stat.isFile ||
+      stat.isSymbolicLink ||
+      stat.device !== receipt.device ||
+      stat.inode !== receipt.inode ||
+      (receipt.size !== undefined && stat.size !== receipt.size) ||
+      (receipt.changedAt !== undefined && stat.changedAt !== receipt.changedAt)
     ) {
       return false;
     }
-    await filesystem.unlink(found.absolutePath);
+    if (
+      receipt.sha256 !== undefined &&
+      sha256Of(await filesystem.readFile(resolution.absolutePath)) !== receipt.sha256
+    ) {
+      return false;
+    }
+    await filesystem.unlink(resolution.absolutePath);
     return true;
   } catch {
     return false;
   }
+}
+
+function sha256Of(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
 }

@@ -16,9 +16,9 @@ import { openSqlite } from "../persistence/sqlitePort";
 import { SpendCeilingService } from "../spendCeilingService";
 import {
   checkNewFileUnder,
-  createdFileReceiptUnder,
   removeCreatedFileUnder,
   saveGeneratedImageUnder,
+  writeIconFileUnder,
   type CreatedFileReceipt,
 } from "./generatedImageSave";
 import { GeneratedImageStore } from "./generatedImageStore";
@@ -703,19 +703,23 @@ describe("createImageAgentTools", () => {
       const root = mkdtempSync(join(tmpdir(), "octant-icon-set-"));
       folders.push(root);
       const write = vi.fn((relativePath: string, bytes: Uint8Array) =>
-        saveGeneratedImageUnder({ root, relativePath, bytes }),
+        writeIconFileUnder({ root, relativePath, bytes }),
       );
       return {
         root,
         write,
-        save: { posture: () => posture, write },
+        save: {
+          posture: () => posture,
+          write: (relativePath: string, bytes: Uint8Array) =>
+            saveGeneratedImageUnder({ root, relativePath, bytes }),
+        },
         iconSets: {
           render: vi.fn(async () => ({
             status: "rendered" as const,
             files: webIcons.map((path) => ({ path, bytes: Uint8Array.from([1, 2, 3]) })),
           })),
           check: (relativePath: string) => checkNewFileUnder({ root, relativePath }),
-          receipt: (relativePath: string) => createdFileReceiptUnder({ root, relativePath }),
+          write,
           remove: (relativePath: string, receipt: CreatedFileReceipt) =>
             removeCreatedFileUnder({ root, relativePath, receipt }),
         },
@@ -812,7 +816,8 @@ describe("createImageAgentTools", () => {
       });
       const { set } = tools([imageProfile()], [job("completed")], [], {
         ...folder,
-        save: { posture: () => level, write },
+        save: { ...folder.save, posture: () => level },
+        iconSets: { ...folder.iconSets, write },
       });
       const outcome = await call(set, iconSet);
       expect(write).toHaveBeenCalledOnce();
@@ -833,7 +838,7 @@ describe("createImageAgentTools", () => {
       });
       const { set } = tools([imageProfile()], [job("completed")], [], {
         ...folder,
-        save: { posture: () => "allow", write },
+        iconSets: { ...folder.iconSets, write },
       });
       if (set === undefined) throw new Error("The image tool was not offered.");
       const outcome = await set.execute({
@@ -858,7 +863,8 @@ describe("createImageAgentTools", () => {
       });
       const { ask, set } = tools([imageProfile()], [job("completed")], [], {
         ...folder,
-        save: { posture: () => level, write },
+        save: { ...folder.save, posture: () => level },
+        iconSets: { ...folder.iconSets, write },
       });
       const outcome = await call(set, iconSet);
       expect(ask).not.toHaveBeenCalled();
@@ -881,7 +887,7 @@ describe("createImageAgentTools", () => {
       };
       const { set } = tools([imageProfile()], [job("completed")], [], {
         ...folder,
-        save: { posture, write: folder.write },
+        save: { ...folder.save, posture },
       });
       const outcome = await call(set, iconSet);
       expect(outcome.result).toMatchObject({
@@ -891,26 +897,48 @@ describe("createImageAgentTools", () => {
       expect(existsSync(join(folder.root, "public", "favicon-16.png"))).toBe(true);
     });
 
-    it("names a file a failed write may have left part written instead of claiming nothing was kept", async () => {
+    it("removes a part-written file its own exclusive open created when a later write fails", async () => {
+      const folder = iconSetFolder("allow");
+      let calls = 0;
+      const write = vi.fn(async (relativePath: string, bytes: Uint8Array) => {
+        calls += 1;
+        if (calls !== 2) return folder.write(relativePath, bytes);
+        // The open succeeded and a few bytes landed before the disk filled.
+        const created = await folder.write(relativePath, Uint8Array.from([7]));
+        if (created.status !== "saved") throw new Error("setup failed");
+        return {
+          status: "failed" as const,
+          reason: "The disk is full.",
+          created: { device: created.receipt.device, inode: created.receipt.inode },
+        };
+      });
+      const { set } = tools([imageProfile()], [job("completed")], [], {
+        ...folder,
+        iconSets: { ...folder.iconSets, write },
+      });
+      const outcome = await call(set, iconSet);
+      expect(outcome.result).toMatchObject({ error: expect.stringMatching(/Nothing was kept/) });
+      expect(readdirSync(join(folder.root, "public"))).toEqual([]);
+    });
+
+    it("claims no leftover for a write whose exclusive open never created the file", async () => {
       const folder = iconSetFolder("allow");
       let calls = 0;
       const write = vi.fn(async (relativePath: string, bytes: Uint8Array) => {
         calls += 1;
         return calls === 2
-          ? { status: "failed" as const, reason: "The disk is full." }
+          ? { status: "failed" as const, reason: "The folder is read-only." }
           : folder.write(relativePath, bytes);
       });
       const { set } = tools([imageProfile()], [job("completed")], [], {
         ...folder,
-        save: { posture: () => "allow", write },
+        iconSets: { ...folder.iconSets, write },
       });
       const outcome = await call(set, iconSet);
       expect(outcome.result).toMatchObject({
-        status: "failed",
-        error: expect.stringMatching(/may be incomplete/),
-        written: ["public/favicon-32.png"],
+        error: expect.stringMatching(/read-only.*Nothing was kept/),
       });
-      expect(existsSync(join(folder.root, "public", "favicon-16.png"))).toBe(false);
+      expect(outcome.result).not.toHaveProperty("written");
     });
 
     it("refuses an Android set where a launcher icon exists in another format", async () => {

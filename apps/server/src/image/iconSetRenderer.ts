@@ -5,8 +5,8 @@ import { join } from "node:path";
 import type { MediaIconSetTarget } from "@octant/plugin-api/media-tools";
 import {
   checkNewFileUnder,
-  createdFileReceiptUnder,
   removeCreatedFileUnder,
+  writeIconFileUnder,
   type CreatedFileReceipt,
 } from "./generatedImageSave";
 import { pngWithoutAlpha } from "./pngOpacity";
@@ -311,7 +311,8 @@ export function hostIconSetsUnder(root: string, dataDirectory: string) {
         iconSets: {
           render,
           check: (relativePath: string) => checkNewFileUnder({ root, relativePath }),
-          receipt: (relativePath: string) => createdFileReceiptUnder({ root, relativePath }),
+          write: (relativePath: string, bytes: Uint8Array) =>
+            writeIconFileUnder({ root, relativePath, bytes }),
           remove: (relativePath: string, receipt: CreatedFileReceipt) =>
             removeCreatedFileUnder({ root, relativePath, receipt }),
         },
