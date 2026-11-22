@@ -152,6 +152,7 @@
     "./turn-metrics-display": "./src/turnMetricsDisplay.ts",
     "./local-usage-pricing": "./src/localUsagePricing.ts",
     "./image-generation-pricing": "./src/imageGenerationPricing.ts",
+    "./video-generation-policy": "./src/videoGenerationPolicy.ts",
     "./command-credential-policy": "./src/commandCredentialPolicy.ts",
     "./thread-wakeup-policy": "./src/threadWakeupPolicy.ts",
     "./strict-policy": "./src/strictPolicy.ts",
