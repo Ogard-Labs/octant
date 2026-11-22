@@ -282,6 +282,7 @@ let codeAnswers = 0;
 let codeAnswerCalls = 0;
 let otherCodeCommands = 0;
 const answeredCodeThreads: string[] = [];
+const stagedCodeTexts: string[] = [];
 const codeRequest = (id: string, title: string) =>
   codeQuestionMode
     ? {
@@ -324,7 +325,7 @@ const codeSession = {
   windowId: "test",
   workspace: "none" as const,
   close: async () => {},
-  send: async (request: { path: string; method?: string; body?: unknown }) => {
+  send: async (request: { path: string; method?: string; body?: unknown; bytes?: Uint8Array }) => {
     if (request.path === "/api/projects/bootstrap")
       return {
         status: 200,
@@ -394,6 +395,8 @@ const codeSession = {
       };
     if (request.path === "/api/code/evidence") {
       codeAnswerCalls++;
+      if (request.bytes !== undefined)
+        stagedCodeTexts.push(new TextDecoder().decode(request.bytes));
       return {
         status: 200,
         body: {
@@ -418,6 +421,8 @@ const codeSession = {
         return { status: 200, body: { kind: "provider-turn-state", state: "running" } };
       }
       if (body.kind !== "observe-git") otherCodeCommands++;
+      if (body.kind === "start-provider-turn")
+        return { status: 200, body: { kind: "provider-turn-state", state: "running" } };
       if (checkoutReadRefused)
         return { status: 403, body: { message: "Checkout snapshot refused." } };
       return {
@@ -584,6 +589,228 @@ try {
   codeRender.renderer.destroy();
 }
 console.log("Rendered draft provenance and slash-prefixed request-read refusal");
+
+refuseChatThreadOpen = undefined;
+const followUpSuggestionId = "72000000-0000-4000-8000-000000000001";
+const followUpSuggestion = {
+  id: followUpSuggestionId,
+  title: "Add tests",
+  prompt: "Write tests.",
+  target: "new-thread",
+};
+const followUpThreadSession = {
+  session: {
+    id: "71000000-0000-4000-8000-000000000001",
+    threadId,
+    mode: "chat",
+    leadSlotId: "lead",
+    lead: { hostId: "local", providerInstanceId: providerId, modelId: "test-model" },
+    status: "idle",
+    turnsRun: 1,
+    cutovers: 0,
+    startedAt: now,
+    updatedAt: now,
+    version: 1,
+  },
+  routes: [],
+  turns: [],
+  reductions: [],
+  interventions: [],
+  followUps: {
+    turnId: "73000000-0000-4000-8000-000000000001",
+    suggestions: [followUpSuggestion],
+  },
+  activatedFollowUpIds: [],
+  questions: [],
+  approvals: [],
+};
+const followUpGoal = {
+  id: "74000000-0000-4000-8000-000000000001",
+  threadId,
+  revisionId: "75000000-0000-4000-8000-000000000001",
+  objective: "Ship the parser",
+  status: "active",
+  budget: {},
+  usage: { tokensUsed: 0, elapsedMs: 0, turnsUsed: 0 },
+  evidence: [],
+  criteria: [{ id: "c1", text: "Tests pass", status: "unmet" }],
+  createdAt: now,
+  updatedAt: now,
+  version: 1,
+};
+let activatedFollowUps = 0;
+const sentChatPrompts: Array<{ readonly threadId?: unknown; readonly prompt?: unknown }> = [];
+const followUpSession = {
+  ...session,
+  send: async (request: { path: string; body?: unknown }) => {
+    if (request.path.endsWith("/follow-ups/preview"))
+      return {
+        status: 200,
+        body: {
+          preview: {
+            suggestion: followUpSuggestion,
+            wouldCreate: { kind: "new-thread", mode: "chat", title: "Add tests" },
+          },
+        },
+      };
+    if (request.path.endsWith("/follow-ups/activate")) {
+      activatedFollowUps++;
+      return {
+        status: 200,
+        body: {
+          kind: "follow-up-activated",
+          suggestionId: followUpSuggestionId,
+          created: {
+            kind: "new-thread",
+            mode: "chat",
+            title: "Add tests",
+            threadId: "76000000-0000-4000-8000-000000000001",
+          },
+        },
+      };
+    }
+    if (request.path.startsWith("/api/native-harness/sessions/"))
+      return { status: 200, body: { view: followUpThreadSession } };
+    if (request.path.startsWith("/api/goals?"))
+      return { status: 200, body: { goal: followUpGoal, history: [] } };
+    if (request.path === "/api/chat/commands") {
+      const body = request.body as { readonly threadId?: unknown; readonly prompt?: unknown };
+      sentChatPrompts.push({ threadId: body.threadId, prompt: body.prompt });
+      return { status: 200, body: { kind: "chat-turn-accepted" } };
+    }
+    return session.send(request);
+  },
+};
+const followUpRender = await createTestRenderer({ width: 120, height: 30 });
+const followUpScreen = mountAgentScreen(
+  tui,
+  followUpRender.renderer,
+  paletteFor(undefined, "dark"),
+  { session: followUpSession, threadId },
+);
+try {
+  await followUpScreen.refresh();
+  await followUpRender.renderOnce();
+  const running = followUpScreen.run();
+  try {
+    await followUpRender.waitForFrame((frame) => frame.includes("Octant"));
+    for (const prompt of ["Summarize what remains", "yes"]) {
+      await followUpRender.mockInput.typeText("/next 1");
+      followUpRender.mockInput.pressEnter();
+      await followUpRender.waitForFrame((frame) => frame.includes("Write tests."));
+      await followUpRender.mockInput.typeText("/goal");
+      followUpRender.mockInput.pressEnter();
+      await followUpRender.waitForFrame((frame) => frame.includes("Ship the parser"));
+      await followUpRender.mockInput.typeText(prompt);
+      followUpRender.mockInput.pressEnter();
+      const expectedPrompts = prompt === "yes" ? 2 : 1;
+      await followUpRender.waitFor(
+        () =>
+          sentChatPrompts.length === expectedPrompts ||
+          followUpRender.captureCharFrame().includes("Left as a suggestion."),
+      );
+      if (sentChatPrompts.length !== expectedPrompts)
+        throw new Error("A follow-up preview consumed a prompt after /goal.");
+    }
+    if (
+      sentChatPrompts[0]?.threadId !== threadId ||
+      sentChatPrompts[0]?.prompt !== "Summarize what remains" ||
+      sentChatPrompts[1]?.threadId !== threadId ||
+      sentChatPrompts[1]?.prompt !== "yes" ||
+      activatedFollowUps !== 0
+    )
+      throw new Error("A dismissed follow-up preview consumed an ordinary prompt.");
+  } finally {
+    followUpRender.mockInput.pressCtrlC();
+    await running;
+  }
+} finally {
+  followUpRender.renderer.destroy();
+}
+console.log("Rendered follow-up dismissal after commands");
+
+for (const hasPendingRequest of [false, true]) {
+  pendingCodeRequests = hasPendingRequest;
+  requestListUnavailable = true;
+  codeQuestionMode = false;
+  codeAnswers = 0;
+  codeAnswerCalls = 0;
+  otherCodeCommands = 0;
+  answeredCodeThreads.length = 0;
+  stagedCodeTexts.length = 0;
+  const recoveryRender = await createTestRenderer({ width: 120, height: 30 });
+  const recoveryScreen = mountAgentScreen(
+    tui,
+    recoveryRender.renderer,
+    paletteFor(undefined, "dark"),
+    {
+      session: codeSession,
+      threadId: codeThreadId,
+      mode: "code",
+      quiet: true,
+    },
+  );
+  let running: Promise<void> | undefined;
+  try {
+    await recoveryScreen.refresh();
+    await recoveryRender.renderOnce();
+    running = recoveryScreen.run();
+    await recoveryRender.waitForFrame((frame) =>
+      frame.includes("Provider requests are unavailable"),
+    );
+    await recoveryRender.mockInput.typeText("/tmp/file");
+    recoveryRender.mockInput.pressEnter();
+    await recoveryRender.waitForFrame(
+      (frame) =>
+        frame.includes("Provider requests are unavailable") &&
+        frame.includes("Review or clear the draft before answering") &&
+        frame.includes("/tmp/file"),
+    );
+    if (codeAnswerCalls !== 0 || codeAnswers !== 0 || otherCodeCommands !== 0)
+      throw new Error("A first request-read refusal submitted a provider command.");
+
+    requestListUnavailable = false;
+    await recoveryScreen.refresh();
+    if (hasPendingRequest) {
+      await recoveryRender.waitForFrame((frame) => frame.includes("Approve Code task A?"));
+      recoveryRender.mockInput.pressEnter();
+      await recoveryRender.waitForFrame(
+        (frame) =>
+          frame.includes("A request appeared after this draft") && frame.includes("/tmp/file"),
+      );
+      if (codeAnswerCalls !== 0 || codeAnswers !== 0 || otherCodeCommands !== 0)
+        throw new Error("A draft from a failed first read answered a newly visible request.");
+      recoveryRender.mockInput.pressKey("u", { ctrl: true });
+      recoveryRender.mockInput.pressKey("k", { ctrl: true });
+      await recoveryRender.renderOnce();
+      await recoveryRender.mockInput.typeText("y");
+      recoveryRender.mockInput.pressEnter();
+      await recoveryRender.waitFor(() => codeAnswers === 1);
+      if (answeredCodeThreads[0] !== codeThreadId)
+        throw new Error("A replacement approval answer reached the wrong thread.");
+    } else {
+      recoveryRender.mockInput.pressEnter();
+      await recoveryRender.waitFor(() => stagedCodeTexts.includes("/tmp/file"));
+      if (codeAnswers !== 0 || stagedCodeTexts.at(-1) !== "/tmp/file")
+        throw new Error("Recovery did not submit the preserved text as the ordinary prompt.");
+    }
+  } finally {
+    if (running !== undefined) {
+      recoveryRender.mockInput.pressCtrlC();
+      await running;
+    }
+    recoveryRender.renderer.destroy();
+    pendingCodeRequests = false;
+    requestListUnavailable = false;
+    codeQuestionMode = false;
+    codeAnswers = 0;
+    codeAnswerCalls = 0;
+    otherCodeCommands = 0;
+    answeredCodeThreads.length = 0;
+    stagedCodeTexts.length = 0;
+  }
+}
+console.log("Rendered first request-read refusal recovery");
 
 // Measure a growing 2,000-line reply across ordinary, block, newline, and table boundaries.
 let reply = Array.from(

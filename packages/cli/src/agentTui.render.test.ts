@@ -15,6 +15,8 @@ it.skipIf(process.platform === "win32")(
     expect(output).toContain("Rendered streaming table boundary and fenced source");
     expect(output).toContain("Rendered fenced literal table in a later streaming block");
     expect(output).toContain("Rendered draft provenance and slash-prefixed request-read refusal");
+    expect(output).toContain("Rendered follow-up dismissal after commands");
+    expect(output).toContain("Rendered first request-read refusal recovery");
   },
   35000,
 );

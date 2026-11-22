@@ -1695,10 +1695,13 @@ class AgentScreen {
       if (text === "?" || text.length === 0) return;
     } else if (text === "?" || text === "/help" || text === "/keys") {
       this.#showHelp = true;
+      this.#pendingFollowUp = undefined;
       this.#draw();
       return;
     }
     if (text.length === 0) return;
+    const pendingFollowUp = this.#pendingFollowUp;
+    this.#pendingFollowUp = undefined;
     this.#note = "";
     if (text === "/notes" || text.startsWith("/notes ")) {
       const threadId = this.#threadId;
@@ -1984,6 +1987,7 @@ class AgentScreen {
       await this.#steer(text.slice("/steer".length).trim());
       return;
     }
+    this.#pendingFollowUp = pendingFollowUp;
     const requestBoundDraftChanged =
       originalDraft?.requestId !== undefined &&
       (originalDraft.threadId !== this.#threadId || originalDraft.requestId !== this.#lastAskId);
