@@ -159,6 +159,12 @@ export interface AcpConfinementInput {
   readonly servers?: ProviderServerAccess;
   /** The person's own setup this session carries; absent keeps every deny. */
   readonly nativeSetup?: ProviderNativeSetup;
+  /**
+   * The launch signs in with a credential Octant passes itself (an API key or
+   * a Cloud project), so a profile's missing data directory is created rather
+   * than refused as a missing personal sign-in.
+   */
+  readonly octantSignIn?: boolean;
 }
 
 export interface AcpConfinementPort {
@@ -480,6 +486,7 @@ function prepareHostAuthentication(
   managedHome: string,
   overridePath: string | undefined,
   releasedEntries: ReadonlySet<string> = new Set(),
+  octantSignIn = false,
 ): Effect.Effect<HostAuthenticationPaths, ProviderFailure> {
   const hostAuthentication = profile.process.hostAuthentication;
   if (hostAuthentication === undefined)
@@ -487,17 +494,25 @@ function prepareHostAuthentication(
   const path = overridePath ?? hostAuthentication.defaultPath;
   const label = `${profile.displayName} provider data directory`;
   if (hostAuthentication.kind === "directory") {
+    // A missing directory means no personal sign-in was ever made. A launch
+    // on a key or Cloud project Octant passes needs none, and the CLI would
+    // create its own data directory there on first run, so Octant creates it
+    // (owner-only) instead of asking for a login the run will not use: a
+    // fresh host otherwise refused a Gemini API key it held (review finding,
+    // 2026-11-22).
     const directory =
-      overridePath === undefined
-        ? canonicalExistingDirectory(path, label).pipe(
-            Effect.mapError(() =>
-              failure(
-                "unauthenticated",
-                `${profile.displayName} provider-owned authentication is unavailable. ${hostAuthentication.loginHint}`,
+      overridePath !== undefined
+        ? canonicalManagedDirectory(path, label)
+        : octantSignIn && !existsSync(path)
+          ? canonicalManagedDirectory(path, label)
+          : canonicalExistingDirectory(path, label).pipe(
+              Effect.mapError(() =>
+                failure(
+                  "unauthenticated",
+                  `${profile.displayName} provider-owned authentication is unavailable. ${hostAuthentication.loginHint}`,
+                ),
               ),
-            ),
-          )
-        : canonicalManagedDirectory(path, label);
+            );
     return directory.pipe(
       Effect.map((canonical) => ({
         readPaths: [canonical],
@@ -704,6 +719,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             mode: input.mode,
             ...(input.strict === false ? { strict: false } : {}),
           }).hostEntries,
+          input.octantSignIn === true,
         );
         const hostReadPaths = yield* canonicalExistingReadPaths(profile);
         yield* writeManagedFiles(profile, {
@@ -1745,6 +1761,9 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           ...(input.strict === false ? { strict: false } : {}),
           ownChannels,
           ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
+          ...(input.apiKey === undefined && input.googleCloud === undefined
+            ? {}
+            : { octantSignIn: true }),
           environment,
           ...(input.loopbackPorts === undefined ? {} : { loopbackPorts: input.loopbackPorts }),
           ...(network === undefined ? {} : { network }),

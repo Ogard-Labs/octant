@@ -3006,7 +3006,10 @@ any session opens, because the guide says `agy acp` otherwise reuses the
 cached sign-in and the environment alone would not decide which login a run
 uses. A launch whose `initialize` does not list that method, or whose
 `authenticate` the CLI refuses, fails as not signed in and opens no session
-(`signInMethods` in the runtime profile). Business sign-in
+(`signInMethods` in the runtime profile). A launch on either needs no prior
+personal sign-in: where `~/.gemini` does not exist yet, Octant creates it
+owner-only, as the CLI would on its first run, instead of refusing the launch
+as not signed in; an existing folder is used as it is. Business sign-in
 (`oauth-business`) is not offered: like the personal sign-in it is a browser
 login the CLI caches, so Octant could not tell the two apart.
 

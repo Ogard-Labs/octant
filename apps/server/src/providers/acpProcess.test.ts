@@ -6,6 +6,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -1388,6 +1389,56 @@ describe("Kilo provider-owned data directory", () => {
       message:
         "Kilo provider-owned authentication is unavailable. Run kilo auth login, then retry.",
     });
+  });
+});
+
+describe("Google Antigravity's data directory on a sign-in Octant passes", () => {
+  it("creates the missing data directory for a Gemini API key or Agent Platform launch instead of asking for a personal sign-in", async () => {
+    for (const signIn of [{ octantSignIn: true }, {}] as const) {
+      const target = fixture(antigravity);
+      const dataDirectory = join(target.canonicalRoot, "absent-gemini-home");
+      const prepared = await Effect.runPromise(
+        Effect.either(
+          makeAcpConfinementLive({
+            platform: "darwin",
+            sandboxPath: target.sandboxPath,
+            temporaryDirectory: join(target.canonicalRoot, "tmp"),
+          }).prepare({
+            profile: {
+              ...antigravity,
+              process: {
+                ...antigravity.process,
+                hostAuthentication: {
+                  ...directoryHostAuthentication(antigravity),
+                  defaultPath: dataDirectory,
+                },
+              },
+            },
+            binaryPath: target.binaryPath,
+            root: target.canonicalRoot,
+            managedHome: join(target.canonicalRoot, "managed-home"),
+            mode: "code",
+            executionPolicy: "approval-gated",
+            environment: {},
+            ...signIn,
+          }),
+        ),
+      );
+      if ("octantSignIn" in signIn) {
+        expect(Either.isRight(prepared)).toBe(true);
+        expect(existsSync(dataDirectory)).toBe(true);
+        expect(statSync(dataDirectory).mode & 0o777).toBe(0o700);
+      } else {
+        // The personal sign-in still needs the CLI's own login first.
+        expect(prepared).toEqual(
+          Either.left({
+            category: "unauthenticated",
+            message: `Google Antigravity provider-owned authentication is unavailable. ${directoryHostAuthentication(antigravity).loginHint}`,
+          }),
+        );
+        expect(existsSync(dataDirectory)).toBe(false);
+      }
+    }
   });
 });
 
