@@ -77,44 +77,67 @@ async function newChatButton(): Promise<HTMLElement> {
 }
 
 describe("starting a thread from a to-do", () => {
-  it("opens a Chat draft from the to-do and links the thread the host creates", async () => {
-    const user = userEvent.setup();
-    const { todos, change } = todoClient();
-    const chatApi = chats();
-    render(
-      <App
-        chatClient={chatApi}
-        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
-        projectClient={projects()}
-        projectWindowCapability={projectWindowCapability}
-        providerClient={providers()}
-        shellClient={client(chatShellBootstrap())}
-        todoClient={todos}
-        todoListHostClient={thisHostKeepsList}
-      />,
-    );
+  it.each(["saved", "refused"] as const)(
+    "waits for a %s link answer before starting the first turn",
+    async (linkOutcome) => {
+      const user = userEvent.setup();
+      const { todos, change } = todoClient();
+      let finishLink: ((result: TodoResult) => void) | undefined;
+      change.mockImplementation(
+        () =>
+          new Promise<TodoResult>((resolve) => {
+            finishLink = resolve;
+          }),
+      );
+      const chatApi = chats();
+      render(
+        <App
+          chatClient={chatApi}
+          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+          projectClient={projects()}
+          projectWindowCapability={projectWindowCapability}
+          providerClient={providers()}
+          shellClient={client(chatShellBootstrap())}
+          todoClient={todos}
+          todoListHostClient={thisHostKeepsList}
+        />,
+      );
 
-    await user.click(await screen.findByRole("button", { name: /^To-dos/ }));
-    await user.click(await screen.findByRole("button", { name: "Start Draft the launch post" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Chat" }));
+      await user.click(await screen.findByRole("button", { name: /^To-dos/ }));
+      await user.click(await screen.findByRole("button", { name: "Start Draft the launch post" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Chat" }));
 
-    const draft = await screen.findByRole("region", { name: "New Octant Chat thread" });
-    expect(within(draft).getByText("From to-do")).toBeVisible();
-    const prompt = within(draft).getByRole("textbox", { name: "First message" });
-    await waitFor(() => expect(prompt).toHaveValue("Draft the launch post\n\nKeep it short."));
-    await user.click(within(draft).getByRole("button", { name: "Create thread" }));
+      const draft = await screen.findByRole("region", { name: "New Octant Chat thread" });
+      expect(within(draft).getByText("From to-do")).toBeVisible();
+      const prompt = within(draft).getByRole("textbox", { name: "First message" });
+      await waitFor(() => expect(prompt).toHaveValue("Draft the launch post\n\nKeep it short."));
+      await user.click(within(draft).getByRole("button", { name: "Create thread" }));
 
-    await waitFor(() =>
-      expect(change).toHaveBeenCalledWith({
-        kind: "link-todo-thread",
-        todoId: TODO,
-        thread: { hostId: HOST, threadId: createdChatThreadId, mode: "chat" },
-      }),
-    );
-    expect(chatApi.execute).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "create-chat-thread" }),
-    );
-  });
+      await waitFor(() =>
+        expect(change).toHaveBeenCalledWith({
+          kind: "link-todo-thread",
+          todoId: TODO,
+          thread: { hostId: HOST, threadId: createdChatThreadId, mode: "chat" },
+        }),
+      );
+      expect(chatApi.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "create-chat-thread" }),
+      );
+      expect(chatApi.execute).not.toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "send-chat-turn" }),
+      );
+      finishLink?.(
+        linkOutcome === "saved"
+          ? list
+          : { kind: "todo-refused", reason: "not-found", message: "That to-do was removed." },
+      );
+      await waitFor(() =>
+        expect(chatApi.execute).toHaveBeenCalledWith(
+          expect.objectContaining({ kind: "send-chat-turn" }),
+        ),
+      );
+    },
+  );
 
   it("links nothing when the person removes the label or leaves for another draft before sending", async () => {
     const user = userEvent.setup();

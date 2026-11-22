@@ -3,7 +3,27 @@ import {
   decodeTodoCommand,
   type Todo,
   type TodoCommand,
+  type TodoListView,
 } from "@octant/contracts/todos";
+
+export interface MobileTodoQuickAddDraft {
+  readonly id: string;
+  readonly text: string;
+}
+
+export function mobileTodoDraftAfterHostChange(
+  draft: MobileTodoQuickAddDraft,
+  nextId: string,
+): MobileTodoQuickAddDraft {
+  return { id: nextId, text: draft.text };
+}
+
+export function mobileTodoViewForRead(result: {
+  readonly status: string;
+  readonly view?: TodoListView;
+}): TodoListView | undefined {
+  return result.status === "loaded" ? result.view : undefined;
+}
 
 /** The phone's two sections: what is open, then what was ticked off. */
 export interface MobileTodoSections {

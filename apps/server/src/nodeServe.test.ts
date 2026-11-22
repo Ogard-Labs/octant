@@ -23,6 +23,21 @@ interface RawResponse {
   readonly status: number | undefined;
 }
 
+/**
+ * Resolves once the server has started reading the response body. Rejects if a
+ * request fails before that, so the test's `finally` still stops its servers
+ * instead of hanging until the test times out.
+ */
+function untilReading(
+  reading: Promise<unknown>,
+  ...responses: ReadonlyArray<Promise<Response>>
+): Promise<unknown> {
+  return Promise.race([
+    reading,
+    ...responses.map((response) => response.then(() => new Promise<never>(() => undefined))),
+  ]);
+}
+
 function rawRequest(
   url: URL,
   options: {
@@ -406,27 +421,32 @@ describe("nodeServe", () => {
 
   it("cancels active response readers when the server stops", async () => {
     let readerCancelled = false;
+    const reading = Promise.withResolvers<void>();
     const server = await nodeServe({
       hostname: "127.0.0.1",
       port: 0,
       fetch: () =>
         new Response(
-          new ReadableStream({
-            async pull(controller) {
-              await new Promise((resolve) => setTimeout(resolve, 1_000));
-              controller.enqueue(new Uint8Array([1]));
+          new ReadableStream(
+            {
+              async pull(controller) {
+                reading.resolve();
+                await new Promise((resolve) => setTimeout(resolve, 1_000));
+                controller.enqueue(new Uint8Array([1]));
+              },
+              cancel() {
+                readerCancelled = true;
+              },
             },
-            cancel() {
-              readerCancelled = true;
-            },
-          }),
+            { highWaterMark: 0 },
+          ),
           { status: 200 },
         ),
     });
 
     try {
       const responsePromise = fetch(new URL("/cancel", server.url));
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      await untilReading(reading.promise, responsePromise);
       await server.stop(true);
       await responsePromise.catch(() => undefined);
       expect(readerCancelled).toBe(true);
@@ -438,28 +458,43 @@ describe("nodeServe", () => {
   it("keeps active response ownership isolated between server instances", async () => {
     let firstCancelled = false;
     let secondCancelled = false;
-    const makeStream = (cancelled: () => void) =>
-      new ReadableStream<Uint8Array>({
-        async pull() {
-          await new Promise(() => undefined);
+    // With a high-water mark of zero, a stream's first pull happens only once the
+    // server is reading the body. Waiting for it, rather than a fixed delay,
+    // guarantees each response is active before a server stops. A 25 ms delay
+    // was not enough on a busy CI runner: the first request had not been read
+    // when its server stopped.
+    const makeStream = (cancelled: () => void, reading: () => void) =>
+      new ReadableStream<Uint8Array>(
+        {
+          async pull() {
+            reading();
+            await new Promise(() => undefined);
+          },
+          cancel: cancelled,
         },
-        cancel: cancelled,
-      });
+        { highWaterMark: 0 },
+      );
+    const firstReading = Promise.withResolvers<void>();
+    const secondReading = Promise.withResolvers<void>();
     const first = await nodeServe({
       hostname: "127.0.0.1",
       port: 0,
-      fetch: () => new Response(makeStream(() => (firstCancelled = true))),
+      fetch: () => new Response(makeStream(() => (firstCancelled = true), firstReading.resolve)),
     });
     const second = await nodeServe({
       hostname: "127.0.0.1",
       port: 0,
-      fetch: () => new Response(makeStream(() => (secondCancelled = true))),
+      fetch: () => new Response(makeStream(() => (secondCancelled = true), secondReading.resolve)),
     });
 
     try {
       const firstResponse = fetch(new URL("/owned", first.url));
       const secondResponse = fetch(new URL("/owned", second.url));
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      await untilReading(
+        Promise.all([firstReading.promise, secondReading.promise]),
+        firstResponse,
+        secondResponse,
+      );
 
       await first.stop(true);
       await firstResponse.catch(() => undefined);

@@ -151,9 +151,15 @@ describe("PlaywrightDownloadHold", () => {
       hold.onDownload(download);
     }
     await hold.finish();
+    // Ids follow the order files finished reading, not the order they started:
+    // concurrent stat and open calls can complete out of order on a busy host.
+    const kept = ["d2", "d3", "d4", "d5", "d6"].map((id) => hold.claim(id));
     expect(hold.claim("d1")).toBeUndefined();
-    expect(downloads[0]?.delete).toHaveBeenCalled();
-    for (const id of ["d2", "d3", "d4", "d5", "d6"]) expect(hold.claim(id)).toBeDefined();
+    expect(kept.every((path) => path !== undefined)).toBe(true);
+    expect(new Set(kept).size).toBe(5);
+    const deleted = downloads.filter((download) => vi.mocked(download.delete).mock.calls.length);
+    expect(deleted).toHaveLength(1);
+    expect(kept).not.toContain(await deleted[0]?.path());
   });
 
   it("holds to the limits the person set in Settings instead of the defaults", async () => {
