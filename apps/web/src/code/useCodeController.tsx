@@ -184,6 +184,8 @@ export type CodeProviderAnswer =
       readonly kind: "approval";
       readonly approvalId: CodeApprovalId;
       readonly decision: "approved" | "denied";
+      /** With `approved`, on an ask that offered it: "Remember for this Project". */
+      readonly rememberForProject?: true;
     }
   | {
       readonly kind: "input";
@@ -3496,6 +3498,7 @@ export function useCodeController(options: CodeControllerOptions) {
                 ...scope,
                 approvalId: answer.approvalId,
                 decision: answer.decision,
+                ...(answer.rememberForProject === true ? { rememberForProject: true } : {}),
               })
             : answer.secret === true
               ? await client.executeOperation({

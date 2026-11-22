@@ -53,6 +53,8 @@ export type CodeProviderRequest =
         readonly plan?: string;
         readonly planContentId?: CodeEvidenceContentId;
       };
+      /** The ask may also be answered with "Remember for this Project". */
+      readonly canRememberForProject?: true;
     }
   | {
       readonly kind: "input";
@@ -142,6 +144,7 @@ function providerRequestFromEvent(event: CodeOperationEvent): CodeProviderReques
                 : { planContentId: event.levelChange.plan.contentId }),
             },
           }),
+      ...(event.canRememberForProject === true ? { canRememberForProject: true } : {}),
     };
   }
   // App questionnaires follow the session read so answers from another window

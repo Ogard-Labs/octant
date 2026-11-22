@@ -8,6 +8,11 @@ export interface ProviderApprovalPromptProps {
   readonly summary: string;
   readonly onAnswer: (decision: "approved" | "denied") => void;
   /**
+   * Present when the ask may be answered for the whole Project as well as for
+   * this once: the card offers "Allow once" and "Remember for this Project".
+   */
+  readonly onRememberForProject?: () => void;
+  /**
    * The agent asks to change the thread's level instead of to run a tool:
    * the level it would move to from the next turn, and the plan it asks the
    * person to approve when it asks to leave Plan.
@@ -37,8 +42,18 @@ export function ProviderApprovalPrompt(props: ProviderApprovalPromptProps) {
       actions={
         <>
           <OctantButton onClick={() => props.onAnswer("approved")} size="sm" type="button">
-            Approve
+            {props.onRememberForProject === undefined ? "Approve" : "Allow once"}
           </OctantButton>
+          {props.onRememberForProject === undefined ? null : (
+            <OctantButton
+              onClick={props.onRememberForProject}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Remember for this Project
+            </OctantButton>
+          )}
           <OctantButton
             onClick={() => props.onAnswer("denied")}
             size="sm"

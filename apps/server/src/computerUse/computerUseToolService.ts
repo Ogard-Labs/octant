@@ -59,11 +59,26 @@ const ownerKey = (owner: ComputerUseOwner) =>
     owner.leaseId ?? null,
   ]);
 
-/** How a turn asks its person, in the thread, to allow one thing. */
+/**
+ * A person's answer to a thread ask. `remembered-for-project` answers an ask
+ * that offered "Remember for this Project", and names who gave it.
+ */
+export type ComputerUseThreadAnswer =
+  | "approved"
+  | "denied"
+  | "cancelled"
+  | "expired"
+  | { readonly kind: "remembered-for-project"; readonly approver: ComputerUseApprovalApprover };
+
+/**
+ * How a turn asks its person, in the thread, to allow one thing. `offer`
+ * adds "Remember for this Project" to the card.
+ */
 export type ComputerUseThreadAsk = (
   summary: string,
   signal?: AbortSignal,
-) => Promise<"approved" | "denied" | "cancelled" | "expired">;
+  offer?: { readonly canRememberForProject: true },
+) => Promise<ComputerUseThreadAnswer>;
 
 export function createComputerUseToolService(options: {
   /** This Mac's driver; absent on a host with no screen of its own. */
@@ -101,6 +116,16 @@ export function createComputerUseToolService(options: {
   readonly rememberProjectApp?: (input: {
     readonly projectId: ProjectId;
     readonly appId: string;
+    readonly approver: ComputerUseApprovalApprover;
+  }) => void | Promise<void>;
+  /**
+   * Whether a remembered Project answer covers an agent's files into a
+   * disposable desktop on this machine for this Project's threads.
+   */
+  readonly projectFileTransferRemembered?: (projectId: ProjectId) => boolean;
+  /** Persists a "Remember for this Project" answer to a sent-file ask. */
+  readonly rememberProjectFileTransfer?: (input: {
+    readonly projectId: ProjectId;
     readonly approver: ComputerUseApprovalApprover;
   }) => void | Promise<void>;
   readonly threadTitle: (owner: ComputerUseOwner) => string;
@@ -611,9 +636,15 @@ export function createComputerUseToolService(options: {
   /**
    * An agent's transfer into its bound desktop. The lease service reads and
    * hashes the file first and decides whether anyone is asked: nobody at Full
-   * access, and below it once per thread for a desktop on this machine. When
-   * it asks, the question goes to this turn's thread with the path, size,
-   * hash, and where the file goes.
+   * access, and below it once per thread, or once per Project when the person
+   * chose "Remember for this Project", for a desktop on this machine. When it
+   * asks, the question goes to this turn's thread with the path, size, hash,
+   * and where the file goes.
+   *
+   * A Project's answer covers only a thread that has read no outside content,
+   * and is offered only there, as a thread's own answer from before the mark
+   * does not cover it after: the person allowed agents that had read nothing
+   * from outside.
    */
   async function sendFile(
     owner: ComputerUseOwner,
@@ -637,6 +668,10 @@ export function createComputerUseToolService(options: {
       );
     const decided = decideDesktopArtifactPath(path);
     if (decided.kind === "relative") endDesktopAppGrants(owner, decided.name);
+    const markedAtStart = options.externalContentIngested(owner);
+    const projectAt = (): ProjectId | undefined =>
+      options.externalContentIngested(owner) ? undefined : options.authority(owner)?.projectId;
+    const projectAtStart = projectAt();
     try {
       return await options.leases.sendFile(
         owner,
@@ -651,9 +686,42 @@ export function createComputerUseToolService(options: {
               ? ` This sends the file off this machine to ${provider.displayName}.`
               : " Approving also covers this thread's later files into that desktop.";
           const summary = `Send ${artifact.path.slice(0, 512)} (${artifact.size} bytes, SHA-256 ${artifact.sha256}) into ${DESKTOP_LABEL} on ${provider.displayName.slice(0, 128)} for "${options.threadTitle(owner).slice(0, 100)}"?${covers}`;
-          return (await ask(summary, signal)) === "approved" ? "approved" : "declined";
+          const offersProject =
+            request.asks === "in-thread" &&
+            projectAtStart !== undefined &&
+            options.rememberProjectFileTransfer !== undefined;
+          const answer = await ask(
+            summary,
+            signal,
+            offersProject ? { canRememberForProject: true } : undefined,
+          );
+          if (typeof answer !== "object") return answer === "approved" ? "approved" : "declined";
+          // Persisted only while the ask still stands as it was offered: the
+          // same Project, an unmarked thread, and an owner that may still act.
+          const projectNow = projectAt();
+          if (
+            !offersProject ||
+            projectNow === undefined ||
+            String(projectNow) !== String(projectAtStart) ||
+            options.rememberProjectFileTransfer === undefined ||
+            !options.settings().enabled ||
+            !options.ownerIsCurrent(owner) ||
+            !admitted(owner, false)
+          )
+            return "declined";
+          try {
+            await options.rememberProjectFileTransfer({
+              projectId: projectNow,
+              approver: answer.approver,
+            });
+          } catch {
+            return "declined";
+          }
+          return "approved";
         },
-        options.externalContentIngested(owner),
+        markedAtStart,
+        projectAtStart !== undefined &&
+          options.projectFileTransferRemembered?.(projectAtStart) === true,
       );
     } finally {
       // Again once the send settles: an approval answered while the bytes were

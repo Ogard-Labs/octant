@@ -2592,6 +2592,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       decision,
                     })
                   }
+                  {...(request.canRememberForProject === true
+                    ? {
+                        onRememberForProject: () =>
+                          void props.controller.answerProviderRequest({
+                            kind: "approval",
+                            approvalId: request.approvalId,
+                            decision: "approved",
+                            rememberForProject: true,
+                          }),
+                      }
+                    : {})}
                   summary={request.summary}
                   {...(request.levelChange === undefined
                     ? {}

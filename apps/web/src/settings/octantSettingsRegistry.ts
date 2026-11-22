@@ -1340,6 +1340,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "computer use remembered applications project approvals forget",
         },
         {
+          id: settingId("computer-use-remembered-desktop-files"),
+          label: "Remembered desktop files",
+          scope: "host",
+          keywords: "disposable desktop send file transfer remembered project approvals forget",
+        },
+        {
           id: settingId("desktop-spend-cap"),
           label: "Monthly cap for desktops that bill you",
           scope: "host",

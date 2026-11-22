@@ -183,3 +183,37 @@ it("lists remembered Project applications and forgets one through settings", asy
     }),
   );
 });
+
+it("lists Projects remembered for desktop files and forgets one through settings", async () => {
+  const onSettingsChange = vi.fn();
+  const projectA = "30000000-0000-4000-8000-000000000001" as never;
+  const projectB = "30000000-0000-4000-8000-000000000002" as never;
+  const grantedBy = {
+    kind: "local-user" as const,
+    actorId: "00000000-0000-4000-8000-000000000002" as never,
+  };
+  const alpha = { projectId: projectA, grantedBy, grantedAt: "2026-11-19T12:00:00.000Z" as never };
+  const beta = { projectId: projectB, grantedBy, grantedAt: "2026-11-19T12:01:00.000Z" as never };
+  render(
+    <ComputerUseSettingsView
+      settings={{ enabled: true, automaticUpdates: false }}
+      rememberedDesktopFiles={[alpha, beta]}
+      projectNames={
+        new Map([
+          [String(projectA), "Alpha"],
+          [String(projectB), "Beta"],
+        ])
+      }
+      onSettingsChange={onSettingsChange}
+      bridge={{}}
+    />,
+  );
+
+  expect(screen.getByText("2 Projects remembered")).toBeVisible();
+  const forgetButtons = screen.getAllByRole("button", { name: "Forget" });
+  expect(forgetButtons).toHaveLength(2);
+  fireEvent.click(forgetButtons[0]!);
+  await waitFor(() =>
+    expect(onSettingsChange).toHaveBeenCalledWith({ rememberedDesktopFileTransfers: [beta] }),
+  );
+});

@@ -1104,6 +1104,22 @@ type ReviewAnchorAssessment = Pick<CodeReviewFindingAssessment, "explanation"> &
   readonly anchorState: "current" | "outdated" | "unavailable";
 };
 
+/** Who gave a "Remember for this Project" answer: a local window, or a person-paired device. */
+export type CodeProjectAnswerApprover =
+  | { readonly kind: "window"; readonly windowId: WindowId }
+  | { readonly kind: "paired-device"; readonly deviceId: string };
+
+/**
+ * A person's answer to an app-managed tool's ask in the thread.
+ * `remembered-for-project` answers only an ask that offered it.
+ */
+export type CodeToolAskAnswer =
+  | "approved"
+  | "denied"
+  | "cancelled"
+  | "expired"
+  | { readonly kind: "remembered-for-project"; readonly approver: CodeProjectAnswerApprover };
+
 export interface CodeOperationTurnPort {
   readonly start: (input: {
     readonly windowId: WindowId;
@@ -1187,6 +1203,11 @@ export interface CodeOperationTurnPort {
     readonly decision: "approved" | "denied";
     /** The window that answered, which a level change acts for. */
     readonly windowId?: WindowId;
+    /**
+     * With `approved`: the person chose "Remember for this Project", and who
+     * they are. Honored only on an ask that offered it.
+     */
+    readonly rememberedForProjectBy?: CodeProjectAnswerApprover;
   }) => Promise<CodeOperationTurnResult>;
   readonly forceStop?: (input: {
     readonly thread: CodeThread;
@@ -4948,6 +4969,16 @@ export class CodeOperationService {
             approvalId: command.approvalId,
             decision: command.decision,
             windowId,
+            // A standing Project answer is the person's alone: a device the
+            // hub introduced answers as an agent and allows only this once.
+            ...(command.rememberForProject === true && initiator === "user"
+              ? {
+                  rememberedForProjectBy:
+                    personActor?.kind === "remote-device"
+                      ? { kind: "paired-device" as const, deviceId: String(personActor.deviceId) }
+                      : { kind: "window" as const, windowId },
+                }
+              : {}),
           }),
         );
       case "force-stop-provider-turn":

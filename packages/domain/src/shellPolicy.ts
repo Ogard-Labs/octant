@@ -54,6 +54,7 @@ import {
   type PaneId,
   type RememberedBrowserTransfer,
   type RememberedComputerUseApp,
+  type RememberedDesktopFileTransfer,
   type ShellSettings,
   type SplitRatio,
   type StowedWorkspaceLayout,
@@ -284,6 +285,7 @@ export function defaultShellSettings(): ShellSettings {
     browserUploadFileCountLimit: MAX_BROWSER_UPLOAD_FILES,
     rememberedBrowserTransfers: [],
     rememberedComputerUseApps: [],
+    rememberedDesktopFileTransfers: [],
     persistentBrowserOwner: false,
     pairedDeviceLifetime: DEFAULT_PAIRED_DEVICE_LIFETIME,
   };
@@ -817,6 +819,10 @@ export function replaceShellSettings(
       current.rememberedComputerUseApps,
       replacement.rememberedComputerUseApps,
     ),
+    rememberedDesktopFileTransfers: resolveRememberedDesktopFileTransfers(
+      current.rememberedDesktopFileTransfers,
+      replacement.rememberedDesktopFileTransfers,
+    ),
   };
 }
 
@@ -913,6 +919,35 @@ function resolveRememberedComputerUseApps(
         "Remembered Computer use approvals can only be added by the approval decision.",
       );
     }
+  }
+  return replacement;
+}
+
+/**
+ * A replacement may forget remembered sent-file answers, never add one: an
+ * entry is kept only exactly as the approval decision stored it.
+ */
+function resolveRememberedDesktopFileTransfers(
+  current: ReadonlyArray<RememberedDesktopFileTransfer>,
+  replacement: ReadonlyArray<RememberedDesktopFileTransfer> | undefined,
+): ReadonlyArray<RememberedDesktopFileTransfer> {
+  if (replacement === undefined) return current;
+  const seen = new Set<string>();
+  for (const entry of replacement) {
+    const key = String(entry.projectId);
+    const stored = current.find((candidate) => String(candidate.projectId) === key);
+    if (
+      seen.has(key) ||
+      stored === undefined ||
+      stored.grantedAt !== entry.grantedAt ||
+      JSON.stringify(stored.grantedBy) !== JSON.stringify(entry.grantedBy)
+    ) {
+      reject(
+        "invalid-settings",
+        "Remembered desktop file answers can only be added by the approval decision.",
+      );
+    }
+    seen.add(key);
   }
   return replacement;
 }
