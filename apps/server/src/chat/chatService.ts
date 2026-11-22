@@ -2621,10 +2621,13 @@ export class ChatService {
       (context.coordinationDepth ?? 0) > 0 ||
       context.limitRecovery === true;
     if (!unattended && context?.fromOutsideAgent !== true) return;
-    const refusals = personalSignInRefusals(
-      this.#persistence.readProviderInstance(decodeProviderInstanceId(providerInstanceId))
-        ?.driverKind ?? "",
+    const instance = this.#persistence.readProviderInstance(
+      decodeProviderInstanceId(providerInstanceId),
     );
+    // A provider that is off runs nothing: routing and fallback probing skip
+    // it, so a pool entry or fallback that still names it blocks no turn.
+    if (instance?.enabled !== true) return;
+    const refusals = personalSignInRefusals(instance.driverKind);
     // The grant's own check read the thread's provider; a pool or fallback
     // can still route the agent's turn onto one that refuses outside agents.
     const refusal = unattended ? refusals?.refusesUnattendedRuns : refusals?.refusesOutsideAgents;

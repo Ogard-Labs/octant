@@ -731,4 +731,18 @@ describe("the providers an outside agent's Chat turn could run on", () => {
     ).toEqual(["p-thread", "p-live", "p-pool", "p-fallback"]);
     expect(chatTurnProviders({ selected: "p-thread" })).toEqual(["p-thread"]);
   });
+
+  it("leaves out a pool candidate or fallback that is turned off, which routing never sends to", () => {
+    expect(
+      chatTurnProviders({
+        selected: "p-thread",
+        pool: [
+          { hostId: "local", providerInstanceId: "p-pool-off" },
+          { hostId: "local", providerInstanceId: "p-pool" },
+        ],
+        fallback: "p-fallback-off",
+        isEnabled: (providerInstanceId) => !providerInstanceId.endsWith("-off"),
+      }),
+    ).toEqual(["p-thread", "p-pool"]);
+  });
 });

@@ -2410,6 +2410,12 @@ export function wireRemote(deps: RemoteDependencies) {
                       })),
                     }),
                 ...(fallback === undefined ? {} : { fallback: String(fallback) }),
+                isEnabled: (providerInstanceId) =>
+                  persistence
+                    .readProviderInstances()
+                    .some(
+                      (instance) => String(instance.id) === providerInstanceId && instance.enabled,
+                    ),
               }),
             ),
           };

@@ -76,14 +76,21 @@ export function chatTurnProviders(input: {
   readonly live?: string;
   readonly pool?: ReadonlyArray<{ readonly hostId: string; readonly providerInstanceId: string }>;
   readonly fallback?: string;
+  /**
+   * Whether a provider is on. Routing never sends a turn to one that is off,
+   * so a pool candidate or fallback that still names it is left out.
+   */
+  readonly isEnabled?: (providerInstanceId: string) => boolean;
 }): ReadonlyArray<string> {
+  const routable = (providerInstanceId: string) => input.isEnabled?.(providerInstanceId) ?? true;
   return [
     input.selected,
     ...(input.live === undefined ? [] : [input.live]),
     ...(input.pool ?? [])
       .filter((candidate) => candidate.hostId === String(LOCAL_HOST_ID))
-      .map((candidate) => candidate.providerInstanceId),
-    ...(input.fallback === undefined ? [] : [input.fallback]),
+      .map((candidate) => candidate.providerInstanceId)
+      .filter(routable),
+    ...(input.fallback === undefined || !routable(input.fallback) ? [] : [input.fallback]),
   ];
 }
 

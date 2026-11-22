@@ -3069,7 +3069,10 @@ that declaration, never by the profile id:
   is marked as having read outside content, so a refused send leaves no mark
   to gate the thread's later helpers. The Chat service checks again on the
   provider a routed send resolves to and, for an answer, on the attempt's own
-  provider.
+  provider. A provider that is turned off counts in neither check, nor in
+  the Chat host-turn checks above: routing and fallback probing never send a
+  turn to it, so a pool entry or fallback that still names a disabled
+  Antigravity instance blocks no turn.
 - **Who else can drive it.** No other principal than the host's own person
   can. Hub members are the person's own devices by scope
   ([Hub and spokes](hub-and-spokes.md#outcome): teams, shared machines and

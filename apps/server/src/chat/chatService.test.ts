@@ -7702,6 +7702,49 @@ describe("ChatService", () => {
     ]);
   });
 
+  it("keeps the routed provider of a turn waiting on a question as the live turn's, for the helper check to read", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000014");
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const liveTurns = new LiveTurnRegistry();
+    const { service } = openFixture({
+      driver: questionDriver([], []),
+      liveTurns,
+      probe: probeFixture({ models: [] }),
+      probeFor: (providerInstanceId) =>
+        providerInstanceId === fallbackProvider
+          ? probeFixture({ instanceId: decodeProviderInstanceId(fallbackProvider) })
+          : undefined,
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Routed and waiting",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    void service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Ask me anything",
+      },
+      { windowId: window },
+    );
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.pendingQuestion !== undefined,
+    );
+    // The lookup the host hands `authorizeAgentRunCreation` reads the turn's
+    // fallback provider, not the thread's own, while the turn waits.
+    expect(String(liveTurns.connection(String(created.thread.id))?.providerInstanceId)).toBe(
+      fallbackProvider,
+    );
+    expect(String(created.thread.providerInstanceId)).not.toBe(fallbackProvider);
+  });
+
   it("takes no outside agent's answer to a question from an attempt running on Google Antigravity", async () => {
     const window = decodeWindowId("84000000-0000-4000-8000-000000000013");
     const sent: Array<SentTurn> = [];
@@ -9913,6 +9956,45 @@ describe("ChatService", () => {
       if (updated.kind !== "thread-updated") throw new Error("Expected thread-updated result.");
       return { ...fixture, thread: updated.thread };
     }
+
+    it("takes an unattended turn on a pool whose Google Antigravity entry is turned off, and refuses it once it is on", async () => {
+      const antigravity = "84000000-0000-4000-8000-000000000031";
+      let antigravityOn = false;
+      const antigravityCandidate = {
+        hostId: "local" as HostId,
+        providerInstanceId: antigravity,
+        modelId: "model-a",
+      } as MultiModelPoolCandidate;
+      const { service, thread } = await threadWithPool(
+        async ({ pool: p }) =>
+          p.candidates.map((candidate) =>
+            String(candidate.providerInstanceId) === antigravity
+              ? poolFacts(candidate, { readiness: "unavailable", authorityAllowed: false })
+              : poolFacts(candidate),
+          ),
+        { candidates: [poolCandidate("model-a"), antigravityCandidate] },
+        {
+          driverKindFor: (id) => (id === antigravity ? "antigravity" : "openai-compatible"),
+          providerEnabledFor: (id) => id !== antigravity || antigravityOn,
+        },
+      );
+      const send = (prompt: string) =>
+        service.execute({
+          kind: "send-chat-turn",
+          threadId: thread.id,
+          expectedVersion: service.read(thread.id).thread.version,
+          prompt,
+        });
+      // Routing never sends a turn to a provider that is off, so a pool that
+      // still lists one does not block the routine's send.
+      await expect(send("While it is off")).resolves.toMatchObject({ kind: "turn-created" });
+      await until(() => service.read(thread.id).turns[0]?.attempts[0]?.outcome === "completed");
+
+      antigravityOn = true;
+      await expect(send("Once it is on")).rejects.toMatchObject({
+        failure: { category: "unauthorized", message: ANTIGRAVITY_UNATTENDED_REFUSAL },
+      });
+    });
 
     it("persists exactly one selected route decision for the requested candidate before provider execution starts", async () => {
       const { service, thread } = await threadWithPool(async ({ pool: p }) =>
