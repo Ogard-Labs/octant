@@ -210,6 +210,7 @@ export interface MediaToolHostPort {
   readonly transcription?: MediaTranscriptionHostPort;
   readonly imageDescription?: MediaImageDescriptionHostPort;
   readonly imageGeneration?: MediaImageGenerationHostPort;
+  /** Host-owned teardown for a shared turn port; individual `MediaToolSet.close()` calls do not invoke it. */
   readonly close?: () => Promise<void>;
 }
 
@@ -225,6 +226,7 @@ export interface MediaToolSet {
    */
   readonly taintErrorResults?: boolean;
   readonly execute: (input: MediaToolCallInput) => Promise<MediaToolResult>;
+  /** Tears down only this tool set's own resources; the host caller retains ownership of closing any shared `MediaToolHostPort`. */
   readonly close: () => Promise<void>;
 }
 

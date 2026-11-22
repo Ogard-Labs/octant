@@ -923,7 +923,11 @@ export function registerContributedMediaTools(input: {
       (definition) => (assignedNameCounts.get(definition.name) ?? 0) > 1,
     );
     if (collides) {
-      void set.close().catch(() => undefined);
+      try {
+        void Promise.resolve(set.close()).catch(() => undefined);
+      } catch {
+        // A failing close on a withheld colliding plugin must not abort sibling registration.
+      }
       continue;
     }
     active.push(set);

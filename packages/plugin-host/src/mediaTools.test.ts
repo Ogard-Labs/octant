@@ -192,11 +192,28 @@ describe("public media tool host bridge and built-in plugins", () => {
       contributions: [
         { packageId: PACKAGE_ID, componentId: "dup", plugin: makePlugin("dup-a"), facts },
         { packageId: PACKAGE_ID, componentId: "dup", plugin: makePlugin("dup-b"), facts },
-        // Multi-tool `media` (`_media_0`, `_media_1`) collides with single-tool `media-0` (`_media_0`).
+        // Multi-tool `media` (`_media_0`, `_media_1`) collides with single-tool `media-0` (`_media_0`),
+        // and a synchronous throw in a colliding plugin's `close()` must not abort sibling registration.
         {
           packageId: PACKAGE_ID,
           componentId: "media",
-          plugin: makePlugin("media", ["first", "second"]),
+          plugin: {
+            kind: MEDIA_TOOL_CONTRIBUTION_KIND,
+            id: "media",
+            modes: ["work"],
+            createTools: () => ({
+              definitions: ["first", "second"].map((name) => ({
+                name,
+                description: `Run ${name}`,
+                inputSchema: { type: "object", properties: {} },
+              })),
+              taintPolicy: "outside-content",
+              close: () => {
+                throw new Error("sync close failure");
+              },
+              execute: async () => ({ result: { ok: true } }),
+            }),
+          },
           facts,
         },
         { packageId: PACKAGE_ID, componentId: "media-0", plugin: makePlugin("media-0"), facts },
