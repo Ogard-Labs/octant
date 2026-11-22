@@ -21,6 +21,12 @@ const decodeDigest = Schema.decodeUnknownSync(Schema.String.pipe(Schema.pattern(
  */
 export class CanvasShareImageStore {
   readonly #store: ManagedAttachmentStore;
+  /**
+   * The startup reconcile, which every keep waits for: it removes staged and
+   * unnamed files, so a share kept while it ran could lose bytes it is about
+   * to record.
+   */
+  #reconciling: Promise<void> = Promise.resolve();
 
   constructor(dataDirectory: string) {
     this.#store = new ManagedAttachmentStore(dataDirectory, {
@@ -42,6 +48,7 @@ export class CanvasShareImageStore {
    * share or two sources with the same bytes keep one verified copy.
    */
   async keepResolved(snapshotId: string, resolved: CanvasShareResolvedImages): Promise<void> {
+    await this.#reconciling;
     const byDigest = new Map([...resolved.values()].map((image) => [image.sha256, image]));
     for (const [sha256, image] of byDigest) {
       if (await this.#holds(snapshotId, sha256, image.byteLength)) continue;
@@ -76,7 +83,13 @@ export class CanvasShareImageStore {
    * stopped between keeping a snapshot's images and recording it.
    */
   async reconcile(isNamed: (snapshotId: string, sha256: string) => boolean): Promise<void> {
-    await this.#store.recover({ isFinalizedAttachmentReferenced: isNamed });
+    const previous = this.#reconciling;
+    const run = previous.then(() =>
+      this.#store.recover({ isFinalizedAttachmentReferenced: isNamed }),
+    );
+    // A failed reconcile leaves files behind but must not refuse every later share.
+    this.#reconciling = run.catch(() => undefined);
+    await run;
   }
 
   async #holds(snapshotId: string, sha256: string, byteLength: number): Promise<boolean> {

@@ -621,7 +621,8 @@ describe("Canvas share policy", () => {
         {
           frameId: "home",
           title: "Home",
-          html: '<div class="hero"></div><img src="octant-asset:shot" alt="Home"><!-- <img src="octant-asset:hidden"> -->',
+          // A CSS comment opener in text is only text: the image after it shows.
+          html: '<div class="hero"></div><p>Matches docs/*</p><img src="octant-asset:shot" alt="Home"><!-- <img src="octant-asset:hidden"> --><style>/* .x { background: url(octant-asset:hidden); } */</style>',
         },
       ],
       assets: [

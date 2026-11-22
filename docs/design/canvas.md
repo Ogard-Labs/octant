@@ -888,7 +888,7 @@ it after checking them against the digest, drops an image whose bytes are gone
 or changed with every reference to it, and removes them when the snapshot is
 revoked or its Canvas is purged; replaying a recorded share keeps nothing
 new, so a revoked snapshot never gets its bytes back. A host that stops between keeping and
-recording leaves only bytes no snapshot names, which the next start removes. A snapshot's prototype, run from
+recording leaves only bytes no snapshot names, which the next start removes before it keeps any new share. A snapshot's prototype, run from
 its ticketed page, draws its images from the same bytes, never from a live
 read. _Rationale:_ the journal is
 replayed and synced, so image bytes there would cost every start and every

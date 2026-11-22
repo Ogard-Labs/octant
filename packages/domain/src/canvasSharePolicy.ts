@@ -263,17 +263,29 @@ function designAssetsShown(
 ): ReadonlySet<string> {
   const shown = new Set<string>();
   // A reference inside a comment is never drawn, so it does not show the
-  // image: comments are taken out before the markup is read.
+  // image: comments are taken out before the markup is read, each kind only
+  // where it is a comment. A `/*` in a frame's text is text, and the image
+  // after it still shows.
+  const withoutCssComments = (css: string) => css.replace(/\/\*[\s\S]*?(?:\*\/|$)/g, "");
+  const withoutHtmlComments = (html: string) =>
+    html
+      .replace(/<!--[\s\S]*?(?:-->|$)/g, "")
+      .replace(
+        /(<style\b[^>]*>)([\s\S]*?)(<\/style\s*>|$)/gi,
+        (_whole, open: string, css: string, close: string) =>
+          open + withoutCssComments(css) + close,
+      )
+      .replace(
+        /(\sstyle\s*=\s*)("[^"]*"|'[^']*')/gi,
+        (_whole, name: string, value: string) => name + withoutCssComments(value),
+      );
   const collect = (markup: string) =>
-    withDesignAssetAddresses(
-      markup.replace(/\/\*[\s\S]*?(?:\*\/|$)/g, "").replace(/<!--[\s\S]*?(?:-->|$)/g, ""),
-      (assetId) => {
-        shown.add(assetId);
-        return "";
-      },
-    );
-  collect(block.styles ?? "");
-  for (const frame of block.frames) collect(frame.html);
+    withDesignAssetAddresses(markup, (assetId) => {
+      shown.add(assetId);
+      return "";
+    });
+  collect(withoutCssComments(block.styles ?? ""));
+  for (const frame of block.frames) collect(withoutHtmlComments(frame.html));
   return shown;
 }
 

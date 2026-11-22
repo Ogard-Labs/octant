@@ -110,4 +110,28 @@ describe("CanvasShareImageStore", () => {
     await store.reconcile(() => false);
     expect((await store.withBytes(snapshotId, snapshotDocument())).images).toBeUndefined();
   });
+
+  it("keeps a share that arrives while the startup reconcile runs", async () => {
+    directory = mkdtempSync(join(tmpdir(), "octant-share-image-store-"));
+    const store = new CanvasShareImageStore(directory);
+    // Nothing is recorded yet at start, so the reconcile names nothing.
+    const reconciling = store.reconcile(() => false);
+    const keeping = store.keepResolved(
+      snapshotId,
+      new Map([
+        [
+          "generated-image:x",
+          {
+            mediaType: "image/png" as const,
+            data: bytes.toString("base64"),
+            byteLength: bytes.byteLength,
+            sha256,
+          },
+        ],
+      ]),
+    );
+    await Promise.all([reconciling, keeping]);
+    const served = await store.withBytes(snapshotId, snapshotDocument());
+    expect(served.images).toEqual([{ ...entry, data: bytes.toString("base64") }]);
+  });
 });
