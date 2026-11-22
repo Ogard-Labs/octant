@@ -481,7 +481,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     },
   };
   const resolveDesignAssets = (
-    block: CanvasDesignBlock,
+    block: Pick<CanvasDesignBlock, "blockId" | "assets">,
     provenance: CanvasProvenance,
   ): Promise<ReadonlyArray<CanvasDesignAssetResolution>> =>
     resolveCanvasDesignAssets(block, provenance, canvasDesignAssetPorts);

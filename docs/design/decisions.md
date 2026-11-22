@@ -2468,8 +2468,9 @@ A design frame never loads anything itself. The server resolves the images a des
 - Resolution runs through the authorized Canvas read under the version's mode, Project and thread; Chat reaches only images generated in its own Project or thread, and Work and Code files pass the Work confinement sequence.
 - Only sniffed raster images within per-image and per-design budgets are returned, and the renderer inlines them as `data:` images.
 - The journal holds references only.
+- An image block may draw a generated image (`generatedImageId`, Canvas version 30). It resolves through the same read as a design's `generated-image` asset, says "Image unavailable" when the image is gone or out of reach, is written into the saved HTML file under its image budget, and leaves a share and the Markdown and destination exports as its description.
 
-Status: Built. Since: —. Detail: [Architecture: Security and authority, Canvas design images](../architecture.md#security-and-authority).
+Status: Built. Since: —. Detail: [Architecture: Security and authority, Canvas design images](../architecture.md#security-and-authority); [Canvas: Image block](canvas.md#image-block).
 
 ### Product feedback notes
 

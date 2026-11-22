@@ -18196,6 +18196,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   within the per-image and per-design budgets are returned, the renderer
   inlines them as `data:` images, and the journal holds references only
   ([Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md), F5).
+  An image block that draws a generated image resolves through the same read,
+  as one declared image ([Canvas: Image block](design/canvas.md#image-block)).
 - **Product feedback notes.** A product-feedback note is the person's comment
   on an element of the running product. It is journaled on its own aggregate
   and carried with the next admitted turn exactly once. The client sends the

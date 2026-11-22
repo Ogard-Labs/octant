@@ -246,7 +246,8 @@ version 26, the `choice` block at version 27, a document's `designSystem`
 at version 28 (the design system its typed blocks draw their colours from; see
 [Project design systems](design-systems.md#where-it-is-used)), and a choice
 block's `sections` and per-question `allowNote` at version 29 (see
-[Decision forms](#decision-forms)), so a document that
+[Decision forms](#decision-forms)), and an image block's `generatedImageId`
+at version 30 (see [Image block](#image-block)), so a document that
 declares an earlier version and carries one is refused as a declared future
 version. Version 20 adds no block or field a share carries, so a share names a
 block authored at 20 as 19 under share version 10. Version 21 adds the
@@ -883,7 +884,9 @@ share still strips: a shared chart leaves as its readings and is named as
 version 21. Share version 12 carries the flow block, so it names blocks up
 to Canvas version 23, share version 16 carries the choice block, and share
 version 17 carries a decision form's sections and notes, so it names blocks up
-to Canvas version 29 (`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`);
+to Canvas version 29 (`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`). Version 30
+adds only an image block's `generatedImageId`, which a share drops, so a share
+names an image block authored at 30 as 29;
 the share service must learn each before a desktop release publishes one.
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
@@ -1559,6 +1562,39 @@ journaled exactly as an imported file is. A Markdown snapshot is refused as
 paired device never reads the snapshot, so it is not offered the action and
 the route refuses it.
 
+## Image block
+
+An `image` block is a picture with its `alt` text and an optional `caption`.
+It names exactly one of a manifest `sourceId`, which draws as its description,
+or, from Canvas version 30, a `generatedImageId`: the attachment id of a
+completed generated image, which it draws. The generated image resolves
+exactly as a design's `generated-image` asset does (see
+[Design block](#design-block)): through `GET /api/canvas/design-assets` for
+that version and block, as one asset named `image`, under the window
+authorization `get` runs and the version's own provenance, only when the
+image job's thread belongs to the Canvas's Project, or is the Canvas's own
+thread when a Chat thread owns it. Nothing is cached and the definition holds
+only the reference, so a replayed version keeps it and a reader is asked again
+each time the block is drawn. The image is named on the block rather than in
+the source manifest because a manifest entry names a Project, and a Canvas its
+Chat thread owns has none.
+
+The block shows "Loading image" until the host answers, then the picture, or
+"Image unavailable" when the image job is gone, belongs to another Project,
+is not a raster image, or passes the 3 MiB image cap; a surface with no host
+to ask shows "Image unavailable" too. The agent's `preview` reports a
+`design-asset-unavailable` warning for such a block with the asset id `image`
+and no frames, and `describe` for the `image` kind explains the field.
+
+The **HTML file** writes the picture in as a `data:` image under the file's
+image budget (`CANVAS_HTML_FILE_IMAGES_MAX_BYTES`), or the labelled placeholder
+when it did not resolve for that reader or would pass the budget. Markdown
+export and the destination exports write the block as its `alt` and caption,
+as they write a design's declared images as placeholders. A share drops
+`generatedImageId` like a source id, so a shared image block draws as its
+description: the image resolves only under this host's authority, as a
+design's declared images do.
+
 ## Design block
 
 A `design` block (Canvas schema version 9) is the one block whose content is
@@ -1749,8 +1785,10 @@ answer carries it in, where a newline, quote, backslash, or control character
 takes two to six bytes, so the answer fits the 8 MiB a paired device is served;
 past that it is refused as `too-large`.
 The surface's status line says what happened, and when the file holds design
-markup, that the markup is included as written. An image block names a source,
-not bytes, and draws as its description, as on screen. The agent's
+markup, that the markup is included as written. An image block that names a
+source draws as its description, as on screen; one that draws a generated
+image is written in as a `data:` image under the same image budget, or as the
+labelled placeholder (see [Image block](#image-block)). The agent's
 `octant_canvas` tool has no export operation, and this adds none.
 
 A share refuses an action block, whose

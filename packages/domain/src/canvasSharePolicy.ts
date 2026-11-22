@@ -248,7 +248,14 @@ function sanitizeBlock(block: CanvasBlock, markupAcknowledged: boolean): CanvasS
     case "browser-reference":
     case "evidence-reference":
     case "image": {
-      const { sourceId: _sourceId, ...rest } = block as CanvasBlock & { sourceId?: string };
+      // A generated image is host identity like a source id, and its bytes
+      // resolve only under this host's authority, so a shared image block
+      // carries its description alone.
+      const {
+        sourceId: _sourceId,
+        generatedImageId: _generatedImageId,
+        ...rest
+      } = block as CanvasBlock & { sourceId?: string; generatedImageId?: string };
       assertNoSecretShape(rest, `block.${block.blockId}`);
       return rest as CanvasStaticExportBlock;
     }

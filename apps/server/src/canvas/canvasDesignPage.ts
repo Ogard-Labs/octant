@@ -680,7 +680,7 @@ export class CanvasExportImages {
     return [...this.#leftOut].filter((key) => key.startsWith(prefix)).length;
   }
 
-  forDesign(block: CanvasDesignBlock): AssetAddresses {
+  forDesign(block: Pick<CanvasDesignBlock, "blockId" | "assets">): AssetAddresses {
     const blockId = String(block.blockId);
     const outcomes = this.#resolved.get(blockId) ?? [];
     const declared = new Set((block.assets ?? []).map((asset) => String(asset.assetId)));

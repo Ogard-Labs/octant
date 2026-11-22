@@ -1,4 +1,5 @@
 import {
+  CANVAS_IMAGE_BLOCK_ASSET_ID,
   CANVAS_DESIGN_ASSET_SCHEME,
   type CanvasBlock,
   type CanvasDefinition,
@@ -242,6 +243,8 @@ function blockWarnings(
       return barListWarnings(block, input);
     case "design":
       return designAssetWarnings(block, input);
+    case "image":
+      return generatedImageWarnings(block, input);
     case "flow":
       return flowWarnings(block, input.definition.blocks);
     default:
@@ -384,6 +387,32 @@ function designAssetWarnings(
     });
   }
   return warnings;
+}
+
+/**
+ * An image block's generated image the host could not draw, so the block
+ * says the image is unavailable: a deleted job, an image from another
+ * Project's thread, or one past the image cap. It has no frames to name.
+ */
+function generatedImageWarnings(
+  block: Extract<CanvasBlock, { readonly kind: "image" }>,
+  input: CanvasPreviewWarningInput,
+): ReadonlyArray<CanvasPreviewWarning> {
+  if (block.generatedImageId === undefined) return [];
+  const id = String(CANVAS_IMAGE_BLOCK_ASSET_ID);
+  const outcome = input.designAssets
+    ?.get(String(block.blockId))
+    ?.find((entry) => String(entry.assetId) === id);
+  if (outcome?.status === "resolved") return [];
+  return [
+    {
+      kind: "design-asset-unavailable",
+      blockId: String(block.blockId),
+      assetId: id,
+      reason: outcome?.reason ?? "refused",
+      frameIds: [],
+    },
+  ];
 }
 
 /** Whether markup names this reference, not one whose id merely starts with it. */

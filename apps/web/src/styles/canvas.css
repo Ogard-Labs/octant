@@ -3136,6 +3136,13 @@
   color: var(--oct-muted);
 }
 
+.canvas-block__image-picture {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--oct-radius-md);
+}
+
 .canvas-block__image figcaption {
   font-size: var(--oct-text-xs);
   color: var(--oct-meta);

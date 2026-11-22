@@ -1101,6 +1101,13 @@ describe("canvas routes", () => {
                 },
               ],
             },
+            {
+              blockId: "cover" as never,
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "image",
+              generatedImageId: "55555555-5555-4555-8555-555555555555" as never,
+              alt: "A lighthouse at dusk",
+            },
           ],
         },
       },
@@ -1184,6 +1191,25 @@ describe("canvas routes", () => {
     });
     expect(resolveDesignAssets).toHaveBeenCalledWith(
       expect.objectContaining({ blockId: "phone" }),
+      expect.objectContaining({ mode: "chat", projectId, threadId }),
+    );
+
+    // An image block that draws a generated image is read as that one image,
+    // under the same version provenance.
+    resolveDesignAssets.mockClear();
+    expect(
+      (await ask(`canvasId=${String(canvasId)}&versionId=${versionId}&blockId=cover`)).body,
+    ).toMatchObject({ kind: "ready", blockId: "cover" });
+    expect(resolveDesignAssets).toHaveBeenCalledWith(
+      {
+        blockId: "cover",
+        assets: [
+          {
+            assetId: "image",
+            source: { kind: "generated-image", imageId: "55555555-5555-4555-8555-555555555555" },
+          },
+        ],
+      },
       expect.objectContaining({ mode: "chat", projectId, threadId }),
     );
 

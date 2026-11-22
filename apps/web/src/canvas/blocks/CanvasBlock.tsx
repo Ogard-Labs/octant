@@ -24,6 +24,7 @@ import { ComparisonMatrixBlock } from "./ComparisonMatrixBlock";
 import { MathBlock } from "./MathBlock";
 import type { CanvasActionRuntime } from "../canvasActionRuntime";
 import type { DesignAssetRuntime } from "./designDocument";
+import { GeneratedImageBlock } from "./GeneratedImageBlock";
 import type { DesignRunRuntime } from "./designRunningFrame";
 import { ChoiceBlock, type CanvasChoiceRuntime } from "./ChoiceBlock";
 
@@ -130,8 +131,13 @@ export function CanvasBlockRenderer({
     case "preview-reference":
     case "browser-reference":
     case "evidence-reference":
-    case "image":
       return <ReferenceBlocks block={block} />;
+    case "image":
+      return block.generatedImageId === undefined ? (
+        <ReferenceBlocks block={block} />
+      ) : (
+        <GeneratedImageBlock block={block} runtime={designAssetRuntime} />
+      );
     case "plan":
       return (
         <PlanBlock block={block} {...(planRuntime === undefined ? {} : { runtime: planRuntime })} />

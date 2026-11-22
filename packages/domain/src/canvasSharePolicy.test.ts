@@ -589,6 +589,38 @@ describe("Canvas share policy", () => {
     expect(JSON.stringify(shared.document)).not.toContain("screens/home.png");
   });
 
+  it("shares an image block that draws a generated image as its description, without the image's id", () => {
+    const imageId = "9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a";
+    const shared = exportStaticDocument({
+      request,
+      current: {
+        ...current,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        definition: {
+          ...current.definition,
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          blocks: [
+            {
+              blockId: "cover",
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "image",
+              generatedImageId: imageId,
+              alt: "A lighthouse at dusk",
+              caption: "Cover art",
+            },
+          ],
+        },
+      },
+      context,
+    });
+    expect(decodeCanvasStaticExportDocument(shared.document).blocks[0]).toMatchObject({
+      kind: "image",
+      alt: "A lighthouse at dusk",
+      caption: "Cover art",
+    });
+    expect(JSON.stringify(shared.document)).not.toContain(imageId);
+  });
+
   it("shares a validated brand and richer diagram fields at the current share version, and leaves presenter notes and a captured page behind", () => {
     const captureId = "66666666-6666-4666-8666-666666666666";
     const design = {

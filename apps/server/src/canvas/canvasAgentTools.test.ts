@@ -649,6 +649,20 @@ describe("createCanvasAgentTools", () => {
     expect(JSON.stringify(outcome.result)).toContain("blocked");
   });
 
+  it("tells an agent asking about the image block how to show a generated image", async () => {
+    const { set } = tools();
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["image"] }),
+    });
+
+    expect(outcome.isError).not.toBe(true);
+    expect(outcome.result).toMatchObject({
+      blockSchema: { properties: { kind: { enum: ["image"] }, generatedImageId: {} } },
+      guidance: { image: expect.stringContaining("generatedImageId") },
+    });
+  });
+
   it("lets an agent create a login sequence and an order state machine from the examples describe returns", async () => {
     const { create, set } = tools();
     const described = await set.execute({

@@ -2,7 +2,7 @@ import { principalActsAsHostPerson } from "./clientPrincipal";
 import { eventActorForPrincipal } from "./principalEventActor";
 import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
 import type { DesignSystemList } from "@octant/contracts/design-systems";
-import type { CanvasDesignSystem } from "@octant/contracts/canvas";
+import { canvasImageBlockAssets, type CanvasDesignSystem } from "@octant/contracts/canvas";
 import { canvasMockupsTsx, canvasExportStem, importCanvasHtmlPage } from "@octant/domain";
 import {
   type CanvasId,
@@ -200,7 +200,7 @@ export interface CanvasRouteDependencies {
    * unavailable rather than guessing.
    */
   readonly resolveDesignAssets?: (
-    block: CanvasDesignBlock,
+    block: Pick<CanvasDesignBlock, "blockId" | "assets">,
     provenance: CanvasProvenance,
   ) => Promise<ReadonlyArray<CanvasDesignAssetResolution>>;
   /**
@@ -2528,10 +2528,17 @@ async function resolveDesignAssetsForReader(
     };
   }
   const definition = read.version.definition;
-  const block = definition.blocks.find(
-    (candidate): candidate is CanvasDesignBlock =>
-      candidate.kind === "design" && String(candidate.blockId) === String(input.blockId),
+  // An image block that draws a generated image is read the same way, as a
+  // design declaring that one image, so it keeps the same authority and caps.
+  const found = definition.blocks.find(
+    (candidate) => String(candidate.blockId) === String(input.blockId),
   );
+  const block =
+    found?.kind === "design"
+      ? found
+      : found?.kind === "image" && found.generatedImageId !== undefined
+        ? { blockId: found.blockId, assets: canvasImageBlockAssets(found) }
+        : undefined;
   if (block === undefined) {
     return {
       kind: "unavailable",
@@ -2618,8 +2625,15 @@ async function renderCanvasHtmlFileForReader(
   const resolve = dependencies.resolveDesignAssets;
   if (resolve !== undefined) {
     for (const block of definition.blocks) {
-      if (block.kind !== "design" || (block.assets ?? []).length === 0) continue;
-      designAssets.set(String(block.blockId), await resolve(block, definition.provenance));
+      // An image block's generated image resolves as a design declaring it.
+      const declaring =
+        block.kind === "design"
+          ? block
+          : block.kind === "image"
+            ? { blockId: block.blockId, assets: canvasImageBlockAssets(block) }
+            : undefined;
+      if (declaring === undefined || (declaring.assets ?? []).length === 0) continue;
+      designAssets.set(String(block.blockId), await resolve(declaring, definition.provenance));
     }
   }
   const rendered = renderCanvasHtmlFile(definition, {

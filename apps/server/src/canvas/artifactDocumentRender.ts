@@ -1,5 +1,7 @@
 import katex from "katex";
 import {
+  CANVAS_IMAGE_BLOCK_ASSET_ID,
+  canvasImageBlockAssets,
   canvasTableRowCells,
   type CanvasBlock,
   type CanvasDefinition,
@@ -451,7 +453,12 @@ function renderDocument(
       ? (designFramePieces(block, options.frameTheme, options.images) ?? piecesFor(block, palette))
       : block.kind === "mockup" && format === "html" && options.pictures !== "reading"
         ? mockupPagePieces(block)
-        : piecesFor(block, palette);
+        : block.kind === "image" &&
+            block.generatedImageId !== undefined &&
+            format === "html" &&
+            options.images !== undefined
+          ? generatedImagePieces(block, options.images)
+          : piecesFor(block, palette);
   // A dashboard reads where it sits: its title, then each placed block in
   // cell order, which is the order the screen's grid reads at one column. A
   // tab reads under its label and a column in track order, and a dashboard in
@@ -1345,6 +1352,29 @@ function asReading(pieces: ReadonlyArray<Piece>): ReadonlyArray<Piece> {
   });
 }
 
+/**
+ * An image block that draws a generated image, in the HTML file a reader
+ * saves: the picture written in as a `data:` image under the file's image
+ * budget, or the labelled placeholder when it did not resolve for this reader
+ * or would pass that budget. Every other form reads it as its description.
+ */
+function generatedImagePieces(
+  block: Extract<CanvasBlock, { readonly kind: "image" }>,
+  images: CanvasExportImages,
+): ReadonlyArray<Piece> {
+  const assets = canvasImageBlockAssets(block);
+  const alt = reading(block.alt);
+  const caption = block.caption === undefined ? "" : reading(block.caption);
+  const text = [alt, caption].filter((part) => part.length > 0).join(" — ");
+  const source = images
+    .forDesign({ blockId: block.blockId, assets })
+    .address(String(CANVAS_IMAGE_BLOCK_ASSET_ID));
+  return styled(
+    text,
+    `<figure class="image"><img src="${escapeXml(source)}" alt="${escapeXml(alt)}">${caption === "" ? "" : `<figcaption>${escapeXml(caption)}</figcaption>`}</figure>`,
+  );
+}
+
 /** `html` is built here from filtered, escaped text; `text` is what Markdown writes. */
 function styled(text: string, html: string): ReadonlyArray<Piece> {
   return text.length === 0 ? [] : [{ kind: "styled", text, html }];
@@ -1544,6 +1574,7 @@ const DOCUMENT_STYLE = [
   `.legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin:6px 0 0;padding:0;list-style:none;font-size:12px;color:${color("text-secondary", "#45454a")}}`,
   ".legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}",
   ".legend i.line{width:14px;height:0;border-radius:0;border-top:2px solid;vertical-align:3px}",
+  `.image{margin:0 0 16px}.image img{display:block;max-width:100%;height:auto;border-radius:8px}.image figcaption{margin-top:6px;color:${color("text-secondary", "#45454a")}}`,
   `.callout{border:1px solid ${color("border", "#e0e0de")};border-left:2px solid ${color("accent-text", "#141414")};border-radius:8px;background:${color("floating", "#fdfdfc")};padding:10px 14px;margin:0 0 16px}`,
   `.callout--warning{border-left-color:${color("warning-text", "#141414")}}`,
   `.callout--danger{border-left-color:${color("danger-text", "#a8102f")}}`,
