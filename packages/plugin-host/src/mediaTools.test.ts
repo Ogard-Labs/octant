@@ -4,6 +4,8 @@ import {
   decodeImageJobId,
   decodeProviderInstanceId,
   decodeProviderModelId,
+  decodeVideoClipId,
+  decodeVideoJobId,
 } from "@octant/contracts";
 import {
   MEDIA_TOOL_CONTRIBUTION_KIND,
@@ -16,6 +18,8 @@ import {
   contributedMediaToolName,
   CREATE_IMAGE_MEDIA_TOOL_PLUGIN,
   CREATE_IMAGE_TOOL_NAME,
+  CREATE_VIDEO_MEDIA_TOOL_PLUGIN,
+  CREATE_VIDEO_TOOL_NAME,
   createContributedMediaTool,
   isReservedBuiltinMediaToolName,
   LOOK_MEDIA_TOOL_PLUGIN,
@@ -566,5 +570,97 @@ describe("public media tool host bridge and built-in plugins", () => {
     );
     await run({ ...request, directory: "./" });
     expect(iconSet).toHaveBeenLastCalledWith(expect.objectContaining({ directory: "." }));
+  });
+});
+
+describe("octant_create_video", () => {
+  const jobId = decodeVideoJobId("c5000000-0000-4000-8000-000000000001");
+  const clipId = decodeVideoClipId("c5000000-0000-4000-8000-000000000002");
+  const profileInstanceId = decodeProviderInstanceId("c5000000-0000-4000-8000-000000000003");
+  const modelId = decodeProviderModelId("gemini-omni-1.2-flash");
+
+  function videoPort(save = true) {
+    const generate = vi.fn(async () => ({
+      status: "completed" as const,
+      jobId,
+      clipId,
+      modelId,
+      profileInstanceId,
+      durationSeconds: 8,
+      resolution: "720p",
+      sizeBytes: 1234,
+    }));
+    const saveClip = vi.fn(async (input: { readonly relativePath: string }) => ({
+      status: "saved" as const,
+      relativePath: input.relativePath,
+    }));
+    const port = basePort({
+      videoGeneration: {
+        isAvailable: () => true,
+        describeModels: () => "Gemini Omni Flash: 3-15 s; 720p, 1080p.",
+        generate,
+        ...(save ? { save: saveClip } : {}),
+      },
+    });
+    return { port, generate, saveClip };
+  }
+
+  it("is offered only where the host grants video generation, naming the ready models", () => {
+    expect(CREATE_VIDEO_MEDIA_TOOL_PLUGIN.createTools(basePort())).toBeUndefined();
+    const tools = CREATE_VIDEO_MEDIA_TOOL_PLUGIN.createTools(videoPort().port);
+    expect(tools?.definitions[0]?.name).toBe(CREATE_VIDEO_TOOL_NAME);
+    expect(tools?.definitions[0]?.description).toContain("Gemini Omni Flash: 3-15 s");
+  });
+
+  it("passes the agent's clip options to the host and reports the finished clip", async () => {
+    const { port, generate } = videoPort();
+    const tools = CREATE_VIDEO_MEDIA_TOOL_PLUGIN.createTools(port);
+    const result = await tools?.execute({
+      name: CREATE_VIDEO_TOOL_NAME,
+      inputJson: JSON.stringify({
+        prompt: "A paper boat on a pond",
+        durationSeconds: 8,
+        resolution: "720p",
+        firstFrame: { kind: "attachment" },
+      }),
+    });
+    expect(generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "A paper boat on a pond",
+        durationSeconds: 8,
+        resolution: "720p",
+        firstFrame: { kind: "attachment" },
+        references: [],
+      }),
+    );
+    expect(result?.result).toMatchObject({ status: "completed", clipId });
+  });
+
+  it("refuses credentials, fractional lengths, and saves that are not MP4 files in the folder", async () => {
+    const { port, generate, saveClip } = videoPort();
+    const tools = CREATE_VIDEO_MEDIA_TOOL_PLUGIN.createTools(port);
+    for (const input of [
+      { prompt: "x", apiKey: "secret" },
+      { prompt: "x", durationSeconds: 2.5 },
+      { operation: "save", clipId, relativePath: "clip.mov" },
+      { operation: "save", clipId, relativePath: "../clip.mp4" },
+    ]) {
+      const result = await tools?.execute({
+        name: CREATE_VIDEO_TOOL_NAME,
+        inputJson: JSON.stringify(input),
+      });
+      expect(result?.isError).toBe(true);
+    }
+    expect(generate).not.toHaveBeenCalled();
+    expect(saveClip).not.toHaveBeenCalled();
+  });
+
+  it("explains that a Chat thread has no folder to save a clip into", async () => {
+    const tools = CREATE_VIDEO_MEDIA_TOOL_PLUGIN.createTools(videoPort(false).port);
+    const result = await tools?.execute({
+      name: CREATE_VIDEO_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "save", clipId, relativePath: "clips/boat.mp4" }),
+    });
+    expect(result).toMatchObject({ isError: true });
   });
 });
