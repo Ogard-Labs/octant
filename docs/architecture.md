@@ -6480,11 +6480,15 @@ or .zip>` write the same files, built by one host command
   threads that window can open. A client decodes a hold reason it does not
   know as `other` and still shows the host's own sentence for it, so a reason
   a later host adds does not fail the status (maintainer decision,
-  2026-11-13). This protects clients built from now on. A client built before
-  it reads the reason as a closed list and refuses the whole status of a host
-  that reports an `uncertain-tool-call` hold, until that start's report is
-  replaced by the next one; the window a host serves is built with the host
-  and is not affected. Chat and Work turns are continued by the same
+  2026-11-13). The fallback and `uncertain-tool-call` shipped together, so the
+  minimum compatible client is Octant 0.1.0-preview.20261114.3: a client of
+  0.1.0-preview.20261113.2 or earlier reads the reason as a closed list and
+  refuses the whole status of a host that reports an `uncertain-tool-call`
+  hold, until that start's report is replaced by the next one; the window a
+  host serves is built with the host and is not affected. The host control
+  wire has no protocol version to raise for this, and recording more waits
+  for a person (below) adds no hold reason, so no client minimum moves with
+  it. Chat and Work turns are continued by the same
   rule (Chat and Work restart recovery, below), and so are Work goal loops,
   subagent runs (subagent restart recovery, below) and pending coordinator
   wakes (coordinator wake restart recovery, below).
@@ -6529,17 +6533,36 @@ or .zip>` write the same files, built by one host command
   Writing the first frame only after approval was rejected: the record cannot
   know which tools will ask, so every tool would have to announce its own
   effect and one that forgot would run unrecorded. This way a tool whose
-  approval service says nothing keeps today's hold. Built for the two
-  approvals asked before a call does anything: the harness's own tool
-  approvals (shell, edit, goal checks and the rest of
-  `NativeHarnessApprovalStore`) and a selected MCP server's tool approval.
-  Not built yet: Browser site, upload, download and sign-in prompts, routine
-  and memory proposals, image offers and a tool's question to the person keep
-  the first frame, so a call waiting on one of them still holds its thread (a
-  Browser prompt can follow a click that already happened, so it is not known
-  to precede every effect); and a runtime's own tool waiting on the runtime's
-  approval request still holds, because the request names no tool call and
-  the answer is sent from eleven places across the three modes.
+  approval service says nothing keeps today's hold. Every ask below goes
+  through the one wrapper, `whileAwaitingToolApproval`, at the service's own
+  wait, and each is asked before its call does anything (maintainer request,
+  2026-11-22):
+
+  - the harness's own tool approvals (shell, edit, goal checks and the rest
+    of `NativeHarnessApprovalStore`) and a selected MCP server's tool
+    approval;
+  - a Browser site, sign-in, upload, page-script or page-tool question
+    (`BrowserToolApprovalService`);
+  - a routine proposal or change request and a Project memory proposal. A
+    confirm creates or changes the routine, or writes the memory, before the
+    tool hears it, so the service calls the wrapper's `answered` as the answer
+    arrives and before it acts; a journal that refuses the frame refuses the
+    answer ("not created", "not applied") and nothing is changed;
+  - an image generation offer, which comes before the generation, save or
+    icon set it offers;
+  - a tool's question to the person (`NativeHarnessQuestionStore`).
+
+  A runtime's own tool waiting on the runtime's approval request is recorded
+  the same way when the request names the call (`approval-request`'s
+  `toolCallId`) and the host recorded that call's start: the turn's record
+  appends the awaiting frame when it reads the request. The answer reaches
+  the runtime only through the connection, from whichever mode or reviewer
+  sent it, so `withRecordedApprovalAnswers` on every configured driver
+  appends the intended frame again before forwarding it, and turns an allow
+  into a refusal when the journal refuses that frame. Still not recorded,
+  so the call keeps holding: a Browser download question, which can follow
+  the click that started the download in the same call; a runtime approval
+  request that names no call, or names one whose start the host had not read.
 
   What the record covers, by who runs the tool:
 
@@ -6562,9 +6585,14 @@ or .zip>` write the same files, built by one host command
     offers: the tool's own name (Codex, Pi), `mcp__octant__<tool>` (Claude
     Code) and `octant-<16 hex>_<tool>` (OpenCode; this spelling is not
     checked against a live OpenCode). Any other spelling stays a runtime
-    tool. Not built yet: an ACP agent titles its calls freely, so its start
-    for a host tool is still recorded as a runtime tool and can hold the
-    thread; and, not provable from what a runtime reports, a tool the runtime
+    tool. An ACP agent titles its calls freely, so its start is recorded as a
+    runtime tool; when the agent then requests a host tool and exactly one
+    open call it reported, not yet paired, has a title naming Octant and the
+    tool (`mcp__octant-browser__read`, `read (octant-browser MCP Server)`),
+    the adapter names that report on the `tool-request` (`toolCallId`), and
+    the record closes it as `superseded` because the host records the request
+    itself. Anything less certain stays a runtime tool and can hold the
+    thread. Not provable from what a runtime reports: a tool the runtime
     started that the host had not read when it stopped leaves no record, and
     that turn continues as before.
   - A managed child agent run (maintainer decision, 2026-11-13): the tools

@@ -9,6 +9,7 @@ import {
   type RoutineProposalId,
   type WindowId,
 } from "@octant/contracts";
+import { whileAwaitingToolApproval } from "../toolEffects/toolEffectLedger";
 
 /**
  * Host-wide cap on waiting proposals and change requests together, as the
@@ -68,6 +69,8 @@ interface PendingProposal {
   readonly view: RoutineAgentRequest;
   readonly windowId: WindowId;
   readonly settle: (outcome: RoutineAskOutcome) => void;
+  /** Puts the asking call back on record before an answer acts; throws when it cannot. */
+  readonly answered: () => void;
 }
 
 /**
@@ -156,21 +159,27 @@ export class RoutineProposalService {
       requestedAt: new Date(this.#options.now()).toISOString(),
     });
     const key = String(view.proposalId);
-    return new Promise((resolve) => {
-      const onAbort = () => settle({ status: "cancelled" });
-      let settled = false;
-      const settle = (outcome: RoutineAskOutcome) => {
-        if (settled) return;
-        settled = true;
-        signal?.removeEventListener("abort", onAbort);
-        if (this.#pending.delete(key)) this.#options.onChanged?.();
-        resolve(outcome);
-      };
-      this.#pending.set(key, { view, windowId, settle });
-      this.#options.onChanged?.();
-      this.#options.onAsked?.({ threadId: String(view.threadId), askId: key });
-      signal?.addEventListener("abort", onAbort, { once: true });
-    });
+    // Asked before anything changes; a confirm creates or changes the routine
+    // before the tool hears it, so `answered` puts the call back on record
+    // first (`claim`).
+    return whileAwaitingToolApproval(
+      (answered) =>
+        new Promise((resolve) => {
+          const onAbort = () => settle({ status: "cancelled" });
+          let settled = false;
+          const settle = (outcome: RoutineAskOutcome) => {
+            if (settled) return;
+            settled = true;
+            signal?.removeEventListener("abort", onAbort);
+            if (this.#pending.delete(key)) this.#options.onChanged?.();
+            resolve(outcome);
+          };
+          this.#pending.set(key, { view, windowId, settle, answered });
+          this.#options.onChanged?.();
+          this.#options.onAsked?.({ threadId: String(view.threadId), askId: key });
+          signal?.addEventListener("abort", onAbort, { once: true });
+        }),
+    );
   }
 
   /** The proposals and change requests this window may answer, oldest first. */
@@ -199,6 +208,14 @@ export class RoutineProposalService {
     if (pending === undefined || String(pending.windowId) !== String(windowId)) return undefined;
     this.#pending.delete(key);
     this.#options.onChanged?.();
+    try {
+      pending.answered();
+    } catch {
+      // The call could not be put back on record, so the answer must not
+      // act: a restart would read the routine's change as never started.
+      pending.settle({ status: "not-created", message: "The routine was not changed." });
+      return undefined;
+    }
     return { proposal: pending.view, settle: pending.settle };
   }
 
