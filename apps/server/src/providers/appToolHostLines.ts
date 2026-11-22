@@ -1,5 +1,10 @@
 import { BROWSER_TOOL_HOST_LINE } from "@octant/plugin-host/browser-use";
 import { COMPUTER_TOOL_HOST_LINE } from "@octant/plugin-host/computer-use";
+import {
+  CREATE_IMAGE_TOOL_HOST_LINE,
+  LOOK_TOOL_HOST_LINE,
+  TRANSCRIBE_TOOL_HOST_LINE,
+} from "@octant/plugin-host/media-tools";
 
 /** One host line and the tool it describes, so a session without the tool leaves it out. */
 export interface AppToolHostLine {
@@ -37,16 +42,14 @@ const GUIDE_LINES: Readonly<Record<string, string>> = {
   octant_code:
     "Ask the language server about a saved file with octant_code: its errors, where a name is defined, and where it is used.",
   octant_computer: COMPUTER_TOOL_HOST_LINE,
-  octant_create_image:
-    "Call octant_create_image when the person asks for a picture instead of drawing it as SVG or HTML. To restyle photos or screenshots, use references, which always need confirmation. Keep SVG for logos, icons, and diagrams.",
+  octant_create_image: CREATE_IMAGE_TOOL_HOST_LINE,
   octant_credential:
     "When a registered operation or a saved command needs a credential the person holds, use octant_credential; you never see the value, and it is not a command runner.",
   octant_debug:
     "When you need breakpoints, stepping, or a stopped program's stack and variables, run the checkout's program under octant_debug.",
   octant_github:
     "Read the repository's issues, pull requests, and projects with octant_github, which uses the person's connected account, rather than gh or the GitHub API.",
-  octant_look:
-    "When you cannot read an image yourself, have octant_look ask the Sees images model to describe it, with your question if you have one.",
+  octant_look: LOOK_TOOL_HOST_LINE,
   octant_memory:
     "When the person states a durable fact, decision or convention about this Project that its future threads should retain, use octant_memory; keep transient task details in the current thread.",
   octant_narrate:
@@ -73,8 +76,7 @@ const GUIDE_LINES: Readonly<Record<string, string>> = {
     "Start long-running processes such as dev servers and watchers with octant_terminal rather than a backgrounded shell command, so their output stays readable and the person can see them.",
   octant_threads:
     "See this Project's other threads, and message them where its operations allow, with octant_threads.",
-  octant_transcribe:
-    "Transcribe a recording from this thread's folder with octant_transcribe instead of installing speech models; page long transcripts with nextOffset.",
+  octant_transcribe: TRANSCRIBE_TOOL_HOST_LINE,
   octant_zen:
     "Read and arrange this Zen space with octant_zen: pin threads, add widgets, move elements.",
 };
