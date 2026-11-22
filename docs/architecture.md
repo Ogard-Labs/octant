@@ -14444,33 +14444,35 @@ feature: usage, diagnostics, Navigator, the automations UI, browser and
 computer use, agent hierarchy, remote and mobile access, the Apple workbench,
 and the marketplace and plugin registry are no longer extraction candidates.
 
-| Surface                                                                      | Status and boundary to preserve                                                                                                                                                                 |
-| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GitHub                                                                       | Switchable bundled plugin; integration ports and contributed views, no direct host-service wiring                                                                                               |
-| Thread boards                                                                | Switchable bundled plugin; separable projection and UI, Work/Code status policy stays host-owned, and Chat has no board                                                                         |
-| Zen                                                                          | Switchable bundled plugin; appearance contributions and their scoped state                                                                                                                      |
-| Linear, Azure Resource Manager reads                                         | Bundled Integration plugins with no switch; integration ports and contributed views                                                                                                             |
-| Declarative Code tools                                                       | Installed package declarations through the public Code-tool port; credential policy, consent and execution stay host-owned                                                                      |
-| Pull request reviewers                                                       | Code-only plugin seam (`pull-request-reviewer`); host owns Plan read-only turns, head-staleness, findings, and opt-ins                                                                          |
-| Canvas, preview viewers, backgrounds, theme presets                          | Core; scoped artifact contracts, registered viewers, and appearance contributions                                                                                                               |
-| Usage, diagnostics, Navigator, automations UI                                | Core; underlying authority stays in the host                                                                                                                                                    |
-| Project memory and its agent tool                                            | Core; the journal, the person's confirmation, and purge stay host-owned                                                                                                                         |
-| Host media tools (`octant_look`, `octant_transcribe`, `octant_create_image`) | Core; host-registered exception while thread-scoped attachments, confined files, host model/speech routing, paid service offers, and outside-content tainting stay outside the public tool port |
-| Octant Harness built-in tools (`read`, `edit`, `bash`, `diagnostics`)        | Core; part of the harness loop's closed catalog, judged by the same authority path                                                                                                              |
-| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench        | Core; capability, lifecycle, and security remain app-managed                                                                                                                                    |
-| Marketplace and plugin registry                                              | Core; they stay in the host because they admit and activate other components                                                                                                                    |
-| Provider drivers                                                             | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned                                                                            |
-| Image adapters (OpenAI, Gemini, BFL, Ideogram)                               | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                                                                                           |
+| Surface                                                                      | Status and boundary to preserve                                                                                                                                                                                                                               |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub                                                                       | Switchable bundled plugin; integration ports and contributed views, no direct host-service wiring                                                                                                                                                             |
+| Thread boards                                                                | Switchable bundled plugin; separable projection and UI, Work/Code status policy stays host-owned, and Chat has no board                                                                                                                                       |
+| Zen                                                                          | Switchable bundled plugin; appearance contributions and their scoped state                                                                                                                                                                                    |
+| Linear, Azure Resource Manager reads                                         | Bundled Integration plugins with no switch; integration ports and contributed views                                                                                                                                                                           |
+| Declarative Code tools                                                       | Installed package declarations through the public Code-tool port; credential policy, consent and execution stay host-owned                                                                                                                                    |
+| Pull request reviewers                                                       | Code-only plugin seam (`pull-request-reviewer`); host owns Plan read-only turns, head-staleness, findings, and opt-ins                                                                                                                                        |
+| Canvas, preview viewers, backgrounds, theme presets                          | Core; scoped artifact contracts, registered viewers, and appearance contributions                                                                                                                                                                             |
+| Usage, diagnostics, Navigator, automations UI                                | Core; underlying authority stays in the host                                                                                                                                                                                                                  |
+| Project memory and its agent tool                                            | Core; the journal, the person's confirmation, and purge stay host-owned                                                                                                                                                                                       |
+| Host media tools (`octant_look`, `octant_transcribe`, `octant_create_image`) | Public media tool port (`@octant/plugin-api/media-tools` and `@octant/plugin-host/media-tools`); path confinement, raw media bytes, credentials/routing, paid service offers, concurrency gates, outside-content tainting, and live admission stay host-owned |
+| Octant Harness built-in tools (`read`, `edit`, `bash`, `diagnostics`)        | Core; part of the harness loop's closed catalog, judged by the same authority path                                                                                                                                                                            |
+| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench        | Core; capability, lifecycle, and security remain app-managed                                                                                                                                                                                                  |
+| Marketplace and plugin registry                                              | Core; they stay in the host because they admit and activate other components                                                                                                                                                                                  |
+| Provider drivers                                                             | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned                                                                                                                                          |
+| Image adapters (OpenAI, Gemini, BFL, Ideogram)                               | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                                                                                                                                                         |
 
-**Host media tools stay in the host (maintainer decision, 2026-11-21).**
-`octant_look`, `octant_transcribe`, and `octant_create_image` are registered in
-the host rather than through the public declarative Code-tool port.
-_Rationale:_ these media tools rely on thread-scoped attachments or confined
-turn files, host model or speech endpoint routing, paid service offers, and
-outside-content tainting that the current `CodeToolHostPort` does not carry.
-Until a capability-scoped public media port is designed and built in its own
-change, they stay in the host as an explicit core exception, and no third-party
-plugin is given private access to those host services.
+**Public media tool port (built).** `octant_look`, `octant_transcribe`, and
+`octant_create_image` compose through the public, provider-neutral
+`MediaToolHostPort` seam in `@octant/plugin-api/media-tools` and the pure
+host-side plugin bridge in `@octant/plugin-host/media-tools`. _Rationale:_
+keeping tool schemas, input validation, paging, and result formatting on a
+public capability-scoped port lets built-in and third-party media tool plugins
+share one seam without touching server internals, while path confinement, raw
+file/attachment bytes and magic-byte sniffing, provider credentials and routing,
+paid service offers, concurrency gates, outside-content tainting (fail-closed
+for third-party plugins), and live mode/window/thread admission remain
+host-owned in the server's port adapter.
 
 **Themes as plugin contributions** (maintainer decision, 2026-11-14; built).
 A plugin may contribute one or more themes as data only. Each is a component
