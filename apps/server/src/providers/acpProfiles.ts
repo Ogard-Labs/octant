@@ -294,8 +294,12 @@ export interface AcpProviderProfile {
    * session and otherwise rejects.
    */
   readonly toleratesStrayUpdates?: true;
-  /** The agent's own allow-always option is chosen when approvals hold for the session. */
-  readonly forwardsAllowAlways?: true;
+  /**
+   * The agent takes a second `session/prompt` while one is open and folds it
+   * into the running turn instead of starting another, so the connection
+   * offers `steer`. Without it a prompt sent mid-turn is refused.
+   */
+  readonly steersMidTurn?: true;
   /** What a turn the agent ends with `refusal` says. */
   readonly refusalMessage?: string;
   /**
@@ -1848,7 +1852,9 @@ const antigravityProfile: AcpProviderProfile = {
   userQuestions: "supported",
   unnamedPermissionDescription: "Google Antigravity is asking before it continues.",
   toleratesStrayUpdates: true,
-  forwardsAllowAlways: true,
+  // Google's ACP guide: a prompt sent while a turn runs steers that turn
+  // instead of starting a new one.
+  steersMidTurn: true,
   // Each launch unpacks the CLI again before it answers, so a cold start per
   // turn costs far more than for any other agent; other clients keep it open.
   retainsSessions: true,

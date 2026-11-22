@@ -728,8 +728,23 @@ host's current version; conflicting edits refresh the list and preserve the
 person's unsent text. A failed enqueue leaves the draft and attachments in the
 composer. Reopening a thread reads the accepted queue from the host without
 resending it. Queue controls remain keyboard accessible and wrap at narrow
-widths. A running-turn steering control is separate and appears only where the
-runtime supports it.
+widths. There is no separate steering control: steering goes through the
+queue's own send.
+
+In Work and Code a message sent while the turn runs is steered into that
+turn where its runtime steers (maintainer decision, 2026-11-21;
+[Architecture](../architecture.md#persistence)): it passes through the queue,
+leaves it once the runtime takes it, and shows inside the running turn, after
+its reply, as the person's message headed "Sent while the turn ran", with its
+time. The phone's Work and Code transcripts show it the same way, in the
+person's message bubble under the same heading. The queue shows no separate
+steered state, since its read lists only messages still waiting. While the
+runtime has not yet taken it, that one message shows "Sending into the
+running turn" and cannot be edited, removed or
+moved; the rest of the queue stays usable. A transcript read afresh shows it
+at once; a desktop transcript already open shows it when the turn settles or
+is read again. A message the runtime does not take stays in the queue for
+the next turn.
 
 ## Scheduled wake-ups
 

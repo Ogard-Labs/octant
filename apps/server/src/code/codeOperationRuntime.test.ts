@@ -5212,6 +5212,69 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("delivers an allow for this one call on a thread that keeps answers only as the Project's default", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    fixture.setThread(decodeCodeThread({ ...thread(), permissionPersistence: "project-default" }));
+    const startOperation = operationId(31);
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "approval-request",
+          requestId: "provider-approval-project-default",
+          action: "write",
+          description: "Modify src/a.ts",
+        }),
+      ),
+    );
+    let approvalId:
+      | Extract<OperationFrame["event"], { kind: "approval-requested" }>["approvalId"]
+      | undefined;
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 40);
+      approvalId = frames
+        .map((frame) => frame.event)
+        .find((event) => event.kind === "approval-requested")?.approvalId;
+      expect(approvalId).toBeDefined();
+    });
+    if (approvalId === undefined) throw new Error("Expected a provider approval");
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(32),
+        threadId,
+        checkoutId,
+        approvalId,
+        decision: "approved",
+      }),
+    ).resolves.toMatchObject({ state: "running" });
+    // The driver reads the host's default, which may keep answers for the
+    // session; this thread's own setting must still hold the allow to one call.
+    expect(connection.answerApproval).toHaveBeenCalledWith({
+      sessionId,
+      requestId: "provider-approval-project-default",
+      approved: true,
+      scope: "once",
+    });
+    fixture.close();
+  });
+
   it("delivers an allow for this one call after the thread's grant persistence changed mid-turn, and names every refusal", async () => {
     type AskedApprovalId = Extract<
       OperationFrame["event"],

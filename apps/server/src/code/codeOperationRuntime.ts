@@ -5597,9 +5597,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const connection = active.connection;
     // The provider session was opened with the persistence the turn started
     // with. After the person changed it, an allow is delivered for this one
-    // call, so nothing is remembered beyond what either setting allows.
+    // call, so nothing is remembered beyond what either setting allows. A
+    // driver reads the host's default persistence, not this thread's, so a
+    // thread that keeps answers only as the Project's default says so with
+    // each answer; otherwise a host default of `current-session` would let
+    // the runtime remember the allow for the session.
     const once =
       ownerCurrent !== undefined ||
+      active.thread.permissionPersistence !== "current-session" ||
       active.thread.permissionPersistence !== input.thread.permissionPersistence;
     const askedUnder = active.approvalPostures.get(input.approvalId);
     if (ownerCurrent === undefined) {

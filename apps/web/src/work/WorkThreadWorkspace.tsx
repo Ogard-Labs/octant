@@ -177,6 +177,7 @@ import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
+import { SteeredMessages } from "../messageQueue/SteeredMessages";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import {
   documentIsVisible,
@@ -278,6 +279,11 @@ type WorkTranscriptRow =
       readonly kind: "steered";
       readonly key: string;
       readonly steered: NonNullable<WorkTurnState["steeredResults"]>;
+    }
+  | {
+      readonly kind: "steered-messages";
+      readonly key: string;
+      readonly steered: NonNullable<WorkTurnState["steeredMessages"]>;
     }
   | {
       readonly kind: "side-tasks";
@@ -1668,6 +1674,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           steered: turn.steeredResults,
         });
       }
+      if (turn.steeredMessages !== undefined && turn.steeredMessages.length > 0) {
+        rows.push({
+          kind: "steered-messages",
+          key: `${String(turn.requestId)}-steered-messages`,
+          steered: turn.steeredMessages,
+        });
+      }
       // The provider's restated task list lands where the turn it belongs to
       // ends, so the transcript reads as what was said and then what it is
       // working through.
@@ -2951,6 +2964,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     turnId={row.turnId}
                   />
                 );
+              }
+              if (row.kind === "steered-messages") {
+                return <SteeredMessages steered={row.steered} />;
               }
               if (row.kind === "steered") {
                 return (

@@ -214,6 +214,7 @@ import {
   AgentRunResultAcknowledged,
   AgentRunResultDeliverySettled,
   AgentResultSteered,
+  ThreadMessageSteered,
   AgentRunStatusChanged,
   AutomationNotificationDeliveryRecorded,
   AutomationNotificationPreferences,
@@ -487,6 +488,7 @@ import {
 import { AgentRunProjection } from "../agentRun/agentRunProjection";
 import { ActivityHistoryProjection } from "./activityHistoryProjection";
 import { AGENT_RESULT_STEERED } from "../agentRun/agentResultSteeredRecord";
+import { THREAD_MESSAGE_STEERED } from "../messageQueue/threadMessageSteeredRecord";
 import {
   AGENT_RUN_REQUESTED,
   AGENT_RUN_RESULT_ACKNOWLEDGED,
@@ -857,6 +859,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)
     .register(AGENT_RUN_RESULT_DELIVERY_SETTLED, 1, AgentRunResultDeliverySettled)
     .register(AGENT_RESULT_STEERED, 1, AgentResultSteered)
+    .register(THREAD_MESSAGE_STEERED, 1, ThreadMessageSteered)
     .register(AGENT_RUN_SETTINGS_UPDATED, 1, AgentRunPolicySettings)
     .register(AGENT_MESSAGE_EVENT_NAMES.sent, 1, AgentMessageSent)
     .register(AGENT_MESSAGE_EVENT_NAMES.delivered, 1, AgentMessageDelivered)
