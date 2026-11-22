@@ -55,6 +55,18 @@ const AccountReadResult = Schema.Struct({
 export type CodexAccountReadResult = typeof AccountReadResult.Type;
 export const decodeAccountReadResult = decode(AccountReadResult);
 
+/**
+ * Whether Codex's own Windows sandbox can run commands now
+ * (`windowsSandbox/readiness`, codex-rs `windows_sandbox_processor.rs`).
+ * `ready` for the elevated backend means its one-time setup has completed;
+ * `updateRequired` means it has not, and `notConfigured` that no sandbox is
+ * configured at all. Any other value is kept as a string so the caller refuses
+ * it instead of failing to decode.
+ */
+const WindowsSandboxReadinessResult = Schema.Struct({ status: Schema.String });
+export type CodexWindowsSandboxReadinessResult = typeof WindowsSandboxReadinessResult.Type;
+export const decodeWindowsSandboxReadinessResult = decode(WindowsSandboxReadinessResult);
+
 const ReasoningEffortOption = Schema.Struct({
   reasoningEffort: Schema.String,
   description: Schema.String,

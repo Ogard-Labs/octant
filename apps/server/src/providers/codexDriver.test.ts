@@ -52,11 +52,16 @@ import {
   makeCodexDriver,
   type CodexClientPort,
   type CodexDriverOptions,
+  type CodexPermissionProfile,
   type CodexThreadResumeInput,
   type CodexThreadStartInput,
   type CodexTurnStartInput,
 } from "./codexDriver";
 import { appToolHostLines } from "./appToolHostLines";
+import {
+  WINDOWS_STRICT_CODEX_SANDBOX_SETUP_REFUSAL,
+  WINDOWS_STRICT_CODEX_SANDBOX_UNSUPPORTED_REFUSAL,
+} from "./codexWindowsStrictSandbox";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000061");
@@ -180,6 +185,8 @@ function fixture(
     readonly threadInjectItems?: (input: unknown) => Promise<void>;
     readonly threadFork?: NonNullable<CodexClientPort["threadFork"]>;
     readonly pluginInstalled?: NonNullable<CodexClientPort["pluginInstalled"]>;
+    /** What `windowsSandbox/readiness` answers; `unsupported` leaves the method out. */
+    readonly windowsSandboxReadiness?: string;
   } = {},
 ): Fixture {
   const calls: Array<{ method: string; input?: unknown }> = [];
@@ -195,6 +202,14 @@ function fixture(
       calls.push({ method: "account/read" });
       return input.account ?? account;
     },
+    ...(input.windowsSandboxReadiness === "unsupported"
+      ? {}
+      : {
+          windowsSandboxReadiness: async () => {
+            calls.push({ method: "windowsSandbox/readiness" });
+            return { status: input.windowsSandboxReadiness ?? "ready" };
+          },
+        }),
     rateLimitsRead: async () => {
       calls.push({ method: "account/rateLimits/read" });
       if (input.rateLimitsRead !== undefined) return input.rateLimitsRead();
@@ -3828,48 +3843,129 @@ describe("Codex execution authority and approvals", () => {
     ).toBe(false);
   });
 
-  it("uses a fresh confined process per session and externalSandbox with never approvals for Windows Strict at Full access", async () => {
-    const f = fixture();
-    const driver = makeCodexDriver({ ...f.options(), platform: "win32" });
+  const windowsEnvironment = {
+    USERPROFILE: "C:\\Users\\person",
+    CODEX_HOME: "C:\\Users\\person\\.codex",
+  };
+  const windowsStrictStart = {
+    sessionId,
+    modelId: "gpt-5.4" as never,
+    executionPolicy: "full-access",
+    strict: true,
+  } as const;
+
+  it("runs Windows Strict at Full access in Codex's own sandbox with the protected files denied, a fresh process per session", async () => {
+    const f = fixture({ version: "0.170.0" });
+    const driver = makeCodexDriver({
+      ...f.options({ environment: windowsEnvironment }),
+      platform: "win32",
+    });
     const first = await acquireConnection(driver, "code");
-    await Effect.runPromise(
-      first.connection.start({
-        sessionId,
-        modelId: "gpt-5.4" as never,
-        executionPolicy: "full-access",
-        strict: true,
-      }),
-    );
+    await Effect.runPromise(first.connection.start(windowsStrictStart));
     await Effect.runPromise(
       first.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
     );
     await first.close();
-
     const second = await acquireConnection(driver, "code");
-    await Effect.runPromise(
-      second.connection.start({
-        sessionId,
-        modelId: "gpt-5.4" as never,
-        executionPolicy: "full-access",
-        strict: true,
-      }),
-    );
+    await Effect.runPromise(second.connection.start(windowsStrictStart));
     await second.close();
 
     expect(f.authorities()).toHaveLength(2);
-    expect(f.authorities()[0]).toMatchObject({
-      kind: "thread",
-      executionPolicy: "full-access",
-      strict: true,
-    });
-    expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
-      sandbox: "read-only",
+    expect(f.calls.filter(({ method }) => method === "windowsSandbox/readiness")).toHaveLength(2);
+    const threadStart = f.calls.find(({ method }) => method === "thread/start")?.input as {
+      readonly config: { readonly permissions: Record<string, CodexPermissionProfile> };
+    };
+    expect(threadStart).toMatchObject({
       approvalPolicy: "never",
+      permissions: CODEX_OCTANT_PROFILE,
     });
+    expect(threadStart).not.toHaveProperty("sandbox");
+    const filesystem = threadStart.config.permissions[CODEX_OCTANT_PROFILE]?.filesystem ?? {};
+    expect(filesystem[projectRoot]).toBe("write");
+    // Every protected store is denied to Codex's commands, its own sign-in too.
+    expect(filesystem["C:\\users\\person\\.codex\\auth.json"]).toBe("deny");
+    expect(filesystem["C:\\users\\person\\.aws\\credentials"]).toBe("deny");
+    expect(filesystem["C:\\users\\person\\.ssh"]).toBe("deny");
+    expect(
+      Object.keys(filesystem).some(
+        (path) =>
+          path.startsWith("C:\\users\\person\\appdata\\local\\") && path.includes("Cookies"),
+      ),
+    ).toBe(true);
     expect(f.calls.find(({ method }) => method === "turn/start")?.input).toMatchObject({
       approvalPolicy: "never",
-      sandboxPolicy: { type: "externalSandbox" },
+      permissions: CODEX_OCTANT_PROFILE,
     });
+  });
+
+  it("refuses Windows Strict by name when Codex's own sandbox is not set up, and never starts a thread", async () => {
+    for (const [readiness, message] of [
+      ["updateRequired", WINDOWS_STRICT_CODEX_SANDBOX_SETUP_REFUSAL],
+      ["notConfigured", WINDOWS_STRICT_CODEX_SANDBOX_SETUP_REFUSAL],
+      ["unsupported", WINDOWS_STRICT_CODEX_SANDBOX_UNSUPPORTED_REFUSAL],
+    ] as const) {
+      const f = fixture({ version: "0.170.0", windowsSandboxReadiness: readiness });
+      const acquired = await acquireConnection(
+        makeCodexDriver({
+          ...f.options({ environment: windowsEnvironment }),
+          platform: "win32",
+        }),
+        "code",
+      );
+      const result = await Effect.runPromise(
+        Effect.either(acquired.connection.start(windowsStrictStart)),
+      );
+      expect(result).toMatchObject({ _tag: "Left", left: { category: "incompatible", message } });
+      expect(f.calls.some(({ method }) => method === "thread/start")).toBe(false);
+      await acquired.close();
+    }
+  });
+
+  it("runs Codex's review under Windows Strict in the session's profile, so protected files stay denied to the reviewer", async () => {
+    const f = fixture({ version: "0.170.0" });
+    const acquired = await acquireConnection(
+      makeCodexDriver({ ...f.options({ environment: windowsEnvironment }), platform: "win32" }),
+      "code",
+    );
+    await Effect.runPromise(acquired.connection.start(windowsStrictStart));
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "/review", attachments: [], tools: [] }),
+    );
+    const review = f.calls.filter(({ method }) => method === "thread/start")[1]?.input as {
+      readonly config: { readonly permissions?: Record<string, CodexPermissionProfile> };
+    };
+    expect(review).toMatchObject({
+      approvalPolicy: "never",
+      permissions: CODEX_OCTANT_PROFILE,
+      ephemeral: true,
+    });
+    expect(review).not.toHaveProperty("sandbox");
+    expect(
+      review.config.permissions?.[CODEX_OCTANT_PROFILE]?.filesystem[
+        "C:\\users\\person\\.aws\\credentials"
+      ],
+    ).toBe("deny");
+    await acquired.close();
+  });
+
+  it("refuses Windows Strict on a Codex too old to take the protected-file list", async () => {
+    const f = fixture({ version: "0.168.0" });
+    const acquired = await acquireConnection(
+      makeCodexDriver({ ...f.options({ environment: windowsEnvironment }), platform: "win32" }),
+      "code",
+    );
+    const result = await Effect.runPromise(
+      Effect.either(acquired.connection.start(windowsStrictStart)),
+    );
+    expect(result).toMatchObject({
+      _tag: "Left",
+      left: {
+        category: "incompatible",
+        message: expect.stringMatching(/Update Codex to 0\.169\.0/u),
+      },
+    });
+    expect(f.calls.some(({ method }) => method === "thread/start")).toBe(false);
+    await acquired.close();
   });
 
   it("runs Codex's own sandbox for Work and Code outside Strict and keeps Octant's profile under Strict or a chosen sandbox", () => {

@@ -197,7 +197,7 @@ export const STRICT_DETAIL =
  */
 const STRICT_MENU_DETAIL = "Octant's own limits on top of the provider's.";
 const STRICT_WINDOWS_CODEX_DETAIL =
-  "Runs native Codex inside a Windows AppContainer and Job Object at Full access.";
+  "Runs native Codex at Full access, with its commands in Codex's own Windows sandbox.";
 
 /** What a level below Full access runs with on Windows, said wherever it is offered. */
 export const WINDOWS_PROVIDER_APPROVALS_DETAIL =
@@ -287,7 +287,7 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
   const warning = useFullAccessWarning(props.warningScope ?? "machine");
   // On Windows outside Strict, levels below Full access run with the provider's
   // own approvals and claim no Octant sandbox. Under canonical Strict, phase 1
-  // admits Codex at Full access (AppContainer + Job Object) and refuses every
+  // admits Codex at Full access (in Codex's own sandbox) and refuses every
   // other Windows Strict provider or level by name.
   const hostPlatform = useHostPlatform();
   const effectiveStrict =

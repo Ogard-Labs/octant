@@ -8,7 +8,6 @@ import {
   chmodSync,
   constants,
   existsSync,
-  lstatSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -67,6 +66,7 @@ import {
 } from "../network/providerRuntimeNetwork";
 import type { ProviderServerPlacement } from "@octant/provider-sdk/driver";
 import { decodeInitializeResult } from "./codexProtocol";
+import { CODEX_WINDOWS_ELEVATED_SANDBOX_ARGS } from "./codexWindowsStrictSandbox";
 import { readCodexSignInOnServer, startCodexOnServer } from "./codexServerProcess";
 import { ServerSignIns } from "./serverSignIn";
 import {
@@ -1173,6 +1173,245 @@ export function prepareCodexLaunch(input: {
   }
 }
 
+const WINDOWS_STRICT_CODEX_SETUP_REFUSAL =
+  "Codex cannot run under Strict with this Windows setup. No runtime was started.";
+
+function windowsNativeRealpath(path: string): string {
+  try {
+    return process.platform === "win32" ? realpathSync.native(path) : path;
+  } catch {
+    return path;
+  }
+}
+
+/** Drive-absolute paths that exist (on a Windows host), resolved natively. */
+function existingWindowsNativePaths(
+  paths: ReadonlyArray<string | undefined>,
+): ReadonlyArray<string> {
+  const resolved = new Set<string>();
+  for (const path of paths) {
+    if (path === undefined || windowsNativePath(path) === undefined) continue;
+    if (process.platform === "win32" && !existsSync(path)) continue;
+    const normalized = windowsNativePath(windowsNativeRealpath(path));
+    if (normalized !== undefined) resolved.add(normalized);
+  }
+  return [...resolved];
+}
+
+/**
+ * A Windows Strict Codex thread at Full access (maintainer decision,
+ * 2026-11-22). The Codex process runs outside any Octant wall, with its own
+ * home, sign-in and history, and is told to run every command in Codex's own
+ * elevated Windows sandbox; the driver hands that sandbox the thread's
+ * writable folders and the protected stores, and refuses the thread when the
+ * sandbox's one-time setup is not done. Octant's AppContainer around the
+ * whole process could not stay out of other threads' history: Codex writes
+ * account-wide state under CODEX_HOME (rollouts in shared date folders, thread
+ * writer locks, rollout compression), and anything the process may write its
+ * commands could write too.
+ *
+ * What Codex's sandbox cannot express is refused here before anything runs,
+ * as the AppContainer path refused it: proxy-only or blocked network, custom
+ * protected-path rules and isolated credentials. A writable folder that
+ * overlaps CODEX_HOME is refused too: Codex leaves its home out of its
+ * commands' writable folders only when it is not itself granted.
+ */
+function prepareWindowsStrictCodexThread(input: {
+  readonly binaryPath: string;
+  readonly args: ReadonlyArray<string>;
+  readonly authority: CodexLaunchAuthority & { readonly kind: "thread" };
+  readonly environment: NodeJS.ProcessEnv;
+  readonly network?: ProviderRuntimeProxiedNetwork;
+}):
+  | { readonly status: "prepared"; readonly launch: CodexLaunch }
+  | { readonly status: "refused"; readonly failure: ProviderFailure } {
+  const { authority } = input;
+  const policy = authority.sandboxPolicy?.policy;
+  if (
+    input.network !== undefined ||
+    policy?.network === "deny" ||
+    policy?.hostServices === "blocked" ||
+    (policy?.approvedDestinations?.length ?? 0) > 0 ||
+    (policy?.localServices?.length ?? 0) > 0 ||
+    (policy?.network === "existing-policy" && sandboxNetworkLimitsOn())
+  ) {
+    return { status: "refused", failure: failure("incompatible", WINDOWS_STRICT_NETWORK_REFUSAL) };
+  }
+  if ((policy?.filesystem.protectedPaths.length ?? 0) > 0 || policy?.credentials === "isolated") {
+    return {
+      status: "refused",
+      failure: failure(
+        "incompatible",
+        "Windows Strict does not support custom protected-path rules or isolated credentials for Codex yet. No runtime was started.",
+      ),
+    };
+  }
+  const root = windowsNativeRealpath(authority.root);
+  try {
+    if (process.platform === "win32" && !statSync(root).isDirectory()) {
+      throw new Error("Codex root is not a directory.");
+    }
+  } catch {
+    return {
+      status: "refused",
+      failure: failure("incompatible", WINDOWS_STRICT_CODEX_SETUP_REFUSAL),
+    };
+  }
+  const writableFolders = existingWindowsNativePaths([
+    root,
+    ...(authority.extraFolders ?? []),
+    ...(policy?.filesystem.readWriteRoots ?? []),
+  ]);
+  // The profile handed to Codex's sandbox carries writable roots and denials
+  // only, so a read-only folder beneath a writable one would be writable.
+  // Such a layout is refused, as the AppContainer planner refused it.
+  const writableForms = writableFolders
+    .map((path) => windowsGuardPath(`${path}\\`))
+    .filter((form): form is string => form !== undefined);
+  const readOnlyBeneath = existingWindowsNativePaths([
+    ...(authority.readOnlyFolders ?? []),
+    ...(policy?.filesystem.readOnlyRoots ?? []),
+  ]).find((path) => {
+    const form = windowsGuardPath(`${path}\\`);
+    return form !== undefined && writableForms.some((writable) => isSameOrInside(form, writable));
+  });
+  if (readOnlyBeneath !== undefined) {
+    return {
+      status: "refused",
+      failure: failure(
+        "incompatible",
+        `Windows Strict cannot keep ${readOnlyBeneath} read-only beneath a writable folder. Choose a read-only folder outside the writable ones. No runtime was started.`,
+      ),
+    };
+  }
+  const home = input.environment.USERPROFILE ?? input.environment.HOME ?? homedir();
+  const [codexHome] = existingWindowsNativePaths([
+    input.environment.CODEX_HOME ?? `${home}\\.codex`,
+  ]);
+  if (codexHome !== undefined) {
+    const codexHomeForm = windowsGuardPath(`${codexHome}\\`);
+    const homeForm = windowsGuardPath(`${home}\\`);
+    if (
+      codexHomeForm !== undefined &&
+      homeForm !== undefined &&
+      isSameOrInside(homeForm, codexHomeForm)
+    ) {
+      return {
+        status: "refused",
+        failure: failure(
+          "incompatible",
+          "Windows Strict cannot use the user profile directory as CODEX_HOME.",
+        ),
+      };
+    }
+    const overlaps = writableFolders
+      .map((path) => windowsGuardPath(`${path}\\`))
+      .some(
+        (writable) =>
+          writable !== undefined &&
+          codexHomeForm !== undefined &&
+          (isSameOrInside(codexHomeForm, writable) || isSameOrInside(writable, codexHomeForm)),
+      );
+    if (overlaps) {
+      return {
+        status: "refused",
+        failure: failure(
+          "incompatible",
+          "Windows Strict cannot grant a writable Project folder that overlaps CODEX_HOME.",
+        ),
+      };
+    }
+  }
+  return {
+    status: "prepared",
+    launch: {
+      command: windowsNativeRealpath(input.binaryPath),
+      args: [...input.args, ...CODEX_WINDOWS_ELEVATED_SANDBOX_ARGS],
+      cwd: root,
+      environment: input.environment,
+      release: () => undefined,
+      ...(authority.sandboxPolicy === undefined ? {} : { sandboxPolicy: authority.sandboxPolicy }),
+    },
+  };
+}
+
+/**
+ * A Codex catalog read for a Windows Strict host: inside the AppContainer and
+ * Job Object launcher, with read-only access to the account home and a private
+ * scratch root (including its own SQLite state), never unconfined.
+ */
+function prepareWindowsConfinedCatalog(input: {
+  readonly binaryPath: string;
+  readonly args: ReadonlyArray<string>;
+  readonly authority: CodexLaunchAuthority;
+  readonly environment: NodeJS.ProcessEnv;
+  readonly confinement: ProcessConfinementPort;
+}):
+  | { readonly status: "prepared"; readonly launch: CodexLaunch }
+  | { readonly status: "refused"; readonly failure: ProviderFailure } {
+  let temporaryDirectory: string | undefined;
+  const release = () => {
+    if (temporaryDirectory !== undefined) releaseScratch(temporaryDirectory);
+  };
+  try {
+    const createdScratch = mkdtempSync(join(tmpdir(), "octant-codex-"));
+    temporaryDirectory =
+      process.platform === "win32" ? realpathSync.native(createdScratch) : createdScratch;
+    const scratchSqliteHome = join(temporaryDirectory, "codex-sqlite");
+    mkdirSync(scratchSqliteHome, { recursive: true });
+    const home = input.environment.USERPROFILE ?? input.environment.HOME ?? homedir();
+    const accountReadRoots = existingWindowsNativePaths([
+      input.environment.CODEX_HOME ?? `${home}\\.codex`,
+    ]);
+    const explicitReadOnly =
+      input.authority.kind === "catalog"
+        ? existingWindowsNativePaths(input.authority.readOnlyFolders ?? [])
+        : [];
+    const launch = input.confinement.prepare({
+      executable: windowsNativeRealpath(input.binaryPath),
+      args: input.args,
+      boundRoot: temporaryDirectory,
+      extraBoundRoots: [],
+      writeBoundRoot: false,
+      temporaryDirectory,
+      readRoots: [...accountReadRoots],
+      ...(explicitReadOnly.length === 0 ? {} : { explicitReadOnlyRoots: explicitReadOnly }),
+      ownAccountPaths: [...accountReadRoots],
+      networkEgress: "allow",
+    });
+    return {
+      status: "prepared",
+      launch: {
+        ...launch,
+        confined: true,
+        cwd: temporaryDirectory,
+        environment: {
+          ...input.environment,
+          ...launch.environment,
+          CODEX_SQLITE_HOME: scratchSqliteHome,
+          TMP: temporaryDirectory,
+          TEMP: temporaryDirectory,
+          TMPDIR: temporaryDirectory,
+        },
+        release,
+      },
+    };
+  } catch (error) {
+    release();
+    return {
+      status: "refused",
+      failure: failure(
+        error instanceof ProcessConfinementError && error.reason === "invalid-configuration"
+          ? "invalid-configuration"
+          : "incompatible",
+        error instanceof ProcessConfinementError
+          ? error.message
+          : "Codex cannot run under Windows Strict with this setup. No runtime was started.",
+      ),
+    };
+  }
+}
+
 /**
  * A Codex launch on Windows, decided from that launch's own authority.
  * Outside Strict, launches run unconfined (resolving npm shims without a
@@ -1201,206 +1440,9 @@ function prepareWindowsCodexLaunch(input: {
     if (binaryRefusal !== undefined) {
       return { status: "refused", failure: failure("incompatible", binaryRefusal) };
     }
-    const policy = authority.kind === "thread" ? authority.sandboxPolicy?.policy : undefined;
-    if (
-      input.network !== undefined ||
-      policy?.network === "deny" ||
-      policy?.hostServices === "blocked" ||
-      (policy?.approvedDestinations?.length ?? 0) > 0 ||
-      (policy?.localServices?.length ?? 0) > 0 ||
-      (policy?.network === "existing-policy" && sandboxNetworkLimitsOn())
-    ) {
-      return {
-        status: "refused",
-        failure: failure("incompatible", WINDOWS_STRICT_NETWORK_REFUSAL),
-      };
-    }
-    let temporaryDirectory: string | undefined;
-    const release = () => {
-      if (temporaryDirectory !== undefined) releaseScratch(temporaryDirectory);
-    };
-    const nativeRealpath = (path: string): string => {
-      try {
-        return process.platform === "win32" ? realpathSync.native(path) : path;
-      } catch {
-        return path;
-      }
-    };
-    const existingNativePaths = (
-      paths: ReadonlyArray<string | undefined>,
-    ): ReadonlyArray<string> => {
-      const resolved = new Set<string>();
-      for (const path of paths) {
-        if (path === undefined || windowsNativePath(path) === undefined) continue;
-        if (process.platform === "win32" && !existsSync(path)) continue;
-        const candidate = nativeRealpath(path);
-        const normalized = windowsNativePath(candidate);
-        if (normalized !== undefined) resolved.add(normalized);
-      }
-      return [...resolved];
-    };
-    const ensureDurableCodexStateDirs = (resolvedCodexHome: string): ReadonlyArray<string> => {
-      // Keep `archived_sessions` read-only and redirect `CODEX_SQLITE_HOME`
-      // into launch-private scratch so confined turns cannot mutate archived
-      // history or the shared SQLite state database. Codex hardcodes active
-      // rollout writes under `CODEX_HOME\sessions` (and runtime logs under
-      // `CODEX_HOME\log`) with no env override independent of `CODEX_HOME`,
-      // and moving `CODEX_HOME` would break Windows Credential Manager keyring
-      // lookup (keyed by canonical `CODEX_HOME` hash) and require copying
-      // `auth.json` (which Octant never reads). Keeping only `sessions` and
-      // `log` writable matches macOS/Linux confinement while keeping the rest
-      // of `CODEX_HOME` strictly read-only.
-      const subdirs = ["sessions", "log"] as const;
-      const writeRoots: string[] = [];
-      for (const sub of subdirs) {
-        const candidate = `${resolvedCodexHome}\\${sub}`;
-        if (process.platform === "win32") {
-          if (existsSync(candidate)) {
-            const meta = lstatSync(candidate);
-            if (!meta.isDirectory() || meta.isSymbolicLink()) {
-              throw new ProcessConfinementError(
-                "incompatible",
-                `Codex cannot run under Windows Strict: ${candidate} must be a regular directory.`,
-              );
-            }
-          } else {
-            mkdirSync(candidate, { recursive: true, mode: 0o700 });
-          }
-          const canonical = windowsNativePath(realpathSync.native(candidate));
-          if (canonical === undefined) {
-            throw new ProcessConfinementError(
-              "incompatible",
-              `Codex cannot run under Windows Strict: ${candidate} could not be resolved.`,
-            );
-          }
-          writeRoots.push(canonical);
-        } else {
-          const normalized = windowsNativePath(candidate);
-          if (normalized !== undefined) writeRoots.push(normalized);
-        }
-      }
-      return writeRoots;
-    };
-    try {
-      const createdScratch = mkdtempSync(join(tmpdir(), "octant-codex-"));
-      temporaryDirectory =
-        process.platform === "win32" ? realpathSync.native(createdScratch) : createdScratch;
-      const scratchSqliteHome = join(temporaryDirectory, "codex-sqlite");
-      mkdirSync(scratchSqliteHome, { recursive: true });
-      const root =
-        authority.kind === "thread" ? nativeRealpath(authority.root) : temporaryDirectory;
-      if (process.platform === "win32" && !statSync(root).isDirectory()) {
-        throw new Error("Codex root is not a directory.");
-      }
-      const extraFolders =
-        authority.kind === "thread"
-          ? existingNativePaths([
-              ...(authority.extraFolders ?? []),
-              ...(policy?.filesystem.readWriteRoots ?? []),
-            ])
-          : [];
-      const home = input.environment.USERPROFILE ?? input.environment.HOME ?? homedir();
-      const codexHome = input.environment.CODEX_HOME ?? `${home}\\.codex`;
-      // Windows AppContainer cannot carve read-only authority entries
-      // (`config.toml`, `hooks.json`, `.env`, `plugins`, `rules`, `skills`,
-      // `AGENTS.md`) out of a writable parent grant. Keep the shared Codex
-      // home, `archived_sessions`, and shared SQLite state read-only/isolated
-      // so a confined turn cannot poison startup config, integrations, or
-      // archived history for later launches, while granting write access only
-      // to `sessions` and `log` so fresh Windows Strict follow-up processes
-      // can resume saved conversations.
-      const accountReadRoots = existingNativePaths([codexHome]);
-      const resolvedCodexHome = accountReadRoots[0];
-      if (resolvedCodexHome !== undefined) {
-        const codexHomeForm = windowsGuardPath(`${resolvedCodexHome}\\`);
-        const homeForm = windowsGuardPath(`${home}\\`);
-        if (
-          codexHomeForm !== undefined &&
-          homeForm !== undefined &&
-          isSameOrInside(homeForm, codexHomeForm)
-        ) {
-          throw new ProcessConfinementError(
-            "incompatible",
-            "Windows Strict cannot use the user profile directory as CODEX_HOME.",
-          );
-        }
-        if (authority.kind === "thread") {
-          const writableProjectForms = [root, ...extraFolders]
-            .map((path) => windowsGuardPath(`${path}\\`))
-            .filter((form): form is string => form !== undefined);
-          if (
-            codexHomeForm !== undefined &&
-            writableProjectForms.some(
-              (writable) =>
-                isSameOrInside(codexHomeForm, writable) || isSameOrInside(writable, codexHomeForm),
-            )
-          ) {
-            throw new ProcessConfinementError(
-              "incompatible",
-              "Windows Strict cannot grant a writable Project folder that overlaps CODEX_HOME.",
-            );
-          }
-        }
-      }
-      const durableWriteRoots =
-        authority.kind === "thread" && resolvedCodexHome !== undefined
-          ? ensureDurableCodexStateDirs(resolvedCodexHome)
-          : [];
-      const explicitReadOnly = existingNativePaths([
-        ...(authority.readOnlyFolders ?? []),
-        ...(policy?.filesystem.readOnlyRoots ?? []),
-      ]);
-      const executable = nativeRealpath(input.binaryPath);
-      const launch = input.confinement.prepare({
-        executable,
-        args: input.args,
-        boundRoot: root,
-        extraBoundRoots: extraFolders,
-        writeBoundRoot: authority.kind === "thread",
-        temporaryDirectory,
-        ...(durableWriteRoots.length === 0 ? {} : { additionalWriteRoots: durableWriteRoots }),
-        readRoots: [...accountReadRoots],
-        ...(explicitReadOnly.length === 0 ? {} : { explicitReadOnlyRoots: explicitReadOnly }),
-        ownAccountPaths: [...accountReadRoots, ...durableWriteRoots],
-        networkEgress: "allow",
-        ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined
-          ? { sandboxPolicy: authority.sandboxPolicy }
-          : {}),
-      });
-      return {
-        status: "prepared",
-        launch: {
-          ...launch,
-          confined: true,
-          cwd: root,
-          environment: {
-            ...input.environment,
-            ...launch.environment,
-            CODEX_SQLITE_HOME: scratchSqliteHome,
-            TMP: temporaryDirectory,
-            TEMP: temporaryDirectory,
-            TMPDIR: temporaryDirectory,
-          },
-          release,
-          ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined
-            ? { sandboxPolicy: authority.sandboxPolicy }
-            : {}),
-        },
-      };
-    } catch (error) {
-      release();
-      return {
-        status: "refused",
-        failure: failure(
-          error instanceof ProcessConfinementError && error.reason === "invalid-configuration"
-            ? "invalid-configuration"
-            : "incompatible",
-          error instanceof ProcessConfinementError
-            ? error.message
-            : "Codex cannot run under Windows Strict with this setup. No runtime was started.",
-        ),
-      };
-    }
+    return authority.kind === "thread"
+      ? prepareWindowsStrictCodexThread({ ...input, authority })
+      : prepareWindowsConfinedCatalog(input);
   }
   const program = resolveWindowsProviderProgram({
     displayName: "Codex",
@@ -1717,10 +1759,12 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
         const versionProbeConfinement = runsWithoutOctantConfinement(authority, platform)
           ? UNCONFINED
           : resolved.versionProbeConfinement;
-        // On Windows a launch outside Strict reads its version unconfined; under
-        // canonical Strict, phase 1 verifies a native `.exe` and probes inside
-        // the AppContainer sandbox (never unconfined). Every other Windows
-        // Strict combination refuses before probe or spawn.
+        // On Windows a thread launch reads its version unconfined, outside Strict
+        // and under it alike: under Strict only the commands Codex runs are
+        // confined, by Codex's own sandbox, after a native `.exe` is verified.
+        // A Strict catalog read probes inside the AppContainer sandbox (never
+        // unconfined). Every other Windows Strict combination refuses before
+        // probe or spawn.
         const windowsLaunch = platform === "win32" ? codexWindowsLaunch(authority) : undefined;
         if (windowsLaunch?.status === "refused") {
           return Effect.fail(failure("incompatible", windowsLaunch.reason));
@@ -1730,7 +1774,11 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
           if (binaryRefusal !== undefined) {
             return Effect.fail(failure("incompatible", binaryRefusal));
           }
-          if (options.confinement === undefined && windowsConfinement === undefined) {
+          if (
+            authority.kind === "catalog" &&
+            options.confinement === undefined &&
+            windowsConfinement === undefined
+          ) {
             return Effect.fail(
               failure(
                 "incompatible",
@@ -1773,7 +1821,7 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
                 ? versionProbeConfinement === undefined
                   ? {}
                   : { confinement: versionProbeConfinement }
-                : windowsLaunch.status === "confined"
+                : windowsLaunch.status === "confined" && authority.kind === "catalog"
                   ? { confinement: resolved.versionProbeConfinement ?? confinement }
                   : {
                       confinement: windowsUnconfinedLaunch({
