@@ -6559,7 +6559,13 @@ or .zip>` write the same files, built by one host command
   the runtime only through the connection, from whichever mode or reviewer
   sent it, so `withRecordedApprovalAnswers` on every configured driver
   appends the intended frame again before forwarding it, and turns an allow
-  into a refusal when the journal refuses that frame. Still not recorded,
+  into a refusal when the journal refuses that frame. The host keeps the link
+  from each such request to its awaiting frame in memory until the request is
+  answered, the call settles, or the turn ends, and never drops it earlier: an
+  answer the host could not match would reach the runtime with the record
+  still saying "waiting", and a restart could repeat the call. When that index
+  is full (512 waiting requests), the awaiting frame is not written and the
+  call keeps holding. Still not recorded,
   so the call keeps holding: a Browser download question, which can follow
   the click that started the download in the same call; a runtime approval
   request that names no call, or names one whose start the host had not read.

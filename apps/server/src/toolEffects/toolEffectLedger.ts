@@ -228,11 +228,29 @@ interface OpenTurn {
 
 /**
  * Runtime approval requests whose call's wait is on record, so the answer
- * can put the call's intent back before the runtime hears it. Bounded: an
- * entry no answer claims (a turn that stopped) is dropped oldest first, and
- * its call then holds after a restart as it did before the wait was recorded.
+ * can put the call's intent back before the runtime hears it. An entry is
+ * the only link from a request to its durable wait, so it is never dropped
+ * while the request can still be answered: it leaves when the request is
+ * answered, when the call settles, or when the turn ends. When the index is
+ * full a new wait is not journaled at all, and its call keeps the intent it
+ * recorded at its start, so a restart holds it rather than continuing past
+ * an answer nobody put on record. (Dropping the oldest entry instead let an
+ * answer to it reach the runtime with the record still saying "waiting", and
+ * a restart could repeat the call.)
  */
 const MAX_RUNTIME_ASKS = 512;
+
+/**
+ * What answering a runtime's approval request did to its call's record.
+ * `recorded`: the call's intent is back on record. `no-wait`: no wait was
+ * journaled for the request, so the record already reads as a call that may
+ * take effect. `refused`: the journal refused the frame, and the call must
+ * be refused.
+ */
+export type RuntimeApprovalAnswerRecord =
+  | { readonly status: "recorded" }
+  | { readonly status: "no-wait" }
+  | { readonly status: "refused" };
 
 /**
  * The record of tool calls about to take effect. A restart cuts a turn off
@@ -258,6 +276,7 @@ export class ToolEffectLedger {
     {
       readonly turn: { readonly threadId: string; readonly turnId: string };
       readonly toolCallId: string;
+      readonly toolName: string;
     }
   >();
 
@@ -347,6 +366,14 @@ export class ToolEffectLedger {
             "runtime",
             event.kind === "tool-success" ? "succeeded" : "failed",
           );
+        } else if (
+          event.kind === "completed" ||
+          event.kind === "failed" ||
+          event.kind === "interrupted"
+        ) {
+          // The runtime asks nothing more of this turn; a wait still on
+          // record stays there and reads as a call that never ran.
+          this.#retireRuntimeAsks(turn.turnId);
         }
       },
     };
@@ -357,21 +384,26 @@ export class ToolEffectLedger {
    * gates goes back on record as one that may take effect before the runtime
    * hears the answer. False when that frame could not be written; the caller
    * then refuses the call rather than let it run under a record that says it
-   * did not. True when the request had no recorded wait.
+   * did not. A request the index does not know had no wait journaled: the
+   * index keeps every wait it journals until the request is answered, its
+   * call settles, or its turn ends.
    */
-  approvalAnswered(answer: { readonly sessionId: string; readonly requestId: string }): boolean {
+  approvalAnswered(answer: {
+    readonly sessionId: string;
+    readonly requestId: string;
+  }): RuntimeApprovalAnswerRecord {
     const key = runtimeAskKey(answer.sessionId, answer.requestId);
     const ask = this.#runtimeAsks.get(key);
-    if (ask === undefined) return true;
-    this.#runtimeAsks.delete(key);
-    const call = this.#turns.get(ask.turn.turnId)?.open.get(ask.toolCallId);
-    if (call?.origin !== "runtime") return true;
+    if (ask === undefined) return { status: "no-wait" };
     try {
-      this.#intend(ask.turn, ask.toolCallId, call.toolName, "runtime");
-      return true;
+      this.#intend(ask.turn, ask.toolCallId, ask.toolName, "runtime");
     } catch {
-      return false;
+      // Kept: the record still says "waiting", so a later answer to the same
+      // request must try again rather than pass as one with no wait.
+      return { status: "refused" };
     }
+    this.#runtimeAsks.delete(key);
+    return { status: "recorded" };
   }
 
   /**
@@ -399,6 +431,7 @@ export class ToolEffectLedger {
     try {
       const unsettled = this.#unsettled(turn.turnId);
       if (unsettled === undefined || unsettled.size === 0) return;
+      this.#retireRuntimeAsks(turn.turnId);
       const state = this.#openTurn(turn.turnId);
       for (const toolCallId of unsettled.keys()) {
         this.#append(
@@ -493,7 +526,11 @@ export class ToolEffectLedger {
     key: string,
   ): void {
     const state = this.#turns.get(turn.turnId);
-    if (state?.open.get(toolCallId)?.origin !== "runtime") return;
+    const call = state?.open.get(toolCallId);
+    if (state === undefined || call?.origin !== "runtime") return;
+    // A full index cannot keep the link back to this wait, so the wait is not
+    // journaled and the call holds after a restart.
+    if (!this.#runtimeAsks.has(key) && this.#runtimeAsks.size >= MAX_RUNTIME_ASKS) return;
     try {
       this.#append(
         state,
@@ -504,11 +541,14 @@ export class ToolEffectLedger {
     } catch {
       return;
     }
-    this.#runtimeAsks.delete(key);
-    this.#runtimeAsks.set(key, { turn, toolCallId });
-    if (this.#runtimeAsks.size > MAX_RUNTIME_ASKS) {
-      const oldest = this.#runtimeAsks.keys().next().value;
-      if (oldest !== undefined) this.#runtimeAsks.delete(oldest);
+    this.#runtimeAsks.set(key, { turn, toolCallId, toolName: call.toolName });
+  }
+
+  /** Drops the asks of a turn, or of one of its calls, that no answer can reach any more. */
+  #retireRuntimeAsks(turnId: string, toolCallId?: string): void {
+    for (const [key, ask] of this.#runtimeAsks) {
+      if (ask.turn.turnId === turnId && (toolCallId === undefined || ask.toolCallId === toolCallId))
+        this.#runtimeAsks.delete(key);
     }
   }
 
@@ -550,6 +590,7 @@ export class ToolEffectLedger {
     origin: ToolEffectOrigin,
     outcome: ToolEffectSettled["outcome"],
   ): void {
+    if (origin === "runtime") this.#retireRuntimeAsks(turn.turnId, toolCallId);
     const state = this.#turns.get(turn.turnId);
     // Only the side that recorded the start ends it: a runtime's report of a
     // call the host is still running says nothing of the host's own tool.

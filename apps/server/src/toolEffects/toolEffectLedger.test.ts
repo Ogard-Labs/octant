@@ -66,15 +66,21 @@ function hostOn(connection: SqliteConnection, clock: () => string = () => now) {
     actor,
     clock,
   });
-  const journaled = () =>
-    journal
-      .replayAggregate({
+  const journaled = () => {
+    const frames: Array<{ readonly eventName: string; readonly payload: unknown }> = [];
+    for (;;) {
+      const page = journal.replayAggregate({
         aggregateType: TOOL_EFFECT_AGGREGATE_TYPE,
         aggregateId: turnId,
-        afterVersion: 0,
+        afterVersion: frames.length,
         limit: 1_000,
-      })
-      .map((envelope) => ({ eventName: envelope.eventName, payload: envelope.payload }));
+      });
+      frames.push(
+        ...page.map((envelope) => ({ eventName: envelope.eventName, payload: envelope.payload })),
+      );
+      if (page.length < 1_000) return frames;
+    }
+  };
   return { journal, ledger, journaled };
 }
 
@@ -423,13 +429,17 @@ describe("tool effect ledger", () => {
     expect(hostOn(connection).ledger.certainty(turnId)).toEqual({ kind: "settled" });
 
     // The answer is on record before the runtime hears it.
-    expect(before.ledger.approvalAnswered({ sessionId: "s-1", requestId: "req-1" })).toBe(true);
+    expect(before.ledger.approvalAnswered({ sessionId: "s-1", requestId: "req-1" })).toEqual({
+      status: "recorded",
+    });
     expect(hostOn(connection).ledger.certainty(turnId)).toEqual({
       kind: "uncertain",
       toolName: "Bash",
     });
     // A second answer to the same request has nothing left to record.
-    expect(before.ledger.approvalAnswered({ sessionId: "s-1", requestId: "req-1" })).toBe(true);
+    expect(before.ledger.approvalAnswered({ sessionId: "s-1", requestId: "req-1" })).toEqual({
+      status: "no-wait",
+    });
     expect(before.journaled()).toHaveLength(3);
   });
 
@@ -463,7 +473,9 @@ describe("tool effect ledger", () => {
         toolCallId: "rt-1",
       }),
     );
-    const refusing = withRecordedApprovalAnswers(driver, { approvalAnswered: () => false });
+    const refusing = withRecordedApprovalAnswers(driver, {
+      approvalAnswered: () => ({ status: "refused" }),
+    });
 
     await Effect.runPromise(
       Effect.scoped(
@@ -489,6 +501,165 @@ describe("tool effect ledger", () => {
       { approved: true, frames: 3 },
       { approved: false, frames: 3 },
     ]);
+  });
+
+  it("still records the answer to a runtime's oldest waiting request after many more requests wait", () => {
+    const connection = openConnection();
+    const before = hostOn(connection);
+    const turn = before.ledger.forTurn({ threadId, turnId });
+    for (let index = 0; index < 600; index += 1) {
+      turn.observe(
+        runtimeEvent({
+          kind: "tool-start",
+          sessionId: "s-1",
+          toolCallId: `rt-${index}`,
+          toolName: "Bash",
+        }),
+      );
+      turn.observe(
+        runtimeEvent({
+          kind: "approval-request",
+          sessionId: "s-1",
+          requestId: `req-${index}`,
+          action: "shell",
+          description: "Run a command",
+          toolCallId: `rt-${index}`,
+        }),
+      );
+    }
+
+    expect(before.ledger.approvalAnswered({ sessionId: "s-1", requestId: "req-0" })).toEqual({
+      status: "recorded",
+    });
+    // Approved and not finished when the host stopped: the restart holds it.
+    expect(hostOn(connection).ledger.certainty(turnId)).toEqual({
+      kind: "uncertain",
+      toolName: "Bash",
+    });
+  });
+
+  it("holds a call whose wait the full request index could not keep, even once it is approved", () => {
+    const connection = openConnection();
+    const before = hostOn(connection);
+    const turn = before.ledger.forTurn({ threadId, turnId });
+    for (let index = 0; index < 512; index += 1) {
+      turn.observe(
+        runtimeEvent({
+          kind: "tool-start",
+          sessionId: "s-1",
+          toolCallId: `read-${index}`,
+          toolName: "Read",
+        }),
+      );
+      turn.observe(
+        runtimeEvent({
+          kind: "approval-request",
+          sessionId: "s-1",
+          requestId: `read-req-${index}`,
+          action: "read",
+          description: "Read a file",
+          toolCallId: `read-${index}`,
+        }),
+      );
+    }
+    turn.observe(
+      runtimeEvent({ kind: "tool-start", sessionId: "s-1", toolCallId: "rt-x", toolName: "Bash" }),
+    );
+    turn.observe(
+      runtimeEvent({
+        kind: "approval-request",
+        sessionId: "s-1",
+        requestId: "req-x",
+        action: "shell",
+        description: "Run rm -rf build",
+        toolCallId: "rt-x",
+      }),
+    );
+    const isBash = (entry: { readonly payload: unknown }) =>
+      (entry.payload as { readonly toolCallId?: string }).toolCallId === "rt-x";
+
+    // Its wait was never journaled, so the record says it may already run.
+    expect(
+      before
+        .journaled()
+        .filter(isBash)
+        .map((entry) => entry.eventName),
+    ).toEqual(["tool-effect-intended@1"]);
+    expect(before.ledger.approvalAnswered({ sessionId: "s-1", requestId: "req-x" })).toEqual({
+      status: "no-wait",
+    });
+    // The other waiting calls never ran; only the approved one holds.
+    for (let index = 0; index < 512; index += 1)
+      turn.observe(
+        runtimeEvent({
+          kind: "tool-success",
+          sessionId: "s-1",
+          toolCallId: `read-${index}`,
+        }),
+      );
+    expect(hostOn(connection).ledger.certainty(turnId)).toEqual({
+      kind: "uncertain",
+      toolName: "Bash",
+    });
+  });
+
+  it("frees a waiting request's place once its call settles or its turn ends", () => {
+    const connection = openConnection();
+    const before = hostOn(connection);
+    const turn = before.ledger.forTurn({ threadId, turnId });
+    const ask = (index: number) => {
+      turn.observe(
+        runtimeEvent({
+          kind: "tool-start",
+          sessionId: "s-1",
+          toolCallId: `rt-${index}`,
+          toolName: "Bash",
+        }),
+      );
+      turn.observe(
+        runtimeEvent({
+          kind: "approval-request",
+          sessionId: "s-1",
+          requestId: `req-${index}`,
+          action: "shell",
+          description: "Run a command",
+          toolCallId: `rt-${index}`,
+        }),
+      );
+    };
+    for (let index = 0; index < 512; index += 1) {
+      ask(index);
+      turn.observe(
+        runtimeEvent({ kind: "tool-failure", sessionId: "s-1", toolCallId: `rt-${index}` }),
+      );
+    }
+    const other = before.ledger.forTurn({ threadId, turnId: otherTurnId });
+    for (let index = 0; index < 512; index += 1) {
+      other.observe(
+        runtimeEvent({
+          kind: "tool-start",
+          sessionId: "s-2",
+          toolCallId: `rt-${index}`,
+          toolName: "Bash",
+        }),
+      );
+      other.observe(
+        runtimeEvent({
+          kind: "approval-request",
+          sessionId: "s-2",
+          requestId: `req-${index}`,
+          action: "shell",
+          description: "Run a command",
+          toolCallId: `rt-${index}`,
+        }),
+      );
+    }
+    other.observe(runtimeEvent({ kind: "interrupted", sessionId: "s-2" }));
+    ask(1_000);
+
+    expect(before.ledger.approvalAnswered({ sessionId: "s-1", requestId: "req-1000" })).toEqual({
+      status: "recorded",
+    });
   });
 
   it("keeps holding a runtime's approval request that names no call it reported", () => {

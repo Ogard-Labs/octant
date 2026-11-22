@@ -9,7 +9,9 @@ import type { ToolEffectLedger } from "./toolEffectLedger";
  * of them reach the runtime through the connection, so the record is kept
  * here once rather than at each of them. When the journal refuses the frame
  * the call is refused instead: allowed, it would run under a record that says
- * it was still waiting, and a restart would continue past it.
+ * it was still waiting, and a restart would continue past it. A request the
+ * ledger never journaled a wait for passes through: its call's record already
+ * says it may take effect.
  */
 export function withRecordedApprovalAnswers(
   driver: ProviderDriver,
@@ -27,7 +29,7 @@ export function withRecordedApprovalAnswers(
                 ledger.approvalAnswered({
                   sessionId: String(answer.sessionId),
                   requestId: answer.requestId,
-                }) || !answer.approved
+                }).status !== "refused" || !answer.approved
                   ? answer
                   : { ...answer, approved: false },
               ),
