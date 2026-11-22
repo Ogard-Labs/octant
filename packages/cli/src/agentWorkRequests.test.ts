@@ -12,6 +12,7 @@ import type { LocalControlRequest, OpenedLocalControlSession } from "./localCont
 const threadId = "00000000-0000-4000-8000-000000000001";
 const projectId = "00000000-0000-4000-8000-000000000002";
 const requestId = "00000000-0000-4000-8000-000000000003";
+const questionRequestId = "00000000-0000-4000-8000-000000000007";
 const pending = {
   mode: "work",
   projectId,
@@ -21,8 +22,8 @@ const pending = {
   answer: { requestId, expectedVersion: 4 },
 };
 /** The journaled Work request the app's thread view reads, with its full detail. */
-const journaled = (detail: unknown) => ({
-  requestId,
+const journaled = (detail: unknown, id: string = requestId) => ({
+  requestId: id,
   projectId,
   threadId,
   providerInstanceId: "00000000-0000-4000-8000-000000000005",
@@ -34,6 +35,10 @@ const journaled = (detail: unknown) => ({
   detail,
 });
 const questionDetail = { kind: "user-input", prompt: "Which format?", options: ["PDF"] };
+const approvalDetail = { kind: "approval", action: "Run", description: "Run the command?" };
+/** Each pending row is derived from its own journaled request, so each has its own id. */
+const details = [journaled(approvalDetail), journaled(questionDetail, questionRequestId)];
+const questionAnswer = { requestId: questionRequestId, expectedVersion: 4 };
 
 describe("terminal Work requests", () => {
   it("lists only answerable Work approvals and questions for the current thread", async () => {
@@ -45,11 +50,12 @@ describe("terminal Work requests", () => {
         status: 200,
         body: {
           requests: request.path.startsWith("/api/work/requests")
-            ? [journaled(questionDetail)]
+            ? details
             : [
                 { ...pending, kind: "approval", text: "Run the command?" },
                 {
                   ...pending,
+                  answer: questionAnswer,
                   kind: "question",
                   text: "Which format?",
                   options: [{ label: "PDF" }],
@@ -137,6 +143,7 @@ describe("terminal Work requests", () => {
     };
     const questionInput = {
       ...pending,
+      answer: questionAnswer,
       kind: "question" as const,
       text: "Which format?",
       options: [{ label: "PDF" }, { label: "DOCX" }],
@@ -148,8 +155,7 @@ describe("terminal Work requests", () => {
       send: async (request) => {
         if (request.path === "/api/pending-requests")
           return { status: 200, body: { requests: [approvalInput, questionInput] } };
-        if (request.method === "GET")
-          return { status: 200, body: { requests: [journaled(questionDetail)] } };
+        if (request.method === "GET") return { status: 200, body: { requests: details } };
         seen.push(request);
         return { status: 200, body: { kind: "work-request-resolved" } };
       },
@@ -179,6 +185,7 @@ describe("terminal Work requests", () => {
     expect(seen[1]).toMatchObject({
       body: {
         kind: "resolve-work-request",
+        requestId: questionRequestId,
         resolution: { kind: "user-input", answer: "DOCX" },
       },
     });
@@ -193,7 +200,7 @@ describe("terminal Work requests", () => {
         status: 200,
         body: {
           requests: request.path.startsWith("/api/work/requests")
-            ? [journaled({ kind: "approval", action: "Run", description: "Run the command?" })]
+            ? [journaled(approvalDetail)]
             : [{ ...pending, kind: "approval", text: "Run the command?" }],
         },
       }),
@@ -255,9 +262,13 @@ describe("terminal Work requests", () => {
 
     expect(text).toContain("Allowing moves this thread to Accept edits.");
     expect(text).toContain("Plan:\nEdit the report\nStep 1");
-    expect(text).toContain("Step 19");
-    expect(text).not.toContain("Step 20");
-    expect(text).toContain("5 more lines. Read the whole plan in the app before allowing.");
+    expect(text).toContain("Step 7");
+    expect(text).not.toContain("Step 8");
+    expect(text).toContain("The plan continues. Read the whole plan in the app before allowing.");
+    const wide = workLevelChangeText({ to: "auto", plan: "x".repeat(2_000) });
+    expect(wide.length).toBeLessThan(700);
+    expect(wide).toContain("The plan continues.");
+    expect(workLevelChangeText({ to: "plan" })).toBe("Allowing moves this thread to Plan.");
     expect(workLevelChangeText(undefined)).toBe("");
   });
 
@@ -379,9 +390,9 @@ describe("terminal Work requests", () => {
         kind: "complete",
         response: { answers: [{}, { customAnswer: "12" }] },
       });
-      expect(stepWorkQuestionnaire(questionnaire, first.answers, "=")).toMatchObject({
-        kind: "asking",
-        note: expect.any(String),
+      expect(stepWorkQuestionnaire(questionnaire, first.answers, "=SUM(B2:B5)")).toMatchObject({
+        kind: "complete",
+        response: { answers: [{}, { customAnswer: "=SUM(B2:B5)" }] },
       });
       expect(stepWorkQuestionnaire(questionnaire, [], "=2")).toMatchObject({
         kind: "asking",

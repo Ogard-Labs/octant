@@ -986,6 +986,14 @@ const workThreadId = "6c000000-0000-4000-8000-000000000001";
 const workProjectId = "6c000000-0000-4000-8000-000000000002";
 const workRequestId = "6c000000-0000-4000-8000-000000000003";
 let workQuestionPending = true;
+let workApprovalPending = false;
+const workApprovalId = "6c000000-0000-4000-8000-000000000005";
+// Long wrapped plan lines: the target level and the y/n line must still fit at 80x24.
+const workPlan = Array.from(
+  { length: 30 },
+  (_, i) =>
+    `Step ${String(i + 1)}: ${"update the export pipeline and its tests ".repeat(4).trim()}`,
+).join("\n");
 const workAnswers: unknown[] = [];
 const workQuestionnaire = {
   questions: [
@@ -1044,7 +1052,7 @@ const workSession = {
       return {
         status: 200,
         body: {
-          requests: workQuestionPending
+          requests: workApprovalPending
             ? [
                 {
                   mode: "work",
@@ -1052,40 +1060,73 @@ const workSession = {
                   threadId: workThreadId,
                   threadTitle: "Export report",
                   requestedAt: now,
-                  kind: "question",
-                  text: "Choose the export",
-                  options: [],
-                  answer: { requestId: workRequestId, expectedVersion: 2 },
+                  kind: "approval",
+                  text: "Start implementing",
+                  answer: { requestId: workApprovalId, expectedVersion: 1 },
                 },
               ]
-            : [],
+            : workQuestionPending
+              ? [
+                  {
+                    mode: "work",
+                    projectId: workProjectId,
+                    threadId: workThreadId,
+                    threadTitle: "Export report",
+                    requestedAt: now,
+                    kind: "question",
+                    text: "Choose the export",
+                    options: [],
+                    answer: { requestId: workRequestId, expectedVersion: 2 },
+                  },
+                ]
+              : [],
         },
       };
     if (request.path === `/api/work/requests?projectId=${workProjectId}&threadId=${workThreadId}`)
       return {
         status: 200,
         body: {
-          requests: workQuestionPending
+          requests: workApprovalPending
             ? [
                 {
-                  requestId: workRequestId,
+                  requestId: workApprovalId,
                   projectId: workProjectId,
                   threadId: workThreadId,
                   providerInstanceId: providerId,
                   providerSessionId: "6c000000-0000-4000-8000-000000000004",
-                  providerRequestId: "request-1",
+                  providerRequestId: "request-2",
                   detail: {
-                    kind: "user-input",
-                    prompt: "Choose the export",
-                    options: [],
-                    questionnaire: workQuestionnaire,
+                    kind: "approval",
+                    action: "Leave Plan",
+                    description: "Start implementing",
+                    levelChange: { to: "auto-accept-edits", plan: workPlan },
                   },
                   status: "pending",
                   requestedAt: now,
-                  version: 2,
+                  version: 1,
                 },
               ]
-            : [],
+            : workQuestionPending
+              ? [
+                  {
+                    requestId: workRequestId,
+                    projectId: workProjectId,
+                    threadId: workThreadId,
+                    providerInstanceId: providerId,
+                    providerSessionId: "6c000000-0000-4000-8000-000000000004",
+                    providerRequestId: "request-1",
+                    detail: {
+                      kind: "user-input",
+                      prompt: "Choose the export",
+                      options: [],
+                      questionnaire: workQuestionnaire,
+                    },
+                    status: "pending",
+                    requestedAt: now,
+                    version: 2,
+                  },
+                ]
+              : [],
         },
       };
     if (request.path === "/api/work/requests/commands") {
@@ -1144,4 +1185,29 @@ try {
   console.log("Answered a Work questionnaire one question at a time");
 } finally {
   workRender.renderer.destroy();
+}
+
+const approvalRender = await createTestRenderer({ width: 80, height: 24 });
+try {
+  workApprovalPending = true;
+  const screen = mountAgentScreen(tui, approvalRender.renderer, paletteFor(undefined, "dark"), {
+    session: workSession,
+    threadId: workThreadId,
+    mode: "work",
+    quiet: true,
+  });
+  await screen.refresh();
+  await approvalRender.renderOnce();
+  const frame = approvalRender.captureCharFrame();
+  for (const expected of [
+    "Allowing moves this thread to Accept edits.",
+    "The plan continues.",
+    "y allow · n deny",
+  ])
+    if (!frame.includes(expected))
+      throw new Error(`The Plan approval at 80x24 is missing "${expected}".\n${frame}`);
+  console.log("Rendered a Plan approval's level and cut plan at 80x24");
+} finally {
+  workApprovalPending = false;
+  approvalRender.renderer.destroy();
 }

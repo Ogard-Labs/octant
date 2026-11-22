@@ -160,8 +160,11 @@ function readQuestionAnswer(
   const refusal = `${limits}${writes ? ", or type your own answer" : ""}.`;
   // Bare numbers choose options, so a written answer that is itself a number
   // starts with "=" (seen in review: "12 copies" typed as 12 was refused).
-  const written = writes && text.startsWith("=") ? text.slice(1).trim() : undefined;
-  if (written === undefined && /^\d+([\s,]+\d+)*$/.test(text)) {
+  // Only that escape is consumed; "=SUM(B2:B5)" is sent as written.
+  const choice = /^\d+([\s,]+\d+)*$/;
+  const escaped = text.startsWith("=") ? text.slice(1).trim() : undefined;
+  const written = writes && escaped !== undefined && choice.test(escaped) ? escaped : undefined;
+  if (written === undefined && choice.test(text)) {
     const numbers = text.split(/[\s,]+/).map(Number);
     const selectedOptionIds =
       numbers.length === 1 && numbers[0] === 0
@@ -177,7 +180,6 @@ function readQuestionAnswer(
       : refusal;
   }
   if (!writes) return refusal;
-  if (written !== undefined && written.length === 0) return refusal;
   const answer = {
     questionId: question.id,
     selectedOptionIds: [],
@@ -269,8 +271,13 @@ const WORK_ACCESS_LABEL: Readonly<Record<WorkAccess, string>> = {
   "full-access": "Full access",
   plan: "Plan",
 };
-/** A plan longer than this many lines is cut in the panel, and the panel says so. */
-const PLAN_PANEL_LINES = 20;
+/**
+ * A plan is cut in the panel past this many lines or characters, so the
+ * target level and the y/n line stay on screen at 80x24 even when long plan
+ * lines wrap; the panel says the plan continues.
+ */
+const PLAN_PANEL_LINES = 8;
+const PLAN_PANEL_CHARACTERS = 480;
 
 /**
  * What a Work approval that changes the thread's level authorizes, as the
@@ -281,12 +288,14 @@ export function workLevelChangeText(levelChange: WorkLevelChangeRequest | undefi
   if (levelChange === undefined) return "";
   const lines = [`Allowing moves this thread to ${WORK_ACCESS_LABEL[levelChange.to]}.`];
   if (levelChange.plan !== undefined) {
-    const plan = levelChange.plan.split("\n");
-    lines.push("Plan:", ...plan.slice(0, PLAN_PANEL_LINES));
-    if (plan.length > PLAN_PANEL_LINES)
-      lines.push(
-        `… ${String(plan.length - PLAN_PANEL_LINES)} more lines. Read the whole plan in the app before allowing.`,
-      );
+    const shown = levelChange.plan
+      .slice(0, PLAN_PANEL_CHARACTERS)
+      .split("\n")
+      .slice(0, PLAN_PANEL_LINES)
+      .join("\n");
+    lines.push("Plan:", shown);
+    if (shown.length < levelChange.plan.length)
+      lines.push("… The plan continues. Read the whole plan in the app before allowing.");
   }
   return lines.join("\n");
 }
