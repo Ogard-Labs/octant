@@ -573,6 +573,37 @@ try {
 } finally {
   tableRender.renderer.destroy();
 }
+reply = [
+  ...Array.from({ length: 30 }, (_, index) => `Before fenced table ${index + 1}`),
+  "```text",
+  "literal source",
+  "| literal | source |",
+  "| --- | --- |",
+  "| preserved | true |",
+  "```",
+].join("\n");
+replyRef.byteLength = reply.length;
+const fencedTableRender = await createTestRenderer({ width: 120, height: 45 });
+try {
+  const screen = mountAgentScreen(tui, fencedTableRender.renderer, paletteFor(undefined, "dark"), {
+    session: streamSession,
+    threadId,
+    quiet: true,
+  });
+  await screen.refresh();
+  await fencedTableRender.renderOnce();
+  const frame = fencedTableRender.captureCharFrame();
+  if (
+    !frame.includes("| literal | source |") ||
+    !frame.includes("| --- | --- |") ||
+    !frame.includes("| preserved | true |") ||
+    frame.includes("│ literal │")
+  )
+    throw new Error("A fenced table at a streaming block boundary was reformatted.");
+  console.log("Rendered fenced literal table in a later streaming block");
+} finally {
+  fencedTableRender.renderer.destroy();
+}
 reply = initialReply;
 replyRef.byteLength = reply.length;
 const perf = await createTestRenderer({ width: 160, height: 45 });

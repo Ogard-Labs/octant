@@ -1569,7 +1569,10 @@ class AgentScreen {
       return box;
     }
     const bodyText = new TextRenderable(this.#renderer, {
-      content: markdown && /[`*_#>|]|^\s*[-+]\s/m.test(visible) ? this.#markdown(visible) : visible,
+      content:
+        markdown && /[`*_#>|]|^\s*[-+]\s/m.test(visible)
+          ? this.#markdown(terminalMarkdownTables(visible))
+          : visible,
       fg: p.text,
       wrapMode: "word",
     });
@@ -1589,7 +1592,7 @@ class AgentScreen {
     const p = this.#palette;
     const chunks: import("@opentui/core").TextChunk[] = [];
     let inFence = startsInFence;
-    const lines = terminalMarkdownTables(text).split("\n");
+    const lines = text.split("\n");
     lines.forEach((line, index) => {
       const eol = index < lines.length - 1 ? "\n" : "";
       if (line.startsWith("```")) {

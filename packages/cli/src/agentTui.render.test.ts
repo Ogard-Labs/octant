@@ -13,6 +13,7 @@ it.skipIf(process.platform === "win32")(
     expect(output).toContain("Rendered 80x24");
     expect(output).toContain("Rendered 160x24");
     expect(output).toContain("Rendered streaming table boundary and fenced source");
+    expect(output).toContain("Rendered fenced literal table in a later streaming block");
   },
   35000,
 );
