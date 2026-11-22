@@ -21,3 +21,18 @@ it("contains a failing tool while the conversation stays available", () => {
   expect(screen.getByText("The conversation remains here")).toBeVisible();
   expect(screen.getByRole("alert")).toHaveTextContent("This tool could not load");
 });
+
+it("lets a person close a dialog that could not load", () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  function Broken(): never {
+    throw new Error("A dialog failed");
+  }
+  const onClose = vi.fn();
+  render(
+    <DockModuleBoundary onClose={onClose}>
+      <Broken />
+    </DockModuleBoundary>,
+  );
+  screen.getByRole("button", { name: "Close" }).click();
+  expect(onClose).toHaveBeenCalledTimes(1);
+});

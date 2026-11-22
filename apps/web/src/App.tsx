@@ -9769,7 +9769,7 @@ function LaunchedShell(
           )
           .map((candidate) => ({ id: candidate.id, title: candidate.title }));
         return (
-          <DockModuleBoundary>
+          <DockModuleBoundary onClose={() => setCoordinatorBoundsThreadId(undefined)}>
             <Suspense fallback={null}>
               <CoordinatorBoundsDialog
                 bounds={coordinator.coordinatorBounds}
@@ -9938,7 +9938,7 @@ function LaunchedShell(
                                 {remoteTodoSlot?.bridge === undefined ? (
                                   <p>Pair with this computer to open its thread.</p>
                                 ) : (
-                                  <DockModuleBoundary>
+                                  <DockModuleBoundary onClose={() => setRemoteTodo(undefined)}>
                                     <Suspense fallback={<SurfaceLoading label="Opening to-do" />}>
                                       <RemoteTodoDraft
                                         key={`${remoteTodo.hostId}:${remoteTodo.todo?.id ?? remoteTodo.thread?.threadId}`}

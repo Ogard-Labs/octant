@@ -1601,7 +1601,7 @@ function CoordinatorDraftSettings(props: {
         Change…
       </OctantButton>
       {open ? (
-        <DockModuleBoundary>
+        <DockModuleBoundary onClose={() => setOpen(false)}>
           <Suspense fallback={null}>
             <CoordinatorBoundsDialog
               bounds={choices.bounds}
