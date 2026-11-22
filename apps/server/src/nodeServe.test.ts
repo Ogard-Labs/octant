@@ -438,28 +438,38 @@ describe("nodeServe", () => {
   it("keeps active response ownership isolated between server instances", async () => {
     let firstCancelled = false;
     let secondCancelled = false;
-    const makeStream = (cancelled: () => void) =>
-      new ReadableStream<Uint8Array>({
-        async pull() {
-          await new Promise(() => undefined);
+    // A stream's first pull happens only once the server is reading the body,
+    // so waiting for it, rather than a fixed delay, guarantees each response is
+    // active before a server stops. A 25 ms delay was not enough on a busy CI
+    // runner: the first request had not been read when its server stopped.
+    const makeStream = (cancelled: () => void, reading: () => void) =>
+      new ReadableStream<Uint8Array>(
+        {
+          async pull() {
+            reading();
+            await new Promise(() => undefined);
+          },
+          cancel: cancelled,
         },
-        cancel: cancelled,
-      });
+        { highWaterMark: 0 },
+      );
+    const firstReading = Promise.withResolvers<void>();
+    const secondReading = Promise.withResolvers<void>();
     const first = await nodeServe({
       hostname: "127.0.0.1",
       port: 0,
-      fetch: () => new Response(makeStream(() => (firstCancelled = true))),
+      fetch: () => new Response(makeStream(() => (firstCancelled = true), firstReading.resolve)),
     });
     const second = await nodeServe({
       hostname: "127.0.0.1",
       port: 0,
-      fetch: () => new Response(makeStream(() => (secondCancelled = true))),
+      fetch: () => new Response(makeStream(() => (secondCancelled = true), secondReading.resolve)),
     });
 
     try {
       const firstResponse = fetch(new URL("/owned", first.url));
       const secondResponse = fetch(new URL("/owned", second.url));
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      await Promise.all([firstReading.promise, secondReading.promise]);
 
       await first.stop(true);
       await firstResponse.catch(() => undefined);
