@@ -31,6 +31,13 @@ const ZenProjectTerminalCard = lazy(() =>
   })),
 );
 
+// Opened only from a coordinator's Change… action, in a draft or a running thread.
+const CoordinatorBoundsDialog = lazy(() =>
+  import("../projects/CoordinatorBoundsDialog").then((module) => ({
+    default: module.CoordinatorBoundsDialog,
+  })),
+);
+
 const ProjectCreateDialog = lazy(() =>
   import("../projects/ProjectCreateDialog").then((module) => ({
     default: module.ProjectCreateDialog,
@@ -38,6 +45,7 @@ const ProjectCreateDialog = lazy(() =>
 );
 
 export {
+  CoordinatorBoundsDialog,
   ProjectCreateDialog,
   RemotePairingView,
   UsageWorkspace,

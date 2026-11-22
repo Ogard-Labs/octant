@@ -9,7 +9,6 @@ import {
   COORDINATOR_BOUND_FIELDS,
   COORDINATOR_WORKER_LEVELS,
 } from "../projects/coordinatorChoices";
-import { CoordinatorBoundsDialog } from "../projects/CoordinatorBoundsDialog";
 import { serverCodeThreadProviderGroups } from "../code/composer/serverCodeComposer";
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import type { AutoReview } from "../code/autoReview";
@@ -120,7 +119,7 @@ import {
   type ComposerProjectGithubSource,
   type ComposerProjectEntry,
 } from "../projects/ComposerProjectSelector";
-import { ProjectCreateDialog } from "./deferredSurfaces";
+import { CoordinatorBoundsDialog, ProjectCreateDialog } from "./deferredSurfaces";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -1601,19 +1600,21 @@ function CoordinatorDraftSettings(props: {
         Change…
       </OctantButton>
       {open ? (
-        <CoordinatorBoundsDialog
-          bounds={choices.bounds}
-          onClose={() => setOpen(false)}
-          onSave={(bounds, workerLevel) => {
-            props.onChoicesChange({
-              ...(workerLevel?.level === undefined ? {} : { workerLevel: workerLevel.level }),
-              ...(Object.keys(bounds).length === 0 ? {} : { bounds }),
-            });
-            setOpen(false);
-          }}
-          title="New coordinator"
-          workerLevel={{ level: choices.workerLevel }}
-        />
+        <Suspense fallback={null}>
+          <CoordinatorBoundsDialog
+            bounds={choices.bounds}
+            onClose={() => setOpen(false)}
+            onSave={(bounds, workerLevel) => {
+              props.onChoicesChange({
+                ...(workerLevel?.level === undefined ? {} : { workerLevel: workerLevel.level }),
+                ...(Object.keys(bounds).length === 0 ? {} : { bounds }),
+              });
+              setOpen(false);
+            }}
+            title="New coordinator"
+            workerLevel={{ level: choices.workerLevel }}
+          />
+        </Suspense>
       ) : null}
     </div>
   );

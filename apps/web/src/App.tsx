@@ -417,7 +417,6 @@ import { TodoListHostSettingsContext } from "./todos/TodoListHostSettings";
 import { TodoQuickAddDialog, useNewTodoShortcut } from "./todos/TodoQuickAddDialog";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
 import { coordinatorDoneWhenEqual } from "@octant/domain";
-import { CoordinatorBoundsDialog } from "./projects/CoordinatorBoundsDialog";
 import {
   ProjectActionRunDialog,
   type ProjectActionTarget,
@@ -511,7 +510,7 @@ import {
 import { describeUtilityTabs } from "./shell/utilityTabs";
 import { sidebarRowMode, threadDragSurface } from "./shell/threadDragSurface";
 import { deliverComposerThreadDrop } from "./chat/composerThreadDrop";
-import { RemotePairingView } from "./shell/deferredSurfaces";
+import { CoordinatorBoundsDialog, RemotePairingView } from "./shell/deferredSurfaces";
 import { firstSelectableProviderSelection } from "./providers/firstSelectableProviderSelection";
 import {
   isAuthorizedCanvasDocument,
@@ -627,7 +626,6 @@ import {
 } from "./host/useHostFederationLifecycle";
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
 import { createPairedComputerFetch } from "./host/pairedComputerFetch";
-import { PairedComputerCodeSurface } from "./host/PairedComputerCodeSurface";
 import { usePairedComputerReads } from "./host/usePairedComputerReads";
 import {
   isPairedComputerAsk,
@@ -723,6 +721,14 @@ const ReaderPagesContainer = lazy(() =>
 const SettingsContainer = lazy(() =>
   import("./app/SettingsContainer").then(({ SettingsContainer }) => ({
     default: SettingsContainer,
+  })),
+);
+// The paired computer's Code surface carries the whole remote workspace
+// (Canvas, math, Markdown and design fonts); loaded statically it added about
+// 160 KB of CSS and 410 KB gzip to every launch, though few windows open it.
+const PairedComputerCodeSurface = lazy(() =>
+  import("./host/PairedComputerCodeSurface").then(({ PairedComputerCodeSurface }) => ({
+    default: PairedComputerCodeSurface,
   })),
 );
 const MoveThreadToProjectDialog = lazy(() =>
@@ -2712,23 +2718,25 @@ function LaunchedShell(
     pairedComputerCodeBridge === undefined
       ? undefined
       : () => (
-          <PairedComputerCodeSurface
-            key={String(createHostId)}
-            bridge={pairedComputerCodeBridge}
-            hosts={hosts}
-            selectedHostId={createHostId}
-            onSelectHost={handleSelectCreateHost}
-            viewScope={createHostViewScope}
-            {...(pairedThreadToOpenHere === undefined
-              ? {}
-              : {
-                  initialThreadId: pairedThreadToOpenHere.threadId,
-                  initialThreadRequest: pairedThreadToOpenHere.request,
-                })}
-            {...(pairedComputerServerOpener === undefined
-              ? {}
-              : { openServer: pairedComputerServerOpener })}
-          />
+          <Suspense fallback={<SurfaceLoading label="Opening computer" />}>
+            <PairedComputerCodeSurface
+              key={String(createHostId)}
+              bridge={pairedComputerCodeBridge}
+              hosts={hosts}
+              selectedHostId={createHostId}
+              onSelectHost={handleSelectCreateHost}
+              viewScope={createHostViewScope}
+              {...(pairedThreadToOpenHere === undefined
+                ? {}
+                : {
+                    initialThreadId: pairedThreadToOpenHere.threadId,
+                    initialThreadRequest: pairedThreadToOpenHere.request,
+                  })}
+              {...(pairedComputerServerOpener === undefined
+                ? {}
+                : { openServer: pairedComputerServerOpener })}
+            />
+          </Suspense>
         );
   function refuseUnlessCreatableDestination(input: {
     readonly action: string;
@@ -9688,48 +9696,50 @@ function LaunchedShell(
           )
           .map((candidate) => ({ id: candidate.id, title: candidate.title }));
         return (
-          <CoordinatorBoundsDialog
-            bounds={coordinator.coordinatorBounds}
-            doneWhen={{
-              value: coordinator.coordinatorDoneWhen,
-              threads: doneWhenThreads,
-              defaultRepository,
-              onSave: (bounds, nextDoneWhen) => {
-                setCoordinatorBoundsThreadId(undefined);
-                const boundsChanged =
-                  coordinator.coordinatorBounds?.wakesPerHour !== bounds.wakesPerHour ||
-                  coordinator.coordinatorBounds?.rounds !== bounds.rounds ||
-                  coordinator.coordinatorBounds?.startsPerHour !== bounds.startsPerHour;
-                const doneWhenChanged = !coordinatorDoneWhenEqual(
-                  coordinator.coordinatorDoneWhen,
-                  nextDoneWhen,
-                );
-                void (async () => {
-                  if (boundsChanged) {
-                    const outcome = await codeController.setThreadCoordinatorBounds(
-                      coordinator.id,
-                      bounds,
-                    );
-                    if (outcome.status === "refused") {
-                      setThreadExportNotice(outcome.message);
-                      return;
+          <Suspense fallback={null}>
+            <CoordinatorBoundsDialog
+              bounds={coordinator.coordinatorBounds}
+              doneWhen={{
+                value: coordinator.coordinatorDoneWhen,
+                threads: doneWhenThreads,
+                defaultRepository,
+                onSave: (bounds, nextDoneWhen) => {
+                  setCoordinatorBoundsThreadId(undefined);
+                  const boundsChanged =
+                    coordinator.coordinatorBounds?.wakesPerHour !== bounds.wakesPerHour ||
+                    coordinator.coordinatorBounds?.rounds !== bounds.rounds ||
+                    coordinator.coordinatorBounds?.startsPerHour !== bounds.startsPerHour;
+                  const doneWhenChanged = !coordinatorDoneWhenEqual(
+                    coordinator.coordinatorDoneWhen,
+                    nextDoneWhen,
+                  );
+                  void (async () => {
+                    if (boundsChanged) {
+                      const outcome = await codeController.setThreadCoordinatorBounds(
+                        coordinator.id,
+                        bounds,
+                      );
+                      if (outcome.status === "refused") {
+                        setThreadExportNotice(outcome.message);
+                        return;
+                      }
                     }
-                  }
-                  if (doneWhenChanged) {
-                    const outcome = await codeController.setThreadCoordinatorDoneWhen(
-                      coordinator.id,
-                      nextDoneWhen,
-                    );
-                    if (outcome.status === "refused") setThreadExportNotice(outcome.message);
-                  }
-                })();
-              },
-            }}
-            key={String(coordinator.id)}
-            onClose={() => setCoordinatorBoundsThreadId(undefined)}
-            onSave={() => setCoordinatorBoundsThreadId(undefined)}
-            title={coordinator.title}
-          />
+                    if (doneWhenChanged) {
+                      const outcome = await codeController.setThreadCoordinatorDoneWhen(
+                        coordinator.id,
+                        nextDoneWhen,
+                      );
+                      if (outcome.status === "refused") setThreadExportNotice(outcome.message);
+                    }
+                  })();
+                },
+              }}
+              key={String(coordinator.id)}
+              onClose={() => setCoordinatorBoundsThreadId(undefined)}
+              onSave={() => setCoordinatorBoundsThreadId(undefined)}
+              title={coordinator.title}
+            />
+          </Suspense>
         );
       })()}
       {threadExportNotice !== undefined ||
