@@ -130,10 +130,6 @@ export async function readCodexProtectedSignInsOnServer(
   const codexHome = posix.isAbsolute(codexHomeSetting)
     ? posix.normalize(codexHomeSetting).replace(/(?<=.)\/+$/, "")
     : posix.join(serverHome, ".codex");
-  // Codex's own sign-in is left to it only when its home is a folder of its
-  // own. A `CODEX_HOME` that is the login's home, or holds it, would exempt
-  // every other provider's sign-in too, so then nothing is exempted.
-  const ownHome = inside(serverHome, codexHome) ? undefined : codexHome;
   const entries = protectedAtLevel(
     secretGuardEntries({
       platform: system === "Darwin" ? "darwin" : "linux",
@@ -144,19 +140,26 @@ export async function readCodexProtectedSignInsOnServer(
   const paths = entries
     .map((entry) => posix.normalize(entry.kind === "path" ? entry.path : entry.directory))
     .filter((path) => inside(path, serverHome));
-  const denied = [
-    ...new Set(paths.filter((path) => ownHome === undefined || !inside(path, ownHome))),
-  ];
+  // Codex's own sign-in is its group entry, left out by identity: no path is
+  // ever dropped for lying under `CODEX_HOME`, so another provider's sign-in
+  // there stays denied.
+  const codexOwnSignIn = posix.join(serverHome, ".codex", "auth.json");
+  const denied = [...new Set(paths.filter((path) => path !== codexOwnSignIn))];
   // The Provider sign-ins group always names paths in a valid home, so an
   // empty list means the home was misread, unless the person removed the group.
   if (denied.length === 0 && !currentProtectedFilesChoice().removed.includes("provider-sign-ins")) {
     return unreadable;
   }
-  return {
-    status: "found",
-    denied,
-    allowed: ownHome !== undefined && denied.some((path) => inside(ownHome, path)) ? [ownHome] : [],
-  };
+  // Codex must read and write its own home to run; one that holds another
+  // provider's sign-in, or lies inside a denied folder, cannot be kept apart.
+  const overlap = denied.find((path) => inside(path, codexHome) || inside(codexHome, path));
+  if (overlap !== undefined) {
+    return {
+      status: "refused",
+      message: `Codex's home on ${placement.serverName} (${codexHome}) overlaps another provider's sign-in (${overlap}), so Codex's sandbox can't keep that sign-in out of its reach. Set CODEX_HOME there to a folder of its own, or use Full access.`,
+    };
+  }
+  return { status: "found", denied, allowed: [] };
 }
 
 /**

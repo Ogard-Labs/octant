@@ -286,8 +286,11 @@ app-server --listen stdio://` after `codex --version` there; for Claude Code,
     `uname -s`, and `$CODEX_HOME`) on the server and resolves the secret
     guard's Provider sign-ins group for it (Claude's `~/.claude` credentials,
     other providers' auth files, after the person's Protected files choice),
-    leaving out Codex's own home (only when it is a folder of its own, not
-    the login's home or a folder holding it) and anything of this host. Full
+    leaving out Codex's own entry (`~/.codex/auth.json`) and anything of this
+    host. No other entry is ever dropped for lying under `CODEX_HOME`: when
+    Codex's home (trailing slashes ignored) holds a denied path or lies inside
+    one, Codex would have to reach a protected sign-in to run, so the launch
+    is refused at the sandboxed levels, naming the overlap. Full
     access runs no sandbox there, so no list is read for it. Those paths go to
     Codex as `deny` entries in the thread's permissions profile. A Codex there
     older than the first release that takes a profile (0.169.0) is refused at

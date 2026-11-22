@@ -83,6 +83,7 @@ function standInServer() {
     hang: join(scratch, "hang"),
     offline: join(scratch, "offline"),
     refusedOffline: join(scratch, "refused-offline"),
+    noHome: join(scratch, "no-home"),
   };
   mkdirSync(bin);
   mkdirSync(folder, { recursive: true });
@@ -108,6 +109,13 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
 });`,
   );
   chmodSync(join(bin, "codex"), 0o700);
+  // While a `no-home` file exists, `uname` fails, so the login's home and
+  // sign-in list cannot be read.
+  writeFileSync(
+    join(bin, "uname"),
+    `#!/bin/sh\nif [ -e ${JSON.stringify(marks.noHome)} ]; then exit 1; fi\nPATH=/usr/bin:/bin exec uname "$@"\n`,
+  );
+  chmodSync(join(bin, "uname"), 0o700);
   const ssh = join(scratch, "ssh");
   writeFileSync(
     ssh,
@@ -364,17 +372,60 @@ describe.skipIf(process.platform === "win32")("Codex on a server Project's serve
     expect(slashed.status === "found" ? slashed.denied : []).toContain(
       "/home/build/.claude/.credentials.json",
     );
-    // A `CODEX_HOME` that is the login's home exempts no other provider.
-    const sharedHome = await readCodexProtectedSignInsOnServer(
-      placementWith("Linux\n/home/build\n/home/build\n"),
+    // A `CODEX_HOME` holding another provider's sign-in, trailing slash or
+    // not, is refused rather than exempting that sign-in.
+    for (const codexHome of ["/home/build/", "/home/build"]) {
+      const shared = await readCodexProtectedSignInsOnServer(
+        placementWith(`Linux\n/home/build\n${codexHome}\n`),
+      );
+      expect(shared.status).toBe("refused");
+      expect(shared.status === "refused" ? shared.message : "").toContain(
+        "/home/build/.claude/.credentials.json",
+      );
+    }
+    // A Codex home of its own leaves every other provider's sign-in denied.
+    const separate = await readCodexProtectedSignInsOnServer(
+      placementWith("Linux\n/home/build\n/opt/codex\n"),
     );
-    expect(sharedHome.status === "found" ? sharedHome.denied : []).toContain(
+    expect(separate.status === "found" ? separate.denied : []).toContain(
       "/home/build/.claude/.credentials.json",
+    );
+    expect(separate.status === "found" ? separate.denied : []).not.toContain(
+      "/home/build/.codex/auth.json",
     );
     const relative = await readCodexProtectedSignInsOnServer(
       placementWith("Linux\nhome/build\n\n"),
     );
     expect(relative.status).toBe("refused");
+  });
+
+  it("starts Full access on a server without reading the login's home, which only sandboxed levels need", async () => {
+    const { connection, folder, marks } = standInServer();
+    // The probe for the login's home fails, so no sign-in list can be read.
+    writeFileSync(marks.noHome, "");
+    const bound = bind(connection, folder, { placesOnServer: true, strict: false });
+    if (bound.status !== "placed") throw new Error(`not placed: ${bound.status}`);
+    const start = (executionPolicy: "full-access" | "approval-gated") =>
+      Effect.runPromiseExit(
+        Effect.scoped(
+          makeCodexProcessLive()
+            .start({
+              binaryPath: "/nonexistent/codex-on-this-host",
+              authority: {
+                kind: "thread",
+                root: folder,
+                mode: "code",
+                executionPolicy,
+                strict: false,
+              },
+              server: bound.placement,
+            })
+            .pipe(Effect.map((codex) => codex.protectedSignIns)),
+        ),
+      );
+    const fullAccess = await start("full-access");
+    expect(Exit.isSuccess(fullAccess) ? fullAccess.value : "failed").toBeUndefined();
+    expect(Exit.isFailure(await start("approval-gated"))).toBe(true);
   });
 
   it("refuses Codex on a server under Strict, before anything runs there", async () => {
