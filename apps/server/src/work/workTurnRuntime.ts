@@ -624,6 +624,18 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             ]),
             acquire,
             input.sessionTerms,
+            {
+              // As the session start below reads them.
+              strict:
+                input.attachmentsFolder !== undefined ||
+                !(sandboxTurn.legacy === true || sandboxTurn.strict === false),
+              executionPolicy: workThreadAccessOf(input.access ?? DEFAULT_WORK_ACCESS)
+                .executionPolicy,
+              fullAccessSandbox:
+                (sandboxTurn.strict ?? input.fullAccessSandbox) === true ||
+                sandboxPolicy !== undefined,
+              sandboxPolicy: sandboxPolicy !== undefined,
+            },
           );
       if (input.runtimeTurn === true && connection.attachRuntimeTurn === undefined) {
         return yield* Effect.fail<ProviderFailure>({

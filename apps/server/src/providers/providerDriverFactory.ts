@@ -280,16 +280,12 @@ export function makeProviderDriver(
         permissionPersistence: options.permissionPersistence,
         environment: codexEnvironment,
         openEnvironment: (credentialPassThrough) =>
-          codexAccountProcessEnvironment({
+          openCodexAccountEnvironment({
             binaryPath: instance.configuration.binaryPath,
             hostEnvironment,
             codexHome,
             ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
-            strict: false,
             credentialPassThrough,
-            // Read at each launch, so an account moved onto Bedrock gets its
-            // AWS credentials from its next process.
-            signsInToBedrock: codexConfiguresBedrock({ ...hostEnvironment, CODEX_HOME: codexHome }),
           }),
         ...(options.credentialResolver === undefined
           ? {}
@@ -478,6 +474,30 @@ export function makeProviderDriver(
     default:
       throw new ProviderDriverConfigurationError();
   }
+}
+
+/**
+ * A Codex account's launch environment outside Strict, for its turns and its
+ * provider terminal alike. Whether the account signs in to Amazon Bedrock is
+ * read from its `config.toml` at each call, so an account moved onto Bedrock
+ * gets the host's AWS credentials from its next process and one moved off it
+ * loses them.
+ */
+export function openCodexAccountEnvironment(input: {
+  readonly binaryPath: string;
+  readonly hostEnvironment: NodeJS.ProcessEnv;
+  readonly codexHome: string;
+  readonly inheritHostAuth?: true;
+  readonly credentialPassThrough: ReadonlyArray<string>;
+}): NodeJS.ProcessEnv {
+  return codexAccountProcessEnvironment({
+    ...input,
+    strict: false,
+    signsInToBedrock: codexConfiguresBedrock({
+      ...input.hostEnvironment,
+      CODEX_HOME: input.codexHome,
+    }),
+  });
 }
 
 /**

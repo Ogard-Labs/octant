@@ -15541,8 +15541,12 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     A running process cannot drop a variable it started with, so a changed
     list never reaches one: a Codex lease is keyed on the list, a Code or
     Work session kept past its turn for background work is not reused by
-    the next turn once its provider's list changed and is stopped when idle
-    (`OutlivingSessions.launchCredentials`). A provider terminal runs the
+    the next turn once the grants its launch actually took changed, and is
+    stopped when idle (`OutlivingSessions.launchCredentials`). Those grants
+    follow the session's posture (`credentialPassThroughApplies`): a Strict
+    session, and a Claude Code or ACP session that keeps or chose a sandbox,
+    takes none, so editing the list leaves it and its background work
+    running. A provider terminal runs the
     person's shell as a login shell outside Strict, so the shell's own
     startup files run and may export a credential again; Octant does not
     read or change them. Strict keeps each runtime's fixed list and ignores

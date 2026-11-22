@@ -26,6 +26,20 @@ describe("codexActiveModelProvider", () => {
     ).toEqual({ id: "my.vendor", envKey: "MY_KEY" });
   });
 
+  it("reads a root model_provider written with a basic or literal quoted key", () => {
+    expect(codexActiveModelProvider('"model_provider" = "amazon-bedrock"\n')).toEqual({
+      id: "amazon-bedrock",
+    });
+    expect(codexActiveModelProvider("'model_provider' = 'amazon-bedrock'\n")).toEqual({
+      id: "amazon-bedrock",
+    });
+    expect(
+      codexActiveModelProvider(
+        '"model_provider" = "corp"\n[model_providers.corp]\n"env_key" = "CORP_KEY"\n',
+      ),
+    ).toEqual({ id: "corp", envKey: "CORP_KEY" });
+  });
+
   it("answers nothing when no provider is selected or the table declares no env_key", () => {
     expect(codexActiveModelProvider('model = "gpt-5"\n')).toBeUndefined();
     expect(

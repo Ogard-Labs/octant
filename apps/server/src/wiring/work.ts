@@ -428,7 +428,7 @@ export function wireWork(deps: WorkDependencies) {
           return undefined;
         }
       },
-      launchCredentials: (key) => {
+      launchCredentials: (key, posture) => {
         let driverKind: string | undefined;
         try {
           const thread = workThreadProjection.read(decodeWorkThreadId(key.slice("work:".length)));
@@ -439,7 +439,7 @@ export function wireWork(deps: WorkDependencies) {
         } catch {
           driverKind = undefined;
         }
-        return launchCredentialsKey(persistence.readShellSettings()?.settings, driverKind);
+        return launchCredentialsKey(persistence.readShellSettings()?.settings, driverKind, posture);
       },
       onChanged: () => machineChangeFeed.publish(["thread-follow-ups"]),
       onError: (message, error) => console.error(`[live tasks] ${message}`, error),

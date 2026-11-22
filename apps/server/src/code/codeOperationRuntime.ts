@@ -6783,6 +6783,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                       ]),
                       active.driver.acquire(acquireInput),
                       active.sessionTerms,
+                      {
+                        strict: launchStrict,
+                        executionPolicy: active.thread.executionPolicy,
+                        fullAccessSandbox: active.thread.fullAccessSandbox === true,
+                        sandboxPolicy: acquireInput.sandboxPolicy !== undefined,
+                      },
                     )
               ).pipe(
                 Effect.tap((connection) =>

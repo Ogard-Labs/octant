@@ -86,6 +86,10 @@ describe("ProviderCredentialPassThroughSettings", () => {
 
   it("says a provider terminal runs the person's shell startup files, which may set credentials again", () => {
     render(<ProviderCredentialPassThroughSettings onChange={vi.fn()} value={{}} />);
-    expect(PROVIDER_CREDENTIAL_PASS_THROUGH_FACT).toContain("shell's startup files");
+    expect(
+      screen.getByText(
+        /A provider terminal also runs your shell's startup files, which may set credentials again\./,
+      ),
+    ).toBeVisible();
   });
 });

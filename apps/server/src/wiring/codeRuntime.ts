@@ -649,7 +649,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           return undefined;
         }
       },
-      launchCredentials: (key) => {
+      launchCredentials: (key, posture) => {
         let driverKind: string | undefined;
         try {
           const thread = persistence.readCodeThread(decodeCodeThreadId(key.slice("code:".length)));
@@ -660,7 +660,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         } catch {
           driverKind = undefined;
         }
-        return launchCredentialsKey(persistence.readShellSettings()?.settings, driverKind);
+        return launchCredentialsKey(persistence.readShellSettings()?.settings, driverKind, posture);
       },
       onChanged: () => machineChangeFeed.publish(["thread-follow-ups"]),
       onError: (message, error) => console.error(`[live tasks] ${message}`, error),
