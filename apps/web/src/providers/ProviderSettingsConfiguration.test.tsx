@@ -326,6 +326,66 @@ describe("AcpAgentConfigurationForm", () => {
     );
   });
 
+  it("does not save Agent Platform without a Google Cloud project, says why, and focuses the project", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn(async () => true);
+    render(
+      <AcpAgentConfigurationForm
+        credentialManagementAvailable
+        disabled={false}
+        instance={antigravityInstance()}
+        onChange={onChange}
+      />,
+    );
+
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Google Antigravity authentication for Antigravity"),
+      "Agent Platform (Google Cloud project)",
+    );
+    await user.type(screen.getByLabelText("Google Cloud location for Antigravity"), "us-central1");
+    await user.click(
+      screen.getByRole("button", { name: "Save Google Antigravity settings for Antigravity" }),
+    );
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Google Cloud project is required.");
+    expect(screen.getByLabelText("Google Cloud project for Antigravity")).toHaveFocus();
+    expect(screen.getByLabelText("Google Cloud project for Antigravity")).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+  });
+
+  it("does not add Antigravity on Agent Platform without its Google Cloud project, and says why", async () => {
+    const user = userEvent.setup();
+    const onCreateAcpAgent = vi.fn(async () => true);
+    render(
+      <ProviderCreateForm
+        {...props({ onCreateAcpAgent })}
+        allowedProviderTypes={["antigravity"]}
+        initialProviderType="antigravity"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add provider manually" }));
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Google Antigravity authentication"),
+      "Agent Platform (Google Cloud project)",
+    );
+    await user.type(screen.getByLabelText("Provider name"), "Antigravity");
+    const binary = screen.getByLabelText(/binary$/);
+    await user.clear(binary);
+    await user.type(binary, "/opt/homebrew/bin/agy");
+    await user.type(screen.getByLabelText("Google Cloud location"), "us-central1");
+    await user.click(screen.getByRole("button", { name: /^Add Google Antigravity/ }));
+
+    expect(onCreateAcpAgent).not.toHaveBeenCalled();
+    expect(screen.getByText("Google Cloud project is required.")).toBeVisible();
+    expect(screen.getByLabelText("Google Cloud project")).toHaveFocus();
+  });
+
   it("renders the binary path inside a setting row", () => {
     const instance: AcpAgentProviderInstance = {
       id: decodeProviderInstanceId("80000000-0000-4000-8000-0000000000d1"),

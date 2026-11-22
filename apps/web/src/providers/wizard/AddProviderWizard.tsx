@@ -95,6 +95,9 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
   const knownIds = useRef<ReadonlySet<string>>(new Set());
   const [createdName, setCreatedName] = useState<string | undefined>(undefined);
   const credentialInput = useRef<HTMLInputElement>(null);
+  const googleCloudProjectInput = useRef<HTMLInputElement>(null);
+  const googleCloudLocationInput = useRef<HTMLInputElement>(null);
+  const [googleCloudMissing, setGoogleCloudMissing] = useState(false);
   const nameInput = useRef<HTMLInputElement>(null);
   const binaryInput = useRef<HTMLInputElement>(null);
 
@@ -162,6 +165,19 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
 
   const next = () => {
     const refusal = validate(step);
+    const cloudMissing =
+      step === "sign-in" &&
+      agentPlatform &&
+      (googleCloudProject.trim() === "" || googleCloudLocation.trim() === "");
+    setGoogleCloudMissing(cloudMissing);
+    if (cloudMissing) {
+      // Move to the first empty field, which the scrolling sign-in step may
+      // have below the fold, so the refusal names something the person sees.
+      (googleCloudProject.trim() === ""
+        ? googleCloudProjectInput.current
+        : googleCloudLocationInput.current
+      )?.focus();
+    }
     if (refusal !== undefined) {
       setProblem(refusal);
       return;
@@ -376,11 +392,15 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
               <label className="add-provider-wizard__field">
                 <span>Google Cloud project</span>
                 <OctantInput
+                  aria-invalid={
+                    googleCloudMissing && googleCloudProject.trim() === "" ? true : undefined
+                  }
                   aria-label="Google Cloud project"
                   onChange={(event) => {
                     setGoogleCloudProject(event.currentTarget.value);
                     setProblem(undefined);
                   }}
+                  ref={googleCloudProjectInput}
                   spellCheck={false}
                   value={googleCloudProject}
                 />
@@ -388,11 +408,15 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
               <label className="add-provider-wizard__field">
                 <span>Google Cloud location</span>
                 <OctantInput
+                  aria-invalid={
+                    googleCloudMissing && googleCloudLocation.trim() === "" ? true : undefined
+                  }
                   aria-label="Google Cloud location"
                   onChange={(event) => {
                     setGoogleCloudLocation(event.currentTarget.value);
                     setProblem(undefined);
                   }}
+                  ref={googleCloudLocationInput}
                   placeholder="us-central1"
                   spellCheck={false}
                   value={googleCloudLocation}

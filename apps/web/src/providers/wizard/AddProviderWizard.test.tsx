@@ -134,6 +134,8 @@ describe("AddProviderWizard", () => {
     await user.click(screen.getByRole("radio", { name: /Agent Platform/ }));
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByText("Enter the Google Cloud project and location.")).toBeVisible();
+    expect(screen.getByLabelText("Google Cloud project")).toHaveFocus();
+    expect(screen.getByLabelText("Google Cloud project")).toHaveAttribute("aria-invalid", "true");
 
     await user.type(screen.getByLabelText("Google Cloud project"), "octant-example-1");
     await user.type(screen.getByLabelText("Google Cloud location"), "us-central1");

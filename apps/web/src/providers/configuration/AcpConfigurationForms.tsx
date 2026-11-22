@@ -7,6 +7,7 @@ import {
   type ProviderInstance,
 } from "@octant/contracts";
 import { useRef, useState, type RefObject } from "react";
+import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
@@ -173,6 +174,11 @@ export function AcpAgentConfigurationForm(props: {
     saved !== undefined && offered.includes(saved) ? saved : offered[0],
   );
   const binaryLabel = `${profile.executable} binary path`;
+  // The form saves without the browser's own validation, so a missing Cloud
+  // project or location is caught here rather than sent and refused.
+  const [googleCloudProblem, setGoogleCloudProblem] = useState<
+    { readonly field: "project" | "location"; readonly message: string } | undefined
+  >(undefined);
   // A profile whose personal sign-in carries limits says so beside the
   // choice itself, whichever sign-in is chosen.
   const personalSignInNote =
@@ -191,8 +197,30 @@ export function AcpAgentConfigurationForm(props: {
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
-        const enteredCredential = transientCredential(credentialInput.current);
         const data = new FormData(event.currentTarget);
+        if (authentication === "agent-platform") {
+          const googleCloud = googleCloudFromForm(data);
+          const missing =
+            googleCloud.project === ""
+              ? "project"
+              : googleCloud.location === ""
+                ? "location"
+                : undefined;
+          if (missing !== undefined) {
+            setGoogleCloudProblem({
+              field: missing,
+              message: `Google Cloud ${missing} is required.`,
+            });
+            event.currentTarget
+              .querySelector<HTMLInputElement>(
+                `[name="${missing === "project" ? "googleCloudProject" : "googleCloudLocation"}"]`,
+              )
+              ?.focus();
+            return;
+          }
+        }
+        setGoogleCloudProblem(undefined);
+        const enteredCredential = transientCredential(credentialInput.current);
         void props.onChange(
           props.instance.id,
           {
@@ -242,6 +270,7 @@ export function AcpAgentConfigurationForm(props: {
               if (next !== "api-key" && credentialInput.current !== null) {
                 credentialInput.current.value = "";
               }
+              setGoogleCloudProblem(undefined);
               setAuthentication(next);
             }}
             options={offered.map((posture) => ({
@@ -262,6 +291,7 @@ export function AcpAgentConfigurationForm(props: {
             settingId={`provider-${props.instance.id}-google-cloud-project`}
           >
             <OctantInput
+              aria-invalid={googleCloudProblem?.field === "project" ? true : undefined}
               aria-label={`Google Cloud project for ${props.instance.displayName}`}
               className="settings-view__text-input"
               defaultValue={props.instance.configuration.googleCloud?.project ?? ""}
@@ -278,6 +308,7 @@ export function AcpAgentConfigurationForm(props: {
             settingId={`provider-${props.instance.id}-google-cloud-location`}
           >
             <OctantInput
+              aria-invalid={googleCloudProblem?.field === "location" ? true : undefined}
               aria-label={`Google Cloud location for ${props.instance.displayName}`}
               className="settings-view__text-input"
               defaultValue={props.instance.configuration.googleCloud?.location ?? ""}
@@ -312,6 +343,11 @@ export function AcpAgentConfigurationForm(props: {
             type="password"
           />
         </SettingRow>
+      ) : null}
+      {authentication === "agent-platform" && googleCloudProblem !== undefined ? (
+        <OctantAlert className="provider-settings__alert" tone="warning">
+          {googleCloudProblem.message}
+        </OctantAlert>
       ) : null}
       <div className="provider-card__edit-actions">
         <OctantButton
