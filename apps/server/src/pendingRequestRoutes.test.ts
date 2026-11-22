@@ -17,9 +17,16 @@ import { defaultShellSettings } from "@octant/domain";
 import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
+import {
+  chatThreadStandsInProject,
+  windowReachesPromptThread,
+} from "./extensions/pairedDeviceApprovalAuthority";
+import { ExtensionToolApprovalService } from "./extensions/extensionToolApprovalService";
 import { createPendingRequestRouteHandler } from "./pendingRequestRoutes";
 import { PendingRequestService, type PendingRequestSources } from "./pendingRequestService";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
+import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "./routineHostScope";
+import { waitingAsksFrom } from "./waitingAsks";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -312,6 +319,101 @@ describe("pending request route", () => {
     expect((await (await workOff.route(request()))?.json()).asks).toEqual([chatSignIn]);
   });
 
+  it("lists a Chat turn's MCP prompt the host raised with no window to every local window, which answers it once", async () => {
+    const chatThreadId = "00000000-0000-4000-8000-000000000921";
+    const approvalId = "00000000-0000-4000-8000-000000000922";
+    let chatThread: { lifecycle: string; projectId?: string } | undefined = { lifecycle: "active" };
+    const approvals = new ExtensionToolApprovalService({
+      uuid: () => approvalId,
+      now: () => Date.parse("2026-10-06T08:06:00.000Z"),
+      isHostScope: isRoutineHostScope,
+      threadAuthorityIsCurrent: (thread, project) =>
+        thread === chatThreadId && chatThreadStandsInProject(chatThread, project),
+      windowCanReachThread: (_scope, thread, project) =>
+        windowReachesPromptThread(
+          { threadId: thread, projectId: project },
+          {
+            readChatThread: (id) => (id === chatThreadId ? chatThread : undefined),
+            readProject: () => undefined,
+            windowDrivesProjectThread: () => false,
+          },
+        ),
+    });
+    const { route } = fixture({
+      work: [],
+      code: [],
+      chat: [],
+      asksFor: (reader) =>
+        waitingAsksFrom(
+          {
+            toolApprovals: approvals.list(reader),
+            browserApprovals: [],
+            memoryProposals: [],
+            routineProposals: [],
+            serviceOffers: [],
+          },
+          (id) =>
+            id === chatThreadId && chatThread?.lifecycle === "active"
+              ? { mode: "chat", title: "Morning digest" }
+              : undefined,
+        ),
+    });
+    // What the Chat resolver hands a usage-limit retry's tool call: the host's
+    // own scope, since no window sent the turn.
+    const call = approvals.request({
+      windowId: ROUTINE_HOST_SCOPE_ID,
+      threadId: chatThreadId,
+      extensionId: "00000000-0000-4000-8000-000000000923",
+      packageId: "00000000-0000-4000-8000-000000000924",
+      componentId: "linear",
+      serverName: "Linear",
+      providerToolName: "plugin__linear__search_issues",
+      mcpToolName: "search_issues",
+      inputJson: '{"q":"open"}',
+    });
+
+    const body = await (await route(request()))?.json();
+    expect(body.asks).toEqual([
+      {
+        kind: "tool-approval",
+        askId: approvalId,
+        mode: "chat",
+        threadId: chatThreadId,
+        threadTitle: "Morning digest",
+        requestedAt: "2026-10-06T08:06:00.000Z",
+        text: "Run search_issues from Linear?",
+        detail: '{"q":"open"}',
+      },
+    ]);
+    // The card the row opens carries the same prompt, unrememberable.
+    expect(approvals.list({ kind: "local-window", scopeId: windowId })).toEqual([
+      expect.objectContaining({ approvalId, threadId: chatThreadId, rememberable: false }),
+    ]);
+
+    const answer = { approvalId: body.asks[0].askId, decision: "approved" } as const;
+    expect(approvals.decide({ kind: "local-window", scopeId: windowId }, answer)).toBe(true);
+    await expect(call).resolves.toBe(true);
+    expect(approvals.decide({ kind: "local-window", scopeId: windowId }, answer)).toBe(false);
+    expect(await (await route(request()))?.json()).not.toHaveProperty("asks");
+
+    // Archived while it waits, nobody can answer the next one, and it is released.
+    const withdrawn = approvals.request({
+      windowId: ROUTINE_HOST_SCOPE_ID,
+      threadId: chatThreadId,
+      extensionId: "00000000-0000-4000-8000-000000000923",
+      packageId: "00000000-0000-4000-8000-000000000924",
+      componentId: "linear",
+      serverName: "Linear",
+      providerToolName: "plugin__linear__search_issues",
+      mcpToolName: "search_issues",
+      inputJson: "{}",
+    });
+    chatThread = { lifecycle: "archived" };
+    expect(approvals.list({ kind: "local-window", scopeId: windowId })).toEqual([]);
+    approvals.withdrawThread(chatThreadId);
+    await expect(withdrawn).resolves.toBe(false);
+  });
+
   it("says nothing of asks when none wait, so the list reads as it always did", async () => {
     const { route } = fixture();
     expect(await (await route(request()))?.json()).not.toHaveProperty("asks");
@@ -447,6 +549,8 @@ function fixture(
     readonly chat?: ReadonlyArray<PendingRequest>;
     readonly children?: ReadonlyArray<PendingRequest>;
     readonly asks?: ReadonlyArray<WaitingAsk>;
+    /** The asks each reader is listed, from the holding services; wins over `asks`. */
+    readonly asksFor?: NonNullable<PendingRequestSources["asks"]>;
     readonly offerHostRun?: string;
   } = {},
 ) {
@@ -462,7 +566,7 @@ function fixture(
     code: vi.fn(typeof code === "function" ? code : async () => code ?? [codeApproval]),
     chat: vi.fn(() => options.chat ?? [chatQuestion]),
     children: vi.fn(async () => options.children ?? []),
-    asks: vi.fn(() => options.asks ?? []),
+    asks: vi.fn(options.asksFor ?? (() => options.asks ?? [])),
   } satisfies PendingRequestSources;
   const route = createPendingRequestRouteHandler({
     service: new PendingRequestService(sources),

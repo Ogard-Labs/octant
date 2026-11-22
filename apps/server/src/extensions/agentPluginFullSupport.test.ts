@@ -1165,6 +1165,7 @@ describe("Agent Plugin MCP session manager", () => {
     expect(draftSeven).toBeDefined();
     await expect(
       manager.createToolExecutionPort().execute({
+        windowId: "17000000-0000-4000-8000-000000000097" as never,
         thread: { id: effective.scope.threadId } as never,
         name: draftSeven!.name,
         inputJson: '{"pair":["one",2,true]}',
@@ -1175,6 +1176,7 @@ describe("Agent Plugin MCP session manager", () => {
     });
     await expect(
       manager.createToolExecutionPort().execute({
+        windowId: "17000000-0000-4000-8000-000000000097" as never,
         thread: { id: effective.scope.threadId } as never,
         name: draftSeven!.name,
         inputJson: '{"pair":["one",2]}',
@@ -1290,6 +1292,7 @@ describe("Agent Plugin MCP session manager", () => {
 
     const execute = (name: string, inputJson: string) =>
       manager.createToolExecutionPort().execute({
+        windowId: "17000000-0000-4000-8000-000000000097" as never,
         thread: { id: effective.scope.threadId } as never,
         name,
         inputJson,
@@ -2281,6 +2284,7 @@ describe("Agent Plugin MCP session manager", () => {
     const caller = new AbortController();
     const callerTimeout = setTimeout(() => caller.abort(), 100);
     const result = await manager.createToolExecutionPort().execute({
+      windowId: "17000000-0000-4000-8000-000000000097" as never,
       thread: { id: effective.scope.threadId } as never,
       name: definition!.name,
       inputJson: "{}",
@@ -2353,6 +2357,7 @@ describe("Agent Plugin MCP session manager", () => {
     const [definition] = manager.toolDefinitions();
 
     const mismatched = await manager.createToolExecutionPort().execute({
+      windowId: "17000000-0000-4000-8000-000000000097" as never,
       thread: { id: "17000000-0000-4000-8000-000000000098" } as never,
       name: definition!.name,
       inputJson: '{"target":"production"}',
@@ -2364,6 +2369,7 @@ describe("Agent Plugin MCP session manager", () => {
     expect(authorizeToolCall).not.toHaveBeenCalled();
 
     const invalidJson = await manager.createToolExecutionPort().execute({
+      windowId: "17000000-0000-4000-8000-000000000097" as never,
       thread: { id: effective.scope.threadId } as never,
       name: definition!.name,
       inputJson: '{"target":',
@@ -2373,6 +2379,7 @@ describe("Agent Plugin MCP session manager", () => {
       isError: true,
     });
     const invalidSchema = await manager.createToolExecutionPort().execute({
+      windowId: "17000000-0000-4000-8000-000000000097" as never,
       thread: { id: effective.scope.threadId } as never,
       name: definition!.name,
       inputJson: '{"target":42}',
@@ -2418,6 +2425,8 @@ describe("Agent Plugin MCP session manager", () => {
       providerToolName: definition!.name,
       mcpToolName: "mutate",
       inputJson: '{"target":"production"}',
+      // Aborted when the session is retired while the ask waits.
+      signal: expect.any(AbortSignal),
     });
     expect(toolCalls).toBe(0);
     await manager.drainAll();
@@ -2463,6 +2472,7 @@ describe("Agent Plugin MCP session manager", () => {
     const [definition] = manager.toolDefinitions();
 
     const result = await manager.createToolExecutionPort().execute({
+      windowId: "17000000-0000-4000-8000-000000000097" as never,
       thread: { id: effective.scope.threadId } as never,
       name: definition!.name,
       inputJson: "{}",
@@ -2535,6 +2545,7 @@ describe("Agent Plugin MCP session manager", () => {
     const [definition] = manager.toolDefinitions();
 
     const outcome = await manager.createToolExecutionPort().execute({
+      windowId: "17000000-0000-4000-8000-000000000097" as never,
       thread: { id: threadId } as never,
       name: definition!.name,
       inputJson: "{}",
@@ -2570,6 +2581,7 @@ describe("Agent Plugin MCP session manager", () => {
 
     record.mockReturnValueOnce({ kind: "refused" as const, reason: "malformed" as const });
     const refused = await manager.createToolExecutionPort().execute({
+      windowId: "17000000-0000-4000-8000-000000000097" as never,
       thread: { id: threadId } as never,
       name: definition!.name,
       inputJson: "{}",
@@ -2636,6 +2648,386 @@ describe("Agent Plugin MCP session manager", () => {
     await manager.reconcile(effective);
     expect(manager.sessions()).toHaveLength(1);
     await manager.drainAll();
+  });
+
+  describe("an MCP session whose tool call waits for a person's approval", () => {
+    const minute = 60_000;
+
+    async function waitingSession() {
+      let toolCalls = 0;
+      const answers: Array<(approved: boolean) => void> = [];
+      const fetchImpl = (async (_input, init) => {
+        if ((init?.method ?? "GET") === "DELETE") return new Response(null, { status: 204 });
+        const body = JSON.parse(String(init?.body ?? "{}")) as { method?: string; id?: number };
+        if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+        if (body.method === "tools/call") toolCalls += 1;
+        return Response.json(
+          {
+            jsonrpc: "2.0",
+            id: body.id,
+            result:
+              body.method === "tools/list"
+                ? { tools: [{ name: "echo", inputSchema: { type: "object" } }] }
+                : body.method === "tools/call"
+                  ? { content: [{ type: "text", text: "echoed" }] }
+                  : {
+                      protocolVersion: "2025-03-26",
+                      capabilities: {},
+                      serverInfo: { name: "remote", version: "1.0.0" },
+                    },
+          },
+          { headers: { "mcp-session-id": "waiting" } },
+        );
+      }) as typeof fetch;
+      const manager = new AgentPluginMcpSessionManager({
+        store: {
+          contentRoot: () => "/tmp/plugin",
+          pluginDataRoot: () => "/tmp/plugin-data",
+          readVerifiedConfiguration: async () =>
+            JSON.stringify({
+              $schema: AGENT_PLUGINS_MCP_SCHEMA,
+              mcpServers: {
+                remote: { type: "streamable-http", url: "https://example.test/mcp" },
+              },
+            }),
+        },
+        fetch: fetchImpl,
+        authorizeToolCall: () =>
+          new Promise<boolean>((resolve) => {
+            answers.push(resolve);
+          }),
+        recordExternalContentIngestion: () => ({
+          kind: "recorded",
+          taint: { externalContentIngested: true, ingestedSources: ["mcp-tool"] },
+        }),
+      } as never);
+      const effective = effectiveMcpSnapshot("mcp-remote", "remote");
+      await manager.reconcile(effective);
+      const [definition] = manager.toolDefinitions();
+      if (definition === undefined) throw new Error("The server offered no tool.");
+      const call = manager.createToolExecutionPort().execute({
+        windowId: "17000000-0000-4000-8000-000000000097" as never,
+        thread: { id: effective.scope.threadId } as never,
+        name: definition.name,
+        inputJson: "{}",
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      const answer = answers[0];
+      if (answer === undefined) throw new Error("The call never asked for approval.");
+      return { manager, call, answer, toolCalls: () => toolCalls };
+    }
+
+    it("stays connected past its idle period while the approval waits, and dispatches the call once on approval", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const { manager, call, answer, toolCalls } = await waitingSession();
+        await vi.advanceTimersByTimeAsync(7 * minute);
+        expect(manager.sessions()).toHaveLength(1);
+
+        answer(true);
+        const result = await call;
+        expect(result.isError).not.toBe(true);
+        expect(toolCalls()).toBe(1);
+
+        // With the approval settled, the session idles out as before.
+        await vi.advanceTimersByTimeAsync(6 * minute);
+        expect(manager.sessions()).toHaveLength(0);
+        await manager.drainAll();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("still refuses the call when authentication changes while its approval waits", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const { manager, call, answer, toolCalls } = await waitingSession();
+        await manager.invalidateAuthentication(
+          "15000000-0000-4000-8000-000000000001",
+          "mcp-remote",
+        );
+        answer(true);
+        expect(await call).toMatchObject({
+          isError: true,
+          result: { error: "extension-tool-authentication-changed" },
+        });
+        expect(toolCalls()).toBe(0);
+        await manager.drainAll();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("idles out as usual once its waiting approval is refused", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const { manager, call, answer, toolCalls } = await waitingSession();
+        await vi.advanceTimersByTimeAsync(7 * minute);
+        answer(false);
+        expect(await call).toMatchObject({
+          isError: true,
+          result: { error: "extension-tool-approval-required" },
+        });
+        expect(toolCalls()).toBe(0);
+        expect(manager.sessions()).toHaveLength(1);
+
+        await vi.advanceTimersByTimeAsync(6 * minute);
+        expect(manager.sessions()).toHaveLength(0);
+        await manager.drainAll();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("a turn with two connectors selected while one call's approval waits", () => {
+    const minute = 60_000;
+
+    /**
+     * Two connectors selected in one scope: the first's call waits for its
+     * approval, the second answers unasked. Both sessions open together, so
+     * the second's idle period runs out while the first's approval waits.
+     */
+    async function twoConnectors() {
+      const initializations = new Map<string, number>();
+      const toolCalls = new Map<string, number>();
+      const answers: Array<(approved: boolean) => void> = [];
+      let withdrawn = 0;
+      const fetchImpl = (async (input, init) => {
+        const server = String(input).endsWith("/second") ? "second" : "first";
+        if ((init?.method ?? "GET") === "DELETE") return new Response(null, { status: 204 });
+        const body = JSON.parse(String(init?.body ?? "{}")) as { method?: string; id?: number };
+        if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+        if (body.method === "initialize")
+          initializations.set(server, (initializations.get(server) ?? 0) + 1);
+        if (body.method === "tools/call") toolCalls.set(server, (toolCalls.get(server) ?? 0) + 1);
+        return Response.json(
+          {
+            jsonrpc: "2.0",
+            id: body.id,
+            result:
+              body.method === "tools/list"
+                ? { tools: [{ name: "echo", inputSchema: { type: "object" } }] }
+                : body.method === "tools/call"
+                  ? { content: [{ type: "text", text: `${server} echoed` }] }
+                  : {
+                      protocolVersion: "2025-03-26",
+                      capabilities: {},
+                      serverInfo: { name: server, version: "1.0.0" },
+                    },
+          },
+          { headers: { "mcp-session-id": server } },
+        );
+      }) as typeof fetch;
+      const manager = new AgentPluginMcpSessionManager({
+        store: {
+          contentRoot: () => "/tmp/plugin",
+          pluginDataRoot: () => "/tmp/plugin-data",
+          readVerifiedConfiguration: async () =>
+            JSON.stringify({
+              $schema: AGENT_PLUGINS_MCP_SCHEMA,
+              mcpServers: {
+                first: { type: "streamable-http", url: "https://example.test/first" },
+                second: { type: "streamable-http", url: "https://example.test/second" },
+              },
+            }),
+        },
+        fetch: fetchImpl,
+        authorizeToolCall: (call: { readonly serverName: string; readonly signal?: AbortSignal }) =>
+          call.serverName === "second"
+            ? Promise.resolve(true)
+            : new Promise<boolean>((resolve) => {
+                answers.push(resolve);
+                // As the approval service does: an aborted ask leaves Needs
+                // you and settles as refused.
+                call.signal?.addEventListener(
+                  "abort",
+                  () => {
+                    withdrawn += 1;
+                    resolve(false);
+                  },
+                  { once: true },
+                );
+              }),
+        recordExternalContentIngestion: () => ({
+          kind: "recorded",
+          taint: { externalContentIngested: true, ingestedSources: ["mcp-tool"] },
+        }),
+      } as never);
+      const single = effectiveMcpSnapshot("mcp-first", "first", {
+        mode: "chat",
+        threadId: "15000000-0000-4000-8000-000000000004" as never,
+      });
+      const pkg = single.packages[0];
+      const first = pkg?.components[0];
+      if (pkg === undefined || first === undefined)
+        throw new Error("The fixture has no first component.");
+      const second = {
+        ...first,
+        component: { ...first.component, id: "mcp-second" as never, displayName: "second" },
+      };
+      const effective: ExtensionEffectiveSnapshot = {
+        ...single,
+        packages: [{ ...pkg, components: [first, second] }],
+      };
+      await manager.reconcile(effective);
+      const packageId = String(pkg.packageId);
+      // The tool names the turn's tool set was built with, at its start.
+      const names = new Map(
+        ["first", "second"].map((server) => [
+          server,
+          manager.toolDefinitionsFor(packageId, `mcp-${server}`, effective.scope)[0]?.name ??
+            "missing-tool",
+        ]),
+      );
+      const invoke = (server: string) =>
+        manager.createToolExecutionPort().execute({
+          windowId: "17000000-0000-4000-8000-000000000097" as never,
+          thread: { id: String(effective.scope.threadId) } as never,
+          name: names.get(server) ?? "missing-tool",
+          inputJson: "{}",
+        });
+      const firstCall = invoke("first");
+      await vi.advanceTimersByTimeAsync(0);
+      const answer = answers[0];
+      if (answer === undefined) throw new Error("The first call never asked for approval.");
+      return {
+        manager,
+        firstCall,
+        answer,
+        invoke,
+        disableSecond: () =>
+          manager.reconcileLifecycleSnapshot({
+            packages: [
+              {
+                ...pkg,
+                components: [
+                  first,
+                  { ...second, effectiveState: { kind: "blocked", reason: "disabled" } },
+                ],
+              },
+            ],
+          } as never),
+        disableFirst: () =>
+          manager.reconcileLifecycleSnapshot({
+            packages: [
+              {
+                ...pkg,
+                components: [
+                  { ...first, effectiveState: { kind: "blocked", reason: "disabled" } },
+                  second,
+                ],
+              },
+            ],
+          } as never),
+        withdrawn: () => withdrawn,
+        initializations: (server: string) => initializations.get(server) ?? 0,
+        toolCalls: (server: string) => toolCalls.get(server) ?? 0,
+      };
+    }
+
+    it("keeps the other connector connected while the approval waits, so its call dispatches without reconnecting", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const fixture = await twoConnectors();
+        await vi.advanceTimersByTimeAsync(7 * minute);
+        expect(fixture.manager.sessions()).toHaveLength(2);
+
+        const second = await fixture.invoke("second");
+        expect(second.isError).not.toBe(true);
+        expect(fixture.toolCalls("second")).toBe(1);
+        expect(fixture.initializations("second")).toBe(1);
+
+        fixture.answer(true);
+        expect((await fixture.firstCall).isError).not.toBe(true);
+        expect(fixture.toolCalls("first")).toBe(1);
+
+        // The hold is released; inside its idle period the sibling still
+        // answers on the same session.
+        await vi.advanceTimersByTimeAsync(4 * minute);
+        expect((await fixture.invoke("second")).isError).not.toBe(true);
+        expect(fixture.toolCalls("second")).toBe(2);
+        expect(fixture.initializations("second")).toBe(1);
+
+        // With no approval waiting in the scope, both idle out as usual.
+        await vi.advanceTimersByTimeAsync(6 * minute);
+        expect(fixture.manager.sessions()).toHaveLength(0);
+        await fixture.manager.drainAll();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("withdraws the waiting prompt when Settings disables the connector that asked, and lets the sibling idle out on schedule", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const fixture = await twoConnectors();
+        await vi.advanceTimersByTimeAsync(minute);
+        await fixture.disableFirst();
+
+        expect(fixture.withdrawn()).toBe(1);
+        expect(await fixture.firstCall).toMatchObject({
+          isError: true,
+          result: { error: "extension-tool-authentication-changed" },
+        });
+        expect(fixture.toolCalls("first")).toBe(0);
+        expect(fixture.manager.sessions()).toHaveLength(1);
+
+        // The sibling's idle period began when it connected and ends on time.
+        await vi.advanceTimersByTimeAsync(3 * minute);
+        expect(fixture.manager.sessions()).toHaveLength(1);
+        await vi.advanceTimersByTimeAsync(2 * minute);
+        expect(fixture.manager.sessions()).toHaveLength(0);
+        await fixture.manager.drainAll();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("closes a connector Settings disables while the approval waits, and refuses its call", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const fixture = await twoConnectors();
+        await vi.advanceTimersByTimeAsync(minute);
+        await fixture.disableSecond();
+        expect(fixture.manager.sessions()).toHaveLength(1);
+
+        expect(await fixture.invoke("second")).toMatchObject({
+          isError: true,
+          result: { error: "extension-tool-unavailable" },
+        });
+        expect(fixture.toolCalls("second")).toBe(0);
+        fixture.answer(false);
+        await fixture.firstCall;
+        await fixture.manager.drainAll();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("still refuses a call to a connector whose authentication changed while the approval waits", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const fixture = await twoConnectors();
+        await vi.advanceTimersByTimeAsync(minute);
+        await fixture.manager.invalidateAuthentication(
+          "15000000-0000-4000-8000-000000000001",
+          "mcp-second",
+        );
+
+        expect(await fixture.invoke("second")).toMatchObject({
+          isError: true,
+          result: { error: "extension-tool-unavailable" },
+        });
+        expect(fixture.toolCalls("second")).toBe(0);
+        expect(fixture.initializations("second")).toBe(1);
+        fixture.answer(false);
+        await fixture.firstCall;
+        await fixture.manager.drainAll();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it("connects effective servers, exposes tools, and isolates sibling failures", async () => {
@@ -3385,6 +3777,7 @@ async function httpRecoveryFixture() {
     effects: () => effects.get("local") ?? 0,
     invoke: (server = "local", signal?: AbortSignal) =>
       manager.createToolExecutionPort().execute({
+        windowId: "17000000-0000-4000-8000-000000000097" as never,
         thread: { id: String(effective.scope.threadId) },
         name: names.get(server) ?? "missing-tool",
         inputJson: "{}",

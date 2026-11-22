@@ -407,8 +407,8 @@ and an answer the person may remember for the site, folder and profile; a recurr
 instead use the explicit manifest below. At Full access an upload does not ask
 and the path checks below still hold
 ([the Full access rule](../architecture.md#security-and-authority); maintainer
-request, 2026-11-12). Not built yet: an unanswered ask still expires instead
-of waiting.
+request, 2026-11-12). An unanswered ask waits for its answer and never
+expires into a refusal (maintainer decision, 2026-11-13).
 
 - `upload` puts files into one file field. `files` names them relative to the
   thread's workspace: the Work thread's Project folder, or the Code thread's
@@ -527,9 +527,10 @@ remember for the site, folder and profile, or separately reviews the bounded rou
 ([the Full access rule](../architecture.md#security-and-authority); maintainer
 request, 2026-11-12). At Full access a download is not kept waiting for a
 second call either: it is saved as the action that started it answers
-(maintainer decision, 2026-11-13). Not built yet: an unanswered ask still
-expires instead of waiting; and the person's own download, built in the
-desktop pane's download handler, has not been run in a packaged window.
+(maintainer decision, 2026-11-13). An unanswered ask waits for its answer and
+never expires into a refusal. Not yet checked: the person's own download,
+built in the desktop pane's download handler, has not been run in a packaged
+window.
 
 - **The switch.** Settings › Permissions has "Let agents download files", off
   by default below Full access and on by default for a thread at Full access.

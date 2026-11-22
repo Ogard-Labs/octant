@@ -30,8 +30,9 @@ export function createExtensionToolCallAuthorizer(options: {
   readonly approvals: Pick<ExtensionToolApprovalService, "request">;
   /**
    * Whether the scope a turn runs under is the host acting on its own (a
-   * routine, a goal loop, a usage-limit resume, a child-run delivery). Such a
-   * turn's prompt is approved once and never remembered.
+   * routine, a goal loop, a usage-limit resume, a child-run delivery, a Chat
+   * turn sent with no window). Such a turn's prompt is approved once and
+   * never remembered.
    */
   readonly isHostScope: (windowId: WindowId) => boolean;
   /**
@@ -99,8 +100,8 @@ export function createExtensionToolCallAuthorizer(options: {
       server,
       decision: decideExtensionToolGrant({
         inProject: call.thread.projectId !== undefined,
-        hostOwnedTurn: call.windowId !== undefined && options.isHostScope(call.windowId),
-        pairedDeviceTurn: call.windowId !== undefined && options.isPairedDeviceScope(call.windowId),
+        hostOwnedTurn: options.isHostScope(call.windowId),
+        pairedDeviceTurn: options.isPairedDeviceScope(call.windowId),
         planTurn: call.thread.planTurn === true,
         fullAccessTurn: call.thread.fullAccessTurn === true,
         threadTainted: options.threadTainted(call.thread.id),
@@ -193,8 +194,6 @@ export function createExtensionToolCallAuthorizer(options: {
   return async (call) => {
     const { decision } = judge(call);
     if (decision.kind === "covered") return true;
-    // A turn nobody is sitting at may use a grant but cannot raise a prompt.
-    if (call.windowId === undefined) return false;
     const outsideContent = options.outsideContent?.(call.thread.id);
     const { windowId } = call;
     // Asked before the server is called: while it waits, the call's record

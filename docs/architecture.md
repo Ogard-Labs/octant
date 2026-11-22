@@ -1233,9 +1233,9 @@ was given for the site and folder on any page and keeps covering that until
 the person forgets it (maintainer decision, 2026-11-13). At Full access a download is not
 held for a second call: it is saved into `downloads/` as the action that
 started it answers, with the size cap, the link checks and the journal record
-unchanged (maintainer decision, 2026-11-13). Not built yet: an unanswered ask
-still expires instead of waiting, and the person's own download has not been
-run in a packaged window. A local person may separately review a
+unchanged (maintainer decision, 2026-11-13). An unanswered ask waits for its
+answer and never expires into a refusal. Not yet checked: the person's own
+download has not been run in a packaged window. A local person may separately review a
 fixed-content routine upload manifest from one approved Project folder, binding
 caller/model/authority, profile/site, exact files, quota and expiry. It grants no
 account access or downloads; revocation and expiry close affected contexts, and
@@ -4983,7 +4983,7 @@ is turned off, since no window stands in for the mode switch; a Work continuatio
 the host's `system` actor. Any approval the resumed turn raises is offered the
 way a routine's is: a browser-origin or extension-tool prompt goes to every
 local window that may drive that thread (one bound to the Project the prompt
-recorded) and, once built, to the person's paired devices, and answering settles
+recorded; any local window for a Chat thread) and, once built, to the person's paired devices, and answering settles
 only that prompt. This resume timer is deliberately narrow and separate from
 [routines](#modes-chat-work-and-code): an in-process host timer over journaled
 opt-ins that only continues a stopped turn — no cloud wake, no background claim
@@ -12996,13 +12996,17 @@ that is not yet effective for the thread is refused and never reaches the model.
   trusted (next item). Who may answer: a local window or a device the host's
   own person paired, alike, for any prompt on a thread it may drive, with the
   same answers, remembering included (maintainer decision, 2026-11-12).
-  Built: such a device's answer to a prompt its own turn raised is kept as a
-  local window's is, journaled as the device. Not built yet: a device answers
-  no prompt but its own turns', so the three rules below still hold:
+  Built: such a device answers any prompt whose thread still stands in the
+  Project the prompt recorded, whichever window, device or host turn raised
+  it, and its answer is kept as a local window's is, journaled as the device.
+  The three rules below hold for a local window and for every other device
+  session (a device the hub introduced, an agent grant):
   - A local window answers its own turns' prompts, and any prompt raised by
     a host-owned turn or by a paired device's turn on a thread that window
-    may drive (bound to the Project the prompt recorded).
-  - A paired device answers only the prompts its own turns raised, approve
+    may drive (bound to the Project the prompt recorded; no window binding
+    holds a Chat thread, so every local window may drive one while it is
+    still active and in the Chat Project the prompt recorded, or in none).
+  - Such another device session answers only the prompts its own turns raised, approve
     once or deny, and only while the thread is still active and bound in
     that Project (a Chat thread: still active and in the same Chat Project,
     or still in none). It never sees or answers a local window's, another
@@ -13029,8 +13033,11 @@ that is not yet effective for the thread is refused and never reaches the model.
   own scope (a routine's run, a usage-limit resume) or a paired device's
   turn, every local window that may drive the thread (maintainer decision,
   2026-11-13). Each new prompt is also told to the paired phones as an
-  approval-needed notification. Not built yet: a call whose turn carries no
-  scope at all is still refused.
+  approval-needed notification. No MCP tool call runs without a scope: a
+  Chat turn the host sends with no window (a usage-limit retry replaying
+  the turn's selections) runs its tool calls under the host's own scope, so
+  its prompts wait and are listed the same way; before, such a call reached
+  no window and was refused.
   An MCP
   server's launch command starts the server, not a shell the model holds, so
   a stdio server is declared `mcp`, not `shell`, whichever package format
@@ -18221,8 +18228,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   a server route for a window that holds the Project and the thread: it returns
   names (page title and host, thread id and title, whether an agent drives it)
   and never page text or a picture; a paired device reads the same list
-  (maintainer decision, 2026-11-12; not built yet: today a paired device is told
-  a stored-profile page exists and nothing more).
+  (maintainer decision, 2026-11-12; built for a device the host's own person
+  paired; a hub-introduced or restricted device is told only that a
+  stored-profile page exists).
 - **Browser profiles and extensions.** A Browser page is Private (in-memory,
   per browsing context) unless the person, at a local window or a paired device, puts it in their
   Project's persistent profile or the host's Personal profile; a profile page
@@ -18230,7 +18238,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   opens another browser's profile in place. The Work and Code agent adapters
   accept a stored profile request and the task's journaled default profile;
   neither grants access by itself. An agent reads or acts on an origin in a profile page only after a site approval naming the profile;
-  a paired device uses profile pages and answers their site approvals as a local window does (maintainer decision, 2026-11-12; not built yet: today paired devices are refused on profile pages). A managed child, named routine
+  a paired device uses profile pages and answers their site approvals as a local window does (maintainer decision, 2026-11-12; built for a device the host's own person paired; a hub-introduced or restricted device is still refused on profile pages). A managed child, named routine
   or selected terminal session may use an existing sign-in only through an
   explicit grant from the person, "this routine or child may use this profile on
   these sites", which is persistent and survives a host restart and an app
@@ -18241,9 +18249,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   lease on the background native owner. It is
   revalidated before effects and observations; it owns its context and receives
   no parent authority or transfer permission. See [delegated sessions](design/browser-profiles.md#delegated-sessions).
-  Not built yet: today a paired device sees only that a signed-in page exists.
+  A hub-introduced or restricted device sees only that a signed-in page exists.
   The person signs out of a profile (closing its pages and removing its storage)
-  at a local window or, not built yet, a paired device, and the host journals
+  at a local window or a device they paired (the host admits a person-paired
+  device; the phone has no control for it yet), and the host journals
   that it happened without naming a site or
   a cookie. The person may also import another browser's cookies into one
   profile, only by picking a browser and profile in Settings: the host reads a

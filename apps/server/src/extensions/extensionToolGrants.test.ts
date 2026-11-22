@@ -230,8 +230,8 @@ function openHost(
     readonly tool?: string;
     readonly planTurn?: boolean;
     readonly fullAccessTurn?: boolean;
-    /** The window the turn was sent from; `"none"` is a turn nobody sits at. */
-    readonly from?: WindowId | "none";
+    /** The scope the turn runs under: a window, a device, or the host's own. */
+    readonly from?: WindowId;
   }) {
     await manager.reconcile(effectiveSnapshot(input.threadId, input.projectId, installed));
     const tool = input.tool ?? "search";
@@ -241,9 +241,8 @@ function openHost(
       })
       .find((candidate) => candidate.name.includes(`_${tool}_`));
     if (definition === undefined) throw new Error(`The server does not list ${tool}.`);
-    const from = input.from ?? windowId;
     return manager.createToolExecutionPort().execute({
-      ...(from === "none" ? {} : { windowId: from }),
+      windowId: input.from ?? windowId,
       thread: {
         id: input.threadId,
         ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
@@ -438,8 +437,6 @@ async function rememberSearch(host: ReturnType<typeof openHost>) {
   expect(await host.answer(true)).toBe(true);
   await expect(first).resolves.not.toMatchObject({ isError: true });
 }
-
-const approvalRequired = { result: { error: "extension-tool-approval-required" }, isError: true };
 
 describe("an MCP server a person is asked about once", () => {
   it("covers every tool of the server in that Project after the first approval, and still asks a Plan turn", async () => {
@@ -739,11 +736,16 @@ describe("an MCP tool a person always allows in a Project", () => {
     await planned;
   });
 
-  it("runs a tool unasked on a Full access thread, with no window and no grant, and records none", async () => {
+  it("runs a tool unasked on a Full access thread the host runs, with no grant, and records none", async () => {
     const host = openHost(temporaryDirectory());
 
     await expect(
-      host.call({ threadId: threadOne, projectId: projectA, fullAccessTurn: true, from: "none" }),
+      host.call({
+        threadId: threadOne,
+        projectId: projectA,
+        fullAccessTurn: true,
+        from: ROUTINE_HOST_SCOPE_ID,
+      }),
     ).resolves.not.toMatchObject({ isError: true });
     expect(host.approvals.list(atWindow)).toEqual([]);
     expect(host.grants.list()).toEqual([]);
@@ -926,18 +928,6 @@ describe("an MCP tool a person always allows in a Project", () => {
     expect(host.grants.list()).toEqual([]);
     expect(await host.answer(false)).toBe(true);
     await routine;
-  });
-
-  it("lets a turn with no window use a grant but never wait on a prompt nobody can see", async () => {
-    const host = openHost(temporaryDirectory());
-    await expect(
-      host.call({ threadId: threadTwo, projectId: projectA, from: "none" }),
-    ).resolves.toEqual(approvalRequired);
-
-    await rememberSearch(host);
-    await expect(
-      host.call({ threadId: threadTwo, projectId: projectA, from: "none" }),
-    ).resolves.not.toMatchObject({ isError: true });
   });
 
   it("approves a host-run turn's prompt once and never remembers it, whoever answers", async () => {
@@ -1328,6 +1318,7 @@ describe("the grant a call is checked against", () => {
       threadTainted: () => true,
     });
     const tool = {
+      windowId,
       thread: { id: threadTwo, projectId: projectA },
       extensionId,
       packageId,
@@ -1342,7 +1333,9 @@ describe("the grant a call is checked against", () => {
     };
 
     await expect(authorize({ ...tool, reach: "confined-stdio" })).resolves.toBe(true);
-    await expect(authorize({ ...tool, reach: "network" })).resolves.toBe(false);
     expect(host.approvals.list(atWindow)).toEqual([]);
+    const network = authorize({ ...tool, reach: "network" });
+    expect(await host.deny()).toBe(true);
+    await expect(network).resolves.toBe(false);
   });
 });

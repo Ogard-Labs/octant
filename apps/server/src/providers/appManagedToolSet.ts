@@ -32,10 +32,17 @@ export interface AppManagedToolSet {
      */
     readonly toolCallId?: string;
     /**
-     * Receives the person-facing approval wait the call's record measured
-     * while it executed, when one ran inside the recorded-call boundary. A
-     * caller that times the whole execution subtracts it; sets that do not
-     * record calls simply never invoke it.
+     * Told each time a person-facing approval wait opens inside the
+     * recorded-call boundary. A caller holding a deadline for the call pauses
+     * it until `onApprovalWait` reports that wait closed, because an
+     * unanswered approval waits for its person and never times out.
+     */
+    readonly onApprovalWaitStarted?: () => void;
+    /**
+     * Receives each person-facing approval wait the call's record measured
+     * while it executed, as that wait closes, when one ran inside the
+     * recorded-call boundary. A caller that times the whole execution
+     * subtracts the sum; sets that do not record calls simply never invoke it.
      */
     readonly onApprovalWait?: (waitMs: number) => void;
   }) => Promise<{

@@ -106,7 +106,9 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 // Discrete events only; streaming deltas are exempt (see turnBudget.ts).
 // How long one app-managed tool call may run before the turn fails. It is the
 // call's own deadline, apart from the stalled-turn limit, which is paused
-// while the call runs and may be turned off.
+// while the call runs and may be turned off. Time the call spends waiting for
+// a person's approval is not running time: an unanswered approval waits in
+// Needs you and never turns into a refusal by timing out.
 const APP_MANAGED_TOOL_DEADLINE_MS = 5 * 60_000;
 // A question record holds at most this many options, matching the attempt
 // contract; longer option lists are cut, not refused.
@@ -117,6 +119,51 @@ const MAX_ATTEMPT_QUESTION_OPTIONS = 8;
  * provider already guarantees the text is non-empty; only the length can
  * overflow, and a truncated question still beats an unanswerable one.
  */
+/**
+ * One tool call's deadline, which stands still while any approval the call
+ * asks is open and runs on from where it stood once the last is answered.
+ * `expired` completes when the call has run for `limitMs` outside those
+ * waits; interrupting it clears its timer.
+ */
+function toolCallDeadline(limitMs: number) {
+  let remainingMs = limitMs;
+  let runningSince: number | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let openWaits = 0;
+  let expire: (() => void) | undefined;
+  const run = () => {
+    if (expire === undefined || openWaits > 0 || timer !== undefined) return;
+    runningSince = Date.now();
+    timer = setTimeout(expire, remainingMs);
+  };
+  const pause = () => {
+    if (timer === undefined || runningSince === undefined) return;
+    clearTimeout(timer);
+    timer = undefined;
+    remainingMs = Math.max(0, remainingMs - (Date.now() - runningSince));
+    runningSince = undefined;
+  };
+  return {
+    expired: Effect.async<void>((resume) => {
+      expire = () => resume(Effect.void);
+      run();
+      return Effect.sync(() => {
+        pause();
+        expire = undefined;
+      });
+    }),
+    approvalWaitStarted: () => {
+      openWaits += 1;
+      pause();
+    },
+    approvalWaitEnded: () => {
+      if (openWaits === 0) return;
+      openWaits -= 1;
+      run();
+    },
+  };
+}
+
 function boundedQuestionText(value: string): string {
   const trimmed = value.trim();
   if (trimmed.length <= 2_000) return trimmed;
@@ -1575,7 +1622,10 @@ export class ChatTurnRunner {
                   // App-owned work suspends the stalled-turn limit, so the call
                   // gets a deadline of its own: a tool that never returns ends
                   // the turn with a named cause instead of hanging it, whatever
-                  // the limit is set to and when it is Off.
+                  // the limit is set to and when it is Off. An approval the call
+                  // asks before it is dispatched pauses that deadline; Stop
+                  // still ends the wait through the call's signal.
+                  const deadline = toolCallDeadline(appManagedToolDeadlineMs);
                   const execution = yield* idle.during(
                     Effect.raceFirst(
                       Effect.tryPromise({
@@ -1585,8 +1635,10 @@ export class ChatTurnRunner {
                             inputJson: event.inputJson,
                             signal: toolSignal,
                             toolCallId: event.requestId,
+                            onApprovalWaitStarted: deadline.approvalWaitStarted,
                             onApprovalWait: (waitMs) => {
                               appToolApprovalWaitMs += waitMs;
+                              deadline.approvalWaitEnded();
                             },
                           }),
                         catch: () =>
@@ -1616,7 +1668,7 @@ export class ChatTurnRunner {
                         ),
                       ),
                       Effect.andThen(
-                        Effect.sleep(appManagedToolDeadlineMs),
+                        deadline.expired,
                         Effect.gen(function* () {
                           toolAbort.abort();
                           return yield* failTurn(

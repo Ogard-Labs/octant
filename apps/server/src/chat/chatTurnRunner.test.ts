@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createNativeHarnessComposition } from "../harness/nativeHarnessComposition";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { ToolActionAuthority } from "@octant/contracts";
@@ -878,6 +878,239 @@ describe("ChatTurnRunner", () => {
     expect(updates.at(-1)?.outcome).toBe("failed");
     expect(updates.at(-1)?.failure).toEqual({ code: "tool-timed-out" });
     expect(toolSignals.at(-1)?.aborted).toBe(true);
+  });
+
+  describe("a tool call whose approval a person has not answered yet", () => {
+    const minute = 60_000;
+
+    /**
+     * Runs one Octant Harness tool call whose approval is asked before it is
+     * dispatched, the way the recorded-call boundary reports an MCP approval:
+     * the wait opens, the person answers, then the tool runs. The runner keeps
+     * its default five-minute tool deadline.
+     */
+    async function runAskingTool(script: {
+      readonly answer: (ask: { readonly signal?: AbortSignal }) => Promise<boolean>;
+      readonly run?: () => Promise<{ readonly result: unknown }>;
+      readonly signal?: AbortSignal;
+      readonly drive: (turn: {
+        readonly asked: () => Promise<void>;
+        readonly settled: () => boolean;
+        readonly finish: () => void;
+      }) => Promise<void>;
+    }) {
+      const updates: ChatAttempt[] = [];
+      let runs = 0;
+      let settled = false;
+      let asking = false;
+      const queue = Effect.runSync(Queue.unbounded<never>());
+      const connection = {
+        subscribe: Effect.succeed(Stream.fromQueue(queue)),
+        start: () => Effect.succeed({ sessionId }),
+        send: () =>
+          Queue.offer(queue, {
+            kind: "tool-request",
+            sessionId,
+            requestId: "call-asks",
+            toolName: "octant_browser",
+            inputJson: "{}",
+          } as never),
+        interrupt: () => Effect.void,
+        stop: () => Effect.void,
+        answerApproval: () => Effect.void,
+        answerUserInput: () => Effect.void,
+        answerTool: () =>
+          Queue.offerAll(queue, [
+            { kind: "text-delta", sessionId, text: "Done." },
+            { kind: "completed", sessionId },
+          ] as never[]),
+      };
+      const toolEffects = {
+        tools: (set: { execute: (call: never) => Promise<unknown> }) => ({
+          ...set,
+          execute: async (call: {
+            readonly signal?: AbortSignal;
+            readonly onApprovalWaitStarted?: () => void;
+            readonly onApprovalWait?: (waitMs: number) => void;
+          }) => {
+            call.onApprovalWaitStarted?.();
+            asking = true;
+            const startedAt = Date.now();
+            let approved: boolean;
+            try {
+              approved = await script.answer({
+                ...(call.signal === undefined ? {} : { signal: call.signal }),
+              });
+            } finally {
+              call.onApprovalWait?.(Date.now() - startedAt);
+            }
+            if (!approved) return { result: { error: "denied" }, isError: true };
+            return set.execute(call as never);
+          },
+        }),
+        observe: () => undefined,
+      };
+      const { scheduler, reservation } = makeScheduler();
+      const runner = new ChatTurnRunner({
+        capacityScheduler: scheduler,
+        contextHarness: makeHarness(),
+        researchRouter: new ResearchRouter({
+          webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        }),
+      });
+      const turn = Effect.runPromise(
+        Effect.either(
+          Effect.scoped(
+            runner.run({
+              thread: thread(),
+              attempt: attempt(),
+              prompt: "hello",
+              scratchRoot: "/tmp/octant-scratch/thread",
+              driver: {
+                kind: "openai-compatible",
+                acquire: () => Effect.succeed(connection),
+              } as never,
+              providerInstanceId,
+              serviceLimits: serviceLimits(),
+              contextSubject: subject,
+              contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+              requestShape: "chat-turn",
+              varianceReserve: 20,
+              reservationId: reservation,
+              estimatedTokens: 100,
+              researchRoute: researchRoute({ kind: "disabled" }),
+              attachments: [],
+              ...(script.signal === undefined ? {} : { signal: script.signal }),
+              toolEffects: toolEffects as never,
+              appManagedTools: {
+                definitions: [{ name: "octant_browser" } as never],
+                execute: async () => {
+                  runs += 1;
+                  return script.run === undefined ? { result: { ok: true } } : script.run();
+                },
+                close: async () => undefined,
+              },
+              persistAttempt: (next) => {
+                updates.push(next);
+                return Effect.void;
+              },
+              persistAppendedResponse: (next) => {
+                updates.push(next);
+                return Effect.void;
+              },
+              persistResponse: () =>
+                Effect.succeed({
+                  contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                  digest: "c".repeat(64),
+                  byteLength: 5,
+                }),
+            }),
+          ),
+        ),
+      ).finally(() => {
+        settled = true;
+      });
+      await script.drive({
+        // The turn reaches its tool call after real work (imports, the
+        // provider's start), so a test times the wait only once it is open.
+        asked: () => vi.waitFor(() => expect(asking).toBe(true), { timeout: 10_000 }),
+        settled: () => settled,
+        finish: () =>
+          Effect.runSync(
+            Queue.offerAll(queue, [
+              { kind: "text-delta", sessionId, text: "Stopped." },
+              { kind: "completed", sessionId },
+            ] as never[]),
+          ),
+      });
+      // The turn's own scheduling runs on the faked timers too: let them run
+      // in small steps until it settles, far inside any deadline.
+      for (let step = 0; step < 1_000 && !settled; step += 1) {
+        await vi.advanceTimersByTimeAsync(10);
+      }
+      const result = await turn;
+      return { result, updates, runs: () => runs };
+    }
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("continues once the person answers, however long after the tool deadline, and runs the tool once", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      let approve: (approved: boolean) => void = () => undefined;
+      const { result, updates, runs } = await runAskingTool({
+        answer: () =>
+          new Promise<boolean>((resolve) => {
+            approve = resolve;
+          }),
+        drive: async ({ asked, settled }) => {
+          await asked();
+          await vi.advanceTimersByTimeAsync(12 * minute);
+          // Twelve minutes unanswered: still waiting in Needs you.
+          expect(settled()).toBe(false);
+          approve(true);
+          await vi.advanceTimersByTimeAsync(0);
+        },
+      });
+
+      expect(result._tag).toBe("Right");
+      expect(runs()).toBe(1);
+      expect(updates.at(-1)?.outcome).not.toBe("failed");
+      expect(updates.some((update) => update.failure?.code === "tool-timed-out")).toBe(false);
+    });
+
+    it("still ends the wait when the person stops the turn", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      const stop = new AbortController();
+      let askSignal: AbortSignal | undefined;
+      const { updates, runs } = await runAskingTool({
+        signal: stop.signal,
+        answer: ({ signal }) =>
+          new Promise<boolean>((resolve) => {
+            askSignal = signal;
+            signal?.addEventListener("abort", () => resolve(false), { once: true });
+          }),
+        drive: async ({ asked, finish }) => {
+          await asked();
+          await vi.advanceTimersByTimeAsync(7 * minute);
+          expect(askSignal?.aborted).toBe(false);
+          stop.abort();
+          await vi.advanceTimersByTimeAsync(0);
+          expect(askSignal?.aborted).toBe(true);
+          finish();
+          await vi.advanceTimersByTimeAsync(0);
+        },
+      });
+
+      expect(runs()).toBe(0);
+      expect(updates.some((update) => update.failure?.code === "tool-timed-out")).toBe(false);
+    });
+
+    it("gives the tool its full deadline again once the answer dispatches it", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      let approve: (approved: boolean) => void = () => undefined;
+      const { result, updates, runs } = await runAskingTool({
+        answer: () =>
+          new Promise<boolean>((resolve) => {
+            approve = resolve;
+          }),
+        run: () => new Promise(() => undefined),
+        drive: async ({ asked, settled }) => {
+          await asked();
+          await vi.advanceTimersByTimeAsync(10 * minute);
+          approve(true);
+          await vi.advanceTimersByTimeAsync(4 * minute);
+          // Four minutes of running, the wait excluded: inside the deadline.
+          expect(settled()).toBe(false);
+          await vi.advanceTimersByTimeAsync(2 * minute);
+        },
+      });
+
+      expect(runs()).toBe(1);
+      expect(result).toMatchObject({ _tag: "Left", left: { category: "failed" } });
+      expect(updates.at(-1)?.failure).toEqual({ code: "tool-timed-out" });
+    });
   });
 
   it("tags the row of an app-managed tool whose result the Watcher labelled", async () => {
