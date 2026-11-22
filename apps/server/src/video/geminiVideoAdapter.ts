@@ -284,7 +284,10 @@ async function readInteraction(
         }
         if ("uri" in video) {
           const downloaded = await downloadFile(ports, video.uri, signal);
-          if (downloaded.status !== "downloaded") return downloaded;
+          // Google finished and billed the clip; a failed download is tried
+          // again on the next poll, and a job that never gets it settles at
+          // its estimate when its time runs out, never as an unbilled failure.
+          if (downloaded.status !== "downloaded") return { status: "running" };
           return {
             status: "completed",
             video: { bytes: downloaded.bytes, mediaType: "video/mp4" },
@@ -328,7 +331,8 @@ async function downloadFile(
   | { readonly status: "downloaded"; readonly bytes: Uint8Array }
   | Exclude<VideoAdapterPoll, { readonly status: "completed" }>
 > {
-  const fileId = /\/files\/([^/:?]+)/.exec(uri)?.[1];
+  // Google gives either a full download URL or a bare `files/{id}` name.
+  const fileId = /(?:^|\/)files\/([^/:?]+)/.exec(uri)?.[1];
   if (fileId === undefined || !FILE_ID_PATTERN.test(fileId)) {
     return {
       status: "failed",

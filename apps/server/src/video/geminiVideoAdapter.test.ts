@@ -167,7 +167,10 @@ describe("Gemini video driver", () => {
     ).toBe("Use image 1 as the last frame of the clip.\n\nA boat");
   });
 
-  it("downloads a clip Google delivered as a file once the file is ready", async () => {
+  it.each([
+    "https://generativelanguage.googleapis.com/v1beta/files/clip-9:download?alt=media",
+    "files/clip-9",
+  ])("downloads a clip Google delivered as a file once the file is ready (%s)", async (uri) => {
     let fileChecks = 0;
     const recorder = ports((request) => {
       if (request.url.endsWith("/interactions/v1_abc")) {
@@ -180,7 +183,7 @@ describe("Gemini video driver", () => {
                   {
                     type: "video",
                     mime_type: "video/mp4",
-                    uri: "https://generativelanguage.googleapis.com/v1beta/files/clip-9:download?alt=media",
+                    uri,
                   },
                 ],
               },
@@ -204,6 +207,27 @@ describe("Gemini video driver", () => {
       video: { mediaType: "video/mp4" },
     });
     expect(recorder.sent.every((request) => request.auth.header === "x-goog-api-key")).toBe(true);
+  });
+
+  it("keeps a finished clip it could not download running, so it is tried again and stays billed", async () => {
+    const recorder = ports((request) =>
+      request.url.endsWith("/interactions/v1_abc")
+        ? Response.json(
+            completedInteraction({
+              steps: [
+                {
+                  type: "model_output",
+                  content: [{ type: "video", mime_type: "video/mp4", uri: "files/clip-9" }],
+                },
+              ],
+            }),
+          )
+        : new Response(null, { status: 503 }),
+    );
+    const adapter = geminiVideoDriver.create({ profile, ports: recorder.ports });
+    expect(await adapter.poll("v1_abc", new AbortController().signal)).toEqual({
+      status: "running",
+    });
   });
 
   it("calls a completed interaction with no clip a safety refusal", async () => {
