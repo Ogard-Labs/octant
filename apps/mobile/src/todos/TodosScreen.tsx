@@ -111,7 +111,10 @@ export function TodosScreen(props: TodosScreenProps) {
     };
   }, [load, transportId]);
 
-  const send = async (command: TodoCommand): Promise<boolean> => {
+  const send = async (
+    command: TodoCommand,
+    acknowledgeDraftOnStaleSuccess = false,
+  ): Promise<boolean> => {
     // A ref, not the busy state: two taps in one tick both saw busy as false.
     if (transport === undefined || view === undefined || sending.current) return false;
     sending.current = true;
@@ -120,11 +123,12 @@ export function TodosScreen(props: TodosScreenProps) {
     // A read already in flight began before this change; its answer is older.
     reads.current += 1;
     const result = await changeMobileTodos(transport, command);
+    if (shownFor !== generation.current) {
+      return acknowledgeDraftOnStaleSuccess && result.status === "loaded";
+    }
     // A read that started while this change was in flight may have seen the
     // list before it; its answer is older than this one.
     reads.current += 1;
-    // The computer changed meanwhile, and its reset already cleared the send.
-    if (shownFor !== generation.current) return false;
     sending.current = false;
     setBusy(false);
     setView(mobileTodoViewForRead(result));
@@ -150,9 +154,7 @@ export function TodosScreen(props: TodosScreenProps) {
     const submitted = text;
     const submittedDraftId = props.draft.id;
     const submittedHostId = transportId;
-    const shownFor = generation.current;
-    if (await send(draft.command)) {
-      if (shownFor !== generation.current) return;
+    if (await send(draft.command, true)) {
       props.onDraftSubmitted(submittedDraftId, submitted, submittedHostId);
     }
   };

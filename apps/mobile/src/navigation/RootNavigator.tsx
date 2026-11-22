@@ -443,6 +443,7 @@ export function RootNavigator(props: RootNavigatorProps) {
   const {
     environment,
     setInboxHostFilter,
+    inboxHostFilter,
     hosts,
     hostsLoaded,
     hostsError,
@@ -450,12 +451,18 @@ export function RootNavigator(props: RootNavigatorProps) {
     transportForHost,
     transports,
   } = useMobileSession();
-  const activeRoute = useRef(props.activeRoute);
-  activeRoute.current = props.activeRoute;
-  const todoHostId = transport?.hostId;
+  const previousTodoHostId = useRef(transport?.hostId);
+  const previousTodoHostIdValue = previousTodoHostId.current;
+  const todoHostId =
+    inboxHostFilter === "all"
+      ? (transport?.hostId ??
+        (previousTodoHostIdValue !== undefined &&
+        hosts.some((host) => String(host.hostId) === previousTodoHostIdValue)
+          ? previousTodoHostIdValue
+          : undefined))
+      : inboxHostFilter;
   const currentTodoHostId = useRef(todoHostId);
   currentTodoHostId.current = todoHostId;
-  const previousTodoHostId = useRef(todoHostId);
   useEffect(() => {
     if (previousTodoHostId.current !== todoHostId) {
       previousTodoHostId.current = todoHostId;
@@ -472,11 +479,7 @@ export function RootNavigator(props: RootNavigatorProps) {
   const completeTodoDraft = useCallback(
     (draftId: string, submittedText: string, hostId: string | undefined) => {
       setTodoDraft((draft) => {
-        if (
-          activeRoute.current !== "todos" ||
-          currentTodoHostId.current !== hostId ||
-          draft.id !== draftId
-        ) {
+        if (currentTodoHostId.current !== hostId || draft.id !== draftId) {
           return draft;
         }
         return {

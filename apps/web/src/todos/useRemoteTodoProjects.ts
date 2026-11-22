@@ -92,42 +92,52 @@ export function useRemoteTodoProjects(
         Promise.allSettled(
           ready.map(async (slot) => {
             const clients = createRemoteProductClients(slot.bridge);
-            const [chat, code, work] = await Promise.all([
-              clients.chat.navigation(),
-              clients.code.navigation(),
-              clients.workThread.navigation(),
+            const [chat, code, work] = await Promise.allSettled([
+              Promise.resolve().then(async () => {
+                const navigation = await clients.chat.navigation();
+                return buildChatThreadNavigation(
+                  navigation.threads.map((thread) => ({
+                    ...(thread.executing === undefined ? {} : { executing: thread.executing }),
+                    ...(thread.awaitingInput === undefined
+                      ? {}
+                      : { awaitingInput: thread.awaitingInput }),
+                    ...(thread.awaitingKind === undefined
+                      ? {}
+                      : { awaitingKind: thread.awaitingKind }),
+                    ...(thread.turnStartedAt === undefined
+                      ? {}
+                      : { turnStartedAt: thread.turnStartedAt }),
+                    ...(thread.liveStep === undefined ? {} : { liveStep: thread.liveStep }),
+                    followUpOpen: thread.followUpOpen,
+                    ...(thread.projectId === undefined
+                      ? {}
+                      : { projectId: String(thread.projectId) }),
+                    providerInstanceId: String(thread.providerInstanceId),
+                    readSequence: 0,
+                    threadId: String(thread.id),
+                    title: thread.title,
+                    updatedAt: thread.updatedAt,
+                    ...(thread.completedAt === undefined
+                      ? {}
+                      : { completedAt: thread.completedAt }),
+                    ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
+                  })),
+                );
+              }),
+              Promise.resolve().then(async () =>
+                codeTodoThreadRows(await clients.code.navigation()),
+              ),
+              Promise.resolve().then(async () => {
+                const navigation = await clients.workThread.navigation();
+                return buildWorkThreadNavigation(navigation.threads, navigation.runtime);
+              }),
             ]);
             return {
               hostId: slot.hostId,
               bridge: slot.bridge,
-              chat: buildChatThreadNavigation(
-                chat.threads.map((thread) => ({
-                  ...(thread.executing === undefined ? {} : { executing: thread.executing }),
-                  ...(thread.awaitingInput === undefined
-                    ? {}
-                    : { awaitingInput: thread.awaitingInput }),
-                  ...(thread.awaitingKind === undefined
-                    ? {}
-                    : { awaitingKind: thread.awaitingKind }),
-                  ...(thread.turnStartedAt === undefined
-                    ? {}
-                    : { turnStartedAt: thread.turnStartedAt }),
-                  ...(thread.liveStep === undefined ? {} : { liveStep: thread.liveStep }),
-                  followUpOpen: thread.followUpOpen,
-                  ...(thread.projectId === undefined
-                    ? {}
-                    : { projectId: String(thread.projectId) }),
-                  providerInstanceId: String(thread.providerInstanceId),
-                  readSequence: 0,
-                  threadId: String(thread.id),
-                  title: thread.title,
-                  updatedAt: thread.updatedAt,
-                  ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
-                  ...(thread.snooze === undefined ? {} : { snooze: thread.snooze }),
-                })),
-              ),
-              code: codeTodoThreadRows(code),
-              work: buildWorkThreadNavigation(work.threads, work.runtime),
+              chat: chat.status === "fulfilled" ? chat.value : [],
+              code: code.status === "fulfilled" ? code.value : [],
+              work: work.status === "fulfilled" ? work.value : [],
             };
           }),
         ),
