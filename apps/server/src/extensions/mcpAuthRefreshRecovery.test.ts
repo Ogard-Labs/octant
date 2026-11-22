@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setImmediate } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
+import { decodeWindowId } from "@octant/contracts";
 import { decodeExtensionEffectiveSnapshot } from "@octant/contracts/extension-rpc";
 import { AGENT_PLUGINS_MCP_SCHEMA } from "@octant/plugin-host/agent-plugins";
 import { AgentPluginMcpSessionManager } from "./agentPluginMcpSessionManager";
@@ -526,7 +527,12 @@ describe("MCP refresh and completed sign-out ownership", () => {
     const execute = () => {
       const name = manager.toolDefinitions()[0]?.name;
       if (name === undefined) throw new Error("Expected discovered tool");
-      return port.execute({ thread: { id: String(state.scope.threadId) }, name, inputJson: "{}" });
+      return port.execute({
+        windowId: decodeWindowId("44000000-0000-4000-8000-0000000000e1"),
+        thread: { id: String(state.scope.threadId) },
+        name,
+        inputJson: "{}",
+      });
     };
     try {
       await manager.reconcile(state);

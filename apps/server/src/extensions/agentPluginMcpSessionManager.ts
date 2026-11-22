@@ -77,7 +77,7 @@ export interface AgentPluginMcpSessionRecord extends AgentPluginMcpSessionKey {
  * where its server can reach.
  */
 export interface ExtensionToolCall {
-  readonly windowId?: WindowId;
+  readonly windowId: WindowId;
   readonly thread: ExtensionToolThread;
   readonly extensionId: string;
   readonly packageId: string;
@@ -420,7 +420,7 @@ export class AgentPluginMcpSessionManager {
             ? false
             : await this.#authorizeToolCall({
                 thread,
-                ...(windowId === undefined ? {} : { windowId }),
+                windowId,
                 extensionId: record.extensionId,
                 packageId: record.packageId,
                 componentId: record.componentId,

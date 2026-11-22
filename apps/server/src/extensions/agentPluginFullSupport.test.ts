@@ -1165,6 +1165,7 @@ describe("Agent Plugin MCP session manager", () => {
     expect(draftSeven).toBeDefined();
     await expect(
       manager.createToolExecutionPort().execute({
+        windowId: "17000000-0000-4000-8000-000000000097" as never,
         thread: { id: effective.scope.threadId } as never,
         name: draftSeven!.name,
         inputJson: '{"pair":["one",2,true]}',
@@ -1175,6 +1176,7 @@ describe("Agent Plugin MCP session manager", () => {
     });
     await expect(
       manager.createToolExecutionPort().execute({
+        windowId: "17000000-0000-4000-8000-000000000097" as never,
         thread: { id: effective.scope.threadId } as never,
         name: draftSeven!.name,
         inputJson: '{"pair":["one",2]}',
@@ -1290,6 +1292,7 @@ describe("Agent Plugin MCP session manager", () => {
 
     const execute = (name: string, inputJson: string) =>
       manager.createToolExecutionPort().execute({
+        windowId: "17000000-0000-4000-8000-000000000097" as never,
         thread: { id: effective.scope.threadId } as never,
         name,
         inputJson,
@@ -2281,6 +2284,7 @@ describe("Agent Plugin MCP session manager", () => {
     const caller = new AbortController();
     const callerTimeout = setTimeout(() => caller.abort(), 100);
     const result = await manager.createToolExecutionPort().execute({
+      windowId: "17000000-0000-4000-8000-000000000097" as never,
       thread: { id: effective.scope.threadId } as never,
       name: definition!.name,
       inputJson: "{}",
@@ -2353,6 +2357,7 @@ describe("Agent Plugin MCP session manager", () => {
     const [definition] = manager.toolDefinitions();
 
     const mismatched = await manager.createToolExecutionPort().execute({
+      windowId: "17000000-0000-4000-8000-000000000097" as never,
       thread: { id: "17000000-0000-4000-8000-000000000098" } as never,
       name: definition!.name,
       inputJson: '{"target":"production"}',
@@ -2364,6 +2369,7 @@ describe("Agent Plugin MCP session manager", () => {
     expect(authorizeToolCall).not.toHaveBeenCalled();
 
     const invalidJson = await manager.createToolExecutionPort().execute({
+      windowId: "17000000-0000-4000-8000-000000000097" as never,
       thread: { id: effective.scope.threadId } as never,
       name: definition!.name,
       inputJson: '{"target":',
@@ -2373,6 +2379,7 @@ describe("Agent Plugin MCP session manager", () => {
       isError: true,
     });
     const invalidSchema = await manager.createToolExecutionPort().execute({
+      windowId: "17000000-0000-4000-8000-000000000097" as never,
       thread: { id: effective.scope.threadId } as never,
       name: definition!.name,
       inputJson: '{"target":42}',
@@ -2463,6 +2470,7 @@ describe("Agent Plugin MCP session manager", () => {
     const [definition] = manager.toolDefinitions();
 
     const result = await manager.createToolExecutionPort().execute({
+      windowId: "17000000-0000-4000-8000-000000000097" as never,
       thread: { id: effective.scope.threadId } as never,
       name: definition!.name,
       inputJson: "{}",
@@ -2535,6 +2543,7 @@ describe("Agent Plugin MCP session manager", () => {
     const [definition] = manager.toolDefinitions();
 
     const outcome = await manager.createToolExecutionPort().execute({
+      windowId: "17000000-0000-4000-8000-000000000097" as never,
       thread: { id: threadId } as never,
       name: definition!.name,
       inputJson: "{}",
@@ -2570,6 +2579,7 @@ describe("Agent Plugin MCP session manager", () => {
 
     record.mockReturnValueOnce({ kind: "refused" as const, reason: "malformed" as const });
     const refused = await manager.createToolExecutionPort().execute({
+      windowId: "17000000-0000-4000-8000-000000000097" as never,
       thread: { id: threadId } as never,
       name: definition!.name,
       inputJson: "{}",
@@ -3385,6 +3395,7 @@ async function httpRecoveryFixture() {
     effects: () => effects.get("local") ?? 0,
     invoke: (server = "local", signal?: AbortSignal) =>
       manager.createToolExecutionPort().execute({
+        windowId: "17000000-0000-4000-8000-000000000097" as never,
         thread: { id: String(effective.scope.threadId) },
         name: names.get(server) ?? "missing-tool",
         inputJson: "{}",

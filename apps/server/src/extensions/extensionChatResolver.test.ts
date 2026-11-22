@@ -8,6 +8,7 @@ import type {
 } from "@octant/contracts/extension-rpc";
 import type { ExtensionEffectiveState } from "@octant/contracts/extensions";
 import { describe, expect, it, vi } from "vitest";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import {
   buildCatalogs,
   createExtensionChatResolver,
@@ -258,6 +259,29 @@ describe("authoritative extension Chat resolver", () => {
       name: "selected_tool",
       inputJson: "{}",
     });
+  });
+
+  it("runs the tools of a turn the host sent with no window under the host's own scope", async () => {
+    const state = snapshots({ kind: "effective" });
+    const execute = vi.fn(async () => ({ result: { ok: true } }));
+    const resolver = createExtensionChatResolver({
+      snapshot: () => state.snapshot,
+      resolveEffectiveState: () => state.effective,
+      providerFamily: () => "openai-compatible" as never,
+      materialLoader: {
+        load: async () => ({
+          tools: [{ name: "selected_tool", inputSchema: { type: "object" } }],
+        }),
+      },
+      toolExecution: { availability: () => "available", execute },
+    });
+    // A usage-limit retry replays the turn's selections with no window.
+    const result = await resolver({ phase: "replay", thread: thread(), selections: [selection()] });
+
+    await result.toolSet?.execute({ name: "selected_tool", inputJson: "{}" });
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({ windowId: ROUTINE_HOST_SCOPE_ID, name: "selected_tool" }),
+    );
   });
 
   it("rejects selected material whose MCP catalogue exceeds provider capacity", async () => {

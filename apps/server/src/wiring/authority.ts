@@ -74,6 +74,7 @@ import { ServiceOfferService } from "../offers/serviceOfferService";
 import {
   chatThreadStandsInProject,
   isDeviceRegistrationCurrent,
+  windowReachesPromptThread,
 } from "../extensions/pairedDeviceApprovalAuthority";
 import type { BrowserModelBinding } from "../browser/browserAppManagedTools";
 import { BrowserCaptureService } from "../browser/browserCaptureService";
@@ -316,27 +317,34 @@ export function wireAuthority(deps: AuthorityDependencies) {
       const authority = browserAuthority.resolve(decodeBrowserThreadId(threadId), project.type);
       return authority !== undefined && String(authority.projectId) === String(project.id);
     },
-    // A usage-limit resume replays its stopped Work turn's extension
-    // selections as the host, so that turn's tool prompts go to the windows
-    // bound to the thread's Project, as a routine's browser prompts do.
+    // A usage-limit resume replays its stopped turn's extension selections as
+    // the host, and a Chat turn the host sends with no window runs its tools
+    // under this scope, so those prompts go to the windows that may drive the
+    // thread, as a routine's browser prompts do.
     isHostScope: isRoutineHostScope,
-    // Routed by the Project the prompt recorded, never by trying each mode:
-    // Work and Code thread ids are separate namespaces, so a raw id alone
-    // could match an unrelated thread another window may drive.
-    windowCanReachThread: (windowId, threadId, projectId) => {
-      if (projectId === undefined) return false;
-      const project = persistence.readProject(decodeProjectId(projectId));
-      if (project === undefined || (project.type !== "work" && project.type !== "code")) {
-        return false;
-      }
-      const thread = decodeBrowserThreadId(threadId);
-      const authority = browserAuthority.resolve(thread, project.type);
-      return (
-        authority !== undefined &&
-        String(authority.projectId) === String(project.id) &&
-        browserAuthority.canAccessWindow(windowId, thread, project.type)
-      );
-    },
+    windowCanReachThread: (windowId, threadId, projectId) =>
+      windowReachesPromptThread(
+        { threadId, projectId },
+        {
+          readChatThread: (id) => {
+            try {
+              return persistence.readChatThread(decodeChatThreadId(id));
+            } catch {
+              return undefined;
+            }
+          },
+          readProject: (id) => persistence.readProject(decodeProjectId(id)),
+          windowDrivesProjectThread: (id, type, project) => {
+            const thread = decodeBrowserThreadId(id);
+            const authority = browserAuthority.resolve(thread, type);
+            return (
+              authority !== undefined &&
+              String(authority.projectId) === project &&
+              browserAuthority.canAccessWindow(windowId, thread, type)
+            );
+          },
+        },
+      ),
     onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
   });
   // Routines a Work or Code thread's agent proposed, waiting for the window

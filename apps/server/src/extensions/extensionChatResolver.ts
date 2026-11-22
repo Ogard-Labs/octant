@@ -35,6 +35,7 @@ import {
   type CapabilityComponentKind,
   type CapabilitySelectionRequest,
 } from "../context/capabilityCatalog";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import type { ExtensionPackageStore } from "./extensionPackageStore";
 import { composeSelectedExtensionCapabilities } from "./extensionAddressingService";
 
@@ -75,7 +76,8 @@ export interface ExtensionToolExecutionPort {
     readonly definitions: ReadonlyArray<ProviderToolDefinition>;
   }): "available" | "unavailable" | "waiting";
   execute(input: {
-    readonly windowId?: WindowId;
+    /** The scope the turn runs under: a window, a paired device, or the host's own. */
+    readonly windowId: WindowId;
     readonly thread: ExtensionToolThread;
     readonly name: string;
     readonly inputJson: string;
@@ -252,11 +254,17 @@ function extensionToolSet(
     });
   }
   const selectedNames = new Set(definitions.map((definition) => definition.name));
+  // A Chat turn with no window is one the host sent itself (a usage-limit
+  // retry replaying the turn's selections). Its calls run under the host's own
+  // scope, as Work and Code host turns do, so a prompt waits in Needs you for
+  // the windows and the person's devices that may drive the thread; with no
+  // scope at all it reached nobody and was refused.
+  const scope = windowId ?? ROUTINE_HOST_SCOPE_ID;
   return {
     definitions,
     execute: (input) =>
       selectedNames.has(input.name)
-        ? execution.execute({ thread, ...input, ...(windowId === undefined ? {} : { windowId }) })
+        ? execution.execute({ thread, ...input, windowId: scope })
         : Promise.resolve({
             result: { error: "extension-tool-not-selected" },
             isError: true,

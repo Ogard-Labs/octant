@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Schema } from "effect";
-import { decodeChatThread } from "@octant/contracts";
+import { decodeChatThread, decodeWindowId } from "@octant/contracts";
 import { ExtensionSelection } from "@octant/contracts/extensions";
 import { decodeHostOAuthDescriptor } from "@octant/contracts/host-oauth";
 import type { HostOAuthService } from "../providers/oauth/hostOAuthService";
@@ -29,6 +29,7 @@ vi.mock("./agentPluginMcpClient", async (importOriginal) => ({
 const connect = vi.mocked(connectAgentPluginMcpSession);
 const EXTENSION = "15000000-0000-4000-8000-000000000001";
 const THREAD = "17000000-0000-4000-8000-000000000099";
+const TURN_SCOPE = decodeWindowId("17000000-0000-4000-8000-000000000097");
 const managers: AgentPluginMcpSessionManager[] = [];
 afterEach(async () => {
   vi.useRealTimers();
@@ -145,7 +146,8 @@ function cachedExecution(subject: AgentPluginMcpSessionManager, threadId = THREA
   if (definition === undefined) throw new Error("Expected a listed tool");
   const port = subject.createToolExecutionPort();
   const thread = { id: threadId } as Parameters<typeof port.execute>[0]["thread"];
-  return () => port.execute({ thread, name: definition.name, inputJson: "{}" });
+  return () =>
+    port.execute({ windowId: TURN_SCOPE, thread, name: definition.name, inputJson: "{}" });
 }
 
 describe("MCP authentication retirement", () => {
@@ -543,9 +545,13 @@ describe("MCP authentication retirement", () => {
     const name = subject.toolDefinitions()[0]?.name;
     if (name === undefined) throw new Error("Expected a tool");
     const controller = new AbortController();
-    const pending = subject
-      .createToolExecutionPort()
-      .execute({ thread: { id: THREAD }, name, inputJson: "{}", signal: controller.signal });
+    const pending = subject.createToolExecutionPort().execute({
+      windowId: TURN_SCOPE,
+      thread: { id: THREAD },
+      name,
+      inputJson: "{}",
+      signal: controller.signal,
+    });
     await vi.waitFor(() => expect(old.callTool).toHaveBeenCalledOnce());
     controller.abort();
     await entered.promise;

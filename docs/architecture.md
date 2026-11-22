@@ -4956,7 +4956,7 @@ is turned off, since no window stands in for the mode switch; a Work continuatio
 the host's `system` actor. Any approval the resumed turn raises is offered the
 way a routine's is: a browser-origin or extension-tool prompt goes to every
 local window that may drive that thread (one bound to the Project the prompt
-recorded) and, once built, to the person's paired devices, and answering settles
+recorded; any local window for a Chat thread) and, once built, to the person's paired devices, and answering settles
 only that prompt. This resume timer is deliberately narrow and separate from
 [routines](#modes-chat-work-and-code): an in-process host timer over journaled
 opt-ins that only continues a stopped turn — no cloud wake, no background claim
@@ -12974,7 +12974,9 @@ that is not yet effective for the thread is refused and never reaches the model.
   no prompt but its own turns', so the three rules below still hold:
   - A local window answers its own turns' prompts, and any prompt raised by
     a host-owned turn or by a paired device's turn on a thread that window
-    may drive (bound to the Project the prompt recorded).
+    may drive (bound to the Project the prompt recorded; no window binding
+    holds a Chat thread, so every local window may drive one while it is
+    still active and in the Chat Project the prompt recorded, or in none).
   - A paired device answers only the prompts its own turns raised, approve
     once or deny, and only while the thread is still active and bound in
     that Project (a Chat thread: still active and in the same Chat Project,
@@ -13002,8 +13004,11 @@ that is not yet effective for the thread is refused and never reaches the model.
   own scope (a routine's run, a usage-limit resume) or a paired device's
   turn, every local window that may drive the thread (maintainer decision,
   2026-11-13). Each new prompt is also told to the paired phones as an
-  approval-needed notification. Not built yet: a call whose turn carries no
-  scope at all is still refused.
+  approval-needed notification. No MCP tool call runs without a scope: a
+  Chat turn the host sends with no window (a usage-limit retry replaying
+  the turn's selections) runs its tool calls under the host's own scope, so
+  its prompts wait and are listed the same way; before, such a call reached
+  no window and was refused.
   An MCP
   server's launch command starts the server, not a shell the model holds, so
   a stdio server is declared `mcp`, not `shell`, whichever package format
