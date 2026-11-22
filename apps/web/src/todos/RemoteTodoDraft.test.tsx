@@ -11,6 +11,8 @@ import { RemoteTodoDraft } from "./RemoteTodoDraft";
 
 const api = vi.hoisted(() => ({
   execute: vi.fn(),
+  thread: vi.fn(),
+  upload: vi.fn(),
   executeWork: vi.fn(),
   startWork: vi.fn(),
   executeCode: vi.fn(),
@@ -60,42 +62,67 @@ vi.mock("../remote/RemoteWorkspace", () => ({
     </>
   ),
 }));
-vi.mock("../shell/DraftThreadWorkspace", () => ({
-  DraftThreadWorkspace: (props: DraftThreadWorkspaceProps) => (
-    <div>
-      {props.todoSource === undefined ? null : (
-        <button onClick={props.todoSource.onRemove}>Remove source</button>
-      )}
-      <button
-        disabled={props.creating}
-        onClick={() => {
-          if (props.mode === "code")
-            void props.onCreateCodeThread?.(
-              {
-                prompt: "Do it",
-                executionPolicy: "approval-gated",
-                permissionPersistence: "current-session",
-                workspace: "current-checkout",
-                deliveryTarget: {
-                  branchIntent: "main",
-                  remoteName: "origin",
-                  proposedBaseRepository: "local/test",
-                  proposedBaseBranch: "main",
-                  outcomeKind: "local-implementation",
-                },
-                worktreeSource: { startFromOrigin: false, remoteName: "origin" },
-              },
-              props.projectId,
-            );
-          else void props.onCreateThread("Do it");
-        }}
-      >
-        Send
-      </button>
-      {props.errorMessage}
-    </div>
-  ),
-}));
+vi.mock("../shell/DraftThreadWorkspace", async () => {
+  const { useEffect, useState } = await import("react");
+  return {
+    DraftThreadWorkspace: (props: DraftThreadWorkspaceProps) => {
+      const [selectedProjectId, setSelectedProjectId] = useState(props.projectId);
+      useEffect(() => setSelectedProjectId(props.projectId), [props.projectId]);
+      return (
+        <div>
+          {props.todoSource === undefined ? null : (
+            <button onClick={props.todoSource.onRemove}>Remove source</button>
+          )}
+          <button onClick={() => setSelectedProjectId(undefined)}>No Project</button>
+          <button
+            disabled={props.creating}
+            onClick={() => {
+              if (props.mode === "code")
+                void props.onCreateCodeThread?.(
+                  {
+                    prompt: "Do it",
+                    executionPolicy: "approval-gated",
+                    permissionPersistence: "current-session",
+                    workspace: "current-checkout",
+                    deliveryTarget: {
+                      branchIntent: "main",
+                      remoteName: "origin",
+                      proposedBaseRepository: "local/test",
+                      proposedBaseBranch: "main",
+                      outcomeKind: "local-implementation",
+                    },
+                    worktreeSource: { startFromOrigin: false, remoteName: "origin" },
+                  },
+                  selectedProjectId,
+                );
+              else void props.onCreateThread("Do it", selectedProjectId);
+            }}
+          >
+            Send
+          </button>
+          <button
+            onClick={() =>
+              void props.onCreateThread("Do it", selectedProjectId, undefined, [
+                new File([new Uint8Array([1])], "first.png", { type: "image/png" }),
+                new File([new Uint8Array([2])], "second.png", { type: "image/png" }),
+              ])
+            }
+          >
+            Send with attachments
+          </button>
+          <button
+            onClick={() =>
+              void props.onCreateThread("Do it", "66666666-6666-4666-8666-666666666666" as never)
+            }
+          >
+            Send to unknown Project
+          </button>
+          {props.errorMessage}
+        </div>
+      );
+    },
+  };
+});
 
 const hostId = "22222222-2222-4222-8222-222222222222";
 const threadId = "33333333-3333-4333-8333-333333333333";
@@ -143,7 +170,8 @@ describe("a to-do draft on its Project's paired computer", () => {
       order.push(command.kind);
       const thread = { id: threadId, version: 1 };
       if (command.kind === "create-chat-thread") return { kind: "thread-created", thread };
-      if (command.kind === "change-chat-provider") return { kind: "thread-updated", thread };
+      if (command.kind === "change-chat-provider")
+        return { kind: "thread-updated", thread: { ...thread, version: 2 } };
       return { kind: "turn-created" };
     });
     let finishLink: (() => void) | undefined;
@@ -182,6 +210,196 @@ describe("a to-do draft on its Project's paired computer", () => {
     expect(api.execute).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "create-chat-thread", projectId: project.id }),
     );
+    expect(api.thread).not.toHaveBeenCalled();
+    expect(api.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "send-chat-turn",
+        expectedVersion: 2,
+        submissionId: expect.any(String),
+      }),
+    );
+  });
+
+  it("rereads the thread version after multiple uploads before sending", async () => {
+    api.execute.mockImplementation(async (command) => {
+      if (command.kind === "create-chat-thread")
+        return { kind: "thread-created", thread: { id: threadId, version: 1 } };
+      if (command.kind === "change-chat-provider")
+        return { kind: "thread-updated", thread: { id: threadId, version: 2 } };
+      return { kind: "turn-created" };
+    });
+    api.upload.mockImplementation(async ({ attachmentId }) => ({ id: attachmentId }));
+    api.thread.mockResolvedValue({ thread: { id: threadId, version: 7 }, turns: [] });
+    render(
+      <RemoteTodoDraft
+        bridge={{ connection: () => undefined } as RemoteSessionBridge}
+        hostId={hostId}
+        connected
+        project={project}
+        todo={todo}
+        onCreated={async () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Send with attachments" }));
+
+    await waitFor(() =>
+      expect(api.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "send-chat-turn",
+          expectedVersion: 7,
+          attachmentIds: expect.arrayContaining([expect.any(String), expect.any(String)]),
+        }),
+      ),
+    );
+    expect(api.upload).toHaveBeenCalledTimes(2);
+    expect(api.thread).toHaveBeenCalledOnce();
+  });
+
+  it("creates an unfiled Chat thread without a Project id", async () => {
+    api.execute.mockImplementation(async (command) => {
+      const thread = { id: threadId, version: 1 };
+      if (command.kind === "create-chat-thread") return { kind: "thread-created", thread };
+      if (command.kind === "change-chat-provider")
+        return { kind: "thread-updated", thread: { ...thread, version: 2 } };
+      return { kind: "turn-created" };
+    });
+    render(
+      <RemoteTodoDraft
+        bridge={{ connection: () => undefined } as RemoteSessionBridge}
+        hostId={hostId}
+        connected
+        todo={todo}
+        onCreated={async () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() =>
+      expect(api.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "create-chat-thread" }),
+      ),
+    );
+    const createCommand = api.execute.mock.calls
+      .map(([command]) => command)
+      .find((command) => command.kind === "create-chat-thread");
+    expect(createCommand).not.toHaveProperty("projectId");
+  });
+
+  it("omits the linked Project after the person selects No Project", async () => {
+    api.execute.mockImplementation(async (command) => {
+      const thread = { id: threadId, version: 1 };
+      if (command.kind === "create-chat-thread") return { kind: "thread-created", thread };
+      if (command.kind === "change-chat-provider")
+        return { kind: "thread-updated", thread: { ...thread, version: 2 } };
+      return { kind: "turn-created" };
+    });
+    render(
+      <RemoteTodoDraft
+        bridge={{ connection: () => undefined } as RemoteSessionBridge}
+        hostId={hostId}
+        connected
+        project={project}
+        todo={todo}
+        onCreated={async () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "No Project" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() =>
+      expect(api.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "create-chat-thread" }),
+      ),
+    );
+    const createCommand = api.execute.mock.calls
+      .map(([command]) => command)
+      .find((command) => command.kind === "create-chat-thread");
+    expect(createCommand).not.toHaveProperty("projectId");
+  });
+
+  it("refuses an unknown selected Project before creating a thread", async () => {
+    render(
+      <RemoteTodoDraft
+        bridge={{ connection: () => undefined } as RemoteSessionBridge}
+        hostId={hostId}
+        connected
+        project={project}
+        todo={todo}
+        onCreated={async () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Send to unknown Project" }));
+
+    expect(await screen.findByText("The selected Project is no longer available.")).toBeVisible();
+    expect(api.execute).not.toHaveBeenCalled();
+  });
+
+  it("does not show an unsent warning when the timed-out first send is in the thread", async () => {
+    let submissionId: unknown;
+    api.execute.mockImplementation(async (command) => {
+      const thread = { id: threadId, version: 1 };
+      if (command.kind === "create-chat-thread") return { kind: "thread-created", thread };
+      if (command.kind === "change-chat-provider")
+        return { kind: "thread-updated", thread: { ...thread, version: 2 } };
+      submissionId = command.submissionId;
+      throw new Error("deadline exceeded");
+    });
+    api.thread.mockImplementation(async () => ({
+      thread: { id: threadId, version: 3 },
+      turns: [{ submissionId }],
+    }));
+    render(
+      <RemoteTodoDraft
+        bridge={{ connection: () => undefined } as RemoteSessionBridge}
+        hostId={hostId}
+        connected
+        project={project}
+        todo={todo}
+        onCreated={async () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(api.thread).toHaveBeenCalledWith(threadId));
+    expect(screen.queryByText(/first message could not be confirmed/)).toBeNull();
+    expect(screen.queryByLabelText("Unsent first message")).toBeNull();
+  });
+
+  it("keeps the first message draft and warning when a timed-out send cannot be confirmed", async () => {
+    api.execute.mockImplementation(async (command) => {
+      const thread = { id: threadId, version: 1 };
+      if (command.kind === "create-chat-thread") return { kind: "thread-created", thread };
+      if (command.kind === "change-chat-provider")
+        return { kind: "thread-updated", thread: { ...thread, version: 2 } };
+      throw new Error("deadline exceeded");
+    });
+    api.thread.mockResolvedValue({ thread: { id: threadId, version: 3 }, turns: [] });
+    render(
+      <RemoteTodoDraft
+        bridge={{ connection: () => undefined } as RemoteSessionBridge}
+        hostId={hostId}
+        connected
+        project={project}
+        todo={todo}
+        onCreated={async () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByText(/first message could not be confirmed/)).toBeVisible();
+    expect(screen.getByLabelText("Unsent first message")).toHaveValue("Do it");
   });
 
   it("keeps the draft and writes no link when the destination refuses creation", async () => {

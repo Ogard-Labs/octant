@@ -20,10 +20,10 @@ export function todoThreadKey(link: {
 }
 
 /**
- * The row's badge, read from the window's own thread rows: the list host takes
- * no part, and no host projects another's threads (docs/design/todos.md). Done
- * wins, then a running turn, then a wait on the person, then the pull request
- * a Code thread opened.
+ * The row's badge is read from each thread host's navigation rows, including
+ * already-authorized paired hosts; the list host takes no part. Done wins,
+ * then a running turn, then a wait on the person, then the pull request a Code
+ * thread opened.
  */
 export function todoThreadState(row: ChatThreadNavigationItem): TodoThreadState {
   const title = row.title;
@@ -50,15 +50,17 @@ export function todoThreadStates(
   hostId: string | undefined,
   rows: ReadonlyArray<{
     readonly mode: OctantMode;
+    readonly hostId?: string;
     readonly rows: ReadonlyArray<ChatThreadNavigationItem>;
   }>,
 ): ReadonlyMap<string, TodoThreadState> {
   const states = new Map<string, TodoThreadState>();
-  if (hostId === undefined) return states;
   for (const group of rows) {
+    const rowHostId = group.hostId ?? hostId;
+    if (rowHostId === undefined) continue;
     for (const row of group.rows) {
       states.set(
-        todoThreadKey({ hostId, mode: group.mode, threadId: row.threadId }),
+        todoThreadKey({ hostId: rowHostId, mode: group.mode, threadId: row.threadId }),
         todoThreadState(row),
       );
     }

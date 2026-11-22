@@ -123,6 +123,11 @@ Every person has one **list host**.
   this host refuses every change to its own list as `kept-elsewhere`, so a
   stale window or a phone paired here cannot add a to-do nobody is shown. A
   window that cannot read the choice shows no list rather than this host's.
+  A phone does not read `/api/todos/list-host`: after the existing person check,
+  `GET /api/todos` resolves the effective list host and returns this host's view
+  only when it keeps the list, otherwise using the existing `kept-elsewhere`
+  refusal. The read does not return the host-choice payload or forward to the
+  chosen computer.
   The choice names the other host by its
   stable id and last-seen name and grants nothing there: a window reaches it
   through its own pairing (the desktop's paired-computer channel admits
@@ -270,7 +275,10 @@ A to-do may be started again; each start adds a link.
   opens it in place for the title, notes, tags and this host's Projects; a
   link to another host's Project is kept as it is. Rows drag to reorder, and
   Move up and Move down do the same from the keyboard. Delete asks first and
-  removes the to-do from every device; Drop keeps it out of the list.
+  removes the to-do from every device; Drop keeps it out of the list. The badge
+  reads each linked thread's own navigation row, including an existing
+  authorized read from a paired host, keyed by that host's id; the list host
+  does not project another computer's thread state.
 - **Everywhere else.** The command palette offers New to-do and Open To-dos.
   New to-do, also on Mod+Shift+L (Settings › Keybindings), opens quick
   add in a dialog over the current page. The phone app shows the
@@ -285,6 +293,10 @@ A to-do may be started again; each start adds a link.
   mode), or Chat when none is there. When the computer answers with the
   thread, the phone links it; a link the list did not take reads "Thread
   started, not linked" on the row, and the same long press offers Link.
+  A refused or unavailable phone read clears cached rows and is not shown as an
+  empty list. Quick-add text stays in the field across refusal and explicit
+  host or pairing changes; mutations wait for a successful read, and switching
+  never sends the draft automatically.
 - **Empty.** A list that was read and holds no to-do draws no toolbar: under
   quick add the page shows the shared empty state centred, with the To-dos
   mark, "No to-dos yet" and one sentence on what goes here and that a to-do can

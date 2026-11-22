@@ -11,6 +11,7 @@ import {
   decodeCodeAttachmentId,
   decodeCodeAttachmentMediaType,
   decodeChatAttachmentId,
+  decodeChatSubmissionId,
   decodeWorkAttachmentId,
   decodeWorkAttachmentMediaType,
   decodeWorkThreadId,
@@ -100,6 +101,13 @@ export function RemoteTodoDraft(props: {
   const project =
     projects.allProjects.find((candidate) => String(candidate.id) === String(props.project?.id)) ??
     props.project;
+  const projectForSelection = (projectId: string | undefined) => {
+    if (projectId === undefined) return undefined;
+    return (
+      projects.allProjects.find((candidate) => String(candidate.id) === String(projectId)) ??
+      (project !== undefined && String(project.id) === String(projectId) ? project : undefined)
+    );
+  };
   const refuseCreate = (message: string): false => {
     setError(message);
     return false;
@@ -203,7 +211,7 @@ export function RemoteTodoDraft(props: {
   };
   const create: DraftThreadWorkspaceProps["onCreateThread"] = async (
     prompt,
-    _projectId,
+    selectedProjectId,
     _outcome,
     images,
     _mentions,
@@ -217,17 +225,26 @@ export function RemoteTodoDraft(props: {
     _terminalSession,
     workingFolder,
   ) => {
-    if (project === undefined || project.type === "code" || model === undefined || !props.connected)
-      return false;
+    if (model === undefined || !props.connected) return false;
+    const selectedProject = projectForSelection(
+      selectedProjectId === undefined ? undefined : String(selectedProjectId),
+    );
+    if (selectedProjectId !== undefined && selectedProject === undefined)
+      return refuseCreate("The selected Project is no longer available.");
+    if (mode !== "chat" && selectedProject === undefined)
+      return refuseCreate("The Project is no longer available.");
+    if (selectedProject !== undefined && selectedProject.type !== mode)
+      return refuseCreate("The selected Project is not available in this mode.");
+    if (selectedProject?.type === "code") return false;
 
     setBusy(true);
     setError(undefined);
     try {
-      if (project.type === "chat") {
+      if (mode === "chat") {
         const created = await clients.chat.execute({
           kind: "create-chat-thread",
           title: prompt.slice(0, 60),
-          projectId: project.id,
+          ...(selectedProject === undefined ? {} : { projectId: selectedProject.id }),
         });
         if (created.kind !== "thread-created")
           return refuseCreate("The host refused to create the thread.");
@@ -256,23 +273,43 @@ export function RemoteTodoDraft(props: {
             });
             attachmentIds.push(attachment.id);
           }
-          const sent = await clients.chat.execute({
-            kind: "send-chat-turn",
-            threadId: selected.thread.id,
-            expectedVersion: selected.thread.version,
-            prompt,
-            ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
-          });
-          if (sent.kind !== "turn-created") keepUnsentPrompt(prompt);
+          const currentVersion =
+            attachmentIds.length === 0
+              ? selected.thread.version
+              : (await clients.chat.thread(selected.thread.id)).thread.version;
+          const submissionId = decodeChatSubmissionId(crypto.randomUUID());
+          try {
+            const sent = await clients.chat.execute({
+              kind: "send-chat-turn",
+              threadId: selected.thread.id,
+              expectedVersion: currentVersion,
+              submissionId,
+              prompt,
+              ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
+            });
+            if (sent.kind !== "turn-created") keepUnsentPrompt(prompt);
+          } catch {
+            const confirmed = await clients.chat
+              .thread(created.thread.id)
+              .then((view) =>
+                view.turns.some(
+                  (turn) =>
+                    turn.submissionId !== undefined &&
+                    String(turn.submissionId) === String(submissionId),
+                ),
+              )
+              .catch(() => false);
+            if (!confirmed) keepUnsentPrompt(prompt);
+          }
         } catch {
           keepUnsentPrompt(prompt);
         }
-      } else if (project.type === "work") {
+      } else if (selectedProject?.type === "work") {
         const created = await clients.workThread.execute({
           kind: "create-work-thread",
           threadId: decodeWorkThreadId(crypto.randomUUID()),
-          projectId: project.id,
-          bindingRevisionId: project.bindingRevisionId,
+          projectId: selectedProject.id,
+          bindingRevisionId: selectedProject.bindingRevisionId,
           title: prompt.slice(0, 60),
           providerInstanceId: model.providerInstanceId,
           modelId: model.modelId,
@@ -308,8 +345,8 @@ export function RemoteTodoDraft(props: {
             ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
             authority: {
               hostId: LOCAL_HOST_ID,
-              projectId: project.id,
-              bindingRevisionId: project.bindingRevisionId,
+              projectId: selectedProject.id,
+              bindingRevisionId: selectedProject.bindingRevisionId,
               ...(created.thread.workingFolderId === undefined
                 ? {}
                 : { workingFolderId: created.thread.workingFolderId }),
@@ -352,7 +389,7 @@ export function RemoteTodoDraft(props: {
         />
       </>
     );
-  if (project === undefined)
+  if (project === undefined && mode !== "chat")
     return <OctantAlert tone="warning">The Project is no longer available.</OctantAlert>;
   return (
     <>
@@ -364,10 +401,11 @@ export function RemoteTodoDraft(props: {
       )}
       <DraftThreadWorkspace
         mode={mode}
-        projectId={project.id}
-        projectName={project.name}
-        {...(project.type === "chat" ? {} : { projectRoot: project.binding.canonicalRoot })}
-        projects={[project]}
+        {...(project === undefined ? {} : { projectId: project.id, projectName: project.name })}
+        {...(project === undefined || project.type === "chat"
+          ? {}
+          : { projectRoot: project.binding.canonicalRoot })}
+        projects={project === undefined ? [] : [project]}
         providerGroups={groups}
         {...(model === undefined
           ? {}
@@ -379,7 +417,7 @@ export function RemoteTodoDraft(props: {
         onCreateThread={create}
         onCreateCodeThread={createCode}
         codeExecute={code.execute}
-        {...(code.bootstrap === undefined || project.type !== "code"
+        {...(code.bootstrap === undefined || project?.type !== "code"
           ? {}
           : {
               defaultPermissionMode: defaultPermissionModeFor({

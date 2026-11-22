@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import type { MobileInboxRow } from "@octant/client-runtime";
 import type { Todo } from "@octant/contracts/todos";
@@ -8,7 +8,11 @@ import { TabBar, type MobileTabId } from "../ui/TabBar";
 import { MOBILE_COPY, MOBILE_TAB_LABELS, mobileHostHealthLabel, type MobileRouteId } from "../copy";
 import { AgentsListScreen, type AgentListView } from "../inbox/AgentsListScreen";
 import { TodosScreen } from "../todos/TodosScreen";
-import type { MobileStartedThread } from "../todos/todosPresentation";
+import {
+  mobileTodoDraftAfterHostChange,
+  type MobileStartedThread,
+  type MobileTodoQuickAddDraft,
+} from "../todos/todosPresentation";
 import { InboxHomeScreen } from "../inbox/InboxHomeScreen";
 import { backMobileHomeView, type MobileHomeView } from "../inbox/homeView";
 import type { MobileThreadArrangement } from "../inbox/threadArrangement";
@@ -415,6 +419,10 @@ export function RootNavigator(props: RootNavigatorProps) {
   const [hostEntryMode, setHostEntryMode] = useState<"manage" | "add" | "scan">("manage");
   // A Start pressed on To-dos, waiting for the Inbox's new-thread sheet to take it.
   const [todoStart, setTodoStart] = useState<Todo | undefined>();
+  const [todoDraft, setTodoDraft] = useState<MobileTodoQuickAddDraft>(() => ({
+    id: globalThis.crypto.randomUUID(),
+    text: "",
+  }));
   // Threads a Start made that the list did not take, by to-do id. They stay on
   // the phone until the person links them again; the threads are unaffected.
   const [unlinkedTodoStarts, setUnlinkedTodoStarts] = useState<
@@ -438,9 +446,47 @@ export function RootNavigator(props: RootNavigatorProps) {
     hosts,
     hostsLoaded,
     hostsError,
+    transport,
     transportForHost,
     transports,
   } = useMobileSession();
+  const activeRoute = useRef(props.activeRoute);
+  activeRoute.current = props.activeRoute;
+  const todoHostId = transport?.hostId;
+  const currentTodoHostId = useRef(todoHostId);
+  currentTodoHostId.current = todoHostId;
+  const previousTodoHostId = useRef(todoHostId);
+  useEffect(() => {
+    if (previousTodoHostId.current !== todoHostId) {
+      previousTodoHostId.current = todoHostId;
+      setTodoDraft((draft) =>
+        mobileTodoDraftAfterHostChange(draft, globalThis.crypto.randomUUID()),
+      );
+    }
+  }, [todoHostId]);
+  const changeTodoDraft = useCallback((text: string) => {
+    setTodoDraft((draft) =>
+      draft.text === text ? draft : { id: globalThis.crypto.randomUUID(), text },
+    );
+  }, []);
+  const completeTodoDraft = useCallback(
+    (draftId: string, submittedText: string, hostId: string | undefined) => {
+      setTodoDraft((draft) => {
+        if (
+          activeRoute.current !== "todos" ||
+          currentTodoHostId.current !== hostId ||
+          draft.id !== draftId
+        ) {
+          return draft;
+        }
+        return {
+          id: globalThis.crypto.randomUUID(),
+          text: draft.text === submittedText ? "" : draft.text,
+        };
+      });
+    },
+    [],
+  );
   usePhoneNotificationRotation({
     enabled: environment.kind === "live",
     book: mobilePushRegistrationBook(),
@@ -564,6 +610,9 @@ export function RootNavigator(props: RootNavigatorProps) {
       {props.activeRoute === "todos" ? (
         <TodosScreen
           onBack={() => props.onSelectRoute("home")}
+          draft={todoDraft}
+          onDraftChange={changeTodoDraft}
+          onDraftSubmitted={completeTodoDraft}
           onLinked={recordTodoLink}
           onStart={(todo) => {
             setTodoStart(todo);

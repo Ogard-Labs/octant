@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ListenerTrustRefused } from "@octant/client-runtime/remote-listener-trust";
+import { MAX_WORK_ATTACHMENT_BYTES } from "@octant/contracts";
+import { MAX_CODE_ATTACHMENT_BYTES } from "@octant/contracts/code";
 import {
   installPairedComputerIpcHandlers,
   PAIRED_COMPUTER_CHANNELS,
@@ -307,6 +309,49 @@ describe("a window's request to a paired computer", () => {
       const { answer, fetchFor } = await ask({ ...hello, ...change });
       expect(answer.status, JSON.stringify(change)).toBe("refused");
       expect(fetchFor).not.toHaveBeenCalled();
+    }
+  });
+
+  it("allows a bounded 10 MiB only for destination attachment uploads", async () => {
+    const destinations = [
+      ["POST", "/api/chat/attachments", MAX_CODE_ATTACHMENT_BYTES],
+      ["PUT", "/api/code/attachments", MAX_CODE_ATTACHMENT_BYTES],
+      ["PUT", "/api/work/attachments", MAX_WORK_ATTACHMENT_BYTES],
+    ] as const;
+    const overEightMiB = new Uint8Array(8 * 1_024 * 1_024 + 1);
+    for (const [method, path, limit] of destinations) {
+      const accepted = await ask({ ...hello, method, path, body: overEightMiB });
+      expect(accepted.answer.status).toBe("answered");
+      expect(accepted.sent).toHaveBeenCalledOnce();
+
+      const boundary = await ask({
+        ...hello,
+        method,
+        path,
+        body: new Uint8Array(limit),
+      });
+      expect(boundary.answer.status).toBe("answered");
+
+      const tooLarge = await ask({
+        ...hello,
+        method,
+        path,
+        body: new Uint8Array(limit + 1),
+      });
+      expect(tooLarge.answer.status).toBe("refused");
+      expect(tooLarge.fetchFor).not.toHaveBeenCalled();
+    }
+
+    for (const [method, path] of [
+      ["POST", "/api/chat/commands"],
+      ["GET", "/api/code/attachments"],
+      ["DELETE", "/api/code/attachments"],
+      ["DELETE", "/api/work/attachments"],
+      ["POST", "/api/work/turns"],
+    ] as const) {
+      const refused = await ask({ ...hello, method, path, body: overEightMiB });
+      expect(refused.answer.status).toBe("refused");
+      expect(refused.fetchFor).not.toHaveBeenCalled();
     }
   });
 

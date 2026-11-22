@@ -3007,7 +3007,8 @@ function LaunchedShell(
     todoList.read.status === "loading" || todoList.read.view === undefined
       ? 0
       : countTodos(todoList.read.view.todos).waiting;
-  const remoteTodoProjects = useRemoteTodoProjects(hostFederationTransports, federationRevision);
+  const remoteTodoData = useRemoteTodoProjects(hostFederationTransports, federationRevision);
+  const remoteTodoProjects = remoteTodoData.projects;
   const [remoteTodo, setRemoteTodo] = useState<{
     readonly hostId: string;
     readonly destination?: RemoteTodoProject;
@@ -3032,12 +3033,18 @@ function LaunchedShell(
         { mode: "chat", rows: chatController.navigation },
         { mode: "work", rows: workNavigation.navigation },
         { mode: "code", rows: codeController.navigation },
+        ...remoteTodoData.threadRows.flatMap((host) => [
+          { hostId: host.hostId, mode: "chat" as const, rows: host.chat },
+          { hostId: host.hostId, mode: "work" as const, rows: host.work },
+          { hostId: host.hostId, mode: "code" as const, rows: host.code },
+        ]),
       ]),
     [
       todoThisHostId,
       chatController.navigation,
       workNavigation.navigation,
       codeController.navigation,
+      remoteTodoData.threadRows,
     ],
   );
   const todosPage: TodosPageProps = {

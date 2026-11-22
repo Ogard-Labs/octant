@@ -153,6 +153,18 @@ export class TodoStore {
     };
   }
 
+  read(): TodoResult {
+    const keptOn = this.#effectiveListHost();
+    if (keptOn.kind === "other-host") {
+      return decodeTodoResult({
+        kind: "todo-refused",
+        reason: "kept-elsewhere",
+        message: `${keptOn.name} keeps the to-do list, so it is changed there.`,
+      });
+    }
+    return this.view();
+  }
+
   setDefaultListHost(
     read: () => Extract<TodoListHostChoice, { kind: "other-host" }> | undefined,
   ): void {

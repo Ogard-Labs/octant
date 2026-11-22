@@ -223,6 +223,53 @@ describe("the person's to-do list", () => {
     expect(h.store.view().todos.map((todo) => todo.title)).toEqual(["Mine"]);
   });
 
+  it("authenticates before resolving a list host or journaling its default", async () => {
+    let resolutions = 0;
+    const h = host(() => {
+      resolutions += 1;
+      return {
+        kind: "other-host",
+        hostId: decodeStableHostId("22222222-2222-4222-8222-222222222222"),
+        name: "Studio Mac",
+      };
+    });
+
+    const response = await h.fromDevice("hub-roster", "/api/todos");
+
+    expect(response?.status).toBe(403);
+    expect(resolutions).toBe(0);
+    expect(h.failing.seen).toBe(0);
+  });
+
+  it("returns the normal local view but refuses a phone read when another host keeps the list", async () => {
+    const local = host();
+    await local.fromWindow("/api/todos/commands", {
+      kind: "add-todo",
+      todoId: TODO_1,
+      title: "Local list",
+    });
+    const localView = await list(await local.fromWindow("/api/todos"));
+    expect(localView.todos.map((todo) => todo.title)).toEqual(["Local list"]);
+
+    const other = host(() => ({
+      kind: "other-host",
+      hostId: decodeStableHostId("22222222-2222-4222-8222-222222222222"),
+      name: "Studio Mac",
+    }));
+    const refused = await other.fromDevice("host-person", "/api/todos");
+    expect(refused?.status).toBe(409);
+    const body = await refused?.json();
+    expect(body).toMatchObject({
+      kind: "todo-refused",
+      reason: "kept-elsewhere",
+      message: "Studio Mac keeps the to-do list, so it is changed there.",
+    });
+    expect(body).not.toHaveProperty("hostId");
+    expect(other.failing.seen).toBe(1);
+    await other.fromDevice("host-person", "/api/todos");
+    expect(other.failing.seen).toBe(1);
+  });
+
   it("keeps the old order everywhere when a renumbering move fails partway", () => {
     const h = host();
     const ids = [1, 2, 3, 4].map((n) => `00000000-0000-4000-8000-00000000010${String(n)}`);

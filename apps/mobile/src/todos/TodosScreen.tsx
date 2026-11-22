@@ -15,6 +15,8 @@ import {
   mobileTodoDetail,
   mobileTodoLinkCommand,
   mobileTodoSections,
+  mobileTodoViewForRead,
+  type MobileTodoQuickAddDraft,
   type MobileStartedThread,
 } from "./todosPresentation";
 
@@ -23,6 +25,9 @@ const REREAD_MS = 30_000;
 
 export interface TodosScreenProps {
   readonly onBack: () => void;
+  readonly draft: MobileTodoQuickAddDraft;
+  readonly onDraftChange: (text: string) => void;
+  readonly onDraftSubmitted: (draftId: string, text: string, hostId: string | undefined) => void;
   /** Opens the new-thread sheet with the to-do in it; nothing starts until the person sends. */
   readonly onStart: (todo: Todo) => void;
   /** Threads a Start made that the list did not take, by to-do id. */
@@ -41,11 +46,9 @@ export function TodosScreen(props: TodosScreenProps) {
   const { transport, hosts } = useMobileSession();
   const [view, setView] = useState<TodoListView>();
   const [problem, setProblem] = useState<string>();
-  const [text, setText] = useState("");
+  const text = props.draft.text;
   const [busy, setBusy] = useState(false);
   const [actionTodo, setActionTodo] = useState<Todo>();
-  // One id per draft, kept across failed sends so a resent add lands once.
-  const draftId = useRef(globalThis.crypto.randomUUID());
   // Every answer is checked against the newest request made to the computer
   // in front: a slower read, or any reply from a computer the phone has since
   // left, is dropped rather than drawn under the new computer's name.
@@ -75,10 +78,11 @@ export function TodosScreen(props: TodosScreenProps) {
     const ticket = ++reads.current;
     const result = await readMobileTodos(transport);
     if (shownFor !== generation.current || ticket !== reads.current) return;
+    setView(mobileTodoViewForRead(result));
     if (result.status === "loaded") {
-      setView(result.view);
       setProblem(undefined);
     } else {
+      setActionTodo(undefined);
       setProblem(
         result.status === "refused" ? result.refusal.message : failureText(result.reason, false),
       );
@@ -90,11 +94,9 @@ export function TodosScreen(props: TodosScreenProps) {
     generation.current += 1;
     setView(undefined);
     setProblem(undefined);
-    setText("");
     setBusy(false);
     setActionTodo(undefined);
     sending.current = false;
-    draftId.current = globalThis.crypto.randomUUID();
     void load();
     const timer = setInterval(() => {
       if (AppState.currentState === "active") void load();
@@ -103,6 +105,7 @@ export function TodosScreen(props: TodosScreenProps) {
       if (state === "active") void load();
     });
     return () => {
+      generation.current += 1;
       clearInterval(timer);
       subscription.remove();
     };
@@ -110,7 +113,7 @@ export function TodosScreen(props: TodosScreenProps) {
 
   const send = async (command: TodoCommand): Promise<boolean> => {
     // A ref, not the busy state: two taps in one tick both saw busy as false.
-    if (transport === undefined || sending.current) return false;
+    if (transport === undefined || view === undefined || sending.current) return false;
     sending.current = true;
     setBusy(true);
     const shownFor = generation.current;
@@ -124,11 +127,12 @@ export function TodosScreen(props: TodosScreenProps) {
     if (shownFor !== generation.current) return false;
     sending.current = false;
     setBusy(false);
+    setView(mobileTodoViewForRead(result));
     if (result.status === "loaded") {
-      setView(result.view);
       setProblem(undefined);
       return true;
     }
+    setActionTodo(undefined);
     setProblem(
       result.status === "refused" ? result.refusal.message : failureText(result.reason, true),
     );
@@ -136,18 +140,20 @@ export function TodosScreen(props: TodosScreenProps) {
   };
 
   const add = async () => {
-    if (sending.current) return;
-    const draft = mobileQuickAdd(text, draftId.current);
+    if (sending.current || transport === undefined || view === undefined) return;
+    const draft = mobileQuickAdd(text, props.draft.id);
     if (draft.status === "empty") return;
     if (draft.status === "too-long") {
       setProblem(MOBILE_COPY.todosTooLong);
       return;
     }
     const submitted = text;
+    const submittedDraftId = props.draft.id;
+    const submittedHostId = transportId;
+    const shownFor = generation.current;
     if (await send(draft.command)) {
-      // Text typed while the add was in flight is the next to-do; keep it.
-      setText((current) => (current === submitted ? "" : current));
-      draftId.current = globalThis.crypto.randomUUID();
+      if (shownFor !== generation.current) return;
+      props.onDraftSubmitted(submittedDraftId, submitted, submittedHostId);
     }
   };
 
@@ -221,8 +227,8 @@ export function TodosScreen(props: TodosScreenProps) {
           accessibilityLabel={MOBILE_COPY.todosNew}
           editable={transport !== undefined}
           onChangeText={(next) => {
-            setText(next);
-            setProblem(undefined);
+            props.onDraftChange(next);
+            if (view !== undefined) setProblem(undefined);
           }}
           onSubmitEditing={() => void add()}
           placeholder={MOBILE_COPY.todosNew}

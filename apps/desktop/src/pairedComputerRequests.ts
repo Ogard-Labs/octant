@@ -19,6 +19,8 @@
 // A computer forgotten while a request is in flight answers nothing.
 
 import { createListenerFetch } from "@octant/client-runtime/remote-listener-tls-node";
+import { MAX_CODE_ATTACHMENT_BYTES } from "@octant/contracts/code";
+import { MAX_WORK_ATTACHMENT_BYTES } from "@octant/contracts";
 import {
   LISTENER_TRUST_REFUSAL_COPY,
   ListenerTrustRefused,
@@ -255,7 +257,16 @@ function decodeRequest(value: unknown, pins: PairedComputerPins): DecodedRequest
     if (typeof body === "string") bytes = new TextEncoder().encode(body);
     else if (body instanceof Uint8Array) bytes = new Uint8Array(body);
     else return refuse("Octant refused that request's body.");
-    if (bytes.byteLength > PAIRED_COMPUTER_REQUEST_LIMITS.requestBodyBytes) {
+    const pathname = new URL(path as string, origin).pathname;
+    const limit =
+      method === "POST" && pathname === "/api/chat/attachments"
+        ? MAX_CODE_ATTACHMENT_BYTES
+        : method === "PUT" && pathname === "/api/code/attachments"
+          ? MAX_CODE_ATTACHMENT_BYTES
+          : method === "PUT" && pathname === "/api/work/attachments"
+            ? MAX_WORK_ATTACHMENT_BYTES
+            : PAIRED_COMPUTER_REQUEST_LIMITS.requestBodyBytes;
+    if (bytes.byteLength > limit) {
       return refuse("That request is too large to send to another computer.");
     }
     if (method === "GET" && bytes.byteLength > 0) {

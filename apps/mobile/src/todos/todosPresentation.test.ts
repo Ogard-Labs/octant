@@ -4,9 +4,11 @@ import {
   mobileQuickAdd,
   mobileTickCommand,
   mobileTodoDetail,
+  mobileTodoDraftAfterHostChange,
   mobileTodoLinkCommand,
   mobileTodoSections,
   mobileTodoStartDraft,
+  mobileTodoViewForRead,
 } from "./todosPresentation";
 
 const AT = "2026-11-14T10:00:00.000Z";
@@ -34,6 +36,18 @@ function todos(...rows: ReadonlyArray<Record<string, unknown>>) {
 }
 
 describe("the phone's to-do list", () => {
+  it("keeps an empty local list distinct from a refused read", () => {
+    const empty = decodeTodoListView({ kind: "todo-list", hostId: HOST, todos: [] });
+    expect(mobileTodoViewForRead({ status: "loaded", view: empty })).toEqual(empty);
+    expect(mobileTodoViewForRead({ status: "refused" })).toBeUndefined();
+  });
+
+  it("preserves unsent quick-add text and renews its id on host change", () => {
+    expect(
+      mobileTodoDraftAfterHostChange({ id: "old-draft", text: "Keep this note" }, "new-draft"),
+    ).toEqual({ id: "new-draft", text: "Keep this note" });
+  });
+
   it("shows open to-dos, then the ticked-off ones, and leaves dropped ones out", () => {
     const sections = mobileTodoSections(
       todos(

@@ -57,7 +57,7 @@ function statusFor(result: TodoResult): number {
 
 export interface TodoRouteDependencies {
   readonly feed: Pick<MachineChangeFeed, "head" | "epoch" | "subscribe">;
-  readonly store: Pick<TodoStore, "view" | "change" | "listHost" | "chooseListHost">;
+  readonly store: Pick<TodoStore, "read" | "change" | "listHost" | "chooseListHost">;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
 }
@@ -185,7 +185,8 @@ export function createTodoRouteHandler(dependencies: TodoRouteDependencies) {
       }
     }
     if (url.pathname === TODOS_PATH && request.method === "GET") {
-      return json(dependencies.store.view(), 200, origin);
+      const result = dependencies.store.read();
+      return json(result, statusFor(result), origin);
     }
     if (url.pathname === TODO_COMMAND_PATH && request.method === "POST") {
       let command: TodoCommand;
