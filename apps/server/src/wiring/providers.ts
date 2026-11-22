@@ -200,6 +200,8 @@ import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
 import { GeneratedImageStore } from "../image/generatedImageStore";
 import { ImageJobService } from "../image/imageJobService";
+import { VideoClipStore } from "../video/videoClipStore";
+import { VideoJobService } from "../video/videoJobService";
 import { createLocalUsageHistoryRouteHandler } from "../localUsageHistoryRoutes";
 import {
   createLocalUsageHistorySourceForDriver,
@@ -2710,6 +2712,38 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
     });
     yield* Effect.promise(() => imageJobService.reconcileInterruptedJobs());
+    // Video generation runs on the same provider credentials and spend
+    // ceilings; restart recovery resumes sent jobs and retries owed removals.
+    const videoJobService = new VideoJobService({
+      journal: persistence.journal,
+      projection: persistence.videoJobProjection,
+      clips: new VideoClipStore(persistence.dataDirectory),
+      readProviderInstance: (id) => persistence.readProviderInstance(id),
+      listProviderInstances: () => persistence.readProviderInstances(),
+      credentialResolver:
+        credentialResolver ??
+        ({
+          has: async () => false,
+          resolve: async () => "",
+        } as const),
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      spendCeiling: spendCeilingService,
+      resolveThreadProjectId: ({ threadType, threadId }) => {
+        if (threadType === "chat-thread") {
+          const projectId = persistence.readChatThread(decodeChatThreadId(threadId))?.projectId;
+          return projectId === undefined ? undefined : String(projectId);
+        }
+        if (threadType === "code-thread") {
+          const projectId = persistence.readCodeThread(decodeCodeThreadId(threadId))?.projectId;
+          return projectId === undefined ? undefined : String(projectId);
+        }
+        const projectId = workThreadProjection.read(decodeWorkThreadId(threadId))?.projectId;
+        return projectId === undefined ? undefined : String(projectId);
+      },
+    });
+    yield* Effect.promise(() => videoJobService.recover());
     return {
       providerAvailabilityMarks,
       bindCodeToolHost,
@@ -2739,6 +2773,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       providerToolingRoutes,
       generatedImageStore,
       imageJobService,
+      videoJobService,
       localPluginImportReceipts,
       localUsageHistoryRoutes,
       managedCodeThreadCreation,
