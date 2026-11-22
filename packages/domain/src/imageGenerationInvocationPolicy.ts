@@ -13,6 +13,7 @@ import {
   type OpenAiImageSize,
   type ProjectImageGenerationChoice,
   type OutsideImageProviderInstance,
+  type OutsideProviderDriverListing,
   type ProviderInstance,
   type ThreadExportAttachment,
 } from "@octant/contracts";
@@ -257,6 +258,36 @@ export function imageGenerationWithoutAsking(input: {
     }
   }
   return { kind: "ask", keptUnavailable: false };
+}
+
+/**
+ * The renderer's reading of which outside image profiles the host admits: the
+ * host lists only the outside drivers it admits, so a profile is admitted
+ * when an image listing names exactly the package, component, version and
+ * digest it binds, and no crash-limit hold is journaled at that digest. The
+ * host decides again before any job is reserved or sent.
+ */
+export function admitsListedOutsideImageDriver(
+  listings: ReadonlyArray<OutsideProviderDriverListing> | undefined,
+): (instance: OutsideImageProviderInstance) => boolean {
+  return (instance) => {
+    const bound = instance.configuration.driver;
+    if (
+      instance.driverQuarantine !== undefined &&
+      String(instance.driverQuarantine.digest) === String(bound.digest)
+    ) {
+      return false;
+    }
+    return (listings ?? []).some(
+      (listing) =>
+        listing.imageGeneration !== undefined &&
+        String(listing.driver.extensionId) === String(bound.extensionId) &&
+        String(listing.driver.packageId) === String(bound.packageId) &&
+        String(listing.driver.componentId) === String(bound.componentId) &&
+        String(listing.driver.version) === String(bound.version) &&
+        String(listing.driver.digest) === String(bound.digest),
+    );
+  };
 }
 
 export function hasEligibleImageProfile(

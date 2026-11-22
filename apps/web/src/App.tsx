@@ -54,6 +54,7 @@ import {
   activePaneContext,
   defaultPermissionModeFor,
   listEligibleImageProfiles,
+  admitsListedOutsideImageDriver,
   permissionModeOf,
 } from "@octant/domain";
 import { SpeechCapabilityProvider } from "./voice/SpeechCapabilityContext";
@@ -4215,6 +4216,7 @@ function LaunchedShell(
         : listEligibleImageProfiles(
             providerController.snapshot.instances,
             imageGenerationCustomSources ?? [],
+            admitsListedOutsideImageDriver(providerController.snapshot.outsideDrivers),
           ),
     [providerController.snapshot, imageGenerationCustomSources],
   );

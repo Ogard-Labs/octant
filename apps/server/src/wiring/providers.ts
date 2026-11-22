@@ -56,6 +56,7 @@ import {
   type UtcTimestamp,
   decodeProjectId,
   decodeUtcTimestamp,
+  isOutsideDriverProviderInstance,
 } from "@octant/contracts";
 import type { McpPlanServerProvider } from "@octant/contracts/mcp-plan-read-only";
 import type { BlockableToolProvider } from "@octant/contracts/blocked-tools";
@@ -286,6 +287,7 @@ import {
   providerKeepsConversation,
   providerOwnSearchOrigin,
   resolveModelContextWindow,
+  isOutsideDriverQuarantined,
 } from "@octant/domain";
 import { ChatAttachmentStore } from "../chat/chatAttachmentStore";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart, ServerStartupFailed } from "./serverShape";
@@ -743,7 +745,9 @@ export function journaledOutsideDriverHold(input: {
     holds: (instanceId, digest) => {
       const instance = input.readProviderInstance(instanceId);
       const hold =
-        instance?.driverKind === "outside-harness-endpoint" ? instance.driverQuarantine : undefined;
+        instance !== undefined && isOutsideDriverProviderInstance(instance)
+          ? instance.driverQuarantine
+          : undefined;
       return hold !== undefined && String(hold.digest) === String(digest);
     },
     // The owner's own hold refuses until this host stops even if the journal
@@ -2701,7 +2705,10 @@ export function wireProviders(deps: ProvidersDependencies) {
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
       spendCeiling: spendCeilingService,
       outsideImageDrivers: {
-        admits: (instance) => outsideDriverAdmission.isAdmitted(instance),
+        // A crash-limit hold journaled at the bound digest refuses before
+        // anything is reserved, and outlives a restart.
+        admits: (instance) =>
+          !isOutsideDriverQuarantined(instance) && outsideDriverAdmission.isAdmitted(instance),
         declaredUsdMicrosPerImage: (instance, modelId) =>
           outsideDriverAdmission
             .imageDriverModels(instance.configuration.driver)

@@ -12,6 +12,7 @@ import type { ShellSettings } from "@octant/contracts/shell";
 import {
   isImageProfileDriverKind,
   listEligibleImageProfiles,
+  admitsListedOutsideImageDriver,
   listImageSourceEligibleInstances,
   resolveImageCustomSources,
 } from "@octant/domain";
@@ -66,7 +67,11 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
 
   const apply = (customSources: ReadonlyArray<ImageGenerationCustomSource>) =>
     props.onSettingsChange({ imageGeneration: { ...props.settings, customSources } });
-  const readyProfiles = listEligibleImageProfiles(instances, props.settings.customSources);
+  const readyProfiles = listEligibleImageProfiles(
+    instances,
+    props.settings.customSources,
+    admitsListedOutsideImageDriver(props.providerSnapshot?.outsideDrivers),
+  );
   const firstReady = readyProfiles[0]?.displayName;
 
   const imageProviderSettings =

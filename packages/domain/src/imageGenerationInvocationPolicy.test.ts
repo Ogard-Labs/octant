@@ -8,6 +8,7 @@ import {
   imageGenerationWithoutAsking,
   listCustomImageProfiles,
   listEligibleImageProfiles,
+  admitsListedOutsideImageDriver,
 } from "./imageGenerationInvocationPolicy";
 
 const timestamp = "2026-08-28T12:00:00.000Z";
@@ -137,6 +138,60 @@ describe("eligible image profiles", () => {
         defaultModel: "example-image-1",
       },
     ]);
+  });
+
+  it("reads an outside image profile as admitted only when the host lists its exact driver and holds no crash limit there", () => {
+    const driver = {
+      extensionId: "a1000000-0000-4000-8000-000000000011",
+      packageId: "a1000000-0000-4000-8000-000000000012",
+      componentId: "images",
+      version: "1.0.0",
+      digest: `sha256:${"c".repeat(64)}`,
+    };
+    const profile = {
+      ...openAiImage(),
+      driverKind: "outside-image",
+      configuration: {
+        kind: "outside-image",
+        driver,
+        baseUrl: "https://images.example.test",
+        modelAllowlist: ["example-image-1"],
+        defaultModel: "example-image-1",
+      },
+    } as never;
+    const listing = {
+      driver,
+      displayName: "Example images",
+      source: "local-folder",
+      installed: true,
+      trusted: true,
+      imageGeneration: { models: [{ modelId: "example-image-1" }] },
+    } as never;
+    expect(admitsListedOutsideImageDriver([listing])(profile)).toBe(true);
+    expect(admitsListedOutsideImageDriver(undefined)(profile)).toBe(false);
+    expect(
+      admitsListedOutsideImageDriver([
+        {
+          ...(listing as object),
+          driver: { ...driver, digest: `sha256:${"d".repeat(64)}` },
+        } as never,
+      ])(profile),
+    ).toBe(false);
+    expect(
+      admitsListedOutsideImageDriver([
+        { ...(listing as object), imageGeneration: undefined } as never,
+      ])(profile),
+    ).toBe(false);
+    expect(
+      admitsListedOutsideImageDriver([listing])({
+        ...(profile as object),
+        driverQuarantine: {
+          reason: "crash-limit",
+          digest: driver.digest,
+          quarantinedAt: timestamp,
+        },
+      } as never),
+    ).toBe(false);
   });
 
   it("lists a BFL image profile with no quality, size, or aspect ratio fields", () => {

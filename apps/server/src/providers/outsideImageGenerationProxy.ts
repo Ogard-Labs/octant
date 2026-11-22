@@ -146,7 +146,10 @@ export function makeOutsideImageGenerationProxy(
       bytes = Uint8Array.from(Buffer.from(image.data, "base64"));
       named = image.mediaType;
     } else {
-      if (!isFetchableImageAddress(image.url, origin) || !relayed.join("").includes(image.url)) {
+      if (
+        !isFetchableImageAddress(image.url, origin) ||
+        !returnedAddresses(relayed).has(image.url)
+      ) {
         throw outsideDriverFailure(
           "unauthorized",
           "The image driver named an image address the provider did not return.",
@@ -217,6 +220,18 @@ export function makeOutsideImageGenerationProxy(
       }
     },
   };
+}
+
+/**
+ * Every complete address the provider's relayed answers contain, as whole
+ * tokens: a JSON string's `\/` escapes undone, and each address ending at the
+ * first character an address cannot hold unescaped. The driver's address must
+ * equal one of them, so a prefix or a longer address that merely contains it
+ * (`https://images.example.test.attacker.invalid/…`) authorizes nothing.
+ */
+function returnedAddresses(relayed: ReadonlyArray<string>): ReadonlySet<string> {
+  const text = relayed.join("").replaceAll("\\/", "/");
+  return new Set(text.match(/https?:\/\/[^\s"'<>\\`{}|^]+/g) ?? []);
 }
 
 /**

@@ -14,6 +14,7 @@ import { ExtensionPackageState, type ExtensionActivationState } from "@octant/co
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GeneratedImageStore } from "../image/generatedImageStore";
+import { journaledOutsideDriverHold } from "../wiring/providers";
 import { ImageJobService } from "../image/imageJobService";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
@@ -469,5 +470,53 @@ describe("an outside image driver that misbehaves", () => {
       "unauthorized",
     );
     expect(imageFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses an address that is only part of, or a prefix of, an address the provider returned", async () => {
+    const imageFetch = vi.fn(() => new Response(png, { status: 200 }));
+    for (const [returned, named] of [
+      ["https://images.example.test.attacker.invalid/out.png", "https://images.example.test"],
+      [
+        "https://cdn.images.example.test/out/1.png?sig=abc",
+        "https://cdn.images.example.test/out/1.png",
+      ],
+    ] as const) {
+      const run = harness({
+        handlers: {
+          ...imageHandlers,
+          "image/generate": async (_params, context) => {
+            await context.http({
+              requestId: context.id,
+              url: "https://images.example.test/v1/generate",
+              method: "POST",
+              auth: { header: "authorization", scheme: "Bearer" },
+            });
+            return { status: "completed", images: [{ url: named }] };
+          },
+        },
+        providerBody: JSON.stringify({ url: returned }),
+        imageFetch,
+      });
+      const job = await run.service.whenTerminal((await run.enqueue({})).id);
+      expect(job.status === "failed" ? job.failure?.category : undefined).toBe("unauthorized");
+    }
+    expect(imageFetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps a journaled crash-limit hold on an image profile's digest across a restart", () => {
+    const held = {
+      ...outsideProfile(),
+      driverQuarantine: {
+        reason: "crash-limit" as const,
+        digest: driver.digest as never,
+        quarantinedAt: now as never,
+      },
+    };
+    const hold = journaledOutsideDriverHold({
+      readProviderInstance: () => held,
+      journalHold: () => undefined,
+    });
+    expect(hold.holds(profileId, driver.digest as never)).toBe(true);
+    expect(hold.holds(profileId, `sha256:${"0".repeat(64)}` as never)).toBe(false);
   });
 });
