@@ -6,6 +6,10 @@ import {
   remoteRotateDeviceKey,
   remoteSignOut,
 } from "@octant/client-runtime";
+import {
+  DEVICE_ACCESS_LEVEL_LABELS,
+  type DeviceAccessLevel,
+} from "@octant/contracts/remote-access";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useTimestampFormat } from "../theme/ThemeSettingsProvider";
 import { formatDateTime, type TimestampFormatPreference } from "../theme/timestampFormat";
@@ -32,6 +36,14 @@ function formatTimestamp(
 }
 
 const ROTATE_LABEL = "Rotate this device's key";
+
+/** Why a browser below Full is offered less; only a window or a Full device on the host changes it. */
+const NARROWED_LEVEL_COPY: Readonly<Record<Exclude<DeviceAccessLevel, "full">, string>> = {
+  "approve-and-steer":
+    "This browser can send turns and answer approvals once, but cannot change settings, credentials, extensions or devices. The level can be changed in Settings on the computer.",
+  "read-only":
+    "This browser can read this computer but not change it. The level can be changed in Settings on the computer.",
+};
 
 /**
  * Rotation ends the current session by design, so the panel says what the user
@@ -138,7 +150,16 @@ export function RemoteDeviceSelfPanel(props: RemoteDeviceSelfPanelProps) {
             <dt>Session idle</dt>
             <dd>{formatTimestamp(metadata.sessionIdleExpiresAt, timestampFormat)}</dd>
           </div>
+          {metadata.accessLevel === undefined ? null : (
+            <div className="remote-shell__device-fact">
+              <dt>Access</dt>
+              <dd>{DEVICE_ACCESS_LEVEL_LABELS[metadata.accessLevel]}</dd>
+            </div>
+          )}
         </dl>
+      )}
+      {metadata?.accessLevel === undefined || metadata.accessLevel === "full" ? null : (
+        <p className="remote-shell__local-only">{NARROWED_LEVEL_COPY[metadata.accessLevel]}</p>
       )}
       <div className="remote-shell__device-actions">
         <OctantButton

@@ -172,6 +172,8 @@ export interface FakeRemoteServerConfig {
    * built before it said so, which a client reads as a restricted session.
    */
   readonly actsAsHostPerson?: boolean;
+  /** The device's own access level, as the own-device answer reports it. */
+  readonly accessLevel?: "full" | "approve-and-steer" | "read-only";
   readonly handleProductRequest?: (input: {
     readonly method: string;
     readonly path: string;
@@ -504,6 +506,7 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
         ...(config.actsAsHostPerson === undefined
           ? {}
           : { actsAsHostPerson: config.actsAsHostPerson }),
+        ...(config.accessLevel === undefined ? {} : { accessLevel: config.accessLevel }),
       });
     }
 

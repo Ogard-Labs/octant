@@ -210,6 +210,17 @@ describe("what a session that acts as the host's own person reaches", () => {
     expect(
       await readRemoteSessionStanding(answering(200, { ...device, actsAsHostPerson: false })),
     ).toEqual({ actsAsHostPerson: false });
+    // The device's own level says why controls are missing; an unknown level is not trusted.
+    expect(
+      await readRemoteSessionStanding(
+        answering(200, { ...device, actsAsHostPerson: false, accessLevel: "read-only" }),
+      ),
+    ).toEqual({ actsAsHostPerson: false, accessLevel: "read-only" });
+    expect(
+      await readRemoteSessionStanding(
+        answering(200, { ...device, actsAsHostPerson: false, accessLevel: "owner" }),
+      ),
+    ).toEqual({ actsAsHostPerson: false });
   });
 
   it("reads a session as restricted when the host does not say, refuses, or cannot be reached", async () => {

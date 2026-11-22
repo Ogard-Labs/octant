@@ -1013,9 +1013,16 @@ async function handleOwnDeviceRoute(
     );
     // The same reading of the principal the product routes decide by, so a
     // client never offers a control this session would be refused.
+    // Only a device the host's person paired has a level; the hub's and an
+    // agent grant's sessions say none.
+    const ownLevel =
+      principal.admittedBy === "host-person" && !isAgentGrantSession(principal)
+        ? (principalAccessLevel(principal) ?? "full")
+        : undefined;
     return jsonResponse(200, {
       ...metadata,
       actsAsHostPerson: principalActsAsHostPerson(principal) && !isAgentGrantSession(principal),
+      ...(ownLevel === undefined ? {} : { accessLevel: ownLevel }),
     });
   } catch (error) {
     throw mapCredentialServiceError(error);
