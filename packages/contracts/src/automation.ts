@@ -319,6 +319,8 @@ const AutomationRemoteDevicePrincipal = Schema.Struct({
   // device principal. A command carries the authenticated principal whole, so
   // a strict struct without this refused every paired device's command.
   admittedBy: Schema.optional(Schema.Literal("host-person", "hub-roster")),
+  // A narrowed device's level, marked beside its admission for the same reason.
+  accessLevel: Schema.optional(Schema.Literal("approve-and-steer", "read-only")),
 }).annotations(strict);
 
 /** Authenticated principals accepted on mutation commands. */
