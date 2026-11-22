@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
 import type { MediaToolSet } from "@octant/plugin-api/media-tools";
 import type { AppManagedToolSet } from "./appManagedToolSet";
 import {
+  recordShieldWatcherLabels,
   taintAppManagedToolResults,
+  watchToolResult,
   type TaintAppManagedToolResultsInput,
 } from "./appManagedToolTaint";
 
@@ -60,10 +63,77 @@ export function adaptMediaToolSet(input: AdaptMediaToolSetInput): AppManagedTool
       }),
     };
   }
-  return taintAppManagedToolResults({
-    tools: base,
-    threadId: input.threadId,
-    recordExternalContentIngestion: input.recordExternalContentIngestion,
-    uuid: input.uuid,
-  });
+  const record = input.recordExternalContentIngestion;
+  const threadId = input.threadId;
+  const uuid = input.uuid;
+  if (input.tools.taintErrorResults !== true) {
+    return taintAppManagedToolResults({
+      tools: base,
+      threadId,
+      recordExternalContentIngestion: record,
+      uuid,
+    });
+  }
+  // Contributed plugins control `isError`, so every plugin-produced result
+  // (including `isError: true`) must pass Watcher inspection and outside-content
+  // tainting. Only explicit host-bridge refusals (`hostRefused: true`) stay unmarked.
+  return {
+    definitions: base.definitions,
+    ...(base.close === undefined ? {} : { close: base.close }),
+    execute: async (call) => {
+      const outcome = await input.tools.execute({
+        name: call.name,
+        inputJson: call.inputJson,
+        ...(call.signal === undefined ? {} : { signal: call.signal }),
+      });
+      if (outcome.hostRefused === true) {
+        return {
+          result: outcome.result,
+          ...(outcome.isError === undefined ? {} : { isError: outcome.isError }),
+        };
+      }
+      let body: string;
+      try {
+        const serialized = JSON.stringify(outcome.result);
+        if (typeof serialized !== "string") {
+          return { result: { error: "tool-unavailable" }, isError: true };
+        }
+        body = serialized;
+      } catch {
+        return { result: { error: "tool-unavailable" }, isError: true };
+      }
+      const digest = createHash("sha256").update(body).digest("hex");
+      const labels = watchToolResult(call, outcome.result, undefined);
+      try {
+        const ingested = record({
+          threadId,
+          provenance: { origin: "tool-result", sourceLabel: call.name },
+          contentReference: `app-managed-${call.name}-${digest}`,
+          correlationId: uuid(),
+          authorized: true,
+        });
+        if (ingested.kind === "refused") {
+          return { result: { error: "tool-unavailable" }, isError: true };
+        }
+      } catch {
+        return { result: { error: "tool-unavailable" }, isError: true };
+      }
+      const recordedLabels = recordShieldWatcherLabels({
+        record,
+        threadId,
+        uuid,
+        labels,
+        digest,
+      });
+      if (!recordedLabels) {
+        return { result: { error: "tool-unavailable" }, isError: true };
+      }
+      return {
+        result: outcome.result,
+        ...(outcome.isError === undefined ? {} : { isError: outcome.isError }),
+        ...(outcome.images === undefined ? {} : { images: outcome.images }),
+        outsideContent: { labels },
+      };
+    },
+  };
 }

@@ -269,7 +269,6 @@ export const TRANSCRIBE_MEDIA_TOOL_PLUGIN: MediaToolPluginDefinition = {
       return undefined;
     }
     const stopped = new AbortController();
-    let closing: Promise<void> | undefined;
     return {
       definitions: [
         {
@@ -289,10 +288,8 @@ export const TRANSCRIBE_MEDIA_TOOL_PLUGIN: MediaToolPluginDefinition = {
         },
       ],
       taintPolicy: "outside-content",
-      close: () => {
+      close: async () => {
         stopped.abort();
-        closing ??= Promise.resolve(port.close?.());
-        return closing;
       },
       execute: async (call) => {
         const signal = combineSignals(stopped.signal, call.signal);
@@ -392,16 +389,13 @@ export const LOOK_MEDIA_TOOL_PLUGIN: MediaToolPluginDefinition = {
       return undefined;
     }
     const stopped = new AbortController();
-    let closing: Promise<void> | undefined;
     return {
       definitions: [
         { name: LOOK_TOOL_NAME, description: LOOK_DESCRIPTION, inputSchema: LOOK_INPUT_SCHEMA },
       ],
       taintPolicy: "watcher-only",
-      close: () => {
+      close: async () => {
         stopped.abort();
-        closing ??= Promise.resolve(port.close?.());
-        return closing;
       },
       execute: async (call) => {
         const signal = combineSignals(stopped.signal, call.signal);
@@ -484,6 +478,12 @@ interface ParsedImageSaveInput {
   readonly relativePath: string;
 }
 
+/**
+ * Pre-flight POSIX relative-path check mirroring `canonicalizeWorkRelativePath`
+ * in `@octant/domain`. `@octant/plugin-host` intentionally does not depend on
+ * `@octant/domain`; the server adapter re-validates every file reference
+ * authoritatively through `parseImageSourceRequests` before any filesystem read.
+ */
 function canonicalizeRelativeReferencePath(raw: string): string | undefined {
   if (
     raw.length === 0 ||
@@ -643,7 +643,6 @@ export const CREATE_IMAGE_MEDIA_TOOL_PLUGIN: MediaToolPluginDefinition = {
       return undefined;
     }
     const stopped = new AbortController();
-    let closing: Promise<void> | undefined;
     return {
       definitions: [
         {
@@ -653,10 +652,8 @@ export const CREATE_IMAGE_MEDIA_TOOL_PLUGIN: MediaToolPluginDefinition = {
         },
       ],
       taintPolicy: "none",
-      close: () => {
+      close: async () => {
         stopped.abort();
-        closing ??= Promise.resolve(port.close?.());
-        return closing;
       },
       execute: async (call) => {
         const signal = combineSignals(stopped.signal, call.signal);
@@ -807,11 +804,15 @@ function isValidContributedDefinition(definition: ProviderToolDefinition): boole
 const CONTRIBUTED_REFUSED: MediaToolResult = {
   result: { status: "refused" },
   isError: true,
+  hostRefused: true,
 };
 
 /**
  * Wraps a third-party media tool plugin behind host-owned naming, activation
  * gating, live authority checks, and fail-closed outside-content tainting.
+ *
+ * Closing the returned set closes only the plugin's own resources; the host
+ * retains ownership of the shared turn `port` lifecycle.
  */
 export function createContributedMediaTool(input: {
   readonly packageId: string;
@@ -851,11 +852,13 @@ export function createContributedMediaTool(input: {
   let closing: Promise<void> | undefined;
   return {
     definitions,
-    // Third-party media tools can never opt out of outside-content tainting.
+    // Third-party media tools can never opt out of outside-content tainting,
+    // including when they return `isError: true`.
     taintPolicy: "outside-content",
+    taintErrorResults: true,
     close: () => {
       closed = true;
-      closing ??= Promise.all([inner.close(), input.port.close?.()]).then(() => undefined);
+      closing ??= Promise.resolve(inner.close());
       return closing;
     },
     execute: async (call) => {
@@ -868,7 +871,12 @@ export function createContributedMediaTool(input: {
       if (closed || isAborted() || !input.port.turn.allowed()) {
         return CONTRIBUTED_REFUSED;
       }
-      return outcome;
+      // Rebuild the result without `hostRefused` so a plugin cannot forge a host refusal.
+      return {
+        result: outcome.result,
+        ...(outcome.isError === undefined ? {} : { isError: outcome.isError }),
+        ...(outcome.images === undefined ? {} : { images: outcome.images }),
+      };
     },
   };
 }
@@ -882,24 +890,43 @@ export interface ContributedMediaToolRegistration {
 
 /**
  * Activates non-colliding contributed media tool plugins for one turn port.
- * Duplicate `(packageId, componentId)` claims are both withheld so a turn never
- * silently routes to a different plugin.
+ * Duplicate `(packageId, componentId)` claims and any registrations whose final
+ * assigned provider tool names collide (for example a multi-tool `media` and a
+ * single-tool `media-0`) are all withheld so a turn never silently routes to a
+ * different plugin.
  */
 export function registerContributedMediaTools(input: {
   readonly contributions: ReadonlyArray<ContributedMediaToolRegistration>;
   readonly port: MediaToolHostPort;
 }): ReadonlyArray<MediaToolSet> {
-  const claims = new Map<string, number>();
+  const componentClaims = new Map<string, number>();
   for (const contribution of input.contributions) {
     const key = `${contribution.packageId}:${contribution.componentId}`;
-    claims.set(key, (claims.get(key) ?? 0) + 1);
+    componentClaims.set(key, (componentClaims.get(key) ?? 0) + 1);
+  }
+  const candidates: MediaToolSet[] = [];
+  for (const contribution of input.contributions) {
+    const key = `${contribution.packageId}:${contribution.componentId}`;
+    if (componentClaims.get(key) !== 1) continue;
+    const set = createContributedMediaTool({ ...contribution, port: input.port });
+    if (set !== undefined) candidates.push(set);
+  }
+  const assignedNameCounts = new Map<string, number>();
+  for (const set of candidates) {
+    for (const definition of set.definitions) {
+      assignedNameCounts.set(definition.name, (assignedNameCounts.get(definition.name) ?? 0) + 1);
+    }
   }
   const active: MediaToolSet[] = [];
-  for (const contribution of input.contributions) {
-    const key = `${contribution.packageId}:${contribution.componentId}`;
-    if (claims.get(key) !== 1) continue;
-    const set = createContributedMediaTool({ ...contribution, port: input.port });
-    if (set !== undefined) active.push(set);
+  for (const set of candidates) {
+    const collides = set.definitions.some(
+      (definition) => (assignedNameCounts.get(definition.name) ?? 0) > 1,
+    );
+    if (collides) {
+      void set.close().catch(() => undefined);
+      continue;
+    }
+    active.push(set);
   }
   return active;
 }

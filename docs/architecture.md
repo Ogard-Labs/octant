@@ -14462,17 +14462,20 @@ and the marketplace and plugin registry are no longer extraction candidates.
 | Provider drivers                                                             | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned                                                                                                                                          |
 | Image adapters (OpenAI, Gemini, BFL, Ideogram)                               | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                                                                                                                                                         |
 
-**Public media tool port (built).** `octant_look`, `octant_transcribe`, and
-`octant_create_image` compose through the public, provider-neutral
-`MediaToolHostPort` seam in `@octant/plugin-api/media-tools` and the pure
-host-side plugin bridge in `@octant/plugin-host/media-tools`. _Rationale:_
-keeping tool schemas, input validation, paging, and result formatting on a
-public capability-scoped port lets built-in and third-party media tool plugins
-share one seam without touching server internals, while path confinement, raw
-file/attachment bytes and magic-byte sniffing, provider credentials and routing,
-paid service offers, concurrency gates, outside-content tainting (fail-closed
-for third-party plugins), and live mode/window/thread admission remain
-host-owned in the server's port adapter.
+**Public media tool port (built for built-in media tools).** `octant_look`,
+`octant_transcribe`, and `octant_create_image` compose through the public,
+provider-neutral `MediaToolHostPort` seam in `@octant/plugin-api/media-tools`
+and the pure host-side plugin bridge in `@octant/plugin-host/media-tools`.
+_Rationale:_ keeping tool schemas, input validation, paging, and result
+formatting on a public capability-scoped port lets built-in media tools run
+without touching server internals and establishes the shared host bridge
+(`createContributedMediaTool`, `registerContributedMediaTools`), while path
+confinement, raw file/attachment bytes and magic-byte sniffing, provider
+credentials and routing, paid service offers, concurrency gates, outside-content
+tainting (fail-closed for third-party plugins, including plugin-generated error
+results), and live mode/window/thread admission remain host-owned in the server
+adapter. Loading installed third-party media tool packages in `server.ts` stays
+deferred until media-tool manifest contributions are enabled.
 
 **Themes as plugin contributions** (maintainer decision, 2026-11-14; built).
 A plugin may contribute one or more themes as data only. Each is a component

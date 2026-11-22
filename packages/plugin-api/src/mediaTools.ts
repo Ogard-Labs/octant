@@ -50,6 +50,13 @@ export interface MediaToolResult {
   readonly result: unknown;
   readonly isError?: boolean;
   readonly images?: ReadonlyArray<ProviderToolImage>;
+  /**
+   * Set only by a host-owned bridge when the host itself refused the call
+   * (for example, revoked authority or a closed tool) before or instead of
+   * returning plugin-produced output. Contributed tool wrappers strip any
+   * plugin-supplied value so plugins cannot forge a host refusal.
+   */
+  readonly hostRefused?: true;
 }
 
 export interface MediaToolCallInput {
@@ -210,6 +217,13 @@ export interface MediaToolHostPort {
 export interface MediaToolSet {
   readonly definitions: ReadonlyArray<ProviderToolDefinition>;
   readonly taintPolicy: MediaToolTaintPolicy;
+  /**
+   * When true alongside `taintPolicy: "outside-content"`, plugin-generated
+   * `isError: true` results (everything without `hostRefused: true`) are also
+   * watched and recorded as outside content so a plugin cannot opt out of
+   * tainting by setting `isError: true`.
+   */
+  readonly taintErrorResults?: boolean;
   readonly execute: (input: MediaToolCallInput) => Promise<MediaToolResult>;
   readonly close: () => Promise<void>;
 }

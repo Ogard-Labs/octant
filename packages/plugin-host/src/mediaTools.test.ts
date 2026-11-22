@@ -148,29 +148,39 @@ describe("public media tool host bridge and built-in plugins", () => {
     expect(active?.definitions.map((d) => d.name)).toEqual([expectedName]);
     expect(active?.taintPolicy).toBe("outside-content");
 
-    // Calling the spoofed built-in name is refused.
+    // Calling the spoofed built-in name is refused as a host refusal.
     expect(await active?.execute({ name: TRANSCRIBE_TOOL_NAME, inputJson: "{}" })).toEqual({
       result: { status: "refused" },
       isError: true,
+      hostRefused: true,
     });
 
     // Revoking turn authority while an in-flight call awaits withholds the result.
     const inFlight = active?.execute({ name: expectedName, inputJson: "{}" });
     allowed = false;
     releaseCall?.();
-    expect(await inFlight).toEqual({ result: { status: "refused" }, isError: true });
+    expect(await inFlight).toEqual({
+      result: { status: "refused" },
+      isError: true,
+      hostRefused: true,
+    });
     await active?.close();
   });
 
-  it("withholds colliding contributed media tool registrations while activating unique ones", () => {
-    const makePlugin = (id: string): MediaToolPluginDefinition => ({
+  it("withholds colliding contributed media tool registrations, including multi-tool and single-tool name overlaps", () => {
+    const makePlugin = (
+      id: string,
+      toolNames: ReadonlyArray<string> = [id],
+    ): MediaToolPluginDefinition => ({
       kind: MEDIA_TOOL_CONTRIBUTION_KIND,
       id,
       modes: ["work"],
       createTools: () => ({
-        definitions: [
-          { name: id, description: `Run ${id}`, inputSchema: { type: "object", properties: {} } },
-        ],
+        definitions: toolNames.map((name) => ({
+          name,
+          description: `Run ${name}`,
+          inputSchema: { type: "object", properties: {} },
+        })),
         taintPolicy: "outside-content",
         close: async () => undefined,
         execute: async () => ({ result: { ok: true } }),
@@ -182,12 +192,93 @@ describe("public media tool host bridge and built-in plugins", () => {
       contributions: [
         { packageId: PACKAGE_ID, componentId: "dup", plugin: makePlugin("dup-a"), facts },
         { packageId: PACKAGE_ID, componentId: "dup", plugin: makePlugin("dup-b"), facts },
+        // Multi-tool `media` (`_media_0`, `_media_1`) collides with single-tool `media-0` (`_media_0`).
+        {
+          packageId: PACKAGE_ID,
+          componentId: "media",
+          plugin: makePlugin("media", ["first", "second"]),
+          facts,
+        },
+        { packageId: PACKAGE_ID, componentId: "media-0", plugin: makePlugin("media-0"), facts },
         { packageId: PACKAGE_ID, componentId: "unique", plugin: makePlugin("unique"), facts },
       ],
     });
     expect(sets.flatMap((set) => set.definitions.map((d) => d.name))).toEqual([
       contributedMediaToolName(PACKAGE_ID, "unique"),
     ]);
+  });
+
+  it("keeps the shared turn port open for sibling contributed media tools when one set closes", async () => {
+    const closePort = vi.fn(async () => undefined);
+    const closeFirst = vi.fn(async () => undefined);
+    const closeSecond = vi.fn(async () => undefined);
+    const transcribe = vi.fn(async () => ({
+      status: "transcribed" as const,
+      text: "sibling still works",
+    }));
+    const makePlugin = (id: string, onClose: () => Promise<void>): MediaToolPluginDefinition => ({
+      kind: MEDIA_TOOL_CONTRIBUTION_KIND,
+      id,
+      modes: ["work"],
+      createTools: (port) => ({
+        definitions: [
+          { name: id, description: `Run ${id}`, inputSchema: { type: "object", properties: {} } },
+        ],
+        taintPolicy: "outside-content",
+        close: onClose,
+        execute: async ({ signal }) => {
+          const outcome = await port.transcription?.transcribe({
+            relativePath: decodeCodeRelativePath("clip.m4a"),
+            allowFreshRequest: true,
+            ...(signal === undefined ? {} : { signal }),
+          });
+          return { result: outcome };
+        },
+      }),
+    });
+    const facts = { installed: true, trusted: true, enabled: true };
+    const sets = registerContributedMediaTools({
+      port: basePort({
+        transcription: { isAvailable: () => true, transcribe },
+        close: closePort,
+      }),
+      contributions: [
+        {
+          packageId: PACKAGE_ID,
+          componentId: "first",
+          plugin: makePlugin("first", closeFirst),
+          facts,
+        },
+        {
+          packageId: PACKAGE_ID,
+          componentId: "second",
+          plugin: makePlugin("second", closeSecond),
+          facts,
+        },
+      ],
+    });
+    expect(sets).toHaveLength(2);
+    const [first, second] = sets;
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+    if (first === undefined || second === undefined) return;
+
+    await first.close();
+    expect(closeFirst).toHaveBeenCalledOnce();
+    expect(closeSecond).not.toHaveBeenCalled();
+    expect(closePort).not.toHaveBeenCalled();
+
+    const firstName = contributedMediaToolName(PACKAGE_ID, "first");
+    const secondName = contributedMediaToolName(PACKAGE_ID, "second");
+    expect(await first.execute({ name: firstName, inputJson: "{}" })).toEqual({
+      result: { status: "refused" },
+      isError: true,
+      hostRefused: true,
+    });
+    expect(await second.execute({ name: secondName, inputJson: "{}" })).toEqual({
+      result: { status: "transcribed", text: "sibling still works" },
+    });
+    expect(transcribe).toHaveBeenCalledOnce();
   });
 
   it("runs the built-in transcription, look, and image generation plugins through MediaToolHostPort", async () => {
