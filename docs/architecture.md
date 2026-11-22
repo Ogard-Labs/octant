@@ -1376,7 +1376,10 @@ authors as an agent; only a host window moves board nodes; `preview` renders
 with the network off and no server address or credential; a static `design`
 frame never receives `allow-scripts` and no frame has both `allow-scripts` and
 `allow-same-origin`; a share carries a design only with the sharer's
-acknowledgement that markup is shared as written, and refuses an action block;
+acknowledgement that markup is shared as written, refuses an action block,
+and carries the generated images the document shows, each on the approval
+card it was approved from, but never a Project file or a Browser capture
+([Canvas: Shares](design/canvas.md#shares));
 nothing drawn inline in the thread can journal a version; and Plan keeps
 `create` and `revise` (the thread's own document) while the tool offers no
 publish or share and the mirror and replica sync write nothing for a Plan
@@ -18198,6 +18201,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   ([Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md), F5).
   An image block that draws a generated image resolves through the same read,
   as one declared image ([Canvas: Image block](design/canvas.md#image-block)).
+  A share copies the generated images its version shows, resolved the same
+  way when the share is made (maintainer decision, 2026-11-22).
 - **Product feedback notes.** A product-feedback note is the person's comment
   on an element of the running product. It is journaled on its own aggregate
   and carried with the next admitted turn exactly once. The client sends the

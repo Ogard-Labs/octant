@@ -703,3 +703,30 @@ export function designFrameTokenValueIsSafe(value: string): boolean {
     !/url\s*\(|@import|expression\s*\(/i.test(value)
   );
 }
+
+// What stands right before an address the browser loads, in the positions the
+// markup policy admits a design asset reference: a `url()`, a `src`, `srcset`,
+// `poster`, or `background` value (or a later srcset candidate), and a quoted
+// `image-set()` candidate. The same token in prose, `alt`, or any other
+// attribute is the author's text and is left as written.
+const DESIGN_ASSET_ADDRESS_LEAD = String.raw`(?:url\(\s*["']?\s*|(?:^|[\s"'/])(?:src|srcset|poster|background)\s*=\s*["']?\s*|(?:^|[\s"'/])srcset\s*=\s*(?:"[^"]*?,\s*|'[^']*?,\s*)|image-set\((?:[^()]|\([^()]*\))*?["']\s*)`;
+const DESIGN_ASSET_REFERENCE = new RegExp(
+  `(?<=${DESIGN_ASSET_ADDRESS_LEAD})octant-asset:([A-Za-z0-9][A-Za-z0-9._-]{0,63})`,
+  "gi",
+);
+
+/**
+ * A design's markup with each `octant-asset:<id>` reference in an image
+ * position replaced by the address `address` gives that id, for a page that
+ * draws a design without a host to ask, such as a shared copy.
+ */
+export function withDesignAssetAddresses(
+  markup: string,
+  address: (assetId: string) => string,
+): string {
+  if (!/octant-asset:/i.test(markup)) return markup;
+  // Only the scheme as the markup policy admits it, in lowercase, is a reference.
+  return markup.replace(DESIGN_ASSET_REFERENCE, (reference: string, id: string) =>
+    reference.startsWith("octant-asset:") ? address(id) : reference,
+  );
+}

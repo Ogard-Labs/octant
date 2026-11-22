@@ -23,6 +23,7 @@ import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import { CanvasId, CanvasVersionId } from "./canvas";
 import { isCanvasShareSafeText, isExportCredentialFreeText } from "./canvasExportText";
+import { CANVAS_SHARE_MAX_IMAGES, CanvasShareImage } from "./canvasShare";
 import { UtcTimestamp } from "./events";
 
 // A destination plugin receives a rendered Canvas and returns a receipt or a
@@ -221,14 +222,31 @@ export const CanvasExportMetadata = Schema.Struct({
 }).annotations(strict);
 export type CanvasExportMetadata = typeof CanvasExportMetadata.Type;
 
+/**
+ * The generated images a share document carries beside its body (maintainer
+ * decision, 2026-11-22). The body stays the text the card shows whole; the
+ * images ride here, and the card shows each one.
+ */
+const exportShareImages = Schema.Array(CanvasShareImage).pipe(
+  Schema.maxItems(CANVAS_SHARE_MAX_IMAGES),
+);
+
 export const CanvasExportRenderedText = Schema.Struct({
   schemaVersion: CanvasExportSchemaVersion,
   kind: Schema.Literal("canvas-export-output"),
   format: CanvasExportTextFormat,
   title: canvasExportSafeBounded(256),
   body: exportBody,
+  /** A share document's images, which only that format carries. */
+  images: Schema.optional(exportShareImages),
   metadata: CanvasExportMetadata,
-}).annotations(strict);
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((output) => output.images === undefined || output.format === "share-document", {
+      message: () => "Only a share document carries images.",
+    }),
+  );
 export type CanvasExportRenderedText = typeof CanvasExportRenderedText.Type;
 
 /** One file of a picture export, with the bytes the destination writes. */
@@ -511,6 +529,11 @@ export const CanvasExportApprovalCard = Schema.Struct({
    * summary of it. A picture form has no text to show and names its files.
    */
   payload: Schema.optional(exportBody),
+  /**
+   * The generated images a share document sends beside its payload, each one
+   * exactly as it leaves, so approving the card names every image that does.
+   */
+  images: Schema.optional(exportShareImages),
   /** The files a picture form writes, named and weighed, in writing order. */
   files: Schema.optional(
     Schema.NonEmptyArray(CanvasExportApprovalFile).pipe(
@@ -563,6 +586,11 @@ export const CanvasExportApprovalCard = Schema.Struct({
           "A text export card shows its payload; a picture export card names its files.",
       },
     ),
+  )
+  .pipe(
+    Schema.filter((card) => card.images === undefined || card.format === "share-document", {
+      message: () => "Only a share document's card shows images.",
+    }),
   )
   .annotations(personDecides);
 export type CanvasExportApprovalCard = typeof CanvasExportApprovalCard.Type;

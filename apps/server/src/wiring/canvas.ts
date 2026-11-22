@@ -58,6 +58,7 @@ import { createCanvasRefreshSourceResolver } from "../canvas/canvasRefreshSource
 import { readCanvasRefreshFile, resolveCanvasRefreshFile } from "../canvas/canvasRefreshFileRead";
 import type {
   CanvasDesignAssetResolution,
+  CanvasDefinition,
   CanvasDesignBlock,
   CanvasProvenance,
 } from "@octant/contracts/canvas";
@@ -73,6 +74,7 @@ import {
   type CanvasDesignAssetPorts,
   readCanvasDesignAssetFile,
   resolveCanvasDesignAssets,
+  resolveCanvasShareImages,
 } from "../canvas/canvasDesignAssets";
 import { createCanvasSkillContributionResolver } from "../canvas/canvasSkillContributionResolver";
 import {
@@ -485,6 +487,8 @@ export function wireCanvas(deps: CanvasDependencies) {
     provenance: CanvasProvenance,
   ): Promise<ReadonlyArray<CanvasDesignAssetResolution>> =>
     resolveCanvasDesignAssets(block, provenance, canvasDesignAssetPorts);
+  const resolveShareImages = (definition: Pick<CanvasDefinition, "blocks" | "provenance">) =>
+    resolveCanvasShareImages(definition, canvasDesignAssetPorts);
 
   const artifactMirrorEvents = new ArtifactMirrorEventStore({
     journal: persistence.journal,
@@ -1149,6 +1153,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     // A picture export is drawn by the same browser, under the same no-route
     // switches and interception, that the agent's preview uses.
     renderer: canvasPreviewRenderer,
+    resolveShareImages,
   });
   // Settle exports a previous run cut off mid-delivery before any new one is
   // decided: recorded as unconfirmed for the person, never sent again.
@@ -1316,6 +1321,7 @@ export function wireCanvas(deps: CanvasDependencies) {
       );
     },
     resolveDesignAssets,
+    resolveShareImages,
     designRunTickets: new CanvasDesignRunTickets(),
     ...(deps.findPublishedSnapshot === undefined
       ? {}

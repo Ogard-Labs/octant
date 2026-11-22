@@ -10,6 +10,7 @@ import {
   decodeCanvasShareSnapshotRevokeRequest,
   decodeCanvasShareSnapshotSummary,
   type CanvasId,
+  type CanvasVersion,
   type CanvasShareAccessLogEvent,
   type CanvasShareAccessRequest,
   type CanvasShareAccessResult,
@@ -28,6 +29,7 @@ import {
   buildCanvasShareAccessLogEvent,
   createCanvasShareSnapshotRecord,
   revokeCanvasShareSnapshot,
+  type CanvasShareResolvedImages,
   validateCanvasShareAccessLogEvent,
 } from "@octant/domain";
 import { principalActsAsHostPerson, type ClientPrincipal } from "../clientPrincipal";
@@ -175,11 +177,37 @@ export class CanvasShareService {
    * `principal` is required so the compiler rejects any call site that would
    * let this host's owner identity stand in for whoever actually asked.
    */
+  /**
+   * The Canvas version a share request would copy, once the caller is known to
+   * be allowed to share it, so the host can resolve the generated images that
+   * version shows before the snapshot is made. Anything else answers nothing
+   * and reads nothing.
+   */
+  versionToShare(
+    requestInput: unknown,
+    context: CanvasAuthorizationContext,
+    project: CanvasProjectRecord | undefined,
+    principal: ClientPrincipal,
+  ): CanvasVersion | undefined {
+    if (!principalActsAsHostPerson(principal) || project === undefined) return undefined;
+    let canvasId: CanvasId;
+    try {
+      canvasId = decodeCanvasShareSnapshotRequest(requestInput).canvasId;
+    } catch {
+      return undefined;
+    }
+    const entry = this.#projection.getById(canvasId);
+    if (entry === undefined || !this.#authorize(entry, context, project)) return undefined;
+    return entry.currentVersion;
+  }
+
   share(
     requestInput: unknown,
     context: CanvasAuthorizationContext,
     project: CanvasProjectRecord | undefined,
     principal: ClientPrincipal,
+    /** The generated images the shared version shows, resolved by the host. */
+    images?: CanvasShareResolvedImages,
   ): CanvasShareResult {
     // Minting a share is an owner action: the host's own person may issue one
     // from a local window or a device they paired (journaled with the device
@@ -231,6 +259,7 @@ export class CanvasShareService {
       const record = createCanvasShareSnapshotRecord({
         request: requestInput,
         current: entry.currentVersion,
+        ...(images === undefined ? {} : { images }),
         context: {
           sharingEnabled: this.#sharingEnabled,
           hostId: this.#hostId,

@@ -676,6 +676,48 @@ describe("share service", () => {
     expect(frame).not.toContain("allow-same-origin");
   });
 
+  test("draws the generated images a share carries on the page and in design frames, and takes images past the document budget", async () => {
+    start();
+    // A picture larger than the whole document budget still leaves with its
+    // share: images count against their own budget, not the text's.
+    const bytes = Buffer.alloc(CANVAS_PUBLIC_SHARE_MAX_DOCUMENT_BYTES + 1024, 7);
+    bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const data = bytes.toString("base64");
+    const image = {
+      imageRef: "image-1",
+      mediaType: "image/png",
+      byteLength: bytes.byteLength,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      data,
+    };
+    const cover = {
+      blockId: "cover",
+      schemaVersion: 30,
+      kind: "image",
+      alt: "A lighthouse at dusk",
+      caption: "Cover art",
+      imageRef: "image-1",
+    };
+    const framed = design({
+      frames: [
+        { frameId: "home", title: "Home", html: '<img src="octant-asset:hero" alt="Hero">' },
+      ],
+      assets: [{ assetId: "hero", imageRef: "image-1" }],
+    });
+    const body = createBody([cover, framed]);
+    const created = await create({ ...body, document: { ...body.document, images: [image] } });
+    const page = await (await fetch(created.url)).text();
+    expect(page).toContain(
+      `<figure class="image"><img src="data:image/png;base64,${data}" alt="A lighthouse at dusk"><figcaption>Cover art</figcaption></figure>`,
+    );
+    const frameSrc = (
+      /src="([^"]+)"/.exec(/<iframe[^>]*>/.exec(page)?.[0] ?? "")?.[1] ?? ""
+    ).replace(/&amp;/g, "&");
+    const frame = await (await fetch(frameSrc)).text();
+    expect(frame).toContain(`<img src="data:image/png;base64,${data}" alt="Hero">`);
+    expect(frame).not.toContain("octant-asset:");
+  });
+
   test("offers a running prototype only as a link until the viewer asks to run it", async () => {
     start();
     const created = await create(createBody([design({ runsScript: true })]));

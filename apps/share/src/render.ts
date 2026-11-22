@@ -8,6 +8,7 @@ import {
   canvasMockupNodeReading,
   type CanvasPlacedReadingItem,
   canvasReadingOrder,
+  type CanvasShareImage,
   type CanvasStaticExportBlock,
   COMPARISON_MATRIX_GLYPH_LABEL,
   formatCanvasNumber,
@@ -31,6 +32,13 @@ export interface RenderContext {
   readonly frameAddress: (blockId: string, mode: FrameMode) => string;
   /** The one prototype the viewer asked to run, if any. */
   readonly runBlockId: string | undefined;
+  /** The images the share carries, by the share's own name for each. */
+  readonly images: ReadonlyMap<string, CanvasShareImage>;
+}
+
+/** A share image as an address a page draws without loading anything. */
+export function shareImageAddress(image: CanvasShareImage): string {
+  return `data:${image.mediaType};base64,${image.data}`;
 }
 
 export function escapeHtml(value: string): string {
@@ -607,11 +615,19 @@ function blockBody(block: Block, ctx: RenderContext): string {
     case "browser-reference":
     case "evidence-reference":
       return labelled(block.label, block.detail);
-    case "image":
-      // No image leaves the host, so the alt text stands where it was.
-      return `<figure class="image-placeholder"><figcaption>${e(block.alt)}${
-        block.caption === undefined ? "" : ` — ${e(block.caption)}`
-      }</figcaption></figure>`;
+    case "image": {
+      // A generated image the share carries is drawn; any other image block
+      // names a source that stayed on the host, so its alt text stands there.
+      const image = block.imageRef === undefined ? undefined : ctx.images.get(block.imageRef);
+      if (image === undefined) {
+        return `<figure class="image-placeholder"><figcaption>${e(block.alt)}${
+          block.caption === undefined ? "" : ` — ${e(block.caption)}`
+        }</figcaption></figure>`;
+      }
+      return `<figure class="image"><img src="${e(shareImageAddress(image))}" alt="${e(
+        block.alt,
+      )}">${block.caption === undefined ? "" : `<figcaption>${e(block.caption)}</figcaption>`}</figure>`;
+    }
     case "design":
       return design(block, ctx);
     case "choice": {

@@ -3,7 +3,12 @@ import { eventActorForPrincipal } from "./principalEventActor";
 import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
 import type { DesignSystemList } from "@octant/contracts/design-systems";
 import { canvasImageBlockAssets, type CanvasDesignSystem } from "@octant/contracts/canvas";
-import { canvasMockupsTsx, canvasExportStem, importCanvasHtmlPage } from "@octant/domain";
+import {
+  canvasMockupsTsx,
+  canvasExportStem,
+  importCanvasHtmlPage,
+  type CanvasShareResolvedImages,
+} from "@octant/domain";
 import {
   type CanvasId,
   decodeCanvasActionResult,
@@ -49,6 +54,7 @@ import {
   decodeProjectId,
   type CanvasDesignAssetResolution,
   type CanvasDesignAssetsOutcome,
+  type CanvasDefinition,
   type CanvasDesignBlock,
   type CanvasDesignRunOutcome,
   type CanvasDesignRunRequest,
@@ -203,6 +209,13 @@ export interface CanvasRouteDependencies {
     block: Pick<CanvasDesignBlock, "blockId" | "assets">,
     provenance: CanvasProvenance,
   ) => Promise<ReadonlyArray<CanvasDesignAssetResolution>>;
+  /**
+   * The generated images a share of a Canvas version carries, resolved under
+   * that version's provenance. Absent, a share carries none.
+   */
+  readonly resolveShareImages?: (
+    definition: Pick<CanvasDefinition, "blocks" | "provenance">,
+  ) => Promise<CanvasShareResolvedImages>;
   /**
    * Single-use tickets for running designs' pages. Absent on a host that does
    * not serve them, and a running design then answers that it cannot run here.
@@ -1378,9 +1391,30 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               ? null
               : String(context.activeContext.projectId),
         };
+        // A share carries the generated images its version shows, resolved
+        // under that version's provenance once the caller may share it.
+        const shared =
+          route === "share" && dependencies.resolveShareImages !== undefined
+            ? shareService.versionToShare(
+                body.value,
+                authorizationContext,
+                context.project,
+                principal,
+              )
+            : undefined;
+        const images =
+          shared === undefined || dependencies.resolveShareImages === undefined
+            ? undefined
+            : await dependencies.resolveShareImages(shared.definition);
         const result =
           route === "share"
-            ? shareService.share(body.value, authorizationContext, context.project, principal)
+            ? shareService.share(
+                body.value,
+                authorizationContext,
+                context.project,
+                principal,
+                images,
+              )
             : shareService.revoke(body.value, authorizationContext, context.project, principal);
         return jsonResponse(decodeCanvasShareResult(result), 200, origin);
       }

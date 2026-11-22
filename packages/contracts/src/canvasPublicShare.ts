@@ -6,8 +6,12 @@ import {
   CanvasExportLinkPassword,
 } from "./canvasExport";
 import {
+  CANVAS_SHARE_IMAGES_MAX_BYTES,
+  CANVAS_SHARE_MAX_IMAGES,
   CANVAS_SHARE_SCHEMA_VERSION,
+  CanvasShareImage,
   CanvasStaticExportBlock,
+  canvasShareImagesAreConsistent,
   isCanvasShareSafeText,
 } from "./canvasShare";
 import { AggregateVersion, UtcTimestamp } from "./events";
@@ -27,6 +31,13 @@ export const CanvasPublicShareWireVersion = Schema.Literal(CANVAS_PUBLIC_SHARE_W
 
 /** The payload budget: the export body budget, measured over the JSON the host sends. */
 export const CANVAS_PUBLIC_SHARE_MAX_DOCUMENT_BYTES = CANVAS_EXPORT_BODY_MAX_BYTES;
+/**
+ * Room a request body has for a share's images on top of the document: the
+ * image budget as base64 plus each image's JSON fields. The document budget
+ * stays the text the approval card shows whole.
+ */
+export const CANVAS_PUBLIC_SHARE_MAX_IMAGES_BODY_BYTES =
+  Math.ceil(CANVAS_SHARE_IMAGES_MAX_BYTES / 3) * 4 + CANVAS_SHARE_MAX_IMAGES * 256;
 export const CANVAS_PUBLIC_SHARE_SUMMARY_MAX_CHARS = 200;
 export const CANVAS_PUBLIC_SHARE_REPORT_DETAIL_MAX_CHARS = 1_000;
 /** Revoked and expired links answer 410 for this long, then 404. */
@@ -113,8 +124,34 @@ export const CanvasPublicShareDocument = Schema.Struct({
   summary: Schema.optional(safeText(CANVAS_PUBLIC_SHARE_SUMMARY_MAX_CHARS)),
   publishedAt: UtcTimestamp,
   blocks: Schema.Array(CanvasStaticExportBlock).pipe(Schema.maxItems(128)),
-}).annotations(strict);
+  /**
+   * The generated images the blocks show (maintainer decision, 2026-11-22).
+   * They count against the share image budget, not the document budget, which
+   * is the text the approval card shows whole.
+   */
+  images: Schema.optional(
+    Schema.Array(CanvasShareImage).pipe(Schema.maxItems(CANVAS_SHARE_MAX_IMAGES)),
+  ),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((document) => canvasShareImagesAreConsistent(document), {
+      message: () =>
+        "A share's images must each be named by a block, match their length, and fit the image budget.",
+    }),
+  );
 export type CanvasPublicShareDocument = typeof CanvasPublicShareDocument.Type;
+
+/**
+ * The bytes a document counts against the document budget: its JSON without
+ * the images, which count against the image budget instead.
+ */
+export function canvasPublicShareDocumentTextBytes(
+  document: Pick<CanvasPublicShareDocument, "images">,
+): number {
+  const { images: _images, ...text } = document;
+  return new TextEncoder().encode(JSON.stringify(text)).byteLength;
+}
 
 /** `POST /api/v1/shares` */
 export const CanvasPublicShareCreateRequest = Schema.Struct({

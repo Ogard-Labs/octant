@@ -3391,6 +3391,7 @@ export const decodeCanvasId = Schema.decodeUnknownSync(CanvasId);
 export const decodeCanvasVersionId = Schema.decodeUnknownSync(CanvasVersionId);
 export const decodeCanvasSourceId = Schema.decodeUnknownSync(CanvasSourceId);
 export const decodeCanvasBlockId = Schema.decodeUnknownSync(CanvasBlockId);
+export const decodeCanvasDesignAssetId = Schema.decodeUnknownSync(CanvasDesignAssetId);
 export const decodeCanvasSchemaVersion = Schema.decodeUnknownSync(CanvasSchemaVersion);
 export const decodeCanvasActor = Schema.decodeUnknownSync(CanvasActor);
 export const decodeCanvasProvenance = Schema.decodeUnknownSync(CanvasProvenance);

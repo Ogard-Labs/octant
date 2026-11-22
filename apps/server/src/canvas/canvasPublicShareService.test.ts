@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
 import { decodeCanvasId, decodeCanvasVersionId, type CanvasBlock } from "@octant/contracts/canvas";
 import { decodeCanvasExportPrepareRequest } from "@octant/contracts/canvas-export";
@@ -20,7 +20,11 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import { CanvasExportEventStore, registerCanvasExportEvents } from "./canvasExportEventStore";
-import { CanvasExportService, type CanvasExportDocument } from "./canvasExportService";
+import {
+  CanvasExportService,
+  type CanvasExportDocument,
+  type CanvasExportServiceOptions,
+} from "./canvasExportService";
 import { canvasExportTargetBindings } from "./canvasExportTargets";
 import { createCanvasExportFilePort } from "./canvasExportFilePort";
 import {
@@ -168,6 +172,7 @@ function harness(options?: {
   readonly secrets?: ReturnType<typeof memorySecrets>;
   readonly doc?: CanvasExportDocument;
   readonly clock?: () => string;
+  readonly resolveShareImages?: CanvasExportServiceOptions["resolveShareImages"];
 }) {
   const connection = options?.connection ?? openConnection();
   const service = options?.service ?? fakeService();
@@ -216,6 +221,9 @@ function harness(options?: {
     eventStore: new CanvasExportEventStore({ journal, uuid: () => crypto.randomUUID() }),
     uuid: () => crypto.randomUUID(),
     clock: () => decodeUtcTimestamp(now),
+    ...(options?.resolveShareImages === undefined
+      ? {}
+      : { resolveShareImages: options.resolveShareImages }),
   });
   const turnOn = () =>
     links.changeSettings({
@@ -321,6 +329,41 @@ describe("public links", () => {
       expect(wire).not.toContain(id);
     }
     expect(h.service.calls[0]?.input.expiry).toEqual({ kind: "days", days: 30 });
+  });
+
+  it("shows every generated image on the card and sends exactly those images with the document", async () => {
+    const imageId = "9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a";
+    const pixel = {
+      mediaType: "image/png" as const,
+      data: "iVBORw0KGgo=",
+      byteLength: 8,
+      sha256: "b".repeat(64),
+    };
+    const resolveShareImages = vi.fn(async () => new Map([[imageId, pixel]]));
+    const doc = {
+      ...canvas([
+        {
+          blockId: "cover",
+          schemaVersion: 30,
+          kind: "image",
+          generatedImageId: imageId,
+          alt: "A lighthouse at dusk",
+        },
+      ]),
+      // The resolver reads the version's provenance; this stand-in is never read.
+      definition: {} as never,
+    };
+    const h = harness({ doc, resolveShareImages });
+    h.turnOn();
+    const { card, decided } = await publish(h);
+    expect(decided.kind).toBe("exported");
+    expect(card.images).toEqual([{ imageRef: "image-1", ...pixel }]);
+    // The card shows the text whole and each image on its own: no bytes in the text.
+    expect(card.payload).not.toContain(pixel.data);
+    expect(card.payload).toContain('"imageRef": "image-1"');
+    const sent = h.service.calls[0]?.input.document as CanvasPublicShareDocument;
+    expect(sent.images).toEqual(card.images);
+    expect(JSON.stringify(sent)).not.toContain(imageId);
   });
 
   it("carries a design's markup only on a card that says it leaves as written, and refuses an action block", async () => {

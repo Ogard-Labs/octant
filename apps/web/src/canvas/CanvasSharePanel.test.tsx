@@ -445,6 +445,59 @@ describe("CanvasSharePanel", () => {
     expect(screen.queryByTestId("canvas-share-snapshot-view")).toBeNull();
   });
 
+  it("draws the generated images a snapshot carries, in an image block and in a design frame", async () => {
+    const data = "iVBORw0KGgo=";
+    const shared = {
+      ...exportDocument(),
+      schemaVersion: 18,
+      blocks: [
+        {
+          blockId: "cover",
+          schemaVersion: 30,
+          kind: "image",
+          alt: "A lighthouse at dusk",
+          imageRef: "image-1",
+        },
+        {
+          blockId: "phone",
+          schemaVersion: 30,
+          kind: "design",
+          title: "Phone",
+          size: "document",
+          frames: [
+            { frameId: "home", title: "Home", html: '<img src="octant-asset:hero" alt="Hero">' },
+          ],
+          assets: [{ assetId: "hero", imageRef: "image-1" }],
+        },
+      ],
+      images: [
+        {
+          imageRef: "image-1",
+          mediaType: "image/png",
+          byteLength: 8,
+          sha256: "e".repeat(64),
+          data,
+        },
+      ],
+    };
+    const onOpen = vi.fn(
+      async () => ({ kind: "allowed", document: shared, event: { eventId: "x" } }) as never,
+    );
+    renderPanel({ overview: overview({ snapshots: [activeSnapshot()] }), onOpen });
+
+    fireEvent.click(screen.getByTestId(`canvas-share-open-${snapshotId}`));
+    const view = await screen.findByTestId("canvas-share-snapshot-view");
+    await waitFor(() =>
+      expect(
+        within(view)
+          .getAllByRole("img", { name: "A lighthouse at dusk" })
+          .some((element) => element.getAttribute("src") === `data:image/png;base64,${data}`),
+      ).toBe(true),
+    );
+    const frame = within(view).getByTitle<HTMLIFrameElement>("Phone, document");
+    await waitFor(() => expect(frame.srcdoc).toContain(`src="data:image/png;base64,${data}"`));
+  });
+
   it("draws a shared treemap, heatmap, and bar list in the opened snapshot", async () => {
     const onOpen = vi.fn(
       async () =>

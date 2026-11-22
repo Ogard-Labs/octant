@@ -1,8 +1,11 @@
-import type {
-  CanvasBlock,
-  CanvasId,
-  CanvasLayoutGroupBlock,
-  CanvasVersionId,
+import {
+  CANVAS_IMAGE_BLOCK_ASSET_ID,
+  decodeCanvasDesignAssetId,
+  type CanvasBlock,
+  type CanvasDesignAssetResolution,
+  type CanvasId,
+  type CanvasLayoutGroupBlock,
+  type CanvasVersionId,
 } from "@octant/contracts/canvas";
 import type { CanvasChoiceRuntime } from "./blocks/ChoiceBlock";
 import {
@@ -37,6 +40,8 @@ import {
 } from "@octant/domain/canvas-dashboard-layout";
 import type { CanvasDeckBlock, CanvasFlowBlock } from "@octant/contracts/canvas";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
+import { GeneratedImageBlock } from "./blocks/GeneratedImageBlock";
+import type { DesignAssetRuntime } from "./blocks/designDocument";
 import { designDrawnInHere, type DesignRunRuntime } from "./blocks/designRunningFrame";
 import { CanvasLayoutGroup } from "./blocks/LayoutGroups";
 import { DashboardBlock } from "./blocks/DashboardBlock";
@@ -409,12 +414,18 @@ function SharedSnapshotView(props: {
   readonly designRun?: DesignRunRuntime;
 }) {
   const { designRun } = props;
+  const designAssets = useMemo(() => sharedImageRuntime(props.document), [props.document]);
   // A shared tab or column draws its children in place through the same
   // reading order as the live document, so a dashboard in a pane is the same
   // grid, and a placed block is never drawn a second time.
   const placed = (item: CanvasPlacedReadingItem<SharedBlock>): ReactNode =>
     item.kind === "block" ? (
-      <SnapshotBlock block={item.block} designRun={designRun} key={item.block.blockId} />
+      <SnapshotBlock
+        block={item.block}
+        designRun={designRun}
+        designAssets={designAssets}
+        key={item.block.blockId}
+      />
     ) : item.kind === "flow" ? (
       <section key={item.flow.blockId} className="canvas-block" data-block-kind="flow">
         <FlowBoard
@@ -438,7 +449,9 @@ function SharedSnapshotView(props: {
           cells={item.cells}
           cellKey={(block) => block.blockId}
           cellKind={(block) => block.kind}
-          renderCell={(block) => <SnapshotBlock block={block} designRun={designRun} />}
+          renderCell={(block) => (
+            <SnapshotBlock block={block} designRun={designRun} designAssets={designAssets} />
+          )}
         />
       </section>
     );
@@ -492,17 +505,58 @@ const SHARED_CHOICE: CanvasChoiceRuntime = {
   reason: "This is a shared copy. Answers are sent from the Canvas itself, not from a share.",
 };
 
+/**
+ * The images a snapshot carries, drawn the way the live Canvas draws a
+ * design's or an image block's images: the snapshot holds the bytes, so it
+ * answers from them and asks the host nothing.
+ */
+function sharedImageRuntime(document: CanvasStaticExportDocument): DesignAssetRuntime {
+  const images = new Map((document.images ?? []).map((image) => [String(image.imageRef), image]));
+  const resolved = (assetId: string, imageRef: string): CanvasDesignAssetResolution => {
+    const image = images.get(imageRef);
+    return image === undefined
+      ? { assetId: decodeCanvasDesignAssetId(assetId), status: "unavailable", reason: "missing" }
+      : {
+          assetId: decodeCanvasDesignAssetId(assetId),
+          status: "resolved",
+          mediaType: image.mediaType,
+          data: image.data,
+        };
+  };
+  return {
+    resolve: async (blockId) => {
+      const block = document.blocks.find((candidate) => String(candidate.blockId) === blockId);
+      if (block?.kind === "image" && block.imageRef !== undefined) {
+        return [resolved(String(CANVAS_IMAGE_BLOCK_ASSET_ID), block.imageRef)];
+      }
+      if (block?.kind === "design") {
+        return (block.assets ?? []).map((asset) =>
+          resolved(String(asset.assetId), String(asset.imageRef)),
+        );
+      }
+      return undefined;
+    },
+  };
+}
+
 function SnapshotBlock(props: {
   readonly block: SharedBlock;
   readonly designRun: DesignRunRuntime | undefined;
+  readonly designAssets: DesignAssetRuntime;
 }) {
+  const { block } = props;
   return (
-    <section className="canvas-block" data-block-kind={props.block.kind}>
-      <CanvasBlockRenderer
-        block={props.block as CanvasBlock}
-        choiceRuntime={SHARED_CHOICE}
-        {...(props.designRun === undefined ? {} : { designRunRuntime: props.designRun })}
-      />
+    <section className="canvas-block" data-block-kind={block.kind}>
+      {block.kind === "image" && block.imageRef !== undefined ? (
+        <GeneratedImageBlock block={block} runtime={props.designAssets} />
+      ) : (
+        <CanvasBlockRenderer
+          block={block as CanvasBlock}
+          choiceRuntime={SHARED_CHOICE}
+          designAssetRuntime={props.designAssets}
+          {...(props.designRun === undefined ? {} : { designRunRuntime: props.designRun })}
+        />
+      )}
     </section>
   );
 }

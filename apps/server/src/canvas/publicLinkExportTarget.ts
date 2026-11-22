@@ -102,7 +102,14 @@ export function createPublicLinkExportTarget(
       }
       let document;
       try {
-        document = decodeCanvasPublicShareDocument(JSON.parse(output.body));
+        // The approved images leave beside the body; together they are the
+        // document the service stores.
+        const body: unknown = JSON.parse(output.body);
+        document = decodeCanvasPublicShareDocument(
+          output.images === undefined || typeof body !== "object" || body === null
+            ? body
+            : { ...body, images: output.images },
+        );
       } catch {
         return refused("malformed", "The approved document is not a public share document.");
       }

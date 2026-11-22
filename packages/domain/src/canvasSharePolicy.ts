@@ -1,9 +1,13 @@
 import { trimTrailingUrlPunctuation } from "./trimTrailing";
 import { designBrandTokenRefusal } from "./canvasDesignFrameKit";
 import {
+  CANVAS_SHARE_IMAGES_MAX_BYTES,
   CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION,
+  CANVAS_SHARE_MAX_IMAGES,
   CANVAS_SHARE_SCHEMA_VERSION,
+  CanvasShareImageRef,
   decodeCanvasStaticExportRequest,
+  type CanvasShareImage,
   type CanvasRedactedProvenance,
   type CanvasStaticExportBlock,
   type CanvasStaticExportDocument,
@@ -19,6 +23,7 @@ import {
   type CanvasVersion,
 } from "@octant/contracts/canvas";
 import type { UtcTimestamp } from "@octant/contracts/events";
+import { Schema } from "effect";
 import {
   CANVAS_PUBLIC_SHARE_SUMMARY_MAX_CHARS,
   CANVAS_PUBLIC_SHARE_WIRE_VERSION,
@@ -185,6 +190,91 @@ function assertNoSecretShape(value: unknown, path: string): void {
   }
 }
 
+/**
+ * A generated image the host resolved for a share, under the Canvas version's
+ * own authority, before the share was built: the sniffed raster type, the
+ * bytes as base64, their length, and their SHA-256 in hex.
+ */
+export interface CanvasShareResolvedImage {
+  readonly mediaType: CanvasShareImage["mediaType"];
+  readonly data: string;
+  readonly byteLength: number;
+  readonly sha256: string;
+}
+
+/** Resolved generated images by their attachment id. */
+export type CanvasShareResolvedImages = ReadonlyMap<string, CanvasShareResolvedImage>;
+
+/**
+ * The generated images a document shows, which a share carries (maintainer
+ * decision, 2026-11-22): each image block's picture, and the generated-image
+ * assets of each design. Project files and Browser captures a design declares
+ * are not among them; a share never carries a file from this computer.
+ */
+export function canvasShareGeneratedImageIds(
+  definition: Pick<CanvasDefinition, "blocks">,
+): ReadonlyArray<string> {
+  const ids = new Set<string>();
+  for (const block of definition.blocks) {
+    if (block.kind === "image" && block.generatedImageId !== undefined) {
+      ids.add(String(block.generatedImageId));
+    }
+    if (block.kind === "design") {
+      for (const asset of block.assets ?? []) {
+        if (asset.source.kind === "generated-image") ids.add(String(asset.source.imageId));
+      }
+    }
+  }
+  return [...ids];
+}
+
+const decodeShareImageRef = Schema.decodeSync(CanvasShareImageRef);
+
+/**
+ * The images one share carries, named in the order the blocks first show
+ * them, each once however often it is shown. An image the host did not
+ * resolve, or one past the share's image count or budget, is not carried and
+ * its block reads as its description.
+ */
+class SharedImages {
+  readonly #resolved: CanvasShareResolvedImages;
+  readonly #refs = new Map<string, CanvasShareImageRef>();
+  readonly #images: CanvasShareImage[] = [];
+  #spent = 0;
+
+  constructor(resolved: CanvasShareResolvedImages) {
+    this.#resolved = resolved;
+  }
+
+  refFor(imageId: string): CanvasShareImageRef | undefined {
+    const known = this.#refs.get(imageId);
+    if (known !== undefined) return known;
+    const image = this.#resolved.get(imageId);
+    if (image === undefined) return undefined;
+    if (
+      this.#images.length >= CANVAS_SHARE_MAX_IMAGES ||
+      this.#spent + image.byteLength > CANVAS_SHARE_IMAGES_MAX_BYTES
+    ) {
+      return undefined;
+    }
+    const imageRef = decodeShareImageRef(`image-${String(this.#images.length + 1)}`);
+    this.#refs.set(imageId, imageRef);
+    this.#images.push({
+      imageRef,
+      mediaType: image.mediaType,
+      byteLength: image.byteLength,
+      sha256: image.sha256,
+      data: image.data,
+    });
+    this.#spent += image.byteLength;
+    return imageRef;
+  }
+
+  get images(): ReadonlyArray<CanvasShareImage> {
+    return this.#images;
+  }
+}
+
 /** A shared block names the newest Canvas version this share version represents. */
 function sharedBlockVersion(block: CanvasStaticExportBlock): CanvasStaticExportBlock {
   return block.schemaVersion > CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION
@@ -200,8 +290,16 @@ function sharedBlockVersion(block: CanvasStaticExportBlock): CanvasStaticExportB
  */
 function sharedDesign(
   block: Extract<CanvasBlock, { readonly kind: "design" }>,
+  images: SharedImages,
 ): CanvasStaticExportBlock {
-  const { assets: _assets, ...design } = block;
+  const { assets: declared, ...design } = block;
+  // A frame's generated images leave with it; a Project file or a Browser
+  // capture it declares does not, and draws as a placeholder.
+  const assets = (declared ?? []).flatMap((asset) => {
+    if (asset.source.kind !== "generated-image") return [];
+    const imageRef = images.refFor(String(asset.source.imageId));
+    return imageRef === undefined ? [] : [{ assetId: asset.assetId, imageRef }];
+  });
   const markup = [design.styles ?? "", ...design.frames.map((frame) => frame.html)];
   if (markup.some((text) => SECRET_VALUE_PATTERN.test(text))) {
     reject(
@@ -230,11 +328,16 @@ function sharedDesign(
   const withoutNotes = {
     ...design,
     frames: design.frames.map(({ notes: _notes, ...frame }) => frame),
+    ...(assets.length === 0 ? {} : { assets }),
   };
   return withoutNotes as CanvasStaticExportBlock;
 }
 
-function sanitizeBlock(block: CanvasBlock, markupAcknowledged: boolean): CanvasStaticExportBlock {
+function sanitizeBlock(
+  block: CanvasBlock,
+  markupAcknowledged: boolean,
+  images: SharedImages,
+): CanvasStaticExportBlock {
   // Drop live source ids from reference-like blocks so the offline snapshot
   // cannot be used to re-resolve host-local authority later.
   switch (block.kind) {
@@ -246,18 +349,19 @@ function sanitizeBlock(block: CanvasBlock, markupAcknowledged: boolean): CanvasS
     case "file-reference":
     case "preview-reference":
     case "browser-reference":
-    case "evidence-reference":
-    case "image": {
-      // A generated image is host identity like a source id, and its bytes
-      // resolve only under this host's authority, so a shared image block
-      // carries its description alone.
-      const {
-        sourceId: _sourceId,
-        generatedImageId: _generatedImageId,
-        ...rest
-      } = block as CanvasBlock & { sourceId?: string; generatedImageId?: string };
+    case "evidence-reference": {
+      const { sourceId: _sourceId, ...rest } = block as CanvasBlock & { sourceId?: string };
       assertNoSecretShape(rest, `block.${block.blockId}`);
       return rest as CanvasStaticExportBlock;
+    }
+    case "image": {
+      // A generated image is host identity like a source id, so its id never
+      // leaves; the picture itself does, as one of the share's images.
+      const { sourceId: _sourceId, generatedImageId, ...rest } = block;
+      assertNoSecretShape(rest, `block.${block.blockId}`);
+      const imageRef =
+        generatedImageId === undefined ? undefined : images.refFor(String(generatedImageId));
+      return (imageRef === undefined ? rest : { ...rest, imageRef }) as CanvasStaticExportBlock;
     }
     case "design":
       // A design's markup leaves as written, so it leaves only when the
@@ -268,7 +372,7 @@ function sanitizeBlock(block: CanvasBlock, markupAcknowledged: boolean): CanvasS
           `Canvas design ${block.blockId} is markup, which is shared as written; sharing it needs that acknowledgement.`,
         );
       }
-      return sharedDesign(block);
+      return sharedDesign(block, images);
     case "deck": {
       // A deck's notes are the presenter's, which never leave the host.
       const slides = block.slides.map(({ notes: _notes, ...slide }) => slide);
@@ -451,11 +555,14 @@ export function buildCanvasStaticExportDocument(input: {
   readonly request: CanvasStaticExportRequest;
   readonly current: CanvasVersion;
   readonly exportedAt: UtcTimestamp | string;
+  /** The generated images the host resolved for this version; absent, none leave. */
+  readonly images?: CanvasShareResolvedImages;
 }): CanvasStaticExportDocument {
   const definition = input.current.definition;
   const markupAcknowledged = input.request.consent.acknowledgedMarkupSharedAsWritten === true;
+  const images = new SharedImages(input.images ?? new Map());
   const blocks = definition.blocks.map((block) =>
-    sharedBlockVersion(sanitizeBlock(block, markupAcknowledged)),
+    sharedBlockVersion(sanitizeBlock(block, markupAcknowledged, images)),
   );
   assertNoSecretShape(definition.title, "title");
   const exportedAtRaw = String(input.exportedAt);
@@ -481,6 +588,7 @@ export function buildCanvasStaticExportDocument(input: {
     provenance: redactProvenance(definition),
     sourceManifest: redactSources(definition),
     blocks,
+    ...(images.images.length === 0 ? {} : { images: images.images }),
     threatModelId: "canvas-share-static-export-v1",
   };
 }
@@ -496,6 +604,8 @@ export function buildCanvasPublicShareDocument(input: {
   readonly definition: Pick<CanvasDefinition, "title" | "blocks">;
   readonly publishedAt: UtcTimestamp | string;
   readonly markupAcknowledged: boolean;
+  /** The generated images the host resolved for this version; absent, none leave. */
+  readonly images?: CanvasShareResolvedImages;
 }): CanvasPublicShareDocument {
   const definition = input.definition;
   for (const block of definition.blocks) {
@@ -507,8 +617,9 @@ export function buildCanvasPublicShareDocument(input: {
     }
   }
   assertNoSecretShape(definition.title, "title");
+  const images = new SharedImages(input.images ?? new Map());
   const blocks = definition.blocks.map((block) =>
-    sharedBlockVersion(sanitizeBlock(block, input.markupAcknowledged)),
+    sharedBlockVersion(sanitizeBlock(block, input.markupAcknowledged, images)),
   );
   const summary = publicShareSummary(blocks);
   try {
@@ -520,6 +631,7 @@ export function buildCanvasPublicShareDocument(input: {
       ...(summary === undefined ? {} : { summary }),
       publishedAt: String(input.publishedAt),
       blocks,
+      ...(images.images.length === 0 ? {} : { images: images.images }),
     });
   } catch {
     return reject("unsafe-payload", "This Canvas holds something a public link cannot carry.");

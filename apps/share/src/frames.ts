@@ -2,9 +2,11 @@ import {
   CANVAS_DESIGN_VIEWPORT,
   type CanvasStaticExportBlock,
   DESIGN_FRAME_KIT,
+  type CanvasShareImage,
+  withDesignAssetAddresses,
 } from "./shareKit.ts";
 import type { ServiceContext } from "./context.ts";
-import { escapeHtml } from "./render.ts";
+import { escapeHtml, shareImageAddress } from "./render.ts";
 import { readFrameToken, type FrameMode } from "./tokens.ts";
 
 type DesignBlock = Extract<CanvasStaticExportBlock, { readonly kind: "design" }>;
@@ -156,7 +158,25 @@ function themeStyles(): string {
  * page per request that runs nothing; the response policy, not the markup,
  * is what keeps it that way.
  */
-export function renderDesignFramePage(block: DesignBlock): string {
+export function renderDesignFramePage(
+  block: DesignBlock,
+  images: ReadonlyArray<CanvasShareImage> = [],
+): string {
+  // A generated image the share carries is written in as a data: image, which
+  // the frame policy admits; any other declared asset stayed on the host and
+  // its reference is left to load nothing.
+  const byRef = new Map(images.map((image) => [String(image.imageRef), image]));
+  const addresses = new Map(
+    (block.assets ?? []).flatMap((asset) => {
+      const image = byRef.get(String(asset.imageRef));
+      return image === undefined ? [] : [[String(asset.assetId), shareImageAddress(image)]];
+    }),
+  );
+  const withImages = (markup: string) =>
+    withDesignAssetAddresses(
+      markup,
+      (assetId) => addresses.get(assetId) ?? `octant-asset:${assetId}`,
+    );
   const isDocument = block.size === "document";
   const themed = (block.theme ?? (isDocument ? "workspace" : "none")) === "workspace";
   const viewport = block.size === "document" ? undefined : CANVAS_DESIGN_VIEWPORT[block.size];
@@ -164,7 +184,7 @@ export function renderDesignFramePage(block: DesignBlock): string {
   const frames = block.frames
     .map((frame) => {
       const id = String(frame.frameId);
-      return `<div class="octant-frame" id="${escapeHtml(id)}"${id === first ? " data-start" : ""}>${frame.html}</div>`;
+      return `<div class="octant-frame" id="${escapeHtml(id)}"${id === first ? " data-start" : ""}>${withImages(frame.html)}</div>`;
     })
     .join("");
   return [
@@ -176,7 +196,7 @@ export function renderDesignFramePage(block: DesignBlock): string {
     `<style>${isDocument ? DOCUMENT_FRAME_RULES : DEVICE_FRAME_RULES}</style>`,
     themed ? themeStyles() : `<style>${UNTHEMED_PAGE}</style>`,
     // A stylesheet that closes its element would let author text become markup.
-    `<style>${(block.styles ?? "").replace(/<\/style/gi, "<\\/style")}</style>`,
+    `<style>${withImages(block.styles ?? "").replace(/<\/style/gi, "<\\/style")}</style>`,
     `</head><body>${frames}</body></html>`,
   ].join("");
 }
@@ -226,7 +246,7 @@ export function handleFrame(request: Request, ctx: ServiceContext): Response {
   // A token minted for a static frame never opens the script policy, and a
   // running token only opens a design that declared it runs script.
   if (mode === "running" && block.runsScript !== true) return plain(404, "Not found", refused);
-  return new Response(renderDesignFramePage(block), {
+  return new Response(renderDesignFramePage(block, share.document.images ?? []), {
     status: 200,
     headers: {
       ...FRAME_HEADERS,

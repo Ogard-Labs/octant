@@ -10,6 +10,7 @@ import { decodeCanvasVersion, type CanvasVersion } from "@octant/contracts/canva
 import type { UtcTimestamp } from "@octant/contracts/events";
 import {
   buildCanvasStaticExportDocument,
+  type CanvasShareResolvedImages,
   CanvasSharePolicyRejected,
   type CanvasSharePolicyContext,
 } from "./canvasSharePolicy";
@@ -156,6 +157,8 @@ export function createCanvasShareSnapshotRecord(input: {
   readonly context: CanvasSharePolicyContext;
   /** @deprecated Optional compatibility no-op; snapshot consent is authoritative. */
   readonly staticExportRequest?: unknown;
+  /** The generated images the host resolved for this version; absent, none are copied. */
+  readonly images?: CanvasShareResolvedImages;
 }): CanvasShareSnapshotRecord {
   let current: CanvasVersion;
   try {
@@ -197,6 +200,7 @@ export function createCanvasShareSnapshotRecord(input: {
       request: sanitizerRequest,
       current,
       exportedAt: createdAt,
+      ...(input.images === undefined ? {} : { images: input.images }),
     });
     document = {
       ...sanitized,

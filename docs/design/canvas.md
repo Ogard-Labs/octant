@@ -867,8 +867,12 @@ window in another mode is offered none, as it cannot open the Canvas.
 A public link carries the same blocks without host, Project, thread, or
 source identity; its rules are in [Canvas public links](canvas-public-links.md).
 A share carries every block kind and field a Canvas holds except source ids,
-a design's declared images, and the action block it refuses (see the `design`
-block). A table
+a design's Project-file and Browser-capture assets, and the action block it
+refuses (see the `design` block). From share version 18 it carries the
+generated images the document shows, an image block's picture and a design's
+`generated-image` assets, as bytes in the document's `images` (maintainer
+decision, 2026-11-22; see [Canvas public links](canvas-public-links.md) for
+the limits and the card). A table
 column keeps its number format and display, a table row leaves as its cells
 without the `id` comments anchor to, and a board keeps its own layout. Because
 the row id is the only Canvas version 13 field and a share drops it, a share at
@@ -883,11 +887,11 @@ Version 22 adds only a chart's title, subtitle, and point callouts, which a
 share still strips: a shared chart leaves as its readings and is named as
 version 21. Share version 12 carries the flow block, so it names blocks up
 to Canvas version 23, share version 16 carries the choice block, and share
-version 17 carries a decision form's sections and notes, so it names blocks up
-to Canvas version 29 (`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`). Version 30
-adds only an image block's `generatedImageId`, which a share drops, so a share
-names an image block authored at 30 as 29;
-the share service must learn each before a desktop release publishes one.
+version 17 carries a decision form's sections and notes, so it named blocks up
+to Canvas version 29. Share version 18 carries the generated images a document
+shows, which an image block draws from Canvas version 30, so it names blocks
+up to Canvas version 30 (`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`); the share
+service must learn each before a desktop release publishes one.
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a
@@ -903,6 +907,7 @@ block with share version 14 (a deck's presenter notes stay behind, as a
 design's frame notes do), flow callouts with share version 15, and the
 choice block with share version 16 (whose blocks may name Canvas version 27),
 and a decision form's sections with share version 17 (Canvas version 29),
+and a document's generated images with share version 18 (Canvas version 30),
 so a share
 that declares an older version
 and carries one is refused as a future version.
@@ -1589,11 +1594,13 @@ and no frames, and `describe` for the `image` kind explains the field.
 The **HTML file** writes the picture in as a `data:` image under the file's
 image budget (`CANVAS_HTML_FILE_IMAGES_MAX_BYTES`), or the labelled placeholder
 when it did not resolve for that reader or would pass the budget. Markdown
-export and the destination exports write the block as its `alt` and caption,
-as they write a design's declared images as placeholders. A share drops
-`generatedImageId` like a source id, so a shared image block draws as its
-description: the image resolves only under this host's authority, as a
-design's declared images do.
+export and the destination's Markdown and HTML exports write the block as its
+`alt` and caption, as they write a design's declared images as placeholders. A share, public or authenticated, carries the
+picture itself (maintainer decision, 2026-11-22): the host resolves it under
+the version's provenance when the share is made, the block names it by the
+share's own `imageRef`, and `generatedImageId` never leaves. A shared image
+whose job is gone when the share is made is not carried, and the block reads
+as its description.
 
 ## Design block
 
@@ -1676,10 +1683,11 @@ not markup, so a Canvas that holds a design is shared only when the sharer
 acknowledges that its markup is shared as written
 (`acknowledgedMarkupSharedAsWritten`); without it the share is refused as
 `consent-required`, and markup that holds a token or key in a recognisable
-shape is refused as `unsafe-payload` even then. A shared design carries no
-declared images: an asset names a Project file, an image job, or a browser capture, which resolve
-only under this host's authority, so a frame that named one draws a
-placeholder. The snapshot viewer draws a shared design with the same block
+shape is refused as `unsafe-payload` even then. A shared design carries its
+`generated-image` assets as the share's images from share version 18, each
+named by the share's own reference, so its frames draw them; a Project file
+or a Browser capture resolves only under this host's authority and is never
+carried, so a frame that named one draws a placeholder. The snapshot viewer draws a shared design with the same block
 the live Canvas uses, so its frames get the same sandbox and page policy, and
 a reader that only knows share version 9 refuses the snapshot as a future
 version rather than drawing a frame any other way. A shared prototype runs
@@ -1728,8 +1736,10 @@ markup, so their card sets `drawsDesignFrames` for the person to acknowledge,
 and a themed design needs the window's `frameTheme` as in HTML export.
 The export approval card says when the document writes design markup
 (`writesDesignMarkup`), so approving it is the person's acknowledgement that
-markup leaves as written. In a destination export a declared image draws a
-placeholder; the HTML file below writes in those that resolve for its reader. A design in
+markup leaves as written. In a destination's Markdown or HTML export a
+declared image draws a placeholder; the HTML file below writes in those that
+resolve for its reader, and a public link's share document carries the
+generated images (see [Shares](#shares)). A design in
 the workspace theme is exported in the theme the person's window draws it
 with: an HTML export of a Canvas that holds a design carries `frameTheme`, the
 scheme and the frame's token values, because an exported file has no Octant

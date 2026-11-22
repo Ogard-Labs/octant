@@ -150,6 +150,7 @@ function renderShare(
   );
   const body = renderBlocks(document.blocks, {
     shareId: id,
+    images: new Map((document.images ?? []).map((image) => [String(image.imageRef), image])),
     runBlockId: runnable === undefined ? undefined : String(runnable.blockId),
     frameAddress: (blockId, mode) =>
       `${ctx.usercontentOrigin}/f/${id}/${encodeURIComponent(blockId)}?t=${mintFrameToken(

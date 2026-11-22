@@ -48,12 +48,14 @@ import {
   CANVAS_SHARE_THREAT_MODEL_ID,
   validateCanvasStaticExportRequest,
   type CanvasSharePolicyContext,
+  type CanvasShareResolvedImages,
 } from "./canvasSharePolicy";
 
 function exportStaticDocument(input: {
   readonly request: unknown;
   readonly current: unknown;
   readonly context: CanvasSharePolicyContext;
+  readonly images?: CanvasShareResolvedImages;
 }) {
   const version = decodeCanvasVersion(input.current);
   const validated = validateCanvasStaticExportRequest({
@@ -65,6 +67,7 @@ function exportStaticDocument(input: {
     request: validated,
     current: version,
     exportedAt: input.context.nowIso as UtcTimestamp,
+    ...(input.images === undefined ? {} : { images: input.images }),
   });
   return { document, consent: validated.consent, note: validated.note };
 }
@@ -465,7 +468,7 @@ describe("Canvas share policy", () => {
     expect(receipt.document.blocks).toEqual(blocks);
   });
 
-  it("shares a decision form's questions and sections at share version 17, never an answer", () => {
+  it("shares a decision form's questions and sections at the current share version, never an answer", () => {
     const form = decodeCanvasBlock({
       blockId: "decisions",
       schemaVersion: CANVAS_SCHEMA_VERSION,
@@ -494,7 +497,7 @@ describe("Canvas share policy", () => {
       }),
       context,
     });
-    expect(receipt.document.schemaVersion).toBe(17);
+    expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_SCHEMA_VERSION);
     expect(decodeCanvasStaticExportDocument(receipt.document).blocks).toEqual([
       { ...form, schemaVersion: CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION },
     ]);
@@ -589,36 +592,61 @@ describe("Canvas share policy", () => {
     expect(JSON.stringify(shared.document)).not.toContain("screens/home.png");
   });
 
-  it("shares an image block that draws a generated image as its description, without the image's id", () => {
+  it("carries the generated images a document shows, once each, and never the image's id or a Project file", () => {
     const imageId = "9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a";
+    const missingId = "8b8b8b8b-8b8b-4b8b-8b8b-8b8b8b8b8b8b";
+    const pixel = {
+      mediaType: "image/png" as const,
+      data: "iVBORw0KGgo=",
+      byteLength: 8,
+      sha256: "a".repeat(64),
+    };
+    const image = (blockId: string, generatedImageId: string) => ({
+      blockId,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "image",
+      generatedImageId,
+      alt: "A lighthouse at dusk",
+      caption: "Cover art",
+    });
+    const design = {
+      ...onboardingFlowExample,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      assets: [
+        { assetId: "hero", source: { kind: "generated-image", imageId } },
+        { assetId: "shot", source: { kind: "project-file", path: "screens/home.png" } },
+      ],
+    };
     const shared = exportStaticDocument({
-      request,
+      request: {
+        ...request,
+        consent: { ...request.consent, acknowledgedMarkupSharedAsWritten: true },
+      },
       current: {
         ...current,
         schemaVersion: CANVAS_SCHEMA_VERSION,
         definition: {
           ...current.definition,
           schemaVersion: CANVAS_SCHEMA_VERSION,
-          blocks: [
-            {
-              blockId: "cover",
-              schemaVersion: CANVAS_SCHEMA_VERSION,
-              kind: "image",
-              generatedImageId: imageId,
-              alt: "A lighthouse at dusk",
-              caption: "Cover art",
-            },
-          ],
+          provenance: { ...current.definition.provenance, mode: "work" },
+          blocks: [image("cover", imageId), image("gone", missingId), design],
         },
       },
       context,
+      images: new Map([[imageId, pixel]]),
     });
-    expect(decodeCanvasStaticExportDocument(shared.document).blocks[0]).toMatchObject({
-      kind: "image",
-      alt: "A lighthouse at dusk",
-      caption: "Cover art",
+    const document = decodeCanvasStaticExportDocument(shared.document);
+    expect(document.schemaVersion).toBe(18);
+    expect(document.images).toEqual([{ imageRef: "image-1", ...pixel }]);
+    expect(document.blocks[0]).toMatchObject({ kind: "image", imageRef: "image-1" });
+    // An image the host could not resolve reads as its description.
+    expect(document.blocks[1]).not.toHaveProperty("imageRef");
+    expect(document.blocks[2]).toMatchObject({
+      kind: "design",
+      assets: [{ assetId: "hero", imageRef: "image-1" }],
     });
-    expect(JSON.stringify(shared.document)).not.toContain(imageId);
+    expect(JSON.stringify(document)).not.toContain(imageId);
+    expect(JSON.stringify(document)).not.toContain("screens/home.png");
   });
 
   it("shares a validated brand and richer diagram fields at the current share version, and leaves presenter notes and a captured page behind", () => {
@@ -661,8 +689,8 @@ describe("Canvas share policy", () => {
       });
     const receipt = share([design, diagram]);
     expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_SCHEMA_VERSION);
-    expect(CANVAS_SHARE_SCHEMA_VERSION).toBe(17);
-    expect(CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION).toBe(29);
+    expect(CANVAS_SHARE_SCHEMA_VERSION).toBe(18);
+    expect(CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION).toBe(30);
     const { assets: _assets, ...withoutAssets } = design;
     expect(receipt.document.blocks).toEqual([
       {

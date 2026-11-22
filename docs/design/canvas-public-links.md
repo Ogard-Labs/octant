@@ -110,9 +110,22 @@ uses:
   200 characters taken from the first reading text (used for link previews),
   and the shared blocks;
 - no Canvas, version, host, Project, or thread id, no provenance labels, and
-  no source manifest; no source ids on any block; no file contents; no
-  declared images of a design (a frame draws a placeholder where one was
-  named); and an action block refuses the whole publish;
+  no source manifest; no source ids on any block; no file contents; and an
+  action block refuses the whole publish;
+- the generated images the document shows (maintainer decision, 2026-11-22):
+  each image block's picture and each design's `generated-image` assets, as
+  sniffed PNG, JPEG, GIF, or WebP bytes in the document's `images`, named by
+  the share's own `image-<n>` references, never by an image or job id. A
+  Project file or Browser capture a design declares is never carried and its
+  frame draws a placeholder. Each image is at most 3 MiB and all of them at
+  most 4 MiB (`CANVAS_SHARE_IMAGES_MAX_BYTES`), counted apart from the
+  document's text budget (the export body limit), so the card still shows the
+  text whole. The card lists every image that leaves, as a thumbnail with its
+  size, and the approved digest covers each image's SHA-256, so approving the
+  card approves exactly those images. There is no separate acknowledgement:
+  the person sees what is sent. _Rationale:_ peers show a guest the images
+  that appear in shared content, and a placeholder made a shared document look
+  broken;
 - a design's frames only with the card's acknowledgement.
 
 The document is self-contained: the service draws it from its typed blocks

@@ -30,7 +30,7 @@ export function GeneratedImageBlock({
   block,
   runtime,
 }: {
-  readonly block: CanvasImageBlock;
+  readonly block: Pick<CanvasImageBlock, "blockId" | "alt" | "caption">;
   readonly runtime: DesignAssetRuntime | undefined;
 }) {
   const [drawn, setDrawn] = useState<Drawn>(

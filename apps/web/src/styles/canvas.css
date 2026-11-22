@@ -4906,6 +4906,38 @@
   color: var(--oct-muted);
 }
 
+/* The images a share sends beside its document, each one as it leaves, so
+   the person sees every picture they approve. */
+.canvas-export__images {
+  margin: var(--oct-space-2) 0 0;
+}
+
+.canvas-export__image-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+  margin: var(--oct-space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.canvas-export__image {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+}
+
+.canvas-export__image img {
+  display: block;
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+}
+
 .canvas-export__payload {
   max-height: 12rem;
   margin: var(--oct-space-2) 0 0;

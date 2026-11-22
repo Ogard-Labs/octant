@@ -146,6 +146,7 @@ function createRevisionRoute(
       readonly advance: (ms: number) => void;
     }) => void;
     readonly canvasExportService?: CanvasRouteDependencies["canvasExportService"];
+    readonly resolveShareImages?: CanvasRouteDependencies["resolveShareImages"];
   } = {},
 ) {
   const canvasProjectId = options.threadOwned === true ? null : projectId;
@@ -419,6 +420,9 @@ function createRevisionRoute(
     ...(options.findPublishedSnapshot === undefined
       ? {}
       : { findPublishedSnapshot: options.findPublishedSnapshot }),
+    ...(options.resolveShareImages === undefined
+      ? {}
+      : { resolveShareImages: options.resolveShareImages }),
     ...(options.resolveDesignSystem === undefined
       ? {}
       : { resolveDesignSystem: options.resolveDesignSystem }),
@@ -2373,6 +2377,55 @@ describe("canvas routes", () => {
       kind: "heading",
       text: "What happened",
     });
+  });
+
+  it("copies the generated images a shared version shows into its snapshot, so its readers see them", async () => {
+    const imageId = "9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a";
+    const pixel = {
+      mediaType: "image/png" as const,
+      data: "iVBORw0KGgo=",
+      byteLength: 8,
+      sha256: "c".repeat(64),
+    };
+    const resolveShareImages = vi.fn(async () => new Map([[imageId, pixel]]));
+    const route = createRevisionRoute(new CanvasProjection(), {
+      extraBlocks: [
+        {
+          blockId: "cover",
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          kind: "image",
+          generatedImageId: imageId,
+          alt: "A lighthouse at dusk",
+        },
+      ],
+      resolveShareImages,
+    });
+    const post = (path: string, body: unknown) =>
+      route(
+        new Request(`http://127.0.0.1/api/canvas/${path}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "user-agent": "Mozilla/5.0 (Macintosh) Chrome/1.0",
+            "x-octant-window-capability": windowCapability,
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+    const shared = decodeCanvasShareResult(
+      JSON.parse(await (await post("share", shareBody()))!.text()),
+    );
+    expect(shared.kind).toBe("accepted");
+    expect(resolveShareImages).toHaveBeenCalledTimes(1);
+    const allowed = decodeCanvasShareAccessResult(
+      JSON.parse(await (await post("share-access", accessBody()))!.text()),
+    );
+    if (allowed.kind !== "allowed") throw new Error("expected the snapshot");
+    expect(allowed.document.images).toEqual([{ imageRef: "image-1", ...pixel }]);
+    expect(allowed.document.blocks.find((block) => block.kind === "image")).toMatchObject({
+      imageRef: "image-1",
+    });
+    expect(JSON.stringify(allowed.document)).not.toContain(imageId);
   });
 
   it("shares, serves, revokes, and then refuses a Canvas snapshot over the API", async () => {
