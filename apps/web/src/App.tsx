@@ -619,6 +619,7 @@ import {
 } from "./host/useHostFederationLifecycle";
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
 import { createPairedComputerFetch } from "./host/pairedComputerFetch";
+import { PairedComputerCodeSurface } from "./host/PairedComputerCodeSurface";
 import { NeedsYouProvider, OctantCommandProvider } from "./palette/CommandRegistry";
 import {
   buildOctantCommands,
@@ -2307,6 +2308,10 @@ function LaunchedShell(
     () => readLastSelectedHealthyHostId(),
   );
   const [createHostId, setCreateHostId] = useState<HostId>(() => defaultCreateHostId());
+  // Whether the destination is only the one a host filter named, not the
+  // person's pick: clearing the filter must not keep an offline computer the
+  // person never chose.
+  const createHostFromFilter = useRef(false);
   // The Create Project dialog's GitHub tab rides the same host-scoped GitHub
   // clients the composer's "New Project from GitHub repository" uses. Disabled
   // GitHub contributes no tab, exactly as it contributes no composer row.
@@ -2480,38 +2485,86 @@ function LaunchedShell(
   }, [runningServicesRemoteHost, remoteServerLiveOpener, federation, pairedComputerFetch]);
   useEffect(() => {
     if (hosts.length === 0) return;
-    const result = preselectCreateHost({
-      hosts,
-      viewScope: createHostViewScope,
-      ...(lastSelectedHealthyHostId === undefined ? {} : { lastSelectedHealthyHostId }),
+    // Read from the current selection rather than a dependency, so choosing a
+    // host does not itself rerun this preselection.
+    const filtered = createHostViewScope.kind === "host-filter";
+    const keptFromFilter = createHostFromFilter.current && !filtered;
+    createHostFromFilter.current = filtered;
+    setCreateHostId((selectedHostId) => {
+      const picked = keptFromFilter ? undefined : selectedHostId;
+      const result = preselectCreateHost({
+        hosts,
+        viewScope: createHostViewScope,
+        ...(picked === undefined ? {} : { selectedHostId: picked }),
+        ...(lastSelectedHealthyHostId === undefined ? {} : { lastSelectedHealthyHostId }),
+      });
+      if (result.kind === "selected") return result.host.hostId;
+      // Host-filter views still name the filtered host so the selector can show
+      // it disabled; create submit refuses until that host is routable.
+      return createHostViewScope.kind === "host-filter"
+        ? createHostViewScope.hostId
+        : selectedHostId;
     });
-    if (result.kind === "selected") {
-      setCreateHostId(result.host.hostId);
-      return;
-    }
-    // Host-filter views still name the filtered host so the selector can show
-    // it disabled; create submit refuses until that host is routable.
-    if (createHostViewScope.kind === "host-filter") {
-      setCreateHostId(createHostViewScope.hostId);
-    }
   }, [createHostViewScope, hosts, lastSelectedHealthyHostId]);
   function handleSelectCreateHost(hostId: HostId) {
+    createHostFromFilter.current = false;
     setCreateHostId(hostId);
     const host = hosts.find((candidate) => candidate.hostId === hostId);
     if (host === undefined) return;
     const remembered = rememberHealthyCreateHost(host);
     if (remembered !== undefined) setLastSelectedHealthyHostId(remembered);
   }
+  // When the Code picker names a paired computer whose session is ready, the
+  // start screen is that computer's own: its Projects, models and threads over
+  // its session. A computer that has not been ready keeps the local draft,
+  // whose create refuses it with a reason. Once the surface has opened it stays
+  // mounted while the same session reconnects, so the open thread and an unsent
+  // prompt survive; the surface itself holds mutations until it is ready again.
+  const pairedComputerCodeSlot =
+    String(createHostId) === String(LOCAL_HOST_ID)
+      ? undefined
+      : hostFederationTransports?.get(createHostId);
+  const pairedComputerSlotBridge =
+    pairedComputerCodeSlot?.kind === "remote" ? pairedComputerCodeSlot.bridge : undefined;
+  const pairedComputerSlotReady =
+    pairedComputerCodeSlot?.kind === "remote" && pairedComputerCodeSlot.state.kind === "ready";
+  const [pairedComputerOpenedBridge, setPairedComputerOpenedBridge] =
+    useState<typeof pairedComputerSlotBridge>(undefined);
+  useEffect(() => {
+    if (pairedComputerSlotReady && pairedComputerSlotBridge !== undefined) {
+      setPairedComputerOpenedBridge(pairedComputerSlotBridge);
+    }
+  }, [pairedComputerSlotBridge, pairedComputerSlotReady]);
+  const pairedComputerCodeBridge =
+    pairedComputerSlotBridge !== undefined &&
+    (pairedComputerSlotReady || pairedComputerSlotBridge === pairedComputerOpenedBridge)
+      ? pairedComputerSlotBridge
+      : undefined;
+  const renderPairedComputerCodeStart =
+    pairedComputerCodeBridge === undefined
+      ? undefined
+      : () => (
+          <PairedComputerCodeSurface
+            key={String(createHostId)}
+            bridge={pairedComputerCodeBridge}
+            hosts={hosts}
+            selectedHostId={createHostId}
+            onSelectHost={handleSelectCreateHost}
+            viewScope={createHostViewScope}
+          />
+        );
   function refuseUnlessCreatableDestination(input: {
     readonly action: string;
     readonly requiredCapability?: string;
     readonly projectHostId?: HostId;
+    readonly onlyThisHost?: boolean;
     readonly onRefuse: (reason: string) => void;
   }): HostId | undefined {
     const decision = assertCreateDestinationFromHosts({
       hosts,
       createHostId,
       action: input.action,
+      ...(input.onlyThisHost === undefined ? {} : { onlyThisHost: input.onlyThisHost }),
       ...(input.projectHostId === undefined ? {} : { projectHostId: input.projectHostId }),
       ...(input.requiredCapability === undefined
         ? {}
@@ -7009,6 +7062,11 @@ function LaunchedShell(
     // overview on screen for a frame before the draft replaced it, which read
     // as an old page flashing past every time a task was started from a row.
     closeWorkspaceReaders();
+    // A draft opened from one of this computer's Projects (its row, New
+    // coordinator, a just-created Project) is aimed at this computer. With a
+    // paired computer left selected in the picker, the draft showed that
+    // computer's start screen instead, and the coordinator intent was lost.
+    if (String(createHostId) !== String(LOCAL_HOST_ID)) handleSelectCreateHost(LOCAL_HOST_ID);
     // The branch-start intent belongs to exactly this draft: keyed to the
     // Project it was opened for and cleared for every other way a draft
     // opens, so a later same-Project draft does not inherit it.
@@ -7546,6 +7604,7 @@ function LaunchedShell(
       const destinationHostId = refuseUnlessCreatableDestination({
         action: "create-code-thread",
         requiredCapability: "code",
+        onlyThisHost: true,
         onRefuse: (reason) => setDraftError(reason),
       });
       if (destinationHostId === undefined) return false;
@@ -7969,10 +8028,10 @@ function LaunchedShell(
         const destinationHostId = refuseUnlessCreatableDestination({
           action: "create-code-thread",
           requiredCapability: "code",
+          onlyThisHost: true,
           onRefuse: (reason) => setDraftError(reason),
         });
         if (destinationHostId === undefined) return false;
-        void destinationHostId;
         const resolution = resolveDraftProject({
           draftProjectId,
           candidates: projectController.projects,
@@ -8916,6 +8975,9 @@ function LaunchedShell(
                   crossContextOffer={controller.crossContextOffer}
                   createHostId={createHostId}
                   createHostViewScope={createHostViewScope}
+                  {...(renderPairedComputerCodeStart === undefined
+                    ? {}
+                    : { renderPairedComputerCodeStart })}
                   dockOpen={dockOpen}
                   {...(dockSurface === undefined
                     ? {}
@@ -9100,6 +9162,7 @@ function LaunchedShell(
             const destinationHostId = refuseUnlessCreatableDestination({
               action: "create-project",
               requiredCapability: mode,
+              onlyThisHost: true,
               onRefuse: (reason) => setDraftError(reason),
             });
             if (destinationHostId === undefined) {

@@ -1,3 +1,4 @@
+import type { NewDeviceAlertsClient } from "@octant/client-runtime/new-device-alerts-client";
 import { SandboxRestrictionsSettings } from "../settings/SandboxRestrictionsSettings";
 import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-restrictions-client";
 import type { SandboxSettingsScope } from "../settings/SandboxRestrictionsSettings";
@@ -299,6 +300,8 @@ export interface SettingsViewProps {
   >;
   /** Settings › Permissions › Protected files; absent where the host publishes no list. */
   readonly protectedFilesClient?: ProtectedFilesClient;
+  /** The host's new-device alerts, read and cleared from this window. */
+  readonly newDeviceAlertsClient?: NewDeviceAlertsClient;
   readonly blockedToolsClient?: BlockedToolsClient;
   readonly sandboxRestrictionsClient?: SandboxRestrictionsClient;
   readonly sandboxInitialScope?:
@@ -1536,6 +1539,7 @@ function ActiveSectionContent({
             ownerUnlock={ownerUnlockOf(props.hostBridge)}
             pairedComputers={pairedComputersOf(props.hostBridge)}
             pairedDeviceLifetime={props.settings.pairedDeviceLifetime}
+            newDeviceAlerts={props.newDeviceAlertsClient}
           />
           {agentAccess}
         </div>

@@ -1,3 +1,5 @@
+import type { NewDeviceAlertsClient } from "@octant/client-runtime/new-device-alerts-client";
+import { NewDeviceAlerts } from "./NewDeviceAlerts";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import {
   buildPairingCode,
@@ -65,6 +67,8 @@ export interface RemoteAccessSettingsSectionProps {
   /** How long a paired device stays paired, a host setting; the row is absent without it. */
   readonly pairedDeviceLifetime?: PairedDeviceLifetime | undefined;
   readonly onPairedDeviceLifetimeChange?: ((lifetime: PairedDeviceLifetime) => void) | undefined;
+  /** Alerts for devices that paired with this host, which every connected device is shown. */
+  readonly newDeviceAlerts?: NewDeviceAlertsClient | undefined;
 }
 
 const PAIRED_DEVICE_LIFETIME_LABELS: Readonly<Record<PairedDeviceLifetime, string>> = {
@@ -132,6 +136,7 @@ export function RemoteAccessSettingsSection({
   now,
   pairedDeviceLifetime,
   onPairedDeviceLifetimeChange,
+  newDeviceAlerts,
 }: RemoteAccessSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
   const [listener, setListener] = useState<ListenerState>({ kind: "loading" });
@@ -812,6 +817,16 @@ export function RemoteAccessSettingsSection({
         tone="danger"
       >
         <div className="settings-panel__stack">
+          {newDeviceAlerts === undefined ? null : (
+            <NewDeviceAlerts
+              client={newDeviceAlerts}
+              kinds={["paired-device"]}
+              onRemoveDevice={async (deviceId) => {
+                await bridge.revokeRemoteDevice(deviceId);
+                await refreshInventory();
+              }}
+            />
+          )}
           {activeDevices.length === 0 ? (
             <SettingsState kind="empty">No devices are paired with this host.</SettingsState>
           ) : (

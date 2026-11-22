@@ -112,6 +112,11 @@ enum SealedNotificationOpener {
       // you list, which reads the threads from the computer itself.
       guard content.threadId == nil, content.mode == nil else { return nil }
       deepLink = "octant://hosts/\(content.hostId)/moves"
+    } else if content.kind == "device-joined" {
+      // A new device names no thread: it opens the phone's list of new
+      // devices, which reads each computer's alerts itself.
+      guard content.threadId == nil, content.mode == nil else { return nil }
+      deepLink = "octant://hosts/\(content.hostId)/new-devices"
     } else {
       guard kinds.contains(content.kind), let threadId = content.threadId,
         isLinkSegment(threadId)

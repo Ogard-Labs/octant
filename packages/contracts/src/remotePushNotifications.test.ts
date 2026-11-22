@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   decodeRemotePushDeliveryRecordedV1,
   decodeRemotePushEnvelopeV1,
+  decodeRemotePushDeviceJoinedDeliveryRecordedV1,
+  decodeRemotePushDeviceJoinedPayloadV1,
   decodeRemotePushMoveWaitingDeliveryRecordedV1,
   decodeRemotePushMoveWaitingPayloadV1,
   decodeRemotePushNotificationPayloadV1,
@@ -198,5 +200,50 @@ describe("remotePushNotifications", () => {
         decodeRemotePushMoveWaitingDeliveryRecordedV1({ ...receipt, ...leak }),
       ).toThrow();
     }
+  });
+
+  it("seals a new device's name and address for the phone, with no room for a thread", () => {
+    const payload = {
+      kind: "device-joined",
+      hostId: "11111111-1111-4111-8111-111111111111",
+      alertId: "44444444-4444-4444-8444-444444444444",
+      title: "New device: Ada's phone",
+      body: "192.168.1.20 · paired with Studio Mac",
+    };
+    expect(decodeRemotePushDeviceJoinedPayloadV1(payload)).toEqual(payload);
+    expect(() => decodeRemotePushDeviceJoinedPayloadV1({ ...payload, threadId: "t" })).toThrow();
+    expect(() => decodeRemotePushDeviceJoinedPayloadV1({ ...payload, kind: "waiting" })).toThrow();
+  });
+
+  it("journals a new-device receipt by its alert, with no room for the name or the address", () => {
+    const receipt = {
+      hostId: "11111111-1111-4111-8111-111111111111",
+      deviceId: "22222222-2222-4222-8222-222222222222",
+      alertId: "33333333-3333-4333-8333-333333333333",
+      outcome: "delivered",
+      recordedAt: "2026-11-20T08:00:00.000Z",
+    };
+    expect(decodeRemotePushDeviceJoinedDeliveryRecordedV1(receipt)).toEqual(receipt);
+    for (const leak of [{ name: "Ada's phone" }, { privateAddress: "192.168.1.20" }]) {
+      expect(() =>
+        decodeRemotePushDeviceJoinedDeliveryRecordedV1({ ...receipt, ...leak }),
+      ).toThrow();
+    }
+  });
+
+  it("keeps a registration from before the new-device setting valid, and takes the setting from newer phones", () => {
+    const registration = {
+      platform: "ios",
+      token: "opaque-provider-token",
+      notificationPublicKey,
+      preferences,
+    };
+    expect(() => decodeRemotePushTokenRegistrationV1(registration)).not.toThrow();
+    expect(
+      decodeRemotePushTokenRegistrationV1({
+        ...registration,
+        preferences: { ...preferences, newDevices: false },
+      }).preferences.newDevices,
+    ).toBe(false);
   });
 });
