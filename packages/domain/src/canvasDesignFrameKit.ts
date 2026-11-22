@@ -799,8 +799,9 @@ const IMAGE_ATTRIBUTES = new Set(["src", "srcset", "poster", "background"]);
  * Where a browser would never draw an image reference in a design's frame
  * markup or stylesheet: comments (HTML comments in markup; CSS comments in a
  * stylesheet, a `<style>` element and a `style` attribute, quoted or not;
- * script comments in a `<script>` element), and in markup also text content
- * and the values of attributes that load no image, such as `alt`. A `/*` in
+ * script comments in a `<script>` element or an inline event handler), and in
+ * markup also text content and the values of attributes that load no image,
+ * such as `alt`. A `/*` in
  * a frame's text, or a `<!--` inside CSS, opens nothing. It is a reading for
  * finding image references, not a parser: a regular expression literal in a
  * script is read as code, which can only hide a reference, never invent one.
@@ -856,6 +857,8 @@ export function designMarkupInertRanges(markup: string, language: "html" | "css"
         const closed = quoted === 1 && value.length > 1 && value.endsWith(value[0] ?? "") ? 1 : 0;
         const inner: [number, number] = [valueStart + quoted, valueStart + value.length - closed];
         if (attributeName === "style") cssComments(markup, inner[0], inner[1], ranges);
+        // An inline event handler is script a running design runs.
+        else if (attributeName.startsWith("on")) scriptComments(markup, inner[0], inner[1], ranges);
         else if (!IMAGE_ATTRIBUTES.has(attributeName)) ranges.push(inner);
       }
       cursor += attribute[0].length;

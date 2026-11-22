@@ -180,19 +180,20 @@ export function renderDesignFramePage(
       if (imageRef === undefined || !carriedRefs.has(imageRef)) return `octant-asset:${assetId}`;
       return pageImages.address(imageRef) ?? "data:,";
     });
-  // The stylesheet is drawn first: it styles the opening frame, so its images
-  // take their copy before a frame further in the flow repeats them.
-  const styles = draw(block.styles ?? "", "css");
+  // Each image's one guaranteed copy goes to what a reader sees first: the
+  // opening frame's markup, then the stylesheet, then the later frames.
+  const drawFrame = (frame: (typeof block.frames)[number]) => {
+    const id = String(frame.frameId);
+    return `<div class="octant-frame" id="${escapeHtml(id)}"${id === first ? " data-start" : ""}>${draw(frame.html, "html")}</div>`;
+  };
   const isDocument = block.size === "document";
   const themed = (block.theme ?? (isDocument ? "workspace" : "none")) === "workspace";
   const viewport = block.size === "document" ? undefined : CANVAS_DESIGN_VIEWPORT[block.size];
-  const first = String(block.frames[0]?.frameId ?? "");
-  const frames = block.frames
-    .map((frame) => {
-      const id = String(frame.frameId);
-      return `<div class="octant-frame" id="${escapeHtml(id)}"${id === first ? " data-start" : ""}>${draw(frame.html, "html")}</div>`;
-    })
-    .join("");
+  const [opening, ...later] = block.frames;
+  const first = String(opening?.frameId ?? "");
+  const openingFrame = opening === undefined ? "" : drawFrame(opening);
+  const styles = draw(block.styles ?? "", "css");
+  const frames = openingFrame + later.map(drawFrame).join("");
   return [
     "<!doctype html>",
     '<html><head><meta charset="utf-8">',

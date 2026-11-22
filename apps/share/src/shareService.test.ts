@@ -1074,6 +1074,25 @@ describe("design frame pages", () => {
       [image as never],
     );
     expect(styled).toContain(`.hero { background: url(data:image/png;base64,${data}); }`);
+
+    // The opening frame's own image comes before a stylesheet rule for a later screen.
+    const opening = renderDesignFramePage(
+      design({
+        schemaVersion: 30,
+        frames: [
+          {
+            frameId: "home",
+            title: "Home",
+            html: '<img id="cover" src="octant-asset:hero" alt="">',
+          },
+          { frameId: "later", title: "Later", html: '<div class="next">Next</div>' },
+        ],
+        styles: ".next { background: url(octant-asset:hero); }",
+        assets: [{ assetId: "hero", imageRef: "image-1" }],
+      }) as never,
+      [image as never],
+    );
+    expect(opening).toContain(`<img id="cover" src="data:image/png;base64,${data}"`);
   });
 
   test("draws a shared image once in full however many blocks show it", () => {

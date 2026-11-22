@@ -106,5 +106,12 @@ describe("drawn design asset references", () => {
         "html",
       ),
     ).toEqual(["shown", "in-custom"]);
+    // A running design's event handler is script, and its references draw.
+    expect(
+      drawn(
+        `<button onclick="this.style.backgroundImage='url(octant-asset:on-click)' /* url(octant-asset:old) */">Go</button>`,
+        "html",
+      ),
+    ).toEqual(["on-click"]);
   });
 });
