@@ -4374,11 +4374,13 @@ Chat still take no app-managed tools.
   a settling interval of 2–60 seconds and at most 1–32 automatic starts per
   explicit arm (default 8). Configuration and reviewed re-arm are the person's
   actions, at a local window or a device the host's own person paired
-  (maintainer decision, 2026-11-12). Built: configuration, from such a device
-  (maintainer decision, 2026-11-13); where a window's capability is read again
-  while the folder is prepared, the device's pairing is read again on the host.
-  Not built yet: a reviewed re-arm is local-window only, because its journaled
-  review record names the reviewing window. Ordinary pause, archive
+  (maintainer decision, 2026-11-12). Built: configuration and reviewed re-arm,
+  from such a device (maintainer decision, 2026-11-13); where a window's
+  capability is read again while the folder is prepared or the held input is
+  reviewed, the device's pairing is read again on the host. The journaled
+  review record names the reviewing window or device, and recovery rebuilds the
+  routine's author from it; a hub-introduced or restricted device cannot
+  re-arm. Ordinary pause, archive
   and thread cancellation keep their existing
   authority. No thread agent proposes a file routine. The existing host scheduler
   owns observation and dispatch; there is no second runner or hosted watcher.
@@ -4504,7 +4506,7 @@ Chat still take no app-managed tools.
   exact recorded operation, session, prompt, checkout and provider, never from
   the thread's latest unrelated turn. Pause, restart, quiet time and ordinary Save reset no budget.
   Explicit Review/Re-arm requires current source and Project authority from a
-  local window (not built yet for a file routine: a device the host's own person paired; such a device re-arms an event routine),
+  local window or a device the host's own person paired,
   no active run, and the displayed definition version. It skips held events,
   restores the allowance and establishes a fresh quiet baseline. A lost response
   remains unconfirmed and is never automatically resent.
@@ -18530,7 +18532,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     secret a window on the host holds and whose native controls (a folder
     picker, an external editor) exist only there; a window's own shell (its bootstrap, workspace commands and local sessions); linking a secret store and
     pointing a key at it, which are acts at the machine; pointing a runtime at an executable, which goes through the host's native file picker; choosing a new skill folder or a local plugin folder, which goes through the host's native folder picker; the replica store and its membership; and the whole host's
-    export, bulk data with no bound for a remote caller. Not built yet: provider cloud sessions (the submission policy and the job records know only a local window), server Projects beyond reading (binding, renaming, removing and their actions and Developer tools switch, whose journaled records name only a local window; the setup check; a server preview's tunnel), disk cleanup, switching a Canvas to another design system, the reviewed re-arm of a file routine, and diagnostics are not open to a person-paired device either. In
+    export, bulk data with no bound for a remote caller. Not built yet: provider cloud sessions (the submission policy and the job records know only a local window), server Projects beyond reading (binding, renaming, removing and their actions and Developer tools switch, whose journaled records name only a local window; the setup check; a server preview's tunnel), disk cleanup, switching a Canvas to another design system, and diagnostics are not open to a person-paired device either. In
     the Browser no device takes the page over from the agent or hands it
     back, reads a signed-in profile's page or a capture, grants login
     permission, chooses a task profile, or runs, saves, or deletes a flow.
