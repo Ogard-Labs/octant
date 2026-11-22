@@ -172,14 +172,37 @@ Rules, each taking the fail-closed option:
   Changing an outside image profile's address or models is a command the host
   takes; its Settings form is not built yet (remove and add the profile).
 
-**Video.** An outside video driver follows the same shape once the
-provider-neutral `videoGeneration` seam exists in code (not built yet): the
-family `outside-video`, protocol `video-generation/1`, and a declaration that
-carries each model's video capabilities and price as the seam defines them,
-read by the host as data. Its start, poll, cancel and forget map onto
-`video/*` calls, and the host keeps the poll loop, job time, reservation,
-storage and restart recovery, as the seam's job service does for bundled
-drivers. Designed, not built.
+**Video.** An outside video driver follows the same shape on the
+provider-neutral video seam (`@octant/provider-sdk/video-generation`), once
+that seam and its job service exist on `main`. Designed, not built:
+
+- **Identity.** One reserved family, `outside-video`, added to the seam's
+  closed `VideoDriverKind` set as `outside-image` joins the provider kinds.
+- **Declaration.** The component's `mediaGeneration` takes `media: "video"`
+  with one to 64 `VideoModelCapabilities` entries, exactly the seam's schema
+  (durations, resolutions, aspect ratios, audio, inputs, `VideoPrice`, and
+  `VideoJobControl`). The host's adapter answers `models()` from this
+  declaration alone, so prices, cancel and removal facts are reviewed,
+  digest-bound data; a running driver cannot change them, and a model whose
+  price is `unpublished` is refused while a spend limit is set.
+- **Protocol `video-generation/1`.** After `initialize`, the host sends
+  `video/start` (model, prompt, the frozen clip options, first frame, last
+  frame and reference images as bytes), `video/poll`, `video/cancel` (only
+  for a model that declares it can cancel) and `video/forget` (only for one
+  that declares `removal: delete`), each naming the remote id the start
+  returned. Results mirror `VideoAdapterStart`, `VideoAdapterPoll` and
+  `VideoAdapterForget` with no free text; usage is read only as the counts
+  the seam names, never as a price.
+- **The clip.** A clip can reach the seam's 1 GB bound, far past a channel
+  line, so a completed poll names the clip by address only. The host fetches
+  it with the seam's approved-URL fetch, once, without the key, and only when
+  that exact address appeared in a response it relayed for this job, then
+  checks it with the seam's MP4 sniffing.
+- **What stays the host's.** The poll interval, the job time, the reservation
+  and settlement, storage, restart recovery (resuming a remote id within the
+  declared window) and the forget retries are the seam's job service, as for
+  the bundled video drivers; a driver process that stops mid-job ends the
+  poll with a closed reason, and the job service decides what follows.
 
 ## What exists today
 
