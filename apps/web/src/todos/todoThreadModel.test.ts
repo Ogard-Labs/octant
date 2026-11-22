@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { todoThreadState } from "./todoThreadModel";
+import { todoThreadKey, todoThreadStates, todoThreadState } from "./todoThreadModel";
 
 describe("a to-do's thread badge", () => {
   const row = { threadId: "t", title: "Fix it" };
@@ -14,5 +14,42 @@ describe("a to-do's thread badge", () => {
     expect(todoThreadState({ ...row, activity: "attention" }).label).toBe("Waiting on you");
     expect(todoThreadState({ ...row, awaitingKind: "approval" }).label).toBe("Waiting on you");
     expect(todoThreadState(row).label).toBe("Started");
+  });
+  it("does not show a local thread's state for the same id on another computer", () => {
+    const local = "11111111-1111-4111-8111-111111111111";
+    const remote = "22222222-2222-4222-8222-222222222222";
+    const states = todoThreadStates(local, [
+      { mode: "code", rows: [{ ...row, markedDone: true }] },
+    ]);
+    expect(states.get(todoThreadKey({ hostId: local, mode: "code", threadId: "t" }))?.label).toBe(
+      "Done",
+    );
+    expect(
+      states.get(todoThreadKey({ hostId: remote, mode: "code", threadId: "t" })),
+    ).toBeUndefined();
+  });
+
+  it("merges paired thread states by host without colliding with local ids", () => {
+    const local = "11111111-1111-4111-8111-111111111111";
+    const remote = "22222222-2222-4222-8222-222222222222";
+    const states = todoThreadStates(local, [
+      { mode: "code", rows: [{ ...row, markedDone: true }] },
+      { hostId: remote, mode: "code", rows: [{ ...row, activity: "working" }] },
+      { hostId: remote, mode: "work", rows: [{ ...row, activity: "attention" }] },
+      { hostId: remote, mode: "chat", rows: [{ ...row, completedAt: "2026-11-14T10:00:00.000Z" }] },
+    ]);
+
+    expect(states.get(todoThreadKey({ hostId: local, mode: "code", threadId: "t" }))?.label).toBe(
+      "Done",
+    );
+    expect(states.get(todoThreadKey({ hostId: remote, mode: "code", threadId: "t" }))?.label).toBe(
+      "Running",
+    );
+    expect(states.get(todoThreadKey({ hostId: remote, mode: "work", threadId: "t" }))?.label).toBe(
+      "Waiting on you",
+    );
+    expect(states.get(todoThreadKey({ hostId: remote, mode: "chat", threadId: "t" }))?.label).toBe(
+      "Done",
+    );
   });
 });

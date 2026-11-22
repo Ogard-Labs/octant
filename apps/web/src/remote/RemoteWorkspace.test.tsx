@@ -541,4 +541,25 @@ describe("RemoteWorkspace", () => {
       await screen.findByRole("article", { name: "Proposed worker: Fix the flaky test" }),
     ).toBeInTheDocument();
   });
+
+  it("opens a to-do-selected Code thread while continuation links are isolated", async () => {
+    const { clients, coordinator } = coordinatorFixture();
+    render(
+      <RemoteCodeSurface
+        actsAsHostPerson
+        clients={clients}
+        connected
+        followsContinuationLink={false}
+        initialThread={{ mode: "code", threadId: String(coordinator.id) }}
+        onNavigate={() => undefined}
+        onOpenCanvas={() => undefined}
+        providerGroups={[]}
+        extensionClient={undefined}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("article", { name: "Proposed worker: Fix the flaky test" }),
+    ).toBeInTheDocument();
+  });
 });

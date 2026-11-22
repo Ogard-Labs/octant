@@ -301,6 +301,7 @@ export function startOctantServer(
       protectedFilesRoutes,
       sandboxRestrictionsRoutes,
       todoRoutes,
+      todos,
       processAuthorityNow,
       processAuthorityTime,
       routineProposalService,
@@ -2097,6 +2098,7 @@ export function startOctantServer(
       zenRoutes,
     });
     const {
+      defaultTodoListHost,
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
@@ -2210,6 +2212,7 @@ export function startOctantServer(
       agentRunOrchestration,
       parentRunsAtFullAccess,
     });
+    todos.setDefaultListHost(defaultTodoListHost);
     benchmarkThreadPurge.purge = async (threadId, mode) => {
       const outcome = await threadRetention.purge(
         {

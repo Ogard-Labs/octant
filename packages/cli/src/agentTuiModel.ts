@@ -6,6 +6,7 @@ import type {
 } from "@octant/contracts";
 import { commandHostLines, readCommandHostNumbers } from "./agentHost";
 import type { AgentThreadSnapshot } from "./agentThread";
+import { isAbsolute, join } from "node:path";
 import { BUILT_IN_THEME_PRESET_IDS, resolveThemePresetTokens } from "@octant/theme";
 import {
   APPROVAL_OUTSIDE_CONTENT_REASON,
@@ -77,6 +78,7 @@ export interface TuiLeadActions {
   readonly route: string;
   readonly model: string;
   readonly duration: string;
+  readonly speed?: string;
   readonly stopReason: string;
   /** The last calls, newest last; `toolCalls` counts what came before too. */
   readonly tools: ReadonlyArray<TuiToolLine>;
@@ -176,6 +178,7 @@ export type TuiTranscriptEntry =
       readonly at: string;
       readonly text: string;
       readonly outcome: string;
+      readonly failure?: string;
       readonly actions?: TuiLeadActions;
       /** Calls of a turn still running, newest last. */
       readonly live?: ReadonlyArray<TuiToolLine>;
@@ -230,6 +233,7 @@ export function transcriptFrom(
       // are in the app, so the block that carries them is not part of the text.
       text: withoutFollowUpBlocks(turn.reply, { streaming: !isDone(turn.outcome) }),
       outcome: turn.outcome,
+      ...(turn.failure === undefined ? {} : { failure: turn.failure }),
       ...(record === undefined
         ? {}
         : {
@@ -242,6 +246,12 @@ export function transcriptFrom(
               route: record.route.kind,
               model: "candidate" in record.route ? String(record.route.candidate.modelId) : "—",
               duration: formatDuration(record.startedAt, record.endedAt),
+              ...(record.metrics?.decodeMs === undefined ||
+              record.metrics.decodeOutputTokens === undefined
+                ? {}
+                : {
+                    speed: `${record.metrics.precision === "approximate" ? "~" : ""}${Math.round((record.metrics.decodeOutputTokens * 1000) / record.metrics.decodeMs)} tok/s`,
+                  }),
               stopReason: record.stopReason,
               tools: toolLines(record.tools ?? []),
             },
@@ -488,4 +498,30 @@ export function readTuiApprovalAnswer(
     else next.add(index);
   }
   return { kind: "tick", ticked: next };
+}
+
+/**
+ * The file an `@path` image mention attaches. An absolute path names its own
+ * file. A relative one is read from the Project root, which a managed
+ * worktree's folder is not: the host does not hand a worktree's image bytes
+ * back, so a relative image there is refused rather than read from the
+ * Project root's other version of it.
+ */
+export function mentionAttachmentPath(input: {
+  readonly path: string;
+  readonly filesRoot: string | undefined;
+  readonly checkoutKind: string | undefined;
+}):
+  | { readonly kind: "path"; readonly path: string }
+  | { readonly kind: "refused"; readonly message: string } {
+  if (isAbsolute(input.path)) return { kind: "path", path: input.path };
+  if (input.checkoutKind === "managed-worktree")
+    return {
+      kind: "refused",
+      message: `${input.path}: give the image's full path; this thread works in its own worktree.`,
+    };
+  return {
+    kind: "path",
+    path: input.filesRoot === undefined ? input.path : join(input.filesRoot, input.path),
+  };
 }

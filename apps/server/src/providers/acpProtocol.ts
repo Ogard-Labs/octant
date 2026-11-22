@@ -497,10 +497,13 @@ const DEFAULT_LIMITS: AcpLimits = {
   // finishes, so it needs its own budget. Without one, a caller that wires the
   // request budget from a startup deadline cancels every longer reply. It is
   // a budget of silence: every message the agent sends restarts it, and it
-  // stands still while the agent waits on an answer from Octant, so a long
-  // turn that keeps working is never cut (a fixed ten minutes failed long
-  // agentic turns that were still streaming).
-  turnTimeoutMs: 600_000,
+  // stands still while the agent waits on an answer from Octant or a tool call
+  // it started is still running, so a long turn that keeps working is never
+  // cut (a fixed ten minutes failed long agentic turns that were still
+  // streaming, and silent builds and subagents outlast any quiet budget). It
+  // stays a hard cut-off because agents do leave `session/prompt` pending
+  // forever after their last output.
+  turnTimeoutMs: 900_000,
   stderrBytes: 65_536,
 };
 
@@ -510,7 +513,7 @@ interface PendingRequest {
   readonly reject: (failure: AcpFailure) => void;
   timeout: ReturnType<typeof setTimeout> | undefined;
   /** Set for a turn: its budget restarts with each agent message (see `turnTimeoutMs`). */
-  readonly idle?: { readonly ms: number; readonly expire: () => void };
+  readonly idle?: { readonly ms: number; readonly expire: () => void; readonly sessionId: string };
 }
 
 type QueuedMessage = AcpServerNotification | AcpServerRequestMessage;
@@ -524,13 +527,60 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
   const queue: QueuedMessage[] = [];
   /** Requests the agent sent that Octant has not answered yet. */
   const awaitingClient = new Set<RpcId>();
+  /**
+   * Tool calls (a subagent is one) the agent started in a session with a turn
+   * open and has not settled, by session. A silent call holds that turn's
+   * budget; the turn ending clears its session's calls, settled or not.
+   */
+  const runningTools = new Map<string, Set<string>>();
+  /**
+   * Calls that already settled in the session's open turn. Antigravity repeats
+   * a finished call's start without a status, and the event mapper ignores the
+   * repeat; counting it as running again would hold the turn open forever.
+   */
+  const settledTools = new Map<string, Set<string>>();
+  /**
+   * A steered turn keeps several prompts open on one session, and an earlier
+   * prompt answering does not end it, so a session's calls are forgotten only
+   * once its last open prompt settles.
+   */
+  const forgetTools = (sessionId: string) => {
+    if ([...pending.values()].some((entry) => entry.idle?.sessionId === sessionId)) return;
+    runningTools.delete(sessionId);
+    settledTools.delete(sessionId);
+  };
+  const holdsIdle = (sessionId: string) =>
+    awaitingClient.size > 0 || (runningTools.get(sessionId)?.size ?? 0) > 0;
   const rearmIdle = () => {
     for (const entry of pending.values()) {
       if (entry.idle === undefined) continue;
       clearTimeout(entry.timeout);
-      entry.timeout =
-        awaitingClient.size === 0 ? setTimeout(entry.idle.expire, entry.idle.ms) : undefined;
+      entry.timeout = holdsIdle(entry.idle.sessionId)
+        ? undefined
+        : setTimeout(entry.idle.expire, entry.idle.ms);
     }
+  };
+  const trackTool = (sessionId: string, update: Readonly<Record<string, unknown>>) => {
+    const kind = update.sessionUpdate;
+    const toolCallId = update.toolCallId;
+    if ((kind !== "tool_call" && kind !== "tool_call_update") || typeof toolCallId !== "string")
+      return;
+    if (![...pending.values()].some((entry) => entry.idle?.sessionId === sessionId)) return;
+    const status = update.status;
+    const calls = runningTools.get(sessionId) ?? new Set<string>();
+    const settled = settledTools.get(sessionId) ?? new Set<string>();
+    // ACP reads a start without a status as pending.
+    if (status === "completed" || status === "failed") {
+      calls.delete(toolCallId);
+      settled.add(toolCallId);
+      settledTools.set(sessionId, settled);
+    } else if (
+      !settled.has(toolCallId) &&
+      (status === "pending" || status === "in_progress" || kind === "tool_call")
+    )
+      calls.add(toolCallId);
+    if (calls.size === 0) runningTools.delete(sessionId);
+    else runningTools.set(sessionId, calls);
   };
   const answered = (id: RpcId) => {
     if (awaitingClient.delete(id)) rearmIdle();
@@ -609,6 +659,8 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
       request.reject(failure ?? new AcpFailure("closed", "ACP transport closed."));
     }
     pending.clear();
+    runningTools.clear();
+    settledTools.clear();
     for (const write of pendingWrites)
       write.reject(failure ?? new AcpFailure("closed", "ACP transport closed."));
     if (failure === undefined) resolveExited();
@@ -719,6 +771,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
     }
     pending.delete(id);
     clearTimeout(request.timeout);
+    if (request.idle !== undefined) forgetTools(request.idle.sessionId);
     if (response.error !== undefined) {
       request.reject(
         new AcpFailure(
@@ -770,11 +823,9 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
     }
     if (envelope.id === undefined) {
       if (envelope.method === "session/update") {
-        enqueue({
-          kind: "notification",
-          method: "session/update",
-          params: decode(SessionUpdateParams)(envelope.params),
-        });
+        const params = decode(SessionUpdateParams)(envelope.params);
+        trackTool(params.sessionId, params.update);
+        enqueue({ kind: "notification", method: "session/update", params });
       }
       return;
     }
@@ -936,7 +987,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
     params: unknown,
     decoder: (value: unknown) => A,
     timeoutMs: number = limits.requestTimeoutMs,
-    budget: "fixed" | "idle" = "fixed",
+    budget: "fixed" | { readonly idleSession: string } = "fixed",
   ): Promise<A> => {
     if (terminal) return Promise.reject(new AcpFailure("closed", "ACP transport closed."));
     if (pending.size >= limits.pendingRequests) {
@@ -944,24 +995,31 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
     }
     const id = nextId++;
     return new Promise<A>((resolve, reject) => {
+      const idleSession = budget === "fixed" ? undefined : budget.idleSession;
       const expire = () => {
         pending.delete(id);
+        if (idleSession !== undefined) forgetTools(idleSession);
         reject(new AcpFailure("timeout", "ACP request timed out."));
       };
       const timeout =
-        budget === "idle" && awaitingClient.size > 0 ? undefined : setTimeout(expire, timeoutMs);
+        idleSession !== undefined && holdsIdle(idleSession)
+          ? undefined
+          : setTimeout(expire, timeoutMs);
       pending.set(id, {
         decode: decoder,
         resolve: (value) => resolve(value as A),
         reject,
         timeout,
-        ...(budget === "idle" ? { idle: { ms: timeoutMs, expire } } : {}),
+        ...(idleSession === undefined
+          ? {}
+          : { idle: { ms: timeoutMs, expire, sessionId: idleSession } }),
       });
       void write({ jsonrpc: "2.0", id, method, params }).catch((error: unknown) => {
         const current = pending.get(id);
         if (current === undefined) return;
         pending.delete(id);
         clearTimeout(current.timeout);
+        if (idleSession !== undefined) forgetTools(idleSession);
         reject(
           error instanceof AcpFailure ? error : new AcpFailure("closed", "ACP transport failed."),
         );
@@ -1071,7 +1129,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
         },
         decode(PromptResult),
         limits.turnTimeoutMs,
-        "idle",
+        { idleSession: sessionId },
       ),
     setConfigOption: (sessionId, configId, value) =>
       request(

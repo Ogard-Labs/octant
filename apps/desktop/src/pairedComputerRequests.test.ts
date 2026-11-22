@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ListenerTrustRefused } from "@octant/client-runtime/remote-listener-trust";
+import { MAX_WORK_ATTACHMENT_BYTES } from "@octant/contracts";
+import { MAX_CODE_ATTACHMENT_BYTES } from "@octant/contracts/code";
 import {
   installPairedComputerIpcHandlers,
   PAIRED_COMPUTER_CHANNELS,
@@ -138,6 +140,59 @@ describe("a window's request to a paired computer", () => {
     expect(raced.answer.status).toBe("refused");
   });
 
+  it("carries attachment metadata only on an attachment route", async () => {
+    const headers = {
+      "content-type": "image/png",
+      "x-octant-code-thread-id": "11111111-1111-4111-8111-111111111111",
+      "x-octant-code-attachment-id": "22222222-2222-4222-8222-222222222222",
+      "x-octant-code-display-name": "image.png",
+    };
+    const upload = await ask({
+      ...hello,
+      method: "PUT",
+      path: "/api/code/attachments",
+      headers,
+      body: new Uint8Array([1, 2, 3]),
+    });
+    expect(upload.answer.status).toBe("answered");
+    expect(upload.sent).toHaveBeenCalledWith(
+      expect.stringContaining("/api/code/attachments"),
+      expect.objectContaining({ method: "PUT", headers: expect.objectContaining(headers) }),
+    );
+    const other = await ask({ ...hello, path: "/api/projects/bootstrap", headers });
+    expect(other.answer.status).toBe("refused");
+    expect(other.sent).not.toHaveBeenCalled();
+  });
+
+  it("returns complete thread event frames and cancels the buffered batch", async () => {
+    const cancelled = vi.fn();
+    const path = "/api/chat/threads/11111111-1111-4111-8111-111111111111/events?afterSequence=0";
+    const { answer } = await ask(
+      { ...hello, path },
+      {
+        answer: () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode('{"sequence":1}\n{"sequence":'));
+              },
+              cancel: cancelled,
+            }),
+            { headers: { "content-type": "application/x-ndjson" } },
+          ),
+      },
+    );
+    expect(answer.status).toBe("answered");
+    if (answer.status !== "answered") return;
+    expect(new TextDecoder().decode(answer.body)).toBe('{"sequence":1}\n');
+    expect(cancelled).toHaveBeenCalled();
+    expect(
+      (await ask({ ...hello, path: path.replace("11111111-1111-4111-8111-111111111111", "bad") }))
+        .answer.status,
+    ).toBe("refused");
+    expect((await ask({ ...hello, path, method: "POST" })).answer.status).toBe("refused");
+  });
+
   it("names no arbitrary URL: only the listed paths and methods get through", async () => {
     const refused = [
       { path: "//example.com/api/remote/hello" },
@@ -208,12 +263,46 @@ describe("a window's request to a paired computer", () => {
         "GET /api/host/resources",
         "POST /api/code/local-servers/commands",
         "GET /api/todos",
+        "GET /api/todos/changes",
         "POST /api/todos/commands",
+        "GET /api/chat/bootstrap",
+        "GET /api/chat/navigation",
+        "GET /api/work/threads/bootstrap",
+        "GET /api/work/navigation",
+        "GET /api/reply-detail",
+        "GET /api/extensions/snapshot",
+        "GET /api/conversation-inputs",
+        "GET /api/work/requests",
+        "GET /api/code/attachments",
+        "GET /api/work/attachments",
+        "POST /api/chat/commands",
+        "POST /api/work/threads/commands",
+        "POST /api/work/turns",
+        "POST /api/work/turns/cancel",
+        "POST /api/work/turns/rewind",
+        "POST /api/work/mutations",
+        "POST /api/work/requests/commands",
+        "POST /api/chat/attachments",
+        "PUT /api/code/attachments",
+        "PUT /api/work/attachments",
+        "DELETE /api/code/attachments",
+        "DELETE /api/work/attachments",
+        "GET /api/chat/threads/:id",
+        "GET /api/chat/threads/:id/window",
+        "GET /api/chat/threads/:id/events",
+        "GET /api/work/turns/transcript/:id",
+        "GET /api/work/turns/window/:id",
+        "GET /api/work/turns/stream/:id",
+        "GET /api/code/content/:id",
+        "GET /api/chat/attachments/:id",
+        "DELETE /api/chat/attachments/:id",
         "GET /api/code/bootstrap",
         "GET /api/code/navigation",
         "GET /api/code/threads/:id",
         "GET /api/code/threads/:id/conversation",
         "GET /api/code/threads/:id/conversation/window",
+        "GET /api/code/threads/:id/follow-up",
+        "POST /api/code/threads/:id/follow-up",
         "GET /api/code/threads/:id/events",
         "GET /api/code/threads/:id/operations/:id/events",
         "GET /api/code/threads/:id/operations/:id/evidence/:id",
@@ -298,6 +387,37 @@ describe("a window's request to a paired computer", () => {
     }
   });
 
+  it("carries Code follow-up reads and commands only for lowercase thread UUIDs", async () => {
+    const thread = "a1b2c3d4-0000-4000-8000-000000000001";
+    const path = `/api/code/threads/${thread}/follow-up`;
+    const read = await ask({ ...hello, path });
+    expect(read.answer.status).toBe("answered");
+    expect(read.sent).toHaveBeenCalledWith(
+      `${ORIGIN}${path}`,
+      expect.objectContaining({ method: "GET" }),
+    );
+
+    const update = await ask({ ...hello, method: "POST", path, body: "{}" });
+    expect(update.answer.status).toBe("answered");
+    expect(update.sent).toHaveBeenCalledWith(
+      `${ORIGIN}${path}`,
+      expect.objectContaining({ method: "POST" }),
+    );
+
+    const wrongMethod = await ask({ ...hello, method: "PUT", path });
+    expect(wrongMethod.answer.status).toBe("refused");
+    expect(wrongMethod.fetchFor).not.toHaveBeenCalled();
+
+    for (const malformedPath of [
+      "/api/code/threads/not-a-thread/follow-up",
+      `/api/code/threads/${thread.toUpperCase()}/follow-up`,
+    ]) {
+      const malformed = await ask({ ...hello, path: malformedPath });
+      expect(malformed.answer.status, malformedPath).toBe("refused");
+      expect(malformed.fetchFor).not.toHaveBeenCalled();
+    }
+  });
+
   it("refuses thread events that would wait, and an id segment that is not a UUID", async () => {
     const thread = "a1b2c3d4-0000-4000-8000-000000000001";
     for (const path of [
@@ -352,6 +472,49 @@ describe("a window's request to a paired computer", () => {
       const { answer, fetchFor } = await ask({ ...hello, ...change });
       expect(answer.status, JSON.stringify(change)).toBe("refused");
       expect(fetchFor).not.toHaveBeenCalled();
+    }
+  });
+
+  it("allows a bounded 10 MiB only for destination attachment uploads", async () => {
+    const destinations = [
+      ["POST", "/api/chat/attachments", MAX_CODE_ATTACHMENT_BYTES],
+      ["PUT", "/api/code/attachments", MAX_CODE_ATTACHMENT_BYTES],
+      ["PUT", "/api/work/attachments", MAX_WORK_ATTACHMENT_BYTES],
+    ] as const;
+    const overEightMiB = new Uint8Array(8 * 1_024 * 1_024 + 1);
+    for (const [method, path, limit] of destinations) {
+      const accepted = await ask({ ...hello, method, path, body: overEightMiB });
+      expect(accepted.answer.status).toBe("answered");
+      expect(accepted.sent).toHaveBeenCalledOnce();
+
+      const boundary = await ask({
+        ...hello,
+        method,
+        path,
+        body: new Uint8Array(limit),
+      });
+      expect(boundary.answer.status).toBe("answered");
+
+      const tooLarge = await ask({
+        ...hello,
+        method,
+        path,
+        body: new Uint8Array(limit + 1),
+      });
+      expect(tooLarge.answer.status).toBe("refused");
+      expect(tooLarge.fetchFor).not.toHaveBeenCalled();
+    }
+
+    for (const [method, path] of [
+      ["POST", "/api/chat/commands"],
+      ["GET", "/api/code/attachments"],
+      ["DELETE", "/api/code/attachments"],
+      ["DELETE", "/api/work/attachments"],
+      ["POST", "/api/work/turns"],
+    ] as const) {
+      const refused = await ask({ ...hello, method, path, body: overEightMiB });
+      expect(refused.answer.status).toBe("refused");
+      expect(refused.fetchFor).not.toHaveBeenCalled();
     }
   });
 

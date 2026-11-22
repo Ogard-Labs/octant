@@ -2794,11 +2794,20 @@ dropped; audio to an agent without the `audio` block goes as an embedded
 resource where it advertises embedded context.
 
 A turn's `session/prompt` has a budget of silence, not of total time (built,
-2026-11-20): ten minutes, restarted by every message the agent sends, and
+2026-11-20; 15 minutes and the tool-call pause by maintainer decision,
+2026-11-22): 15 minutes, restarted by every message the agent sends, and
 standing still while the agent waits on an answer from Octant (an approval,
-a question, a client request). A turn that keeps streaming is never cut;
-before, a fixed ten minutes failed long agentic turns that were still
-working. A session config option that is not a `select` (ACP also defines a
+a question, a client request) or while a tool call it started in that
+session is still running (a `tool_call` or `tool_call_update` that is
+`pending` or `in_progress`; a native subagent runs as such a call). The clock
+restarts from zero when the last running call completes or fails, and the
+turn ending or being cancelled forgets calls left running. A turn that keeps
+streaming is never cut; before, a fixed ten minutes failed long agentic turns
+that were still working. It stays a hard cut-off in every mode, Strict or
+not, because ACP agents do leave `session/prompt` pending forever after their
+last output; the pause exists because a long build or subagent can be silent
+for longer than any quiet budget while it is still working. The stalled-turn
+limit is separate and unchanged. A session config option that is not a `select` (ACP also defines a
 boolean toggle) is left out of what Octant reads, since Octant sets none,
 instead of failing the whole `session/new`, load or update reply that
 carried it.
@@ -3695,7 +3704,9 @@ its status are in
   every command unable to run.
 - **Chat** outside Strict starts unconfined on every provider family (maintainer
   decision, 2026-11-19: outside Strict, the provider's own rules apply and
-  Octant adds none of its own): Codex with no execution environment and its
+  Octant adds none of its own; the one exception is an ACP agent whose person
+  turned its own setup off while it holds back setup in the home folder,
+  refused as the setup-off bullet below says): Codex with no execution environment and its
   shell, image, plugin and app features off; Pi with `--no-tools`, no extension
   and none of the person's resources; Claude with no file or shell tool in its
   session's tool list (`claudeExecutionOptions` leaves out `Read`, `Grep`,
@@ -3718,7 +3729,8 @@ its status are in
   setup back (`forbiddenRootEntries`, `hostDeniedEntries` or the sign-in
   folder's `forbiddenEntries`; in Chat, which has no Project folder, only the
   host's entries count), naming the agent and offering to turn its setup on,
-  switch to Full access, or use a Mac or Linux host (`acpWindowsLaunch` in
+  switch to Full access (Work and Code only, since Chat turns run at Ask
+  first), or use a Mac or Linux host (`acpWindowsLaunch` in
   `acpProcess.ts`). On macOS and Linux the sandbox's deny rules are that
   hold-back ([ACP agents outside Strict](../architecture.md#security-and-authority));
   Windows has no sandbox to hold it, and unwrapped Kimi Code 0.38.0 started

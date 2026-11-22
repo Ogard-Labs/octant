@@ -252,8 +252,16 @@ export interface AcpProcessOptions {
  * Why a Windows launch below Full access of an agent that holds its own setup
  * back refuses while the person has that setup turned off.
  */
-export function acpWindowsSetupOffRefusal(profile: AcpProviderProfile): string {
-  return `${profile.displayName} cannot keep its own setup turned off on Windows, where Octant has no sandbox to hold it back. Turn the agent's own setup on for this thread, switch to Full access, or run it on a Mac or Linux host.`;
+/** Chat turns always run at Ask first, so the refusal offers Full access only to Work and Code. */
+export function acpWindowsSetupOffRefusal(
+  profile: AcpProviderProfile,
+  mode: AcpSessionMode,
+): string {
+  const ways =
+    mode === "chat"
+      ? "Turn the agent's own setup on for this thread, or run it on a Mac or Linux host."
+      : "Turn the agent's own setup on for this thread, switch to Full access, or run it on a Mac or Linux host.";
+  return `${profile.displayName} cannot keep its own setup turned off on Windows, where Octant has no sandbox to hold it back. ${ways}`;
 }
 
 /**
@@ -296,7 +304,7 @@ function acpWindowsLaunch(
     !acpLoadsAllOwnSetup({ strict: input.strict, setup: input.nativeSetup }) &&
     acpHoldsSetupBack(input.profile, input.mode)
   ) {
-    return { status: "refused", reason: acpWindowsSetupOffRefusal(input.profile) };
+    return { status: "refused", reason: acpWindowsSetupOffRefusal(input.profile, input.mode) };
   }
   return launch;
 }
