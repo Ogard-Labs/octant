@@ -99,22 +99,17 @@ driver on the same seam, under
 OpenAI-compatible custom source for video is not designed: no compatible video
 API exists to be compatible with.
 
-## How other agent workspaces do it
+## Native first
 
 The maintainer asked (2026-11-22) that Octant prefer the native or platform
-solution, stay aligned with T3 Code and Paseo, and not lock or restrict
-features. Their public source was read on 2026-11-22 (T3 Code at `1e78f376`,
-Paseo at `e886aeb`):
-
-- Neither generates video itself, and neither has a video provider, card or
-  setting.
-- Both show what the provider runtime makes natively. Codex's app server
-  reports its own `imageGeneration` thread items, and Paseo turns each one into
-  an image in the chat (`codex-app-server-agent.ts`, `mapCodexThreadImageItem`).
-  Neither adds a gate, cap or price check of its own around the runtime's
-  generation.
-- The Codex app-server schema T3 Code generates has no video item, so no
-  runtime either app drives generates video natively today.
+solution, stay aligned with comparable agent workspaces, and not lock or
+restrict features. Comparable workspaces whose public source was read on
+2026-11-22 do not generate video themselves and have no video provider, card
+or setting. They show what the provider runtime makes natively: Codex's app
+server reports its own `imageGeneration` thread items, and they render each
+one as an image in the chat, with no gate, cap or price check of their own
+around it. The Codex app-server schema has no video item, so no runtime they
+drive generates video natively today.
 
 This design follows that. A runtime's own native media output is shown in the
 thread as any provider output is, with no Octant gate. Octant's own video tool
@@ -142,8 +137,9 @@ card shows:
 
 "Don't ask again" is offered as for images and kept the same way: journaled
 per Project, or for a Chat thread outside a Project in host memory. At Full
-access the card is skipped where the Project holds that choice or Settings
-names a default video profile. A routine or goal loop may generate video where
+access the card is skipped as it is for images: where the Project holds that
+choice or exactly one video profile is ready, and with several ready on the
+profile Settings names for Full access, else the first ready one. A routine or goal loop may generate video where
 its Project keeps a choice, since nobody is there to answer a card. Reference
 images always need the card, as for images. Plan refuses, because Plan changes
 nothing outside the host. A Side Chat never gets the tool.
@@ -153,15 +149,16 @@ nothing outside the host. A Side Chat never gets the tool.
 Octant offers what the provider offers and adds only the bounds a host needs to
 stay healthy:
 
-| Bound                   | Value                                    | Why                                                                                                                       |
-| ----------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Clip length             | 3–15 s, default 8 s                      | Omni's own range; the default keeps a first clip quick and cheap                                                          |
-| Resolution              | 360p, 720p (default), 1080p, 4K          | Omni's own range                                                                                                          |
-| Aspect ratio            | 16:9 (default) or 9:16                   | Omni's own range                                                                                                          |
-| Stored size of one clip | 1 GB                                     | Far above a 15-second 4K MP4; a larger response is refused, not truncated, so a broken one cannot fill the disk           |
-| Job time                | 30 minutes                               | Long enough for a 4K clip under load; the job then fails as `timeout` and the remote interaction is cancelled and deleted |
-| Running jobs            | the image job service's host concurrency | Video jobs share the bounded queue image jobs already use                                                                 |
-| Agent call wait         | 2 minutes                                | As for images; after that the call answers `generating` and the clip appears when done                                    |
+| Bound                   | Value                                    | Why                                                                                                                                                         |
+| ----------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Clip length             | 3–15 s, default 8 s                      | Omni's own range; the default keeps a first clip quick and cheap                                                                                            |
+| Resolution              | 360p, 720p (default), 1080p, 4K          | Omni's own range                                                                                                                                            |
+| Aspect ratio            | 16:9 (default) or 9:16                   | Omni's own range                                                                                                                                            |
+| Stored size of one clip | 1 GB                                     | Far above a 15-second 4K MP4; a larger response is refused, not truncated, so a broken one cannot fill the disk                                             |
+| Job time                | 30 minutes                               | Long enough for a 4K clip under load; the job then fails as `timeout` and the remote interaction is cancelled and deleted                                   |
+| Running jobs            | the image job service's host concurrency | Video jobs share the bounded queue image jobs already use                                                                                                   |
+| Queued jobs             | 16 per host                              | A kept choice lets calls start without a card, so a runaway loop cannot queue without end; a further call is refused with "Too many video jobs are queued." |
+| Agent call wait         | 2 minutes                                | As for images; after that the call answers `generating` and the clip appears when done                                                                      |
 
 ### Spend ceilings
 
@@ -252,8 +249,8 @@ deletion, the size bound, MP4 recognition and declared hosts.
 export interface VideoAdapterRequest {
   readonly modelId: ProviderModelId;
   readonly prompt: string;
-  readonly durationSeconds: number; // 3..10
-  readonly resolution: "360p" | "720p" | "1080p";
+  readonly durationSeconds: number; // 3..15
+  readonly resolution: "360p" | "720p" | "1080p" | "4k";
   readonly aspectRatio: "16:9" | "9:16";
   readonly references: ReadonlyArray<ImageAdapterReference>; // at most 6
 }
@@ -316,7 +313,7 @@ nothing in this design is platform-specific.
 
 ## Decisions this design asks for
 
-Each has a recommendation, aligned with T3 Code and Paseo where they have one:
+Each has a recommendation, aligned with comparable agent workspaces where they have one:
 
 1. **Provider.** Recommended: Gemini Omni Flash on the person's own Gemini
    key, the one provider whose video API is live. OpenAI's is shut down, and

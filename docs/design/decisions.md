@@ -1670,7 +1670,7 @@ Status: Partly built. Since: —; agent images in every mode 2026-11-07. Detail:
 Short video clips run as a journaled job on the person's own Gemini API key, following the image rule for asking, with the price on the card (design, 2026-11-22; awaiting maintainer approval).
 
 - Gemini Omni Flash (`gemini-omni-1.2-flash`) is the only provider at first: OpenAI shut its Videos API down on 2026-09-24, and Google shut down the Veo 3.1 previews in the Gemini API on 2026-10-22.
-- A provider runtime's own native media output shows in the thread with no Octant gate, as in T3 Code and Paseo; no runtime they drive makes video natively today.
+- A provider runtime's own native media output shows in the thread with no Octant gate, as in comparable agent workspaces; no runtime they drive makes video natively today.
 - The card shows duration × the published per-second rate before Generate and offers "Don't ask again" as for images; Full access, routines and paired devices behave as they do for images. Plan and Side Chats are never offered the tool.
 - Clips use the provider's own range (3–15 seconds, up to 4K). The host bounds only a clip's stored size (1 GB) and job time (30 minutes) and shares the image queue; the person's thread and Project spend ceilings apply, settled from the provider's token count.
 - Clips are stored beside generated images, exported and deleted with their thread, and the provider's stored interaction is deleted as soon as the clip is kept.
