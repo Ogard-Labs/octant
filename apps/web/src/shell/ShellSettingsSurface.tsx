@@ -141,6 +141,8 @@ export interface ShellSettingsSurfaceProps {
   readonly extensionClient: ExtensionClient;
   /** Project names by Project id, to head the remembered tool approvals. */
   readonly projectNames?: ReadonlyMap<string, string>;
+  /** The Code and Work Projects, which the hub grant's Act item can name. */
+  readonly actProjectNames?: ReadonlyMap<string, string>;
 }
 
 export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
@@ -166,6 +168,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
               ? {}
               : { pickSkillFolder: props.pickSkillFolder })}
             {...(props.projectNames === undefined ? {} : { projectNames: props.projectNames })}
+            {...(props.actProjectNames === undefined
+              ? {}
+              : { actProjectNames: props.actProjectNames })}
             {...(props.pickLocalPluginFolder === undefined
               ? {}
               : { pickLocalPluginFolder: props.pickLocalPluginFolder })}

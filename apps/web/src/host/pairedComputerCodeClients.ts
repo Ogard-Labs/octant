@@ -1,5 +1,9 @@
 import { createRemoteProductFetch, type RemoteSessionBridge } from "@octant/client-runtime";
 import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
+import {
+  createFolderBrowseClient,
+  type FolderBrowseClient,
+} from "@octant/client-runtime/folder-browse-client";
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
 import { createProviderClient, type ProviderClient } from "@octant/client-runtime/provider-client";
 
@@ -7,6 +11,8 @@ export interface PairedComputerCodeClients {
   readonly code: CodeClient;
   readonly project: ProjectClient;
   readonly provider: ProviderClient;
+  /** That computer's folders, for a new Code Project there; it admits only its own person. */
+  readonly folderBrowse: FolderBrowseClient;
 }
 
 // The remote session owns the destination, so the base URL only shapes the
@@ -33,5 +39,6 @@ export function createPairedComputerCodeClients(
     code: createCodeClient({ ...port, threadEvents: "poll" }),
     project: createProjectClient(port),
     provider: createProviderClient(port),
+    folderBrowse: createFolderBrowseClient(port),
   };
 }

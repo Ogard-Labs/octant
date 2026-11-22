@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { hostReadsProviderCatalogUnconfined } from "@octant/domain/guardrail-policy";
+import { codeOrWorkThreadProjectId, type HubActScopeSlot } from "../hub/hubActScope";
 import { openAdmittedSqlite, openSqlite } from "../persistence/sqlitePort";
 import { ChildWorktreeSourceService } from "../code/childWorktreeSourceService";
 import { GitObservationPort } from "../code/gitObservationPort";
@@ -766,10 +767,14 @@ export type ProvidersDependencies = Pick<
   Pick<
     FoundationsWiring,
     "providerRuntimeRegistry" | "workThreadProjection" | "resolveThreadStrict" | "resolveHostStrict"
-  >;
+  > & {
+    /** The member's Act item for its hub, bound by the hub side after this is built. */
+    readonly hubActScopeSlot: HubActScopeSlot;
+  };
 
 export function wireProviders(deps: ProvidersDependencies) {
   const {
+    hubActScopeSlot,
     agentRunChildWorktree,
     agentRunProcessSupervisor,
     agentRunSessionStore,
@@ -1600,6 +1605,11 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
       toolApprovals: extensionToolApprovalService,
       toolGrants: extensionToolGrantStore,
+      hubActScope: hubActScopeSlot.current,
+      codeOrWorkThreadProjectId: codeOrWorkThreadProjectId({
+        readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+        readWorkThread: (threadId) => workThreadProjection.read(threadId),
+      }),
     });
     const preparationProcess = new RepositoryTestProcessPort({
       resourceBudget: deps.hostResourceBudget,

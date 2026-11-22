@@ -23,6 +23,8 @@ import {
   type HubPrincipal,
   type PeerPrincipal,
   type HubSpokeStatus,
+  type HubWindowComputers,
+  type HubWindowGuestRequest,
   type NewMemberAlert,
   type NewMemberConfirmation,
   type OwnerCandidate,
@@ -58,7 +60,7 @@ import { HUB_PEER_KEY_HEADER, HubLinkVerifier, sendHubLinkRequest } from "./hubL
 import { openHubPairing, type HubPairingRefusal, type HubPairingSession } from "./hubPairing";
 import type { HubHostIdentity } from "./hubService";
 import type { HostOwnerRecord, HubLinkState, HubState, HubStatePort } from "./hubStateStore";
-import { memberOrigin } from "./memberOrigin";
+import { memberOrigin, windowComputersFrom } from "./memberOrigin";
 import {
   addOwnerRecords,
   ownerEntries,
@@ -104,9 +106,13 @@ export interface SpokeDevicePort {
     readonly sourceClass: "lan-private" | "tailscale";
   }) => { readonly deviceId: string };
   readonly deviceLifecycle: (deviceId: string, now: number) => SpokeDeviceLifecycle;
+  /** The listener origin a device was registered at; it signs in only there. */
+  readonly deviceOrigin: (deviceId: string) => string | undefined;
   readonly revokeDevice: (deviceId: string) => void;
   /** False for a device that is revoked, expired, or not held here. */
   readonly deviceActive: (deviceId: string) => boolean;
+  /** Ends these devices' open sessions because Act was withdrawn; each stays registered. */
+  readonly endActSessions: (deviceIds: ReadonlyArray<string>) => void;
 }
 
 /** Reads one device's lifecycle from the host's device list under the pairing's own expiry policy. */
@@ -1170,7 +1176,64 @@ export class SpokeLinkService {
       memberId: link.hubMemberId,
       items: grant.items,
     });
+    // Unticking Act refuses a hub-introduced device's next start and also ends
+    // what it has open here (maintainer decision, 2026-11-20): a session opened
+    // under Act must not outlive it. The devices stay paired, so re-ticking Act
+    // lets them sign in again.
+    if (link.grant.items.includes("act") && !grant.items.includes("act")) {
+      const deviceIds = (link.guestDevices ?? []).map((entry) => entry.deviceId);
+      if (deviceIds.length > 0) this.#options.devices()?.endActSessions(deviceIds);
+    }
     return { status: "changed", grant };
+  }
+
+  /**
+   * Asks the hub to list this host's own desktop window as a guest, signed as
+   * this member, and answers with the other members that window may then ask
+   * for a device of its own. The members come from the roster this host holds,
+   * so a hub that cannot be reached still leaves the window the members that
+   * accepted it before.
+   */
+  async introduceWindow(request: HubWindowGuestRequest): Promise<HubWindowComputers> {
+    const link = this.#options.state.load().link;
+    if (link === undefined || link.removed === true || link.leaving === true) {
+      return { membership: "none" };
+    }
+    const identity = this.#options.identity();
+    const answer = await sendHubLinkRequest({
+      transport: this.#options.transport,
+      target: { origin: link.hubOrigin, pin: listenerPinFromDigest(link.hubListenerPin) },
+      signHostPayload: identity.signing.signHostPayload,
+      senderMemberId: String(link.selfMemberId),
+      recipientMemberId: String(link.hubMemberId),
+      method: "POST",
+      path: "/api/hub/window-guest",
+      body: JSON.stringify(request),
+      // A hub that never held this key (a promoted standby) checks it against the roster.
+      headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
+      now: this.#options.now(),
+    });
+    let introduction: "introduced" | "unchanged" | "refused" | "hub-unreachable" =
+      "hub-unreachable";
+    if (answer.status === "answered") {
+      const said = (await answer.response.json().catch(() => undefined)) as
+        | { readonly status?: unknown }
+        | undefined;
+      introduction =
+        answer.response.ok && (said?.status === "introduced" || said?.status === "unchanged")
+          ? said.status
+          : "refused";
+    }
+    const held = this.#options.state.load().link ?? link;
+    return {
+      membership: "member",
+      introduction,
+      hubMemberId: held.hubMemberId,
+      members: windowComputersFrom({
+        roster: held.roster,
+        selfMemberId: String(held.selfMemberId),
+      }),
+    };
   }
 
   /**
@@ -1644,16 +1707,20 @@ export class SpokeLinkService {
       if (devices === undefined) return { status: "refused", kind: "devices-unavailable" };
       const lifecycle = devices.deviceLifecycle(existing.deviceId, this.#options.now());
       if (lifecycle === "revoked") return { status: "refused", kind: "device-revoked" };
-      if (lifecycle === "active") {
-        return {
-          status: "admitted",
-          spokeMemberId: link.selfMemberId,
-          deviceId: existing.deviceId,
-        };
-      }
     }
     const own = readPrivateListener(this.#options.listener());
     if (own.status === "refused") return { status: "refused", kind: own.kind };
+    // A device signs in only at the origin it was registered at, so one made
+    // before this listener moved is replaced like an expired one: the window
+    // saves the new address with the id it is given and would be refused there.
+    if (
+      existing !== undefined &&
+      devices !== undefined &&
+      devices.deviceLifecycle(existing.deviceId, this.#options.now()) === "active" &&
+      devices.deviceOrigin(existing.deviceId) === own.origin
+    ) {
+      return { status: "admitted", spokeMemberId: link.selfMemberId, deviceId: existing.deviceId };
+    }
     if (devices === undefined) return { status: "refused", kind: "devices-unavailable" };
     const device = devices.admitIntroducedDevice({
       devicePublicKey: publicKeyPem(request.devicePublicKey),

@@ -1,4 +1,5 @@
-import { principalActsAsHostPerson } from "../clientPrincipal";
+import { principalActsAsHostPerson, principalIsHubIntroduced } from "../clientPrincipal";
+import { hubActRefusal, type HubActScopePort } from "../hub/hubActScope";
 import {
   type EventActor,
   decodeAnswerNativeHarnessQuestion,
@@ -112,6 +113,10 @@ export interface NativeHarnessSessionRouteDependencies {
     readonly actor: EventActor;
   }) => "answered" | "question-not-found" | "already-settled" | "invalid-answer";
   readonly now?: () => number;
+  /** The member's Act item for its hub, which bounds where a device only the hub introduced may answer. */
+  readonly hubActScope?: () => HubActScopePort | undefined;
+  /** The Project a Code or Work thread belongs to; undefined for a thread this host does not hold. */
+  readonly threadProjectId?: (threadId: string) => string | undefined;
 }
 
 function corsHeaders(origin: string | null): Record<string, string> {
@@ -158,6 +163,7 @@ export function createNativeHarnessSessionRouteHandler(
     let windowId: string;
     let person: ToolEgressPerson;
     let actor: EventActor;
+    let hubIntroduced: boolean;
     try {
       const context = authenticateRoutePrincipal({
         request,
@@ -179,6 +185,7 @@ export function createNativeHarnessSessionRouteHandler(
               deviceId: String(context.principal.deviceId),
             };
       actor = eventActorForPrincipal(context.principal);
+      hubIntroduced = principalIsHubIntroduced(context.principal);
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failure("Native harness session request is unauthorized.", 401, origin);
@@ -209,6 +216,18 @@ export function createNativeHarnessSessionRouteHandler(
     const questions =
       person.kind === "remote-device" ? (rawView?.questions ?? []).filter(eligibleChild) : [];
     const view = rawView;
+    // A device only the hub introduced answers a Code or Work thread's request
+    // only in a Project the member's Act item names, read at this answer; a
+    // thread the host does not hold names no Project. Chat is not held to the
+    // Act item.
+    const hubActAnswerRefusal = (): string | undefined =>
+      hubIntroduced && rawView !== undefined && rawView.session.mode !== "chat"
+        ? hubActRefusal(
+            dependencies.hubActScope?.(),
+            dependencies.threadProjectId?.(threadId),
+            "answer",
+          )
+        : undefined;
     if (
       person.kind === "remote-device" &&
       action !== "" &&
@@ -345,6 +364,8 @@ export function createNativeHarnessSessionRouteHandler(
           403,
           origin,
         );
+      const approvalActRefusal = hubActAnswerRefusal();
+      if (approvalActRefusal !== undefined) return failure(approvalActRefusal, 403, origin);
       const outcome = dependencies.decideApproval?.({
         threadId,
         approvalId: String(decision.approvalId),
@@ -457,6 +478,8 @@ export function createNativeHarnessSessionRouteHandler(
           403,
           origin,
         );
+      const questionActRefusal = hubActAnswerRefusal();
+      if (questionActRefusal !== undefined) return failure(questionActRefusal, 403, origin);
       const outcome = dependencies.answerQuestion?.({
         threadId,
         questionId: String(answer.questionId),

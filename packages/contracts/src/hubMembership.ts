@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { AuditActingPrincipal } from "./auditEvents";
 import { HubGrantItem, HubMemberId, RosterMember, SignedHubRoster } from "./hubAndSpokes";
 import { HubPushReason } from "./hubPush";
+import { ProjectId } from "./projects";
 import { RemotePushPlatform } from "./remotePushNotifications";
 import { HubOfferId, HubOfferKind, HubProvisionMode, HubProvisionReason } from "./hubProvision";
 import { HubSignInKind, HubSignInOutcome, HubSignInReason } from "./hubSignIn";
@@ -51,6 +52,7 @@ export const HubMembershipChange = Schema.Literal(
   "new-hub-accepted",
   "wake-switch-changed",
   "accept-moved-threads-changed",
+  "hub-act-changed",
   "wake-times-reported",
   "wake-times-merged",
   "wake-times-dropped",
@@ -260,7 +262,71 @@ export const HubGuestAdmissionResponse = Schema.Struct({
 export type HubGuestAdmissionResponse = typeof HubGuestAdmissionResponse.Type;
 export const decodeHubGuestAdmissionResponse = Schema.decodeUnknownSync(HubGuestAdmissionResponse);
 
+/**
+ * A desktop window asking its own host to have the hub introduce it as a
+ * guest: the device key it generated, the member id it chose, and its label.
+ * A spoke's host forwards the same three facts to the hub, signed as itself.
+ */
+export const HubWindowGuestRequest = Schema.Struct({
+  memberId: HubMemberId,
+  devicePublicKey: base64Url(512),
+  deviceLabel: bounded(128),
+}).annotations(strict);
+export type HubWindowGuestRequest = typeof HubWindowGuestRequest.Type;
+export const decodeHubWindowGuestRequest = Schema.decodeUnknownSync(HubWindowGuestRequest);
+
+/**
+ * A member of the hub as a window on another member reaches it: the address
+ * and listener pin the roster this host holds gives, and the identity key
+ * fingerprint the member's hello must prove.
+ */
+export const HubWindowComputer = Schema.Struct({
+  memberId: HubMemberId,
+  name: bounded(128),
+  origin: bounded(300),
+  /** The listener's certificate pin, `sha256-` and base64url. */
+  pin: Schema.String.pipe(Schema.pattern(/^sha256-[A-Za-z0-9_-]{43}$/)),
+  identityKeyFingerprint: digest,
+  /**
+   * `hub` for the hub itself, which holds a member's window to its own Act
+   * list; absent for a spoke or standby, which holds it to its Act item.
+   */
+  role: Schema.optional(Schema.Literal("hub")),
+}).annotations(strict);
+export type HubWindowComputer = typeof HubWindowComputer.Type;
+
+/**
+ * What a host answers its window's introduction: no hub, or the hub's other
+ * members the window may reach directly, and how the introduction went. A
+ * member the window cannot reach on a private address is not listed.
+ */
+export const HubWindowComputers = Schema.Union(
+  Schema.Struct({ membership: Schema.Literal("none") }).annotations(strict),
+  Schema.Struct({
+    membership: Schema.Literal("member"),
+    introduction: Schema.Literal("introduced", "unchanged", "refused", "hub-unreachable"),
+    hubMemberId: HubMemberId,
+    members: Schema.Array(HubWindowComputer),
+  }).annotations(strict),
+);
+export type HubWindowComputers = typeof HubWindowComputers.Type;
+export const decodeHubWindowComputers = Schema.decodeUnknownSync(HubWindowComputers);
+
 const uniqueIds = <A>(items: ReadonlyArray<A>) => new Set(items.map(String)).size === items.length;
+
+/**
+ * The hub's own Act list: the Projects on the hub a member's desktop window
+ * may start threads in, answer, and stop. Set only from a window on the hub;
+ * empty names none.
+ */
+export const HubActProjectsRequest = Schema.Struct({
+  actProjects: Schema.Array(ProjectId).pipe(
+    Schema.maxItems(1_024),
+    Schema.filter(uniqueIds, { message: () => "Entries must not repeat." }),
+  ),
+}).annotations(strict);
+export type HubActProjectsRequest = typeof HubActProjectsRequest.Type;
+export const decodeHubActProjectsRequest = Schema.decodeUnknownSync(HubActProjectsRequest);
 
 /** The standby hubs the person names on the hub, in the order members try them. Empty clears them. */
 export const HubStandbyOrderRequest = Schema.Struct({

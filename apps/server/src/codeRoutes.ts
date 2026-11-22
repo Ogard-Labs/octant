@@ -202,6 +202,7 @@ import type { FileIdentity } from "./code/fileOperationPort";
 import type { ProjectTerminalService } from "./code/projectTerminalService";
 import { MAX_EDITABLE_CODE_FILE_BYTES } from "./code/codeFileService";
 import type { PairedMergeUnlockPort } from "./hub/pairedMergeUnlock";
+import { hubActRefusal, type HubActScopePort } from "./hub/hubActScope";
 import {
   isAgentGrantSession,
   principalActsAsHostPerson,
@@ -622,6 +623,8 @@ export interface CodeRouteDependencies {
    * switch off, a paired client's merge keeps its confirmation and checks gate.
    */
   readonly pairedMergeUnlock?: () => PairedMergeUnlockPort | undefined;
+  /** The member's Act item for its hub, which bounds where a device only the hub introduced may start a thread. */
+  readonly hubActScope?: () => HubActScopePort | undefined;
   /** Terminals a Code Project owns without a thread; absent on a host without them. */
   readonly projectTerminals?: Pick<ProjectTerminalService, "execute">;
   /**
@@ -696,6 +699,9 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
     // judged as a local window is; it stays the principal and the actor.
     let callerAuthority: "local-window" | "remote-device";
     let agentGrantSession: boolean;
+    // A device only the hub introduced: it starts threads, answers approvals
+    // and questions, and stops turns within the member's Act item.
+    let hubIntroduced = false;
     // Who the journal names for what this request changes: the device, when a
     // device asked.
     let callerActor: EventActor;
@@ -726,6 +732,10 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
         ? "local-window"
         : "remote-device";
       agentGrantSession = isAgentGrantSession(principalContext.principal);
+      hubIntroduced =
+        principalContext.principal.kind === "remote-device" &&
+        callerAuthority === "remote-device" &&
+        !agentGrantSession;
       callerActor = eventActorForPrincipal(principalContext.principal);
       projectTerminalDeviceBinding =
         principalContext.principal.kind === "remote-device" &&
@@ -790,6 +800,50 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
       return checked.status === "unlocked" ? undefined : checked;
     };
 
+    // Where a hub-introduced device may start a thread: a Project the member's
+    // Act item names, read at this start. A fork's Project is its source's,
+    // which this route does not read, so a fork from such a device is refused
+    // while this host is in a hub.
+    const hubActStartRefusal = (command: CodeCommand | undefined): string | undefined => {
+      const projectId =
+        command?.kind === "create-code-thread"
+          ? String(command.thread.projectId)
+          : command?.kind === "create-managed-code-thread"
+            ? String(command.projectId)
+            : command?.kind === "fork-code-thread"
+              ? ""
+              : undefined;
+      if (projectId === undefined) return undefined;
+      return hubActRefusal(dependencies.hubActScope?.(), projectId, "start");
+    };
+
+    // Answering a thread's approval or question, and Stop, likewise: only in a
+    // Project the member's Act item names, read at this request. The Project
+    // is the thread's own, read under this caller's scope; a thread it cannot
+    // read names no Project, so the request is refused while this host is in a
+    // hub and keeps its own rules otherwise.
+    const hubActOperationRefusal = async (
+      operation: CodeOperationCommand,
+    ): Promise<string | undefined> => {
+      const action =
+        operation.kind === "answer-provider-approval" || operation.kind === "answer-provider-input"
+          ? "answer"
+          : operation.kind === "cancel-provider-turn" ||
+              operation.kind === "force-stop-provider-turn"
+            ? "stop"
+            : undefined;
+      const scope = dependencies.hubActScope?.();
+      if (action === undefined || scope === undefined) return undefined;
+      let projectId: string | undefined;
+      try {
+        const view = await dependencies.service.read(authenticatedWindowId, operation.threadId);
+        projectId = String(view.thread.projectId);
+      } catch {
+        projectId = undefined;
+      }
+      return hubActRefusal(scope, projectId, action);
+    };
+
     try {
       switch (route.kind) {
         case "bootstrap":
@@ -849,6 +903,10 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             command = decodeCodeCommand(value);
           } catch {
             // The authenticated command endpoint also carries strict Code operations.
+          }
+          const actRefusal = hubIntroduced ? hubActStartRefusal(command) : undefined;
+          if (actRefusal !== undefined) {
+            return failureResponse({ category: "unauthorized", message: actRefusal }, 403, origin);
           }
           if (
             command?.kind === "change-code-thread-document-delivery" &&
@@ -1035,6 +1093,16 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             return failureResponse(
               { category: "unavailable", message: "Code operations are unavailable." },
               503,
+              origin,
+            );
+          }
+          const operationActRefusal = hubIntroduced
+            ? await hubActOperationRefusal(operation)
+            : undefined;
+          if (operationActRefusal !== undefined) {
+            return failureResponse(
+              { category: "unauthorized", message: operationActRefusal },
+              403,
               origin,
             );
           }

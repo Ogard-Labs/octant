@@ -23,7 +23,12 @@ import {
   decodeListenerOriginTrust,
   type ListenerOriginTrust,
 } from "@octant/client-runtime/remote-listener-trust";
+import { decodeHubWindowComputers, type HubWindowComputers } from "@octant/contracts";
 import { classifyRemoteListenerAddress } from "@octant/domain";
+import {
+  sendHubAdministrationOperation,
+  type HubAdministrationControlRuntime,
+} from "./hubAdministrationControls";
 import { requestPairedComputer } from "./pairedComputerRequests";
 
 export interface PairedComputer {
@@ -37,6 +42,12 @@ interface PinRecord {
   readonly pin: string;
   readonly listenerTrust?: ListenerOriginTrust;
   readonly hostId?: string;
+  /**
+   * A member of this host's hub, pinned from the roster the host itself named
+   * in its answer to the window's introduction. It is replaced whole at each
+   * introduction, so a member the roster drops is no longer reachable.
+   */
+  readonly throughHub?: true;
 }
 
 /** The single-use ticket a pairing code carried, for the window that claims it. */
@@ -123,8 +134,45 @@ export class PairedComputerPins {
     return true;
   }
 
+  /** The computers paired directly; a hub member is listed by the window's own registry. */
   list(): ReadonlyArray<PairedComputer> {
-    return this.#records.map(({ origin, displayName }) => ({ origin, displayName }));
+    return this.#records
+      .filter((record) => record.throughHub !== true)
+      .map(({ origin, displayName }) => ({ origin, displayName }));
+  }
+
+  /** Whether this origin is a hub member's, pinned from the host's roster. */
+  isThroughHub(origin: string): boolean {
+    return this.#records.some((record) => record.origin === origin && record.throughHub === true);
+  }
+
+  /**
+   * Replaces the hub members' pins with the ones the host just named. A
+   * computer paired directly keeps its own pin, and only a private origin is
+   * pinned, whatever reaches this.
+   */
+  replaceHubMembers(
+    members: ReadonlyArray<{
+      readonly origin: string;
+      readonly displayName: string;
+      readonly pin: string;
+      readonly hostId: string;
+    }>,
+  ): void {
+    const direct = this.#records.filter((record) => record.throughHub !== true);
+    const next: ReadonlyArray<PinRecord> = [
+      ...direct,
+      ...members
+        .filter(
+          (member) =>
+            isPrivateListenerOrigin(member.origin) &&
+            !direct.some((record) => record.origin === member.origin),
+        )
+        .map((member) => ({ ...member, throughHub: true as const })),
+    ];
+    if (JSON.stringify(next) === JSON.stringify(this.#records)) return;
+    writePinRecords(this.#path, next);
+    this.#records = next;
   }
 
   pinFor(origin: string): string | undefined {
@@ -335,6 +383,45 @@ export async function pairFromPairingCode(input: {
   };
 }
 
+/**
+ * What a window's introduction to its hub comes back as: the host's answer,
+ * or `unavailable` when the host could not be asked or answered something
+ * Octant will not read, in which case the window keeps what it lists.
+ */
+export type HubComputersOutcome = HubWindowComputers | { readonly membership: "unavailable" };
+
+/**
+ * A window asks its own host to have the hub list it as a guest, and to name
+ * the members it may then reach. The window sends only its own key, member id
+ * and label; the pins main keeps come from the host's answer, never from the
+ * window, and replace the hub members' pins whole.
+ */
+export async function introduceWindowToHub(input: {
+  readonly request: unknown;
+  readonly pins: PairedComputerPins;
+  readonly send: (body: unknown) => Promise<{ readonly status: number; readonly body: unknown }>;
+}): Promise<HubComputersOutcome> {
+  let answer: HubWindowComputers;
+  try {
+    const sent = await input.send(input.request);
+    if (sent.status !== 200) return { membership: "unavailable" };
+    answer = decodeHubWindowComputers(sent.body);
+  } catch {
+    return { membership: "unavailable" };
+  }
+  input.pins.replaceHubMembers(
+    answer.membership === "none"
+      ? []
+      : answer.members.map((member) => ({
+          origin: member.origin,
+          displayName: member.name,
+          pin: member.pin,
+          hostId: String(member.memberId),
+        })),
+  );
+  return answer;
+}
+
 export type SettleResult =
   | { readonly status: "settled" }
   | { readonly status: "refused"; readonly message: string };
@@ -394,7 +481,10 @@ function readPinRecords(path: string): ReadonlyArray<PinRecord> {
   const records: PinRecord[] = [];
   for (const entry of computers) {
     if (typeof entry !== "object" || entry === null) continue;
-    const { origin, displayName, pin, listenerTrust, hostId } = entry as Record<string, unknown>;
+    const { origin, displayName, pin, listenerTrust, hostId, throughHub } = entry as Record<
+      string,
+      unknown
+    >;
     if (
       typeof origin === "string" &&
       typeof displayName === "string" &&
@@ -415,6 +505,7 @@ function readPinRecords(path: string): ReadonlyArray<PinRecord> {
         pin,
         ...(trust === undefined ? {} : { listenerTrust: trust }),
         ...(hostId === undefined ? {} : { hostId }),
+        ...(throughHub === true ? { throughHub: true as const } : {}),
       });
     }
   }
@@ -444,6 +535,7 @@ export const PAIRED_COMPUTER_CHANNELS = {
   forget: DESKTOP_IPC_CHANNELS.pairedComputerForget,
   settle: DESKTOP_IPC_CHANNELS.pairedComputerSettle,
   request: DESKTOP_IPC_CHANNELS.pairedComputerRequest,
+  introduceToHub: DESKTOP_IPC_CHANNELS.pairedComputerIntroduceToHub,
 } as const;
 
 /**
@@ -460,6 +552,8 @@ export function installPairedComputerIpcHandlers(options: {
   readonly pins: () => PairedComputerPins;
   readonly serverPages?: Parameters<typeof forgetPairedComputer>[0]["serverPages"];
   readonly webBuildVersion: string;
+  /** The window's own loopback hub administration, which answers its introduction to the hub. */
+  readonly hubAdministration: (event: unknown) => HubAdministrationControlRuntime;
   /** The Node transport; replaced only by tests. */
   readonly fetchFor?: (origin: string, trust: ListenerOriginTrust) => typeof globalThis.fetch;
 }): void {
@@ -501,6 +595,20 @@ export function installPairedComputerIpcHandlers(options: {
       request,
       pins: options.pins(),
       ...(options.fetchFor === undefined ? {} : { fetchFor: options.fetchFor }),
+    });
+  });
+  options.handle(PAIRED_COMPUTER_CHANNELS.introduceToHub, async (event, request) => {
+    authorize(event);
+    let runtime: HubAdministrationControlRuntime;
+    try {
+      runtime = options.hubAdministration(event);
+    } catch {
+      return { membership: "unavailable" } satisfies HubComputersOutcome;
+    }
+    return await introduceWindowToHub({
+      request,
+      pins: options.pins(),
+      send: (body) => sendHubAdministrationOperation(runtime, "window-guest", body),
     });
   });
 }

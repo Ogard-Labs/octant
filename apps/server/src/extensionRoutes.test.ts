@@ -6,6 +6,8 @@ import type {
   ExtensionCommandResult,
   ExtensionSnapshot,
 } from "@octant/contracts/extension-rpc";
+import type { HubGrant } from "@octant/contracts";
+import { hubActScopeFromSpokeLink } from "./hub/hubActScope";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 import { createExtensionRouteHandler, type ExtensionRouteService } from "./extensionRoutes";
 import { ExtensionApiService } from "./extensions/extensionApiService";
@@ -546,6 +548,60 @@ describe("bounded authenticated extension routes", () => {
       }),
     );
     expect(anonymous?.status).toBe(401);
+    const approved = await handler(pairedDeviceRequest("/api/extensions/tool-approvals", answer));
+    expect(approved?.status).toBe(200);
+    await expect(call).resolves.toBe(true);
+  });
+
+  it("a hub-introduced device answers a Code or Work thread's MCP prompt only in a Project the member's Act item names", async () => {
+    const approvals = new ExtensionToolApprovalService({
+      uuid: () => "44000000-0000-4000-8000-000000000010",
+      now: () => now,
+      isPairedDeviceScope: (scope) => String(scope) === pairedDeviceId,
+      threadAuthorityIsCurrent: () => true,
+    });
+    const namedProject = "44000000-0000-4000-8000-000000000012";
+    const grant: { current: HubGrant } = {
+      current: { items: ["roster", "introduce", "act"], actProjects: [] },
+    };
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: new WindowAuthorityStore(),
+      toolApprovals: approvals,
+      hubActScope: () =>
+        hubActScopeFromSpokeLink({
+          status: () => ({ membership: "member", grant: grant.current }) as never,
+        }),
+      codeOrWorkThreadProjectId: () => namedProject,
+      now: () => now,
+    });
+    const call = approvals.request({
+      windowId: pairedDeviceId as never,
+      threadId: "44000000-0000-4000-8000-000000000011",
+      projectId: namedProject,
+      extensionId,
+      packageId,
+      componentId: "server",
+      serverName: "server",
+      providerToolName: "plugin__server__read",
+      mcpToolName: "read",
+      inputJson: "{}",
+    });
+    const answer = {
+      kind: "decide",
+      approvalId: "44000000-0000-4000-8000-000000000010",
+      decision: "approved",
+    };
+
+    const unnamed = await handler(pairedDeviceRequest("/api/extensions/tool-approvals", answer));
+    expect(unnamed?.status).toBe(403);
+    expect(await unnamed?.json()).toMatchObject({
+      failure: {
+        message:
+          "This computer's Act item for its hub does not name this Project, so a device the hub introduced cannot answer approvals or questions in it here.",
+      },
+    });
+    grant.current = { items: ["roster", "introduce", "act"], actProjects: [namedProject as never] };
     const approved = await handler(pairedDeviceRequest("/api/extensions/tool-approvals", answer));
     expect(approved?.status).toBe(200);
     await expect(call).resolves.toBe(true);

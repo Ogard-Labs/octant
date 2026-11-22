@@ -2,7 +2,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { decodeHostId } from "@octant/contracts/host";
 import { createClientHostRegistry } from "@octant/client-runtime/host-federation-registry";
-import type { PairedComputersBridge } from "../shell/hostBridge";
+import type { HubComputersBridge, PairedComputersBridge } from "../shell/hostBridge";
 import { createBrowserHostRegistryStorage } from "./browserHostRegistryStorage";
 import { useHostFederationLifecycle } from "./useHostFederationLifecycle";
 
@@ -113,5 +113,43 @@ describe("the main window's view of computers paired through Other computers", (
     const removed = await result.current?.lifecycle.removeLocal(HOST);
 
     expect(removed?.warning).toBe("Quit and reopen.");
+  });
+});
+
+describe("the main window on a hub member", () => {
+  it("asks its host to introduce it with a key of its own, and lets a hub computer go when its host is in no hub", async () => {
+    await createClientHostRegistry(createBrowserHostRegistryStorage()).upsertRemote({
+      hostId: decodeHostId(HOST),
+      kind: "remote",
+      displayName: "Studio",
+      origin: ORIGIN,
+      enabled: true,
+      through: "hub",
+      credential: {
+        keyId: "key-hub",
+        credentialGeneration: 1,
+        hostKeyFingerprint: "a".repeat(64),
+        deviceId: "device-1",
+        listenerTrust: { current: { kind: "pinned", pin: "sha256-pinned" } },
+      },
+    });
+    const introduceWindowToHub = vi.fn<HubComputersBridge["introduceWindowToHub"]>(async () => ({
+      membership: "none",
+    }));
+    const forgetPairedComputer = vi.fn(async () => ({ status: "forgotten" as const }));
+    const { result } = renderHook(() =>
+      useHostFederationLifecycle({
+        forgetPairedComputer,
+        requestPairedComputer: vi.fn(),
+        introduceWindowToHub,
+      }),
+    );
+
+    await waitFor(() => expect(introduceWindowToHub).toHaveBeenCalledOnce());
+    const [asked] = introduceWindowToHub.mock.calls[0] ?? [];
+    expect(asked).toMatchObject({ deviceLabel: "Octant desktop window" });
+    expect(asked?.devicePublicKey).toMatch(/^[A-Za-z0-9_-]+$/);
+    await waitFor(async () => expect(await result.current?.registry.get(HOST)).toBeUndefined());
+    expect(forgetPairedComputer).toHaveBeenCalledWith(ORIGIN);
   });
 });

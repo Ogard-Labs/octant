@@ -146,6 +146,48 @@ describe("FederatedHostsLifecyclePanel", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
   });
+
+  it("says which computers this window reaches through the hub and which it paired itself", async () => {
+    const member: FederatedHostLifecycleSnapshot = {
+      ...OFFICE,
+      displayName: "Studio",
+      through: "hub",
+      state: "ready",
+      health: "healthy",
+    };
+    const lifecycle = createLifecycle([LOCAL, member, LAPTOP]);
+    render(<FederatedHostsLifecyclePanel lifecycle={lifecycle} />);
+
+    const studio = (await screen.findByText("Studio")).closest("[data-host-id]");
+    const laptop = screen.getByText("Laptop").closest("[data-host-id]");
+    expect(studio).toHaveTextContent("Through the hub");
+    expect(laptop).not.toHaveTextContent("Through the hub");
+  });
+
+  it("labels the hub among the computers this window reaches through the hub", async () => {
+    const member: FederatedHostLifecycleSnapshot = {
+      ...OFFICE,
+      displayName: "Studio",
+      through: "hub",
+      state: "ready",
+      health: "healthy",
+    };
+    const hub: FederatedHostLifecycleSnapshot = {
+      ...LAPTOP,
+      hostId: decodeHostId("33333333-3333-4333-8333-333333333333"),
+      displayName: "Mac mini",
+      origin: "https://mac-mini.tailnet:8443",
+      through: "hub",
+      role: "hub",
+    };
+    const lifecycle = createLifecycle([LOCAL, member, hub]);
+    render(<FederatedHostsLifecyclePanel lifecycle={lifecycle} />);
+
+    const macMini = (await screen.findByText("Mac mini")).closest("[data-host-id]");
+    const studio = screen.getByText("Studio").closest("[data-host-id]");
+    expect(macMini).toHaveTextContent("mac-mini.tailnet:8443 · hub · Through the hub");
+    expect(studio).not.toHaveTextContent("· hub ·");
+  });
 });
 
 describe("FederatedHostsLifecycleStrip", () => {

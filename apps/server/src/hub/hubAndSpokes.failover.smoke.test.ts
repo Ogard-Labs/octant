@@ -4,6 +4,7 @@
 // time. The standby adds and removes members, the hub returns, and the
 // standby's changes merge back with a removal winning.
 
+import { generateKeyPairSync } from "node:crypto";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -415,8 +416,20 @@ describe("a hand-back from a named standby", () => {
     expect(hub.records.map((record) => record.change)).toContain("stand-in-refused");
   });
 
-  it("still merges a hand-back that removes a plain spoke", async () => {
+  it("still merges a hand-back that removes a plain spoke, and the spoke's desktop window goes with it", async () => {
     const { hub, standby, member } = await startNamed();
+    const windowKey = generateKeyPairSync("ec", { namedCurve: "prime256v1" })
+      .publicKey.export({ format: "der", type: "spki" })
+      .toString("base64url");
+    const introduced = await hub.hub.introduceWindowGuest(
+      {
+        memberId: decodeMemberId(crypto.randomUUID()),
+        devicePublicKey: windowKey,
+        introducedBy: member.hostId,
+      },
+      window,
+    );
+    expect(introduced.status).toBe("introduced");
     const before = hub.hub.status().roster;
     if (before === undefined) throw new Error("The hub holds no roster.");
 
@@ -582,6 +595,38 @@ describe("replacing the hub for good", () => {
     // The new hub hears the laptop leave, though it never held the laptop's key.
     expect(await member.spoke.leave(window)).toEqual({ status: "left", hubNotified: true });
     expect(names(standby.hub.status().roster ?? promoted.roster)).toEqual(["Standby"]);
+  });
+
+  it("lists a member's window again on the promoted hub, which kept it on the roster without knowing whose it is", async () => {
+    const { hub, standby, member } = await startFamily();
+    standby.spoke.setGrant(standbyGrant, window);
+    await hub.hub.setStandbyOrder([decodeMemberId(standby.hostId)], window);
+    const windowGuest = {
+      memberId: decodeMemberId(crypto.randomUUID()),
+      devicePublicKey: generateKeyPairSync("ec", { namedCurve: "prime256v1" })
+        .publicKey.export({ format: "der", type: "spki" })
+        .toString("base64url"),
+      introducedBy: member.hostId,
+    };
+    expect((await hub.hub.introduceWindowGuest(windowGuest, window)).status).toBe("introduced");
+    const promoted = standby.hub.promote(window);
+    if (promoted.status !== "promoted") throw new Error(JSON.stringify(promoted));
+    expect(
+      promoted.roster.roster.members.some(
+        (entry) => String(entry.memberId) === String(windowGuest.memberId),
+      ),
+    ).toBe(true);
+
+    const again = await standby.hub.introduceWindowGuest(windowGuest, window);
+
+    expect(again.status).toBe("introduced");
+    expect(
+      standby.hub
+        .status()
+        .roster?.roster.members.filter(
+          (entry) => String(entry.memberId) === String(windowGuest.memberId),
+        ),
+    ).toHaveLength(1);
   });
 
   /** A promoted standby, a laptop that ticked Standby, and a tablet that did not, with the old hub stopped. */

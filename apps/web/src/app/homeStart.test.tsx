@@ -13,6 +13,7 @@ const codeOnly: HomeStartInput["workingNowModes"] = ["code"];
 const noPullRequests: HomeStartInput["githubPullRequestCapability"] = { readable: false };
 const noActions = {} as never;
 const stubClient = {} as never;
+const openNothing = () => undefined;
 const hostResourceClient = { read: async () => ({ status: "refused" as const }) } as never;
 const loadHomePullRequests = (async () => undefined) as never;
 
@@ -39,6 +40,8 @@ function input(computerSnapshots: HomeStartInput["computerSnapshots"]): HomeStar
     loadHomePullRequests,
     needsYouCoordinatorTitles: emptyMap,
     needsYouThreadProviders: emptyMap,
+    otherComputerAsks: none,
+    onOpenOtherComputerAsk: openNothing,
     needsYouAskClients: noAskClients,
     now: 0,
     openRunningServiceLive: undefined,

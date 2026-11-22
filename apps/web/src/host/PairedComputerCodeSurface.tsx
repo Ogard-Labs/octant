@@ -1,17 +1,24 @@
 import {
+  createLocalServerClient,
+  createRemoteProductFetch,
   canExecuteRemoteProductMutation,
   readRemoteSessionStanding,
   RESTRICTED_REMOTE_SESSION,
   type RemoteSessionBridge,
   type RemoteSessionStanding,
 } from "@octant/client-runtime";
+import type { CodeCheckoutIdentity, CodeThread, CodeThreadId } from "@octant/contracts/code";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import { buildModelPickerGroups, type CreateHostViewScope } from "@octant/domain";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useProviderController } from "../providers/useProviderController";
+import { createRemoteExtensionClient } from "../remote/remoteProductClients";
 import { RemoteCodeSurface } from "../remote/RemoteWorkspace";
 import { HostSelector } from "../shell/HostSelector";
 import { createPairedComputerCodeClients } from "./pairedComputerCodeClients";
+import { PairedComputerThreadServers } from "./PairedComputerThreadServers";
+import type { RemoteServerGrantSource } from "@octant/contracts";
+import type { RemoteOpenMode, RemoteOpenOutcome } from "../home/runningServices";
 
 export interface PairedComputerCodeSurfaceProps {
   /** The paired computer's session, already ready. */
@@ -20,6 +27,18 @@ export interface PairedComputerCodeSurfaceProps {
   readonly selectedHostId: HostId;
   readonly onSelectHost: (hostId: HostId) => void;
   readonly viewScope?: CreateHostViewScope;
+  /** A thread on that computer to open, chosen from this window's list of its threads. */
+  readonly initialThreadId?: CodeThreadId;
+  /** Counts each request to open `initialThreadId`, so the same thread can be reopened. */
+  readonly initialThreadRequest?: number;
+  /**
+   * Opens one of a thread's servers on that computer, in Octant's own window or
+   * the default browser. Absent where this window cannot show such a page.
+   */
+  readonly openServer?: (
+    source: RemoteServerGrantSource,
+    mode: RemoteOpenMode,
+  ) => Promise<RemoteOpenOutcome>;
 }
 
 /**
@@ -32,6 +51,20 @@ export interface PairedComputerCodeSurfaceProps {
 export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps) {
   const { bridge } = props;
   const clients = useMemo(() => createPairedComputerCodeClients(bridge), [bridge]);
+  const localServers = useMemo(
+    () =>
+      createLocalServerClient({
+        // The session owns the destination; the base URL only shapes the path.
+        baseUrl: "http://127.0.0.1",
+        fetch: createRemoteProductFetch({ bridge }),
+        windowCapability: "",
+      }),
+    [bridge],
+  );
+  const hostName =
+    props.hosts.find((host) => String(host.hostId) === String(props.selectedHostId))?.displayName ??
+    "that computer";
+  const { openServer } = props;
   const state = useSyncExternalStore(
     (onChange) => bridge.subscribe(onChange),
     () => bridge.getState(),
@@ -54,6 +87,13 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
       current = false;
     };
   }, [bridge, ready]);
+
+  // A thread's MCP tool approvals, listed and answered on that computer, so one
+  // Needs you opens here can be answered here.
+  const extensionClient = useMemo(
+    () => createRemoteExtensionClient(bridge, standing),
+    [bridge, standing],
+  );
 
   const providerController = useProviderController({ client: clients.provider });
   const providerGroups = useMemo(
@@ -88,10 +128,32 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
       <RemoteCodeSurface
         clients={clients}
         actsAsHostPerson={standing.actsAsHostPerson}
-        extensionClient={undefined}
+        extensionClient={extensionClient}
         connected={connected}
         providerGroups={providerGroups}
         followsContinuationLink={false}
+        {...(props.initialThreadId === undefined ? {} : { initialThreadId: props.initialThreadId })}
+        {...(props.initialThreadRequest === undefined
+          ? {}
+          : { initialThreadRequest: props.initialThreadRequest })}
+        {...(openServer === undefined
+          ? {}
+          : {
+              renderThreadExtras: (
+                thread: CodeThread,
+                checkout: CodeCheckoutIdentity | undefined,
+              ) => (
+                <PairedComputerThreadServers
+                  key={String(thread.id)}
+                  client={localServers}
+                  inOwnWorktree={checkout?.kind === "managed-worktree"}
+                  hostName={hostName}
+                  open={openServer}
+                  projectId={thread.projectId}
+                  threadId={thread.id}
+                />
+              ),
+            })}
         onNavigate={() => undefined}
         onOpenCanvas={() => undefined}
       />

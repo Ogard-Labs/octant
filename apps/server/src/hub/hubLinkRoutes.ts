@@ -7,6 +7,7 @@
 // and the product routes never read it.
 
 import {
+  HubMemberId,
   decodeHubGuestAdmissionRequest,
   decodeHubJoinRequest,
   decodeHubLeaveRequest,
@@ -19,9 +20,11 @@ import {
   decodeHubWakeCopy,
   decodeHubWakeNudge,
   decodeHubWakeReport,
+  decodeHubWindowGuestRequest,
   decodeSignedHubRoster,
   encodeSignedHubRoster,
 } from "@octant/contracts";
+import { Schema } from "effect";
 import { HUB_HANDBACK_MAX_BODY_BYTES, HUB_WAKE_COPY_MAX_BODY_BYTES } from "../remoteRoutePolicy";
 import type { FailoverService } from "./failoverService";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, HubLinkVerifier } from "./hubLink";
@@ -51,6 +54,8 @@ export const HUB_LINK_ROUTES = {
   guestRoster: "/api/hub/guest-roster",
   /** A guest asks a spoke to admit it as a paired device. */
   guest: "/api/hub/guest",
+  /** A spoke asks the hub to list its own desktop window as a guest. */
+  windowGuest: "/api/hub/window-guest",
   /** A spoke whose hub grant ticks Wake tells the hub, or a standing-in standby, its routines' next times. */
   wakeTimes: "/api/hub/wake-times",
   /** The hub, or a standing-in standby, nudges a spoke shortly before one of its routines is due. */
@@ -72,6 +77,8 @@ export const HUB_LINK_ROUTES = {
   /** A spoke tells the hub one word about how a sign-in request ended. */
   signInOutcome: "/api/hub/sign-in-outcome",
 } as const;
+
+const decodeHubMemberId = Schema.decodeUnknownSync(HubMemberId);
 
 type RouteValue = (typeof HUB_LINK_ROUTES)[keyof typeof HUB_LINK_ROUTES];
 
@@ -511,12 +518,20 @@ export function createHubLinkRouteHandler(
       } catch {
         return refused(400, "invalid");
       }
+      const signed = { header, method: request.method, path: route, body, request: admission };
+      // The hub admits only a member's own desktop window, which its own Act
+      // list then bounds; a spoke admits the guests it accepted.
+      if (options.hub.status().enabled) {
+        const admitted = options.hub.admitWindowGuest(signed);
+        return admitted.status === "admitted"
+          ? Response.json(
+              { spokeMemberId: admitted.hubMemberId, deviceId: admitted.deviceId },
+              { status: 201, headers: NO_STORE },
+            )
+          : refused(GUEST_REFUSAL_STATUS.has(admitted.kind) ? 401 : 403, admitted.kind);
+      }
       const admitted = options.spoke.admitGuest({
-        header,
-        method: request.method,
-        path: route,
-        body,
-        request: admission,
+        ...signed,
         ...(facts?.privateAddress === undefined ? {} : { privateAddress: facts.privateAddress }),
       });
       return admitted.status === "admitted"
@@ -588,6 +603,22 @@ export function createHubLinkRouteHandler(
       publicKeyFor: (sender) => options.hub.memberKey(sender, presentedKey ?? undefined),
     });
     if (verified.status === "refused") return refused(401, verified.kind);
+    if (route === HUB_LINK_ROUTES.windowGuest) {
+      let asked;
+      try {
+        asked = decodeHubWindowGuestRequest(JSON.parse(body));
+      } catch {
+        return refused(400, "invalid");
+      }
+      // The window is the signing member's own: a member never names another's.
+      const introduced = await options.hub.introduceWindowGuest(
+        { ...asked, introducedBy: verified.senderMemberId },
+        { kind: "peer", memberId: decodeHubMemberId(verified.senderMemberId) },
+      );
+      return introduced.status === "refused"
+        ? refused(403, introduced.kind)
+        : Response.json(introduced, { headers: NO_STORE });
+    }
     if (route === HUB_LINK_ROUTES.handback) {
       let handback;
       try {

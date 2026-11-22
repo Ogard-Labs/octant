@@ -52,6 +52,7 @@ import {
 import { activityHistoryHeld, readActivityFacts } from "../persistence/activityHistoryProjection";
 import { createPairedMergeUnlockSlot } from "../hub/pairedMergeUnlock";
 import { createCodeEditDiagnostics } from "../code/codeEditDiagnostics";
+import type { HubActScopeSlot } from "../hub/hubActScope";
 import { createCodeLanguageAgentTools } from "../code/codeLanguageAgentTools";
 import {
   createCodeDebugAgentSessionApprovals,
@@ -180,10 +181,14 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
     | "childWorktreeSources"
     | "resolveChildWorktree"
     | "configuredDriverOptions"
-  >;
+  > & {
+    /** The member's Act item for its hub, bound by the hub side after this is built. */
+    readonly hubActScopeSlot: HubActScopeSlot;
+  };
 
 export function wireCodeTooling(deps: CodeToolingDependencies) {
   const {
+    hubActScopeSlot,
     browserAuthority,
     workThreadProjection,
     agentRunPersistence,
@@ -1037,6 +1042,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       service: routeCodeService,
       homeActivity: codeHomeActivity,
       pairedMergeUnlock: pairedMergeUnlockSlot.current,
+      hubActScope: hubActScopeSlot.current,
       ...(projectTerminals === undefined ? {} : { projectTerminals }),
       language: languageService,
       debug: debugService,

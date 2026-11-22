@@ -57,7 +57,14 @@ export interface HubSettingsSectionProps {
   readonly ownerUnlock?: Pick<OwnerUnlockBridge, "ownerUnlockMakeKey" | "ownerUnlockForgetKey">;
   /** Reads the clock so a test can freeze a code's time left. */
   readonly now?: () => number;
+  /**
+   * This computer's Code and Work Projects by id, for the Projects the Act
+   * item names. A saved id missing here stays listed so it can be unticked.
+   */
+  readonly projectNames?: ReadonlyMap<string, string>;
 }
+
+const NO_PROJECTS: ReadonlyMap<string, string> = new Map();
 
 const GRANT_ITEM_COPY: Readonly<Record<HubGrantItem, { label: string; line: string }>> = {
   roster: { label: "Roster", line: "The hub's signed list of members." },
@@ -271,6 +278,8 @@ interface HubStatus {
   readonly standbyOrder: ReadonlyArray<string>;
   /** Whether this hub takes threads its members move to it. */
   readonly acceptMovedThreads: boolean;
+  /** The hub's own Act list: the Projects here a member's window may work in. */
+  readonly actProjects: ReadonlyArray<string>;
   readonly wake?: WakeView;
   readonly push?: PushView;
   readonly directPush?: DirectPushView;
@@ -439,7 +448,13 @@ const JOIN_POLL_MS = 2_000;
 /** How often the hub re-reads its pairing requests while a code is live. */
 const PENDING_POLL_MS = 3_000;
 
-export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettingsSectionProps) {
+export function HubSettingsSection({
+  hub,
+  pairing,
+  ownerUnlock,
+  now,
+  projectNames = NO_PROJECTS,
+}: HubSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
   /** The public half of the unlock key made for the join in progress; the private half never leaves the Secure Enclave. */
   const unlockPublicKey = useRef<string | undefined>(undefined);
@@ -486,6 +501,10 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
   const [joinCode, setJoinCode] = useState("");
   const [join, setJoin] = useState<JoinState>({ phase: "idle" });
   const [draft, setDraft] = useState<ReadonlyArray<HubGrantItem>>([]);
+  /** The Projects the Act item names, as edited; absent while the list shows the saved one. */
+  const [actDraft, setActDraft] = useState<ReadonlyArray<string>>();
+  /** The hub's own Act list, as edited; absent while the list shows the saved one. */
+  const [hubActDraft, setHubActDraft] = useState<ReadonlyArray<string>>();
   const ownerId = useId();
   const codeId = useId();
   const removeOpener = useRef<HTMLButtonElement>(null);
@@ -717,6 +736,24 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
         on
           ? "Accept moved threads is on. Each move still asks for an owner's Touch ID."
           : "Accept moved threads is off. This hub refuses every move.",
+      );
+    }
+    await refresh();
+  };
+
+  const saveHubActProjects = async (actProjects: ReadonlyArray<string>) => {
+    const reply = await act(
+      "act-projects",
+      { actProjects },
+      "changed",
+      "Octant could not save the Projects a member's window may work in.",
+    );
+    if (reply !== undefined) {
+      setHubActDraft(undefined);
+      setMessage(
+        actProjects.length === 0
+          ? "A member's window can see this hub but start nothing here."
+          : "Saved. A member's window may work only in the Projects you ticked.",
       );
     }
     await refresh();
@@ -998,12 +1035,13 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
     const reply = await act(
       "grant",
       // Projects may be named only while Act is ticked.
-      { items, actProjects: items.includes("act") ? current.actProjects : [] },
+      { items, actProjects: items.includes("act") ? (actDraft ?? current.actProjects) : [] },
       "changed",
       "Octant could not change the hub grant.",
     );
     if (reply !== undefined) {
       setJoin({ phase: "idle" });
+      setActDraft(undefined);
       setMessage("The hub grant is saved.");
     }
     await refresh();
@@ -1224,6 +1262,47 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
       HUB_GRANT_ITEMS.filter((each) => (each === item ? on : items.includes(each))),
     );
 
+  // Which Projects a device the hub introduced may start threads in (on a
+  // member, its Act item; on the hub, its own Act list), read by this computer
+  // at each request. A Project no longer here stays listed by id so unticking
+  // it is still possible.
+  const actProjectsEditor = (
+    named: ReadonlyArray<string>,
+    legend: string,
+    change: (next: ReadonlyArray<string>) => void,
+  ) => {
+    const rows = [
+      ...[...projectNames.entries()].map(([projectId, name]) => ({ projectId, name })),
+      ...named
+        .filter((projectId) => !projectNames.has(projectId))
+        .map((projectId) => ({ projectId, name: projectId })),
+    ];
+    return (
+      <fieldset className="settings-panel__stack">
+        <legend>{legend}</legend>
+        {rows.length === 0 ? (
+          <p className="settings-section-line">This computer has no Projects yet.</p>
+        ) : (
+          rows.map((row) => (
+            <label className="check" key={row.projectId}>
+              <OctantCheckbox
+                checked={named.includes(row.projectId)}
+                onChange={(event) =>
+                  change(
+                    event.target.checked
+                      ? [...named.filter((each) => each !== row.projectId), row.projectId]
+                      : named.filter((each) => each !== row.projectId),
+                  )
+                }
+              />
+              <span>{row.name}</span>
+            </label>
+          ))
+        )}
+      </fieldset>
+    );
+  };
+
   const grantEditor = (current: Grant, actionLabel: string) => (
     <fieldset className="settings-panel__stack">
       <legend>What the hub may do here</legend>
@@ -1238,6 +1317,13 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
           </span>
         </label>
       ))}
+      {draft.includes("act")
+        ? actProjectsEditor(
+            actDraft ?? current.actProjects,
+            "Projects a device the hub introduced may start threads in",
+            setActDraft,
+          )
+        : null}
       <p className="settings-section-line">
         This computer keeps its files, sign-ins, sandbox, and every approval whatever you tick. Only
         you can change this list.
@@ -1287,7 +1373,7 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
         {message === undefined ? null : (
           <SettingsState
             kind={
-              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub|Wake service is|Accept moved threads is|Push sender is|Direct sending is|Apple key (stored|removed)|Apple notifications go|Google service account (stored|removed)|Offers are|Offered|Offer withdrawn|Offer applied|Hardware address)/.test(
+              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub|Wake service is|Accept moved threads is|Push sender is|Direct sending is|Apple key (stored|removed)|Apple notifications go|Google service account (stored|removed)|Offers are|Offered|Offer withdrawn|Offer applied|Hardware address|Saved\. A member|A member.s window can see this hub)/.test(
                 message,
               )
                 ? "success"
@@ -1574,6 +1660,32 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
                 onCheckedChange={(on) => void setAcceptMovedThreads(on)}
               />
             </SettingRow>
+          </div>
+        </SettingsSection>
+      )}
+
+      {!hubOn || status === undefined ? null : (
+        <SettingsSection title="Member windows">
+          <p className="settings-section-line">
+            A desktop window on one of your other computers lists this hub as one of its computers.
+            It may start threads, answer approvals and questions, and stop turns here only in the
+            Projects you tick. With none ticked, it sees this hub and can start nothing here.
+          </p>
+          {actProjectsEditor(
+            hubActDraft ?? status.actProjects,
+            "Projects a member's window may work in",
+            setHubActDraft,
+          )}
+          <div className="host-settings__controls">
+            <OctantButton
+              disabled={busy || hubActDraft === undefined}
+              onClick={() => void saveHubActProjects(hubActDraft ?? status.actProjects)}
+              size="sm"
+              type="button"
+              variant="default"
+            >
+              Save the Projects
+            </OctantButton>
           </div>
         </SettingsSection>
       )}
@@ -2370,6 +2482,7 @@ function readStatus(body: unknown): HubStatus | undefined {
       ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),
       standbyOrder,
       acceptMovedThreads: field(hub, "acceptMovedThreads") !== false,
+      actProjects: readProjectIds(field(hub, "actProjects")),
       ...(wake === undefined ? {} : { wake }),
       ...(push === undefined ? {} : { push }),
       ...(directPush === undefined ? {} : { directPush }),
@@ -2405,6 +2518,7 @@ function readStatus(body: unknown): HubStatus | undefined {
     ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),
     standbyOrder,
     acceptMovedThreads: field(hub, "acceptMovedThreads") !== false,
+    actProjects: readProjectIds(field(hub, "actProjects")),
     ...(wake === undefined ? {} : { wake }),
     ...(push === undefined ? {} : { push }),
     ...(directPush === undefined ? {} : { directPush }),
@@ -2674,6 +2788,10 @@ function readHeldMembers(rows: unknown): HeldMemberRow[] {
     }
   }
   return held;
+}
+
+function readProjectIds(value: unknown): ReadonlyArray<string> {
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
 }
 
 function readMembers(rows: unknown): Member[] {
