@@ -329,6 +329,8 @@ describe("the to-do draft across host selection", () => {
       resolveFirst(Response.json({ kind: "todo-list", hostId: hostA, todos: [] }));
       await acceptedReply;
     });
+    await renderRoute(root, "todos", onSelectRoute);
+    expect(input(container).value).toBe("");
 
     const resolveSecond = resolveRetry;
     if (resolveSecond === undefined) throw new Error("The explicit retry did not start.");
