@@ -3203,14 +3203,29 @@ that declaration, never by the profile id:
 - **Strict and credentials.** Strict does for Antigravity's credentials what
   it did before the sign-in choice: the launch keeps the narrow keychain read
   for the personal sign-in and gains no other credential read. A Gemini API
-  key reaches the CLI in its environment, so it works in every launch. Agent
-  Platform's Application Default Credentials stay where `gcloud` keeps them,
-  under `~/.config/gcloud`, a built-in protected path no sandboxed launch may
-  read, so an Agent Platform instance signs in only where the CLI starts
-  unconfined (Work and Code outside Strict, Full access, and Windows); its
-  readiness check, Chat, Plan, Strict and an explicit sandbox fail as not
-  signed in. Granting a sandboxed launch that read is an open maintainer
-  decision.
+  key reaches the CLI in its environment, so it works in every launch.
+- **Agent Platform's one file** (maintainer decision, 2026-11-22: "Allow one
+  file, outside Strict"). Agent Platform signs in with the host's Application
+  Default Credentials, which `gcloud auth application-default login` writes
+  to `~/.config/gcloud/application_default_credentials.json`, under a
+  built-in protected path. Where the CLI starts unconfined (Work and Code
+  outside Strict, Full access, Windows) it reads the file as on its own. A
+  sandboxed launch of an Agent Platform instance may read exactly that file,
+  by its literal and resolved path, and nothing else in `~/.config/gcloud`,
+  never with a write: outside Strict (Chat and Plan, as the AWS profile is
+  readable there, but not inside a sandbox the thread keeps or one the person
+  chose) and in its readiness check, which otherwise runs Strict-shaped, so
+  **Check connection** can reach Ready on macOS and Linux. On macOS the grant
+  is a literal read rule placed after the built-in secret-file denials and
+  before the paths the person protects, which still win; on Linux the file
+  alone is bound read-only (`guardedReadFiles`). Under Strict, and inside a
+  sandbox the thread keeps, the launch is refused before `agy` starts:
+  "Google Antigravity can't sign in to Agent Platform under Strict, because
+  Strict doesn't let it read your Application Default Credentials. Turn
+  Strict off for this thread, or switch this provider to a Gemini API key."
+  Only the default location is granted, since Octant's provider launches
+  honour `CLOUDSDK_CONFIG` nowhere else, and the personal sign-in and Gemini
+  API key get no gcloud read. Nothing records the file's contents.
 - **Personal sign-in.** On the personal Google sign-in, the person runs `agy`
   in a terminal and signs in with their own Google account; Octant reuses
   that sign-in as the CLI reads it, in the person's own threads only (turns

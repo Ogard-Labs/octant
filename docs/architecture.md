@@ -17408,7 +17408,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
   launch on an API key takes none of it. Google Antigravity's ACP launch
   takes the same four when it is sandboxed, to read its own keychain sign-in
   (maintainer decision, 2026-11-20), but commands the agent runs in-process
-  share that launch's sandbox, so they may run `security` too. In Work and
+  share that launch's sandbox, so they may run `security` too. An
+  Antigravity instance signed in to Agent Platform may also read exactly one
+  protected file when sandboxed, the Application Default Credentials file
+  `~/.config/gcloud/application_default_credentials.json`, outside Strict and
+  in its readiness check only; Strict refuses that launch by name (maintainer
+  decision, 2026-11-22). In Work and
   Code outside Strict it starts with no sandbox at all, as Windows starts ACP
   agents below Full access; see
   [Provider runtimes: Google Antigravity](design/provider-runtimes.md#google-antigravity).

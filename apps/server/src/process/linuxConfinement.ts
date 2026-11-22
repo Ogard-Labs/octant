@@ -467,6 +467,10 @@ export function buildBubblewrapLaunch(
   for (const path of input.privateHomeAllowPaths ?? []) {
     tryBindReadOnly(path);
   }
+  const guardedReadFiles = new Set(input.guardedReadFiles ?? []);
+  for (const path of guardedReadFiles) {
+    if (existsSync(path)) tryBindReadOnly(path);
+  }
 
   // The Project's extra folders are bound exactly as the root is: writable
   // when the root is, read-only when it is not.
@@ -703,6 +707,7 @@ export function buildBubblewrapLaunch(
       ...(input.additionalWriteRoots ?? []),
     ],
   })) {
+    if (guardedReadFiles.has(path)) continue;
     bindAdditionalDenyPath(path, "read");
   }
 

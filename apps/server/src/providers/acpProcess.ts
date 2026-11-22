@@ -165,6 +165,13 @@ export interface AcpConfinementInput {
    * than refused as a missing personal sign-in.
    */
   readonly octantSignIn?: boolean;
+  /**
+   * The launch signs in to Agent Platform with the host's Application Default
+   * Credentials. A sandboxed launch outside Strict, and a readiness check,
+   * may then read that one file (maintainer decision, 2026-11-22); Strict and
+   * a sandbox the thread keeps refuse the launch by name.
+   */
+  readonly agentPlatformSignIn?: boolean;
 }
 
 export interface AcpConfinementPort {
@@ -324,6 +331,27 @@ export interface AcpConfinementOptions {
   readonly temporaryDirectory?: string;
   /** Overrides the profile's provider-owned authentication path (tests). */
   readonly hostAuthenticationPath?: string;
+  /** Overrides where gcloud keeps Application Default Credentials (tests). */
+  readonly applicationDefaultCredentialsPath?: string;
+}
+
+/**
+ * Where `gcloud auth application-default login` writes the credentials an
+ * Agent Platform sign-in reads. Octant's provider launches do not honour
+ * `CLOUDSDK_CONFIG` anywhere else, so neither does this grant.
+ */
+function applicationDefaultCredentialsPath(): string {
+  return join(homedir(), ".config", "gcloud", "application_default_credentials.json");
+}
+
+/** The literal and resolved forms of one file, for rules that match either. */
+function fileForms(path: string): ReadonlyArray<string> {
+  try {
+    const resolved = realpathSync(path);
+    return resolved === path ? [path] : [path, resolved];
+  } catch {
+    return [path];
+  }
 }
 
 export interface AcpProbeOptions {
@@ -797,6 +825,37 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             environment: { ...input.environment, ...hostAuthentication.environment },
           };
         }
+        // Agent Platform reads the host's Application Default Credentials,
+        // which sit under the protected `~/.config/gcloud`. Outside Strict,
+        // where the AWS profile is readable too, and in a readiness check,
+        // which must reach Ready, the launch may read that one file and
+        // nothing else there; Strict and a sandbox the thread keeps withhold
+        // it, so the launch is refused by name rather than failing as not
+        // signed in (maintainer decision, 2026-11-22).
+        const credentialFiles =
+          input.agentPlatformSignIn === true
+            ? fileForms(
+                options.applicationDefaultCredentialsPath ?? applicationDefaultCredentialsPath(),
+              )
+            : [];
+        if (
+          input.agentPlatformSignIn === true &&
+          input.purpose !== "probe" &&
+          !(
+            input.strict === false &&
+            input.fullAccessSandbox !== true &&
+            input.sandboxPolicy === undefined
+          )
+        ) {
+          return yield* Effect.fail(
+            failure(
+              "unauthorized",
+              input.strict === false
+                ? `${name} can't sign in to Agent Platform inside the sandbox this thread keeps, because it doesn't let it read your Application Default Credentials. Run without the sandbox, or switch this provider to a Gemini API key.`
+                : `${name} can't sign in to Agent Platform under Strict, because Strict doesn't let it read your Application Default Credentials. Turn Strict off for this thread, or switch this provider to a Gemini API key.`,
+            ),
+          );
+        }
         const binaryDirectory = dirname(realpathSync(input.binaryPath));
         const binaryRuntimeDirectory = dirname(binaryDirectory);
         const configuredBinaryDirectory = dirname(input.binaryPath);
@@ -854,6 +913,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             ? [seatbeltAllowLiteralReadRule(SYSTEM_KEYCHAIN_PATH)]
             : []),
           ...(readsLoginKeychain ? loginKeychainSeatbeltRules() : []),
+          ...(platform === "darwin" ? credentialFiles.map(seatbeltAllowLiteralReadRule) : []),
         ];
         const launch = yield* Effect.try({
           try: () =>
@@ -901,6 +961,9 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 profile.process.requiresChildServer === true ||
                 readsLoginKeychain,
               additionalWriteRoots: [managedHome, ...hostAuthentication.writePaths],
+              ...(platform === "linux" && credentialFiles.length > 0
+                ? { guardedReadFiles: credentialFiles }
+                : {}),
               additionalDenyReadPaths: confinedDenyPaths,
               additionalDenyWritePaths: confinedDenyPaths,
               allowFileReadStar: true,
@@ -1764,6 +1827,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           ...(input.apiKey === undefined && input.googleCloud === undefined
             ? {}
             : { octantSignIn: true }),
+          ...(input.googleCloud === undefined ? {} : { agentPlatformSignIn: true }),
           environment,
           ...(input.loopbackPorts === undefined ? {} : { loopbackPorts: input.loopbackPorts }),
           ...(network === undefined ? {} : { network }),

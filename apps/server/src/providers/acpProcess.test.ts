@@ -2678,6 +2678,125 @@ describe("login keychain read for Google Antigravity", () => {
   );
 });
 
+describe("Google Antigravity's Agent Platform credentials file", () => {
+  async function prepared(input: {
+    readonly platform?: "darwin" | "linux";
+    readonly mode?: "chat" | "code";
+    readonly strict?: boolean;
+    readonly purpose?: "probe" | "session";
+    readonly fullAccessSandbox?: boolean;
+    readonly agentPlatformSignIn?: boolean;
+    readonly octantSignIn?: boolean;
+  }) {
+    const target = fixture(antigravity);
+    const gcloud = join(target.canonicalRoot, "home", ".config", "gcloud");
+    mkdirSync(gcloud, { recursive: true });
+    const credentials = join(gcloud, "application_default_credentials.json");
+    writeFileSync(credentials, "{}", { mode: 0o600 });
+    writeFileSync(join(gcloud, "credentials.db"), "", { mode: 0o600 });
+    const result = await Effect.runPromise(
+      Effect.either(
+        makeAcpConfinementLive({
+          platform: input.platform ?? "darwin",
+          sandboxPath: input.platform === "linux" ? target.bwrapPath : target.sandboxPath,
+          temporaryDirectory: join(target.canonicalRoot, "tmp"),
+          hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+          applicationDefaultCredentialsPath: credentials,
+        }).prepare({
+          profile: antigravity,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome: join(target.canonicalRoot, "managed-home"),
+          mode: input.mode ?? "chat",
+          executionPolicy: "approval-gated",
+          ...(input.strict === undefined ? {} : { strict: input.strict }),
+          ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
+          ...(input.fullAccessSandbox === undefined
+            ? {}
+            : { fullAccessSandbox: input.fullAccessSandbox }),
+          ...(input.agentPlatformSignIn === true ? { agentPlatformSignIn: true } : {}),
+          ...(input.octantSignIn === true ? { octantSignIn: true } : {}),
+          environment: { PATH: "/usr/bin" },
+        }),
+      ),
+    );
+    return { result, credentials, gcloud };
+  }
+  const gcloudAllows = (text: string) =>
+    text.split("\n").filter((line) => line.startsWith("(allow") && line.includes(".config/gcloud"));
+
+  it("an Agent Platform launch outside Strict may read only the Application Default Credentials file", async () => {
+    for (const mode of ["chat", "code"] as const) {
+      const { result, credentials } = await prepared({
+        mode,
+        strict: false,
+        agentPlatformSignIn: true,
+      });
+      if (Either.isLeft(result)) throw new Error(result.left.message);
+      // Code outside Strict starts unconfined and needs no grant at all.
+      if (mode === "code") {
+        expect(result.right.args).not.toContain(credentials);
+        continue;
+      }
+      expect(gcloudAllows(seatbeltProfile(result.right))).toEqual([
+        `(allow file-read* (literal "${credentials}"))`,
+      ]);
+    }
+    const linux = await prepared({ platform: "linux", strict: false, agentPlatformSignIn: true });
+    if (Either.isLeft(linux.result)) throw new Error(linux.result.left.message);
+    const args = linux.result.right.args;
+    const bound = args.flatMap((arg, index) =>
+      arg === "--ro-bind" && String(args[index + 1]).includes(".config/gcloud")
+        ? [String(args[index + 1])]
+        : [],
+    );
+    expect(bound).toEqual([linux.credentials]);
+    expect(args.some((arg) => arg.startsWith(linux.gcloud) && arg !== linux.credentials)).toBe(
+      false,
+    );
+  });
+
+  it("Check connection for an Agent Platform instance reads that one file, so it can reach Ready", async () => {
+    const { result, credentials } = await prepared({ purpose: "probe", agentPlatformSignIn: true });
+    if (Either.isLeft(result)) throw new Error(result.left.message);
+    expect(gcloudAllows(seatbeltProfile(result.right))).toEqual([
+      `(allow file-read* (literal "${credentials}"))`,
+    ]);
+  });
+
+  it("an Agent Platform launch under Strict is still refused, by name", async () => {
+    for (const mode of ["chat", "code"] as const) {
+      const { result } = await prepared({ mode, agentPlatformSignIn: true });
+      expect(result).toEqual(
+        Either.left({
+          category: "unauthorized",
+          message:
+            "Google Antigravity can't sign in to Agent Platform under Strict, because Strict doesn't let it read your Application Default Credentials. Turn Strict off for this thread, or switch this provider to a Gemini API key.",
+        }),
+      );
+    }
+    const kept = await prepared({
+      mode: "code",
+      strict: false,
+      fullAccessSandbox: true,
+      agentPlatformSignIn: true,
+    });
+    expect(Either.isLeft(kept.result) && kept.result.left.message).toContain(
+      "inside the sandbox this thread keeps",
+    );
+  });
+
+  it("a personal-sign-in or API-key launch gets no gcloud read", async () => {
+    for (const signIn of [{}, { octantSignIn: true }] as const) {
+      for (const launch of [{ strict: false }, { purpose: "probe" as const }]) {
+        const { result } = await prepared({ ...launch, ...signIn });
+        if (Either.isLeft(result)) throw new Error(result.left.message);
+        expect(gcloudAllows(seatbeltProfile(result.right))).toEqual([]);
+      }
+    }
+  });
+});
+
 describe("ACP agents launch without Octant's sandbox in Work and Code outside Strict", () => {
   async function launchFor(input: {
     readonly mode: "chat" | "work" | "code";
