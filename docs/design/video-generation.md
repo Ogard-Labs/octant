@@ -15,18 +15,18 @@ Image generation, which this design follows wherever it can, stays in
 [Architecture: Providers](../architecture.md#providers). The agent tool table
 in [Agent tools](agent-tools.md) gains a row only when this is built.
 
-Status: designed, not built. The maintainer approved the direction on
-2026-11-22 and asked for two things: video works like image generation, as
-provider plugins, and it supports more than one provider. The first-party
-provider shortlist below still needs his confirmation. Nothing may be
-implemented until then.
+Status: approved, being built (maintainer decision, 2026-11-22). The maintainer
+approved the design and asked for two things: video works like image
+generation, as provider plugins, and it supports more than one provider. He
+approved the three first-party drivers below the same day: the Gemini API's
+Gemini Omni Flash, Runway, and fal.
 
-Implementation is then four steps, each one commit series on one branch:
+It is built as one stack of three layers:
 
-1. the seam and its conformance harness;
-2. the job service and the first driver;
-3. the agent tool and its card;
-4. the viewer, the save and the other first-party drivers.
+1. this design, the seam with its conformance harness, and the Gemini driver;
+2. the host: the job service, storage, recovery and spend, the agent tool and
+   its card, the viewer and the save;
+3. the Runway and fal drivers.
 
 ## Why
 
@@ -135,8 +135,9 @@ Sources:
 
 ### First-party drivers
 
-Octant ships three video drivers in-tree. Each imports only the seam, as a
-third-party plugin would, and passes the same activation ladder.
+Octant ships three video drivers in-tree (maintainer decision, 2026-11-22).
+Each imports only the seam, as a third-party plugin would, and passes the same
+activation ladder.
 
 1. **Google Gemini API (Gemini Omni Flash).**
    - It reuses the Gemini API key a person already set up for Gemini images.
@@ -182,8 +183,11 @@ Pika's own models. Runway also resells MiniMax H3, which fal does not host.
 A third-party video driver builds against the same seam as the in-tree
 drivers. Loading one from an outside package needs the outside driver format
 to carry media drivers. Today it carries only harness-endpoint chat drivers,
-and the same is true for image drivers. That extension is its own change,
-sequenced by the plugin design, and is not part of this one.
+and the same is true for image drivers. Loading outside media drivers (image
+and video) was approved on 2026-11-22 as its own change and is built
+separately. This seam stays compatible with it: a driver is a plain value of
+the seam's types, with no host import, so the same value can come from an
+outside package.
 
 ## Native first
 
@@ -608,46 +612,46 @@ person asks for a video.
 
 Video generation joins the design-first list in the
 [Current Release Boundary](../architecture.md#current-release-boundary). It is
-in scope only once this design and its provider shortlist are approved, and it
-adds no Octant-operated service: the person's own provider key calls the
+in scope since the maintainer approved this design and its provider shortlist
+on 2026-11-22, and it adds no Octant-operated service: the person's own provider key calls the
 provider directly from the host. Settings, the card and the viewer ship on
 macOS, Linux and Windows alike; nothing in this design is platform-specific.
 
-## Decisions this design asks for
+## Decisions
 
-Each has a recommendation, aligned with comparable agent workspaces where they
-have one:
+The maintainer approved each of these on 2026-11-22. Each follows comparable
+agent workspaces where they have a rule:
 
-1. **Seam.** Approved in direction (2026-11-22). Recommended: the
+1. **Seam.** The
    provider-neutral seam above. Each model declares durations, resolutions,
    aspect ratios, audio, inputs, price basis, cancel, removal and resume
    window. The host builds every shared behaviour from those facts.
-2. **First-party providers.** Recommended: Google Gemini API (Gemini Omni
+2. **First-party providers.** Google Gemini API (Gemini Omni
    Flash), Runway and fal, shipped in-tree as plugin-shaped drivers.
    Replicate, MiniMax, xAI, Kling, Seedance, Wan, Luma, Pika and Vertex Veo are
    left to plugins.
-3. **Native first.** Recommended: a runtime's own native media output is shown
+3. **Native first.** a runtime's own native media output is shown
    in the thread with no Octant gate, as the peers do. Octant's tool serves the
    providers without it.
-4. **Asking.** Recommended: the image rule unchanged, including:
+4. **Asking.** the image rule unchanged, including:
    - "Don't ask again";
    - Full access with a kept or default profile;
    - routines with a kept choice.
 
    The card shows the price, and what Stop does when the model cannot cancel.
 
-5. **Limits.** Recommended: each model's own declared range, with only
+5. **Limits.** each model's own declared range, with only
    host-health bounds: 1 GB per clip, a 30-minute job time, the image queue's
    concurrency, and 16 queued video jobs per host.
-6. **Spend.** Recommended: the person's existing thread and Project ceilings,
+6. **Spend.** the person's existing thread and Project ceilings,
    reserved from the declared price. Settled from the provider's reported
    usage, else the estimate. No new video ceiling.
-7. **Storage and privacy.** Recommended: clips are exported and deleted with
+7. **Storage and privacy.** clips are exported and deleted with
    their thread. The provider's copy is removed as soon as the clip is kept
    where the driver can; otherwise the card says how long the provider keeps
    it.
-8. **Paired devices.** Recommended: watch, download and answer their own
+8. **Paired devices.** watch, download and answer their own
    cards, as for images.
-9. **Restarts.** Recommended: a running job with a recorded provider id
+9. **Restarts.** a running job with a recorded provider id
    resumes within its declared resume window. One without settles at its
    estimate as interrupted.

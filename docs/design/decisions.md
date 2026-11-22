@@ -1667,10 +1667,10 @@ Status: Partly built. Since: —; agent images in every mode 2026-11-07. Detail:
 
 ### Video generation
 
-Short video clips run as a journaled job through provider-neutral video driver plugins on the person's own provider keys, following the image rule for asking, with the price on the card (design, 2026-11-22; direction approved by the maintainer on 2026-11-22, first-party provider shortlist awaiting confirmation).
+Short video clips run as a journaled job through provider-neutral video driver plugins on the person's own provider keys, following the image rule for asking, with the price on the card (maintainer decision, 2026-11-22: the design and the three first-party drivers).
 
 - Video works like image generation: drivers plug into a `videoGeneration` seam in `@octant/provider-sdk` through the plugin-host activation ladder, and more than one provider is supported. Each model declares its durations, resolutions, aspect ratios, audio, inputs, price basis, cancel, removal and resume window, and the host builds the card, price, limits, spend, storage, recovery and viewing from those facts the same way for every provider.
-- Proposed first-party drivers: Google Gemini API (Gemini Omni Flash), Runway and fal; Replicate, MiniMax, xAI, Kling, Seedance, Wan, Luma, Pika and Vertex Veo are left to plugins. OpenAI's Videos API, Stability's video API and Bedrock Nova Reel are shut down.
+- First-party drivers (maintainer decision, 2026-11-22): Google Gemini API (Gemini Omni Flash), Runway and fal; Replicate, MiniMax, xAI, Kling, Seedance, Wan, Luma, Pika and Vertex Veo are left to plugins. OpenAI's Videos API, Stability's video API and Bedrock Nova Reel are shut down.
 - A provider runtime's own native media output shows in the thread with no Octant gate, as in comparable agent workspaces; no runtime they drive makes video natively today.
 - The card shows the estimate from the model's declared price before Generate, and what Stop does when the model cannot cancel, and offers "Don't ask again" as for images; Full access, routines and paired devices behave as they do for images. Plan and Side Chats are never offered the tool.
 - Clips use each model's declared range. The host bounds only a clip's stored size (1 GB), job time (30 minutes) and queued video jobs (16 per host) and shares the image queue; the person's thread and Project spend ceilings apply, settled from the provider's reported usage, else the estimate.
