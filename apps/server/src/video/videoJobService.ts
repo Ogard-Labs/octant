@@ -446,7 +446,7 @@ export class VideoJobService {
         controller: new AbortController(),
         stopRequested: false,
       });
-      void this.#resume(job);
+      void this.#withSlot(() => this.#resume(job));
     }
     await this.retryOwedRemovals();
     if (this.#removalTimer === undefined) {
@@ -481,12 +481,16 @@ export class VideoJobService {
   // --- running jobs ---
 
   async #schedule(id: VideoJobId): Promise<void> {
+    await this.#withSlot(() => this.#run(id));
+  }
+
+  async #withSlot(work: () => Promise<void>): Promise<void> {
     if (this.#active >= VIDEO_JOB_HOST_CONCURRENCY) {
       await new Promise<void>((resolve) => this.#waiting.push(resolve));
     }
     this.#active += 1;
     try {
-      await this.#run(id);
+      await work();
     } finally {
       this.#active -= 1;
       this.#waiting.shift()?.();
@@ -530,11 +534,19 @@ export class VideoJobService {
       return;
     }
     if (started.status === "failed") {
-      this.#finish(
-        sending,
-        running.stopRequested ? "cancelled" : "failed",
-        running.stopRequested ? {} : { failure: started.providerFailure },
-      );
+      // Host shutdown: left running without a provider id, so recovery
+      // settles it at the estimate, as for any send it cannot confirm.
+      if (this.#closing.signal.aborted) return;
+      // Stop aborted the start request after it may have reached the
+      // provider, which can still make and bill the clip.
+      if (running.stopRequested) {
+        this.#finish(sending, "cancelled", {
+          settledCostUsdMicros: estimateOrZero(sending),
+          billed: true,
+        });
+        return;
+      }
+      this.#finish(sending, "failed", { failure: started.providerFailure });
       return;
     }
     const model = (await adapter.models()).find(
@@ -619,17 +631,28 @@ export class VideoJobService {
         await this.#forget(this.#current(job));
         return;
       }
-      const poll = await adapter.poll(remoteId, this.#closing.signal);
+      // Bounded by the job time too, so a hung poll or download cannot hold
+      // the job past it; the deadline branch above then settles it.
+      const poll = await adapter.poll(
+        remoteId,
+        AbortSignal.any([
+          this.#closing.signal,
+          AbortSignal.timeout(Math.max(1, deadline - this.#now())),
+        ]),
+      );
+      // Shutdown aborted the poll: the job stays running for the next host
+      // to resume, never concluded from an answer the abort produced.
+      if (this.#closing.signal.aborted) return;
+      if (poll.status === "failed" && this.#now() >= deadline) continue;
       if (poll.status !== "running") {
         await this.#conclude(job, poll, running.stopRequested);
         return;
       }
-      if (this.#closing.signal.aborted) return;
+      // Once cancel is asked, Stop's signal stays aborted; waiting on it would
+      // poll without any pause while the provider confirms.
       await this.#sleep(
         Math.min(interval, Math.max(0, deadline - this.#now())),
-        running.controller.signal.aborted && !cancelAsked
-          ? this.#closing.signal
-          : running.controller.signal,
+        cancelAsked ? this.#closing.signal : running.controller.signal,
       );
       interval = Math.min(Math.round(interval * 1.5), MAX_POLL_MS);
     }

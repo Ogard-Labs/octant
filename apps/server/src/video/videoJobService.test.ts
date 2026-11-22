@@ -72,6 +72,7 @@ function profile(): ProviderInstance {
 interface Script {
   start?: () => Promise<VideoAdapterStart>;
   polls?: Array<VideoAdapterPoll>;
+  poll?: (signal: AbortSignal) => Promise<VideoAdapterPoll>;
   cancel?: () => Promise<VideoAdapterPoll>;
   forget?: () => Promise<"removed" | "failed">;
   model?: VideoModelCapabilities;
@@ -91,8 +92,9 @@ function fakeDriver(script: Script) {
         calls.start += 1;
         return (await script.start?.()) ?? { status: "started", remoteId: "remote-1" };
       },
-      poll: async () => {
+      poll: async (_remoteId, signal) => {
         calls.poll += 1;
+        if (script.poll !== undefined) return script.poll(signal);
         return (
           script.polls?.shift() ?? {
             status: "completed",
@@ -225,6 +227,51 @@ describe("video jobs", () => {
     const done = await service.whenTerminal(queued.id);
     expect(done).toMatchObject({ status: "cancelled", settledCostUsdMicros: 69_504 });
     expect(calls.cancel).toBe(1);
+  });
+
+  it("settles at the estimate when Stop interrupts a start that may have reached the provider", async () => {
+    let entered: () => void = () => undefined;
+    const sending = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const { service } = harness({
+      start: () =>
+        new Promise((resolve) => {
+          entered();
+          setTimeout(
+            () =>
+              resolve({
+                status: "failed",
+                providerFailure: { category: "interrupted", message: "Aborted." },
+              }),
+            5,
+          );
+        }),
+    });
+    const queued = await enqueue(service);
+    await sending;
+    service.stop(queued.id);
+    const done = await service.whenTerminal(queued.id);
+    expect(done).toMatchObject({ status: "cancelled", settledCostUsdMicros: 695_040 });
+  });
+
+  it("leaves a job running for the next host when shutdown interrupts its poll", async () => {
+    const { service } = harness({
+      poll: (signal) =>
+        new Promise((resolve) =>
+          signal.addEventListener("abort", () =>
+            resolve({
+              status: "failed",
+              providerFailure: { category: "interrupted", message: "Aborted." },
+            }),
+          ),
+        ),
+    });
+    const queued = await enqueue(service);
+    await vi.waitFor(() => expect(service.getById(queued.id)?.remoteId).toBe("remote-1"));
+    service.close();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(service.getById(queued.id)?.status).toBe("running");
   });
 
   it("ends the wait at its estimate when the model cannot stop a running job", async () => {

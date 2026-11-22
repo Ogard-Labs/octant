@@ -2744,6 +2744,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
     });
     yield* Effect.promise(() => videoJobService.recover());
+    yield* Effect.addFinalizer(() => Effect.sync(() => videoJobService.close()));
     return {
       providerAvailabilityMarks,
       bindCodeToolHost,
