@@ -633,6 +633,9 @@ export class VideoJobService {
         cancelAsked = true;
         if (model?.job.cancel === "running") {
           const answer = await adapter.cancel(remoteId, this.#closing.signal);
+          // Shutdown aborted the cancel: the job stays running for the next
+          // host to resume, never concluded from an answer the abort produced.
+          if (this.#closing.signal.aborted) return;
           if (answer.status !== "running") {
             await this.#conclude(job, answer, true);
             return;

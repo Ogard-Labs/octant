@@ -379,6 +379,31 @@ describe("video jobs", () => {
     expect(cancelSignal?.aborted).toBe(true);
   });
 
+  it("leaves a job running for the next host when shutdown interrupts its cancel", async () => {
+    const { service, calls } = harness({
+      polls: Array.from({ length: 1000 }, () => ({ status: "running" as const })),
+      cancel: (signal) =>
+        new Promise((resolve) =>
+          signal?.addEventListener("abort", () =>
+            resolve({
+              status: "failed",
+              providerFailure: { category: "interrupted", message: "Aborted." },
+            }),
+          ),
+        ),
+    });
+    const queued = await enqueue(service);
+    await vi.waitFor(() => expect(service.getById(queued.id)?.remoteId).toBe("remote-1"));
+    service.stop(queued.id);
+    await vi.waitFor(() => expect(calls.cancel).toBe(1));
+    service.close();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(service.getById(queued.id)).toMatchObject({
+      status: "running",
+      remoteId: "remote-1",
+    });
+  });
+
   it("leaves a job running for the next host when shutdown interrupts its poll", async () => {
     const { service } = harness({
       poll: (signal) =>
