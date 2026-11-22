@@ -20974,7 +20974,13 @@ defers, and it owns the architectural rules behind it.
 Silicon technical preview with the provider-neutral plugin/skill marketplace.
 It needs macOS 15 Sequoia or later: the app bundle declares 15.0 because the
 bundled Simulator accessibility and camera tools need it, while the core
-helpers declare 14.0 and are covered by the app's floor.
+helpers declare 14.0 and are covered by the app's floor. Macs on macOS 14
+must not update past the last version released before this requirement. The
+update feed does not guard against it (maintainer decision, 2026-11-22): an
+older installed copy on macOS 14 can still download a newer build, through the
+updater or its Install Octant Nightly button, and that build will not launch
+there. Whether Squirrel keeps the existing app when macOS refuses the new one
+is unverified. The guide and every release's notes say so instead.
 Builds of `main` are meant to publish daily on the `preview` ring as the second
 app Octant Nightly, and on-demand pre-releases of the next stable on the
 `candidate` ring as Octant's Preview channel, as GitHub pre-releases named

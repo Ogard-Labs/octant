@@ -209,7 +209,7 @@ jobs:
               --prerelease \
               --target "${SOURCE_COMMIT}" \
               --title "${PRODUCT} ${VERSION} (${RING})" \
-              --notes "${RING} build of ${ROLLBACK_REF:-${GITHUB_REF_NAME}} at ${SOURCE_COMMIT}. Not a stable release." \
+              --notes "${RING} build of ${ROLLBACK_REF:-${GITHUB_REF_NAME}} at ${SOURCE_COMMIT}. Not a stable release. The Mac app requires macOS 15 or later; Macs on macOS 14 must not update past the last version released before that requirement, because an update installed there will not launch." \
               || gh release upload "$tag" "$archive" --clobber
           fi
           echo "archive=${archive}" >> "$GITHUB_OUTPUT"

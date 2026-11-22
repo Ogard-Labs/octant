@@ -157,6 +157,7 @@ jobs:
           else
             gh release create "$tag" "$archive" \
               --title "Octant ${VERSION}" \
+              --notes "The Mac app requires macOS 15 or later. Macs on macOS 14 must not update past the last version released before that requirement, because an update installed there will not launch." \
               --generate-notes \
               || gh release upload "$tag" "$archive" --clobber
           fi
