@@ -1,0 +1,497 @@
+import {
+  decodeVideoModelCapabilities,
+  type ProviderFailure,
+  type VideoModelCapabilities,
+  type VideoPrice,
+} from "@octant/contracts";
+import {
+  classifyVideoHttpFailure,
+  isProviderFailure,
+  jsonField,
+  readVideoJson,
+  refuseOutsideDeclaration,
+  sanitizeVideoFailure,
+  videoFailure,
+  type VideoAdapterForget,
+  type VideoAdapterPoll,
+  type VideoAdapterRequest,
+  type VideoAdapterStart,
+  type VideoGenerationDriver,
+  type VideoGenerationPorts,
+  type VideoGenerationProfile,
+} from "@octant/provider-sdk/video-generation";
+
+const QUEUE_BASE_URL = "https://queue.fal.run";
+const PLATFORM_BASE_URL = "https://api.fal.ai/v1";
+const SCHEMA_URL = "https://fal.ai/api/openapi/queue/openapi.json";
+const AUTH = { header: "authorization", scheme: "Key" } as const;
+/**
+ * fal keeps no request history when asked (`X-Fal-Store-IO: 0`), and its CDN
+ * copy of the clip expires after two hours. Deleting it outright needs a key
+ * with fal's admin preset, so the copy is left to expire instead (fal's
+ * data-retention guide, checked 2026-11-22).
+ */
+const FAL_CLIP_EXPIRY_HOURS = 2;
+const RETENTION_HEADERS = {
+  "x-fal-store-io": "0",
+  "x-fal-object-lifecycle-preference": JSON.stringify({
+    expiration_duration_seconds: FAL_CLIP_EXPIRY_HOURS * 3600,
+  }),
+} as const;
+/**
+ * With request history off, fal keeps a result for one hour after it
+ * completes (Inference API, "Result retention"), so a restarted host can
+ * collect a clip only within that hour.
+ */
+const FAL_RESUME_WINDOW_HOURS = 1;
+/** An endpoint id: owner, app, and an optional path, each a plain lowercase segment. */
+const ENDPOINT_PATTERN = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/;
+const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Placeholders for an option the endpoint does not take; the field is then left out of the request. */
+const MODEL_DEFAULT = "model default";
+
+/** How one endpoint takes its options, read from its published input schema. */
+interface FalEndpoint {
+  readonly endpointId: string;
+  readonly durationFormat: "seconds-suffix" | "string" | "integer";
+  readonly takesResolution: boolean;
+  readonly takesAspectRatio: boolean;
+  readonly takesAudio: boolean;
+  readonly takesImage: boolean;
+  readonly model: VideoModelCapabilities;
+}
+
+interface FalEndpoints {
+  readonly endpoints: ReadonlyArray<FalEndpoint>;
+  /** Why an endpoint or the prices could not be read, when one could not. */
+  readonly failure?: ProviderFailure;
+}
+
+function asFailure(error: unknown): ProviderFailure {
+  return isProviderFailure(error)
+    ? sanitizeVideoFailure(error)
+    : videoFailure("provider-failed", "The provider request failed.");
+}
+
+function invalidId() {
+  return {
+    status: "failed" as const,
+    providerFailure: videoFailure("protocol", "The provider returned an unusable job id."),
+  };
+}
+
+function enumOf(property: unknown): ReadonlyArray<unknown> | undefined {
+  const values = jsonField(property, "enum");
+  return Array.isArray(values) && values.length > 0 ? values : undefined;
+}
+
+function secondsOf(value: unknown): number | undefined {
+  const seconds =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.replace(/s$/, ""))
+        : NaN;
+  return Number.isInteger(seconds) && seconds > 0 ? seconds : undefined;
+}
+
+/** The POST body schema of the endpoint's queue OpenAPI document. */
+function inputSchema(document: unknown, endpointId: string): unknown {
+  const reference = jsonField(
+    document,
+    "paths",
+    `/${endpointId}`,
+    "post",
+    "requestBody",
+    "content",
+    "application/json",
+    "schema",
+    "$ref",
+  );
+  if (typeof reference !== "string" || !reference.startsWith("#/components/schemas/")) {
+    return undefined;
+  }
+  return jsonField(
+    document,
+    "components",
+    "schemas",
+    reference.slice("#/components/schemas/".length),
+  );
+}
+
+/**
+ * The options an endpoint declares, in Octant's terms, or undefined when the
+ * schema does not say how long a clip is. A price comes separately.
+ */
+export function readFalEndpoint(
+  endpointId: string,
+  document: unknown,
+  price: VideoPrice,
+): FalEndpoint | undefined {
+  const schema = inputSchema(document, endpointId);
+  const properties = jsonField(schema, "properties");
+  if (properties === undefined) return undefined;
+  const required = jsonField(schema, "required");
+  const isRequired = (name: string) => Array.isArray(required) && required.includes(name);
+
+  const duration = jsonField(properties, "duration");
+  const durationValues = (enumOf(duration) ?? [])
+    .map(secondsOf)
+    .filter((seconds): seconds is number => seconds !== undefined);
+  const durationMin = jsonField(duration, "minimum");
+  const durationMax = jsonField(duration, "maximum");
+  const durations =
+    durationValues.length > 0
+      ? { kind: "values" as const, values: durationValues }
+      : typeof durationMin === "number" && typeof durationMax === "number"
+        ? { kind: "range" as const, min: durationMin, max: durationMax }
+        : undefined;
+  if (durations === undefined) return undefined;
+  const durationDefault = secondsOf(jsonField(duration, "default"));
+  const enumValues = enumOf(duration);
+  const durationFormat =
+    enumValues !== undefined && typeof enumValues[0] === "string"
+      ? String(enumValues[0]).endsWith("s")
+        ? "seconds-suffix"
+        : "string"
+      : "integer";
+
+  const resolutionValues = (enumOf(jsonField(properties, "resolution")) ?? []).filter(
+    (value): value is string => typeof value === "string",
+  );
+  const ratioValues = (enumOf(jsonField(properties, "aspect_ratio")) ?? []).filter(
+    (value): value is string => typeof value === "string" && value !== "auto",
+  );
+  const audio = jsonField(properties, "generate_audio");
+  const takesImage = jsonField(properties, "image_url") !== undefined;
+  const imageRequired = isRequired("image_url");
+  const resolutions = resolutionValues.length > 0 ? resolutionValues : [MODEL_DEFAULT];
+  const ratios = ratioValues.length > 0 ? ratioValues : [MODEL_DEFAULT];
+  const resolutionDefault = jsonField(jsonField(properties, "resolution"), "default");
+  const ratioDefault = jsonField(jsonField(properties, "aspect_ratio"), "default");
+
+  try {
+    const model = decodeVideoModelCapabilities({
+      modelId: endpointId,
+      displayName: endpointId,
+      durations,
+      ...(durationDefault === undefined ? {} : { defaultDuration: durationDefault }),
+      resolutions,
+      ...(typeof resolutionDefault === "string" && resolutions.includes(resolutionDefault)
+        ? { defaultResolution: resolutionDefault }
+        : {}),
+      aspectRatios: ratios.map((ratio) =>
+        imageRequired ? { ratio, needsImage: true } : { ratio },
+      ),
+      ...(typeof ratioDefault === "string" && ratios.includes(ratioDefault)
+        ? { defaultAspectRatio: ratioDefault }
+        : {}),
+      audio: audio === undefined ? "none" : "optional",
+      ...(typeof jsonField(audio, "default") === "boolean"
+        ? { defaultAudio: jsonField(audio, "default") }
+        : {}),
+      inputs: { firstFrame: takesImage, lastFrame: false, maxReferenceImages: 0 },
+      price,
+      job: {
+        cancel: "running",
+        removal: { kind: "expires", afterHours: FAL_CLIP_EXPIRY_HOURS },
+        resumeWindowHours: FAL_RESUME_WINDOW_HOURS,
+      },
+    });
+    return {
+      endpointId,
+      durationFormat,
+      takesResolution: resolutionValues.length > 0,
+      takesAspectRatio: ratioValues.length > 0,
+      takesAudio: audio !== undefined,
+      takesImage,
+      model,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The price fal's pricing API gives, in Octant's terms: a per-second unit is a
+ * per-second rate; a per-video unit is a flat rate only for the endpoint's
+ * default clip, since fal adjusts it by length and resolution; anything else,
+ * or a currency other than US dollars, is unpublished, so a dollar ceiling
+ * refuses it.
+ */
+export function falPrice(
+  entry: unknown,
+  defaults: {
+    readonly durationSeconds: number | undefined;
+    readonly resolutions: ReadonlyArray<string>;
+    readonly defaultResolution: string | undefined;
+  },
+): VideoPrice {
+  const unitPrice = jsonField(entry, "unit_price");
+  const unit = jsonField(entry, "unit");
+  if (jsonField(entry, "currency") !== "USD" || typeof unitPrice !== "number" || unitPrice < 0) {
+    return { kind: "unpublished" };
+  }
+  const usdMicros = Math.round(unitPrice * 1_000_000);
+  if (unit === "second" || unit === "seconds") {
+    const [first, ...rest] = defaults.resolutions;
+    if (first === undefined) return { kind: "unpublished" };
+    return {
+      kind: "per-second",
+      rates: [first, ...rest].map((resolution) => ({
+        resolution,
+        usdMicrosPerSecond: usdMicros,
+      })) as [
+        { resolution: string; usdMicrosPerSecond: number },
+        ...Array<{ resolution: string; usdMicrosPerSecond: number }>,
+      ],
+    };
+  }
+  const resolution = defaults.defaultResolution ?? defaults.resolutions[0];
+  if (unit === "video" && defaults.durationSeconds !== undefined && resolution !== undefined) {
+    return {
+      kind: "per-clip",
+      rates: [{ durationSeconds: defaults.durationSeconds, resolution, usdMicros }],
+    };
+  }
+  return { kind: "unpublished" };
+}
+
+/** The endpoint id and fal's request id a job is tracked by, as one remote id. */
+function remoteIdOf(endpointId: string, requestId: string): string {
+  return `${endpointId}#${requestId}`;
+}
+
+/**
+ * The status, result and cancel addresses use only the owner and app of the
+ * endpoint (Inference API, "Model IDs and paths").
+ */
+function queueUrls(remoteId: string) {
+  const [endpointId = "", requestId = ""] = remoteId.split("#");
+  if (!ENDPOINT_PATTERN.test(endpointId) || !REQUEST_ID_PATTERN.test(requestId)) return undefined;
+  const [owner, app] = endpointId.split("/");
+  const base = `${QUEUE_BASE_URL}/${owner}/${app}/requests/${requestId}`;
+  return { status: `${base}/status`, result: base, cancel: `${base}/cancel` };
+}
+
+function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGenerationPorts) {
+  let declared: Promise<FalEndpoints> | undefined;
+
+  const readEndpoints = async (): Promise<FalEndpoints> => {
+    const ids = profile.modelIds.map(String).filter((id) => ENDPOINT_PATTERN.test(id));
+    if (ids.length === 0) return { endpoints: [] };
+    let failure: ProviderFailure | undefined;
+    let prices: ReadonlyArray<unknown> = [];
+    try {
+      const url = new URL(`${PLATFORM_BASE_URL}/models/pricing`);
+      url.searchParams.set("endpoint_id", ids.join(","));
+      const response = await ports.request({ url: url.toString(), method: "GET", auth: AUTH });
+      const listed = response.ok ? jsonField(await readVideoJson(response), "prices") : undefined;
+      prices = Array.isArray(listed) ? listed : [];
+    } catch (error) {
+      // Without a price every endpoint is declared unpublished below.
+      failure = asFailure(error);
+    }
+    const endpoints: Array<FalEndpoint> = [];
+    for (const endpointId of ids) {
+      try {
+        const url = new URL(SCHEMA_URL);
+        url.searchParams.set("endpoint_id", endpointId);
+        const response = await ports.request({ url: url.toString(), method: "GET", auth: AUTH });
+        if (!response.ok) {
+          failure = classifyVideoHttpFailure(response);
+          continue;
+        }
+        const document = await readVideoJson(response);
+        // Read once without a price to learn the defaults the price depends on.
+        const shape = readFalEndpoint(endpointId, document, { kind: "unpublished" });
+        if (shape === undefined) continue;
+        const entry = prices.find(
+          (candidate) => jsonField(candidate, "endpoint_id") === endpointId,
+        );
+        const price = falPrice(entry, {
+          durationSeconds: shape.model.defaultDuration,
+          resolutions: shape.model.resolutions,
+          defaultResolution: shape.model.defaultResolution,
+        });
+        const endpoint = readFalEndpoint(endpointId, document, price);
+        if (endpoint !== undefined) endpoints.push(endpoint);
+      } catch (error) {
+        // An endpoint whose schema cannot be read is not offered.
+        failure = asFailure(error);
+      }
+    }
+    return failure === undefined ? { endpoints } : { endpoints, failure };
+  };
+
+  /** Read once per adapter; a read that failed is tried again on the next call. */
+  const endpoints = async (): Promise<FalEndpoints> => {
+    declared ??= readEndpoints();
+    const read = await declared;
+    if (read.failure !== undefined) declared = undefined;
+    return read;
+  };
+
+  const start = async (request: VideoAdapterRequest): Promise<VideoAdapterStart> => {
+    // A stopped request or an empty prompt sends nothing, not even the
+    // schema and price reads; the seam's own check gives the reason.
+    if (request.signal.aborted || request.prompt.trim().length === 0) {
+      const early = refuseOutsideDeclaration([], request);
+      if (early !== undefined) return { status: "failed", providerFailure: early };
+    }
+    const read = await endpoints();
+    const known = read.endpoints;
+    // The endpoint is the profile's but could not be read: say why, rather
+    // than calling it undeclared.
+    if (
+      read.failure !== undefined &&
+      !known.some((endpoint) => endpoint.endpointId === String(request.modelId)) &&
+      profile.modelIds.some((id) => String(id) === String(request.modelId))
+    ) {
+      return { status: "failed", providerFailure: read.failure };
+    }
+    const refusal = refuseOutsideDeclaration(
+      known.map((endpoint) => endpoint.model),
+      request,
+    );
+    if (refusal !== undefined) return { status: "failed", providerFailure: refusal };
+    const endpoint = known.find((candidate) => candidate.endpointId === String(request.modelId));
+    if (endpoint === undefined) {
+      return {
+        status: "failed",
+        providerFailure: videoFailure("unsupported", "That fal endpoint is not offered."),
+      };
+    }
+    const seconds = request.options.durationSeconds;
+    const frame = request.firstFrame;
+    const body = {
+      prompt: request.prompt,
+      duration:
+        endpoint.durationFormat === "seconds-suffix"
+          ? `${seconds}s`
+          : endpoint.durationFormat === "string"
+            ? String(seconds)
+            : seconds,
+      ...(endpoint.takesResolution ? { resolution: request.options.resolution } : {}),
+      ...(endpoint.takesAspectRatio ? { aspect_ratio: request.options.aspectRatio } : {}),
+      ...(endpoint.takesAudio ? { generate_audio: request.options.audio } : {}),
+      ...(frame === undefined || !endpoint.takesImage
+        ? {}
+        : {
+            image_url: `data:${frame.mediaType};base64,${Buffer.from(frame.bytes).toString("base64")}`,
+          }),
+    };
+    try {
+      const response = await ports.request({
+        url: `${QUEUE_BASE_URL}/${endpoint.endpointId}`,
+        method: "POST",
+        auth: AUTH,
+        headers: { ...RETENTION_HEADERS, "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal: request.signal,
+      });
+      if (!response.ok) {
+        return { status: "failed", providerFailure: classifyVideoHttpFailure(response) };
+      }
+      const requestId = jsonField(await readVideoJson(response), "request_id");
+      if (typeof requestId !== "string" || !REQUEST_ID_PATTERN.test(requestId)) return invalidId();
+      return { status: "started", remoteId: remoteIdOf(endpoint.endpointId, requestId) };
+    } catch (error) {
+      return { status: "failed", providerFailure: asFailure(error) };
+    }
+  };
+
+  const poll = async (remoteId: string, signal?: AbortSignal): Promise<VideoAdapterPoll> => {
+    const urls = queueUrls(remoteId);
+    if (urls === undefined) return invalidId();
+    const withSignal = signal === undefined ? {} : { signal };
+    try {
+      const status = await ports.request({
+        url: urls.status,
+        method: "GET",
+        auth: AUTH,
+        ...withSignal,
+      });
+      if (!status.ok && status.status !== 202) {
+        return { status: "failed", providerFailure: classifyVideoHttpFailure(status) };
+      }
+      if (jsonField(await readVideoJson(status), "status") !== "COMPLETED")
+        return { status: "running" };
+      // A failed or cancelled request is also COMPLETED; its result says which.
+      const result = await ports.request({
+        url: urls.result,
+        method: "GET",
+        auth: AUTH,
+        ...withSignal,
+      });
+      if (!result.ok) {
+        return { status: "failed", providerFailure: classifyVideoHttpFailure(result) };
+      }
+      const units = Number(result.headers.get("x-fal-billable-units"));
+      const videoUrl = jsonField(await readVideoJson(result), "video", "url");
+      if (typeof videoUrl !== "string" || !videoUrl.startsWith("https://")) {
+        return {
+          status: "failed",
+          providerFailure: videoFailure("protocol", "fal returned no clip address."),
+        };
+      }
+      const fetched = await ports.fetchApprovedVideoUrl({ url: videoUrl, ...withSignal });
+      // fal made and billed the clip; a failed download is tried again on the
+      // next poll while the result is still kept.
+      if ("failure" in fetched) return { status: "running" };
+      if (ports.sniffMediaType(fetched.bytes) !== "video/mp4") {
+        return {
+          status: "failed",
+          providerFailure: videoFailure("protocol", "fal returned a clip that is not an MP4."),
+        };
+      }
+      return {
+        status: "completed",
+        video: { bytes: fetched.bytes, mediaType: "video/mp4" },
+        ...(Number.isFinite(units) && units > 0 ? { usage: { billedSeconds: units } } : {}),
+      };
+    } catch (error) {
+      return { status: "failed", providerFailure: asFailure(error) };
+    }
+  };
+
+  const cancel = async (remoteId: string): Promise<VideoAdapterPoll> => {
+    const urls = queueUrls(remoteId);
+    if (urls === undefined) return invalidId();
+    try {
+      const response = await ports.request({ url: urls.cancel, method: "PUT", auth: AUTH });
+      // 200: removed from the queue. 202: fal signalled the runner, which
+      // decides whether to stop, so the job keeps polling. 400: already done.
+      if (response.status === 200) return { status: "cancelled" };
+      if (response.status === 202) return { status: "running" };
+      if (response.status === 400) return await poll(remoteId);
+      return { status: "failed", providerFailure: classifyVideoHttpFailure(response) };
+    } catch (error) {
+      return { status: "failed", providerFailure: asFailure(error) };
+    }
+  };
+
+  // fal's copy expires on its own (see RETENTION_HEADERS), so the host owes
+  // no removal; this answers a call that should not come.
+  const forget = async (): Promise<VideoAdapterForget> => ({ status: "removed" });
+
+  return {
+    models: async () => (await endpoints()).endpoints.map((endpoint) => endpoint.model),
+    start,
+    poll: (remoteId: string, signal: AbortSignal) => poll(remoteId, signal),
+    cancel,
+    forget,
+  };
+}
+
+/**
+ * fal video driver: any fal video endpoint the person lists, with its options
+ * read from the endpoint's published input schema and its price from fal's
+ * pricing API. It imports only the contracts and the video seam, as a
+ * third-party video plugin would.
+ */
+export const falVideoDriver: VideoGenerationDriver = {
+  driverKind: "fal-video",
+  providerHosts: ["queue.fal.run", "api.fal.ai", "fal.ai"],
+  create: ({ profile, ports }) => createFalAdapter(profile, ports),
+};
