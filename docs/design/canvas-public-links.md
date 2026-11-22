@@ -140,11 +140,7 @@ update. The document's text, everything but its images, is bounded at
 larger one; its images are bounded apart, at 3 MiB each and 4 MiB together,
 and the service stores them with the share, counting them toward its total
 storage cap. A view counts in a small file beside the share, so a share's
-images are never rewritten when it is read. A design's frame page writes
-each image in whole at its first reference; repeats share one page budget of
-every image written once plus 128 KiB, and a repeat past it draws an empty
-image, so a frame that names one image many times cannot build an unbounded
-page.
+images are never rewritten when it is read. A design's frame page writes each carried image in whole at its first reference, once per image however many asset ids name it; repeats share a budget of 128 KiB beyond those copies, and a repeat past it draws an empty image, so a frame that names one image many times cannot build an unbounded page. A reference inside an HTML or CSS comment is left as written: it draws nothing and spends none of the budget.
 
 ## Link terms
 

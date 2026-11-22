@@ -1018,7 +1018,45 @@ describe("design frame pages", () => {
       [image as never],
     );
     expect(page).toContain(`data:image/png;base64,${data}`);
-    expect(page.length).toBeLessThan(8 * 1024 * 1024);
+    expect(page.length).toBeLessThan(2 * 1024 * 1024);
     expect(page).toContain('src="data:,"');
+
+    // A dozen asset ids naming the same image get one free copy between them.
+    const aliases = Array.from({ length: 12 }, (_, index) => `alias-${String(index)}`);
+    const aliased = renderDesignFramePage(
+      design({
+        schemaVersion: 30,
+        frames: [
+          {
+            frameId: "home",
+            title: "Home",
+            html: aliases.map((id) => `<img src="octant-asset:${id}" alt="">`).join(""),
+          },
+        ],
+        assets: aliases.map((assetId) => ({ assetId, imageRef: "image-1" })),
+      }) as never,
+      [image as never],
+    );
+    expect(aliased.length).toBeLessThan(2 * 1024 * 1024);
+
+    // A reference inside a comment draws nothing and leaves the visible one its copy.
+    const commented = renderDesignFramePage(
+      design({
+        schemaVersion: 30,
+        frames: [
+          {
+            frameId: "home",
+            title: "Home",
+            html: '<!-- <img src="octant-asset:hero" alt=""> --><style>/* url(octant-asset:hero) */</style><img id="live" src="octant-asset:hero" alt="">',
+          },
+        ],
+        styles: "/* .old { background: url(octant-asset:hero); } */",
+        assets: [{ assetId: "hero", imageRef: "image-1" }],
+      }) as never,
+      [image as never],
+    );
+    expect(commented).toContain(`<img id="live" src="data:image/png;base64,${data}"`);
+    expect(commented).toContain('<!-- <img src="octant-asset:hero" alt=""> -->');
+    expect(commented).toContain("/* .old { background: url(octant-asset:hero); } */");
   });
 });

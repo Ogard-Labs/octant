@@ -1,6 +1,5 @@
 import {
   CANVAS_DESIGN_VIEWPORT,
-  CANVAS_SHARE_IMAGES_MAX_BYTES,
   type CanvasStaticExportBlock,
   DESIGN_FRAME_KIT,
   type CanvasShareImage,
@@ -153,41 +152,83 @@ function themeStyles(): string {
   ].join("");
 }
 
-/**
- * Every share image written once as base64, and room for repeats. Each
- * reference is written in as a whole `data:` image, so a frame that names one
- * large image a hundred times would otherwise build a page of hundreds of
- * MiB from a document within every input limit.
- */
-const FRAME_PAGE_IMAGE_BUDGET = Math.ceil(CANVAS_SHARE_IMAGES_MAX_BYTES / 3) * 4 + 128 * 1024;
+/** Room for repeated images beyond every carried image written once. */
+const FRAME_PAGE_REPEAT_BUDGET = 128 * 1024;
 
 /**
  * The address each image reference on a frame page is drawn from. Each
- * image's first reference is reserved up front, so repeats early in the page
- * cannot crowd out a different image later; a repeat past the budget draws an
- * empty image.
+ * reference is written in as a whole `data:` image, so a frame that names one
+ * large image a hundred times, or under a dozen asset ids, would otherwise
+ * build a page of hundreds of MiB from a document within every input limit.
+ * Each carried image's first reference is reserved up front, once per image
+ * however many asset ids name it, so repeats early in the page cannot crowd
+ * out a different image later; a repeat past the budget draws an empty image.
  */
 class FramePageImageBudget {
-  readonly #addresses: ReadonlyMap<string, string>;
+  /** Asset id to the share image it draws. */
+  readonly #imageOf: ReadonlyMap<string, string>;
+  /** Share image to its `data:` address. */
+  readonly #addressOf: ReadonlyMap<string, string>;
   readonly #drawn = new Set<string>();
+  readonly #limit: number;
   #spent = 0;
 
-  constructor(addresses: ReadonlyMap<string, string>) {
-    this.#addresses = addresses;
-    for (const address of addresses.values()) this.#spent += address.length;
+  constructor(imageOf: ReadonlyMap<string, string>, addressOf: ReadonlyMap<string, string>) {
+    this.#imageOf = imageOf;
+    this.#addressOf = addressOf;
+    const used = new Set(imageOf.values());
+    for (const [imageRef, address] of addressOf) {
+      if (used.has(imageRef)) this.#spent += address.length;
+    }
+    this.#limit = this.#spent + FRAME_PAGE_REPEAT_BUDGET;
   }
 
   address(assetId: string): string {
-    const address = this.#addresses.get(assetId);
-    if (address === undefined) return `octant-asset:${assetId}`;
-    if (!this.#drawn.has(assetId)) {
-      this.#drawn.add(assetId);
+    const imageRef = this.#imageOf.get(assetId);
+    const address = imageRef === undefined ? undefined : this.#addressOf.get(imageRef);
+    if (imageRef === undefined || address === undefined) return `octant-asset:${assetId}`;
+    if (!this.#drawn.has(imageRef)) {
+      this.#drawn.add(imageRef);
       return address;
     }
-    if (this.#spent + address.length > FRAME_PAGE_IMAGE_BUDGET) return "data:,";
+    if (this.#spent + address.length > this.#limit) return "data:,";
     this.#spent += address.length;
     return address;
   }
+}
+
+const CSS_COMMENT = /(\/\*[\s\S]*?(?:\*\/|$))/;
+const HTML_COMMENT = /(<!--[\s\S]*?(?:-->|$))/;
+
+/**
+ * Apply `draw` to the CSS outside its comments. A reference inside a comment
+ * is never drawn by the browser, so it keeps its address, which loads
+ * nothing, and spends none of the page's image budget.
+ */
+function cssOutsideComments(css: string, draw: (code: string) => string): string {
+  return css
+    .split(CSS_COMMENT)
+    .map((part, index) => (index % 2 === 1 ? part : draw(part)))
+    .join("");
+}
+
+/** Apply `draw` to frame markup outside HTML comments and the CSS comments in its styles. */
+function htmlOutsideComments(html: string, draw: (code: string) => string): string {
+  return html
+    .split(HTML_COMMENT)
+    .map((part, index) =>
+      index % 2 === 1
+        ? part
+        : part
+            .split(/(<style\b[^>]*>[\s\S]*?(?:<\/style\s*>|$))/i)
+            .map((piece, inner) => {
+              if (inner % 2 === 0) return draw(piece);
+              const open = /^<style\b[^>]*>/i.exec(piece)?.[0] ?? "";
+              return open + cssOutsideComments(piece.slice(open.length), draw);
+            })
+            .join(""),
+    )
+    .join("");
 }
 
 /**
@@ -203,15 +244,11 @@ export function renderDesignFramePage(
   // An image the share carries is written in as a data: image, which the
   // frame policy admits; a declared image it does not carry keeps its
   // reference, which loads nothing.
-  const byRef = new Map(images.map((image) => [String(image.imageRef), image]));
-  const addresses = new Map(
-    (block.assets ?? []).flatMap((asset) => {
-      const image = byRef.get(String(asset.imageRef));
-      return image === undefined ? [] : [[String(asset.assetId), shareImageAddress(image)]];
-    }),
+  const budget = new FramePageImageBudget(
+    new Map((block.assets ?? []).map((asset) => [String(asset.assetId), String(asset.imageRef)])),
+    new Map(images.map((image) => [String(image.imageRef), shareImageAddress(image)])),
   );
-  const budget = new FramePageImageBudget(addresses);
-  const withImages = (markup: string) =>
+  const draw = (markup: string) =>
     withDesignAssetAddresses(markup, (assetId) => budget.address(assetId));
   const isDocument = block.size === "document";
   const themed = (block.theme ?? (isDocument ? "workspace" : "none")) === "workspace";
@@ -220,7 +257,7 @@ export function renderDesignFramePage(
   const frames = block.frames
     .map((frame) => {
       const id = String(frame.frameId);
-      return `<div class="octant-frame" id="${escapeHtml(id)}"${id === first ? " data-start" : ""}>${withImages(frame.html)}</div>`;
+      return `<div class="octant-frame" id="${escapeHtml(id)}"${id === first ? " data-start" : ""}>${htmlOutsideComments(frame.html, draw)}</div>`;
     })
     .join("");
   return [
@@ -232,7 +269,7 @@ export function renderDesignFramePage(
     `<style>${isDocument ? DOCUMENT_FRAME_RULES : DEVICE_FRAME_RULES}</style>`,
     themed ? themeStyles() : `<style>${UNTHEMED_PAGE}</style>`,
     // A stylesheet that closes its element would let author text become markup.
-    `<style>${withImages(block.styles ?? "").replace(/<\/style/gi, "<\\/style")}</style>`,
+    `<style>${cssOutsideComments(block.styles ?? "", draw).replace(/<\/style/gi, "<\\/style")}</style>`,
     `</head><body>${frames}</body></html>`,
   ].join("");
 }
