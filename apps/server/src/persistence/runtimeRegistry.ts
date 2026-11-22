@@ -416,6 +416,8 @@ import { ProviderKeyJournalRecord } from "@octant/contracts/provider-key-journal
 import { SecretStoreJournalRecord } from "@octant/contracts/secret-stores";
 import {
   REMOTE_ACCESS_EVENT_NAMES,
+  DeviceAccessLevelChangedV1,
+  RemoteAccessPauseChangedV1,
   DeviceKeyRotatedV1,
   DeviceRegisteredV1,
   DeviceRevokedV1,
@@ -942,6 +944,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       DeviceRegistrationDeadlineChangedV1,
     )
     .register(REMOTE_ACCESS_EVENT_NAMES.hostKeyRotated, 1, HostKeyRotatedV1)
+    .register(REMOTE_ACCESS_EVENT_NAMES.deviceAccessLevelChanged, 1, DeviceAccessLevelChangedV1)
+    .register(REMOTE_ACCESS_EVENT_NAMES.remoteAccessPauseChanged, 1, RemoteAccessPauseChangedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.sessionInvalidated, 1, RemoteSessionInvalidatedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.commandReceiptRecorded, 1, RemoteCommandReceiptRecordedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.securityAuditRecorded, 1, SecurityAuditRecordedV1)

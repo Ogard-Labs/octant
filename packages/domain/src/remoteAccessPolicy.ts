@@ -1,4 +1,8 @@
-import type { PairedDeviceLifetime, ProtocolRange } from "@octant/contracts/remote-access";
+import type {
+  DeviceAccessLevel,
+  PairedDeviceLifetime,
+  ProtocolRange,
+} from "@octant/contracts/remote-access";
 
 export const PAIRING_TICKET_TTL_MS = 5 * 60 * 1_000;
 export const PAIRING_MAX_FAILED_ATTEMPTS = 5;
@@ -120,6 +124,29 @@ const REMOTE_APPROVABLE_ACTIONS = new Set([
   "benchmark.rate-cell",
   "provider.list-models",
   "usage.spend-ceiling.read",
+  // Signing a connector in or out, and a connector's own operations (a Linear
+  // issue created, say): changes made through a connector the host already
+  // has, which a device the hub introduced may confirm. Not a read.
+  "integration.command",
+]);
+
+/**
+ * The catalogue's reads: what a device at `read-only` may do (maintainer
+ * decision, 2026-11-22). Each reads state the host already holds and changes
+ * nothing. Left out on purpose: `code.local-servers.list`, whose route also
+ * opens and stops servers, and `speech.transcribe`, which spends the host's
+ * Voice budget and writes a draft.
+ */
+const REMOTE_READ_ACTIONS = new Set([
+  "project.overview.read",
+  "code.language.read",
+  "browser.observe",
+  "simulator.observe",
+  "terminal.read",
+  "preview.open-authorized",
+  "settings.read-non-secret",
+  "provider.list-models",
+  "usage.spend-ceiling.read",
 ]);
 /**
  * What only the host's own person does: at a local window, or on a device they
@@ -139,6 +166,10 @@ const LOCAL_HOST_ACTIONS = new Set([
   "desktop.bridge.invoke",
   "desktop.listener.configure",
   "desktop.device.rename",
+  // Choosing how much a paired device may do, and pausing remote access. A
+  // device below Full is not the host's person, so it can never raise itself.
+  "desktop.device.set-access-level",
+  "desktop.remote-access.pause",
   "provider.credentials.write",
   "provider.credentials.read",
   // Making or widening an outside agent's grant, its connection codes and
@@ -198,17 +229,35 @@ export function classifyRemoteAction(action: string): RemoteActionDecision {
 }
 
 /**
- * `person-paired-device` is a device the host's own person paired: it is that
- * person, and passes wherever a local window passes (maintainer decision,
- * 2026-11-12). `remote-device` is every other authenticated device session (a
- * device the hub's roster introduced, an agent grant, a principal whose
- * pairing is not proved) and stays held to the remote action catalogue.
+ * `person-paired-device` is a device the host's own person paired at Full: it
+ * is that person, and passes wherever a local window passes (maintainer
+ * decisions, 2026-11-12 and 2026-11-22). `remote-device` is every other
+ * authenticated device session (a device the person paired at a narrower
+ * level, a device the hub's roster introduced, an agent grant, a principal
+ * whose pairing is not proved) and stays held to the remote action catalogue.
  */
 export type PrincipalKind = "local-window" | "person-paired-device" | "remote-device";
 
 /** Whether the principal is the host's own person, at the machine or on a device they paired. */
 export function actsAsHostPerson(principalKind: PrincipalKind): boolean {
   return principalKind === "local-window" || principalKind === "person-paired-device";
+}
+
+/**
+ * The class a device is judged by, from the host's own record of it: who let
+ * it on and, for a device the person paired, the level they chose. Only a
+ * person-approved device at Full (or with no level recorded, as every pairing
+ * before levels) is the person; a hub-introduced device stays restricted
+ * whatever level a record might carry.
+ */
+export function admittedDeviceAuthorityKind(device: {
+  readonly admittedBy?: "host-person" | "hub-roster" | undefined;
+  readonly accessLevel?: DeviceAccessLevel | undefined;
+}): PrincipalKind {
+  return device.admittedBy === "host-person" &&
+    (device.accessLevel === undefined || device.accessLevel === "full")
+    ? "person-paired-device"
+    : "remote-device";
 }
 
 export type PrincipalActionDecision =
@@ -218,6 +267,7 @@ export type PrincipalActionDecision =
       readonly reason:
         | "unknown-action"
         | "local-host-required"
+        | "access-level"
         | "principal-laundering"
         | "remote-cannot-mint-local-receipt";
     };
@@ -231,6 +281,8 @@ export function authorizePrincipalAction(input: {
   readonly principalKind: PrincipalKind;
   readonly action: string;
   readonly requestedPrincipalKind?: PrincipalKind;
+  /** A paired device's level; `read-only` narrows the catalogue to its reads. */
+  readonly accessLevel?: DeviceAccessLevel;
 }): PrincipalActionDecision {
   if (
     input.requestedPrincipalKind !== undefined &&
@@ -253,10 +305,36 @@ export function authorizePrincipalAction(input: {
   if (classification.kind === "rejected") {
     return { kind: "deny", reason: "unknown-action" };
   }
-  if (classification.kind === "local-host-required" && !actsAsHostPerson(input.principalKind)) {
+  const narrowed = input.accessLevel !== undefined && input.accessLevel !== "full";
+  if (
+    classification.kind === "local-host-required" &&
+    (narrowed || !actsAsHostPerson(input.principalKind))
+  ) {
     return { kind: "deny", reason: "local-host-required" };
   }
+  if (input.accessLevel === "read-only" && !REMOTE_READ_ACTIONS.has(input.action)) {
+    return { kind: "deny", reason: "access-level" };
+  }
   return { kind: "allow" };
+}
+
+/**
+ * Who may pause or resume remote access. A local window does either. A device
+ * acting as the person may pause it, which ends its own access too, but cannot
+ * resume it: a paused host refuses every paired device, so resuming is the
+ * person's at the machine.
+ */
+export function authorizeRemoteAccessPause(input: {
+  readonly principalKind: PrincipalKind;
+  readonly paused: boolean;
+}):
+  | { readonly kind: "allow" }
+  | { readonly kind: "deny"; readonly reason: "local-host-required" | "local-window-required" } {
+  if (input.principalKind === "local-window") return { kind: "allow" };
+  if (input.principalKind !== "person-paired-device") {
+    return { kind: "deny", reason: "local-host-required" };
+  }
+  return input.paused ? { kind: "allow" } : { kind: "deny", reason: "local-window-required" };
 }
 
 export interface PairingClaimState {

@@ -527,6 +527,9 @@ export function wireRemote(deps: RemoteDependencies) {
             ...(input.principal.admittedBy === undefined
               ? {}
               : { admittedBy: input.principal.admittedBy }),
+            ...(input.principal.accessLevel === undefined
+              ? {}
+              : { accessLevel: input.principal.accessLevel }),
           },
           scopeId: context.scopeId,
           grantId: input.grantId,
@@ -555,6 +558,9 @@ export function wireRemote(deps: RemoteDependencies) {
             ...(input.principal.admittedBy === undefined
               ? {}
               : { admittedBy: input.principal.admittedBy }),
+            ...(input.principal.accessLevel === undefined
+              ? {}
+              : { accessLevel: input.principal.accessLevel }),
           },
           scopeId: context.scopeId,
           grantId: input.grantId,

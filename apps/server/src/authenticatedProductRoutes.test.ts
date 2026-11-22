@@ -52,21 +52,21 @@ describe("authenticated product route dispatch", () => {
           method: "POST",
         }),
       ),
-    ).toBe("settings.read-non-secret");
+    ).toBe("integration.command");
     expect(
       classifyProductAction(
         new Request("https://octant.example/api/integrations/linear/operations", {
           method: "POST",
         }),
       ),
-    ).toBe("settings.read-non-secret");
+    ).toBe("integration.command");
     expect(
       classifyProductAction(
         new Request("https://octant.example/api/github/authentication/commands", {
           method: "POST",
         }),
       ),
-    ).toBe("settings.read-non-secret");
+    ).toBe("integration.command");
     expect(
       classifyProductAction(new Request("https://octant.example/api/projects/project-id/memory")),
     ).toBe("project.overview.read");
@@ -299,6 +299,62 @@ describe("authenticated product route dispatch", () => {
     }
 
     expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("holds a device paired below Full to its level before any route runs", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+    const pairedAt = (accessLevel: "approve-and-steer" | "read-only") =>
+      createRemoteDevicePrincipal({
+        hostId: principal.hostId,
+        deviceId: principal.deviceId,
+        credentialGeneration: 1,
+        origin: principal.origin,
+        protocolVersion: 1,
+        capabilityDigest: principal.capabilityDigest,
+        sessionId: principal.sessionId,
+        admittedBy: "host-person",
+        accessLevel,
+      });
+    const steer = pairedAt("approve-and-steer");
+    const reader = pairedAt("read-only");
+
+    // A person-paired route is the person's: neither narrowed level reaches it.
+    for (const device of [steer, reader]) {
+      for (const [path, method] of [
+        ["/api/providers/credentials/set", "POST"],
+        ["/api/remote/devices/revoke", "POST"],
+        ["/api/extensions/lifecycle", "POST"],
+      ] as const) {
+        expect((await product({ ...handoff(path, method), principal: device }))?.status).toBe(403);
+      }
+    }
+    expect(dispatch).not.toHaveBeenCalled();
+
+    // Approve and steer sends a turn; read only reads and is refused the turn.
+    expect(
+      (await product({ ...handoff("/api/chat/threads/t/commands", "POST"), principal: steer }))
+        ?.status,
+    ).toBe(200);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    const refused = await product({
+      ...handoff("/api/chat/threads/t/commands", "POST"),
+      principal: reader,
+    });
+    expect(refused?.status).toBe(403);
+    expect(await refused?.json()).toMatchObject({ reasonCode: "device-access-level" });
+    for (const [path, method] of [
+      ["/api/integrations/linear/operations", "POST"],
+      ["/api/canvas/c/revise", "POST"],
+      ["/api/code/local-servers/commands", "POST"],
+    ] as const) {
+      expect((await product({ ...handoff(path, method), principal: reader }))?.status).toBe(403);
+    }
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(
+      (await product({ ...handoff("/api/chat/threads/t", "GET"), principal: reader }))?.status,
+    ).toBe(200);
+    expect(dispatch).toHaveBeenCalledTimes(2);
   });
 
   it("passes a shared remote principal context to the existing product route chain", async () => {

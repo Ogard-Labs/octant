@@ -21,6 +21,7 @@ import type { AutomationEventSourcePreparation } from "./automationEventSources"
 import type { AutomationFileActivityPorts } from "./automationFileSourceActivity";
 import { isDeepStrictEqual } from "node:util";
 import {
+  admittedDeviceAuthorityKind,
   AutomationPolicyRejected,
   automationFileSourceReviewedBy,
   buildAutomationWeeklyResolution,
@@ -840,7 +841,10 @@ function isSchemaParseError(error: unknown): boolean {
  * decision, 2026-11-13).
  */
 function actsAsHostPerson(principal: AutomationClientPrincipal): boolean {
-  return principal.kind === "local-window" || principal.admittedBy === "host-person";
+  return (
+    principal.kind === "local-window" ||
+    admittedDeviceAuthorityKind(principal) === "person-paired-device"
+  );
 }
 
 /**

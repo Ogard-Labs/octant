@@ -5,7 +5,12 @@ import type {
   RemotePortForwardService,
 } from "./remotePortForwardService";
 import { decodeRemotePortForwardRequest, encodeRemotePortForwardResult } from "@octant/contracts";
-import type { RemoteClientPrincipal, StableHostId } from "@octant/contracts/remote-access";
+import {
+  REMOTE_ACCESS_PAUSED_REASON,
+  type DeviceAccessLevel,
+  type RemoteClientPrincipal,
+  type StableHostId,
+} from "@octant/contracts/remote-access";
 import {
   decodeRemoteChallengeRequestV1,
   decodeRemoteKeyRotationRequestV1,
@@ -34,6 +39,7 @@ import type { RemoteAuthenticatedRequestResultV1 } from "@octant/contracts/remot
 import { buildRemoteSessionMetadataPayload, canonicalizeRemotePathQuery } from "@octant/domain";
 import {
   isAgentGrantSession,
+  principalAccessLevel,
   principalActsAsHostPerson,
   principalIsHubIntroduced,
 } from "../clientPrincipal";
@@ -319,6 +325,17 @@ export interface RemoteHttpAuthenticationOptions {
    * catalogue.
    */
   readonly deviceAdmittedBy?: (deviceId: string) => "host-person" | "hub-roster";
+  /**
+   * The level the host's person chose for a device they paired, read from the
+   * host's own record on every request like the admission. Absent, a device is
+   * judged by its admission alone.
+   */
+  readonly deviceAccessLevel?: (deviceId: string) => DeviceAccessLevel;
+  /**
+   * Whether the person paused remote access. While it answers yes, every
+   * paired device's session request and authenticated request is refused.
+   */
+  readonly remoteAccessPaused?: () => boolean;
 }
 
 export interface RemoteHttpAuthentication {
@@ -352,17 +369,28 @@ type RemoteAuthFailureCategory =
   | "unavailable"
   | "too-large";
 
+type RemoteAuthFailureReason = "expired" | "revoked" | typeof REMOTE_ACCESS_PAUSED_REASON;
+
+/**
+ * The refusal every paired request meets while remote access is paused. It is
+ * a 403 that leaves the session cookie in place, so no client reads it as a
+ * lost credential and forgets its pairing (a 401 would).
+ */
+function pausedFailure(): RemoteHttpAuthFailure {
+  return new RemoteHttpAuthFailure(403, "unavailable", false, REMOTE_ACCESS_PAUSED_REASON);
+}
+
 class RemoteHttpAuthFailure extends Error {
   readonly status: number;
   readonly category: RemoteAuthFailureCategory;
   readonly clearSession: boolean;
-  readonly reasonCode: "expired" | "revoked" | undefined;
+  readonly reasonCode: RemoteAuthFailureReason | undefined;
 
   constructor(
     status: number,
     category: RemoteAuthFailureCategory,
     clearSession = false,
-    reasonCode?: "expired" | "revoked",
+    reasonCode?: RemoteAuthFailureReason,
   ) {
     super("Remote request rejected.");
     this.name = "RemoteHttpAuthFailure";
@@ -402,7 +430,23 @@ export function createRemoteHttpAuthentication(
     return jsonResponse(200, challenge);
   };
 
+  /** Who let a device on, and the narrower level its person chose, marked on its principal. */
+  const markAdmission = (principal: RemoteClientPrincipal): RemoteClientPrincipal => {
+    if (principal.kind !== "remote-device") return principal;
+    const deviceId = String(principal.deviceId);
+    const admittedBy = options.deviceAdmittedBy?.(deviceId);
+    if (admittedBy === undefined) return principal;
+    const accessLevel =
+      admittedBy === "host-person" ? options.deviceAccessLevel?.(deviceId) : undefined;
+    return Object.freeze({
+      ...principal,
+      admittedBy,
+      ...(accessLevel === undefined || accessLevel === "full" ? {} : { accessLevel }),
+    });
+  };
+
   const handleSession = async (body: RemoteSessionRequestV1): Promise<Response> => {
+    if (options.remoteAccessPaused?.() === true) throw pausedFailure();
     const issued = issueWithServiceErrors(() => options.proofService.issueSession(body), {
       exposeLifecycleReason: false,
     });
@@ -453,6 +497,7 @@ export function createRemoteHttpAuthentication(
       const facts = requireTransportFacts(transport);
       const proxy = options.serverProxy;
       if (proxy === undefined) throw new RemoteHttpAuthFailure(503, "unavailable");
+      if (options.remoteAccessPaused?.() === true) throw pausedFailure();
       const body = decodeBounded(decodeRemoteSessionRequestV1, await readJsonBody(request));
       release = options.admission?.acquire({
         bucket: "auth",
@@ -550,6 +595,9 @@ export function createRemoteHttpAuthentication(
       if (sessionFacts === undefined) {
         throw new RemoteHttpAuthFailure(401, "unauthorized", true);
       }
+      // Checked before anything the request asks is read or done, for every
+      // authenticated route, the device's own self-service included.
+      if (options.remoteAccessPaused?.() === true) throw pausedFailure();
       admissionRelease = options.admission?.acquire({
         bucket: "product",
         deviceId: sessionFacts.deviceId,
@@ -566,17 +614,11 @@ export function createRemoteHttpAuthentication(
         options.proofService,
         route,
       );
-      // Who let the device on is read from the host's own record at each
-      // request, never from the session or the client. Without the port the
-      // principal carries no admission and stays held to the catalogue.
-      const admittedBy =
-        verified.principal.kind === "remote-device"
-          ? options.deviceAdmittedBy?.(String(verified.principal.deviceId))
-          : undefined;
-      const handoff =
-        verified.principal.kind === "remote-device" && admittedBy !== undefined
-          ? { ...verified, principal: Object.freeze({ ...verified.principal, admittedBy }) }
-          : verified;
+      // Who let the device on, and its level, are read from the host's own
+      // record at each request, never from the session or the client. Without
+      // the port the principal carries no admission and stays held to the
+      // catalogue.
+      const handoff = { ...verified, principal: markAdmission(verified.principal) };
 
       // S1: Create the registry abort controller before registration. The
       // combined signal merges client-disconnect (request.signal) with the
@@ -691,6 +733,7 @@ export function createRemoteHttpAuthentication(
       const sessionId = readSessionCookie(request.headers, REMOTE_SERVER_PROXY_SESSION_COOKIE);
       const session = proxy.sessions.describe(sessionId);
       if (session === undefined) throw new RemoteHttpAuthFailure(401, "unauthorized", true);
+      if (options.remoteAccessPaused?.() === true) throw pausedFailure();
       release = proxy.sessions.acquire(session.deviceId);
       if (release === undefined) throw new RemoteHttpAuthFailure(503, "rate-limited");
       const verified = await authenticateRequest(
@@ -704,11 +747,12 @@ export function createRemoteHttpAuthentication(
       if (verified.principal.kind !== "remote-device") {
         throw new RemoteHttpAuthFailure(403, "invalid");
       }
-      const admittedBy = options.deviceAdmittedBy?.(String(verified.principal.deviceId));
-      const handoff =
-        admittedBy === undefined
-          ? verified
-          : { ...verified, principal: Object.freeze({ ...verified.principal, admittedBy }) };
+      const handoff = { ...verified, principal: markAdmission(verified.principal) };
+      // A dev server reached through the proxy is operated, not only read, so
+      // a device its person paired read-only reaches none of it.
+      if (principalAccessLevel(handoff.principal) === "read-only") {
+        throw new RemoteHttpAuthFailure(403, "unauthorized");
+      }
       // A forward's server is observed under the device's own scope, bound to
       // this request; the host, not the client, says which port it holds.
       const remoteDevice = handoff.principal;
@@ -1665,7 +1709,7 @@ function failureResponse(
   status: number,
   category: RemoteAuthFailureCategory,
   clearSession = false,
-  reasonCode?: "expired" | "revoked",
+  reasonCode?: RemoteAuthFailureReason,
   session: RemoteSessionKind = "product",
 ): Response {
   return jsonResponse(
@@ -1675,7 +1719,10 @@ function failureResponse(
       status: "rejected",
       category,
       ...(reasonCode === undefined ? {} : { reasonCode }),
-      message: "Remote request rejected.",
+      message:
+        reasonCode === REMOTE_ACCESS_PAUSED_REASON
+          ? "Remote access is paused on this computer. Resume it in Settings there."
+          : "Remote request rejected.",
     },
     {
       ...(category === "rate-limited"

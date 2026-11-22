@@ -19,7 +19,11 @@
 import type { RemotePortForwardService } from "./remotePortForwardService";
 import { randomUUID as defaultRandomUUID } from "node:crypto";
 import { Schema } from "effect";
-import type { PairedDeviceLifetime, StableHostId } from "@octant/contracts/remote-access";
+import type {
+  DeviceAccessLevel,
+  PairedDeviceLifetime,
+  StableHostId,
+} from "@octant/contracts/remote-access";
 import {
   HOST_HELLO_CLIENT_NONCE_PARAMETER,
   HostHelloClientNonce,
@@ -32,8 +36,10 @@ import {
 import type { Journal } from "../persistence/journal";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
+  readDeviceAccessLevel,
   readDeviceApprovedByPerson,
   readDeviceRegistrations,
+  readRemoteAccessPaused,
 } from "../persistence/remoteAccessProjection";
 import { RemoteRequestProofService } from "../remoteRequestProofService";
 import { RemoteCredentialLifecycleService } from "../remoteCredentialLifecycleService";
@@ -79,7 +85,7 @@ import {
   pushRegistrationClearReasonFor,
   type PushNotificationTokenStore,
 } from "./pushNotificationTokenStore";
-import type { RemoteServerGrantCloseReason } from "@octant/contracts";
+import type { EventActor, RemoteServerGrantCloseReason } from "@octant/contracts";
 import {
   proxySessionEndReasonForCredentialChange,
   RemoteServerProxySessions,
@@ -722,9 +728,75 @@ function assembleServices(
     },
   });
 
+  // A device's approval record is written once, with its registration, and
+  // never changes, so the answer is kept: the audit table has no device index
+  // and this is asked on every product request.
+  const admissions = new Map<string, "host-person" | "hub-roster">();
+  const deviceAdmittedBy = (deviceId: string): "host-person" | "hub-roster" => {
+    const known = admissions.get(deviceId);
+    if (known !== undefined) return known;
+    const admittedBy = readDeviceApprovedByPerson(options.connection, deviceId)
+      ? "host-person"
+      : "hub-roster";
+    admissions.set(deviceId, admittedBy);
+    return admittedBy;
+  };
+  // A device's level and the pause are read on every request too, and change
+  // only through this generation's administration port below, which writes
+  // the journal first and then this answer, so the next request sees it.
+  const accessLevels = new Map<string, DeviceAccessLevel>();
+  const deviceAccessLevel = (deviceId: string): DeviceAccessLevel => {
+    const known = accessLevels.get(deviceId);
+    if (known !== undefined) return known;
+    const level = readDeviceAccessLevel(options.connection, deviceId);
+    accessLevels.set(deviceId, level);
+    return level;
+  };
+  let paused: boolean | undefined;
+  const remoteAccessPaused = (): boolean => {
+    paused ??= readRemoteAccessPaused(options.connection);
+    return paused;
+  };
+  /**
+   * Ends devices' in-flight requests and streams, so each asks again under the
+   * host's new answer. The asking device's own request is left to finish its
+   * response; its next request meets the new answer.
+   */
+  const cancelDeviceWork = (deviceIds: ReadonlyArray<string>, actor?: EventActor): void => {
+    const asking = actor?.kind === "remote-device" ? String(actor.deviceId) : undefined;
+    for (const deviceId of deviceIds) {
+      if (deviceId === asking) continue;
+      registry.cancelByDevice({ hostId: identity.hostId, deviceId });
+      proxySessions?.endDevice(deviceId, "proxy-session-ended");
+    }
+  };
+
   const localDeviceAdministration: LocalDeviceAdministrationPort = {
     createPairingTicket: (input) => lifecycle.createTicket(input),
     listPendingPairings: () => lifecycle.listPendingClaims(),
+    deviceAccessLevel: (deviceId) =>
+      deviceAdmittedBy(deviceId) === "host-person" ? deviceAccessLevel(deviceId) : undefined,
+    setDeviceAccessLevel: (input) => {
+      const changed = lifecycle.setAccessLevel(input);
+      accessLevels.set(input.deviceId, changed.accessLevel);
+      if (changed.previousLevel !== changed.accessLevel) {
+        cancelDeviceWork([input.deviceId], input.actor);
+      }
+      return changed;
+    },
+    remoteAccessPaused,
+    setRemoteAccessPaused: (input) => {
+      paused = lifecycle.setRemoteAccessPaused(input);
+      if (paused) {
+        cancelDeviceWork(
+          readDeviceRegistrations(options.connection)
+            .filter((device) => device.state === "active")
+            .map((device) => String(device.device_id)),
+          input.actor,
+        );
+      }
+      return paused;
+    },
     approvePairing: (input) => {
       const approved = lifecycle.approveTicket(input);
       if (approved.firstApproval) {
@@ -754,8 +826,12 @@ function assembleServices(
       credentialLifecycle.revokeAll({
         commandId: uuid(),
         hostId: identity.hostId,
-        reasonCode: "local-all-devices-revoked",
+        reasonCode:
+          input?.exceptDeviceId === undefined
+            ? "local-all-devices-revoked"
+            : "other-devices-signed-out",
         ...(input?.actor === undefined ? {} : { actor: input.actor }),
+        ...(input?.exceptDeviceId === undefined ? {} : { exceptDeviceId: input.exceptDeviceId }),
       }),
     reconcileExpired: () =>
       credentialLifecycle.reconcileExpired({
@@ -810,20 +886,6 @@ function assembleServices(
       }),
   };
 
-  // A device's approval record is written once, with its registration, and
-  // never changes, so the answer is kept: the audit table has no device index
-  // and this is asked on every product request.
-  const admissions = new Map<string, "host-person" | "hub-roster">();
-  const deviceAdmittedBy = (deviceId: string): "host-person" | "hub-roster" => {
-    const known = admissions.get(deviceId);
-    if (known !== undefined) return known;
-    const admittedBy = readDeviceApprovedByPerson(options.connection, deviceId)
-      ? "host-person"
-      : "hub-roster";
-    admissions.set(deviceId, admittedBy);
-    return admittedBy;
-  };
-
   // HTTP authentication — pre-auth challenge/session + authenticated
   // self-service and product dispatch.
   const auth: RemoteHttpAuthentication = createRemoteHttpAuthentication({
@@ -838,6 +900,8 @@ function assembleServices(
     sessionRevalidation,
     sessionNow: now,
     deviceAdmittedBy,
+    deviceAccessLevel,
+    remoteAccessPaused,
     ...(options.productDispatch === undefined ? {} : { productDispatch: options.productDispatch }),
     ...(proxySessions === undefined || remoteServerGrants === undefined
       ? {}

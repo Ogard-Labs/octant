@@ -1,7 +1,9 @@
+import { DEVICE_ACCESS_LEVEL_REFUSED_REASON } from "@octant/contracts/remote-access";
 import { authorizePrincipalAction } from "@octant/domain";
 import { removeImageMetadata } from "./attachments/imageMetadataRemoval";
 import { NEW_DEVICE_ALERTS_PATH } from "./hub/newDeviceAlertRoutes";
 import {
+  principalAccessLevel,
   principalActsAsHostPerson,
   principalAuthorityKind,
   type ClientPrincipal,
@@ -42,13 +44,17 @@ export function createAuthenticatedProductDispatch(
     // private listener forwards reaches its handler, as it does for a local
     // window, and the handler's own authority checks decide. Any other device
     // session is held to the catalogue, where an uncatalogued action fails closed.
+    // A device the person paired below Full is held there too, and a read-only
+    // one to the catalogue's reads.
     if (!principalActsAsHostPerson(handoff.principal)) {
       const action = classifyProductAction(handoff.request);
+      const accessLevel = principalAccessLevel(handoff.principal);
       const decision = authorizePrincipalAction({
         principalKind: principalAuthorityKind(handoff.principal),
         action: action ?? "",
+        ...(accessLevel === undefined ? {} : { accessLevel }),
       });
-      if (decision.kind === "deny") return unauthorizedResponse();
+      if (decision.kind === "deny") return unauthorizedResponse(accessLevel !== undefined);
     }
 
     const context = resolvePrincipalRouteContext({
@@ -224,11 +230,13 @@ export function classifyProductAction(request: Request): string | undefined {
     if (method === "POST" && path === "/api/canvas/html-file") {
       return "project.overview.read";
     }
+    // Revising and refreshing change the Canvas, so they are a document
+    // update, not a read, and a read-only device is refused them.
     if (
       method === "POST" &&
       (path.endsWith("/revise") || path.endsWith("/refresh") || path.endsWith("/refresh-cancel"))
     ) {
-      return "project.overview.read";
+      return "work.update-document";
     }
     return method === "GET" || method === "HEAD" ? "project.overview.read" : undefined;
   }
@@ -236,15 +244,16 @@ export function classifyProductAction(request: Request): string | undefined {
     return method === "GET" || method === "HEAD" ? "provider.list-models" : undefined;
   }
   if (path.startsWith("/api/integrations/")) {
+    if (method === "GET" || method === "HEAD") return "settings.read-non-secret";
+    // Signing a connector in or out and its operations change something
+    // through the connector, so they are their own action, not a read.
     if (
-      method === "GET" ||
-      method === "HEAD" ||
-      (method === "POST" &&
-        (path.endsWith("/authentication/commands") ||
-          path.endsWith("/operations") ||
-          path.endsWith("/secrets")))
+      method === "POST" &&
+      (path.endsWith("/authentication/commands") ||
+        path.endsWith("/operations") ||
+        path.endsWith("/secrets"))
     ) {
-      return "settings.read-non-secret";
+      return "integration.command";
     }
     return undefined;
   }
@@ -253,12 +262,9 @@ export function classifyProductAction(request: Request): string | undefined {
     // lifecycle commands. The final route still rejects providers/automation
     // and validates the command confirmation; this only prevents the remote
     // gateway from making that supported headless-host path unreachable.
-    if (
-      method === "GET" ||
-      method === "HEAD" ||
-      (method === "POST" && path === "/api/github/authentication/commands")
-    ) {
-      return "settings.read-non-secret";
+    if (method === "GET" || method === "HEAD") return "settings.read-non-secret";
+    if (method === "POST" && path === "/api/github/authentication/commands") {
+      return "integration.command";
     }
     return undefined;
   }
@@ -418,9 +424,15 @@ export function classifyProductAction(request: Request): string | undefined {
   return undefined;
 }
 
-function unauthorizedResponse(): Response {
+function unauthorizedResponse(byAccessLevel: boolean): Response {
   return Response.json(
-    { category: "unauthorized", message: "Remote action is not authorized." },
+    {
+      category: "unauthorized",
+      message: byAccessLevel
+        ? "This device's access level does not allow that. The person can change it in Settings on the host."
+        : "Remote action is not authorized.",
+      ...(byAccessLevel ? { reasonCode: DEVICE_ACCESS_LEVEL_REFUSED_REASON } : {}),
+    },
     {
       status: 403,
       headers: {

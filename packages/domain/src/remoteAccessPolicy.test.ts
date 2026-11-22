@@ -1,6 +1,9 @@
+import type { DeviceAccessLevel } from "@octant/contracts/remote-access";
 import { describe, expect, it } from "vitest";
 import {
+  admittedDeviceAuthorityKind,
   authorizePrincipalAction,
+  authorizeRemoteAccessPause,
   classifyRemoteAction,
   classifyRemoteListenerAddress,
   remoteListenerOrigin,
@@ -302,6 +305,88 @@ describe("remote access policy", () => {
         action: "invented.action",
       }),
     ).toEqual({ kind: "deny", reason: "unknown-action" });
+  });
+
+  it("judges a device the person paired by the level they chose for it", () => {
+    const decide = (accessLevel: DeviceAccessLevel, action: string) =>
+      authorizePrincipalAction({
+        principalKind: admittedDeviceAuthorityKind({ admittedBy: "host-person", accessLevel }),
+        action,
+        accessLevel,
+      }).kind;
+    // Full is the person: every catalogued action, the host-only ones included.
+    for (const action of [
+      "chat.send-turn",
+      "extension.tool-call.answer-once",
+      "provider.credentials.write",
+      "extension.install",
+      "desktop.device.set-access-level",
+    ]) {
+      expect(decide("full", action)).toBe("allow");
+    }
+    // Approve and steer is what a device the hub introduced may do.
+    expect(decide("approve-and-steer", "chat.send-turn")).toBe("allow");
+    expect(decide("approve-and-steer", "extension.tool-call.answer-once")).toBe("allow");
+    expect(decide("approve-and-steer", "provider.credentials.write")).toBe("deny");
+    expect(decide("approve-and-steer", "extension.install")).toBe("deny");
+    expect(decide("approve-and-steer", "desktop.device.set-access-level")).toBe("deny");
+    // Read only reaches the catalogue's reads and nothing that changes the host.
+    expect(decide("read-only", "project.overview.read")).toBe("allow");
+    expect(decide("read-only", "settings.read-non-secret")).toBe("allow");
+    expect(decide("read-only", "terminal.read")).toBe("allow");
+    for (const action of [
+      "chat.send-turn",
+      "extension.tool-call.answer-once",
+      "work.update-document",
+      "code.local-servers.list",
+      "integration.command",
+      "provider.credentials.write",
+    ]) {
+      expect(
+        authorizePrincipalAction({
+          principalKind: "remote-device",
+          action,
+          accessLevel: "read-only",
+        }),
+      ).toEqual({
+        kind: "deny",
+        reason: action === "provider.credentials.write" ? "local-host-required" : "access-level",
+      });
+    }
+  });
+
+  it("keeps a device the hub introduced, or one with no level, as it was", () => {
+    expect(admittedDeviceAuthorityKind({ admittedBy: "host-person" })).toBe("person-paired-device");
+    expect(admittedDeviceAuthorityKind({ admittedBy: "hub-roster" })).toBe("remote-device");
+    expect(admittedDeviceAuthorityKind({})).toBe("remote-device");
+    expect(admittedDeviceAuthorityKind({ admittedBy: "hub-roster", accessLevel: "full" })).toBe(
+      "remote-device",
+    );
+    expect(
+      authorizePrincipalAction({ principalKind: "remote-device", action: "integration.command" }),
+    ).toEqual({ kind: "allow" });
+  });
+
+  it("lets a window pause and resume remote access and a Full device only pause it", () => {
+    expect(authorizeRemoteAccessPause({ principalKind: "local-window", paused: true })).toEqual({
+      kind: "allow",
+    });
+    expect(authorizeRemoteAccessPause({ principalKind: "local-window", paused: false })).toEqual({
+      kind: "allow",
+    });
+    expect(
+      authorizeRemoteAccessPause({ principalKind: "person-paired-device", paused: true }),
+    ).toEqual({ kind: "allow" });
+    expect(
+      authorizeRemoteAccessPause({ principalKind: "person-paired-device", paused: false }),
+    ).toEqual({
+      kind: "deny",
+      reason: "local-window-required",
+    });
+    expect(authorizeRemoteAccessPause({ principalKind: "remote-device", paused: true })).toEqual({
+      kind: "deny",
+      reason: "local-host-required",
+    });
   });
 
   it("accepts only the first concurrent claim and fails closed for stolen or used tickets", () => {
