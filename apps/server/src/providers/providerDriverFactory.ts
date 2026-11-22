@@ -27,6 +27,7 @@ import {
   hostCodexHomeOverlayIsRelative,
 } from "./providerService";
 import { codexAccountProcessEnvironment } from "./codexProcess";
+import { codexConfiguresBedrock } from "./codexProviderCredential";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
 import { makeClaudeDriver, type ClaudeResumeIdentityPort } from "./claudeDriver";
 import { readClaudeGitIdentity } from "./claudeGitIdentity";
@@ -286,6 +287,9 @@ export function makeProviderDriver(
             ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
             strict: false,
             credentialPassThrough,
+            // Read at each launch, so an account moved onto Bedrock gets its
+            // AWS credentials from its next process.
+            signsInToBedrock: codexConfiguresBedrock({ ...hostEnvironment, CODEX_HOME: codexHome }),
           }),
         ...(options.credentialResolver === undefined
           ? {}

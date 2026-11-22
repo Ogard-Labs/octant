@@ -15525,20 +15525,28 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     `GITHUB_ENTERPRISE_TOKEN`, `GITLAB_TOKEN`, `NPM_TOKEN`,
     `NODE_AUTH_TOKEN`, AWS access keys, session tokens and the Bedrock bearer
     token, and any other `*_API_KEY` (`hostCredentialCrosses`). A provider's
-    own credential is never stripped: Codex keeps its keys and the AWS
-    credentials its Bedrock sign-in takes, Claude Code keeps the AWS
-    credentials while the host routes it through Bedrock
-    (`CLAUDE_CODE_USE_BEDROCK`), Pi keeps the keys of the thread's model
-    provider, and an account's own key is applied by Octant after the
-    filter. Settings › Providers & Models › Credentials let through keeps a
-    per-provider list of names the person lets through anyway (such as
-    `GH_TOKEN` for an agent that runs `gh`); it holds names only, never
-    values, is read at each launch, applies to that provider's turns and its
-    provider terminal, and cannot let another model provider's key or an
-    `OCTANT_*` variable through. A Codex process keeps the list it launched
-    with; a lease is keyed on the list, so a changed list starts a new one.
-    Strict keeps each runtime's fixed list and ignores the pass-through
-    list. OpenCode does not strip these yet: its launch receives the host's
+    own credential is never stripped: Codex keeps its keys, and the AWS
+    credentials its Bedrock sign-in takes only while the account's
+    `config.toml` selects Amazon Bedrock (`codexConfiguresBedrock`, read at
+    each launch); Claude Code keeps the AWS credentials while the host routes
+    it through Bedrock (`CLAUDE_CODE_USE_BEDROCK`); Pi keeps the keys of the
+    thread's model provider; and an account's own key is applied by Octant
+    after the filter. Settings › Providers & Models › Credentials let through
+    keeps a per-provider list of names the person lets through anyway (such
+    as `GH_TOKEN` for an agent that runs `gh`), at most 64 per provider; it
+    holds names only, never values, is read at each launch, and applies to
+    that provider's turns and its provider terminal. Settings refuses, with
+    its reason, a name the launch would still keep out: an `OCTANT_*`
+    variable or a model provider's key (`hostCredentialPassThroughRefusal`).
+    A running process cannot drop a variable it started with, so a changed
+    list never reaches one: a Codex lease is keyed on the list, a Code or
+    Work session kept past its turn for background work is not reused by
+    the next turn once its provider's list changed and is stopped when idle
+    (`OutlivingSessions.launchCredentials`). A provider terminal runs the
+    person's shell as a login shell outside Strict, so the shell's own
+    startup files run and may export a credential again; Octant does not
+    read or change them. Strict keeps each runtime's fixed list and ignores
+    the pass-through list. OpenCode does not strip these yet: its launch receives the host's
     environment as before. Built for
     Claude Code, Pi and the ACP agents, read at each launch; OpenCode already
     received the host's environment. Built for Codex: each account has a

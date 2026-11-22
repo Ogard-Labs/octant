@@ -51,4 +51,41 @@ describe("ProviderCredentialPassThroughSettings", () => {
     expect(screen.getByText("Octant's own variables never reach a provider.")).toBeVisible();
     expect(field).toHaveValue("OCTANT_DESKTOP_BRIDGE_SECRET");
   });
+
+  it("refuses another model provider's key, which the launch never lets through, and keeps the draft", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(<ProviderCredentialPassThroughSettings onChange={onChange} value={{}} />);
+    const field = screen.getByLabelText("Variable to let through");
+    await user.type(field, "OPENAI_API_KEY");
+    await user.click(screen.getByRole("button", { name: "Let through" }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        "This is a model provider's key. A provider already gets its own and never gets another provider's.",
+      ),
+    ).toBeVisible();
+    expect(field).toHaveValue("OPENAI_API_KEY");
+    expect(field).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("refuses a name past the most one provider may let through, and keeps the draft", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    const full = Array.from({ length: 64 }, (_, index) => `TOKEN_${index}`);
+    render(<ProviderCredentialPassThroughSettings onChange={onChange} value={{ claude: full }} />);
+    const field = screen.getByLabelText("Variable to let through");
+    await user.type(field, "GH_TOKEN");
+    await user.click(screen.getByRole("button", { name: "Let through" }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(
+      screen.getByText("A provider can let at most 64 credentials through. Remove one first."),
+    ).toBeVisible();
+    expect(field).toHaveValue("GH_TOKEN");
+  });
+
+  it("says a provider terminal runs the person's shell startup files, which may set credentials again", () => {
+    render(<ProviderCredentialPassThroughSettings onChange={vi.fn()} value={{}} />);
+    expect(PROVIDER_CREDENTIAL_PASS_THROUGH_FACT).toContain("shell's startup files");
+  });
 });

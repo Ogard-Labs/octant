@@ -296,6 +296,34 @@ describe("OutlivingSessions", () => {
     expect(runtime.stopped).toEqual([sessionId]);
   });
 
+  it("a kept session is relaunched when its provider's credential list changes", async () => {
+    const runtime = fakeRuntime();
+    let credentials = JSON.stringify(["GH_TOKEN"]);
+    const keeper = keeperFor({ launchCredentials: () => credentials });
+    await turn(keeper, runtime, () => runtime.report({ tasks: [{ taskId: "dev" }] }));
+    expect(runtime.stopped).toEqual([]);
+    // The person takes GH_TOKEN back: the next turn gets a fresh launch, not
+    // the kept session that still holds the token.
+    credentials = JSON.stringify([]);
+    await turn(keeper, runtime, () => runtime.report({ tasks: [{ taskId: "dev" }] }));
+    expect(runtime.stopped[0]).toBe(sessionId);
+    expect(runtime.counts().opened).toBe(2);
+    expect(runtime.started).toHaveLength(2);
+  });
+
+  it("stops an idle kept session once its provider's credential list changes", async () => {
+    const runtime = fakeRuntime();
+    let credentials = JSON.stringify(["GH_TOKEN"]);
+    const keeper = keeperFor({ launchCredentials: () => credentials });
+    await turn(keeper, runtime, () => runtime.report({ tasks: [{ taskId: "dev" }] }));
+    await keeper.stopSessionsWithChangedCredentials();
+    expect(runtime.stopped).toEqual([]);
+    credentials = JSON.stringify([]);
+    await keeper.stopSessionsWithChangedCredentials();
+    expect(runtime.stopped).toEqual([sessionId]);
+    expect(keeper.liveTasks(key)).toBeUndefined();
+  });
+
   it("refuses a second turn while another holds the thread's session", async () => {
     const runtime = fakeRuntime();
     const keeper = keeperFor();

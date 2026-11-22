@@ -3,6 +3,7 @@ import type { ProviderInstance, ProviderToolingProvider } from "@octant/contract
 import { accountRunsAsItself, effectiveClaudeAccountConfigDirectory } from "@octant/domain";
 import { isolatedClaudeAccountEnvironment } from "./claudeAccountIsolation";
 import { codexAccountProcessEnvironment } from "./codexProcess";
+import { codexConfiguresBedrock } from "./codexProviderCredential";
 import { effectiveCodexAccountHome } from "./providerDriverFactory";
 import { DEFAULT_PROVIDER_OWN_CHANNELS } from "./providerOwnChannels";
 
@@ -72,7 +73,16 @@ export function resolveProviderToolingAccount(
         binaryPath: instance.configuration.binaryPath,
         hostEnvironment,
         codexHome: directory,
-        ...(strict ? {} : { strict: false as const, credentialPassThrough }),
+        ...(strict
+          ? {}
+          : {
+              strict: false as const,
+              credentialPassThrough,
+              signsInToBedrock: codexConfiguresBedrock({
+                ...hostEnvironment,
+                CODEX_HOME: directory,
+              }),
+            }),
       }),
       shownEnvironment: [{ name: "CODEX_HOME", value: directory }],
       directory,

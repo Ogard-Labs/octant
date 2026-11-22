@@ -1567,8 +1567,9 @@ run every command unasked (below).
 - The lease key carries Strict, so a Strict and a non-Strict session never
   share a process, and the launch takes the account's open environment: the
   host's less Octant's variables, other providers' keys and the unrelated
-  credentials the person did not let through for Codex (its own keys and
-  the AWS credentials its Bedrock sign-in takes stay). The lease key also
+  credentials the person did not let through for Codex (its own keys stay,
+  and the AWS credentials its Bedrock sign-in takes stay only while the
+  account's `config.toml` selects Amazon Bedrock). The lease key also
   carries that pass-through list, so a changed list starts a new process. A Plan or Chat
   lease outside Strict keeps Octant's read-only profile, with only other
   providers' sign-ins refused among the protected files.

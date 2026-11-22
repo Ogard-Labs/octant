@@ -34,6 +34,19 @@ export function providerOwnChannelsFromSettings(
   };
 }
 
+/**
+ * The pass-through list for a provider as one comparable string, so a kept
+ * session launched with another list is told apart. Undefined driver kind
+ * (a thread whose provider is gone) lets nothing through.
+ */
+export function launchCredentialsKey(
+  settings: Pick<ShellSettings, "providerCredentialPassThrough"> | undefined,
+  driverKind: string | undefined,
+): string {
+  const names = driverKind === undefined ? [] : providerCredentialPassThrough(settings, driverKind);
+  return JSON.stringify([...new Set(names)].sort());
+}
+
 /** The host credentials the person lets through to a provider of this driver kind. */
 export function providerCredentialPassThrough(
   settings: Pick<ShellSettings, "providerCredentialPassThrough"> | undefined,

@@ -343,6 +343,39 @@ describe("sanitizeCodexEnvironment", () => {
     expect(environment.CODEX_HOME).toBe("/Users/test/.codex-accounts/api");
   });
 
+  it("an OpenAI-backed Codex launch outside Strict gets no exported AWS keys", () => {
+    const hostEnvironment = {
+      PATH: "/usr/bin",
+      AWS_PROFILE: "work",
+      AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
+      AWS_SECRET_ACCESS_KEY: "aws-secret",
+      AWS_BEARER_TOKEN_BEDROCK: "bedrock-token",
+      OPENAI_API_KEY: "codex-own",
+    };
+    const open = codexAccountProcessEnvironment({
+      binaryPath: "/opt/homebrew/bin/codex",
+      hostEnvironment,
+      codexHome: "/Users/test/.codex",
+      inheritHostAuth: true,
+      strict: false,
+    });
+    expect(open).toMatchObject({ AWS_PROFILE: "work", OPENAI_API_KEY: "codex-own" });
+    expect(open.AWS_ACCESS_KEY_ID).toBeUndefined();
+    expect(open.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+    expect(open.AWS_BEARER_TOKEN_BEDROCK).toBeUndefined();
+    // Let through by name, it crosses like any other.
+    expect(
+      codexAccountProcessEnvironment({
+        binaryPath: "/opt/homebrew/bin/codex",
+        hostEnvironment,
+        codexHome: "/Users/test/.codex",
+        inheritHostAuth: true,
+        strict: false,
+        credentialPassThrough: ["AWS_ACCESS_KEY_ID"],
+      }).AWS_ACCESS_KEY_ID,
+    ).toBe("AKIAEXAMPLE");
+  });
+
   it("gives a lease outside Strict the host's environment less Octant's own, other providers' keys and unrelated credentials, keeping the AWS keys its Bedrock sign-in uses", () => {
     const hostEnvironment = {
       PATH: "/usr/bin",
@@ -361,6 +394,7 @@ describe("sanitizeCodexEnvironment", () => {
       codexHome: "/Users/test/.codex",
       inheritHostAuth: true,
       strict: false,
+      signsInToBedrock: true,
     });
     expect(open).toMatchObject({
       AWS_PROFILE: "work",

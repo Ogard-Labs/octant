@@ -32,7 +32,7 @@ const LABEL: ReadonlyMap<string, string> = new Map(PROVIDERS.map(({ id, label })
 
 /** What the section says the list does, in the person's words. */
 export const PROVIDER_CREDENTIAL_PASS_THROUGH_FACT =
-  "Outside Strict, a provider does not get credentials from your environment that are not its own, such as GH_TOKEN, GITHUB_TOKEN, NPM_TOKEN, AWS keys and other services' API keys. Name one here to let it through to one provider. Strict ignores this list. Applies from the next turn.";
+  "Outside Strict, a provider does not get credentials from your environment that are not its own, such as GH_TOKEN, GITHUB_TOKEN, NPM_TOKEN, AWS keys and other services' API keys. Name one here to let it through to one provider. Strict ignores this list. Applies from the next turn. A provider terminal also runs your shell's startup files, which may set credentials again.";
 
 /**
  * Settings › Providers & Models › Credentials let through. Empty until the
@@ -49,6 +49,12 @@ export function ProviderCredentialPassThroughSettings(
   const entries = Object.entries(props.value).flatMap(([id, names]) =>
     names.map((name) => ({ id, name })),
   );
+  // A search for the list lands on its first row, or on the add row while the
+  // list is empty and has no row to focus.
+  const addFocused =
+    props.focusedSetting === "provider-credential-pass-through-add" ||
+    (props.focusedSetting === "provider-credential-pass-through" && entries.length === 0);
+  const problemId = `${ids}-problem`;
 
   function change(id: string, names: ReadonlyArray<string>) {
     const next: Record<string, ReadonlyArray<string>> = { ...props.value };
@@ -60,66 +66,69 @@ export function ProviderCredentialPassThroughSettings(
   function add() {
     const name = draft.trim();
     if (name === "") return;
-    const refusal = hostCredentialPassThroughRefusal(name);
+    const current = props.value[provider] ?? [];
+    const refusal = hostCredentialPassThroughRefusal(name, current);
     if (refusal !== undefined) {
       setProblem(refusal);
       return;
     }
     setProblem(undefined);
-    const current = props.value[provider] ?? [];
     if (!current.includes(name)) change(provider, [...current, name]);
     setDraft("");
   }
 
   return (
     <SettingsSection
+      className="provider-credentials"
       description={PROVIDER_CREDENTIAL_PASS_THROUGH_FACT}
       title="Credentials let through"
     >
+      {/* A quiet sentence on the page ground, not a row inside the card
+          (DESIGN.md "Depth and material"); the card holds only the add row. */}
+      {entries.length === 0 ? (
+        <SettingsState kind="empty">
+          Nothing is let through. Each provider keeps only its own credentials.
+        </SettingsState>
+      ) : null}
       <div className="setgroup">
-        {entries.length === 0 ? (
-          <SettingsState kind="empty">
-            Nothing is let through. Each provider keeps only its own credentials.
-          </SettingsState>
-        ) : (
-          entries.map((entry, index) => {
-            const label = LABEL.get(entry.id) ?? entry.id;
-            return (
-              <SettingsCompactRow
-                focused={props.focusedSetting === "provider-credential-pass-through" && index === 0}
-                key={`${entry.id}:${entry.name}`}
-                label={entry.name}
-                labelWraps
-                meta={`${label} · Let through`}
-                settingId="provider-credential-pass-through"
+        {entries.map((entry, index) => {
+          const label = LABEL.get(entry.id) ?? entry.id;
+          return (
+            <SettingsCompactRow
+              focused={props.focusedSetting === "provider-credential-pass-through" && index === 0}
+              key={`${entry.id}:${entry.name}`}
+              label={entry.name}
+              labelWraps
+              meta={`${label} · Let through`}
+              settingId="provider-credential-pass-through"
+            >
+              <OctantButton
+                aria-label={`Stop letting ${entry.name} through to ${label}`}
+                onClick={() =>
+                  change(
+                    entry.id,
+                    (props.value[entry.id] ?? []).filter((name) => name !== entry.name),
+                  )
+                }
+                size="sm"
+                type="button"
+                variant="secondary"
               >
-                <OctantButton
-                  aria-label={`Stop letting ${entry.name} through to ${label}`}
-                  onClick={() =>
-                    change(
-                      entry.id,
-                      (props.value[entry.id] ?? []).filter((name) => name !== entry.name),
-                    )
-                  }
-                  size="sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  Remove
-                </OctantButton>
-              </SettingsCompactRow>
-            );
-          })
-        )}
+                Remove
+              </OctantButton>
+            </SettingsCompactRow>
+          );
+        })}
         <SettingRow
           description="The variable's name as your environment has it, such as GH_TOKEN for an agent that runs gh."
+          focused={addFocused}
           htmlFor={`${ids}-name`}
           label="Let a credential through"
           scope="host"
           settingId="provider-credential-pass-through-add"
         >
           <form
-            className="protected-files__add"
+            className="protected-files__add provider-credentials__add"
             noValidate
             onSubmit={(event) => {
               event.preventDefault();
@@ -137,9 +146,15 @@ export function ProviderCredentialPassThroughSettings(
             />
             <OctantInput
               aria-label="Variable to let through"
+              {...(problem === undefined
+                ? {}
+                : { "aria-describedby": problemId, "aria-invalid": true })}
               className="settings-view__text-input"
               id={`${ids}-name`}
-              onChange={(event) => setDraft(event.currentTarget.value)}
+              onChange={(event) => {
+                setDraft(event.currentTarget.value);
+                setProblem(undefined);
+              }}
               placeholder="GH_TOKEN"
               type="text"
               value={draft}
@@ -152,7 +167,9 @@ export function ProviderCredentialPassThroughSettings(
       </div>
       <div className="settings-feedback-slot" aria-live="polite">
         {problem === undefined ? null : (
-          <OctantFieldError className="settings-section-line">{problem}</OctantFieldError>
+          <OctantFieldError className="settings-section-line" id={problemId}>
+            {problem}
+          </OctantFieldError>
         )}
       </div>
     </SettingsSection>

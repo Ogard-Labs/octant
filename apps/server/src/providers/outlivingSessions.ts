@@ -52,6 +52,15 @@ export interface OutlivingSessionsOptions {
    */
   readonly currentTerms?: (key: string) => string | undefined;
   /**
+   * The host credentials a launch for this thread's provider would let
+   * through now, outside Strict (Settings › Providers & Models › Credentials
+   * let through), as one comparable string. A running process cannot drop a
+   * variable it was started with, so a kept session launched with another
+   * list is never reused: the next turn opens a fresh one, and
+   * {@link OutlivingSessions.stopSessionsWithChangedCredentials} stops an idle one.
+   */
+  readonly launchCredentials?: (key: string) => string;
+  /**
    * How long a session whose last task just ended waits for the runtime's
    * own follow-up turn before it is stopped as idle.
    */
@@ -89,6 +98,8 @@ interface Kept {
   readonly acquiredFor: string;
   /** The thread's terms (see {@link OutlivingSessionsOptions.currentTerms}) its last turn ran on. */
   terms?: string | undefined;
+  /** The credential list its connection was launched with (see {@link OutlivingSessionsOptions.launchCredentials}). */
+  readonly credentials: string | undefined;
   session?:
     | {
         readonly sessionId: ProviderSessionId;
@@ -156,7 +167,11 @@ export class OutlivingSessions {
         });
       }
       let kept = existing;
-      if (kept !== undefined && kept.acquiredFor !== acquiredFor) {
+      const credentials = this.#options.launchCredentials?.(key);
+      if (
+        kept !== undefined &&
+        (kept.acquiredFor !== acquiredFor || kept.credentials !== credentials)
+      ) {
         yield* Effect.promise(() => this.#dispose(existing as Kept));
         kept = undefined;
       }
@@ -165,7 +180,15 @@ export class OutlivingSessions {
         const connection = yield* Scope.extend(open, scope).pipe(
           Effect.tapError(() => Scope.close(scope, Exit.void)),
         ) as Effect.Effect<ProviderConnection, ProviderFailure, Exclude<R, Scope.Scope>>;
-        kept = { key, connection, scope, acquiredFor, leased: false, runtimeTurnRequested: false };
+        kept = {
+          key,
+          connection,
+          scope,
+          acquiredFor,
+          credentials,
+          leased: false,
+          runtimeTurnRequested: false,
+        };
         this.#kept.set(key, kept);
       }
       const leased = kept;
@@ -250,7 +273,27 @@ export class OutlivingSessions {
     clearTimers(kept);
   }
 
+  /**
+   * The person changed which credentials a provider is let through: every
+   * idle kept session launched with another list is stopped, so a variable
+   * taken back does not stay in a running agent. A turn holding its session
+   * settles it when it ends.
+   */
+  async stopSessionsWithChangedCredentials(): Promise<void> {
+    await Promise.all(
+      [...this.#kept.values()]
+        .filter((kept) => !kept.leased && !this.#credentialsCurrent(kept))
+        .map((kept) => this.#dispose(kept)),
+    );
+  }
+
+  #credentialsCurrent(kept: Kept): boolean {
+    const current = this.#options.launchCredentials;
+    return current === undefined || current(kept.key) === kept.credentials;
+  }
+
   #termsCurrent(kept: Kept): boolean {
+    if (!this.#credentialsCurrent(kept)) return false;
     const current = this.#options.currentTerms;
     if (current === undefined) return true;
     const terms = current(kept.key);

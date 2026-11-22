@@ -154,7 +154,10 @@ import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
 import type { CanvasWiring } from "./canvas";
 import { sessionNativeSetup } from "../providers/providerNativeSetup";
-import { providerCredentialPassThrough } from "../providers/providerOwnChannels";
+import {
+  launchCredentialsKey,
+  providerCredentialPassThrough,
+} from "../providers/providerOwnChannels";
 import { resolveProviderTerminal } from "../providers/providerTerminal";
 import { homedir } from "node:os";
 import {
@@ -646,6 +649,19 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           return undefined;
         }
       },
+      launchCredentials: (key) => {
+        let driverKind: string | undefined;
+        try {
+          const thread = persistence.readCodeThread(decodeCodeThreadId(key.slice("code:".length)));
+          driverKind =
+            thread === undefined
+              ? undefined
+              : persistence.readProviderInstance(thread.providerInstanceId)?.driverKind;
+        } catch {
+          driverKind = undefined;
+        }
+        return launchCredentialsKey(persistence.readShellSettings()?.settings, driverKind);
+      },
       onChanged: () => machineChangeFeed.publish(["thread-follow-ups"]),
       onError: (message, error) => console.error(`[live tasks] ${message}`, error),
     });
@@ -663,6 +679,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       }).catch((error: unknown) =>
         console.error("[live tasks] A changed thread's session did not stop.", error),
       );
+      if (append.events.some((event) => event.eventName === "shell.settings-replaced")) {
+        void outlivingCodeSessions
+          .stopSessionsWithChangedCredentials()
+          .catch((error: unknown) =>
+            console.error("[live tasks] A session with changed credentials did not stop.", error),
+          );
+      }
     });
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {

@@ -39,6 +39,7 @@ import {
   type WorkStatusDatedItem,
 } from "@octant/contracts";
 import { Effect } from "effect";
+import { launchCredentialsKey } from "../providers/providerOwnChannels";
 import { OutlivingSessions, type RuntimeTurnStarter } from "../providers/outlivingSessions";
 import { readJournaledSessionHistory } from "../providers/nativeSessionHistory";
 import { createWorkSessionRouteHandler } from "../work/workSessionRoutes";
@@ -427,6 +428,19 @@ export function wireWork(deps: WorkDependencies) {
           return undefined;
         }
       },
+      launchCredentials: (key) => {
+        let driverKind: string | undefined;
+        try {
+          const thread = workThreadProjection.read(decodeWorkThreadId(key.slice("work:".length)));
+          driverKind =
+            thread === undefined
+              ? undefined
+              : persistence.readProviderInstance(thread.providerInstanceId)?.driverKind;
+        } catch {
+          driverKind = undefined;
+        }
+        return launchCredentialsKey(persistence.readShellSettings()?.settings, driverKind);
+      },
       onChanged: () => machineChangeFeed.publish(["thread-follow-ups"]),
       onError: (message, error) => console.error(`[live tasks] ${message}`, error),
     });
@@ -444,6 +458,13 @@ export function wireWork(deps: WorkDependencies) {
       }).catch((error: unknown) =>
         console.error("[live tasks] A changed thread's session did not stop.", error),
       );
+      if (append.events.some((event) => event.eventName === "shell.settings-replaced")) {
+        void outlivingWorkSessions
+          .stopSessionsWithChangedCredentials()
+          .catch((error: unknown) =>
+            console.error("[live tasks] A session with changed credentials did not stop.", error),
+          );
+      }
     });
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
