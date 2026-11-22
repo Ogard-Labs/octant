@@ -21,7 +21,9 @@ import { checkConfinedNewFileUnder, writeConfinedNewFileUnder } from "../image/g
 import type { ServiceOfferAnswer } from "../offers/serviceOfferDecision";
 import type { ServiceOfferService } from "../offers/serviceOfferService";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import type { SpeechAdapter } from "./speechAdapter";
+import { matchesSpeechSynthesisFormat } from "./speechAudio";
 import type { SpeechGates } from "./speechGates";
 
 export type NarrationPosture = "refuse" | "ask" | "allow";
@@ -47,11 +49,14 @@ const FORMAT_EXTENSIONS: Readonly<Record<SpeechSynthesisFormat, string>> = {
 const TOO_LONG_REASON =
   "Split the text into parts of at most 4,096 characters and narrate each to its own file.";
 
-export function narrationDecision(_offer: Offer, decision: ServiceOfferDecision) {
+export function narrationDecision(offer: Offer, decision: ServiceOfferDecision) {
   if (decision.decision === "cancel") return { outcome: { status: "cancelled" } } as const;
   if (decision.decision !== "narrate") return { reason: "That answer does not fit this request." };
   return {
-    outcome: { status: "narrate", rememberForThread: decision.rememberForThread },
+    outcome: {
+      status: "narrate",
+      rememberForThread: offer.canRemember === false ? false : decision.rememberForThread,
+    },
   } as const;
 }
 
@@ -141,6 +146,10 @@ export class ThreadNarration {
         const root = await input.root();
         if (root === undefined || !allowed())
           return refused("The turn no longer has access to this folder.");
+        // Pin the physical folder identity before asking so replacing the
+        // directory at the same path while approval waits fails closed.
+        const rootStillSame = threadWorkingDirectoryCurrent(root, root);
+        if (!rootStillSame()) return refused("The turn no longer has access to this folder.");
 
         const precheck = await checkConfinedNewFileUnder({ root, relativePath: args.relativePath });
         if (precheck.status !== "ok") return refused(precheck.reason);
@@ -150,6 +159,7 @@ export class ThreadNarration {
           const now = readySynthesis(input.endpoint());
           return (
             folder === root &&
+            rootStillSame() &&
             allowed() &&
             (cardApproved || input.posture() === "allow") &&
             now !== undefined &&
@@ -167,6 +177,7 @@ export class ThreadNarration {
 
         let cardApproved = false;
         let remember = false;
+        const canRemember = posture === "allow";
         // At Ask first (and Work Auto) the card is also the file-write confirmation,
         // so a remembered thread skips it only at Accept edits and Full access.
         if (posture === "ask" || !remembered) {
@@ -187,6 +198,7 @@ export class ThreadNarration {
                 endpointName: ready.instance.displayName.slice(0, 120).trimEnd(),
                 modelId: ready.modelId,
                 format: args.format,
+                canRemember,
               }),
           });
           if (answer.status !== "narrate") {
@@ -197,7 +209,7 @@ export class ThreadNarration {
             );
           }
           cardApproved = true;
-          remember = answer.rememberForThread;
+          remember = canRemember && answer.rememberForThread;
         }
 
         if (!(await current(cardApproved)))
@@ -214,11 +226,14 @@ export class ThreadNarration {
           const stillClear = await checkConfinedNewFileUnder({
             root,
             relativePath: args.relativePath,
+            expectedRootIdentity: precheck.rootIdentity,
           });
           if (stillClear.status !== "ok") return refused(stillClear.reason);
           if (!(await current(cardApproved)))
             return refused("The folder, access or Voice destination changed.");
-          if (remember) this.#consent.set(thread, { target, windowId: input.windowId });
+          if (remember && input.posture() === "allow") {
+            this.#consent.set(thread, { target, windowId: input.windowId });
+          }
 
           const result = await input.adapter(ready).synthesize({
             text: args.text,
@@ -250,12 +265,23 @@ export class ThreadNarration {
               },
             };
           }
+          if (!matchesSpeechSynthesisFormat(result.bytes, args.format)) {
+            return {
+              isError: true,
+              result: {
+                status: "failed",
+                reason: `The provider returned audio that does not match the requested ${args.format} format.`,
+              },
+            };
+          }
 
           const saved = await writeConfinedNewFileUnder({
             root,
             relativePath: args.relativePath,
             bytes: result.bytes,
-            current: () => allowed() && (cardApproved || input.posture() === "allow"),
+            expectedRootIdentity: precheck.rootIdentity,
+            current: () =>
+              rootStillSame() && allowed() && (cardApproved || input.posture() === "allow"),
           });
           if (saved.status !== "saved") {
             return saved.status === "refused"

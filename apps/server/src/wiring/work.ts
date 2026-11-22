@@ -889,6 +889,10 @@ export function wireWork(deps: WorkDependencies) {
               },
               port: canvasAgentToolPort,
             });
+        const pinnedRoot =
+          input.projectRoot.length > 0
+            ? threadWorkingDirectoryCurrent(input.projectRoot, input.projectRoot)
+            : undefined;
         const currentRoot = async () => {
           const thread = workThreadProjection.read(input.thread.id);
           if (thread?.lifecycle !== "active") return undefined;
@@ -905,7 +909,7 @@ export function wireWork(deps: WorkDependencies) {
             selected,
             thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
           ).catch(() => undefined);
-          return root === input.projectRoot ? root : undefined;
+          return root === input.projectRoot && pinnedRoot?.() === true ? root : undefined;
         };
         const speechTurnAllowed = () => {
           const active = runningWorkTurns.get(String(input.thread.id));

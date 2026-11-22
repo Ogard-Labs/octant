@@ -152,6 +152,36 @@ describe("ServiceOfferPrompt", () => {
       );
     },
   );
+  it("hides Don't ask again on a narration card when the access level always asks", async () => {
+    const fake = client([
+      decodeNarrationOffer({
+        kind: "narrate",
+        threadKind: "code-thread",
+        scopeId,
+        offerId,
+        requestedAt: "2026-11-07T10:00:00.000Z",
+        excerpt: "Ask first narration",
+        characters: 19,
+        relativePath: "narration/ask.mp3",
+        voice: "alloy",
+        endpointName: "Studio",
+        modelId: "tts-1",
+        format: "mp3",
+        canRemember: false,
+      }),
+    ]);
+    renderPrompt(fake);
+    await screen.findByRole("article", { name: "Narration request" });
+    expect(
+      screen.queryByRole("checkbox", { name: "Don't ask again in this thread" }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Narrate" }));
+    expect(fake.decide).toHaveBeenCalledExactlyOnceWith({
+      offerId,
+      decision: "narrate",
+      rememberForThread: false,
+    });
+  });
   it("asks whether to generate the agent's picture with an image model, the suggested model chosen", async () => {
     renderPrompt(client([offer()]));
     const card = await screen.findByRole("article", { name: "Image generation request" });

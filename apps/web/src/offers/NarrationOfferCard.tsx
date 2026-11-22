@@ -16,6 +16,7 @@ export function NarrationOfferCard({
   const id = useId();
   if (offer.kind !== "narrate") return null;
   const truncated = offer.characters > offer.excerpt.length;
+  const canRemember = offer.canRemember !== false;
   return (
     <article aria-label="Narration request" className="follow-up-card">
       <p className="follow-up-card__title">Narrate this text to an audio file?</p>
@@ -29,15 +30,17 @@ export function NarrationOfferCard({
         Voice {offer.voice} on {offer.endpointName} ({offer.modelId}). Your provider may charge for
         synthesis.
       </p>
-      <label className="follow-up-card__summary" htmlFor={id}>
-        <OctantCheckbox
-          id={id}
-          disabled={busy}
-          checked={remember}
-          onChange={(event) => setRemember(event.currentTarget.checked)}
-        />{" "}
-        Don't ask again in this thread
-      </label>
+      {canRemember ? (
+        <label className="follow-up-card__summary" htmlFor={id}>
+          <OctantCheckbox
+            id={id}
+            disabled={busy}
+            checked={remember}
+            onChange={(event) => setRemember(event.currentTarget.checked)}
+          />{" "}
+          Don't ask again in this thread
+        </label>
+      ) : null}
       <div className="follow-up-card__actions">
         <OctantButton
           disabled={busy}
@@ -53,7 +56,11 @@ export function NarrationOfferCard({
           size="xs"
           type="button"
           onClick={() =>
-            decide({ decision: "narrate", offerId: offer.offerId, rememberForThread: remember })
+            decide({
+              decision: "narrate",
+              offerId: offer.offerId,
+              rememberForThread: canRemember && remember,
+            })
           }
         >
           Narrate

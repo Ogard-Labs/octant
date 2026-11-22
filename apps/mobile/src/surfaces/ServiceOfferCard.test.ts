@@ -152,6 +152,64 @@ it.each(["Narrate", "Don't narrate"])(
   },
 );
 
+it("hides Don't ask again on the phone narration card when the access level always asks", async () => {
+  const threadId = "00000000-0000-4000-8000-000000000020";
+  const offerId = "00000000-0000-4000-8000-000000000024";
+  const offer = {
+    kind: "narrate",
+    threadKind: "work-thread",
+    scopeId: threadId,
+    offerId,
+    requestedAt: "2026-10-15T06:00:00.000Z",
+    excerpt: "Ask first narration",
+    characters: 19,
+    relativePath: "narration/ask.mp3",
+    voice: "alloy",
+    endpointName: "Studio",
+    modelId: "tts-1",
+    format: "mp3",
+    canRemember: false,
+  };
+  const answers: string[] = [];
+  const authenticatedFetch: MobileRemoteTransport["authenticatedFetch"] = async (request) => {
+    if (request.method === "GET")
+      return Response.json({ offers: answers.length === 0 ? [offer] : [] });
+    answers.push(String(request.body));
+    return Response.json({ kind: "offer-answered" });
+  };
+  const node = document.createElement("div");
+  document.body.append(node);
+  const root = createRoot(node);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(ThemeProvider, {
+          preference: "light",
+          children: createElement(ServiceOfferCard, {
+            transport: { hostId: "studio", authenticatedFetch },
+            authenticator: {
+              hasDeviceCredential: async () => true,
+              authenticate: async () => "confirmed" as const,
+            },
+            threadId,
+            threadKind: "work-thread",
+            inProject: true,
+          }),
+        }),
+      ),
+    );
+    expect(node.textContent).not.toContain("Don't ask again in this thread");
+    const button = node.querySelector<HTMLElement>('[aria-label="Narrate"]');
+    await act(async () => button?.click());
+    expect(answers.map((s) => JSON.parse(s))).toEqual([
+      { offerId, decision: "narrate", rememberForThread: false },
+    ]);
+  } finally {
+    act(() => root.unmount());
+    node.remove();
+  }
+});
+
 it.each([false, true])(
   "requires confirmation on the phone, with reference images: %s",
   async (references) => {

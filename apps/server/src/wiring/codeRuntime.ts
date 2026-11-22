@@ -719,24 +719,19 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           requested: readThread()?.executionPolicy ?? thread.executionPolicy,
           thread: persistence.readCodeThread(thread.id)?.executionPolicy ?? thread.executionPolicy,
         });
-      const currentRoot = async () => {
-        const current = persistence.readCodeThread(thread.id);
-        const checkout = await threadProjectAssetRoot({
-          mode: "code",
-          threadId: String(thread.id),
-          projectId: String(thread.projectId),
+      const pinnedCheckout =
+        checkoutRoot === undefined
+          ? undefined
+          : threadWorkingDirectoryCurrent(checkoutRoot, checkoutRoot);
+      const currentRoot = () =>
+        resolveCurrentCodeTurnRoot({
+          thread,
+          checkoutRoot,
+          pinnedCheckout,
+          readCodeThread: (id) => persistence.readCodeThread(id),
+          readProject: (id) => persistence.readProject(id),
+          threadProjectAssetRoot,
         });
-        const project = persistence.readProject(thread.projectId);
-        if (checkout === undefined || current === undefined || project?.type !== "code")
-          return undefined;
-        const selected = approvedWorkingFolderRoot(project, current.workingFolderId, checkout);
-        if (selected === undefined) return undefined;
-        const root = await resolveThreadWorkingDirectory(
-          selected,
-          current.workingDirectory ?? decodeThreadWorkingDirectory("."),
-        ).catch(() => undefined);
-        return root === checkoutRoot ? root : undefined;
-      };
       const speechTurnAllowed = () =>
         readThread()?.lifecycle === "active" &&
         (deps.isPairedDeviceScope(windowId)
@@ -3102,3 +3097,36 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
 }
 
 export type CodeRuntimeWiring = Effect.Effect.Success<ReturnType<typeof wireCodeRuntime>>;
+
+/**
+ * Resolves the active working folder for a Code turn's host media tools from
+ * the thread's checkout (existing worktree or managed linked worktree),
+ * approved extra folder, and pinned physical directory identity.
+ */
+export async function resolveCurrentCodeTurnRoot(input: {
+  readonly thread: Pick<CodeThread, "id" | "projectId">;
+  readonly checkoutRoot: string | undefined;
+  readonly pinnedCheckout?: (() => boolean) | undefined;
+  readonly readCodeThread: ServerStart["persistence"]["readCodeThread"];
+  readonly readProject: ServerStart["persistence"]["readProject"];
+  readonly threadProjectAssetRoot: CanvasWiring["threadProjectAssetRoot"];
+}): Promise<string | undefined> {
+  if (input.checkoutRoot === undefined) return undefined;
+  const current = input.readCodeThread(input.thread.id);
+  const checkout = await input.threadProjectAssetRoot({
+    mode: "code",
+    threadId: String(input.thread.id),
+    projectId: String(input.thread.projectId),
+  });
+  const project = input.readProject(input.thread.projectId);
+  if (checkout === undefined || current === undefined || project?.type !== "code") {
+    return undefined;
+  }
+  const selected = approvedWorkingFolderRoot(project, current.workingFolderId, checkout);
+  if (selected === undefined) return undefined;
+  const root = await resolveThreadWorkingDirectory(
+    selected,
+    current.workingDirectory ?? decodeThreadWorkingDirectory("."),
+  ).catch(() => undefined);
+  return root === input.checkoutRoot && input.pinnedCheckout?.() !== false ? root : undefined;
+}

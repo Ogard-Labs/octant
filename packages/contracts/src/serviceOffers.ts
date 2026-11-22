@@ -60,6 +60,7 @@ export const NarrationOffer = Schema.Struct({
   endpointName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(120)),
   modelId: ProviderModelId,
   format: SpeechSynthesisFormat,
+  canRemember: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export const decodeNarrationOffer = Schema.decodeUnknownSync(NarrationOffer);
 

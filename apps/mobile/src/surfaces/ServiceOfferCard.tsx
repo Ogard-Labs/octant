@@ -111,11 +111,19 @@ function OfferCard(props: {
   if (settled) return null;
   const text = { ...mobileTypography.caption, color: colors.textSecondary };
   const cancel = () => void decide({ offerId: offer.offerId, decision: "cancel" });
+  const canRemember =
+    offer.kind !== "save" &&
+    references === undefined &&
+    (offer.kind !== "narrate" || offer.canRemember !== false);
   const approve = () => {
     if (offer.kind === "transcribe")
       void decide({ offerId: offer.offerId, decision: "transcribe", rememberForThread: remember });
     else if (offer.kind === "narrate")
-      void decide({ offerId: offer.offerId, decision: "narrate", rememberForThread: remember });
+      void decide({
+        offerId: offer.offerId,
+        decision: "narrate",
+        rememberForThread: canRemember && remember,
+      });
     else if (offer.kind === "save") void decide({ offerId: offer.offerId, decision: "save" });
     else if (choice !== undefined) {
       void decide({
@@ -204,7 +212,7 @@ function OfferCard(props: {
           />
         </>
       )}
-      {offer.kind !== "save" && references === undefined ? (
+      {canRemember ? (
         <View style={styles.remember}>
           <Text style={[text, styles.rememberLabel]}>{rememberLabel}</Text>
           <Switch

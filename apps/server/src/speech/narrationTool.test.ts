@@ -1,14 +1,23 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, lstatSync, realpathSync } from "node:fs";
-import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
-  decodeCodeRelativePath,
   decodeCodeThreadView,
   decodeImageGenerationScopeId,
+  decodeNarrationOffer,
   decodeProject,
   decodeProviderInstance,
   decodeProviderModelId,
@@ -22,13 +31,12 @@ import { createManagedWorktreeNodePorts } from "../code/managedWorktreeNodePorts
 import type { ServiceOfferAnswer } from "../offers/serviceOfferDecision";
 import { ServiceOfferService } from "../offers/serviceOfferService";
 import { applyProtectedFilesChoice, currentProtectedFilesChoice } from "../process/secretGuard";
-import {
-  createExistingWorktreeCodeFileRootAuthority,
-  deriveExistingWorktreeCheckoutId,
-} from "../wiring/code";
+import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
+import { resolveCodeThreadCheckoutRoot } from "../wiring/canvas";
+import { resolveCurrentCodeTurnRoot } from "../wiring/codeRuntime";
 import { makeOpenAiCompatibleSpeechAdapter } from "./speechAdapter";
 import { createSpeechGates } from "./speechGates";
-import { ThreadNarration, type NarrationPosture } from "./narrationTool";
+import { narrationDecision, ThreadNarration, type NarrationPosture } from "./narrationTool";
 
 let dir = "";
 let folder = "";
@@ -39,7 +47,12 @@ const mp3Bytes = Uint8Array.from([
 const wavBytes = Uint8Array.from([
   0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45,
 ]);
-const oggBytes = Uint8Array.from([0x4f, 0x67, 0x67, 0x53, 0x00, 0x02, 0x00, 0x00]);
+// Minimal RFC 3533 + RFC 7845 Ogg Opus BOS page ("OggS" + 1 segment + "OpusHead").
+const oggBytes = Uint8Array.from([
+  0x4f, 0x67, 0x67, 0x53, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x13, 0x4f, 0x70, 0x75, 0x73,
+  0x48, 0x65, 0x61, 0x64, 0x01, 0x01, 0x38, 0x01, 0x80, 0xbb, 0x00, 0x00, 0x00, 0x00, 0x00,
+]);
 
 beforeEach(async () => {
   dir = await realpath(await mkdtemp(join(tmpdir(), "octant-narrate-")));
@@ -324,63 +337,44 @@ it("writes into a Code thread's linked git worktree rather than the main project
     updatedAt: now,
   });
   if (project.type !== "code") throw new Error("Expected a Code Project.");
-  const identity = (path: string) => {
-    const stat = lstatSync(path, { bigint: true });
-    return { device: String(stat.dev), inode: String(stat.ino) };
+  const managedReceipt = {
+    version: 1 as const,
+    receiptId: id(6),
+    state: "ready" as const,
+    threadId: view.thread.id,
+    checkoutId,
+    repositoryId,
+    canonicalRepositoryPath: projectRoot,
+    canonicalWorktreePath: worktreeRoot,
+    branchIntent: "narrate-branch",
+    refIntent: "refs/heads/narrate-branch",
+    expectedHead: head,
+    createdAt: now,
+    updatedAt: now,
   };
-  const roots = createExistingWorktreeCodeFileRootAuthority({
-    projects: {
-      bootstrap: async () => ({
-        active: [{ ...project, bindingRevisionId: view.thread.bindingRevisionId }],
-        archived: [],
-        availability: [],
-        memory: [],
-      }),
-    },
-    readProject: () => project,
-    repository,
-    managedReceipts: {
-      load: async () => ({
-        version: 1,
-        receiptId: id(6),
-        state: "ready",
-        threadId: view.thread.id,
-        checkoutId,
-        repositoryId,
-        canonicalRepositoryPath: projectRoot,
-        canonicalWorktreePath: worktreeRoot,
-        branchIntent: "narrate-branch",
-        refIntent: "refs/heads/narrate-branch",
-        expectedHead: head,
-        createdAt: now,
-        updatedAt: now,
-      }),
-    },
-    statIdentity: async (path) => identity(path),
-    currentIdentity: (path) => ({ canonicalPath: realpathSync(path), ...identity(path) }),
-  });
-
-  // Derive the existing-worktree id too just to verify our checkout is genuinely managed.
-  expect(
-    deriveExistingWorktreeCheckoutId({
-      projectId,
-      bindingRevisionId,
-      repositoryId,
-      canonicalRoot: projectRoot,
-    }),
-  ).not.toBe(checkoutId);
-
-  const windowId = decodeWindowId(id(7));
+  const pinnedCheckout = threadWorkingDirectoryCurrent(worktreeRoot, worktreeRoot);
   const f = fixture("code-thread", {
-    root: async () => {
-      const resolved = await roots.resolve(
-        windowId,
-        view.thread,
-        view.checkout,
-        decodeCodeRelativePath("narration/intro.mp3"),
-      );
-      return resolved?.rootPath;
-    },
+    root: () =>
+      resolveCurrentCodeTurnRoot({
+        thread: view.thread,
+        checkoutRoot: worktreeRoot,
+        pinnedCheckout,
+        readCodeThread: (threadId) =>
+          String(threadId) === String(view.thread.id) ? view.thread : undefined,
+        readProject: (readId) => (String(readId) === String(project.id) ? project : undefined),
+        threadProjectAssetRoot: async ({ threadId, projectId: assetProjectId }) =>
+          resolveCodeThreadCheckoutRoot({
+            threadId,
+            projectId: assetProjectId,
+            readCodeThread: (readThreadId) =>
+              String(readThreadId) === String(view.thread.id) ? view.thread : undefined,
+            readProject: (readId) => (String(readId) === String(project.id) ? project : undefined),
+            readCodeCheckout: (readCheckoutId) =>
+              String(readCheckoutId) === String(view.checkout.id) ? view.checkout : undefined,
+            loadManagedReceipt: async (receiptId) =>
+              receiptId === managedReceipt.receiptId ? managedReceipt : undefined,
+          }),
+      }),
   });
   const pending = f.call({ relativePath: "narration/intro.mp3" });
   await f.answer();
@@ -484,6 +478,7 @@ it("withholds narration when synthesis is unconfigured, lacks a voice, is in Pla
 it("skips the card for a remembered thread at Accept edits or Full access, but always asks at Ask first", async () => {
   const f = fixture("work-thread", { posture: "allow" });
   const first = f.call({ relativePath: "part1.mp3" });
+  expect(await f.waiting()).toMatchObject({ kind: "narrate", canRemember: true });
   await f.answer(true);
   expect(await first).toEqual({
     result: { status: "saved", relativePath: "part1.mp3", bytes: mp3Bytes.byteLength },
@@ -496,10 +491,23 @@ it("skips the card for a remembered thread at Accept edits or Full access, but a
   expect(f.offers.listForWindow(f.windowId)).toEqual([]);
   expect(f.fetch).toHaveBeenCalledTimes(2);
 
-  // Switching to Ask first / Work Auto ("ask") still shows the card even though the thread was remembered.
+  // Switching to Ask first / Work Auto ("ask") still shows the card and disables remembering.
   f.settings.posture = "ask";
   const third = f.call({ relativePath: "part3.mp3" });
-  expect(await f.waiting()).toMatchObject({ kind: "narrate", relativePath: "part3.mp3" });
+  const askOffer = await f.waiting();
+  expect(askOffer).toMatchObject({
+    kind: "narrate",
+    relativePath: "part3.mp3",
+    canRemember: false,
+  });
+  // Server-enforced decision ignores rememberForThread when canRemember is false.
+  expect(
+    narrationDecision(decodeNarrationOffer(askOffer), {
+      offerId: askOffer.offerId,
+      decision: "narrate",
+      rememberForThread: true,
+    }),
+  ).toEqual({ outcome: { status: "narrate", rememberForThread: false } });
   expect(f.fetch).toHaveBeenCalledTimes(2);
   await f.answer(false);
   expect(await third).toEqual({
@@ -556,6 +564,81 @@ it.each(["destination", "model", "voice", "access", "folder", "plan", "file", "s
     else expect(await readFile(join(folder, "out.mp3"), "utf8")).toBe("appeared");
   },
 );
+
+it("writes nothing when the folder is replaced at the same path while approval waits or synthesis runs", async () => {
+  const f = fixture("work-thread", { posture: "allow" });
+  const pending = f.call({ relativePath: "narration/intro.mp3" });
+  await f.waiting();
+
+  // Rename the original folder away and put a different directory in its place.
+  const movedOriginal = join(dir, "folder-old");
+  const replacement = join(dir, "folder-replacement");
+  await mkdir(replacement);
+  await rename(folder, movedOriginal);
+  await rename(replacement, folder);
+
+  await f.answer(true);
+  expect(await pending).toMatchObject({ isError: true, result: { status: "refused" } });
+  expect(f.fetch).not.toHaveBeenCalled();
+  expect(existsSync(join(folder, "narration", "intro.mp3"))).toBe(false);
+  expect(existsSync(join(movedOriginal, "narration", "intro.mp3"))).toBe(false);
+
+  // Also test directory replacement while synthesis is already in flight.
+  const second = f.call({ relativePath: "narration/second.mp3" });
+  await f.waiting();
+  f.fetch.mockImplementationOnce(async () => {
+    const movedAgain = join(dir, "folder-old-2");
+    const replacement2 = join(dir, "folder-replacement-2");
+    await mkdir(replacement2);
+    await rename(folder, movedAgain);
+    await rename(replacement2, folder);
+    return new Response(Uint8Array.from(mp3Bytes), {
+      status: 200,
+      headers: { "content-type": "audio/mpeg" },
+    });
+  });
+  await f.answer(false);
+  expect(await second).toMatchObject({ isError: true, result: { status: "refused" } });
+  expect(existsSync(join(folder, "narration", "second.mp3"))).toBe(false);
+});
+
+it("fails without creating a file when the provider returns mismatched or non-audio bytes", async () => {
+  // Provider returns MP3 bytes for a requested WAV file.
+  const wrongFormat = fixture("work-thread", { audio: mp3Bytes });
+  const wavPending = wrongFormat.call({ relativePath: "narration/bad.wav", format: "wav" });
+  await wrongFormat.answer();
+  expect(await wavPending).toMatchObject({
+    isError: true,
+    result: { status: "failed", reason: expect.stringMatching(/wav/) },
+  });
+  expect(existsSync(join(folder, "narration", "bad.wav"))).toBe(false);
+
+  // Provider returns non-audio text/HTML for an MP3 request.
+  const nonAudio = fixture("work-thread", {
+    audio: new TextEncoder().encode("<html>upstream error page</html>"),
+  });
+  const mp3Pending = nonAudio.call({ relativePath: "narration/html.mp3", format: "mp3" });
+  await nonAudio.answer();
+  expect(await mp3Pending).toMatchObject({
+    isError: true,
+    result: { status: "failed", reason: expect.stringMatching(/mp3/) },
+  });
+  expect(existsSync(join(folder, "narration", "html.mp3"))).toBe(false);
+
+  // Provider returns an Ogg container without an OpusHead packet for an opus request.
+  const nonOpusOgg = fixture("work-thread", {
+    audio: new TextEncoder().encode(
+      "OggS\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x08\x01vorbis!!",
+    ),
+  });
+  const oggPending = nonOpusOgg.call({ relativePath: "narration/vorbis.ogg", format: "opus" });
+  await nonOpusOgg.answer();
+  expect(await oggPending).toMatchObject({
+    isError: true,
+    result: { status: "failed", reason: expect.stringMatching(/opus/) },
+  });
+  expect(existsSync(join(folder, "narration", "vorbis.ogg"))).toBe(false);
+});
 
 it("writes nothing when access or posture is lost while synthesis is in flight", async () => {
   const f = fixture("work-thread", { posture: "allow" });

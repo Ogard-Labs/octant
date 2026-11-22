@@ -8,7 +8,11 @@ import { canonicalizeWorkRelativePath } from "@octant/domain";
 import type { CodeFileRootAuthorityPort } from "../code/codeService";
 import { isProtectedSecretPath } from "../process/secretGuard";
 import { writeConfinedWorkFile } from "../work/workConfinedWrite";
-import { liveWorkFilesystem, type WorkFilesystemPort } from "../work/workFilesystemPort";
+import {
+  liveWorkFilesystem,
+  type WorkFileIdentity,
+  type WorkFilesystemPort,
+} from "../work/workFilesystemPort";
 import { WorkResolutionService } from "../work/workResolutionService";
 
 export async function saveGeneratedCodeImage(
@@ -98,8 +102,9 @@ export type ConfinedNewFileCheck =
       readonly status: "ok";
       readonly relativePath: string;
       readonly absolutePath: string;
+      readonly rootIdentity: WorkFileIdentity;
       readonly parentAbsolute: string;
-      readonly parentIdentity: { readonly device: string; readonly inode: string };
+      readonly parentIdentity: WorkFileIdentity;
       readonly remaining: ReadonlyArray<string>;
     }
   | { readonly status: "refused"; readonly reason: string };
@@ -119,9 +124,28 @@ export async function checkConfinedNewFileUnder(
   input: {
     readonly root: string;
     readonly relativePath: string;
+    readonly expectedRootIdentity?: WorkFileIdentity;
   },
   filesystem: WorkFilesystemPort = liveWorkFilesystem,
 ): Promise<ConfinedNewFileCheck> {
+  let rootIdentity: WorkFileIdentity;
+  try {
+    const canonicalRoot = await filesystem.realpath(input.root);
+    const rootStat = await filesystem.lstat(canonicalRoot);
+    if (canonicalRoot !== input.root || !rootStat.isDirectory) {
+      return { status: "refused", reason: "The save folder is unavailable." };
+    }
+    rootIdentity = { device: rootStat.device, inode: rootStat.inode };
+    if (
+      input.expectedRootIdentity !== undefined &&
+      (rootIdentity.device !== input.expectedRootIdentity.device ||
+        rootIdentity.inode !== input.expectedRootIdentity.inode)
+    ) {
+      return { status: "refused", reason: "The save folder changed." };
+    }
+  } catch {
+    return { status: "refused", reason: "The save folder is unavailable." };
+  }
   let relativePath: string;
   try {
     relativePath = canonicalizeWorkRelativePath(input.relativePath);
@@ -157,6 +181,7 @@ export async function checkConfinedNewFileUnder(
     status: "ok",
     relativePath: resolution.relativePath,
     absolutePath: resolution.absolutePath,
+    rootIdentity,
     parentAbsolute: resolution.parentAbsolute,
     parentIdentity: resolution.parentIdentity,
     remaining: resolution.remaining,
@@ -165,14 +190,15 @@ export async function checkConfinedNewFileUnder(
 
 /**
  * Writes a new file under `root` through the same confined, exclusive-create
- * path as `saveGeneratedImageUnder`, also refusing protected secret paths and
- * existing files with neutral failure reasons.
+ * path as `saveGeneratedImageUnder`, also refusing protected secret paths,
+ * replaced roots, and existing files with neutral failure reasons.
  */
 export async function writeConfinedNewFileUnder(
   input: {
     readonly root: string;
     readonly relativePath: string;
     readonly bytes: Uint8Array;
+    readonly expectedRootIdentity?: WorkFileIdentity;
     readonly current?: () => boolean;
   },
   filesystem: WorkFilesystemPort = liveWorkFilesystem,
