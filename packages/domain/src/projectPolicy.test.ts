@@ -30,6 +30,7 @@ import {
   changeCodeProjectDesktopRecipe,
   changeCodeProjectAgentDefaultBranchPush,
   changeCodeProjectAgentMerge,
+  changeCodeProjectDelegatedCode,
   changeCodeProjectOwnToolchain,
   changeCodeProjectAgentPullRequestComments,
   changeCodeProjectPullRequestBackgroundRefresh,
@@ -293,6 +294,31 @@ describe("Project creation and lifecycle", () => {
       changeCodeProjectOwnToolchain(
         makeProject(ids.work, "0/1", { type: "work" }),
         "enabled",
+        updatedAt,
+      ),
+    ).toThrow(ProjectPolicyRejected);
+  });
+
+  it("marks a Code Project as taking delegated Code work with its confirmed target, and takes the mark off", () => {
+    const project = makeProject(ids.code, "0/1", { type: "code" });
+    const target = {
+      remoteName: "origin",
+      baseBranch: "main",
+      outcomeKind: "opened-pr" as const,
+      confirmedAt: updatedAt,
+    };
+    const marked = changeCodeProjectDelegatedCode(project, target, updatedAt);
+    expect(marked).toMatchObject({ delegatedCode: target, version: 2 });
+    const unmarked = changeCodeProjectDelegatedCode(marked, undefined, updatedAt);
+    expect(unmarked.delegatedCode).toBeUndefined();
+    expect(unmarked.version).toBe(3);
+    expect(() => changeCodeProjectDelegatedCode(project, undefined, updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
+    expect(() =>
+      changeCodeProjectDelegatedCode(
+        makeProject(ids.work, "0/1", { type: "work" }),
+        target,
         updatedAt,
       ),
     ).toThrow(ProjectPolicyRejected);

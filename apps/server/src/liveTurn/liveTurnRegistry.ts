@@ -119,6 +119,11 @@ export class LiveTurnRegistry {
     this.#pending.set(topic, timer);
   }
 
+  /** How many turns run on this host now, for the load level other members read. */
+  count(): number {
+    return this.#turns.size;
+  }
+
   tracker(threadId: string, topic: MachineChangeTopic): LiveTurnTracker {
     const owner = Symbol(threadId);
     const own = (): LiveTurn | undefined => {

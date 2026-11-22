@@ -285,6 +285,8 @@ interface HubStatus {
   readonly directPush?: DirectPushView;
   readonly provision?: ProvisionView;
   readonly signIn?: SignInView;
+  /** Whether this computer takes work other members delegate; absent where delegation is not composed. */
+  readonly delegationAccepting?: boolean;
   readonly link?: {
     readonly membership: "member" | "removed";
     readonly hubName: string;
@@ -1126,6 +1128,23 @@ export function HubSettingsSection({
     await refresh();
   };
 
+  const setDelegationAccepting = async (accepting: boolean) => {
+    const reply = await act(
+      "delegation-accepting",
+      { accepting },
+      "changed",
+      "Octant could not change whether this computer takes delegated work.",
+    );
+    if (reply !== undefined) {
+      setMessage(
+        accepting
+          ? "This computer takes delegated work again."
+          : "This computer takes no new delegated work. Work already running carries on.",
+      );
+    }
+    await refresh();
+  };
+
   const confirmMember = async (memberId: string, name: string) => {
     const reply = await act(
       "confirm-member",
@@ -1213,9 +1232,15 @@ export function HubSettingsSection({
 
   // A joined computer keeps editing the grant it already has.
   const linked = status?.link;
+  // Keyed by the saved grant, not the status object: any refresh (turning
+  // delegated work on or off, confirming a member) returns a new object, and
+  // resetting on that would throw away unsaved grant edits.
+  const savedGrant = linked === undefined ? undefined : JSON.stringify(linked.grant.items);
+  const savedGrantItems = linked?.grant.items;
   useEffect(() => {
-    if (linked !== undefined && join.phase === "idle") setDraft(linked.grant.items);
-  }, [linked, join.phase]);
+    if (savedGrantItems !== undefined && join.phase === "idle") setDraft(savedGrantItems);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedGrant, join.phase]);
 
   // The hub shows the devices that ask to join while a code is live.
   useEffect(() => {
@@ -2054,6 +2079,25 @@ export function HubSettingsSection({
               </SettingsState>
             )}
           </SettingsSection>
+          {status?.delegationAccepting === undefined ? null : (
+            <SettingsSection title="Delegated work">
+              <div className="setgroup">
+                <SettingRow
+                  description="Other members of the hub can ask this computer to run work in the Projects you open to them. Turning this off refuses every new request at once; work already running here carries on."
+                  label="Take delegated work from other members"
+                  scope="host"
+                  settingId="hub-delegation-accepting"
+                >
+                  <OctantSwitch
+                    checked={status.delegationAccepting}
+                    disabled={busy}
+                    label="Take delegated work from other members"
+                    onCheckedChange={(accepting) => void setDelegationAccepting(accepting)}
+                  />
+                </SettingRow>
+              </div>
+            </SettingsSection>
+          )}
           <SettingsSection title="New members">
             <NewMemberChecks
               alerts={linked.alerts}
@@ -2069,6 +2113,33 @@ export function HubSettingsSection({
         </>
       )}
 
+      {/* Settings search lists this switch on every computer, so a computer
+          whose live switch is not shown (in no hub, the hub itself, or a member
+          that did not report it) still shows its row, saying why. */}
+      {status === undefined ||
+      (linked !== undefined && status.delegationAccepting !== undefined) ? null : (
+        <SettingsSection title="Delegated work">
+          <div className="setgroup">
+            <SettingRow
+              description={
+                hubOn || linked !== undefined
+                  ? "This computer has not reported whether it takes work from other members, so the switch is unavailable here. It appears once the computer reports it as a hub member."
+                  : "Join a hub to take work from its other members. Once this computer is a member, they can ask it to run work in the Projects you open to them, and this switch stops new requests."
+              }
+              label="Take delegated work from other members"
+              scope="host"
+              settingId="hub-delegation-accepting"
+            >
+              <OctantSwitch
+                checked={false}
+                disabled
+                label="Take delegated work from other members"
+                onCheckedChange={() => undefined}
+              />
+            </SettingRow>
+          </div>
+        </SettingsSection>
+      )}
       {hubOn ? null : (
         <SettingsSection title="Join a hub">
           {linked !== undefined ? (
@@ -2457,6 +2528,7 @@ function readStatus(body: unknown): HubStatus | undefined {
   const signIn = readSignIn(field(body, "signIn"));
   const pairedMergeUnlock = field(body, "pairedMergeUnlock") === true;
   const ownerApprovalAnswerUnlock = field(body, "ownerApprovalAnswerUnlock") === true;
+  const delegationAccepting = field(field(body, "delegation"), "accepting");
   if (
     (membership === "member" || membership === "removed") &&
     typeof hubName === "string" &&
@@ -2488,6 +2560,7 @@ function readStatus(body: unknown): HubStatus | undefined {
       ...(directPush === undefined ? {} : { directPush }),
       ...(provision === undefined ? {} : { provision }),
       ...(signIn === undefined ? {} : { signIn }),
+      ...(typeof delegationAccepting === "boolean" ? { delegationAccepting } : {}),
       link: {
         membership,
         hubName,

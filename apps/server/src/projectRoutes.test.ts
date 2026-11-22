@@ -434,6 +434,15 @@ describe("Project routes", () => {
   });
   it.each([
     {
+      kind: "change-code-project-delegated-code",
+      delegatedCode: {
+        remoteName: "origin",
+        baseBranch: "main",
+        outcomeKind: "opened-pr",
+        confirmedAt: "2026-11-20T10:00:00.000Z",
+      },
+    },
+    {
       kind: "change-code-project-agent-pull-request-comments",
       agentPullRequestComments: "enabled",
     },
@@ -504,6 +513,15 @@ describe("Project routes", () => {
 
   it.each([
     { kind: "change-code-project-agent-merge", agentMerge: "enabled" },
+    {
+      kind: "change-code-project-delegated-code",
+      delegatedCode: {
+        remoteName: "origin",
+        baseBranch: "main",
+        outcomeKind: "opened-pr",
+        confirmedAt: "2026-11-20T10:00:00.000Z",
+      },
+    },
     {
       kind: "change-code-project-agent-pull-request-comments",
       agentPullRequestComments: "enabled",

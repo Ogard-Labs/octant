@@ -26,6 +26,7 @@ import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { DelegatedCodeSetting } from "./DelegatedCodeSetting";
 import { ProjectIcon, useProjectIconDetails, useProjectIconSource } from "./ProjectIcon";
 import { FolderPicker } from "./FolderPicker";
 import { ProjectMemorySection } from "./ProjectMemorySection";
@@ -146,6 +147,11 @@ export interface ProjectOverviewProps {
    * host accepts it only from a window on its own machine.
    */
   readonly onOwnToolchainChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  /** Marks the Project as taking delegated Code work from hub members; the host accepts it only from its own person. */
+  readonly onDelegatedCodeChange?: (
+    projectId: ProjectId,
+    delegatedCode: import("@octant/contracts/projects").CodeProjectDelegatedCode | undefined,
+  ) => Promise<boolean>;
   /** Absent when the host cannot accept the change; the switch is then not shown. */
   readonly onWorkDeveloperToolsChange?: (
     projectId: ProjectId,
@@ -815,6 +821,17 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 disabled={archived || connectionStale}
                 enabled={props.project.ownToolchain === "enabled"}
                 onChange={(enabled) => props.onOwnToolchainChange?.(props.project.id, enabled)}
+              />
+            ) : null}
+            {props.project.type === "code" && props.onDelegatedCodeChange !== undefined ? (
+              <DelegatedCodeSetting
+                key={`${String(props.project.id)}-delegated-code`}
+                delegatedCode={props.project.delegatedCode}
+                disabled={archived || connectionStale}
+                onChange={(delegatedCode) =>
+                  props.onDelegatedCodeChange?.(props.project.id, delegatedCode) ??
+                  Promise.resolve(false)
+                }
               />
             ) : null}
             {props.project.type === "code" && props.onDesktopRecipeChange !== undefined ? (
