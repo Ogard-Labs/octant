@@ -452,8 +452,17 @@ and `cancel: "running"`, `removal: delete`, with a resume window of 55 days.
 xAI would declare `cancel: "none"`, which puts the Stop line on the card.
 A model priced `per-clip` is offered only at the combinations of duration,
 resolution and audio it has a rate for, so the card never multiplies a flat
-fee by seconds. Its default is a whole combination that has a rate, the one
-nearest the declared defaults, not each field chosen on its own. The card and
+fee by seconds. A rate that omits `audio` applies to both audio choices, and
+a rate that names the chosen audio wins over it. The default is a whole
+combination that has a rate, never each field chosen on its own. Candidates are
+ranked by these rules, in order:
+
+1. the declared default resolution, else the lowest;
+2. the declared default audio, else audio off;
+3. the length nearest the declared default (or 8 s), with a tie going to the
+   shorter.
+
+The card and
 a call that skips the card use the same lookup. A call whose combination has
 no rate is refused before anything is reserved or sent.
 
