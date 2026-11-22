@@ -140,13 +140,13 @@ function fixedFramesPerSecond(property: unknown): number | undefined {
     jsonField(property, "maximum"),
   ].filter((value): value is number => typeof value === "number" && value > 0);
   const [first] = declared;
-  return first !== undefined && declared.every((value) => value === first)
-    ? first
-    : undefined;
+  return first !== undefined && declared.every((value) => value === first) ? first : undefined;
 }
 
 interface FalDuration {
-  readonly durations: { kind: "values"; values: ReadonlyArray<number> } | { kind: "range"; min: number; max: number };
+  readonly durations:
+    | { kind: "values"; values: ReadonlyArray<number> }
+    | { kind: "range"; min: number; max: number };
   readonly defaultDuration: number | undefined;
   readonly format: FalEndpoint["durationFormat"];
   readonly framesPerSecond: number | undefined;
@@ -209,9 +209,7 @@ function readFalDuration(properties: unknown): FalDuration | string {
   if (frameValues.length > 0) {
     const values = [
       ...new Set(
-        frameValues
-          .map(wholeSeconds)
-          .filter((seconds): seconds is number => seconds !== undefined),
+        frameValues.map(wholeSeconds).filter((seconds): seconds is number => seconds !== undefined),
       ),
     ].sort((a, b) => a - b);
     if (values.length === 0) {
@@ -307,8 +305,7 @@ export function readFalEndpoint(
         ? ("first_frame_url" as const)
         : undefined;
   const takesLastFrame = jsonField(properties, "last_frame_url") !== undefined;
-  const firstFrameRequired =
-    isRequired("image_url") || isRequired("first_frame_url");
+  const firstFrameRequired = isRequired("image_url") || isRequired("first_frame_url");
   const lastFrameRequired = isRequired("last_frame_url");
   const resolutions = resolutionValues.length > 0 ? resolutionValues : [MODEL_DEFAULT];
   const ratios = ratioValues.length > 0 ? ratioValues : [MODEL_DEFAULT];
@@ -398,11 +395,7 @@ export function falPrice(
     // only a single-resolution endpoint without an audio choice can take it;
     // anything else is unpublished and the dollar ceiling refuses it.
     const [first] = defaults.resolutions;
-    if (
-      first === undefined ||
-      defaults.resolutions.length > 1 ||
-      defaults.audioSelectable
-    ) {
+    if (first === undefined || defaults.resolutions.length > 1 || defaults.audioSelectable) {
       return { kind: "unpublished" };
     }
     return {
@@ -503,7 +496,13 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
         url.searchParams.set("endpoint_id", endpointId);
         const response = await ports.request({ url: url.toString(), method: "GET", auth: AUTH });
         if (!response.ok) {
-          failure = classifyVideoHttpFailure(response);
+          // A missing endpoint is a configuration problem for that endpoint,
+          // not an outage that hides the endpoints that do exist.
+          if (response.status === 404) {
+            reasons.push(`${endpointId}: fal has no endpoint by that id`);
+          } else {
+            failure = classifyVideoHttpFailure(response);
+          }
           continue;
         }
         const document = await readVideoJson(response);
@@ -536,7 +535,10 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
     // A profile whose endpoints all read cleanly but none can be offered is a
     // configuration problem, said aloud rather than offered as nothing.
     if (failure === undefined && endpoints.length === 0 && reasons.length > 0) {
-      failure = videoFailure("invalid-configuration", `No fal endpoint can be offered — ${reasons.join("; ")}.`);
+      failure = videoFailure(
+        "invalid-configuration",
+        `No fal endpoint can be offered — ${reasons.join("; ")}.`,
+      );
     }
     return failure === undefined ? { endpoints } : { endpoints, failure };
   };
@@ -645,11 +647,7 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
       const [status, result, cancel] = ["status_url", "response_url", "cancel_url"].map((name) =>
         jsonField(submitted, name),
       );
-      if (
-        typeof status === "string" &&
-        typeof result === "string" &&
-        typeof cancel === "string"
-      ) {
+      if (typeof status === "string" && typeof result === "string" && typeof cancel === "string") {
         rememberUrls(remoteId, { status, result, cancel });
       }
       return { status: "started", remoteId };

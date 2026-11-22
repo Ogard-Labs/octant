@@ -247,7 +247,12 @@ describe("fal video driver", () => {
                 properties: {
                   prompt: { type: "string" },
                   num_frames: { type: "integer", minimum: 17, maximum: 161, default: 81 },
-                  frames_per_second: { default: 16 },
+                  // Wan's live schema makes the rate selectable (4-60 or
+                  // null); the adapter pins its choice in the submit body.
+                  frames_per_second: {
+                    anyOf: [{ type: "integer", minimum: 4, maximum: 60 }, { type: "null" }],
+                    default: 16,
+                  },
                   resolution: {
                     type: "string",
                     enum: ["480p", "580p", "720p"],
@@ -399,6 +404,25 @@ describe("fal video driver", () => {
     ]);
   });
 
+  it("still offers the endpoints that exist when one configured id is gone", async () => {
+    const gone = decodeProviderModelId("fal-ai/no-such-model");
+    const adapter = falVideoDriver.create({
+      profile: { ...profile, modelIds: [veo, gone] },
+      ports: ports((request) => {
+        const url = new URL(request.url);
+        if (url.hostname === "fal.ai") {
+          const endpoint = url.searchParams.get("endpoint_id") ?? "";
+          if (endpoint === "fal-ai/no-such-model") return new Response(null, { status: 404 });
+          return Response.json(schema(endpoint, endpoint.endsWith("image-to-video")));
+        }
+        if (url.hostname === "api.fal.ai") return Response.json({ prices: [] });
+        return new Response(null, { status: 500 });
+      }).ports,
+    });
+    const models = await adapter.models();
+    expect(models.map((model) => model.modelId)).toEqual(["fal-ai/veo3.1"]);
+  });
+
   it("says why a profile offers nothing when no endpoint can be described", async () => {
     const still = decodeProviderModelId("fal-ai/minimax/video-01-live/image-to-video");
     const adapter = falVideoDriver.create({
@@ -449,17 +473,17 @@ describe("fal video driver", () => {
       if (url.pathname.endsWith("/status")) return Response.json({ status: "COMPLETED" });
       return Response.json({ video: { url: "http://169.254.169.254/latest/meta-data" } });
     });
-    const adapter = falVideoDriver.create({ profile, ports: {
-      ...recorder.ports,
-      fetchApprovedVideoUrl: async () => {
-        fetched += 1;
-        return { bytes: CONFORMANCE_MP4_BYTES };
+    const adapter = falVideoDriver.create({
+      profile,
+      ports: {
+        ...recorder.ports,
+        fetchApprovedVideoUrl: async () => {
+          fetched += 1;
+          return { bytes: CONFORMANCE_MP4_BYTES };
+        },
       },
-    } });
-    const polled = await adapter.poll(
-      `fal-ai/veo3.1#${requestId}`,
-      new AbortController().signal,
-    );
+    });
+    const polled = await adapter.poll(`fal-ai/veo3.1#${requestId}`, new AbortController().signal);
     expect(polled.status).toBe("failed");
     expect(fetched).toBe(0);
   });

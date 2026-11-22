@@ -154,10 +154,7 @@ async function start(
   const frame = request.firstFrame;
   // Runway takes JPEG, PNG or WebP prompt images; the shared reader accepts
   // more, so what Runway cannot use is refused before it is sent.
-  if (
-    frame !== undefined &&
-    !["image/jpeg", "image/png", "image/webp"].includes(frame.mediaType)
-  ) {
+  if (frame !== undefined && !["image/jpeg", "image/png", "image/webp"].includes(frame.mediaType)) {
     return {
       status: "failed",
       providerFailure: videoFailure(
