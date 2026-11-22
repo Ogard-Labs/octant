@@ -108,6 +108,10 @@ jobs:
           # The same, with the push capability on, so its config plugin runs.
           OCTANT_MOBILE_PUSH=1 EAS_BUILD_PROFILE=production bunx expo config --type introspect --json >/dev/null
       - run: bun run build --filter=!@octant/desktop --filter=!@octant/scripts
+      # Fails a change that grows the renderer's first load past the byte budget
+      # in scripts/initial-renderer-budget.json: main entry, initial CSS and
+      # initial gzip. A shrink should lower the recorded budget.
+      - run: bun run renderer:check
 
   # The macOS and Windows jobs that `checks` does not need also skip on a stack
   # layer whose base is not `main`: those runners cost several times a Linux

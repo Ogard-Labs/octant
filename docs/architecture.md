@@ -446,6 +446,20 @@ The renderer defers code and styles used only by workspaces such as Browser
 and Canvas until they open. Shared shell controls keep their styles in the
 initial load.
 
+The renderer's first load has a byte budget, recorded in
+`scripts/initial-renderer-budget.json` and enforced by `bun run renderer:check`
+in CI. The budget counts the static graph Vite loads for `index.html`: the main
+entry is at most 1,153,433 B (1.10 MiB), the initial CSS at most 665,600 B
+(650 KiB), and the initial JavaScript and CSS at most 1,335,769 B after gzip
+level 6. A change that grows any measure past its budget fails. A change that
+shrinks one lowers the recorded budget. Raising a budget is a maintainer
+decision. The gzip budget was re-baselined on 2026-11-22 to the measured
+startup head. The original 1.25 MiB target was set against an older main, and
+ordinary shared-code growth since then left it about 25 KB over, with no
+deferred surface left in the first load. The budgets are exact bytes with no
+headroom, because the same source measures identically on macOS and Linux
+with Bun 1.4.4.
+
 The sandbox restrictions notice and Settings share one poll per client and
 scope while the document is visible. A successful change publishes the host's
 snapshot immediately. An older in-flight read cannot replace it. The last
