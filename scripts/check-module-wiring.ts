@@ -146,6 +146,26 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "Image-seam conformance harness that image driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the image seam is retired.",
   ],
   [
+    "packages/provider-sdk/src/videoGenerationConformance.ts",
+    "Video-seam conformance harness that video driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the video seam is retired.",
+  ],
+  [
+    "apps/server/src/video/geminiVideoAdapter.ts",
+    "The Gemini API video driver, built and conformance-tested on the video seam before the host job service that runs it, which lands in the next layer of the same stack. Remove once the video job service registers it.",
+  ],
+  [
+    "packages/provider-sdk/src/videoGeneration.ts",
+    "The video seam, which the Gemini driver and the conformance harness build against before the host job service that grants its ports lands in the next layer of the same stack. Remove once the video job service imports it.",
+  ],
+  [
+    "packages/domain/src/videoGenerationPolicy.ts",
+    "The video option, default and pricing rules, which the video seam runs today and the host job service and card run from the next layer of the same stack. Remove once the video job service imports it.",
+  ],
+  [
+    "packages/contracts/src/videoGeneration.ts",
+    "The video capability and price contract the video seam and its drivers declare, read by the host job service and card from the next layer of the same stack. Remove once the video job service imports it.",
+  ],
+  [
     "packages/provider-sdk/src/cloudSessionConformance.ts",
     "Provider-cloud conformance harness that cloud driver tests run against synthetic HTTP; test scaffolding by intent, so reachable only from tests is its correct state. Remove once a product runner imports it or the cloud-session seam is retired.",
   ],

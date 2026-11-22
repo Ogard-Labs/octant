@@ -43,7 +43,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 5         | 3       | 2            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
-| [Providers](#providers)                                                               | 11        | 8       | 2            | 1                   |
+| [Providers](#providers)                                                               | 11        | 8       | 3            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 10        | 8       | 2            | 0                   |
 | [Native harness](#native-harness)                                                     | 7         | 5       | 2            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **296**   | **178** | **113**      | **5**               |
+| **All areas**                                                                         | **296**   | **178** | **114**      | **4**               |
 
 ## Principles and hard lines
 
@@ -1677,7 +1677,7 @@ Short video clips run as a journaled job through provider-neutral video driver p
 - Clips are stored beside generated images, exported and deleted with their thread, and the provider's copy is removed as soon as the clip is kept where the driver can; otherwise the card says how long the provider keeps it.
 - After a restart, a running job with a recorded provider id resumes within its declared resume window; one without settles at its estimate as interrupted.
 
-Status: Designed, not built. Since: 2026-11-22. Detail: [Video generation](video-generation.md).
+Status: Partly built. Since: 2026-11-22. Built: the video seam in `@octant/provider-sdk/video-generation` with its conformance harness, the declared-capability contract and pricing rules, and the Gemini API driver (Gemini Omni Flash). Not yet built: the host job service, the agent tool and card, the viewer and save, and the Runway and fal drivers. Detail: [Video generation](video-generation.md).
 
 ### Provider reach Octant no longer narrows
 

@@ -267,3 +267,9 @@ export function jsonField(value: unknown, ...path: ReadonlyArray<string>): unkno
   }
   return current;
 }
+
+/** Whether a rejection is already a provider failure a job can record. */
+export { isProviderFailure } from "./imageGeneration";
+
+/** The failure a video job may record: a decodable category and message, and nothing else. */
+export { sanitizeImageFailure as sanitizeVideoFailure } from "./imageGeneration";
