@@ -286,6 +286,9 @@ export interface VideoGenerationDriver {
    * states. A result still `running` means the stop is not yet confirmed: the
    * job service keeps polling until a terminal state or the job time runs
    * out, and only then settles, at the reported usage or else the estimate.
+   * At the deadline it calls `forget` whatever the state; a `forget` that
+   * fails is journaled and retried at every startup until Google confirms
+   * the interaction is gone, so a provider copy is never silently kept.
    */
   readonly cancel: (remoteId: string) => Promise<VideoAdapterPoll>;
   /** Removes the provider's stored copy; called after every terminal state. */
