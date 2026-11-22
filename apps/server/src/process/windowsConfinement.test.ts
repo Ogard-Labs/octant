@@ -79,7 +79,7 @@ describe("Windows confinement port", () => {
     ]);
   });
 
-  it("refuses a grant that already holds a browser store, since a deny cannot carve it out", () => {
+  it("refuses a grant that already holds a browser store by its category, with a way forward", () => {
     const port = windowsPort({
       [TOOL_BIN]: [
         { name: "profile", directory: true },
@@ -87,9 +87,12 @@ describe("Windows confinement port", () => {
       ],
       [`${TOOL_BIN}\\profile`]: [{ name: "Cookies", directory: false }],
     });
-    expect(
-      refusalOf(() => port.prepare({ ...launch, executable: `${TOOL_BIN}\\tool.exe` })),
-    ).toMatch(/holds .*profile\\Cookies/u);
+    const message = refusalOf(() =>
+      port.prepare({ ...launch, executable: `${TOOL_BIN}\\tool.exe` }),
+    );
+    expect(message).toMatch(/holds browser .*secret guard protects/iu);
+    expect(message).toMatch(/Choose a narrower clean folder or another host\./u);
+    expect(message).not.toMatch(/Cookies/u);
   });
 
   it("starts a grant whose store-folder walk finds nothing", () => {
