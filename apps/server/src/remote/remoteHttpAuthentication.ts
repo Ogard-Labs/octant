@@ -897,13 +897,15 @@ export function createRemoteHttpAuthentication(
 
 /**
  * Who asks for a port forward, from the host's own record of the device: a
- * device its person paired forwards any port, a device only the hub
+ * device its person paired at Full forwards any port, one they paired at
+ * Approve and steer forwards a thread's server, a device only the hub
  * introduced forwards a thread's server within the member's Act item, and an
- * agent grant forwards nothing.
+ * agent grant forwards nothing. A Read only device never reaches the proxy.
  */
 function forwardAsker(principal: RemoteClientPrincipal): RemotePortForwardAsker {
   if (isAgentGrantSession(principal)) return "agent-grant";
   if (principalActsAsHostPerson(principal)) return "host-person";
+  if (principalAccessLevel(principal) !== undefined) return "steering-device";
   return principalIsHubIntroduced(principal) ? "hub-introduced" : "agent-grant";
 }
 

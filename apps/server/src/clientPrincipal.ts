@@ -63,12 +63,14 @@ export function isAgentGrantSession(principal: ClientPrincipal): boolean {
  * this host's own person did not pair and that is no agent grant's. While this
  * host is in a hub, such a device acts only within the member's Act item. A
  * session that carries no pairing proof counts, so an unproved pairing is held
- * to the item too.
+ * to the item too. This is who let the device on, not what it may do: a
+ * device the person paired at a narrower level is not the person, but it is
+ * not the hub's either, so the hub's Act item never holds it.
  */
 export function principalIsHubIntroduced(principal: ClientPrincipal): boolean {
   return (
     principal.kind === "remote-device" &&
-    !principalActsAsHostPerson(principal) &&
+    principal.admittedBy !== "host-person" &&
     !isAgentGrantSession(principal)
   );
 }
