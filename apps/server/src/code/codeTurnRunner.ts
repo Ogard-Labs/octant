@@ -77,6 +77,7 @@ import {
   sanitizeLoopNoticeToolName,
   STREAMED_OUTPUT_TRUNCATION_MARKER,
 } from "../providers/turnBudget";
+import type { CredentialLaunchPosture } from "../providers/providerOwnChannels";
 
 export const MAX_CODE_TURN_EVENT_BYTES = 64 * 1024;
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
@@ -122,6 +123,12 @@ export interface CodeTurnFailure {
 export interface CodeProviderAcquireInput extends ProviderAcquireInput {
   readonly mode: "code";
   readonly permissionPersistence: PermissionPersistence;
+  /**
+   * The posture the session will start on, from the same values as its start
+   * options, for the host's kept-session credential check. Not a driver
+   * input: the host strips it before acquiring.
+   */
+  readonly credentialPosture: CredentialLaunchPosture;
 }
 
 export interface CodeProviderPort {
@@ -525,6 +532,19 @@ export class CodeTurnRunner {
         }),
       );
       const sandboxPolicy = sandboxTurn.selection;
+      // The session start's Strict value and kept sandbox, read once so the
+      // start below and the kept session's credential posture agree. The
+      // sandbox turn decides them, not the thread's own Strict value; absent
+      // `strict` on the start is Strict.
+      const startStrict =
+        sandboxTurn.strict === undefined
+          ? undefined
+          : sandboxTurn.legacy === true
+            ? false
+            : sandboxTurn.strict;
+      const startFullAccessSandbox =
+        (sandboxTurn.strict ?? input.thread.fullAccessSandbox) === true ||
+        sandboxPolicy !== undefined;
       const outsideContentMarks = input.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS;
       // An earlier turn's read that could not be marked is still in the
       // session this turn would resume.
@@ -548,6 +568,12 @@ export class CodeTurnRunner {
             ? {}
             : { serverPlacement: input.serverPlacement }),
           permissionPersistence: input.thread.permissionPersistence,
+          credentialPosture: {
+            strict: startStrict !== false,
+            executionPolicy: input.thread.executionPolicy,
+            fullAccessSandbox: startFullAccessSandbox,
+            sandboxPolicy: sandboxPolicy !== undefined,
+          },
         })
         .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
       input.liveTurn?.connect({
@@ -574,14 +600,9 @@ export class CodeTurnRunner {
           ? {}
           : { modelOptionValues: input.thread.modelOptionValues }),
         executionPolicy: input.thread.executionPolicy,
-        ...(sandboxTurn.strict !== undefined
-          ? { strict: sandboxTurn.legacy === true ? false : sandboxTurn.strict }
-          : {}),
+        ...(startStrict === undefined ? {} : { strict: startStrict }),
         ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),
-        ...((sandboxTurn.strict ?? input.thread.fullAccessSandbox) === true ||
-        sandboxPolicy !== undefined
-          ? { fullAccessSandbox: true }
-          : {}),
+        ...(startFullAccessSandbox ? { fullAccessSandbox: true } : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         ...(input.wakeups === undefined ? {} : { wakeups: input.wakeups }),
         // The host answers the runtime's own asks to plan or to leave Plan.

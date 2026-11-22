@@ -3,12 +3,12 @@ import type { ProviderOwnChannels } from "@octant/provider-sdk";
 import { Effect, type Scope } from "effect";
 
 import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
-import { providerHostEnvironment } from "./providerHostEnvironment";
 import {
   ISOLATED_CLAUDE_LAUNCH_GUARDS,
   ensureClaudeAccountConfigDirectory,
   hostDisableOnlySwitches,
   isolatedClaudeAccountEnvironment,
+  openClaudeHostEnvironment,
   openClaudeLaunchGuards,
   openLaunchTelemetryOptOut,
 } from "./claudeAccountIsolation";
@@ -132,7 +132,7 @@ export function sanitizeClaudeEnvironment(
     // host's Claude account directories, with the telemetry and self-update
     // guards the person's provider switches keep.
     return {
-      ...providerHostEnvironment(hostEnvironment),
+      ...openClaudeHostEnvironment(hostEnvironment, overrides.ownChannels),
       ...packagedSmokeObserverEnvironment(hostEnvironment),
       ...openLaunchTelemetryOptOut(hostEnvironment, overrides.ownChannels),
       ...openClaudeLaunchGuards(launchOwnChannels(false, overrides.ownChannels)),

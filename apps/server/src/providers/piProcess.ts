@@ -476,15 +476,12 @@ export function sanitizePiEnvironment(
   if (!strict) {
     // The thread's own provider's variables are its own; Pi's account home
     // stays Octant's, so the account it signs in as stays the thread's.
+    const chosen = launchOwnChannels(false, ownChannels);
     return {
-      ...providerHostEnvironment(host, credentials),
+      ...providerHostEnvironment(host, credentials, chosen.credentialPassThrough),
       HOME: piHome,
       PI_CODING_AGENT_DIR: piHome,
-      ...guardsForOwnChannels(
-        PI_GUARDS,
-        PI_CHANNEL_GUARD_NAMES,
-        launchOwnChannels(false, ownChannels),
-      ),
+      ...guardsForOwnChannels(PI_GUARDS, PI_CHANNEL_GUARD_NAMES, chosen),
       OCTANT_PI_APPROVALS: approvals,
       NO_COLOR: "1",
     };

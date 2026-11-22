@@ -107,6 +107,7 @@ const settings = {
   backgroundSessionIdleLimitMinutes: 120,
   providerTelemetry: false,
   providerSelfUpdate: false,
+  providerCredentialPassThrough: {},
   threadWakeupsWaitingLimit: 8,
   threadWakeupsRunMissedOnReturn: false,
   messageWakesPerHour: 30,

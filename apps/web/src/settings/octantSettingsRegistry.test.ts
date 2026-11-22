@@ -305,6 +305,8 @@ describe("octantSettingsRegistry", () => {
       "background-session-idle-limit",
       "provider-own-telemetry",
       "provider-self-update",
+      "provider-credential-pass-through",
+      "provider-credential-pass-through-add",
       "opencode-managed-update",
       "provider-display-name",
       "provider-binary-path",

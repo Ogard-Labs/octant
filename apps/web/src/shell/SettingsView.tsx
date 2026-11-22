@@ -136,6 +136,7 @@ import { PersonMemorySettings } from "../settings/PersonMemorySettings";
 import { TodoListHostSettings } from "../todos/TodoListHostSettings";
 import { ProtectedFilesSettings } from "../settings/ProtectedFilesSettings";
 import { BlockedToolsSettings } from "../settings/BlockedToolsSettings";
+import { ProviderCredentialPassThroughSettings } from "../settings/ProviderCredentialPassThroughSettings";
 import { ArchivedWorktreesSettings } from "../settings/ArchivedWorktreesSettings";
 import { HostWorktreesSettings } from "../settings/HostWorktreesSettings";
 import { XcodeBuildDataSettings } from "../settings/XcodeBuildDataSettings";
@@ -1349,6 +1350,11 @@ function ActiveSectionContent({
                 </SettingRow>
               </div>
             </SettingsSection>
+            <ProviderCredentialPassThroughSettings
+              focusedSetting={focusedSetting}
+              onChange={(next) => props.onSettingsChange({ providerCredentialPassThrough: next })}
+              value={props.settings.providerCredentialPassThrough}
+            />
           </div>
           <ProviderCatalogSection
             discoveryController={props.discoveryController}

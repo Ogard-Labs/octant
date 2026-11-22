@@ -47,6 +47,7 @@ import type {
   ProviderCompactionPoint,
   ProviderConnection,
   ProviderDriver,
+  ProviderOwnChannels,
   ProviderSessionCompaction,
   ProviderSessionForkRequest,
   ProviderSessionOwnership,
@@ -746,10 +747,11 @@ export interface CodexDriverOptions {
   readonly environment?: NodeJS.ProcessEnv;
   /**
    * The account's launch environment outside Strict: the host's, less
-   * Octant's variables and other providers' keys. Absent, a lease outside
-   * Strict takes `environment`.
+   * Octant's variables, other providers' keys and the unrelated credentials
+   * the person did not let through (the names given). Absent, a lease
+   * outside Strict takes `environment`.
    */
-  readonly openEnvironment?: NodeJS.ProcessEnv;
+  readonly openEnvironment?: (credentialPassThrough: ReadonlyArray<string>) => NodeJS.ProcessEnv;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly correlationId?: () => string;
   readonly requestId?: () => string;
@@ -2244,6 +2246,11 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             keepsOwnMemory(executionPolicy, strict) ? "+own-memory" : ""
           }${strict ? "" : "+not-strict"}`,
           ...(fullAccessSandbox ? ["+sandbox"] : []),
+          // A process launched with other host credentials let through is
+          // not reused for this list.
+          ...(posture.credentialPassThrough.length === 0
+            ? []
+            : [{ credentialPassThrough: posture.credentialPassThrough }]),
           {
             strict: strict ?? "legacy",
             ...(windowsConfined ? { windowsStrictNonce } : {}),
@@ -2279,6 +2286,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             leaseKey(posture),
             windowsConfined ? 0 : undefined,
             serverPlacement,
+            posture.credentialPassThrough,
           );
           // Turn starts probe first, but not every caller does (compaction,
           // summaries, agent runs), so the session itself refuses too. Only
@@ -2366,6 +2374,11 @@ interface CodexLeasePosture {
   readonly strict: boolean;
   /** True only when the caller explicitly requested canonical Strict. */
   readonly explicitStrict: boolean;
+  /**
+   * The host credentials the person lets through to Codex outside Strict,
+   * sorted; empty under Strict. A process keeps the list it launched with.
+   */
+  readonly credentialPassThrough: ReadonlyArray<string>;
 }
 
 function codexLeasePosture(input: {
@@ -2373,13 +2386,18 @@ function codexLeasePosture(input: {
   readonly nativeSetup?: ProviderNativeSetup;
   readonly fullAccessSandbox?: boolean;
   readonly strict?: boolean;
+  readonly ownChannels?: ProviderOwnChannels;
 }): CodexLeasePosture {
+  const strict = input.strict !== false;
   return {
     executionPolicy: input.executionPolicy,
     ownSubagents: codexRunsOwnSubagents(input),
     fullAccessSandbox: input.fullAccessSandbox === true,
-    strict: input.strict !== false,
+    strict,
     explicitStrict: input.strict === true,
+    credentialPassThrough: strict
+      ? []
+      : [...new Set(input.ownChannels?.credentialPassThrough ?? [])].sort(),
   };
 }
 
@@ -2428,6 +2446,7 @@ function acquireRuntime(
   lease?: string,
   idleMs?: number,
   server?: ProviderServerPlacement,
+  credentialPassThrough: ReadonlyArray<string> = [],
 ) {
   return options.runtimeRegistry.acquireRuntime<CodexLeasedRuntime>(options.instanceId, {
     idleMs:
@@ -2447,6 +2466,7 @@ function acquireRuntime(
             ? await resolveCodexLaunchEnvironment(
                 options,
                 !(authority.kind === "thread" && authority.strict === false),
+                credentialPassThrough,
               )
             : undefined;
         const processExit = await Effect.runPromiseExit(
@@ -3002,7 +3022,7 @@ function makeConnection(
     }): CodexPermissionProfile | undefined => {
       const launchEnvironment =
         input.strict === false
-          ? (options.openEnvironment ?? options.environment)
+          ? (options.openEnvironment?.([]) ?? options.environment)
           : options.environment;
       // This host's sign-in paths name nothing on a server; there the list
       // was resolved for the server's login when Codex started on it.
@@ -4638,8 +4658,11 @@ function stateForMessage(
 async function resolveCodexLaunchEnvironment(
   options: CodexDriverOptions,
   strict = true,
+  credentialPassThrough: ReadonlyArray<string> = [],
 ): Promise<NodeJS.ProcessEnv | undefined> {
-  const base = strict ? options.environment : (options.openEnvironment ?? options.environment);
+  const base = strict
+    ? options.environment
+    : (options.openEnvironment?.(credentialPassThrough) ?? options.environment);
   if (options.credentialResolver === undefined) return base;
   try {
     if (!(await options.credentialResolver.has(String(options.instanceId)))) return base;

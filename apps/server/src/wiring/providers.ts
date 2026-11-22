@@ -328,8 +328,14 @@ export interface ConfiguredProviderDriverOptions {
   readonly planMcpServers?: (provider: McpPlanServerProvider) => ReadonlyArray<string>;
   /** The tools the person blocked for a provider in Settings, read at each launch. */
   readonly blockedTools?: (provider: BlockableToolProvider) => ReadonlyArray<string>;
-  /** The person's provider telemetry and self-update switches, read at each launch. */
-  readonly providerOwnChannels?: () => ProviderOwnChannels;
+  /**
+   * The person's provider telemetry and self-update switches, and the host
+   * credentials they let through to a provider of this driver kind, read at
+   * each launch.
+   */
+  readonly providerOwnChannels?: (
+    driverKind: ProviderInstance["driverKind"],
+  ) => ProviderOwnChannels;
   /** Whether the host enforces Strict; read on Claude probes so Bedrock/custom routing works outside Strict. */
   readonly hostStrict?: () => boolean;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
@@ -605,11 +611,12 @@ export function makeConfiguredProviderDriver(
   if (blockedTools !== undefined && blockable !== undefined) {
     driver = withBlockedTools(driver, () => blockedTools(blockable));
   }
-  // The person's telemetry and self-update switches ride on every launch;
-  // each driver applies them only outside Strict.
+  // The person's telemetry and self-update switches, and the credentials
+  // they let through to this provider, ride on every launch; each driver
+  // applies them only outside Strict.
   const ownChannels = options.providerOwnChannels;
   if (ownChannels !== undefined) {
-    driver = withProviderOwnChannels(driver, ownChannels);
+    driver = withProviderOwnChannels(driver, () => ownChannels(instance.driverKind));
   }
   // Redaction comes first, so every consumer of the stream, the usage tap
   // included, reads the redacted events.
@@ -826,9 +833,10 @@ export function wireProviders(deps: ProvidersDependencies) {
     });
     const blockedTools = (provider: BlockableToolProvider) =>
       blockedToolsService.toolsFor(provider);
-    const providerOwnChannels = () =>
+    const providerOwnChannels = (driverKind: ProviderInstance["driverKind"]) =>
       providerOwnChannelsFromSettings(
         persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+        driverKind,
       );
     // What each provider-owned session already holds outlives this process, as
     // the runtime's own history does, so a resumed session's first turn after

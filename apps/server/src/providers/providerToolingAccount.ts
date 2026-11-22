@@ -3,7 +3,8 @@ import type { ProviderInstance, ProviderToolingProvider } from "@octant/contract
 import { accountRunsAsItself, effectiveClaudeAccountConfigDirectory } from "@octant/domain";
 import { isolatedClaudeAccountEnvironment } from "./claudeAccountIsolation";
 import { codexAccountProcessEnvironment } from "./codexProcess";
-import { effectiveCodexAccountHome } from "./providerDriverFactory";
+import { effectiveCodexAccountHome, openCodexAccountEnvironment } from "./providerDriverFactory";
+import { DEFAULT_PROVIDER_OWN_CHANNELS } from "./providerOwnChannels";
 
 export interface ProviderToolingAccount {
   readonly provider: ProviderToolingProvider;
@@ -29,6 +30,8 @@ export function resolveProviderToolingAccount(
   homeDirectory: string,
   /** Whether the launch it mirrors is Strict; tooling commands always are. */
   strict = true,
+  /** Host credentials the person lets through to this provider; read only outside Strict. */
+  credentialPassThrough: ReadonlyArray<string> = [],
 ): ProviderToolingAccount | undefined {
   if (instance.driverKind === "claude") {
     const directory =
@@ -39,6 +42,10 @@ export function resolveProviderToolingAccount(
       configDirectory: directory ?? "/",
       authentication: instance.configuration.authentication,
       strict,
+      // The provider's channels stay closed here, as before this list existed.
+      ...(credentialPassThrough.length === 0
+        ? {}
+        : { ownChannels: { ...DEFAULT_PROVIDER_OWN_CHANNELS, credentialPassThrough } }),
     });
     if (directory === undefined) {
       // The account uses Claude's own default folder; leave both variables unset
@@ -61,12 +68,18 @@ export function resolveProviderToolingAccount(
     return {
       provider: "codex",
       binary: instance.configuration.binaryPath,
-      environment: codexAccountProcessEnvironment({
-        binaryPath: instance.configuration.binaryPath,
-        hostEnvironment,
-        codexHome: directory,
-        ...(strict ? {} : { strict: false as const }),
-      }),
+      environment: strict
+        ? codexAccountProcessEnvironment({
+            binaryPath: instance.configuration.binaryPath,
+            hostEnvironment,
+            codexHome: directory,
+          })
+        : openCodexAccountEnvironment({
+            binaryPath: instance.configuration.binaryPath,
+            hostEnvironment,
+            codexHome: directory,
+            credentialPassThrough,
+          }),
       shownEnvironment: [{ name: "CODEX_HOME", value: directory }],
       directory,
       runsAsItself: accountRunsAsItself(instance),

@@ -27,6 +27,7 @@ import {
   hostCodexHomeOverlayIsRelative,
 } from "./providerService";
 import { codexAccountProcessEnvironment } from "./codexProcess";
+import { codexConfiguresBedrock } from "./codexProviderCredential";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
 import { makeClaudeDriver, type ClaudeResumeIdentityPort } from "./claudeDriver";
 import { readClaudeGitIdentity } from "./claudeGitIdentity";
@@ -278,13 +279,14 @@ export function makeProviderDriver(
         runtimeRegistry: options.runtimeRegistry,
         permissionPersistence: options.permissionPersistence,
         environment: codexEnvironment,
-        openEnvironment: codexAccountProcessEnvironment({
-          binaryPath: instance.configuration.binaryPath,
-          hostEnvironment,
-          codexHome,
-          ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
-          strict: false,
-        }),
+        openEnvironment: (credentialPassThrough) =>
+          openCodexAccountEnvironment({
+            binaryPath: instance.configuration.binaryPath,
+            hostEnvironment,
+            codexHome,
+            ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
+            credentialPassThrough,
+          }),
         ...(options.credentialResolver === undefined
           ? {}
           : { credentialResolver: options.credentialResolver }),
@@ -472,6 +474,30 @@ export function makeProviderDriver(
     default:
       throw new ProviderDriverConfigurationError();
   }
+}
+
+/**
+ * A Codex account's launch environment outside Strict, for its turns and its
+ * provider terminal alike. Whether the account signs in to Amazon Bedrock is
+ * read from its `config.toml` at each call, so an account moved onto Bedrock
+ * gets the host's AWS credentials from its next process and one moved off it
+ * loses them.
+ */
+export function openCodexAccountEnvironment(input: {
+  readonly binaryPath: string;
+  readonly hostEnvironment: NodeJS.ProcessEnv;
+  readonly codexHome: string;
+  readonly inheritHostAuth?: true;
+  readonly credentialPassThrough: ReadonlyArray<string>;
+}): NodeJS.ProcessEnv {
+  return codexAccountProcessEnvironment({
+    ...input,
+    strict: false,
+    signsInToBedrock: codexConfiguresBedrock({
+      ...input.hostEnvironment,
+      CODEX_HOME: input.codexHome,
+    }),
+  });
 }
 
 /**

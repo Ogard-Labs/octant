@@ -7,7 +7,15 @@ import type {
   ProviderSessionResume,
   ProviderSessionStart,
 } from "@octant/provider-sdk/driver";
+import type { CredentialLaunchPosture } from "./providerOwnChannels";
 import { Effect, Exit, Scope } from "effect";
+
+const STRICT_POSTURE: CredentialLaunchPosture = {
+  strict: true,
+  executionPolicy: "approval-gated",
+  fullAccessSandbox: false,
+  sandboxPolicy: false,
+};
 
 /**
  * Keeps a thread's provider session past the turn that opened it while its
@@ -52,6 +60,17 @@ export interface OutlivingSessionsOptions {
    */
   readonly currentTerms?: (key: string) => string | undefined;
   /**
+   * The host credentials a launch for this thread's provider, on this
+   * posture, would let through now (Settings › Providers & Models ›
+   * Credentials let through), as one comparable string: empty for a posture
+   * whose launch discards the list, such as Strict. A running process cannot
+   * drop a variable it was started with, so a kept session launched with
+   * other grants is never reused: the next turn opens a fresh one, and
+   * {@link OutlivingSessions.stopSessionsWithChangedCredentials} stops an
+   * idle one. A session whose grants did not change keeps running.
+   */
+  readonly launchCredentials?: (key: string, posture: CredentialLaunchPosture) => string;
+  /**
    * How long a session whose last task just ended waits for the runtime's
    * own follow-up turn before it is stopped as idle.
    */
@@ -89,6 +108,10 @@ interface Kept {
   readonly acquiredFor: string;
   /** The thread's terms (see {@link OutlivingSessionsOptions.currentTerms}) its last turn ran on. */
   terms?: string | undefined;
+  /** The posture its connection was launched on, which decides its grants. */
+  readonly posture: CredentialLaunchPosture;
+  /** The grants its connection was launched with (see {@link OutlivingSessionsOptions.launchCredentials}). */
+  readonly credentials: string | undefined;
   session?:
     | {
         readonly sessionId: ProviderSessionId;
@@ -132,6 +155,8 @@ export class OutlivingSessions {
     acquiredFor: string,
     open: Effect.Effect<ProviderConnection, ProviderFailure, R | Scope.Scope>,
     terms?: string,
+    /** The launch's posture; absent is Strict, whose grants never change. */
+    posture: CredentialLaunchPosture = STRICT_POSTURE,
   ): Effect.Effect<ProviderConnection, ProviderFailure, Exclude<R, Scope.Scope> | Scope.Scope> {
     return Effect.gen(this, function* () {
       if (this.#closed) {
@@ -156,7 +181,11 @@ export class OutlivingSessions {
         });
       }
       let kept = existing;
-      if (kept !== undefined && kept.acquiredFor !== acquiredFor) {
+      const credentials = this.#options.launchCredentials?.(key, posture);
+      if (
+        kept !== undefined &&
+        (kept.acquiredFor !== acquiredFor || kept.credentials !== credentials)
+      ) {
         yield* Effect.promise(() => this.#dispose(existing as Kept));
         kept = undefined;
       }
@@ -165,7 +194,16 @@ export class OutlivingSessions {
         const connection = yield* Scope.extend(open, scope).pipe(
           Effect.tapError(() => Scope.close(scope, Exit.void)),
         ) as Effect.Effect<ProviderConnection, ProviderFailure, Exclude<R, Scope.Scope>>;
-        kept = { key, connection, scope, acquiredFor, leased: false, runtimeTurnRequested: false };
+        kept = {
+          key,
+          connection,
+          scope,
+          acquiredFor,
+          posture,
+          credentials,
+          leased: false,
+          runtimeTurnRequested: false,
+        };
         this.#kept.set(key, kept);
       }
       const leased = kept;
@@ -250,7 +288,27 @@ export class OutlivingSessions {
     clearTimers(kept);
   }
 
+  /**
+   * The person changed which credentials a provider is let through: every
+   * idle kept session launched with another list is stopped, so a variable
+   * taken back does not stay in a running agent. A turn holding its session
+   * settles it when it ends.
+   */
+  async stopSessionsWithChangedCredentials(): Promise<void> {
+    await Promise.all(
+      [...this.#kept.values()]
+        .filter((kept) => !kept.leased && !this.#credentialsCurrent(kept))
+        .map((kept) => this.#dispose(kept)),
+    );
+  }
+
+  #credentialsCurrent(kept: Kept): boolean {
+    const current = this.#options.launchCredentials;
+    return current === undefined || current(kept.key, kept.posture) === kept.credentials;
+  }
+
   #termsCurrent(kept: Kept): boolean {
+    if (!this.#credentialsCurrent(kept)) return false;
     const current = this.#options.currentTerms;
     if (current === undefined) return true;
     const terms = current(kept.key);

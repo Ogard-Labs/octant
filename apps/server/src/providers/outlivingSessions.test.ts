@@ -11,6 +11,7 @@ import type {
   ProviderSessionStart,
 } from "@octant/provider-sdk/driver";
 import { OutlivingSessions } from "./outlivingSessions";
+import { launchCredentialsKey, type CredentialLaunchPosture } from "./providerOwnChannels";
 
 const sessionId = decodeProviderSessionId("94000000-0000-4000-8000-000000000001");
 const otherSessionId = decodeProviderSessionId("94000000-0000-4000-8000-000000000002");
@@ -90,6 +91,20 @@ function fakeRuntime() {
   };
 }
 
+const OPEN: CredentialLaunchPosture = {
+  strict: false,
+  executionPolicy: "approval-gated",
+  fullAccessSandbox: false,
+  sandboxPolicy: false,
+};
+const STRICT: CredentialLaunchPosture = { ...OPEN, strict: true };
+
+/** The keeper's credential fingerprint as the host builds it, for a Claude Code thread. */
+function settingsCredentials(names: () => ReadonlyArray<string>) {
+  return (_key: string, posture: CredentialLaunchPosture) =>
+    launchCredentialsKey({ providerCredentialPassThrough: { claude: names() } }, "claude", posture);
+}
+
 /** Runs one turn: acquire, start, let `during` act, then the runner's own stop. */
 async function turn(
   keeper: OutlivingSessions,
@@ -97,10 +112,11 @@ async function turn(
   during: (connection: ProviderConnection) => void = () => undefined,
   input: ProviderSessionStart = start(),
   terms?: string,
+  posture?: CredentialLaunchPosture,
 ) {
   const scope = Effect.runSync(Scope.make());
   const connection = await Effect.runPromise(
-    Scope.extend(keeper.acquire(key, "same-folder", runtime.open, terms), scope),
+    Scope.extend(keeper.acquire(key, "same-folder", runtime.open, terms, posture), scope),
   );
   await Effect.runPromise(connection.start(input));
   during(connection);
@@ -294,6 +310,83 @@ describe("OutlivingSessions", () => {
       "full-access",
     );
     expect(runtime.stopped).toEqual([sessionId]);
+  });
+
+  it("a kept session is relaunched when its provider's credential list changes", async () => {
+    const runtime = fakeRuntime();
+    let names = ["GH_TOKEN"];
+    const keeper = keeperFor({ launchCredentials: settingsCredentials(() => names) });
+    await turn(
+      keeper,
+      runtime,
+      () => runtime.report({ tasks: [{ taskId: "dev" }] }),
+      start(),
+      undefined,
+      OPEN,
+    );
+    expect(runtime.stopped).toEqual([]);
+    // The person takes GH_TOKEN back: the next turn gets a fresh launch, not
+    // the kept session that still holds the token.
+    names = [];
+    await turn(
+      keeper,
+      runtime,
+      () => runtime.report({ tasks: [{ taskId: "dev" }] }),
+      start(),
+      undefined,
+      OPEN,
+    );
+    expect(runtime.stopped[0]).toBe(sessionId);
+    expect(runtime.counts().opened).toBe(2);
+    expect(runtime.started).toHaveLength(2);
+  });
+
+  it("stops an idle kept session once its provider's credential list changes", async () => {
+    const runtime = fakeRuntime();
+    let names = ["GH_TOKEN"];
+    const keeper = keeperFor({ launchCredentials: settingsCredentials(() => names) });
+    await turn(
+      keeper,
+      runtime,
+      () => runtime.report({ tasks: [{ taskId: "dev" }] }),
+      start(),
+      undefined,
+      OPEN,
+    );
+    await keeper.stopSessionsWithChangedCredentials();
+    expect(runtime.stopped).toEqual([]);
+    names = [];
+    await keeper.stopSessionsWithChangedCredentials();
+    expect(runtime.stopped).toEqual([sessionId]);
+    expect(keeper.liveTasks(key)).toBeUndefined();
+  });
+
+  it("editing a provider's credential list leaves a kept Strict session and its background work running", async () => {
+    for (const posture of [
+      STRICT,
+      // Claude Code drops the list for a thread that keeps its sandbox too.
+      { ...OPEN, executionPolicy: "full-access" as const, fullAccessSandbox: true },
+    ]) {
+      const runtime = fakeRuntime();
+      let names = ["GH_TOKEN"];
+      const keeper = keeperFor({ launchCredentials: settingsCredentials(() => names) });
+      await turn(
+        keeper,
+        runtime,
+        () => runtime.report({ tasks: [{ taskId: "dev", description: "bun run dev" }] }),
+        start(),
+        undefined,
+        posture,
+      );
+      names = [];
+      await keeper.stopSessionsWithChangedCredentials();
+      expect(runtime.stopped, JSON.stringify(posture)).toEqual([]);
+      expect(keeper.liveTasks(key)?.tasks).toEqual([{ taskId: "dev", description: "bun run dev" }]);
+      // The next turn on the same posture reuses it rather than relaunching.
+      await turn(keeper, runtime, () => undefined, start(), undefined, posture);
+      expect(runtime.counts().opened).toBe(1);
+      await keeper.close();
+    }
   });
 
   it("refuses a second turn while another holds the thread's session", async () => {
