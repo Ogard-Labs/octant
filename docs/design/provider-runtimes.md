@@ -3098,8 +3098,9 @@ that declaration, never by the profile id:
   slot, its fallback or its pool route, as `effectiveAgentRunExecutionTarget`
   reads the routing receipt) is the one checked when the child starts or
   resumes.
-- **Helper runs** (`refusesHelperRuns`). Antigravity is never a helper
-  target: the target list names it unavailable as `helper-runs-refused`, so an
+- **Helper runs** (`refusesHelperRuns`). Antigravity on the personal sign-in
+  is never a helper target (for the other sign-ins see "Which sign-ins they
+  bind", below): the target list names it unavailable as `helper-runs-refused`, so an
   explicit target, a role slot and a follow-up on it are refused, and a child
   that would start or resume on it is refused at launch. A thread running on
   Antigravity starts no helper on any provider, here or on another hub member,
@@ -3173,6 +3174,19 @@ that declaration, never by the profile id:
   (`personalSignInRefusals` reads the instance's configured sign-in). The
   check reads the instance as each turn is admitted, so switching an
   instance back to the personal sign-in refuses its next unattended run.
+  As a helper target, the outcome by sign-in is:
+  - **Gemini API key:** an ordinary target.
+  - **Agent Platform:** not a target. A helper child always launches under
+    Strict, since nothing passes it the parent's Strict setting, and under
+    Strict it cannot read the Application Default Credentials (below). So
+    the target list names it unavailable as `helper-runs-refused`, with the
+    sentence "Google Antigravity can't run as a helper on Agent Platform:
+    helpers launch under Strict, which doesn't let it read your Application
+    Default Credentials. Use a Gemini API key account for helper work."
+    A child that would start or resume on it is refused with that sentence
+    (`helperRunRefusalOf`). This holds even though its Check connection
+    reads the file and reports Ready.
+  - **A thread on either sign-in:** may start helpers on other providers.
 
 - **No sandbox in Work and Code outside Strict.** There the CLI starts as the
   person's own terminal would start it, at every level: no Octant sandbox, no
@@ -3199,7 +3213,9 @@ that declaration, never by the profile id:
   `www.googleapis.com`, `accounts.google.com`, `antigravity.google`), and the
   Gemini API and Agent Platform services an API-key or Agent Platform
   instance calls instead (`generativelanguage.googleapis.com`,
-  `aiplatform.googleapis.com`, each with its subdomains).
+  `aiplatform.googleapis.com`, each with its subdomains, and for Agent
+  Platform the one regional host of its configured location, such as
+  `us-central1-aiplatform.googleapis.com`).
 - **Strict and credentials.** Strict does for Antigravity's credentials what
   it did before the sign-in choice: the launch keeps the narrow keychain read
   for the personal sign-in and gains no other credential read. A Gemini API

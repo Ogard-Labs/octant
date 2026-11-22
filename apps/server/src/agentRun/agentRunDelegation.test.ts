@@ -8,7 +8,11 @@ import {
 } from "@octant/contracts";
 import { isProviderAllowedByProjectPolicy } from "@octant/domain";
 import { describe, expect, it } from "vitest";
-import { agentRunEligibleTargets, agentRunTargetAvailability } from "./agentRunDelegation";
+import {
+  agentRunEligibleTargets,
+  agentRunTargetAvailability,
+  helperRunRefusalOf,
+} from "./agentRunDelegation";
 
 const timestamp = "2026-07-14T09:00:00.000Z";
 const binding = { canonicalRoot: "/Users/example/Atlas" } as const;
@@ -269,6 +273,50 @@ describe("agentRunTargetAvailability", () => {
         reason: "helper-runs-refused",
       },
     ]);
+  });
+
+  it("an Agent Platform account a helper would launch under Strict is not offered as a helper target, and a helper start on it is refused by name", () => {
+    const agentPlatform = {
+      ...runtime("80000000-0000-4000-8000-000000000026", "Antigravity Cloud", "acp"),
+      driverKind: "antigravity",
+      configuration: {
+        kind: "antigravity-acp",
+        binaryPath: "/opt/homebrew/bin/agy",
+        authentication: "agent-platform",
+        googleCloud: { project: "octant-example-1", location: "us-central1" },
+      },
+    };
+    const availability = agentRunTargetAvailability({
+      project: undefined,
+      instances: [agentPlatform] as never,
+      // Check connection reads the credentials file, so the account is Ready.
+      observedState: () => ({
+        readiness: "ready",
+        models: [model("m")],
+        capabilities: { appManagedTools: "supported" },
+      }),
+      isTargetAllowed: () => true,
+    });
+    const refusal =
+      "Google Antigravity can't run as a helper on Agent Platform: helpers launch under Strict, which doesn't let it read your Application Default Credentials. Use a Gemini API key account for helper work.";
+    expect(availability.targets).toEqual([]);
+    expect(availability.unavailable).toEqual([
+      {
+        providerInstanceId: agentPlatform.id,
+        displayName: "Antigravity Cloud",
+        driverKind: "antigravity",
+        reason: "helper-runs-refused",
+        message: refusal,
+      },
+    ]);
+    // The same sentence refuses a child's start or resume on that account.
+    expect(helperRunRefusalOf(agentPlatform as never)).toBe(refusal);
+    expect(
+      helperRunRefusalOf({
+        driverKind: "antigravity",
+        configuration: { kind: "antigravity-acp", binaryPath: "/b/agy", authentication: "api-key" },
+      }),
+    ).toBeUndefined();
   });
 
   it("offers an Antigravity instance signed in with a Gemini API key as a helper target", () => {
