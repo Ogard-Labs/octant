@@ -1006,8 +1006,17 @@ export class VideoJobService {
         break;
       }
       case "refused":
+        // Most providers bill nothing for a refusal; one that reports a
+        // charge (Runway keeps input-safety credits) settles at that charge.
         this.#finish(current, "failed", {
           safetyRefusal: answer.safetyRefusal,
+          ...(answer.usage?.costUsdMicros === undefined
+            ? {}
+            : {
+                settledCostUsdMicros: Math.max(0, Math.round(answer.usage.costUsdMicros)),
+                billed: true,
+                usage: answer.usage,
+              }),
         });
         break;
       case "failed":

@@ -258,6 +258,16 @@ describe("video generation policy", () => {
     );
   });
 
+  it("settles at a cost the provider reports, and a single-rate clip from its billed seconds", () => {
+    const perSecond = {
+      kind: "per-second" as const,
+      rates: [{ resolution: "720p", usdMicrosPerSecond: 120_000 }] as const,
+    };
+    expect(settleVideoCostUsdMicros(perSecond, 600_000, { costUsdMicros: 480_000 })).toBe(480_000);
+    expect(settleVideoCostUsdMicros(perSecond, 600_000, { billedSeconds: 4 })).toBe(480_000);
+    expect(settleVideoCostUsdMicros(omni.price, 696_540, { costUsdMicros: 100 })).toBe(100);
+  });
+
   it("treats an unpublished price as unknown spend", () => {
     expect(
       estimateVideoCost(

@@ -27,6 +27,8 @@ export interface VideoUsage {
   readonly inputTokens?: number;
   readonly outputTokens?: number;
   readonly billedSeconds?: number;
+  /** The amount the provider says it charged, in US micro-dollars, where it reports one. */
+  readonly costUsdMicros?: number;
 }
 
 /** Every whole second the model accepts for these frames, ascending. */
@@ -311,6 +313,16 @@ export function settleVideoCostUsdMicros(
   input: { readonly imageCount: number },
 ): number {
   if (usage === undefined) return estimateUsdMicros;
+  // A cost the provider reports is what the person was billed.
+  if (usage.costUsdMicros !== undefined) return Math.max(0, Math.round(usage.costUsdMicros));
+  if (price.kind === "per-second" && usage.billedSeconds !== undefined) {
+    const rate = price.rates[0];
+    // Only a single-rate model can be settled from seconds alone; otherwise
+    // the rate for the clip's own options is the estimate's.
+    if (price.rates.length === 1 && rate !== undefined) {
+      return Math.ceil(rate.usdMicrosPerSecond * usage.billedSeconds);
+    }
+  }
   if (price.kind === "per-token" && usage.outputTokens !== undefined) {
     return tokenCost(price, {
       outputTokens: usage.outputTokens,

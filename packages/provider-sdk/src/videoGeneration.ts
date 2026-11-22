@@ -35,6 +35,8 @@ export interface VideoAdapterUsage {
   readonly inputTokens?: number;
   readonly outputTokens?: number;
   readonly billedSeconds?: number;
+  /** The amount the provider says it charged, in US micro-dollars, where it reports one. */
+  readonly costUsdMicros?: number;
 }
 
 export interface VideoAdapterClip {
@@ -54,7 +56,12 @@ export type VideoAdapterPoll =
       readonly video: VideoAdapterClip;
       readonly usage?: VideoAdapterUsage;
     }
-  | { readonly status: "refused"; readonly safetyRefusal: string }
+  | {
+      readonly status: "refused";
+      readonly safetyRefusal: string;
+      /** What the provider charged for the refusal, where it bills one. */
+      readonly usage?: VideoAdapterUsage;
+    }
   | {
       readonly status: "failed";
       readonly providerFailure: ProviderFailure;

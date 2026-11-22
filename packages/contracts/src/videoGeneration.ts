@@ -16,7 +16,7 @@ const OptionLabel = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(32));
  * `@octant/provider-sdk/video-generation`, admitted by the same activation
  * ladder as image drivers (maintainer decision, 2026-11-22).
  */
-export const VIDEO_DRIVER_KINDS = ["gemini-video"] as const;
+export const VIDEO_DRIVER_KINDS = ["gemini-video", "runway-video", "fal-video"] as const;
 export const VideoDriverKind = Schema.Literal(...VIDEO_DRIVER_KINDS);
 export type VideoDriverKind = typeof VideoDriverKind.Type;
 
