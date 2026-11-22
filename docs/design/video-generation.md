@@ -139,7 +139,7 @@ card shows:
 per Project, or for a Chat thread outside a Project in host memory. At Full
 access the card is skipped as it is for images: where the Project holds that
 choice or exactly one video profile is ready, and with several ready on the
-profile Settings names for Full access, else the first ready one. A routine or goal loop may generate video where
+profile Settings names for Full access, else the first ready one. As for images, Full access asks again after the person chooses Ask again, and a kept choice the host can no longer run (its profile turned off or its model removed) is dropped and the person is asked, never swapped for another model. A routine or goal loop may generate video where
 its Project keeps a choice, since nobody is there to answer a card. Reference
 images always need the card, as for images. Plan refuses, because Plan changes
 nothing outside the host. A Side Chat never gets the tool.
@@ -149,16 +149,16 @@ nothing outside the host. A Side Chat never gets the tool.
 Octant offers what the provider offers and adds only the bounds a host needs to
 stay healthy:
 
-| Bound                   | Value                                    | Why                                                                                                                                                         |
-| ----------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Clip length             | 3–15 s, default 8 s                      | Omni's own range; the default keeps a first clip quick and cheap                                                                                            |
-| Resolution              | 360p, 720p (default), 1080p, 4K          | Omni's own range                                                                                                                                            |
-| Aspect ratio            | 16:9 (default) or 9:16                   | Omni's own range                                                                                                                                            |
-| Stored size of one clip | 1 GB                                     | Far above a 15-second 4K MP4; a larger response is refused, not truncated, so a broken one cannot fill the disk                                             |
-| Job time                | 30 minutes                               | Long enough for a 4K clip under load; the job then fails as `timeout` and the remote interaction is cancelled and deleted                                   |
-| Running jobs            | the image job service's host concurrency | Video jobs share the bounded queue image jobs already use                                                                                                   |
-| Queued jobs             | 16 per host                              | A kept choice lets calls start without a card, so a runaway loop cannot queue without end; a further call is refused with "Too many video jobs are queued." |
-| Agent call wait         | 2 minutes                                | As for images; after that the call answers `generating` and the clip appears when done                                                                      |
+| Bound                   | Value                                                             | Why                                                                                                                                                                                                                                   |
+| ----------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Clip length             | 3–15 s, default 8 s                                               | Omni's own range; the default keeps a first clip quick and cheap                                                                                                                                                                      |
+| Resolution              | 360p, 720p (default), 1080p, 4K                                   | Omni's own range                                                                                                                                                                                                                      |
+| Aspect ratio            | 16:9 (default) or 9:16                                            | Omni's own range                                                                                                                                                                                                                      |
+| Stored size of one clip | 1 GB                                                              | Far above a 15-second 4K MP4; a larger response is refused, not truncated, so a broken one cannot fill the disk                                                                                                                       |
+| Job time                | 30 minutes                                                        | Long enough for a 4K clip under load; the job then fails as `timeout` and the remote interaction is cancelled and deleted                                                                                                             |
+| Running jobs            | the image job service's host concurrency                          | Video jobs share the bounded queue image jobs already use                                                                                                                                                                             |
+| Queued jobs             | 16 video jobs per host, counting only video jobs waiting to start | A kept choice lets calls start without a card, so a runaway loop cannot queue without end; image jobs waiting in the shared queue do not count against it, and a further video call is refused with "Too many video jobs are queued." |
+| Agent call wait         | 2 minutes                                                         | As for images; after that the call answers `generating` and the clip appears when done                                                                                                                                                |
 
 ### Spend ceilings
 
@@ -281,7 +281,12 @@ export interface VideoGenerationDriver {
   readonly declaredHosts: ReadonlyArray<string>;
   readonly start: (input: VideoAdapterRequest, signal: AbortSignal) => Promise<VideoAdapterStart>;
   readonly poll: (remoteId: string, signal: AbortSignal) => Promise<VideoAdapterPoll>;
-  /** Asks the provider to stop, then reports the job's final state with any usage it states. */
+  /**
+   * Asks the provider to stop, then reports the job's state with any usage it
+   * states. A result still `running` means the stop is not yet confirmed: the
+   * job service keeps polling until a terminal state or the job time runs
+   * out, and only then settles, at the reported usage or else the estimate.
+   */
   readonly cancel: (remoteId: string) => Promise<VideoAdapterPoll>;
   /** Removes the provider's stored copy; called after every terminal state. */
   readonly forget: (remoteId: string) => Promise<void>;
