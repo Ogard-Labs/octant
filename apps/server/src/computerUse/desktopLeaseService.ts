@@ -397,9 +397,10 @@ export interface DesktopLeaseService {
       readonly confirm?: (request: DesktopTransferConfirmation) => Promise<"approved" | "declined">;
       /**
        * An agent's turn as it runs now. A turn may sit below its thread's
-       * posture, which only adds a question. Whether the thread has read
-       * outside content decides which earlier answer still covers the
-       * transfer below Full access; at Full access it changes nothing.
+       * posture, which only adds a question. Whether outside content marks
+       * the thread, which the tool binding reports only under Strict,
+       * decides which earlier answer still covers the transfer below Full
+       * access; at Full access it changes nothing.
        */
       readonly turn?: {
         readonly executionPolicy: ProviderExecutionPolicy;
@@ -2430,7 +2431,10 @@ export interface LeasedComputerUsePort {
     owner: ComputerUseOwner,
     path: string,
     confirm: (request: DesktopTransferConfirmation) => Promise<"approved" | "declined">,
-    /** Whether the owner's thread has read outside content, which an answer from before it does not cover. */
+    /**
+     * Whether outside content marks the owner's thread under Strict, which an
+     * answer from before it does not cover. Outside Strict it is false.
+     */
     externalContentIngested: boolean,
     /** Whether a person's "Remember for this Project" answer covers the owner's thread now. */
     answeredForProject?: boolean,

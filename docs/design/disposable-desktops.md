@@ -877,9 +877,14 @@ Rules this slice resolved:
   person's yes covers the thread's later transfers: it is journaled as
   `thread.standing-answer-recorded@1` (subject `desktop-file-transfer`) once
   the transfer it was given for is admitted, survives a host restart, and is
-  erased with the thread. An answer given before the thread read outside
-  content does not cover it afterwards, so the person is asked once more with
-  the mark in front of them. A refusal is never kept. Full access proceeds to
+  erased with the thread. Under Strict, an answer given before the thread
+  read outside content does not cover it afterwards, so the person is asked
+  once more with the mark in front of them; outside Strict the mark adds no
+  ask and the answer keeps covering the thread (maintainer decision,
+  2026-11-22, replacing the 2026-11-13 rule that withdrew it after outside
+  content at any setting, under
+  [Octant adds no restrictions of its own unless Strict is on](decisions.md#octant-adds-no-restrictions-of-its-own-unless-strict-is-on)).
+  A refusal is never kept. Full access proceeds to
   a host-local desktop without asking, whether or not the thread has read
   outside content (maintainer decision, 2026-11-13), and a person sending a
   file to one is not asked again. A transfer to a cloud desktop asks a person
@@ -925,7 +930,8 @@ changes during the answer. `desktopArtifactRead.test.ts` covers files that
 grow or shrink during the read, an ancestor swapped for a link between the
 checks and the open, and the platform that cannot name the open file;
 `desktopLeaseService.test.ts` also covers a second transfer while one waits,
-and a root change while the transfer waits in the lease's order. `computerUseToolService.test.ts` covers a remembered Project answer
+and a root change while the transfer waits in the lease's order. `computerUseToolService.test.ts` covers a thread's answer withdrawn after
+outside content under Strict and kept outside it, a remembered Project answer
 covering another thread of that Project, not one in another Project, and
 ending once forgotten, and the offer withheld on a marked thread under
 Strict but kept outside it;

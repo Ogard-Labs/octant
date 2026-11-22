@@ -669,7 +669,10 @@ export function createComputerUseToolService(options: {
       );
     const decided = decideDesktopArtifactPath(path);
     if (decided.kind === "relative") endDesktopAppGrants(owner, decided.name);
-    const markedAtStart = options.externalContentIngested(owner);
+    // The lease service reads this as "the thread is marked" for its own
+    // answer: only under Strict does a mark withdraw an earlier answer
+    // (maintainer decision, 2026-11-22).
+    const markedAtStart = outsideContentGates(owner);
     const projectAt = (): ProjectId | undefined =>
       outsideContentGates(owner) ? undefined : options.authority(owner)?.projectId;
     const projectAtStart = projectAt();
