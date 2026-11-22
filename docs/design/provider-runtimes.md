@@ -3712,6 +3712,22 @@ its status are in
 - **Refused by name:** Strict at every level, Chat included ("Strict needs a
   sandbox Windows doesn't have yet"), and Full access with the sandbox kept. A
   launch that does not carry its Strict value is Strict.
+- **An ACP agent's own setup turned off** (maintainer decision, 2026-11-22;
+  built). Below Full access, a launch whose person turned the agent's own
+  setup off refuses before its version is read wherever the profile holds
+  setup back (`forbiddenRootEntries`, `hostDeniedEntries` or the sign-in
+  folder's `forbiddenEntries`; in Chat, which has no Project folder, only the
+  host's entries count), naming the agent and offering to turn its setup on,
+  switch to Full access, or use a Mac or Linux host (`acpWindowsLaunch` in
+  `acpProcess.ts`). On macOS and Linux the sandbox's deny rules are that
+  hold-back ([ACP agents outside Strict](../architecture.md#security-and-authority));
+  Windows has no sandbox to hold it, and unwrapped Kimi Code 0.38.0 started
+  a trusted Project's `.mcp.json` server at `session/new` with no approval
+  asked. Full access, a session with the person's own setup on, and a
+  profile that holds nothing back start as above. Rationale: refusing fails
+  closed; loading the setup the person turned off would break
+  [the setup-off rule](decisions.md#key-providers-run-as-themselves)
+  silently.
 - **Version and catalog reads.** An admitted launch reads its version
   unconfined. A read that serves no one thread (Codex's catalog lease,
   OpenCode's or an ACP agent's readiness check) runs unconfined only while the host's new

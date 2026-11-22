@@ -16882,7 +16882,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
     under Strict, and a session whose person turned the agent's own setup
     off keeps the sandbox wherever its profile holds setup back, since the
     sandbox's deny rules are that hold-back: unwrapped, Kimi Code started a
-    trusted Project's `.mcp.json` server with no approval asked);
+    trusted Project's `.mcp.json` server with no approval asked; Windows,
+    with no sandbox to hold it back, refuses that launch instead, as
+    [Windows launches](design/provider-runtimes.md#windows-launches) says);
     OpenCode's permission rules ask Octant, as the level says, before an edit, shell command
     or outside folder below Full access, and Pi's approval bridge asks
     before every `bash`, `edit` and `write` call. Such a launch takes no egress
@@ -21146,7 +21148,11 @@ own mode, level and Strict value (`windowsProviderLaunch`), so no earlier
 launch or cached read admits another: Claude, Codex, OpenCode, Pi and the ACP
 agents start unconfined there, read their version unconfined, and are stopped
 with their whole process tree, each launch keeping its ownership receipt. A
-launch that does not carry its Strict value is Strict. Codex below Full access
+launch that does not carry its Strict value is Strict. Below Full access an ACP
+launch whose person turned the agent's own setup off is refused, with a reason,
+wherever the profile holds setup back, since no sandbox can hold that setup back
+there (maintainer decision, 2026-11-22;
+[Windows launches](design/provider-runtimes.md#windows-launches)). Codex below Full access
 is told to keep its own sandbox (`workspace-write`, `read-only` in Plan) with
 its own approvals rather than an external one; a Codex or OpenCode process
 started outside Strict is never reused by a Strict session at the same level.
