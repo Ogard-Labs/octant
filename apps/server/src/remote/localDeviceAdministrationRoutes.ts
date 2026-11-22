@@ -171,7 +171,8 @@ export function createLocalDeviceAdministrationRouteHandler(
   return async (request) => {
     const url = new URL(request.url);
     const deviceRoute = pairedDeviceRoute(url.pathname);
-    if (deviceRoute === undefined && !Object.values(ROUTES).includes(url.pathname as Route)) {
+    const bridgeRoutes: ReadonlyArray<string> = Object.values(ROUTES);
+    if (deviceRoute === undefined && !bridgeRoutes.includes(url.pathname)) {
       return undefined;
     }
     const route = deviceRoute ?? (url.pathname as Route);
