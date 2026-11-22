@@ -36,17 +36,15 @@ import {
   type VideoModelCapabilities,
   type VideoProviderCopy,
 } from "@octant/contracts";
+import { isVideoProfileDriverKind } from "@octant/domain";
+import { admittedBundledVideoDriverKinds } from "@octant/plugin-host/provider-drivers";
 import {
   checkVideoClipOptions,
   estimateVideoCost,
   estimateVideoPromptTokens,
-  isVideoProfileDriverKind,
   settleVideoCostUsdMicros,
-  type VideoCostEstimate,
-} from "@octant/domain";
-import { admittedBundledVideoDriverKinds } from "@octant/plugin-host/provider-drivers";
-import {
   videoFailure,
+  type VideoCostEstimate,
   type VideoAdapterPoll,
   type VideoAdapterUsage,
   type VideoGenerationAdapter,
