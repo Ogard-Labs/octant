@@ -1230,5 +1230,59 @@ describe("image routes", () => {
       expect(secondAfterClose?.status).toBe(206);
       expect(readSpy).toHaveBeenCalledTimes(4);
     });
+
+    it("does not populate the cache when scope eviction races with an in-flight artifact read", async () => {
+      const imageBytes = makeMultiChunkPng(128, 11);
+      const job = completedJobWith([
+        { attachmentId, size: imageBytes.byteLength, hash: "3".repeat(64) },
+      ]);
+      let releaseFirstRead: (() => void) | undefined;
+      let firstReadStarted: (() => void) | undefined;
+      const started = new Promise<void>((resolve) => {
+        firstReadStarted = resolve;
+      });
+      let calls = 0;
+      const readArtifact = vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) {
+          firstReadStarted?.();
+          await new Promise<void>((resolve) => {
+            releaseFirstRead = resolve;
+          });
+        }
+        return { bytes: imageBytes, mime: "image/png" as const };
+      });
+      const windowAuthorityStore = new WindowAuthorityStore();
+      windowAuthorityStore.register({ windowId: windowId as never, capability, now: nowMs });
+      const handler = createImageRouteHandler({
+        jobs: {
+          enqueue: vi.fn(),
+          cancel: vi.fn(),
+          get: (id: ImageJobId) => (String(id) === String(job.id) ? job : undefined),
+          listByScope: () => [job],
+          readArtifact,
+        } as unknown as ImageJobService,
+        listInstances: () => [imageProfile()],
+        readImageGenerationSettings: () => ({ customSources: [] }),
+        authorizeScope: async () => true,
+        saveToProject: vi.fn(),
+        windowAuthorityStore,
+        now: () => nowMs,
+      });
+
+      try {
+        const path = `/api/image/thread-artifact?jobId=${jobId}&attachmentId=${attachmentId}&offset=0`;
+        const inFlight = handler(request(path));
+        await started;
+        handler.evictScope(job.scopeId);
+        releaseFirstRead?.();
+        expect((await inFlight)?.status).toBe(206);
+        // The raced read must not have populated the cache.
+        expect((await handler(request(path)))?.status).toBe(206);
+        expect(readArtifact).toHaveBeenCalledTimes(2);
+      } finally {
+        handler.close();
+      }
+    });
   });
 });

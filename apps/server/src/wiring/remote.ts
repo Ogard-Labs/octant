@@ -2676,12 +2676,22 @@ export function wireRemote(deps: RemoteDependencies) {
           await serverAttachmentCleanup.removeForThreadScope(scope);
         },
         purgeGeneratedImages: async (id) => {
+          let scopeId: ImageGenerationScopeId;
           try {
-            const scopeId = decodeImageGenerationScopeId(id);
-            evictGeneratedImageScope?.(scopeId);
-            await generatedImageStore.purgeScope(scopeId);
+            scopeId = decodeImageGenerationScopeId(id);
           } catch {
             // A thread id that is not a generated-image scope is not an image basin.
+            return;
+          }
+          evictGeneratedImageScope?.(scopeId);
+          try {
+            await generatedImageStore.purgeScope(scopeId);
+          } catch {
+            // Keep prior best-effort cleanup semantics if scope removal throws.
+          } finally {
+            // Evict again once disk removal completes so any preview read that
+            // raced with purgeScope cannot leave purged bytes cached.
+            evictGeneratedImageScope?.(scopeId);
           }
         },
         purgeBrowserCaptures: async (id) => {
