@@ -1077,6 +1077,7 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
   { octant: "pair approve|deny <ticket-id>" },
   { octant: "auth list" },
   { octant: "auth revoke <device-id> | --all" },
+  { octant: "auth status | pause | resume" },
   { octant: "status [--hostname <host>] [--port <port>]" },
   { octant: "mcp" },
 ];

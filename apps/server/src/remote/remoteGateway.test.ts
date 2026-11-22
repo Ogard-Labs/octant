@@ -6,7 +6,8 @@ import {
   verify,
   type KeyObject,
 } from "node:crypto";
-import { decodeEventActor, type EventActor } from "@octant/contracts";
+import { decodeEventActor, decodeWindowId, type EventActor } from "@octant/contracts";
+import { rebuildProjection } from "../persistence/projection";
 import { ReplayCursor } from "@octant/contracts/events";
 import { Schema } from "effect";
 
@@ -2071,6 +2072,75 @@ describe("RemoteGateway — a paired device's access level and the pause", () =>
       expect(await response.json()).toEqual({ paused: true });
       expect(otherStreamEnded).toBe(true);
       expect(gateway.localDeviceAdministration()?.remoteAccessPaused()).toBe(true);
+    } finally {
+      await gateway.stop();
+    }
+  });
+
+  it("keeps a pause a device made through a restart, and resumes it over this computer's own channel", async () => {
+    const capturing = createCapturingServe();
+    const windowAuthority = new WindowAuthorityStore();
+    const capability = "A".repeat(43);
+    windowAuthority.register({
+      windowId: decodeWindowId("33333333-3333-4333-8333-333333333333"),
+      capability,
+      now: Date.now(),
+    });
+    let gatewayRef: ReturnType<typeof createRemoteGateway> | undefined;
+    const administration = createLocalDeviceAdministrationRouteHandler({
+      desktopBridgeSecret: "bridge-secret",
+      windowAuthorityStore: windowAuthority,
+      control: () => gatewayRef?.localDeviceAdministration(),
+    });
+    const { gateway, connection, journal } = setup({
+      serve: capturing.serve,
+      productDispatch: createAuthenticatedProductDispatch({
+        dispatch: async (request) => await administration(request),
+      }),
+    });
+    gatewayRef = gateway;
+    await gateway.start();
+    try {
+      const fetch = capturing.getFetch();
+      if (fetch === undefined) throw new Error("Expected captured gateway fetch");
+      const privateKey = pairDevice(connection, "22222222-2222-4222-8222-222222222222", true);
+      const paused = await fetch(
+        signedRequest(privateKey, "7", "/api/remote/access-pause", { paused: true }),
+        lanFacts,
+      );
+      expect(paused.status).toBe(201);
+
+      // The host stops and starts again with its projections rebuilt from the journal.
+      await gateway.stop();
+      const projection = createPhase1RuntimeRegistries().projections.get("remote-access");
+      if (projection === undefined) throw new Error("Expected the remote-access projection");
+      rebuildProjection({ connection, journal, projection, clock: () => nowIso });
+      await gateway.start();
+
+      const local = (method: "GET" | "POST", body?: unknown) =>
+        administration(
+          new Request("http://127.0.0.1/api/desktop/remote/access-pause", {
+            method,
+            headers: {
+              "x-octant-desktop-secret": "bridge-secret",
+              "x-octant-window-capability": capability,
+              ...(body === undefined ? {} : { "content-type": "application/json" }),
+            },
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          }),
+        );
+      expect(await (await local("GET"))?.json()).toEqual({ paused: true });
+      const resumed = await local("POST", { paused: false });
+      expect(resumed?.status).toBe(201);
+      expect(await resumed?.json()).toEqual({ paused: false });
+      expect(gateway.localDeviceAdministration()?.remoteAccessPaused()).toBe(false);
+      const changes = journal
+        .replay(decodeReplayCursor({ afterSequence: 0, limit: 1_000 }))
+        .filter((event) => event.eventName === "remote.access-pause-changed@1");
+      expect(changes.map((event) => [event.actor.kind, event.payload])).toEqual([
+        ["remote-device", expect.objectContaining({ paused: true })],
+        ["local-user", expect.objectContaining({ paused: false })],
+      ]);
     } finally {
       await gateway.stop();
     }
