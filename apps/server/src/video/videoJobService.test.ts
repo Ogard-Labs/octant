@@ -81,8 +81,8 @@ interface Script {
   credential?: () => Promise<string>;
   forget?: () => Promise<"removed" | "failed">;
   model?: VideoModelCapabilities;
-  /** Rejects models() once, or for good, as a failed discovery read can. */
-  modelsFail?: "once" | "always";
+  /** Rejects models() once, on a numbered call, or for good, as a failed discovery read can. */
+  modelsFail?: "once" | "always" | number;
 }
 
 function fakeDriver(script: Script) {
@@ -94,10 +94,16 @@ function fakeDriver(script: Script) {
     driverKind: "gemini-video",
     providerHosts: ["video.example.test"],
     create: ({ ports }) => {
+      let modelsCalls = 0;
       let modelsFailOnce = script.modelsFail === "once";
       return {
         models: async () => {
-          if (modelsFailOnce || script.modelsFail === "always") {
+          modelsCalls += 1;
+          if (
+            modelsFailOnce ||
+            script.modelsFail === "always" ||
+            script.modelsFail === modelsCalls
+          ) {
             modelsFailOnce = false;
             throw { category: "unavailable", message: "Discovery failed." };
           }
@@ -538,6 +544,13 @@ describe("video jobs", () => {
     const done = await second.service.whenTerminal(queued.id);
     expect(done?.status).toBe("completed");
     await vi.waitFor(() => expect(second.service.getById(queued.id)?.providerCopy).toBe("removed"));
+  });
+
+  it("keeps polling a sent job whose post-start model lookup fails", async () => {
+    const { service } = harness({ modelsFail: 2 });
+    const queued = await enqueue(service);
+    const done = await service.whenTerminal(queued.id);
+    expect(done).toMatchObject({ status: "completed", remoteId: "remote-1" });
   });
 
   it("ends a sent job as interrupted when discovery cannot describe it after a restart", async () => {
