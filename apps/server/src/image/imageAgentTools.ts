@@ -560,12 +560,17 @@ async function executeHostIconSet(
     // Each write is awaited, so the level and the turn's Stop are read again
     // before the next one starts: a thread moved to Plan or stopped mid-set
     // writes no further file.
+    // A level lowered to one that asks, when nobody was asked, also stops the
+    // set: the earlier level's consent does not carry over.
+    const posture = save.posture();
     const stopped =
       request.signal?.aborted === true
         ? "The turn was stopped."
-        : save.posture() === "refuse"
+        : posture === "refuse"
           ? "Plan mode cannot save files."
-          : undefined;
+          : posture === "ask" && !confirmed
+            ? "The thread now asks before edits; ask the person before saving the icon set."
+            : undefined;
     if (stopped !== undefined) return await undo(stopped);
     const saved = await save.write(file.relativePath, file.bytes);
     if (saved.status !== "saved") {

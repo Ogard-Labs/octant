@@ -8011,7 +8011,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   refused path writes nothing; for Android an existing launcher icon in
   another format (`ic_launcher.webp` beside a new `ic_launcher.png`) is
   refused too, since Android treats both as one resource. The level and the
-  turn's Stop are read again before each file, and a set stopped part way
+  turn's Stop are read again before each file (a drop to Plan, or to a level
+  that asks when nobody was asked, stops the set), and a set stopped part way
   removes the files it had written, so the folder is left as it was. It
   removes only a file that is still the object it wrote (same device, inode,
   size and change time), so one a person edited or replaced meanwhile is kept

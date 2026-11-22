@@ -848,6 +848,25 @@ describe("createImageAgentTools", () => {
       expect(existsSync(join(folder.root, "public", "favicon-16.png"))).toBe(false);
     });
 
+    it("stops and removes what it wrote when the level drops to Ask first mid-set without consent", async () => {
+      const folder = iconSetFolder("allow");
+      let level: "allow" | "ask" = "allow";
+      const write = vi.fn(async (relativePath: string, bytes: Uint8Array) => {
+        const saved = await folder.write(relativePath, bytes);
+        level = "ask";
+        return saved;
+      });
+      const { ask, set } = tools([imageProfile()], [job("completed")], [], {
+        ...folder,
+        save: { posture: () => level, write },
+      });
+      const outcome = await call(set, iconSet);
+      expect(ask).not.toHaveBeenCalled();
+      expect(write).toHaveBeenCalledOnce();
+      expect(outcome.result).toMatchObject({ error: expect.stringMatching(/asks before edits/) });
+      expect(readdirSync(join(folder.root, "public"))).toEqual([]);
+    });
+
     it("keeps a written icon someone replaced before the set stopped, and names it", async () => {
       const folder = iconSetFolder("allow");
       // The level is read before each write. Once the first favicon exists,
