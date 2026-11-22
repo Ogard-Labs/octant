@@ -1524,6 +1524,16 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
           run,
           randomUUID,
         ),
+      strict: () => resolveThreadStrict(input.parentThreadId),
+      // A child's own mark is kept under its run id, as Shield reads it.
+      childMarked: (run) => {
+        try {
+          return readThreadExternalContentTaint(persistence.connection, String(run.id))
+            .externalContentIngested;
+        } catch {
+          return true;
+        }
+      },
       recordPeerListingIngestion: () => {
         try {
           return (

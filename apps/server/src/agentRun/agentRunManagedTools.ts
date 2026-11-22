@@ -61,6 +61,15 @@ export interface AgentsManagedToolsOptions {
    */
   readonly recordResultIngestion: (run: AgentRun) => boolean;
   /**
+   * Whether the calling thread runs under Strict. Under Strict a reply `wait`
+   * hands back marks this thread only when its child was itself marked;
+   * outside Strict every reply marks it, and the mark adds no ask there.
+   * Absent counts as outside Strict.
+   */
+  readonly strict?: () => boolean;
+  /** Whether the child has itself read outside content; absent counts as marked. */
+  readonly childMarked?: (run: AgentRun) => boolean;
+  /**
    * Marks the calling thread as having read outside content before peer
    * listings reach its model: member and Project names are written by other
    * members. False, or absent, keeps the listing out of the answer.
@@ -82,7 +91,7 @@ const WAIT_ENTRY_OVERHEAD_BYTES = 512;
 const AGENTS_TOOL_DEFINITION = {
   name: AGENTS_TOOL_NAME,
   description:
-    "Delegate parts of this task to child agent runs the host owns and supervises; each appears in the Agents surface, where the person can watch and stop it. capabilities lists the provider models you may target, the enabled providers you may not with why (unavailableTargets), and whether delegation is open; pick a target from it rather than naming one you have not seen. delegate starts one child with a bounded, standalone task (objective, expected output, boundaries) and returns its runId; independent children run in parallel, and after names existing siblings whose results a child needs, so it starts once they all completed and receives their replies. compareGroup gives sibling children the same short label when a person should compare their results side by side; the host only groups them and ranks nothing. status lists this thread's children without consuming their replies. wait blocks up to timeoutMs for one child (runId) and returns its reply once it completed, or for several (runIds) until the first settles (waitFor any) or all have (waitFor all), returning each settled reply and the ids still pending (timeoutMs 0 reads finished replies without waiting). A child's reply counts as outside content, so below Full access this thread cannot delegate again after one until a person reviews it. cancel stops one of this thread's children. follow-up continues a completed child in its saved session using runId, expectedVersion from status or wait, and an explicit message (at most 4096 characters); unsupported continuity is refused. Omit providerInstanceId and modelId to use the configured role slot. Delegation is refused when subagents are off in Settings, the thread has read outside content below Full access, or it is paused.",
+    "Delegate parts of this task to child agent runs the host owns and supervises; each appears in the Agents surface, where the person can watch and stop it. capabilities lists the provider models you may target, the enabled providers you may not with why (unavailableTargets), and whether delegation is open; pick a target from it rather than naming one you have not seen. delegate starts one child with a bounded, standalone task (objective, expected output, boundaries) and returns its runId; independent children run in parallel, and after names existing siblings whose results a child needs, so it starts once they all completed and receives their replies. compareGroup gives sibling children the same short label when a person should compare their results side by side; the host only groups them and ranks nothing. status lists this thread's children without consuming their replies. wait blocks up to timeoutMs for one child (runId) and returns its reply once it completed, or for several (runIds) until the first settles (waitFor any) or all have (waitFor all), returning each settled reply and the ids still pending (timeoutMs 0 reads finished replies without waiting). A child's reply can count as outside content, so below Full access this thread may need its person's approval to delegate again after one. cancel stops one of this thread's children. follow-up continues a completed child in its saved session using runId, expectedVersion from status or wait, and an explicit message (at most 4096 characters); unsupported continuity is refused. Omit providerInstanceId and modelId to use the configured role slot. Delegation is refused when subagents are off in Settings, the thread has read outside content below Full access, or it is paused.",
   inputSchema: {
     type: "object",
     properties: {
@@ -412,6 +421,16 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
       : undefined;
   };
   /**
+   * A child that read nothing from outside relays only what its parent's own
+   * brief gave it, so under Strict its reply leaves the parent unmarked and
+   * does not cost the parent its next helper. A child whose mark cannot be
+   * read is treated as marked.
+   */
+  const recordWaitedResultIngestion = (run: AgentRun): boolean => {
+    if (options.strict?.() === true && options.childMarked?.(run) === false) return true;
+    return options.recordResultIngestion(run);
+  };
+  /**
    * Whether `wait` would answer for this child now, without collecting its
    * reply: the same cases `settleWait` answers, read with no side effect.
    */
@@ -441,7 +460,7 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
           options.persistence,
           run,
           text,
-          options.recordResultIngestion,
+          recordWaitedResultIngestion,
         );
         return collected.status === "refused"
           ? failure(collected.reason, collected.message)
