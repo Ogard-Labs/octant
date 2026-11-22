@@ -364,5 +364,17 @@ export const VideoClipTicketResponse = Schema.Struct({
 }).annotations(strict);
 export type VideoClipTicketResponse = typeof VideoClipTicketResponse.Type;
 
+/**
+ * Host settings for video. `defaultProfileInstanceId` is the video profile a
+ * thread at Full access makes clips on when several are ready and its Project
+ * keeps no choice; absent, or naming one that is not ready, means the first
+ * ready profile, as for images.
+ */
+export const VideoGenerationSettings = Schema.Struct({
+  defaultProfileInstanceId: Schema.optional(ProviderInstanceId),
+}).annotations(strict);
+export type VideoGenerationSettings = typeof VideoGenerationSettings.Type;
+export const decodeVideoGenerationSettings = Schema.decodeUnknownSync(VideoGenerationSettings);
+
 export const decodeVideoJobsResponse = Schema.decodeUnknownSync(VideoJobsResponse);
 export const decodeVideoClipTicketResponse = Schema.decodeUnknownSync(VideoClipTicketResponse);

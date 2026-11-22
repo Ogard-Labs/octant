@@ -1196,6 +1196,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "image generation profile default full access ask card without asking",
         },
         {
+          id: settingId("video-profile-full-access"),
+          label: "Video profile at Full access",
+          scope: "host",
+          keywords: "video clip generation profile default full access ask card without asking",
+        },
+        {
           id: settingId("default-model"),
           label: "Default image model",
           scope: "app",

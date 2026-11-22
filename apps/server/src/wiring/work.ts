@@ -1068,6 +1068,9 @@ export function wireWork(deps: WorkDependencies) {
               jobs: videoJobService,
               recordExternalContentIngestion: (input) =>
                 externalContentIngestionStore.record(input),
+              defaultProfileInstanceId: () =>
+                (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                  .videoGeneration.defaultProfileInstanceId,
               imageSources: workImageSources,
               imageJobs: imageJobService,
               save: {
