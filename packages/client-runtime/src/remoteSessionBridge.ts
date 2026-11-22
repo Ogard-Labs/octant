@@ -205,7 +205,10 @@ export function createRemoteSessionBridge(
           return {
             kind: "unauthorized",
             reason: error.message,
-            ...(error.reasonCode === undefined ? {} : { reasonCode: error.reasonCode }),
+            // A pause is never a refused credential; it arrives as unavailable.
+            ...(error.reasonCode === undefined || error.reasonCode === "remote-access-paused"
+              ? {}
+              : { reasonCode: error.reasonCode }),
             ...partial,
           };
         case "host-changed":
