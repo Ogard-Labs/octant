@@ -89,6 +89,19 @@ describe("drawn design asset references", () => {
         "css",
       ),
     ).toEqual(["after-string"]);
+    // A quote in a regular expression opens no string; every line terminator
+    // and newline reference ends a line comment.
+    expect(
+      drawn(
+        [
+          `<button onclick="this.title = this.title.replace(/&quot;/g, ''); /* url(octant-asset:after-regex) */">C</button>`,
+          `<button onclick="&#47;&#47; on click&#13;this.style.backgroundImage = 'url(octant-asset:after-cr)'">D</button>`,
+          `<button onclick="&#47;&#47; on click&NewLine;this.style.backgroundImage = 'url(octant-asset:after-newline)'">E</button>`,
+          `<button onclick="&#47;&#47; on click&#10this.style.backgroundImage = 'url(octant-asset:after-bare-reference)'">F</button>`,
+        ].join(""),
+        "html",
+      ),
+    ).toEqual(["after-cr", "after-newline", "after-bare-reference"]);
     // Text-only elements hold text, not markup.
     expect(
       drawn(

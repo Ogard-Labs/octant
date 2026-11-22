@@ -765,37 +765,100 @@ function cssComments(text: string, start: number, end: number, into: Array<[numb
 }
 
 /** Comments in a script from `start` to `end`: block and line comments outside strings. */
+/** ECMAScript line terminators, which end a `//` comment. */
+const LINE_TERMINATOR = /[\n\r\u2028\u2029]/g;
+/** A `/` after one of these (or at the start) opens a regular expression literal. */
+const REGEX_PRECEDES = new Set([
+  "",
+  "(",
+  ",",
+  "=",
+  ":",
+  "[",
+  "!",
+  "&",
+  "|",
+  "?",
+  "{",
+  "}",
+  ";",
+  "+",
+  "-",
+  "*",
+  "%",
+  "<",
+  ">",
+  "~",
+  "^",
+]);
+
+/** The end of a regular expression literal opened at `start`, past its closing `/`. */
+function regexEnd(text: string, start: number, end: number): number {
+  let inClass = false;
+  for (let index = start + 1; index < end; index += 1) {
+    const char = text[index];
+    if (char === "\\") index += 1;
+    else if (char === "\n" || char === "\r") return index;
+    else if (char === "[") inClass = true;
+    else if (char === "]") inClass = false;
+    else if (char === "/" && !inClass) return index + 1;
+  }
+  return end;
+}
+
+/**
+ * Comments in a script from `start` to `end`: block and line comments outside
+ * strings and regular expression literals. A `/` opens a regular expression
+ * where an expression may begin, read from the last code character before
+ * it; that reading misses only rare forms such as a regex after a keyword.
+ */
 function scriptComments(text: string, start: number, end: number, into: Array<[number, number]>) {
   let index = start;
+  let previous = "";
   while (index < end) {
-    const char = text[index];
+    const char = text[index] ?? "";
     if (char === '"' || char === "'" || char === "`") {
       index = Math.min(quotedEnd(text, index, char !== "`"), end);
+      previous = char;
     } else if (char === "/" && text[index + 1] === "*") {
       const close = text.indexOf("*/", index + 2);
       const stop = close === -1 || close + 2 > end ? end : close + 2;
       into.push([index, stop]);
       index = stop;
     } else if (char === "/" && text[index + 1] === "/") {
-      const close = text.indexOf("\n", index + 2);
+      LINE_TERMINATOR.lastIndex = index + 2;
+      const close = LINE_TERMINATOR.exec(text)?.index ?? -1;
       const stop = close === -1 || close > end ? end : close;
       into.push([index, stop]);
       index = stop;
+    } else if (char === "/" && REGEX_PRECEDES.has(previous)) {
+      index = regexEnd(text, index, end);
+      previous = "/";
     } else {
+      if (!/\s/.test(char)) previous = char;
       index += 1;
     }
   }
 }
 
-// The element name ends at a tag delimiter: `<script-preview>` is a custom
-// element whose children are HTML, not a script.
-const CHARACTER_REFERENCE = /&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|(quot|apos|amp|lt|gt));/y;
+// Character references a browser decodes in an attribute before compiling a
+// handler: numeric ones with or without their semicolon, and the named ones a
+// handler's quotes, ampersands, brackets and line breaks are written with.
+const CHARACTER_REFERENCE =
+  /&(?:#(\d{1,7});?|#[xX]([0-9a-fA-F]{1,6});?|(quot|apos|amp|lt|gt|NewLine|Tab|sol|bsol|ast|lpar|rpar);)/y;
 const NAMED_CHARACTERS: Readonly<Record<string, string>> = {
   quot: '"',
   apos: "'",
   amp: "&",
   lt: "<",
   gt: ">",
+  NewLine: "\n",
+  Tab: "\t",
+  sol: "/",
+  bsol: "\\",
+  ast: "*",
+  lpar: "(",
+  rpar: ")",
 };
 
 /**
@@ -838,6 +901,8 @@ function handlerComments(text: string, start: number, end: number, into: Array<[
   for (const [from, to] of local) into.push([offsets[from] ?? end, offsets[to] ?? end]);
 }
 
+// The element name ends at a tag delimiter: `<script-preview>` is a custom
+// element whose children are HTML, not a script.
 const RAW_TEXT_OPEN =
   /<(style|script|textarea|title|xmp|iframe|noembed|noframes|plaintext)(?=[\t\n\f\r />])[^>]*>/iy;
 const TAG_NAME = /<[A-Za-z][^\s/>]*/y;
