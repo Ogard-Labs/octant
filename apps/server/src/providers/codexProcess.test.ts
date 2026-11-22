@@ -1330,6 +1330,46 @@ describe("Codex launch confinement", () => {
     if (profileHomeRefused.status === "refused") {
       expect(profileHomeRefused.failure.message).toMatch(/user profile directory/);
     }
+
+    // Codex's sandbox takes writable roots and denials only, so a read-only
+    // folder beneath a writable one is refused rather than left writable.
+    const readOnlyBeneathRefused = prepareCodexLaunch({
+      binaryPath: "C:\\Tools\\Codex\\codex.exe",
+      args: ["app-server"],
+      authority: {
+        kind: "thread",
+        root: "C:\\Work\\repo",
+        readOnlyFolders: ["C:\\Work\\repo\\reference"],
+        mode: "code",
+        executionPolicy: "full-access",
+        strict: true,
+      },
+      environment: { USERPROFILE: "C:\\Users\\Ada" },
+      confinement: windowsPlannerPort,
+      platform: "win32",
+    });
+    expect(readOnlyBeneathRefused).toMatchObject({
+      status: "refused",
+      failure: { message: expect.stringMatching(/read-only beneath a writable folder/u) },
+    });
+    // One outside every writable folder is fine.
+    expect(
+      prepareCodexLaunch({
+        binaryPath: "C:\\Tools\\Codex\\codex.exe",
+        args: ["app-server"],
+        authority: {
+          kind: "thread",
+          root: "C:\\Work\\repo",
+          readOnlyFolders: ["C:\\Octant\\attachments"],
+          mode: "code",
+          executionPolicy: "full-access",
+          strict: true,
+        },
+        environment: { USERPROFILE: "C:\\Users\\Ada" },
+        confinement: windowsPlannerPort,
+        platform: "win32",
+      }).status,
+    ).toBe("prepared");
   });
 
   it("reads the Windows catalog unconfined only for a host whose new threads run with no Octant sandbox", () => {

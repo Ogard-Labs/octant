@@ -1262,6 +1262,28 @@ function prepareWindowsStrictCodexThread(input: {
     ...(authority.extraFolders ?? []),
     ...(policy?.filesystem.readWriteRoots ?? []),
   ]);
+  // The profile handed to Codex's sandbox carries writable roots and denials
+  // only, so a read-only folder beneath a writable one would be writable.
+  // Such a layout is refused, as the AppContainer planner refused it.
+  const writableForms = writableFolders
+    .map((path) => windowsGuardPath(`${path}\\`))
+    .filter((form): form is string => form !== undefined);
+  const readOnlyBeneath = existingWindowsNativePaths([
+    ...(authority.readOnlyFolders ?? []),
+    ...(policy?.filesystem.readOnlyRoots ?? []),
+  ]).find((path) => {
+    const form = windowsGuardPath(`${path}\\`);
+    return form !== undefined && writableForms.some((writable) => isSameOrInside(form, writable));
+  });
+  if (readOnlyBeneath !== undefined) {
+    return {
+      status: "refused",
+      failure: failure(
+        "incompatible",
+        `Windows Strict cannot keep ${readOnlyBeneath} read-only beneath a writable folder. Choose a read-only folder outside the writable ones. No runtime was started.`,
+      ),
+    };
+  }
   const home = input.environment.USERPROFILE ?? input.environment.HOME ?? homedir();
   const [codexHome] = existingWindowsNativePaths([
     input.environment.CODEX_HOME ?? `${home}\\.codex`,

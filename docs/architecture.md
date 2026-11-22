@@ -22125,7 +22125,9 @@ a Codex that cannot answer it is refused. Nothing
 retries without the sandbox, and Codex still works with Strict off. A writable
 folder that overlaps `CODEX_HOME` and a profile-root `CODEX_HOME` keep
 refusing: Codex leaves its home out of its commands' writable roots
-(`filter_sensitive_write_roots`) only when the home is not itself granted.
+(`filter_sensitive_write_roots`) only when the home is not itself granted. A read-only
+folder beneath a writable one refuses too: the profile carries writable roots
+and denials only, so it could not stay read-only.
 
 **Exception to the no-administrator rule.** The elevated backend runs commands
 as Codex's own local sandbox accounts, created by Codex's one-time setup, which
