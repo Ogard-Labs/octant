@@ -379,8 +379,10 @@ export function admittedBundledVideoDriverKinds(
   patches: Readonly<Partial<Record<ProviderDriverKind, BundledProviderDriverActivationPatch>>> = {},
 ): ReadonlySet<ProviderDriverKind> {
   return new Set(
-    bundledVideoDriverPlugins().filter((plugin) =>
-      isBundledProviderDriverEffective(plugin, patches[plugin.driverKind] ?? {}),
-    ).map((plugin) => plugin.driverKind),
+    bundledVideoDriverPlugins()
+      .filter((plugin) =>
+        isBundledProviderDriverEffective(plugin, patches[plugin.driverKind] ?? {}),
+      )
+      .map((plugin) => plugin.driverKind),
   );
 }
