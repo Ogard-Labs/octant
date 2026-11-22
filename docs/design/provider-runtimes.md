@@ -3695,7 +3695,9 @@ its status are in
   every command unable to run.
 - **Chat** outside Strict starts unconfined on every provider family (maintainer
   decision, 2026-11-19: outside Strict, the provider's own rules apply and
-  Octant adds none of its own): Codex with no execution environment and its
+  Octant adds none of its own; the one exception is an ACP agent whose person
+  turned its own setup off while it holds back setup in the home folder,
+  refused as the setup-off bullet below says): Codex with no execution environment and its
   shell, image, plugin and app features off; Pi with `--no-tools`, no extension
   and none of the person's resources; Claude with no file or shell tool in its
   session's tool list (`claudeExecutionOptions` leaves out `Read`, `Grep`,
@@ -3718,7 +3720,8 @@ its status are in
   setup back (`forbiddenRootEntries`, `hostDeniedEntries` or the sign-in
   folder's `forbiddenEntries`; in Chat, which has no Project folder, only the
   host's entries count), naming the agent and offering to turn its setup on,
-  switch to Full access, or use a Mac or Linux host (`acpWindowsLaunch` in
+  switch to Full access (Work and Code only, since Chat turns run at Ask
+  first), or use a Mac or Linux host (`acpWindowsLaunch` in
   `acpProcess.ts`). On macOS and Linux the sandbox's deny rules are that
   hold-back ([ACP agents outside Strict](../architecture.md#security-and-authority));
   Windows has no sandbox to hold it, and unwrapped Kimi Code 0.38.0 started

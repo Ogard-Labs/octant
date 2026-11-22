@@ -894,10 +894,19 @@ describe("ACP child-server profiles", () => {
       ] as const) {
         expect(await prepareKimi(level)).toMatchObject({
           _tag: "Left",
-          left: { category: "incompatible", message: acpWindowsSetupOffRefusal(kimi) },
+          left: {
+            category: "incompatible",
+            message: acpWindowsSetupOffRefusal(kimi, level.mode ?? "code"),
+          },
         });
       }
-      expect(acpWindowsSetupOffRefusal(kimi)).toContain("Kimi Code");
+      expect(acpWindowsSetupOffRefusal(kimi, "code")).toContain("Kimi Code");
+    });
+
+    it("offers Full access in the refusal only where the thread can switch to it, never in Chat", () => {
+      expect(acpWindowsSetupOffRefusal(kimi, "code")).toContain("Full access");
+      expect(acpWindowsSetupOffRefusal(kimi, "work")).toContain("Full access");
+      expect(acpWindowsSetupOffRefusal(kimi, "chat")).not.toContain("Full access");
     });
 
     it("refuses the same launch before the agent's version is read", async () => {
@@ -922,7 +931,7 @@ describe("ACP child-server profiles", () => {
             }),
           ),
         ),
-      ).toEqual({ category: "incompatible", message: acpWindowsSetupOffRefusal(kimi) });
+      ).toEqual({ category: "incompatible", message: acpWindowsSetupOffRefusal(kimi, "code") });
       expect(prepare).not.toHaveBeenCalled();
       expect(started).not.toHaveBeenCalled();
     });
