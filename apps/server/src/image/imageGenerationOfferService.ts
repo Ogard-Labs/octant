@@ -72,9 +72,11 @@ export class ImageGenerationOfferService {
           }),
       }),
     );
-    return outcome.status === "transcribe" || outcome.status === "narrate"
-      ? { status: "cancelled" }
-      : outcome;
+    return outcome.status === "generate" ||
+      outcome.status === "agent-draws" ||
+      outcome.status === "save"
+      ? outcome
+      : { status: "cancelled" };
   }
 
   remember(scope: ThreadScope, choice: ImageGenerationChoice): void {
