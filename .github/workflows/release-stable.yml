@@ -171,6 +171,14 @@ jobs:
           echo "url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/$(basename "$archive")" >> "$GITHUB_OUTPUT"
           echo "archive=${archive}" >> "$GITHUB_OUTPUT"
 
+      # Whichever job created the shared release, its notes say what macOS
+      # the Mac build needs, read from the built bundle.
+      - name: State the Mac build's minimum macOS in the release notes
+        if: matrix.apple_signing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/note-macos-minimum.sh "${GITHUB_REF_NAME}" out Octant
+
       # The first-install disk image, built, signed, notarized and stapled by
       # the packaging step above. It is attached for people to download and is
       # not given to the feed step: the updater reads the zip.
