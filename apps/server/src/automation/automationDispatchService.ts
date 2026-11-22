@@ -2,6 +2,7 @@ import { automationDispatchPromptText } from "./automationFileContext";
 import {
   decodeAutomationCancelRunRequestId,
   decodeChatThreadId,
+  personalSignInRefusals,
   type AutomationBlockReason,
   type AutomationDefinition,
   type AutomationDispatchIntent,
@@ -175,13 +176,21 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     // that refusal fails the run for good.
     if (this.#refusesNewRuns?.() === true) return;
     if (run.dispatchIntent === undefined) {
-      const revalidation = revalidateAutomationAuthority({
-        definition,
-        run,
-        facts: this.#resolveFacts({ definition, run }),
-      });
+      const facts = this.#resolveFacts({ definition, run });
+      const revalidation = revalidateAutomationAuthority({ definition, run, facts });
       if (revalidation.kind === "blocked") {
         this.#refuse(definition, run, revalidation.reason, revalidation.message);
+        return;
+      }
+      // Refused here, not in the revalidation source polling and file arming
+      // share, so a routine on such a provider keeps observing and each run
+      // is journaled as refused with why, before any thread exists. Read from
+      // the live instance, so a routine saved earlier is refused too.
+      const unattended = personalSignInRefusals(
+        facts.providerInstance?.driverKind ?? "",
+      )?.refusesUnattendedRuns;
+      if (unattended !== undefined) {
+        this.#refuse(definition, run, "provider-capability-mismatch", unattended);
         return;
       }
       if (run.definitionSnapshot.mode === "work" && !this.#work.available) {

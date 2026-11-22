@@ -1,12 +1,11 @@
 import { createHash } from "node:crypto";
-import {
-  personalSignInRefusals,
-  type AutomationBlockReason,
-  type AutomationDefinition,
-  type AutomationDigest,
-  type AutomationRun,
-  type Project,
-  type ProviderInstance,
+import type {
+  AutomationBlockReason,
+  AutomationDefinition,
+  AutomationDigest,
+  AutomationRun,
+  Project,
+  ProviderInstance,
 } from "@octant/contracts";
 
 /**
@@ -132,12 +131,6 @@ export function revalidateAutomationAuthority(input: {
       "Provider or model capability no longer matches the definition.",
     );
   }
-  // Read from the live instance, so a routine saved before its provider
-  // declared the limit is refused at its next run, before any thread exists.
-  const unattended = personalSignInRefusals(
-    input.facts.providerInstance.driverKind,
-  )?.refusesUnattendedRuns;
-  if (unattended !== undefined) return blocked("provider-capability-mismatch", unattended);
   if (!input.facts.authorityDigestMatches) {
     return blocked(
       "authority-mismatch",

@@ -9,6 +9,7 @@ import {
   decodeLayoutNodeId,
   decodePaneId,
   decodeProjectId,
+  decodeProviderInstanceId,
   decodeWindowId,
   decodeWorkspaceTab,
   decodeWorkspaceTabId,
@@ -178,8 +179,8 @@ function authorize(input: {
   readonly parentDriverKind?: string;
   /** The driver kind by provider instance id, where instances differ. */
   readonly driverKindFor?: (providerInstanceId: string) => string | undefined;
-  /** The provider the Chat thread's newest attempt ran on, when a route moved it. */
-  readonly latestAttemptProvider?: string;
+  /** The provider the thread's running turn holds, when one is running. */
+  readonly liveProvider?: string;
 }) {
   return authorizeAgentRunCreation({
     persistence: {
@@ -188,10 +189,6 @@ function authorize(input: {
           input.driverKindFor?.(String(providerInstanceId)) ?? input.parentDriverKind;
         return driverKind === undefined ? undefined : { driverKind };
       },
-      readChatThreadView: () =>
-        input.latestAttemptProvider === undefined
-          ? undefined
-          : { turns: [{ attempts: [{ providerInstanceId: input.latestAttemptProvider }] }] },
       readWindowWorkspace: () =>
         input.workspace === undefined
           ? undefined
@@ -216,6 +213,8 @@ function authorize(input: {
     windowId: String(ids.window),
     codeSessionAuthority: input.authority ?? new CodeSessionAuthorityStore(),
     ...(input.activeTurn === undefined ? {} : { activeTurn: input.activeTurn }),
+    liveTurnProvider: () =>
+      input.liveProvider === undefined ? undefined : decodeProviderInstanceId(input.liveProvider),
   });
 }
 
@@ -406,7 +405,7 @@ describe("authorizeAgentRunCreation", () => {
     expect(on("gemini")).not.toHaveProperty("helperRunRefusal");
   });
 
-  it("marks a Chat parent whose running turn a pool or fallback moved onto Google Antigravity", () => {
+  it("judges a Chat parent by its running turn's provider, and with none running by the thread's own", () => {
     const thread = chatThread();
     const workspace = withSurface(
       defaultWindowWorkspace(ids.window),
@@ -420,16 +419,21 @@ describe("authorizeAgentRunCreation", () => {
       }),
     );
     const routed = "00000000-0000-4000-8000-00000000a061";
-    const facts = authorize({
-      workspace,
-      chat: thread,
-      parentThreadId: String(thread.id),
-      driverKindFor: (id) => (id === routed ? "antigravity" : "gemini"),
-      latestAttemptProvider: routed,
-    });
-    expect(facts?.helperRunRefusal).toMatch(
+    const on = (liveProvider: string | undefined) =>
+      authorize({
+        workspace,
+        chat: thread,
+        parentThreadId: String(thread.id),
+        driverKindFor: (id) => (id === routed ? "antigravity" : "gemini"),
+        ...(liveProvider === undefined ? {} : { liveProvider }),
+      });
+    // A pool or fallback put the running turn on Antigravity: no helper.
+    expect(on(routed)?.helperRunRefusal).toMatch(
       /^Google doesn't support Google Antigravity as a helper agent/,
     );
+    // No turn running (an earlier attempt on Antigravity has settled): a
+    // retry or resume is judged by the thread's own provider, and runs.
+    expect(on(undefined)).not.toHaveProperty("helperRunRefusal");
   });
 
   it("refuses a Chat parent that is not in the window layout", () => {

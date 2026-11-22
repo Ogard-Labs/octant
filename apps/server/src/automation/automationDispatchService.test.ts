@@ -929,6 +929,43 @@ describe("AutomationDispatchService", () => {
     session.connection.close();
   });
 
+  it("records a routine's run on Google Antigravity as refused, with why, and creates no thread", async () => {
+    const session = openSession();
+    const definition = codeDefinition();
+    const run = claimQueuedRun(session, definition);
+    const code = createCodePort();
+    const dispatcher = new AutomationDispatchService({
+      store: session.store,
+      projection: session.projection,
+      code: code.port,
+      work: unavailableAutomationWorkDispatchPort(),
+      capacity: alwaysAdmit(),
+      resolveFacts: () => ({
+        ...matchingFacts(definition),
+        providerInstance: {
+          id: AUTOMATION_TEST_IDS.providerInstance,
+          enabled: true,
+          driverKind: "antigravity",
+        } as never,
+      }),
+      now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+    });
+
+    await dispatcher.dispatchNow(definition.id, run.id);
+
+    expect(code.create).not.toHaveBeenCalled();
+    expect(session.projection.getRun(run.id)?.failure).toMatchObject({
+      reason: "provider-capability-mismatch",
+      message: expect.stringContaining(
+        "Google doesn't support unattended runs of Google Antigravity",
+      ),
+    });
+    expect(session.projection.getDefinition(definition.id)?.blockedReason).toBe(
+      "provider-capability-mismatch",
+    );
+    session.connection.close();
+  });
+
   it("capability-gates Work when the first-turn runtime port is unavailable", async () => {
     const session = openSession();
     const definition = workDefinition();

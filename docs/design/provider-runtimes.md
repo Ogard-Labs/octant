@@ -2989,10 +2989,15 @@ that declaration, never by the profile id:
 - **Routines and every other turn no person sent** (`refusesUnattendedRuns`).
   Every Automation dispatch on an `antigravity` instance (scheduled,
   triggered, Run now, a follow-up, and a Chat follow-up proposal, which runs
-  through the same dispatch) is refused at the dispatcher's authority
-  revalidation as `provider-capability-mismatch`, before a thread is created
-  or the CLI starts; the provider is read live at dispatch, so a routine
-  saved earlier is refused at its next run. Every other turn the host starts
+  through the same dispatch) is refused by the dispatcher as
+  `provider-capability-mismatch`, after its authority revalidation and before
+  a thread is created or the CLI starts: the run is journaled as refused with
+  the sentence below and the routine is paused with that reason. The
+  provider is read live at dispatch, so a routine saved earlier is refused at
+  its next run. The refusal is not part of the revalidation itself, which
+  source polling and file arming share, so an integration or file routine on
+  Antigravity keeps observing and each occurrence it turns into a run is
+  recorded as refused rather than the routine going quiet with no reason. Every other turn the host starts
   as itself runs under the host's own scope (`ROUTINE_HOST_SCOPE_ID`), which
   no window or device can claim, and is refused at that mode's turn
   admission: a Work turn (`startFirstTurn`) and a Code turn
@@ -3015,13 +3020,17 @@ that declaration, never by the profile id:
   would actually run on, not only the thread's own. In Chat a model pool or
   the Chat provider fallback can route a turn onto Antigravity from a thread
   on another provider, and a retry or resume runs on its attempt's provider,
-  so every Chat send, retry, resume and child-result delivery is checked
-  again on its resolved provider when it is prepared, before its turn or
-  attempt is journaled. A turn the person sends themselves that their own
+  so a Chat send, retry, resume or child-result delivery is checked before
+  anything is probed: the thread's own provider and each of this host's pool
+  candidates before a route is computed (routing probes every candidate),
+  the routed provider or retry's attempt provider before it is probed, and
+  the Chat provider fallback before it is probed, so no Antigravity session
+  opens for a turn that is refused. A pooled thread with an Antigravity
+  candidate therefore takes no unattended turn, even one the route might
+  have sent elsewhere. A turn the person sends themselves that their own
   pool or fallback routes onto Antigravity still runs (maintainer decision,
-  2026-11-21); an outside agent's send routed there is refused with the
-  outside-agent sentence, since its grant checked only the thread's own
-  provider. Work and Code have no pool or provider
+  2026-11-21); an outside agent's send that could be routed there is refused
+  with the outside-agent sentence (below). Work and Code have no pool or provider
   fallback: a turn runs on the thread's own provider, and a coordinator's
   continue-on-fallback move changes that provider before it starts its host
   turn, which admission then refuses. A helper's resolved provider (its role
@@ -3034,8 +3043,10 @@ that declaration, never by the profile id:
   that would start or resume on it is refused at launch. A thread running on
   Antigravity starts no helper on any provider, here or on another hub member,
   including a Chat thread whose running turn a pool or fallback moved onto
-  Antigravity (its newest attempt's provider is read as well as the
-  thread's), and the person's retry or resume of an earlier child is refused too (its
+  Antigravity (the running turn's provider, from the live-turn registry, is
+  read; with no turn running, the thread's own provider is, so a retry or
+  resume of an earlier helper after the person moved off Antigravity runs),
+  and the person's retry or resume of an earlier child is refused too (its
   capabilities report delegation blocked as `helper-runs-refused`). A hub
   member whose Work default is Antigravity refuses a peer's delegated task as
   `provider-unavailable`, and so does a member taking delegated Code work
@@ -3051,7 +3062,14 @@ that declaration, never by the profile id:
   outside agent, which is never the person) may not send a prompt or an answer
   to a thread on Antigravity: "Google doesn't support another agent driving
   Google Antigravity on a personal Google sign-in. Continue this thread
-  yourself in Octant, or use a provider that uses a Gemini API key."
+  yourself in Octant, or use a provider that uses a Gemini API key." The
+  grant's check reads every provider the turn could run on (the thread's
+  own and its running turn's; for Chat also each of this host's pool
+  candidates and the Chat provider fallback) and refuses before the thread
+  is marked as having read outside content, so a refused send leaves no mark
+  to gate the thread's later helpers. The Chat service checks again on the
+  provider a routed send resolves to and, for an answer, on the attempt's own
+  provider.
 - **Who else can drive it.** No other principal than the host's own person
   can. Hub members are the person's own devices by scope
   ([Hub and spokes](hub-and-spokes.md#outcome): teams, shared machines and
@@ -3071,8 +3089,10 @@ that declaration, never by the profile id:
   turned on, and never started if it was added earlier: "Google Antigravity
   runs only as its built-in provider, which keeps it to the use its vendor
   supports on a personal sign-in. Add Google Antigravity in Settings ›
-  Providers & Models instead." The registry entry stays listed so the person finds
-  that pointer.
+  Providers & Models instead." The registry entry stays listed so the person
+  finds that pointer: Settings' registry picker shows that sentence for it in
+  place of the install line, offers no Add, and starts on the first entry that
+  can be added.
 - **Every sign-in.** The limits bind every `antigravity` instance whatever
   sign-in the CLI has cached: Octant cannot verify which method the cached
   credentials use, and the profile offers no posture of its own. A Gemini API

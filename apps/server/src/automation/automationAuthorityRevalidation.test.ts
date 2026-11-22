@@ -191,10 +191,12 @@ describe("revalidateAutomationAuthority", () => {
     void definition;
   });
 
-  it("refuses a routine on a provider whose personal sign-in does not cover unattended runs", () => {
+  it("keeps an Antigravity routine's sources watched, leaving its runs to be refused at dispatch", () => {
     const definition = automationDefinitionFixture();
     const run = automationRunForDefinition(definition);
-    const on = (driverKind: string) =>
+    // Source polling and file arming read the same revalidation; refusing
+    // here would stop them silently, with no run to say why.
+    expect(
       revalidateAutomationAuthority({
         definition,
         run,
@@ -202,18 +204,11 @@ describe("revalidateAutomationAuthority", () => {
           providerInstance: {
             id: AUTOMATION_TEST_IDS.providerInstance,
             enabled: true,
-            driverKind,
+            driverKind: "antigravity",
           } as never,
         }),
-      });
-    expect(on("antigravity")).toEqual({
-      kind: "blocked",
-      reason: "provider-capability-mismatch",
-      message:
-        "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Choose a provider that uses a Gemini API key, such as Gemini CLI with an API key.",
-    });
-    // Another ACP agent runs routines as before.
-    expect(on("gemini")).toEqual({ kind: "ok" });
+      }),
+    ).toEqual({ kind: "ok" });
   });
 
   it("digests the task prompt stably", () => {

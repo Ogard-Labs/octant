@@ -1257,6 +1257,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         windowId,
         codeSessionAuthority,
         activeTurn: codeParentActiveTurn,
+        liveTurnProvider: (threadId) => liveTurns.connection(threadId)?.providerInstanceId,
       }),
     poolRouting: ({ request }) => {
       if (request.pool === undefined) return undefined;

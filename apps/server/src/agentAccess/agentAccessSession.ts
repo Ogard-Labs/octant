@@ -18,6 +18,7 @@ import type {
   OpenedLocalControlSession,
 } from "@octant/cli/agent-tools";
 import { Schema } from "effect";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import type { AuthenticatedProductDispatchHandoff } from "../authenticatedProductRoutes";
 import { AGENT_ACCESS_ORIGIN, createRemoteDevicePrincipal } from "../clientPrincipal";
 import type { AgentAccessService } from "./agentAccessService";
@@ -60,6 +61,30 @@ export interface AgentSessionDependencies {
    * could not be recorded, and the agent's prompt is then not sent.
    */
   readonly markOutsideContent: (threadId: string, grant: AgentGrant) => void;
+}
+
+/**
+ * Every provider a Chat turn an outside agent sends or answers could run on:
+ * the thread's own, the running turn's (which a model pool or the Chat
+ * provider fallback may have chosen), each of this host's pool candidates,
+ * and the fallback. The grant's check runs before the thread is marked as
+ * having read outside content, so it fails closed over all of them rather
+ * than waiting for the route the turn would take.
+ */
+export function chatTurnProviders(input: {
+  readonly selected: string;
+  readonly live?: string;
+  readonly pool?: ReadonlyArray<{ readonly hostId: string; readonly providerInstanceId: string }>;
+  readonly fallback?: string;
+}): ReadonlyArray<string> {
+  return [
+    input.selected,
+    ...(input.live === undefined ? [] : [input.live]),
+    ...(input.pool ?? [])
+      .filter((candidate) => candidate.hostId === String(LOCAL_HOST_ID))
+      .map((candidate) => candidate.providerInstanceId),
+    ...(input.fallback === undefined ? [] : [input.fallback]),
+  ];
 }
 
 /** What a thread is and runs on now: its mode (`kind`), model, and access. */

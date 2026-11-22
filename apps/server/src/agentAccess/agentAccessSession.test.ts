@@ -12,6 +12,7 @@ import {
   guardAgentRequest,
   type AgentSessionDependencies,
   type AgentThreadAccess,
+  chatTurnProviders,
 } from "./agentAccessSession";
 
 const grantId = "10000000-0000-4000-8000-000000000001";
@@ -412,6 +413,34 @@ describe("prompts an outside agent sends", () => {
     expect(order).toEqual([`marked ${projectThread}`, "sent"]);
   });
 
+  it("marks nothing and sends nothing when the thread's turn could run on Google Antigravity", async () => {
+    const { service, threadProject, threadAccess } = deps();
+    const markOutsideContent = vi.fn();
+    const dispatch = vi.fn(async () => Response.json({}));
+    const session = createAgentSession({
+      grant: grant({ threads: "project" }),
+      signal: new AbortController().signal,
+      deps: {
+        service,
+        threadProject,
+        threadAccess,
+        hostId: () => "40000000-0000-4000-8000-000000000001",
+        markOutsideContent,
+        dispatch,
+      },
+    });
+    const answer = await session.send({
+      path: "/api/code/commands",
+      method: "POST",
+      body: { kind: "start-provider-turn", operationId: turnKey, threadId: antigravityThread },
+    });
+    expect(answer.status).toBe(403);
+    // Refused before the mark, so a send that never reached the thread leaves
+    // no outside content to gate its later helpers.
+    expect(markOutsideContent).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it("sends nothing when the mark cannot be recorded", async () => {
     const { service, threadProject, threadAccess } = deps();
     const dispatch = vi.fn(async () => Response.json({}));
@@ -684,5 +713,22 @@ describe("the sender of each turn", () => {
         { threads: "project" },
       ),
     ).toBe("refused");
+  });
+});
+
+describe("the providers an outside agent's Chat turn could run on", () => {
+  it("takes the thread's own, the running turn's, every local pool candidate and the Chat fallback", () => {
+    expect(
+      chatTurnProviders({
+        selected: "p-thread",
+        live: "p-live",
+        pool: [
+          { hostId: "local", providerInstanceId: "p-pool" },
+          { hostId: "other-host", providerInstanceId: "p-foreign" },
+        ],
+        fallback: "p-fallback",
+      }),
+    ).toEqual(["p-thread", "p-live", "p-pool", "p-fallback"]);
+    expect(chatTurnProviders({ selected: "p-thread" })).toEqual(["p-thread"]);
   });
 });

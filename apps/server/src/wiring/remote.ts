@@ -127,6 +127,7 @@ import {
 } from "../agentAccess/agentGrantRoutes";
 import { createAgentAccessListenerRouteHandler } from "../agentAccess/agentAccessRoutes";
 import {
+  chatTurnProviders,
   createAgentSession,
   type AgentSessionDependencies,
 } from "../agentAccess/agentAccessSession";
@@ -2375,20 +2376,44 @@ export function wireRemote(deps: RemoteDependencies) {
       return work === undefined ? undefined : { projectId: String(work.projectId) };
     },
     threadAccess: (threadId) => {
-      const refusalOf = (providerInstanceId: string) => {
-        const refusal = personalSignInRefusals(
-          providerDriverKind(providerInstanceId),
-        )?.refusesOutsideAgents;
-        return refusal === undefined ? {} : { outsideAgentRefusal: refusal };
+      // The running turn's provider is read as well as the thread's own: a
+      // Chat turn a pool or fallback moved takes an answer on that provider.
+      const live = deps.liveTurns.connection(threadId)?.providerInstanceId;
+      const refusalOf = (...providerInstanceIds: ReadonlyArray<string | undefined>) => {
+        for (const providerInstanceId of providerInstanceIds) {
+          if (providerInstanceId === undefined) continue;
+          const refusal = personalSignInRefusals(
+            providerDriverKind(providerInstanceId),
+          )?.refusesOutsideAgents;
+          if (refusal !== undefined) return { outsideAgentRefusal: refusal };
+        }
+        return {};
       };
       try {
         const chat = persistence.readChatThread(decodeChatThreadId(threadId));
-        if (chat !== undefined)
+        if (chat !== undefined) {
+          const fallback =
+            persistence.readChatSettings()?.settings.providerFallback?.providerInstanceId;
           return {
             kind: "chat",
             modelId: String(chat.modelId),
-            ...refusalOf(String(chat.providerInstanceId)),
+            ...refusalOf(
+              ...chatTurnProviders({
+                selected: String(chat.providerInstanceId),
+                ...(live === undefined ? {} : { live: String(live) }),
+                ...(chat.multiModelPool === undefined
+                  ? {}
+                  : {
+                      pool: chat.multiModelPool.candidates.map((candidate) => ({
+                        hostId: String(candidate.hostId),
+                        providerInstanceId: String(candidate.providerInstanceId),
+                      })),
+                    }),
+                ...(fallback === undefined ? {} : { fallback: String(fallback) }),
+              }),
+            ),
           };
+        }
       } catch {
         // Not a Chat thread id; try the other modes.
       }
@@ -2401,7 +2426,10 @@ export function wireRemote(deps: RemoteDependencies) {
             executionPolicy: code.executionPolicy,
             autoApprove: code.autoApprove === true,
             fullAccessSandbox: code.fullAccessSandbox === true,
-            ...refusalOf(String(code.providerInstanceId)),
+            ...refusalOf(
+              String(code.providerInstanceId),
+              live === undefined ? undefined : String(live),
+            ),
           };
         }
       } catch {
@@ -2415,7 +2443,10 @@ export function wireRemote(deps: RemoteDependencies) {
             modelId: String(work.modelId),
             access: work.access,
             fullAccessSandbox: work.fullAccessSandbox === true,
-            ...refusalOf(String(work.providerInstanceId)),
+            ...refusalOf(
+              String(work.providerInstanceId),
+              live === undefined ? undefined : String(live),
+            ),
           };
     },
     markOutsideContent: (threadId, grant) => {

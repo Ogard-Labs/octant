@@ -1438,12 +1438,14 @@ describe("ChatService", () => {
   it("sends no turn nobody sent that would fall back onto Google Antigravity, and takes the person's own", async () => {
     const window = decodeWindowId("84000000-0000-4000-8000-000000000012");
     const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    let fallbackProbes = 0;
     const { service } = openFixture({
       probe: probeFixture({ models: [] }),
-      probeFor: (providerInstanceId) =>
-        providerInstanceId === fallbackProvider
-          ? probeFixture({ instanceId: decodeProviderInstanceId(fallbackProvider) })
-          : undefined,
+      probeFor: (providerInstanceId) => {
+        if (providerInstanceId !== fallbackProvider) return undefined;
+        fallbackProbes += 1;
+        return probeFixture({ instanceId: decodeProviderInstanceId(fallbackProvider) });
+      },
       driverKindFor: (providerInstanceId) =>
         providerInstanceId === fallbackProvider ? "antigravity" : "openai-compatible",
       settings: {
@@ -1474,6 +1476,9 @@ describe("ChatService", () => {
       failure: { category: "unauthorized", message: ANTIGRAVITY_UNATTENDED_REFUSAL },
     });
     expect(service.read(created.thread.id).turns).toHaveLength(0);
+    // Refused from the fallback's declaration, before it is probed, so no
+    // Antigravity session opens for a turn that will not run.
+    expect(fallbackProbes).toBe(0);
     // An outside agent's send carries its grant's scope as a window, yet is
     // never the person: its grant checked only the thread's own provider.
     await expect(send({ windowId: window, fromOutsideAgent: true })).rejects.toMatchObject({
@@ -7695,6 +7700,62 @@ describe("ChatService", () => {
     expect(context.filter((block) => block.kind === "assistant-message")).toEqual([
       { kind: "assistant-message", text: "Fixture response 2" },
     ]);
+  });
+
+  it("takes no outside agent's answer to a question from an attempt running on Google Antigravity", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000013");
+    const sent: Array<SentTurn> = [];
+    const answered: Array<{ requestId: string; answer: string }> = [];
+    const { service } = openFixture({
+      driver: questionDriver(sent, answered),
+      driverKindFor: () => "antigravity",
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Antigravity question",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    void service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Ask me anything",
+      },
+      { windowId: window },
+    );
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.pendingQuestion !== undefined,
+    );
+    const waiting = service.read(created.thread.id);
+    const attempt = waiting.turns[0]!.attempts[0]!;
+    const answer = (context: Parameters<typeof service.execute>[1]) =>
+      service.execute(
+        {
+          kind: "answer-chat-turn-question",
+          threadId: created.thread.id,
+          expectedVersion: waiting.thread.version,
+          turnId: waiting.turns[0]!.id,
+          attemptId: attempt.id,
+          requestId: "q-first",
+          answer: "Yes",
+        },
+        context,
+      );
+
+    // The attempt's own provider is read, which a pool or fallback chose.
+    await expect(answer({ windowId: window, fromOutsideAgent: true })).rejects.toMatchObject({
+      failure: {
+        category: "unauthorized",
+        message:
+          "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or use a provider that uses a Gemini API key.",
+      },
+    });
+    expect(answered).toEqual([]);
+    await expect(answer({ windowId: window })).resolves.toMatchObject({
+      kind: "attempt-updated",
+    });
   });
 
   it("shows and answers a provider's question set, one question at a time", async () => {
