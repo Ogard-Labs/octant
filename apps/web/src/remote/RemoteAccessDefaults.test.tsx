@@ -148,7 +148,7 @@ describe("default modes on a browser the host's own person paired", () => {
     );
   });
 
-  it("sets Work's own default to Full access, and offers Work no Plan", async () => {
+  it("sets Work's own default to Full access and offers Plan", async () => {
     const { codeClient, projectClient, workThreadClient, executeWork, execute } = clients();
     const user = userEvent.setup();
     render(
@@ -164,7 +164,7 @@ describe("default modes on a browser the host's own person paired", () => {
     const picker = await screen.findByRole("combobox", { name: "Default mode for new threads" });
     await waitFor(() => expect(picker).toHaveTextContent("Ask first"));
     await user.click(picker);
-    expect(screen.queryByRole("option", { name: "Plan" })).toBeNull();
+    expect(await screen.findByRole("option", { name: "Plan" })).toBeVisible();
     await user.click(await screen.findByRole("option", { name: "Full access" }));
     await user.click(await screen.findByRole("button", { name: "Use Full access" }));
 
