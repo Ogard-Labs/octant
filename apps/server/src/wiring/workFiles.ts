@@ -25,6 +25,7 @@ import { WorkResearchProjection } from "../work/workResearchProjection";
 import { createWorkResearchSourcePort } from "../work/workResearchSourcePort";
 import { saveGeneratedCodeImage, saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createImageRouteHandler } from "../image/imageRoutes";
+import { createVideoRouteHandler } from "../video/videoRoutes";
 import { videoOfferDecisionRules } from "../video/videoOfferDecisionRules";
 import { imageOfferDecisionRules } from "../image/imageOfferDecisionRules";
 import { createServiceOfferRouteHandler } from "../offers/serviceOfferRoutes";
@@ -60,12 +61,18 @@ import type { HarnessStateWiring } from "./harnessState";
 import { createServerWorkFileListing } from "../serverProjects/serverWorkFiles";
 
 export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<AuthorityWiring, "serviceOffers" | "speechGates" | "windowAuthorityStore"> &
+  Pick<
+    AuthorityWiring,
+    "onWindowRevoked" | "serviceOffers" | "speechGates" | "windowAuthorityStore"
+  > &
   Pick<
     WorkspaceWiring,
     "keptImageChoices" | "keptVideoChoices" | "projectService" | "shellService"
   > &
-  Pick<ProvidersWiring, "credentialResolver" | "imageJobService" | "providerDataDirectory"> &
+  Pick<
+    ProvidersWiring,
+    "credentialResolver" | "imageJobService" | "providerDataDirectory" | "videoJobService"
+  > &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
   Pick<CodeWiring, "roots"> &
   Pick<WorkWiring, "workThreadService"> &
@@ -79,6 +86,8 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
     credentialResolver,
     serviceOffers,
     imageJobService,
+    videoJobService,
+    onWindowRevoked,
     keptImageChoices,
     keptVideoChoices,
     options,
@@ -208,6 +217,13 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
     windowAuthorityStore,
     now: Date.now,
   });
+  const videoRoutes = createVideoRouteHandler({
+    jobs: videoJobService,
+    authorizeScope: (windowId, threadKind, scopeId, principal) =>
+      windowCanOpenThread(windowId, threadKind, String(scopeId), principal),
+    windowAuthorityStore,
+  });
+  onWindowRevoked((windowId) => videoRoutes.revokeWindow(windowId));
   const imageRoutes = createImageRouteHandler({
     jobs: imageJobService,
     ...imageProfiles,
@@ -415,6 +431,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
   });
   return {
     imageRoutes,
+    videoRoutes,
     serviceOfferRoutes,
     previewHandoffBridgeRoutes,
     previewRoutes,

@@ -1529,6 +1529,7 @@ export function startOctantServer(
     });
     const {
       imageRoutes,
+      videoRoutes,
       serviceOfferRoutes,
       previewHandoffBridgeRoutes,
       previewRoutes,
@@ -1545,6 +1546,8 @@ export function startOctantServer(
       keptImageChoices,
       keptVideoChoices,
       imageJobService,
+      videoJobService,
+      onWindowRevoked,
       options,
       persistence,
       projectService,
@@ -2050,6 +2053,7 @@ export function startOctantServer(
       goalLoopRoutes,
       goalRoutes,
       imageRoutes,
+      videoRoutes,
       serviceOfferRoutes,
       integrationRoutes,
       latencyStats,
@@ -2206,6 +2210,7 @@ export function startOctantServer(
       externalContentIngestionStore,
       extensionApiService,
       generatedImageStore,
+      videoJobService,
       debugConfigurationApprovals,
       debugService,
       hostMemoryGuard,

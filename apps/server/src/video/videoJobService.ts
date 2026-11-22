@@ -324,6 +324,23 @@ export class VideoJobService {
     return ready;
   }
 
+  /** Bytes `[start, end]` of a finished clip, clamped to it, for a byte-range response. */
+  async readClipRange(
+    job: VideoJob,
+    range: { readonly start: number; readonly end: number },
+  ): Promise<
+    | {
+        readonly bytes: Uint8Array;
+        readonly start: number;
+        readonly end: number;
+        readonly size: number;
+      }
+    | undefined
+  > {
+    if (job.status !== "completed" || job.clip === undefined) return undefined;
+    return this.#options.clips.readRange(job.scopeId, job.clip.clipId, range);
+  }
+
   /** A finished clip's bytes, for a save under the turn's folder. */
   async readClip(job: VideoJob): Promise<Uint8Array | undefined> {
     if (job.status !== "completed" || job.clip === undefined) return undefined;
