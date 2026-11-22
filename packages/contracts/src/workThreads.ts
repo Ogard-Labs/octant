@@ -216,6 +216,8 @@ const WorkThreadCommandFields = {
 
 export const CreateWorkThreadCommand = Schema.Struct({
   kind: Schema.Literal("create-work-thread"),
+  /** An explicit initial level, admitted and journaled with creation. */
+  access: Schema.optional(WorkAccess),
   threadId: WorkThreadId,
   projectId: ProjectId,
   title: Schema.NonEmptyTrimmedString,
@@ -239,6 +241,8 @@ export const CreateWorkThreadCommand = Schema.Struct({
   fullAccessSandbox: Schema.optional(Schema.Boolean),
   /** Strict for this thread; absent follows its Project and Settings. */
   strict: Schema.optional(Schema.Boolean),
+  /** The person passed the per-run `octant agent --full-access` flag. */
+  fullAccessRunFlag: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type CreateWorkThreadCommand = typeof CreateWorkThreadCommand.Type;
 

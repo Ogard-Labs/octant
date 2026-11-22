@@ -21,6 +21,7 @@ import { Effect, Either } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   acpNegotiationAccepted,
+  acpWindowsSetupOffRefusal,
   makeAcpConfinementLive,
   makeAcpProcessLive,
   probeAcpBinary,
@@ -787,6 +788,14 @@ describe("ACP child-server profiles", () => {
 
   it("starts an ACP agent on Windows at Full access, below it, and in Chat outside Strict with no sandbox, and refuses Strict and a kept sandbox by name", async () => {
     const target = fixture(kilo);
+    const kiloOwnSetup = {
+      subagents: true,
+      webTools: true,
+      skills: true,
+      toolServers: true,
+      hooks: true,
+      projectCode: true,
+    } as const;
     const confinement = makeAcpConfinementLive({
       platform: "win32",
       hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
@@ -796,6 +805,7 @@ describe("ACP child-server profiles", () => {
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly fullAccessSandbox?: boolean;
       readonly strict?: boolean;
+      readonly nativeSetup?: ProviderNativeSetup;
     }) =>
       Effect.runPromise(
         Effect.either(
@@ -812,8 +822,10 @@ describe("ACP child-server profiles", () => {
       );
     for (const level of [
       { executionPolicy: "full-access" },
-      { executionPolicy: "approval-gated", strict: false },
-      { executionPolicy: "plan", strict: false },
+      // Kilo holds a Project's own setup back, which Windows can only do by
+      // loading the person's setup instead (covered below).
+      { executionPolicy: "approval-gated", strict: false, nativeSetup: kiloOwnSetup },
+      { executionPolicy: "plan", strict: false, nativeSetup: kiloOwnSetup },
       { mode: "chat", executionPolicy: "approval-gated", strict: false },
     ] as const) {
       expect(await prepare(level)).toMatchObject({
@@ -836,6 +848,152 @@ describe("ACP child-server profiles", () => {
         left: { category: "incompatible", message },
       });
     }
+  });
+
+  describe("on Windows, an agent that holds its own setup back", () => {
+    const ownSetup = {
+      subagents: true,
+      webTools: true,
+      skills: true,
+      toolServers: true,
+      hooks: true,
+      projectCode: true,
+    } as const;
+    const prepareKimi = (level: {
+      readonly mode?: "chat" | "work" | "code";
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly nativeSetup?: ProviderNativeSetup;
+    }) => {
+      const target = fixture(kimi);
+      return Effect.runPromise(
+        Effect.either(
+          makeAcpConfinementLive({
+            platform: "win32",
+            hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+          }).prepare({
+            profile: kimi,
+            binaryPath: target.binaryPath,
+            root: target.canonicalRoot,
+            managedHome: join(target.canonicalRoot, "managed-home"),
+            mode: "code",
+            strict: false,
+            environment: { PATH: "/usr/bin" },
+            ...level,
+          }),
+        ),
+      );
+    };
+
+    it("refuses a setup-off launch below Full access with a reason, since Windows has no sandbox to hold that setup back", async () => {
+      for (const level of [
+        { executionPolicy: "approval-gated" },
+        { executionPolicy: "auto-accept-edits" },
+        { executionPolicy: "plan" },
+        { mode: "work", executionPolicy: "approval-gated" },
+        { mode: "chat", executionPolicy: "approval-gated" },
+      ] as const) {
+        expect(await prepareKimi(level)).toMatchObject({
+          _tag: "Left",
+          left: {
+            category: "incompatible",
+            message: acpWindowsSetupOffRefusal(kimi, level.mode ?? "code"),
+          },
+        });
+      }
+      expect(acpWindowsSetupOffRefusal(kimi, "code")).toContain("Kimi Code");
+    });
+
+    it("offers Full access in the refusal only where the thread can switch to it, never in Chat", () => {
+      expect(acpWindowsSetupOffRefusal(kimi, "code")).toContain("Full access");
+      expect(acpWindowsSetupOffRefusal(kimi, "work")).toContain("Full access");
+      expect(acpWindowsSetupOffRefusal(kimi, "chat")).not.toContain("Full access");
+    });
+
+    it("refuses the same launch before the agent's version is read", async () => {
+      const target = fixture(kimi);
+      const prepare = vi.fn(passthroughConfinement.prepare);
+      const started = vi.fn(() => Promise.reject(new Error("The agent must not start.")));
+      expect(
+        await failureOf(
+          Effect.scoped(
+            makeAcpProcessLive({
+              platform: "win32",
+              confinement: { prepare },
+            }).start({
+              profile: kimi,
+              binaryPath: target.binaryPath,
+              root: target.canonicalRoot,
+              managedHome: join(target.canonicalRoot, "managed-home"),
+              mode: "code",
+              executionPolicy: "approval-gated",
+              strict: false,
+              onProcessStarted: started,
+            }),
+          ),
+        ),
+      ).toEqual({ category: "incompatible", message: acpWindowsSetupOffRefusal(kimi, "code") });
+      expect(prepare).not.toHaveBeenCalled();
+      expect(started).not.toHaveBeenCalled();
+    });
+
+    it("starts the same launch at Full access, or with the person's own setup on", async () => {
+      for (const level of [
+        { executionPolicy: "full-access" },
+        { executionPolicy: "approval-gated", nativeSetup: ownSetup },
+        { mode: "chat", executionPolicy: "approval-gated", nativeSetup: ownSetup },
+      ] as const) {
+        expect(await prepareKimi(level)).toMatchObject({
+          _tag: "Right",
+          right: { command: expect.stringContaining("agent-fixture") },
+        });
+      }
+    });
+
+    it("starts a Chat launch of an agent that holds back only a Project's entries, since Chat has no Project folder", async () => {
+      const target = fixture(kilo);
+      expect(
+        await Effect.runPromise(
+          Effect.either(
+            makeAcpConfinementLive({
+              platform: "win32",
+              hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+            }).prepare({
+              profile: kilo,
+              binaryPath: target.binaryPath,
+              root: target.canonicalRoot,
+              managedHome: join(target.canonicalRoot, "managed-home"),
+              mode: "chat",
+              executionPolicy: "approval-gated",
+              strict: false,
+              environment: { PATH: "/usr/bin" },
+            }),
+          ),
+        ),
+      ).toMatchObject({ _tag: "Right", right: { command: target.binaryPath } });
+    });
+
+    it("starts a setup-off launch below Full access of an agent that holds nothing back", async () => {
+      const target = fixture(antigravity);
+      expect(
+        await Effect.runPromise(
+          Effect.either(
+            makeAcpConfinementLive({
+              platform: "win32",
+              hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+            }).prepare({
+              profile: antigravity,
+              binaryPath: target.binaryPath,
+              root: target.canonicalRoot,
+              managedHome: join(target.canonicalRoot, "managed-home"),
+              mode: "code",
+              executionPolicy: "approval-gated",
+              strict: false,
+              environment: { PATH: "/usr/bin" },
+            }),
+          ),
+        ),
+      ).toMatchObject({ _tag: "Right", right: { command: target.binaryPath } });
+    });
   });
 
   it("reads an ACP agent's readiness on Windows only for a host whose new threads run with no Octant sandbox", async () => {

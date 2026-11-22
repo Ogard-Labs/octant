@@ -249,18 +249,40 @@ export interface AcpProcessOptions {
 }
 
 /**
+ * Why a Windows launch below Full access of an agent that holds its own setup
+ * back refuses while the person has that setup turned off.
+ */
+/** Chat turns always run at Ask first, so the refusal offers Full access only to Work and Code. */
+export function acpWindowsSetupOffRefusal(
+  profile: AcpProviderProfile,
+  mode: AcpSessionMode,
+): string {
+  const ways =
+    mode === "chat"
+      ? "Turn the agent's own setup on for this thread, or run it on a Mac or Linux host."
+      : "Turn the agent's own setup on for this thread, switch to Full access, or run it on a Mac or Linux host.";
+  return `${profile.displayName} cannot keep its own setup turned off on Windows, where Octant has no sandbox to hold it back. ${ways}`;
+}
+
+/**
  * How one ACP launch runs on Windows, from that launch's own authority. A
  * readiness check serves no one thread, so it runs only for a host whose new
- * threads run with no Octant sandbox.
+ * threads run with no Octant sandbox. Below Full access a launch whose person
+ * turned the agent's own setup off refuses wherever the profile holds setup
+ * back: on macOS and Linux the sandbox's deny rules are that hold-back, and
+ * unconfined Kimi Code 0.38.0 started a trusted Project's `.mcp.json` server
+ * at `session/new` with no approval asked (maintainer decision, 2026-11-22).
  */
 function acpWindowsLaunch(
   input: {
+    readonly profile: AcpProviderProfile;
     readonly mode: AcpSessionMode;
     readonly executionPolicy: ProviderExecutionPolicy;
     readonly fullAccessSandbox?: boolean;
     readonly strict?: boolean;
     readonly sandboxPolicy?: SandboxPolicySelection;
     readonly purpose?: "probe" | "session";
+    readonly nativeSetup?: ProviderNativeSetup;
   },
   catalogUnconfined: boolean,
 ): WindowsProviderLaunch {
@@ -269,13 +291,22 @@ function acpWindowsLaunch(
       ? { status: "unconfined", approvals: "none" }
       : { status: "refused", reason: WINDOWS_SANDBOX_MISSING_REASON };
   }
-  return windowsProviderLaunch({
+  const launch = windowsProviderLaunch({
     mode: input.mode,
     executionPolicy: input.executionPolicy,
     fullAccessSandbox: input.fullAccessSandbox,
     strict: input.sandboxPolicy === undefined ? input.strict : true,
     driverKind: "acp-agent",
   });
+  if (
+    launch.status === "unconfined" &&
+    input.executionPolicy !== "full-access" &&
+    !acpLoadsAllOwnSetup({ strict: input.strict, setup: input.nativeSetup }) &&
+    acpHoldsSetupBack(input.profile, input.mode)
+  ) {
+    return { status: "refused", reason: acpWindowsSetupOffRefusal(input.profile, input.mode) };
+  }
+  return launch;
 }
 
 export interface AcpConfinementOptions {
@@ -614,11 +645,15 @@ function acpStartsUnconfinedBelowFullAccess(input: {
   );
 }
 
-/** Whether the profile's launch denies any of the agent's own setup. */
-function acpHoldsSetupBack(profile: AcpProviderProfile): boolean {
+/**
+ * Whether the profile's launch denies any of the agent's own setup. A Chat
+ * launch runs in the managed home, which holds no Project entry, so there only
+ * the host's own entries count.
+ */
+function acpHoldsSetupBack(profile: AcpProviderProfile, mode?: AcpSessionMode): boolean {
   const hostAuthentication = profile.process.hostAuthentication;
   return (
-    (profile.process.forbiddenRootEntries?.length ?? 0) > 0 ||
+    (mode !== "chat" && (profile.process.forbiddenRootEntries?.length ?? 0) > 0) ||
     (profile.process.hostDeniedEntries?.length ?? 0) > 0 ||
     (hostAuthentication?.kind === "directory" &&
       (hostAuthentication.forbiddenEntries?.length ?? 0) > 0)

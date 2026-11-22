@@ -1,3 +1,6 @@
+import type { ProviderRegistrySnapshot } from "@octant/contracts";
+import { buildModelPickerGroups } from "@octant/domain";
+import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import {
   StrictPreferenceControl,
   strictPreferenceValue,
@@ -17,7 +20,7 @@ import {
   type SettingsSettingId,
 } from "@octant/contracts";
 import { permissionModeOf, threadAccessOf } from "@octant/domain/guardrail-policy";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useHostPlatform } from "../platform";
 import { SettingRow, SettingsSection } from "../settings/primitives";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
@@ -32,6 +35,7 @@ import { PERMISSION_MODE_OPTIONS } from "./PermissionModePicker";
 import { WORKERS_UNLISTED } from "./coordinatorWorkerListing";
 
 export interface CodeSettingsUpdate {
+  readonly defaultModel?: CodeSettings["defaultModel"] | null;
   readonly defaultExecutionPolicy: CodeSettings["defaultExecutionPolicy"];
   readonly defaultPermissionPersistence: CodeSettings["defaultPermissionPersistence"];
   readonly defaultAutoApprove?: boolean;
@@ -138,6 +142,7 @@ interface CodeSettingsDraft {
 }
 
 export interface CodeSettingsViewProps {
+  readonly providerSnapshot?: ProviderRegistrySnapshot | undefined;
   readonly focusedSetting?: SettingsSettingId | undefined;
   readonly onUpdate: (input: CodeSettingsUpdate) => Promise<boolean>;
   readonly settings: CodeSettings;
@@ -185,6 +190,21 @@ function permissionModeOfSettings(settings: CodeSettings): PermissionMode {
 }
 
 export function CodeSettingsView(props: CodeSettingsViewProps) {
+  const [modelBusy, setModelBusy] = useState(false);
+  const modelGroups = useMemo(
+    () =>
+      buildModelPickerGroups({
+        instances: props.providerSnapshot?.instances ?? [],
+        observedByInstance: new Map(
+          (props.providerSnapshot?.observedStates ?? []).map(
+            (state) => [state.instanceId, state] as const,
+          ),
+        ),
+        mode: "code",
+        currentSelection: props.settings.defaultModel,
+      }),
+    [props.providerSnapshot, props.settings.defaultModel],
+  );
   const [permissionMode, setPermissionMode] = useState(permissionModeOfSettings(props.settings));
   const [strictPreference, setStrictPreference] = useState(strictPreferenceValue(props.settings));
   const [autoReviewer, setAutoReviewer] = useState<AutoReviewer>(
@@ -308,6 +328,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
    */
   function restoreUnsavedPicks(
     change: Partial<CodeSettingsDraft> & {
+      readonly defaultModel?: CodeSettings["defaultModel"] | null;
       readonly bundledLanguageServer?: boolean;
       readonly androidEmulatorSnapshotBoot?: boolean;
       readonly restartContinuation?: boolean;
@@ -367,6 +388,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   async function commit(
     section: CodeSettingsSectionId,
     change: Partial<CodeSettingsDraft> & {
+      readonly defaultModel?: CodeSettings["defaultModel"] | null;
       readonly bundledLanguageServer?: boolean;
       readonly androidEmulatorSnapshotBoot?: boolean;
       readonly restartContinuation?: boolean;
@@ -411,6 +433,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     try {
       const access = threadAccessOf(draft.permissionMode);
       updated = await props.onUpdate({
+        ...(change.defaultModel === undefined ? {} : { defaultModel: change.defaultModel }),
         defaultExecutionPolicy: access.executionPolicy,
         defaultPermissionPersistence: hostSettings.current.defaultPermissionPersistence,
         // The host keeps what it stored when a change leaves these out, so
@@ -542,6 +565,37 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         title="Thread defaults"
       >
         <div className="setgroup">
+          <SettingRow
+            description="The provider and model new Code threads start on, in the app and terminal."
+            focused={props.focusedSetting === "code-default-model"}
+            label="Default model"
+            scope="host"
+            settingId="code-default-model"
+          >
+            <ComposerModelPicker
+              ariaLabel="Default Code provider and model"
+              groups={modelGroups}
+              disabled={modelBusy}
+              menuSide="bottom"
+              rememberChoice={false}
+              selectedModelId={props.settings.defaultModel?.modelId}
+              selectedProviderInstanceId={props.settings.defaultModel?.providerInstanceId}
+              unselectedLabel="Choose when starting"
+              onSelect={async (selection) => {
+                setModelBusy(true);
+                try {
+                  await commit("thread-defaults", {
+                    defaultModel: {
+                      providerInstanceId: selection.providerInstanceId,
+                      modelId: selection.modelId,
+                    },
+                  });
+                } finally {
+                  setModelBusy(false);
+                }
+              }}
+            />
+          </SettingRow>
           <SettingRow
             description="Off lets Code threads start in a plain folder, including the default folder. Branches, diffs, and pull requests are not available there."
             label="Code needs a Git repository"

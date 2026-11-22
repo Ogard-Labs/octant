@@ -27,6 +27,7 @@ import {
   decodeWorkThreadId,
   decodeProjectId,
   decodeProviderInstance,
+  decodeEventActor,
   decodeWindowId,
   decodeWorkTurnAuthority,
   decodeWorkTurnState,
@@ -358,6 +359,136 @@ describe("WorkThreadService", () => {
         title: "Renamed while moving",
       }),
     ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+  });
+
+  it("journals an explicit initial access with creation, without a later mutation", async () => {
+    const fixture = serviceFixture({ threads: [] });
+    const result = await fixture.service.execute(ids.window, {
+      kind: "create-work-thread",
+      threadId: ids.thread,
+      projectId: ids.project,
+      title: "Draft brief",
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      hostId: "local",
+      bindingRevisionId: ids.binding,
+      access: "full-access",
+      fullAccessSandbox: true,
+    });
+    expect(result).toMatchObject({
+      kind: "thread-created",
+      thread: { access: "full-access", fullAccessSandbox: true, version: 1 },
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledTimes(1);
+  });
+
+  it("journals the local person's per-run Full access flag with Work thread creation", async () => {
+    const fixture = serviceFixture({
+      threads: [],
+      project: {
+        ...workProject(),
+        defaultPermissionMode: "full-access",
+      } as Project,
+    });
+    const result = await fixture.service.execute(ids.window, {
+      kind: "create-work-thread",
+      threadId: ids.thread,
+      projectId: ids.project,
+      title: "Draft brief",
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      hostId: "local",
+      bindingRevisionId: ids.binding,
+      fullAccessRunFlag: true,
+    });
+    expect(result).toMatchObject({
+      kind: "thread-created",
+      thread: { access: "full-access", fullAccessRunFlag: true, version: 1 },
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            eventName: "work.thread-created@1",
+            payload: {
+              kind: "thread-created",
+              thread: expect.objectContaining({ fullAccessRunFlag: true }),
+            },
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("refuses a Work creation run flag under resolved Strict before journaling or preparing the thread", async () => {
+    const create = {
+      kind: "create-work-thread" as const,
+      threadId: ids.thread,
+      projectId: ids.project,
+      title: "Draft brief",
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      hostId: "local" as const,
+      bindingRevisionId: ids.binding,
+      access: "full-access" as const,
+      fullAccessRunFlag: true as const,
+    };
+    const projectStrict = serviceFixture({
+      threads: [],
+      project: { ...workProject(), defaultStrict: true } as Project,
+    });
+    await expect(projectStrict.service.execute(ids.window, create)).rejects.toMatchObject({
+      failure: { category: "invalid", message: expect.stringMatching(/Strict/) },
+    });
+    expect(projectStrict.persistence.journal.append).not.toHaveBeenCalled();
+    expect(projectStrict.workingDirectories.resolve).not.toHaveBeenCalled();
+
+    const settingsStrict = serviceFixture({ threads: [] });
+    await settingsStrict.service.execute(ids.window, {
+      kind: "update-work-settings",
+      expectedVersion: 0,
+      defaultAccess: "ask-first",
+      defaultStrict: true,
+    });
+    const journaledSettings = settingsStrict.persistence.journal.append.mock.calls.length;
+    await expect(settingsStrict.service.execute(ids.window, create)).rejects.toMatchObject({
+      failure: { category: "invalid", message: expect.stringMatching(/Strict/) },
+    });
+    expect(settingsStrict.persistence.journal.append).toHaveBeenCalledTimes(journaledSettings);
+    expect(settingsStrict.workingDirectories.resolve).not.toHaveBeenCalled();
+
+    await expect(
+      projectStrict.service.execute(ids.window, { ...create, strict: false }),
+    ).resolves.toMatchObject({ thread: { access: "full-access", strict: false } });
+  });
+
+  it("refuses a non-person's Work creation run flag before journaling or preparing the thread", async () => {
+    const fixture = serviceFixture({ threads: [] });
+    const actor = decodeEventActor({
+      kind: "remote-device",
+      actorId: "72000000-0000-4000-8000-000000000090",
+      deviceId: "72000000-0000-4000-8000-000000000091",
+    });
+    await expect(
+      fixture.service.execute(
+        ids.window,
+        {
+          kind: "create-work-thread",
+          threadId: ids.thread,
+          projectId: ids.project,
+          title: "Draft brief",
+          providerInstanceId: ids.provider,
+          modelId: "model-a",
+          hostId: "local",
+          bindingRevisionId: ids.binding,
+          access: "full-access",
+          fullAccessRunFlag: true,
+        },
+        { actor },
+      ),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(fixture.workingDirectories.resolve).not.toHaveBeenCalled();
   });
 
   it("creates a thread for the active Work Project with a local-user event", async () => {

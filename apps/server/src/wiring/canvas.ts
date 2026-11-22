@@ -355,39 +355,18 @@ export function wireCanvas(deps: CanvasDependencies) {
    * its ownership receipt still names this thread, checkout, and repository.
    * Undefined refuses.
    */
-  const codeThreadCheckoutRoot = async (
+  const codeThreadCheckoutRoot = (
     threadId: string,
     projectId: string,
-  ): Promise<string | undefined> => {
-    const thread = persistence.readCodeThread(threadId as never);
-    if (
-      thread === undefined ||
-      String(thread.projectId) !== projectId ||
-      thread.lifecycle !== "active"
-    ) {
-      return undefined;
-    }
-    const project = persistence.readProject(thread.projectId);
-    if (project?.type !== "code" || project.lifecycle !== "active") return undefined;
-    const checkout = persistence.readCodeCheckout(thread.checkoutId);
-    if (checkout === undefined) return undefined;
-    if (checkout.kind === "existing-worktree") return project.binding.canonicalRoot;
-    if (checkout.kind !== "managed-worktree") return undefined;
-    const receipt = await managedWorktreeReceipts.load(String(checkout.ownershipReceiptId));
-    if (
-      receipt === undefined ||
-      receipt.state !== "ready" ||
-      receipt.receiptId !== checkout.ownershipReceiptId ||
-      receipt.threadId !== thread.id ||
-      receipt.checkoutId !== checkout.id ||
-      receipt.repositoryId !== thread.repositoryId ||
-      receipt.repositoryId !== checkout.repositoryId ||
-      receipt.canonicalRepositoryPath !== project.binding.canonicalRoot
-    ) {
-      return undefined;
-    }
-    return receipt.canonicalWorktreePath;
-  };
+  ): Promise<string | undefined> =>
+    resolveCodeThreadCheckoutRoot({
+      threadId,
+      projectId,
+      readCodeThread: (id) => persistence.readCodeThread(id as never),
+      readProject: (id) => persistence.readProject(id),
+      readCodeCheckout: (id) => persistence.readCodeCheckout(id),
+      loadManagedReceipt: (id) => managedWorktreeReceipts.load(id),
+    });
 
   const threadProjectAssetRoot = async (input: {
     readonly mode: "work" | "code";
@@ -1456,4 +1435,51 @@ export function appendArtifactMirrorBundleVersion(input: {
   return result.kind === "accepted"
     ? { kind: "accepted", versionId: String(result.receipt.versionId) }
     : { kind: "denied", message: result.message };
+}
+
+/**
+ * Resolves a Code thread's live checkout root (its managed linked worktree or
+ * the bound existing-worktree root), checking thread/project lifecycle and the
+ * managed worktree ownership receipt.
+ */
+export async function resolveCodeThreadCheckoutRoot(input: {
+  readonly threadId: string;
+  readonly projectId: string;
+  readonly readCodeThread: (
+    threadId: string,
+  ) => ReturnType<ServerStart["persistence"]["readCodeThread"]>;
+  readonly readProject: ServerStart["persistence"]["readProject"];
+  readonly readCodeCheckout: ServerStart["persistence"]["readCodeCheckout"];
+  readonly loadManagedReceipt: (
+    receiptId: string,
+  ) => ReturnType<CanvasDependencies["managedWorktreeReceipts"]["load"]>;
+}): Promise<string | undefined> {
+  const thread = input.readCodeThread(input.threadId);
+  if (
+    thread === undefined ||
+    String(thread.projectId) !== input.projectId ||
+    thread.lifecycle !== "active"
+  ) {
+    return undefined;
+  }
+  const project = input.readProject(thread.projectId);
+  if (project?.type !== "code" || project.lifecycle !== "active") return undefined;
+  const checkout = input.readCodeCheckout(thread.checkoutId);
+  if (checkout === undefined) return undefined;
+  if (checkout.kind === "existing-worktree") return project.binding.canonicalRoot;
+  if (checkout.kind !== "managed-worktree") return undefined;
+  const receipt = await input.loadManagedReceipt(String(checkout.ownershipReceiptId));
+  if (
+    receipt === undefined ||
+    receipt.state !== "ready" ||
+    receipt.receiptId !== checkout.ownershipReceiptId ||
+    receipt.threadId !== thread.id ||
+    receipt.checkoutId !== checkout.id ||
+    receipt.repositoryId !== thread.repositoryId ||
+    receipt.repositoryId !== checkout.repositoryId ||
+    receipt.canonicalRepositoryPath !== project.binding.canonicalRoot
+  ) {
+    return undefined;
+  }
+  return receipt.canonicalWorktreePath;
 }

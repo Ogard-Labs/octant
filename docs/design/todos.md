@@ -13,13 +13,13 @@ scope ([Current Release Boundary](../architecture.md#current-release-boundary)).
 [Hub and spokes](hub-and-spokes.md) owns the hub, owner devices and the
 roster; [Workspace](workspace.md) owns the icon rail and pages.
 
-**Status: approved design 2026-11-14 (maintainer decision); partly built.**
+**Status: approved design 2026-11-14 (maintainer decision); built for paired devices.**
 The list on one host is built: its events, the list rebuilt from them, the
 `/api/todos` read and command routes, version-checked edits, and the refusals
 for every caller but the person. The To-dos destination is built on that host:
 the page, quick add, filters, editing in place, reordering, the sidebar row and
 its badge, and New to-do in the command palette and on a shortcut. Start is
-built for this host's Projects and Chat: the draft with its source, the link,
+built for this host's and paired computers' Projects and Chat: the draft with its source, the link,
 Link again, the thread state on a row, and Tick off. Every window on the list
 host follows changes as they happen: each change publishes the host's `todos`
 change topic, and a window reads the list again on it (and every 30 seconds
@@ -28,9 +28,11 @@ list on is built: this host, or a computer this window is paired with, saved
 on this host and refused once this host keeps a to-do. A window reaches a list
 on another computer through its own pairing with it, shows the last list
 read-only when that computer cannot be reached, and keeps quick adds as
-unsent drafts on the device. Not built yet: the hub as the default list host,
-Start into another host's Project, and a list host's changes reaching windows
-on other computers as they happen (they read it every 30 seconds). The phone
+unsent drafts on the device. An empty spoke records its hub as the default list
+host. Windows on paired computers follow bounded, cursor-based list-change
+notices; reconnecting or a restarted host triggers a fresh read. Start uses the
+ordinary draft composer with the Project host's own clients and creation checks.
+Physical two-computer and hub runs remain maintainer live checks. The phone
 screen is built: Inbox › To-dos lists the connected computer's open and done
 to-dos, adds one with quick add, ticks one off or opens it again, and starts a
 thread from one.
@@ -102,10 +104,13 @@ Every person has one **list host**.
 
 - **Default.** A host that belongs to a hub uses the hub as its list host; a
   phone or browser that joined a hub as a guest uses the hub. A host in no hub
-  uses itself, and a phone paired with it uses that host. Built so far: every
-  host uses itself until the person chooses; the hub default is not built,
-  because applied to a host that already keeps to-dos it would show an empty
-  list in place of the person's own.
+  uses itself, and a phone paired with it uses that host. An
+  empty spoke records its hub as the default when first read or changed; a
+  host that already keeps to-dos stays on itself, and an explicit choice wins.
+  A window reaches that hub through its own pairing. The default is journaled
+  once as a system choice, so losing membership or the hub becoming unreachable
+  never silently switches back to a new local list. Moving a populated list is
+  separate work; an existing list stays visible on its current host.
 - **Choosing.** Settings › To-dos › Keep the list on names the list host: this
   host, the hub, or a computer this host is paired with. In the first version
   the choice can change only while this host's own list is empty; moving a
@@ -118,6 +123,11 @@ Every person has one **list host**.
   this host refuses every change to its own list as `kept-elsewhere`, so a
   stale window or a phone paired here cannot add a to-do nobody is shown. A
   window that cannot read the choice shows no list rather than this host's.
+  A phone does not read `/api/todos/list-host`: after the existing person check,
+  `GET /api/todos` resolves the effective list host and returns this host's view
+  only when it keeps the list, otherwise using the existing `kept-elsewhere`
+  refusal. The read does not return the host-choice payload or forward to the
+  chosen computer.
   The choice names the other host by its
   stable id and last-seen name and grants nothing there: a window reaches it
   through its own pairing (the desktop's paired-computer channel admits
@@ -138,15 +148,22 @@ Every person has one **list host**.
   private listener forwards both, and every other caller is refused, a read
   included. A window on another
   computer reaches the list as such a paired device, through the paired
-  computer channel, or as an owner device after a fresh unlock
-  ([Owner devices](hub-and-spokes.md#owner-devices); not built yet). Agents, routines,
+  computer channel. A hub membership or owner mark alone grants no access;
+  the window still needs its own pairing (the product-route distinction in
+  [Owner devices](hub-and-spokes.md#owner-devices)). Agents, routines,
   delegated runs and peer hosts are refused: a peer grant has no to-do item.
 
 ## Sync, conflicts and offline
 
 - **One copy.** Only the list host keeps the list. Other hosts keep no copy;
   their windows read it the way they read any other host, through the host
-  federation registry, and changes stream to every connected client.
+  federation registry, and changes reach every connected client. A paired
+  desktop window waits at `GET /api/todos/changes` with a process epoch and
+  sequence cursor. Each wait ends at a to-do change or after 20 seconds,
+  below the paired channel's request timeout; an invalidated cursor requires
+  a fresh read. The endpoint applies the list's own-person check, including
+  on its first read. It carries invalidations only; the list is read through
+  its ordinary route.
 - **Conflicts.** There is one journal, so nothing is merged. An edit to the
   title or notes carries the version it was made on; when the title or notes
   changed after that version it is refused as `changed-elsewhere` (a tick or a
@@ -190,7 +207,7 @@ option.
 1. **Start.** Each open to-do row has Start. With more than one Project the
    person picks one; with none, Start offers Chat or a Project.
 2. **The draft.** Start opens the ordinary new-thread draft for that Project
-   on that Project's host, with the to-do's title (and notes, under it) in the
+   on that Project's host (in a paired-computer dialog for another host), with the to-do's title (and notes, under it) in the
    prompt and the to-do named as the draft's source: a "From to-do" label
    beside Create from, which the person can remove to leave an ordinary
    draft. Opening any other new-thread draft drops it too. The window keeps
@@ -258,7 +275,10 @@ A to-do may be started again; each start adds a link.
   opens it in place for the title, notes, tags and this host's Projects; a
   link to another host's Project is kept as it is. Rows drag to reorder, and
   Move up and Move down do the same from the keyboard. Delete asks first and
-  removes the to-do from every device; Drop keeps it out of the list.
+  removes the to-do from every device; Drop keeps it out of the list. The badge
+  reads each linked thread's own navigation row, including an existing
+  authorized read from a paired host, keyed by that host's id; the list host
+  does not project another computer's thread state.
 - **Everywhere else.** The command palette offers New to-do and Open To-dos.
   New to-do, also on Mod+Shift+L (Settings › Keybindings), opens quick
   add in a dialog over the current page. The phone app shows the
@@ -273,6 +293,10 @@ A to-do may be started again; each start adds a link.
   mode), or Chat when none is there. When the computer answers with the
   thread, the phone links it; a link the list did not take reads "Thread
   started, not linked" on the row, and the same long press offers Link.
+  A refused or unavailable phone read clears cached rows and is not shown as an
+  empty list. Quick-add text stays in the field across refusal and explicit
+  host or pairing changes; mutations wait for a successful read, and switching
+  never sends the draft automatically.
 - **Empty.** A list that was read and holds no to-do draws no toolbar: under
   quick add the page shows the shared empty state centred, with the To-dos
   mark, "No to-dos yet" and one sentence on what goes here and that a to-do can

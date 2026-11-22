@@ -89,7 +89,7 @@ export type AgentCliCommand =
       readonly quiet: boolean;
       /** `auto` follows the folder: a Code or Work Project holding it, else Chat. */
       readonly mode: "chat" | "work" | "code" | "auto";
-      /** A model for a new thread; Work and Code use harness endpoints: `model` or `endpoint/model`. */
+      /** A model for a new thread: `model` or `account/model`. */
       readonly model?: string;
       /** The access a new Work or Code thread starts at, as the composer's mode picker names it. */
       readonly access?: AgentAccessMode;
@@ -1289,6 +1289,24 @@ async function resolveThread(input: RunAgentCliCommandInput): Promise<string | u
       input.command.title ?? `Agent ${new Date().toISOString().slice(0, 16).replace("T", " ")}`,
     projectName: input.command.project,
     model: input.command.model,
+    ...(input.interactive === true && !input.command.json
+      ? {
+          chooseModel: async (models: readonly import("./agentHost").AgentModelChoice[]) => {
+            if (models.length === 0) return undefined;
+            input.stdout.write("Choose a provider/model:\n");
+            models.forEach((model, index) =>
+              input.stdout.write(`  ${index + 1}. ${model.endpoint}/${model.modelId}\n`),
+            );
+            const lines = lineSource(input.stdin);
+            try {
+              const answer = await lines.next(input.signal);
+              return models[Number(answer) - 1];
+            } finally {
+              lines.close();
+            }
+          },
+        }
+      : {}),
     access: input.command.access,
     ...(input.command.fullAccessRun === true ? { fullAccessScope: "run" as const } : {}),
     sandbox: input.command.sandbox === true,
@@ -1537,13 +1555,17 @@ async function followTurn(
         `${JSON.stringify({
           kind: "outcome",
           outcome: turn.outcome,
+          ...(turn.failure === undefined ? {} : { failure: turn.failure }),
           text,
           ...(turn.inputTokens === undefined ? {} : { usage: { inputTokens: turn.inputTokens } }),
         })}\n`,
       );
     } else {
       if (!printed.endsWith("\n")) input.stdout.write("\n");
-      if (turn.outcome !== "completed") input.stderr.write(`Turn ended: ${turn.outcome}.\n`);
+      if (turn.outcome !== "completed")
+        input.stderr.write(
+          `Turn ended: ${turn.outcome}.${turn.failure === undefined ? "" : ` ${turn.failure}`}\n`,
+        );
     }
     return turn.outcome === "completed";
   }

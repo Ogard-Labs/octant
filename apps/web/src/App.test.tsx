@@ -1,4 +1,5 @@
 import {
+  decodeBindingRevisionId,
   decodeWorkThread,
   decodeCodeThreadId,
   decodeWorkspaceOperation,
@@ -51,6 +52,7 @@ import {
   writeUtilityDockPresentation,
 } from "./shell/rightUtilityDockSelection";
 import { writeBottomPanelPresentation } from "./shell/useShellPresentation";
+import { writePreferredWorkKind } from "./shell/workKind";
 import {
   archivedChatThread,
   bindingReceipt,
@@ -767,6 +769,271 @@ describe("App", () => {
    * first picker entry — which the picker itself marks unusable — and failing
    * only after the work exists.
    */
+  it("starts the Code draft on the shared default rather than the first catalogued model", async () => {
+    const user = userEvent.setup();
+    const providerApi = providersWithToolModel();
+    const catalog = await providerApi.bootstrap();
+    const observed = catalog.observedStates[0];
+    const first = observed?.models[0];
+    if (observed === undefined || first === undefined) throw new Error("Missing provider fixture");
+    const modelId = decodeProviderModelId("default-code-model");
+    const codeApi = codesRecordingCreates();
+    const codeBootstrap = await codeApi.bootstrap();
+    render(
+      <App
+        codeClient={{
+          ...codeApi,
+          bootstrap: async () => ({
+            ...codeBootstrap,
+            settings: {
+              ...codeBootstrap.settings,
+              defaultModel: { providerInstanceId: observed.instanceId, modelId },
+            },
+          }),
+        }}
+        contextClient={contextClient()}
+        hostClient={hostClient() as never}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={{
+          ...providerApi,
+          bootstrap: async () => ({
+            ...catalog,
+            observedStates: [
+              {
+                ...observed,
+                models: [first, { ...first, id: modelId, displayName: "Default Code model" }],
+              },
+            ],
+          }),
+        }}
+        shellClient={client(codeDraftShellBootstrap(projectId))}
+      />,
+    );
+    await user.type(
+      await screen.findByRole("textbox", { name: "First message" }),
+      "Use the configured default",
+    );
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() =>
+      expect(codeApi.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "create-code-thread",
+          thread: expect.objectContaining({ providerInstanceId: observed.instanceId, modelId }),
+        }),
+      ),
+    );
+  });
+
+  it("starts a fresh Code thread on the default saved after onboarding", async () => {
+    const user = userEvent.setup();
+    const providerApi = providersWithToolModel();
+    const catalog = await providerApi.bootstrap();
+    const observed = catalog.observedStates[0];
+    const first = observed?.models[0];
+    if (observed === undefined || first === undefined) throw new Error("Missing provider fixture");
+    const modelA = decodeProviderModelId("onboarding-model-a");
+    const modelB = decodeProviderModelId("settings-model-b");
+    const providerClient = {
+      ...providerApi,
+      bootstrap: vi.fn(async () => ({
+        ...catalog,
+        observedStates: [
+          {
+            ...observed,
+            models: [
+              { ...first, id: modelA, displayName: "Model A" },
+              { ...first, id: modelB, displayName: "Model B" },
+            ],
+          },
+        ],
+      })),
+    };
+    const codeApi = codesRecordingCreates();
+    const initialCode = await codeApi.bootstrap();
+    const checkout = initialCode.checkouts[0];
+    if (checkout === undefined) throw new Error("Missing checkout fixture");
+    let codeSettings = initialCode.settings;
+    const execute = vi.fn<CodeClient["execute"]>(async (command) => {
+      if (command.kind === "update-code-settings") {
+        codeSettings = {
+          ...codeSettings,
+          ...(command.defaultModel === undefined || command.defaultModel === null
+            ? {}
+            : { defaultModel: command.defaultModel }),
+          defaultExecutionPolicy: command.defaultExecutionPolicy,
+          defaultPermissionPersistence: command.defaultPermissionPersistence,
+          ...(command.defaultAutoApprove === undefined
+            ? {}
+            : { defaultAutoApprove: command.defaultAutoApprove }),
+          version: (command.expectedVersion + 1) as typeof codeSettings.version,
+        };
+        return { kind: "settings-updated", settings: codeSettings };
+      }
+      if (command.kind === "prepare-code-project-checkout") {
+        return {
+          kind: "checkout-prepared",
+          bindingRevisionId: decodeBindingRevisionId("30000000-0000-4000-8000-000000000099"),
+          checkout,
+        };
+      }
+      if (command.kind === "create-code-thread")
+        return { kind: "thread-created", thread: command.thread };
+      throw new Error(`Unhandled ${command.kind}`);
+    });
+    const codeClient = {
+      ...codeApi,
+      bootstrap: vi.fn(async () => ({ ...initialCode, settings: codeSettings })),
+      execute,
+    };
+    const initialShell = codeShellBootstrap();
+    const shellClient = client({
+      ...initialShell,
+      settings: { ...initialShell.settings, firstRunOnboarding: "pending" },
+    });
+
+    render(
+      <App
+        codeClient={codeClient}
+        contextClient={contextClient()}
+        hostClient={hostClient() as never}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providerClient}
+        shellClient={shellClient}
+      />,
+    );
+
+    const onboarding = await screen.findByRole("dialog", { name: "Welcome to Octant" });
+    await user.click(within(onboarding).getByRole("button", { name: "Continue" }));
+    await user.click(within(onboarding).getByRole("button", { name: "Continue" }));
+    await user.click(await screen.findByRole("option", { name: /Model A/ }));
+    await user.click(within(onboarding).getByRole("button", { name: "Back" }));
+    await user.click(within(onboarding).getByRole("button", { name: "Back" }));
+    await user.click(within(onboarding).getByRole("button", { name: "Set up a provider" }));
+    await user.click(await screen.findByRole("button", { name: "Code" }));
+    await user.click(screen.getByRole("button", { name: "Default Code provider and model" }));
+    await user.click(await screen.findByRole("option", { name: /Model B/ }));
+    await user.click(screen.getByRole("button", { name: "Close Settings" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Settings" })).toBeNull());
+
+    const returnedOnboarding = await screen.findByRole("dialog", { name: "Welcome to Octant" });
+    await user.click(within(returnedOnboarding).getByRole("button", { name: "Continue" }));
+    await user.click(within(returnedOnboarding).getByRole("button", { name: "Continue" }));
+    await user.click(within(returnedOnboarding).getByRole("button", { name: "Continue" }));
+    await user.click(within(returnedOnboarding).getByRole("button", { name: "Continue" }));
+    await user.click(await screen.findByRole("button", { name: "Start a task" }));
+    const prompt = await screen.findByRole("textbox", { name: "First message" });
+    await user.type(prompt, "Use the updated default");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+
+    await waitFor(() =>
+      expect(execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "create-code-thread",
+          thread: expect.objectContaining({
+            providerInstanceId: observed.instanceId,
+            modelId: modelB,
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("keeps Chat's model choice when switching from a Code draft with its own default", async () => {
+    const user = userEvent.setup();
+    writePreferredWorkKind("chat", globalThis.localStorage);
+    const providerApi = providersWithToolModel();
+    const catalog = await providerApi.bootstrap();
+    const observed = catalog.observedStates[0];
+    const first = observed?.models[0];
+    if (observed === undefined || first === undefined) throw new Error("Missing provider fixture");
+    const chatModelId = decodeProviderModelId("chat-draft-model");
+    const codeModelId = decodeProviderModelId("code-draft-model");
+    const providerClient = {
+      ...providerApi,
+      bootstrap: async () => ({
+        ...catalog,
+        observedStates: [
+          {
+            ...observed,
+            models: [
+              first,
+              { ...first, id: chatModelId, displayName: "Chat draft model" },
+              { ...first, id: codeModelId, displayName: "Code draft model" },
+            ],
+          },
+        ],
+      }),
+    };
+    const codeApi = codesRecordingCreates();
+    const codeBootstrap = await codeApi.bootstrap();
+    const codeClient = {
+      ...codeApi,
+      bootstrap: async () => ({
+        ...codeBootstrap,
+        settings: {
+          ...codeBootstrap.settings,
+          defaultModel: { providerInstanceId: observed.instanceId, modelId: codeModelId },
+        },
+      }),
+    };
+    const chatApi = chats();
+    const chatBootstrap = await chatApi.bootstrap();
+    const chatClient = {
+      ...chatApi,
+      bootstrap: async () => ({
+        ...chatBootstrap,
+        settings: {
+          ...chatBootstrap.settings,
+          defaultProviderInstanceId: observed.instanceId,
+          defaultModelId: chatModelId,
+        },
+      }),
+    };
+    render(
+      <App
+        chatClient={chatClient}
+        codeClient={codeClient}
+        contextClient={contextClient()}
+        hostClient={hostClient() as never}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providerClient}
+        shellClient={client(codeDraftShellBootstrap(projectId))}
+      />,
+    );
+
+    await screen.findByRole("textbox", { name: "First message" });
+    await user.click(
+      within(screen.getByRole("group", { name: "Workspace mode" })).getByRole("button", {
+        name: "Work",
+      }),
+    );
+    const welcome = await screen.findByRole("region", { name: "Chat welcome" });
+    await user.type(
+      within(welcome).getByRole("textbox", { name: "First message" }),
+      "Keep Chat's choice",
+    );
+    await user.click(within(welcome).getByRole("button", { name: "Start chat" }));
+
+    await waitFor(() =>
+      expect(chatApi.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "change-chat-provider",
+          providerInstanceId: observed.instanceId,
+          modelId: chatModelId,
+        }),
+      ),
+    );
+  });
+
   it("reports no usable Code model instead of starting a turn on a chat-only model", async () => {
     const user = userEvent.setup();
     const codeApi = codesRecordingCreates();

@@ -33,8 +33,9 @@ import { SpendCeilingService } from "../spendCeilingService";
 import { GeneratedImageStore } from "./generatedImageStore";
 import { ImageGenerationOfferService } from "./imageGenerationOfferService";
 import type { ServiceOfferAnswer } from "../offers/serviceOfferDecision";
+import { narrationDecision } from "../speech/narrationTool";
 import { transcriptionDecision } from "../speech/transcriptionTool";
-import { decodeTranscriptionOffer } from "@octant/contracts";
+import { decodeNarrationOffer, decodeTranscriptionOffer } from "@octant/contracts";
 import { createImageRouteHandler } from "./imageRoutes";
 import { ImageJobService } from "./imageJobService";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
@@ -124,6 +125,7 @@ function setup(
     listImageProfiles: () => listEligibleImageProfiles(imageProfiles.listInstances()),
     rules: {
       transcribe: transcriptionDecision,
+      narrate: narrationDecision,
       ...imageOfferDecisionRules({
         ...imageProfiles,
         kept: { remember },
@@ -448,6 +450,60 @@ describe("image routes", () => {
         kind: "offer-gone",
       });
       expect(await pending).toEqual({ status: "transcribe", rememberForThread: true });
+    });
+
+    it("shows a narration offer only to clients with its disclosure and permits one matching answer", async () => {
+      const { handler, serviceOffers } = setup();
+      const pending = serviceOffers.wait({
+        windowId: decodeWindowId(windowId),
+        stamp: (offerId, requestedAt) =>
+          decodeNarrationOffer({
+            kind: "narrate",
+            threadKind: "code-thread",
+            scopeId,
+            offerId,
+            requestedAt,
+            excerpt: "Welcome to the demo.",
+            characters: 20,
+            relativePath: "narration/intro.mp3",
+            voice: "alloy",
+            endpointName: "Studio",
+            modelId: "tts-1",
+            format: "mp3",
+          }),
+      });
+      const query = `threadKind=code-thread&scopeId=${scopeId}`;
+      for (const path of [
+        "/api/image/offers?",
+        "/api/offers?referenceImages=1&",
+        "/api/offers?transcription=1&",
+      ]) {
+        const response = await handler(request(path + query));
+        expect(await response?.json()).toEqual({ offers: [] });
+      }
+      const [offer] = decodeServiceOffersResponse(
+        await (await handler(request("/api/offers?narration=1&" + query)))?.json(),
+      ).offers;
+      expect(offer?.kind).toBe("narrate");
+      const decide = async (body: object) =>
+        (
+          await handler(
+            request("/api/offers/decide", {
+              method: "POST",
+              body: { offerId: offer?.offerId, ...body },
+            }),
+          )
+        )?.json();
+      expect(await decide({ decision: "transcribe", rememberForThread: false })).toMatchObject({
+        kind: "offer-refused",
+      });
+      expect(await decide({ decision: "narrate", rememberForThread: true })).toEqual({
+        kind: "offer-answered",
+      });
+      expect(await decide({ decision: "narrate", rememberForThread: true })).toEqual({
+        kind: "offer-gone",
+      });
+      expect(await pending).toEqual({ status: "narrate", rememberForThread: true });
     });
 
     it("shows reference offers only to current clients and requires disclosure and a compatible model", async () => {

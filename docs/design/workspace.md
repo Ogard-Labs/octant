@@ -2554,6 +2554,35 @@ definition; settlement, cancellation, replacement or recovery invalidates them.
 Closing or reloading the app screen drops these drafts. They are never journaled,
 exported in diagnostics or submitted by restoration.
 
+In the full-screen terminal (`octant agent`) a Work questionnaire is answered
+in place (maintainer decision, 2026-11-22). Line mode (`--plain`, or a terminal
+the screen cannot use) does not show Work provider requests; answer them in the
+app or on the full screen. The request panel shows one question at a time with
+its numbered options, labelled recommendations, and descriptions. The person
+types option numbers, `0` where the question allows no choice, or a written
+alternative where the question allows one. A written alternative that is itself
+a number starts with `=` (`==` for a literal leading `=`), because bare numbers
+choose options. A line the question cannot accept is refused and the same
+question is asked again. After the last question the terminal asks for the
+optional comment, as the app's form offers one, unless the ask refuses a
+comment; an empty line sends without one. Earlier answers are kept only in
+memory and only for that request. The terminal then submits the complete
+response once, through the same authenticated Work request route the app uses,
+and the host validates it as it would an answer from the app. A refused
+submission starts again from the first question. If the terminal cannot read
+the request's definition, it does not offer the request at all. A Work question
+that asks for a secret is answered in a masked entry, as the app's field is
+(maintainer decision, 2026-11-22): the composer gives up focus, what is typed
+or pasted is never drawn (the panel shows only how many characters), and Enter
+sends it only as the command's `secretAnswer`, after which the terminal drops
+it. It never reaches the composer, a draft, the transcript or a note. Line mode
+does not take one.
+A Work approval
+that changes the thread's level shows, as the app's card does, the whole plan
+the agent hands over and then the level it moves to, directly above the y/n
+line. The panel ends the bottom-pinned transcript, so a long plan scrolls above
+those two lines instead of pushing them out of view.
+
 Submitted questionnaires collapse into an expandable, readable summary of
 the questions, selected labels, written answers, and comment. The journal
 keeps the definition and response so the summary survives reopening. Expired,

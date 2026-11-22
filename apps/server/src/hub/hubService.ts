@@ -101,6 +101,18 @@ export interface HubServiceOptions {
   readonly pairing: () => HubPairingPort | undefined;
   readonly transport: HubTransport;
   readonly record: (change: HubMembershipChangedPayload) => void;
+  /**
+   * A member's window was given its first device here. No person approved it
+   * on the hub, so every device connected to the hub is told, by the roster's
+   * name for it and the private address it was admitted over, with Remove
+   * (maintainer decision, 2026-11-21).
+   */
+  readonly onWindowAdmitted?: (device: {
+    readonly deviceId: string;
+    readonly name: string;
+    readonly deviceKeyFingerprint: string;
+    readonly privateAddress?: string;
+  }) => void;
   readonly now: () => number;
 }
 
@@ -891,6 +903,8 @@ export class HubService {
     readonly path: string;
     readonly body: string;
     readonly request: HubGuestAdmissionRequest;
+    /** The window's private-network address from its connection, for its alert. */
+    readonly privateAddress?: string;
   }): HubWindowAdmission {
     const state = this.#options.state.load();
     const hub = state.hub;
@@ -976,6 +990,17 @@ export class HubService {
       memberId: request.memberId,
       sequence: hub.roster.roster.sequence,
     });
+    // Only a window's first device here is new to the hub's devices: a device
+    // replaced after it expired or the listener moved is the same window.
+    const deviceKeyFingerprint = pairing.deviceKeyFingerprint(device.deviceId);
+    if (record.windowDeviceId === undefined && deviceKeyFingerprint !== undefined) {
+      this.#options.onWindowAdmitted?.({
+        deviceId: device.deviceId,
+        name: listed.name,
+        deviceKeyFingerprint,
+        ...(input.privateAddress === undefined ? {} : { privateAddress: input.privateAddress }),
+      });
+    }
     return { status: "admitted", hubMemberId: hubId, deviceId: device.deviceId };
   }
 

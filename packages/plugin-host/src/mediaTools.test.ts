@@ -21,6 +21,8 @@ import {
   LOOK_MEDIA_TOOL_PLUGIN,
   LOOK_TOOL_NAME,
   MEDIA_TOOL_HOST_LINES,
+  NARRATE_MEDIA_TOOL_PLUGIN,
+  NARRATE_TOOL_NAME,
   offerMediaToolPlugin,
   registerContributedMediaTools,
   TRANSCRIBE_MEDIA_TOOL_PLUGIN,
@@ -411,6 +413,39 @@ describe("public media tool host bridge and built-in plugins", () => {
         nextOffset: 32_000,
       },
     });
+
+    const narrate = vi.fn(async () => ({
+      status: "saved" as const,
+      relativePath: "narration/intro.mp3",
+      bytes: 256,
+    }));
+    const narrateTools = NARRATE_MEDIA_TOOL_PLUGIN.createTools(
+      basePort({ narration: { isAvailable: () => true, narrate } }),
+    );
+    expect(narrateTools?.taintPolicy).toBe("none");
+    expect(
+      await narrateTools?.execute({
+        name: NARRATE_TOOL_NAME,
+        inputJson: JSON.stringify({
+          text: "Hello world",
+          relativePath: "narration/intro.wav",
+          format: "mp3",
+        }),
+      }),
+    ).toMatchObject({ isError: true, result: { status: "refused" } });
+    expect(narrate).not.toHaveBeenCalled();
+    expect(
+      await narrateTools?.execute({
+        name: NARRATE_TOOL_NAME,
+        inputJson: JSON.stringify({
+          text: "Hello world",
+          relativePath: "narration/intro.mp3",
+        }),
+      }),
+    ).toEqual({
+      result: { status: "saved", relativePath: "narration/intro.mp3", bytes: 256 },
+    });
+    expect(narrate).toHaveBeenCalledOnce();
 
     const lookTools = LOOK_MEDIA_TOOL_PLUGIN.createTools(
       basePort({

@@ -97,6 +97,13 @@ interface DirectoryEntry {
 /** How many entries a pattern scan reads before it refuses the launch. */
 const PATTERN_SCAN_LIMIT = 4_096;
 
+/**
+ * What a person can do about a grant that holds, or may hold, a protected
+ * store. A deny entry did not stop the read on the hosted runner, so the guard
+ * is never narrowed to let the launch through.
+ */
+const NARROWER_GRANT_CHOICE = "Choose a narrower clean folder or another host.";
+
 export function buildWindowsConfinedLaunch(
   input: ProcessConfinementPrepareInput,
   options: UnverifiedWindowsConfinementOptions,
@@ -171,14 +178,16 @@ export function buildWindowsConfinedLaunch(
     if (found === "truncated") {
       throw new ProcessConfinementError(
         "incompatible",
-        `Windows confinement could not finish checking ${scan.directory} for ${scan.entry.label} (over ${String(PATTERN_SCAN_LIMIT)} entries), so the launch was refused.`,
+        `Windows confinement could not finish checking ${scan.directory} for ${scan.entry.label} (over ${String(PATTERN_SCAN_LIMIT)} entries), so the launch was refused. ${NARROWER_GRANT_CHOICE}`,
       );
     }
-    const [first] = found;
-    if (first !== undefined) {
+    // The refusal names the grant and the protected category, not the file:
+    // it reaches the thread as the reason Codex did not start, and a receipt
+    // carries no sensitive path.
+    if (found.length > 0) {
       throw new ProcessConfinementError(
         "incompatible",
-        `Windows confinement does not grant ${scan.directory}: it holds ${first}, one of the ${scan.entry.label} the secret guard protects.`,
+        `Windows confinement does not grant ${scan.directory}: it holds ${scan.entry.label}, which the secret guard protects. ${NARROWER_GRANT_CHOICE}`,
       );
     }
   }
@@ -456,7 +465,7 @@ function listForScan(
     if (code === "ENOENT" || code === "ENOTDIR" || isFile(path)) return [];
     throw new ProcessConfinementError(
       "incompatible",
-      `Windows confinement could not check ${path} for protected files, so the launch was refused.`,
+      `Windows confinement could not check ${path} for protected files, so the launch was refused. ${NARROWER_GRANT_CHOICE}`,
     );
   }
 }

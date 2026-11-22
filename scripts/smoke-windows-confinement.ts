@@ -175,8 +175,9 @@ try {
     storeRefusal = error instanceof Error ? error.message : String(error);
   }
   check(
-    "refuses to grant a folder that holds a browser store",
-    /holds .*Cookies/u.test(storeRefusal),
+    "refuses to grant a folder that holds a browser store, by category and not by file",
+    /holds browser .*secret guard protects/iu.test(storeRefusal) &&
+      !storeRefusal.includes("Cookies"),
     storeRefusal,
   );
 

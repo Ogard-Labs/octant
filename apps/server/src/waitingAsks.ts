@@ -252,6 +252,8 @@ function serviceOfferText(offer: ServiceOffer): string {
   switch (offer.kind) {
     case "transcribe":
       return "Transcribe an audio file?";
+    case "narrate":
+      return "Narrate text to an audio file?";
     case "save":
       return "Save a generated image?";
     case "generate":

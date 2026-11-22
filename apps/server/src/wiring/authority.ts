@@ -1,3 +1,4 @@
+import { ThreadNarration } from "../speech/narrationTool";
 import { ThreadTranscription } from "../speech/transcriptionTool";
 import { createSpeechGates } from "../speech/speechGates";
 import { workThreadAccessOf, threadAccessOf } from "@octant/domain/guardrail-policy";
@@ -205,6 +206,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
   });
   const todos = new TodoStore({
+    defaultActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     journal: persistence.journal,
     uuid: randomUUID,
     clock: () => decodeUtcTimestamp(new Date().toISOString()),
@@ -347,6 +349,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
   });
   const speechGates = createSpeechGates();
+  const threadNarration = new ThreadNarration();
   const threadTranscription = new ThreadTranscription();
   const serviceOffers = new ServiceOfferService<ServiceOffer, ServiceOfferAnswer>(
     MAX_PENDING_IMAGE_GENERATION_OFFERS,
@@ -365,6 +368,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     (id) => extensionToolApprovalService.withdrawThread(id),
     (id) => routineProposalService.withdrawThread(id),
     (id) => serviceOffers.withdrawThread(id),
+    (id) => threadNarration.forget(id),
     (id) => threadTranscription.forget(id),
   ];
   const onThreadArchived = (withdraw: (threadId: string) => void): void => {
@@ -461,6 +465,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
         (id) => extensionToolApprovalService.revokeWindow(id),
         (id) => routineProposalService.revokeWindow(id),
         (id) => serviceOffers.revokeWindow(id),
+        (id) => threadNarration.revokeWindow(id),
         (id) => threadTranscription.revokeWindow(id),
         (id) => codeSessionAuthority.revokeWindow(id),
         (id) => {
@@ -485,7 +490,11 @@ export function wireAuthority(deps: AuthorityDependencies) {
     service: sandboxRestrictions,
     windowAuthorityStore,
   });
-  const todoRoutes = createTodoRouteHandler({ store: todos, windowAuthorityStore });
+  const todoRoutes = createTodoRouteHandler({
+    store: todos,
+    feed: machineChangeFeed,
+    windowAuthorityStore,
+  });
   const octantInstructionsRoutes = createOctantInstructionsRouteHandler({
     store: octantInstructions,
     windowAuthorityStore,
@@ -537,6 +546,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     imageGenerationOffers,
     serviceOffers,
     speechGates,
+    threadNarration,
     threadTranscription,
     isPairedDeviceScope,
     isRestrictedDeviceScope,
@@ -567,6 +577,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     sandboxRestrictionsRoutes,
     simulatorInputGrants,
     todoRoutes,
+    todos,
     unsubscribeMachineChanges,
     unsubscribeThreadArchivals,
     windowAuthorityStore,

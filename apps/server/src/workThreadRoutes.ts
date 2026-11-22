@@ -316,7 +316,7 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
       // The per-run Full access flag is typed by the person on `octant agent`
       // at this host; no device and no agent grant sets it.
       if (
-        command.kind === "change-work-thread-access" &&
+        (command.kind === "change-work-thread-access" || command.kind === "create-work-thread") &&
         command.fullAccessRunFlag === true &&
         readPrincipalRouteContext(request)?.principal.kind === "remote-device"
       ) {
@@ -537,6 +537,7 @@ const WORK_FULL_ACCESS_LOCAL_ONLY = "Full access is chosen in the Octant window 
 /** Whether a command would put a Work thread, or new Work threads, at Full access. */
 function raisesWorkToFullAccess(command: WorkThreadCommand): boolean {
   switch (command.kind) {
+    case "create-work-thread":
     case "change-work-thread-access":
       return command.access === "full-access";
     case "update-work-settings":
