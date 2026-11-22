@@ -403,6 +403,15 @@ export interface AcpProviderProfile {
    * entry calls nothing and leaves the agent's own cached login in charge.
    */
   readonly signInMethods?: Partial<Readonly<Record<AcpAgentAuthentication, string>>>;
+  /**
+   * Exact hosts the launch may reach beyond the profile's listed endpoints,
+   * derived from the instance's own launch input. Never patterns: the
+   * runtime's network allowlist merges them as exact hosts, so a host no
+   * instance configured is never reachable.
+   */
+  readonly runtimeHosts?: (launch: {
+    readonly googleCloud?: AcpAgentGoogleCloud;
+  }) => ReadonlyArray<string>;
   /** Provider-owned CLI login, with delegated browser auth reserved for legacy profiles. */
   readonly authentication:
     | { readonly kind: "provider-owned" }
@@ -1889,6 +1898,16 @@ const antigravityProfile: AcpProviderProfile = {
   closesSessions: false,
   authenticateOnProbe: false,
   signInMethods: { "api-key": "gemini-api-key", "agent-platform": "agent-platform" },
+  // The Google Cloud location an Agent Platform instance is configured with
+  // reaches a regional endpoint (`us-central1-aiplatform.googleapis.com`)
+  // that is not a subdomain of `aiplatform.googleapis.com`, so that one host
+  // is added; `global` uses the listed host itself.
+  runtimeHosts: ({ googleCloud }) =>
+    googleCloud !== undefined &&
+    googleCloud.location !== "global" &&
+    /^[a-z0-9][a-z0-9-]*$/u.test(googleCloud.location)
+      ? [`${googleCloud.location}-aiplatform.googleapis.com`]
+      : [],
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
     "Google Antigravity is not signed in. Run agy (or agy acp --login) in your terminal and sign in with your Google account, then retry.",

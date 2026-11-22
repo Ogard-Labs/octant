@@ -2074,10 +2074,14 @@ export type ProviderProcessDiagnostic = typeof ProviderProcessDiagnostic.Type;
  * `driver-incompatible`: an outside driver agreed no protocol version with the
  * host or wrote a message the host could not read, so the host stopped it and
  * the instance contributes nothing.
+ * `sign-in-not-offered`: the agent never listed the sign-in the instance is
+ * configured with, so the fix is the agent's version or another sign-in, not
+ * the credential.
  */
 export const ProviderRefusalReason = Schema.Literal(
   "runtime-incompatible",
   "authentication-required",
+  "sign-in-not-offered",
   "runtime-unavailable",
   "no-usable-model",
   "driver-not-admitted",

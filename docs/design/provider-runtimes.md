@@ -3022,8 +3022,12 @@ any session opens, because the guide says `agy acp` otherwise reuses the
 cached sign-in and the environment alone would not decide which login a run
 uses. A launch whose `initialize` does not list that method, or whose
 `authenticate` the CLI refuses, fails as not signed in and opens no session
-(`signInMethods` in the runtime profile). A launch on either needs no prior
-personal sign-in: where `~/.gemini` does not exist yet, Octant creates it
+(`signInMethods` in the runtime profile), and the two are told apart so the
+person gets the right next step: a method `initialize` never listed is
+`sign-in-not-offered`, which Settings reads as "update the CLI or choose
+another sign-in", while a refused `authenticate` stays
+`authentication-required`, which keeps the check-the-credential advice. A
+launch on either needs no prior personal sign-in: where `~/.gemini` does not exist yet, Octant creates it
 owner-only, as the CLI would on its first run, instead of refusing the launch
 as not signed in; an existing folder is used as it is. Business sign-in
 (`oauth-business`) is not offered: like the personal sign-in it is a browser
@@ -3192,13 +3196,15 @@ that declaration, never by the profile id:
   instance back to the personal sign-in refuses its next unattended run.
   As a helper target, the outcome by sign-in is:
   - **Gemini API key:** an ordinary target.
-  - **Agent Platform:** not a target. A helper child always launches under
-    Strict, since nothing passes it the parent's Strict setting, and under
-    Strict it cannot read the Application Default Credentials (below). So
-    the target list names it unavailable as `helper-runs-refused`, with the
-    sentence "Google Antigravity can't run as a helper on Agent Platform:
-    helpers launch under Strict, which doesn't let it read your Application
-    Default Credentials. Use a Gemini API key account for helper work."
+  - **Agent Platform:** not a target. A helper child launches with no
+    Strict override of its own, since nothing passes it the parent's
+    setting, and admitting unsandboxed helpers would widen helper
+    authority, which needs its own decision; a confined helper cannot read
+    the Application Default Credentials (below). So the target list names
+    it unavailable as `helper-runs-refused`, with the sentence "Google
+    Antigravity can't run as a helper on Agent Platform: helpers can't
+    read your Application Default Credentials. Use a Gemini API key
+    account for helper work."
     A child that would start or resume on it is refused with that sentence
     (`helperRunRefusalOf`). This holds even though its Check connection
     reads the file and reports Ready.
@@ -3231,7 +3237,10 @@ that declaration, never by the profile id:
   instance calls instead (`generativelanguage.googleapis.com`,
   `aiplatform.googleapis.com`, each with its subdomains, and for Agent
   Platform the one regional host of its configured location, such as
-  `us-central1-aiplatform.googleapis.com`).
+  `us-central1-aiplatform.googleapis.com`, which the instance's own profile
+  derives from its configured location — `runtimeHosts` — and hands the
+  launch as exact hosts, so the network allowlist carries no vendor field
+  of its own).
 - **Strict and credentials.** Strict does for Antigravity's credentials what
   it did before the sign-in choice: the launch keeps the narrow keychain read
   for the personal sign-in and gains no other credential read. A Gemini API

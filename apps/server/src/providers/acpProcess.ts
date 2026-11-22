@@ -1788,6 +1788,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           ...(environmentStrict ? {} : { strict: false, ownChannels }),
         });
         const wall = acpWallPolicy(input);
+        const profileHosts = profile.runtimeHosts?.(input);
         const network =
           wall === "full-access" ||
           windows !== undefined ||
@@ -1803,9 +1804,9 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
                 executionPolicy: wall,
                 loopbackPorts: input.loopbackPorts ?? [],
                 environment,
-                ...(input.googleCloud === undefined
+                ...(profileHosts === undefined || profileHosts.length === 0
                   ? {}
-                  : { googleCloudLocation: input.googleCloud.location }),
+                  : { profileHosts }),
               });
         const servers =
           input.purpose === "probe" || windows !== undefined

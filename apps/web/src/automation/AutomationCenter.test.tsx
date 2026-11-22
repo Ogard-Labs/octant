@@ -451,6 +451,59 @@ describe("AutomationCenter detail disclosure", () => {
     ).toBeVisible();
   });
 
+  it("a paused routine's banner shows the refusal its run recorded", async () => {
+    const refused = automationRunFixture(definition, {
+      lifecycle: "failed",
+      failureMessage: "The provider refused this run's sign-in.",
+    });
+    const blocked = automationDefinitionFixture({
+      lifecycle: "paused",
+      blockedReason: "delivery-target-invalid",
+      nextDueAt: null,
+    });
+    const client = fakeClient({
+      get: vi.fn(async () => ({
+        kind: "automation-detail" as const,
+        automation: blocked,
+        runs: [refused],
+      })),
+    });
+    renderCenter({ client });
+    const detail = await openDetail();
+    expect(within(detail).getByText("The provider refused this run's sign-in.")).toBeVisible();
+    expect(
+      within(detail).queryByText(
+        "The confirmed delivery target is no longer valid. Edit and confirm a new target.",
+      ),
+    ).toBeNull();
+  });
+
+  it("a paused routine with no recorded run for its reason keeps the generic label", async () => {
+    const unrelated = automationRunFixture(definition, {
+      lifecycle: "failed",
+      failureMessage: "The delivery target no longer matches.",
+    });
+    const blocked = automationDefinitionFixture({
+      lifecycle: "paused",
+      blockedReason: "missed-run-cap-exceeded",
+      nextDueAt: null,
+    });
+    const client = fakeClient({
+      get: vi.fn(async () => ({
+        kind: "automation-detail" as const,
+        automation: blocked,
+        runs: [unrelated],
+      })),
+    });
+    renderCenter({ client });
+    const detail = await openDetail();
+    expect(
+      within(detail).getByText(
+        "Paused automatically: too many missed runs. Resume after reviewing the schedule.",
+      ),
+    ).toBeVisible();
+  });
+
   it("names an unavailable detail and recovers through retry", async () => {
     let fail = true;
     const client = fakeClient({

@@ -267,6 +267,19 @@ export function providerRefusalCopy(
             : `Sign in to ${label} with its provider-owned login, then check the connection again.`,
     };
   }
+  if (reason === "sign-in-not-offered") {
+    // The agent's `initialize` never listed the sign-in the instance chose, so
+    // checking the credential cannot help: the advice names the agent.
+    return instance.driverKind === "antigravity"
+      ? {
+          reason: "Your agy doesn't offer this sign-in.",
+          nextStep: "Update the Antigravity CLI, or choose another sign-in.",
+        }
+      : {
+          reason: `${label} doesn't offer this sign-in.`,
+          nextStep: `Update ${label}, or choose another sign-in.`,
+        };
+  }
   if (reason === "driver-not-admitted" && instance.driverKind !== "outside-harness-endpoint") {
     // A bundled driver is never missing a package; the host withholds it and
     // sends the reason in the observed message.

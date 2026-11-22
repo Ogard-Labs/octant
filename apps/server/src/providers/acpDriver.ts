@@ -856,7 +856,7 @@ function selectSignIn(
       failure(
         "unauthenticated",
         `${name} did not offer ${label} sign-in. Update ${name}, or choose another sign-in in Settings.`,
-        { reason: "authentication-required" },
+        { reason: "sign-in-not-offered" },
       ),
     );
   }

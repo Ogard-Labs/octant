@@ -106,6 +106,20 @@ export function automationBlockReasonLabel(reason: AutomationBlockReason): strin
   return blockReasonLabels[reason];
 }
 
+/**
+ * What a paused routine's banner says: the newest run (`runs` arrives
+ * newest-first) that recorded this reason carries the refusal the host
+ * journaled, which is plainer than the generic label. With none recorded —
+ * a pause from revalidation rather than a run — the label stands.
+ */
+export function automationBlockedMessage(
+  reason: AutomationBlockReason,
+  runs: ReadonlyArray<AutomationRun>,
+): string {
+  const run = runs.find((candidate) => candidate.failure?.reason === reason);
+  return run?.failure?.message ?? automationBlockReasonLabel(reason);
+}
+
 // ── Instant and trigger formatting ───────────────────────────────────────────
 
 export interface AutomationFormatOptions {

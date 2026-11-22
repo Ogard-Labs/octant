@@ -3700,7 +3700,7 @@ describe("ACP provider driver profile quirks", () => {
       expect(client.authenticateWith.mock.calls).toEqual([["agent-platform"], ["agent-platform"]]);
     });
 
-    it("refuses as not signed in when agy does not offer the chosen sign-in", async () => {
+    it("names a sign-in agy never offered as not offered, so the fix is the CLI, not the key", async () => {
       const { driver, client } = fixture(antigravity, {
         authentication: "api-key",
         authMethods: [{ id: "oauth-personal" }],
@@ -3711,11 +3711,30 @@ describe("ACP provider driver profile quirks", () => {
       );
       expect(failure).toMatchObject({
         category: "unauthenticated",
+        reason: "sign-in-not-offered",
         message:
           "Google Antigravity did not offer Gemini API key sign-in. Update Google Antigravity, or choose another sign-in in Settings.",
       });
       expect(client.authenticateWith).not.toHaveBeenCalled();
       expect(client.newSession).not.toHaveBeenCalled();
+    });
+
+    it("a sign-in agy refuses still asks the person to check it, not to update the CLI", async () => {
+      const { driver, client } = fixture(antigravity, {
+        authentication: "api-key",
+        authMethods: agyAuthMethods,
+        runtimeVersion: "1.5.12",
+      });
+      client.authenticateWith.mockRejectedValueOnce(new AcpFailure("remote", "method not found"));
+      const failure = await Effect.runPromise(
+        Effect.flip(Effect.scoped(driver.probe({ instanceId }))),
+      );
+      expect(failure).toMatchObject({
+        category: "unauthenticated",
+        reason: "authentication-required",
+        message:
+          "Google Antigravity refused its Gemini API key sign-in. Check it in Settings, then retry.",
+      });
     });
 
     it("leaves a personal Google sign-in to the CLI's own cached login", async () => {
