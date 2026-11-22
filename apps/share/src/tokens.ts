@@ -78,3 +78,38 @@ export function readFrameToken(
   const expected = sign(key, "frame", [shareId, String(revision), blockId, mode, expires]);
   return signaturesMatch(expected, signature) ? mode : undefined;
 }
+
+/**
+ * A frame image token: what a frame page hands its own images, for one link,
+ * revision and block. It lasts as long as a view grant rather than a frame
+ * address, so a prototype left open past a frame token's few minutes still
+ * draws a screen it shows later.
+ */
+export function mintFrameImageToken(
+  key: Buffer,
+  shareId: string,
+  revision: number,
+  blockId: string,
+  now: number,
+): string {
+  const expires = String(now + VIEW_GRANT_TTL_MS);
+  return `${expires}.${sign(key, "frame-image", [shareId, String(revision), blockId, expires])}`;
+}
+
+export function frameImageTokenIsValid(
+  key: Buffer,
+  shareId: string,
+  revision: number,
+  blockId: string,
+  now: number,
+  token: string,
+): boolean {
+  const parts = splitToken(token, 2);
+  const [expires, signature] = parts ?? [];
+  if (expires === undefined || signature === undefined) return false;
+  if (!(Number(expires) > now)) return false;
+  return signaturesMatch(
+    sign(key, "frame-image", [shareId, String(revision), blockId, expires]),
+    signature,
+  );
+}

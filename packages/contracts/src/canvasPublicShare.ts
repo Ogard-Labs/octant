@@ -6,8 +6,13 @@ import {
   CanvasExportLinkPassword,
 } from "./canvasExport";
 import {
-  CANVAS_SHARE_SCHEMA_VERSION,
+  CANVAS_SHARE_IMAGES_MAX_BYTES,
+  CANVAS_SHARE_IMAGES_SCHEMA_VERSION,
+  CANVAS_SHARE_MAX_IMAGES,
+  CanvasShareSchemaVersion,
+  CanvasShareImage,
   CanvasStaticExportBlock,
+  canvasShareImagesAreConsistent,
   isCanvasShareSafeText,
 } from "./canvasShare";
 import { AggregateVersion, UtcTimestamp } from "./events";
@@ -27,6 +32,13 @@ export const CanvasPublicShareWireVersion = Schema.Literal(CANVAS_PUBLIC_SHARE_W
 
 /** The payload budget: the export body budget, measured over the JSON the host sends. */
 export const CANVAS_PUBLIC_SHARE_MAX_DOCUMENT_BYTES = CANVAS_EXPORT_BODY_MAX_BYTES;
+/**
+ * Room a request body has for a share's images on top of the document: the
+ * image budget as base64 plus each image's JSON fields. The document budget
+ * stays the text the approval card shows whole.
+ */
+export const CANVAS_PUBLIC_SHARE_MAX_IMAGES_BODY_BYTES =
+  Math.ceil(CANVAS_SHARE_IMAGES_MAX_BYTES / 3) * 4 + CANVAS_SHARE_MAX_IMAGES * 256;
 export const CANVAS_PUBLIC_SHARE_SUMMARY_MAX_CHARS = 200;
 export const CANVAS_PUBLIC_SHARE_REPORT_DETAIL_MAX_CHARS = 1_000;
 /** Revoked and expired links answer 410 for this long, then 404. */
@@ -106,15 +118,52 @@ export type CanvasPublicLinkServiceAddress = typeof CanvasPublicLinkServiceAddre
 export const CanvasPublicShareDocument = Schema.Struct({
   schemaVersion: CanvasPublicShareWireVersion,
   kind: Schema.Literal("canvas-public-share-document"),
-  /** The share schema the blocks are written in. */
-  shareSchemaVersion: Schema.Literal(CANVAS_SHARE_SCHEMA_VERSION),
+  /**
+   * The share schema the blocks are written in. A host always publishes the
+   * current version; every earlier one stays readable, because a service
+   * redeployed with a newer version still holds links published under an
+   * older one, which must keep opening until they expire.
+   */
+  shareSchemaVersion: CanvasShareSchemaVersion,
   title: safeText(256),
   /** The first reading text, shortened, for link previews. */
   summary: Schema.optional(safeText(CANVAS_PUBLIC_SHARE_SUMMARY_MAX_CHARS)),
   publishedAt: UtcTimestamp,
   blocks: Schema.Array(CanvasStaticExportBlock).pipe(Schema.maxItems(128)),
-}).annotations(strict);
+  /**
+   * The images the blocks display (maintainer decision, 2026-11-22).
+   * They count against the share image budget, not the document budget, which
+   * is the text the approval card shows whole.
+   */
+  images: Schema.optional(
+    Schema.Array(CanvasShareImage).pipe(Schema.maxItems(CANVAS_SHARE_MAX_IMAGES)),
+  ),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (document) =>
+        document.shareSchemaVersion >= CANVAS_SHARE_IMAGES_SCHEMA_VERSION ||
+        document.images === undefined,
+      { message: () => "Shared images require Canvas share version 18." },
+    ),
+    Schema.filter((document) => canvasShareImagesAreConsistent(document), {
+      message: () =>
+        "A share's images must each be named by a block, match their length, and fit the image budget.",
+    }),
+  );
 export type CanvasPublicShareDocument = typeof CanvasPublicShareDocument.Type;
+
+/**
+ * The bytes a document counts against the document budget: its JSON without
+ * the images, which count against the image budget instead.
+ */
+export function canvasPublicShareDocumentTextBytes(
+  document: Pick<CanvasPublicShareDocument, "images">,
+): number {
+  const { images: _images, ...text } = document;
+  return new TextEncoder().encode(JSON.stringify(text)).byteLength;
+}
 
 /** `POST /api/v1/shares` */
 export const CanvasPublicShareCreateRequest = Schema.Struct({

@@ -282,14 +282,46 @@ describe("a shared prototype's page", () => {
     expect(page).toMatch(/^\/api\/canvas\/design-page\?ticket=[A-Za-z0-9_-]{43}$/);
     const grant = tickets.redeem(page?.split("ticket=")[1] ?? "");
     expect(grant).toMatchObject({ canvasId, versionId, blockId: "cart", startFrameId: "paid" });
-    // A shared design names no image and so needs no authority to resolve one.
+    // A shared design never carries the authority to resolve a live image.
     expect(grant?.provenance).toBeUndefined();
-    expect(grant?.block.assets).toBeUndefined();
+    expect(grant?.sharedAssets).toEqual([]);
     // A share never carries the sharer's "Allow network": a reader's page
     // can ask this host to fetch nothing.
     expect(grant?.network).toBeUndefined();
     // The ticket opened once.
     expect(tickets.redeem(page?.split("ticket=")[1] ?? "")).toBeUndefined();
+  });
+
+  it("draws a shared prototype's images from the bytes the snapshot carries, never a live read", () => {
+    const tickets = new CanvasDesignRunTickets();
+    const withImage = {
+      ...prototype,
+      frames: [{ frameId: "cart", title: "Cart", html: '<img src="octant-asset:hero" alt="">' }],
+      assets: [{ assetId: "hero", imageRef: "image-1" }],
+    };
+    const page = issueSharedDesignRun(
+      tickets,
+      {
+        canvasId,
+        versionId,
+        blocks: [withImage],
+        images: [
+          {
+            imageRef: "image-1",
+            mediaType: "image/png",
+            byteLength: 8,
+            sha256: "a".repeat(64),
+            data: "iVBORw0KGgo=",
+          },
+        ],
+      } as never,
+      { blockId: "cart" as never },
+    );
+    const grant = tickets.redeem(page?.split("ticket=")[1] ?? "");
+    expect(grant?.provenance).toBeUndefined();
+    expect(grant?.sharedAssets).toEqual([
+      { assetId: "hero", status: "resolved", mediaType: "image/png", data: "iVBORw0KGgo=" },
+    ]);
   });
 
   it("is not offered for a static design, an unknown block, an unknown frame, or a host without tickets", () => {

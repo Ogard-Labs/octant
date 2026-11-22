@@ -1,4 +1,5 @@
 import {
+  canvasImageBlockAssets,
   decodeCanvasId,
   type CanvasDesignAssetResolution,
   type CanvasDesignBlock,
@@ -45,7 +46,7 @@ export interface CanvasPreviewServiceOptions {
    * refused and is reported as a warning.
    */
   readonly resolveDesignAssets?: (
-    block: CanvasDesignBlock,
+    block: Pick<CanvasDesignBlock, "blockId" | "assets">,
     provenance: CanvasProvenance,
   ) => Promise<ReadonlyArray<CanvasDesignAssetResolution>>;
   /** Milliseconds since the epoch; injectable so a test owns the clock. */
@@ -172,10 +173,17 @@ export function createCanvasPreviewService(
         const resolveDesignAssets = options.resolveDesignAssets;
         if (resolveDesignAssets !== undefined) {
           for (const block of definition.blocks) {
-            if (block.kind !== "design" || (block.assets ?? []).length === 0) continue;
+            // An image block's generated image resolves as a design declaring it.
+            const declaring =
+              block.kind === "design"
+                ? block
+                : block.kind === "image"
+                  ? { blockId: block.blockId, assets: canvasImageBlockAssets(block) }
+                  : undefined;
+            if (declaring === undefined || (declaring.assets ?? []).length === 0) continue;
             designAssets.set(
               String(block.blockId),
-              await resolveDesignAssets(block, definition.provenance),
+              await resolveDesignAssets(declaring, definition.provenance),
             );
           }
         }

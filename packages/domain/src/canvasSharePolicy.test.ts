@@ -48,12 +48,16 @@ import {
   CANVAS_SHARE_THREAT_MODEL_ID,
   validateCanvasStaticExportRequest,
   type CanvasSharePolicyContext,
+  canvasShareImageKey,
+  canvasShareImageSources,
+  type CanvasShareResolvedImages,
 } from "./canvasSharePolicy";
 
 function exportStaticDocument(input: {
   readonly request: unknown;
   readonly current: unknown;
   readonly context: CanvasSharePolicyContext;
+  readonly images?: CanvasShareResolvedImages;
 }) {
   const version = decodeCanvasVersion(input.current);
   const validated = validateCanvasStaticExportRequest({
@@ -65,6 +69,7 @@ function exportStaticDocument(input: {
     request: validated,
     current: version,
     exportedAt: input.context.nowIso as UtcTimestamp,
+    ...(input.images === undefined ? {} : { images: input.images }),
   });
   return { document, consent: validated.consent, note: validated.note };
 }
@@ -465,7 +470,7 @@ describe("Canvas share policy", () => {
     expect(receipt.document.blocks).toEqual(blocks);
   });
 
-  it("shares a decision form's questions and sections at share version 17, never an answer", () => {
+  it("shares a decision form's questions and sections at the current share version, never an answer", () => {
     const form = decodeCanvasBlock({
       blockId: "decisions",
       schemaVersion: CANVAS_SCHEMA_VERSION,
@@ -494,7 +499,7 @@ describe("Canvas share policy", () => {
       }),
       context,
     });
-    expect(receipt.document.schemaVersion).toBe(17);
+    expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_SCHEMA_VERSION);
     expect(decodeCanvasStaticExportDocument(receipt.document).blocks).toEqual([
       { ...form, schemaVersion: CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION },
     ]);
@@ -589,6 +594,104 @@ describe("Canvas share policy", () => {
     expect(JSON.stringify(shared.document)).not.toContain("screens/home.png");
   });
 
+  it("carries every image a document shows, once each, by the share's own name and never by a host id or path", () => {
+    const imageId = "9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a";
+    const missingId = "8b8b8b8b-8b8b-4b8b-8b8b-8b8b8b8b8b8b";
+    const pixel = {
+      mediaType: "image/png" as const,
+      data: "iVBORw0KGgo=",
+      byteLength: 8,
+      sha256: "a".repeat(64),
+    };
+    const image = (blockId: string, generatedImageId: string) => ({
+      blockId,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "image",
+      generatedImageId,
+      alt: "A lighthouse at dusk",
+      caption: "Cover art",
+    });
+    const unusedId = "7c7c7c7c-7c7c-4c7c-8c7c-7c7c7c7c7c7c";
+    const design = {
+      ...onboardingFlowExample,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      styles:
+        ".hero { background: url(octant-asset:hero); } /* .old { background: url(octant-asset:hidden); } */",
+      frames: [
+        {
+          frameId: "home",
+          title: "Home",
+          // A CSS comment opener in text is only text: the image after it shows.
+          html: '<div class="hero"></div><p>Matches docs/*</p><img src="octant-asset:shot" alt="Home"><!-- <img src="octant-asset:hidden"> --><style>/* .x { background: url(octant-asset:hidden); } */</style>',
+        },
+      ],
+      assets: [
+        { assetId: "hero", source: { kind: "generated-image", imageId } },
+        { assetId: "shot", source: { kind: "project-file", path: "screens/home.png" } },
+        // Declared but named nowhere, so never shown and never shared.
+        { assetId: "unused", source: { kind: "generated-image", imageId: unusedId } },
+        // Named only inside comments, which are never drawn.
+        { assetId: "hidden", source: { kind: "project-file", path: "private/plan.png" } },
+      ],
+    };
+    const shared = exportStaticDocument({
+      request: {
+        ...request,
+        consent: { ...request.consent, acknowledgedMarkupSharedAsWritten: true },
+      },
+      current: {
+        ...current,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        definition: {
+          ...current.definition,
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          provenance: { ...current.definition.provenance, mode: "work" },
+          blocks: [image("cover", imageId), image("gone", missingId), design],
+        },
+      },
+      context,
+      images: new Map([
+        [canvasShareImageKey({ kind: "generated-image", imageId } as never), pixel],
+        [
+          canvasShareImageKey({ kind: "project-file", path: "screens/home.png" }),
+          { ...pixel, sha256: "f".repeat(64) },
+        ],
+        [
+          canvasShareImageKey({ kind: "generated-image", imageId: unusedId } as never),
+          { ...pixel, sha256: "0".repeat(64) },
+        ],
+        [
+          canvasShareImageKey({ kind: "project-file", path: "private/plan.png" }),
+          { ...pixel, sha256: "1".repeat(64) },
+        ],
+      ]),
+    });
+    const document = decodeCanvasStaticExportDocument(shared.document);
+    expect(document.schemaVersion).toBe(18);
+    expect(document.images).toEqual([
+      { imageRef: "image-1", ...pixel },
+      { imageRef: "image-2", ...pixel, sha256: "f".repeat(64) },
+    ]);
+    expect(document.blocks[0]).toMatchObject({ kind: "image", imageRef: "image-1" });
+    // An image the host could not resolve reads as its description.
+    expect(document.blocks[1]).not.toHaveProperty("imageRef");
+    // The same generated image shown again is the same share image.
+    expect(document.blocks[2]).toMatchObject({
+      kind: "design",
+      assets: [
+        { assetId: "hero", imageRef: "image-1" },
+        { assetId: "shot", imageRef: "image-2" },
+      ],
+    });
+    expect(JSON.stringify(document)).not.toContain(imageId);
+    expect(JSON.stringify(document)).not.toContain("screens/home.png");
+    expect(JSON.stringify(document)).not.toContain("0".repeat(64));
+    expect(JSON.stringify(document)).not.toContain("1".repeat(64));
+    expect(
+      canvasShareImageSources({ blocks: [design] } as never).map((source) => source.kind),
+    ).toEqual(["generated-image", "project-file"]);
+  });
+
   it("shares a validated brand and richer diagram fields at the current share version, and leaves presenter notes and a captured page behind", () => {
     const captureId = "66666666-6666-4666-8666-666666666666";
     const design = {
@@ -629,8 +732,8 @@ describe("Canvas share policy", () => {
       });
     const receipt = share([design, diagram]);
     expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_SCHEMA_VERSION);
-    expect(CANVAS_SHARE_SCHEMA_VERSION).toBe(17);
-    expect(CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION).toBe(29);
+    expect(CANVAS_SHARE_SCHEMA_VERSION).toBe(18);
+    expect(CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION).toBe(30);
     const { assets: _assets, ...withoutAssets } = design;
     expect(receipt.document.blocks).toEqual([
       {

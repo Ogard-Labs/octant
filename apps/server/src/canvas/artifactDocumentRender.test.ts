@@ -1281,6 +1281,64 @@ describe("a Canvas as one HTML file", () => {
     expect(pages[1]).toMatch(/<img src="data:image\/svg\+xml;base64,[^"]+" alt="Shot">/);
   });
 
+  it("writes an image block's generated image in, draws a placeholder when its job is gone, and reads it as its description elsewhere", () => {
+    const cover = decodeCanvasBlock({
+      blockId: "cover",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "image",
+      generatedImageId: "66666666-6666-4666-8666-666666666666",
+      alt: "A lighthouse at dusk",
+      caption: "Cover art",
+    });
+    const document = { title: "Pitch", blocks: [cover] };
+    const drawn = renderCanvasHtmlFile(document, {
+      designAssets: new Map([
+        [
+          "cover",
+          [
+            {
+              assetId: "image" as never,
+              status: "resolved" as const,
+              mediaType: "image/png" as const,
+              data: pixel,
+            },
+          ],
+        ],
+      ]),
+    });
+    if (drawn.kind !== "rendered") throw new Error("expected a file");
+    expect(drawn.body).toContain(
+      `<figure class="image"><img src="data:image/png;base64,${pixel}" alt="A lighthouse at dusk"><figcaption>Cover art</figcaption></figure>`,
+    );
+    expect(drawn.body).not.toContain("66666666-6666-4666-8666-666666666666");
+
+    const gone = renderCanvasHtmlFile(document, {
+      designAssets: new Map([
+        [
+          "cover",
+          [
+            {
+              assetId: "image" as never,
+              status: "unavailable" as const,
+              reason: "missing" as const,
+            },
+          ],
+        ],
+      ]),
+    });
+    if (gone.kind !== "rendered") throw new Error("expected a file");
+    expect(gone.body).toMatch(
+      /<img src="data:image\/svg\+xml;base64,[^"]+" alt="A lighthouse at dusk">/,
+    );
+
+    const markdown = renderArtifactMarkdown(document);
+    if (markdown.kind !== "rendered") throw new Error("expected a document");
+    expect(markdown.body).toContain("A lighthouse at dusk — Cover art");
+    const destination = renderArtifactHtml(document);
+    if (destination.kind !== "rendered") throw new Error("expected a document");
+    expect(destination.body).not.toContain("<img");
+  });
+
   it("carries no host path, file path, or image identity", () => {
     const file = renderCanvasHtmlFile(source, { frames: "as-written", designAssets: resolved });
     if (file.kind !== "rendered") throw new Error("expected a file");

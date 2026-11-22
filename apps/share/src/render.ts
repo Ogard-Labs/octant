@@ -31,6 +31,13 @@ export interface RenderContext {
   readonly frameAddress: (blockId: string, mode: FrameMode) => string;
   /** The one prototype the viewer asked to run, if any. */
   readonly runBlockId: string | undefined;
+  /**
+   * The address of an image the share carries, by the share's own name for
+   * it, or undefined for one it does not carry. Each carried image is served
+   * once at its own address, so a page that shows it many times names it
+   * many times and the browser fetches it once.
+   */
+  readonly imageAddress: (imageRef: string) => string | undefined;
 }
 
 export function escapeHtml(value: string): string {
@@ -607,11 +614,20 @@ function blockBody(block: Block, ctx: RenderContext): string {
     case "browser-reference":
     case "evidence-reference":
       return labelled(block.label, block.detail);
-    case "image":
-      // No image leaves the host, so the alt text stands where it was.
-      return `<figure class="image-placeholder"><figcaption>${e(block.alt)}${
-        block.caption === undefined ? "" : ` — ${e(block.caption)}`
-      }</figcaption></figure>`;
+    case "image": {
+      // An image the share carries is drawn; any other image block
+      // names a source that stayed on the host, so its alt text stands there.
+      const address =
+        block.imageRef === undefined ? undefined : ctx.imageAddress(String(block.imageRef));
+      if (address === undefined) {
+        return `<figure class="image-placeholder"><figcaption>${e(block.alt)}${
+          block.caption === undefined ? "" : ` — ${e(block.caption)}`
+        }</figcaption></figure>`;
+      }
+      return `<figure class="image"><img src="${e(address)}" alt="${e(
+        block.alt,
+      )}">${block.caption === undefined ? "" : `<figcaption>${e(block.caption)}</figcaption>`}</figure>`;
+    }
     case "design":
       return design(block, ctx);
     case "choice": {

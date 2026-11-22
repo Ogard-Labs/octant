@@ -115,6 +115,8 @@ export interface CanvasExportPictureRequest {
         readonly kind: "document";
         readonly definition: CanvasDefinition;
         readonly designPages?: ReadonlyArray<CanvasPreviewDesignPage>;
+        /** The images its blocks show, resolved for the version being drawn. */
+        readonly designAssets?: ReadonlyArray<CanvasPreviewDesignAssets>;
       }
     | {
         /**
@@ -440,7 +442,7 @@ export function createPlaywrightCanvasPreviewRenderer(
           definition: subject.definition,
           theme: request.theme,
           placement: "document",
-          designAssets: [],
+          designAssets: subject.designAssets ?? [],
           designPages: pages,
         });
         if (html === undefined) return { kind: "unavailable", reason: "no-renderer" };

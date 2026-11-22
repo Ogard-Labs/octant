@@ -472,6 +472,26 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
               ))}
             </ul>
           )}
+          {card.images === undefined ? null : (
+            <figure className="canvas-export__images" data-testid="canvas-export-images">
+              <figcaption className="canvas-export__note">
+                {card.images.length === 1
+                  ? "Sends this image with the document:"
+                  : `Sends these ${String(card.images.length)} images with the document:`}
+              </figcaption>
+              <ul className="canvas-export__image-list">
+                {card.images.map((image) => (
+                  <li key={image.imageRef} className="canvas-export__image">
+                    <img
+                      src={`data:${image.mediaType};base64,${image.data}`}
+                      alt={`${image.imageRef}, sent with the document`}
+                    />
+                    <span>{`${image.imageRef} — ${fileSize(image.byteLength)}`}</span>
+                  </li>
+                ))}
+              </ul>
+            </figure>
+          )}
           {card.payload === undefined ? null : (
             <pre className="canvas-export__payload" data-testid="canvas-export-payload">
               {card.payload}

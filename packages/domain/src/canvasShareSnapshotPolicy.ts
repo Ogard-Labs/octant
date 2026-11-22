@@ -10,6 +10,7 @@ import { decodeCanvasVersion, type CanvasVersion } from "@octant/contracts/canva
 import type { UtcTimestamp } from "@octant/contracts/events";
 import {
   buildCanvasStaticExportDocument,
+  type CanvasShareResolvedImages,
   CanvasSharePolicyRejected,
   type CanvasSharePolicyContext,
 } from "./canvasSharePolicy";
@@ -156,6 +157,8 @@ export function createCanvasShareSnapshotRecord(input: {
   readonly context: CanvasSharePolicyContext;
   /** @deprecated Optional compatibility no-op; snapshot consent is authoritative. */
   readonly staticExportRequest?: unknown;
+  /** The generated images the host resolved for this version; absent, none are copied. */
+  readonly images?: CanvasShareResolvedImages;
 }): CanvasShareSnapshotRecord {
   let current: CanvasVersion;
   try {
@@ -197,9 +200,24 @@ export function createCanvasShareSnapshotRecord(input: {
       request: sanitizerRequest,
       current,
       exportedAt: createdAt,
+      ...(input.images === undefined ? {} : { images: input.images }),
     });
+    // The journaled snapshot names each image by its digest and never holds
+    // its bytes: the host keeps them for the snapshot and adds them when the
+    // snapshot is read.
+    // Every image the snapshot copies is one the person saw in the share
+    // panel and agreed to; an image they did not see is never copied.
+    const acknowledged = new Set(request.consent.acknowledgedImages ?? []);
+    if ((sanitized.images ?? []).some((image) => !acknowledged.has(image.sha256))) {
+      reject(
+        "consent-required",
+        "The images this snapshot would copy changed since you reviewed them. Review them and share again.",
+      );
+    }
+    const images = sanitized.images?.map(({ data: _data, ...image }) => image);
     document = {
       ...sanitized,
+      ...(images === undefined ? {} : { images }),
       channel: "authenticated-snapshot" as const,
       threatModelId: "canvas-share-authenticated-snapshot-v1" as const,
     };
@@ -209,7 +227,8 @@ export function createCanvasShareSnapshotRecord(input: {
     // as missing consent. Both are about the Canvas's content, not a malformed
     // request, so the owner is told which.
     reject(
-      error instanceof CanvasSharePolicyRejected &&
+      (error instanceof CanvasSharePolicyRejected ||
+        error instanceof CanvasShareSnapshotPolicyRejected) &&
         (error.denialCode === "unsafe-payload" || error.denialCode === "consent-required")
         ? error.denialCode
         : "malformed-request",

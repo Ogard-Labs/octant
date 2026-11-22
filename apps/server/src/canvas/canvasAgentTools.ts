@@ -507,6 +507,11 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
       detail:
         "For a plan, use a plan block: phases, and tasks that name their phase, with a status (todo, doing, blocked, done), and optional owner, estimate, acceptance notes, dates, and dependsOn. Give tasks startAt and dueAt and set view to gantt to open the plan as bars on days with its dependency arrows; a task without dates is listed under the chart. The person can work the plan too, so read the Canvas before revising it and keep their progress.",
     },
+    image: {
+      use: "A picture on its own: a generated image drawn in place.",
+      detail:
+        'An image block shows a generated image when it names generatedImageId, the attachment id of a completed image made in this thread or its Project (not sourceId), with alt text and an optional caption. The host draws it each time it is read, says "Image unavailable" when the image is gone, and preview names it then. Saved HTML files carry the picture; Markdown, destination exports, and shares carry its alt text and caption. Use a design only when the picture sits in a laid-out page.',
+    },
     sequence: {
       use: "A login or request flow between participants.",
       detail:

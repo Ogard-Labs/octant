@@ -74,6 +74,55 @@ describe("CanvasExportPanel", () => {
     expect(screen.getByTestId("canvas-export-payload")).toHaveTextContent("# Launch plan");
   });
 
+  it("shows each image a share document sends beside its text before anything is sent", async () => {
+    const user = userEvent.setup();
+    const image = {
+      imageRef: "image-1",
+      mediaType: "image/png" as const,
+      byteLength: 2048,
+      sha256: "d".repeat(64),
+      data: "iVBORw0KGgo=",
+    };
+    const onPrepare = vi.fn(async () => ({
+      kind: "approval" as const,
+      card: {
+        schemaVersion: 1 as const,
+        kind: "canvas-export-approval" as const,
+        approvalId,
+        canvasId,
+        versionId,
+        sequence: 1,
+        targetId: "reading-copy",
+        destinationLabel: "Reading copy",
+        format: "share-document" as const,
+        title: "Launch plan",
+        payload: '{ "imageRef": "image-1" }',
+        images: [image],
+        payloadDigest: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        byteLength: 25,
+      },
+    }));
+    render(
+      <CanvasExportPanel
+        offers={{
+          ...offers(),
+          targets: [{ ...offers().targets[0]!, formats: ["share-document"] }],
+        }}
+        onDecide={vi.fn() as never}
+        onPrepare={onPrepare as never}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Review export" }));
+    const images = await screen.findByTestId("canvas-export-images");
+    expect(images).toHaveTextContent("Sends this image with the document:");
+    expect(images).toHaveTextContent("image-1");
+    expect(screen.getByRole("img", { name: "image-1, sent with the document" })).toHaveAttribute(
+      "src",
+      `data:image/png;base64,${image.data}`,
+    );
+  });
+
   it("says a delivered export could not be recorded instead of reporting a failure", async () => {
     const user = userEvent.setup();
     const onPrepare = vi.fn(async () => ({

@@ -113,6 +113,40 @@ describe("canvasPreviewWarnings", () => {
     expect(JSON.stringify(warnings)).not.toContain("iVBOR");
   });
 
+  it("tells the author when an image block's generated image is gone, and stays quiet when it draws", () => {
+    const cover = (blockId: string) =>
+      block({
+        blockId,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "image",
+        generatedImageId: "22222222-2222-4222-8222-222222222222",
+        alt: "Cover art",
+      });
+    const warnings = canvasPreviewWarnings({
+      definition: { blocks: [cover("drawn"), cover("deleted")] },
+      width: 720,
+      palette: canvasPreviewPalette("light"),
+      designAssets: new Map([
+        [
+          "drawn",
+          [
+            { assetId: "image", status: "resolved", mediaType: "image/png", data: "iVBORw0KGgo=" },
+          ] as never,
+        ],
+        ["deleted", [{ assetId: "image", status: "unavailable", reason: "missing" }] as never],
+      ]),
+    });
+    expect(warnings).toEqual([
+      {
+        kind: "design-asset-unavailable",
+        blockId: "deleted",
+        assetId: "image",
+        reason: "missing",
+        frameIds: [],
+      },
+    ]);
+  });
+
   it("reports nothing for a document that reads cleanly", () => {
     const blocks = [
       richText("summary"),

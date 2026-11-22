@@ -1,5 +1,7 @@
 import { Schema } from "effect";
 import {
+  CANVAS_SHARE_MAX_IMAGES,
+  CanvasShareImage,
   CanvasShareLocalUserActor,
   CanvasShareSchemaVersion,
   CanvasStaticExportDocument,
@@ -172,6 +174,14 @@ export const CanvasShareOverview = Schema.Struct({
   ),
   accessLog: Schema.Array(CanvasShareAccessLogEvent).pipe(
     Schema.maxItems(CANVAS_SHARE_MAX_ACCESS_LOG_EVENTS),
+  ),
+  /**
+   * The images a snapshot of the current version would copy, each exactly as
+   * it would leave, so the share panel shows the person what is shared
+   * before they agree (maintainer decision, 2026-11-22).
+   */
+  images: Schema.optional(
+    Schema.Array(CanvasShareImage).pipe(Schema.maxItems(CANVAS_SHARE_MAX_IMAGES)),
   ),
 }).annotations(strict);
 export type CanvasShareOverview = typeof CanvasShareOverview.Type;

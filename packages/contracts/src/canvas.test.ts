@@ -19,6 +19,7 @@ import {
   CANVAS_THREAD_OWNED_SCHEMA_VERSION,
   CANVAS_DECISION_FORM_SCHEMA_VERSION,
   CANVAS_DESIGN_SYSTEM_SCHEMA_VERSION,
+  CANVAS_GENERATED_IMAGE_BLOCK_SCHEMA_VERSION,
   CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
   CANVAS_MAX_DESIGN_BRAND_TOKENS,
   CANVAS_MAX_DESIGN_NOTES_LENGTH,
@@ -2305,7 +2306,43 @@ describe("tabs and columns layout groups", () => {
     expect(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION).toBe(19);
     expect(CANVAS_THREAD_OWNED_SCHEMA_VERSION).toBe(20);
     expect(CANVAS_DESIGN_FIELDS_SCHEMA_VERSION).toBe(21);
-    expect(CANVAS_SCHEMA_VERSION).toBe(CANVAS_DECISION_FORM_SCHEMA_VERSION);
+    expect(CANVAS_DECISION_FORM_SCHEMA_VERSION).toBe(29);
+    expect(CANVAS_SCHEMA_VERSION).toBe(CANVAS_GENERATED_IMAGE_BLOCK_SCHEMA_VERSION);
+  });
+
+  it("lets an image block draw a generated image from version 30, and keeps the reference through a version round trip", () => {
+    const generated = {
+      blockId: "generated",
+      schemaVersion: CANVAS_GENERATED_IMAGE_BLOCK_SCHEMA_VERSION,
+      kind: "image",
+      generatedImageId: "11111111-1111-4111-8111-111111111111",
+      alt: "A lighthouse at dusk",
+      caption: "Cover art",
+    } as const;
+    const current = {
+      ...definition,
+      schemaVersion: CANVAS_GENERATED_IMAGE_BLOCK_SCHEMA_VERSION,
+      blocks: [generated],
+    };
+    expect(decodeCanvasDefinition(current).blocks).toEqual([generated]);
+    // A replayed version decodes the same envelope the journal stored.
+    const version = {
+      schemaVersion: CANVAS_GENERATED_IMAGE_BLOCK_SCHEMA_VERSION,
+      canvasId: ids.canvas,
+      versionId: ids.version,
+      sequence: 2,
+      definition: current,
+      createdBy: provenance.actor,
+      createdAt: "2026-08-01T21:00:01.000Z",
+    } as const;
+    expect(decodeCanvasVersion(version).definition.blocks).toEqual([generated]);
+    expect(() =>
+      decodeCanvasDefinition({ ...current, schemaVersion: CANVAS_DECISION_FORM_SCHEMA_VERSION }),
+    ).toThrow(/generated image requires Canvas schema version 30/);
+    expect(() => decodeCanvasBlock({ ...generated, sourceId: ids.source })).toThrow();
+    const { generatedImageId: _omitted, ...neither } = generated;
+    expect(() => decodeCanvasBlock(neither)).toThrow();
+    expect(() => decodeCanvasBlock({ ...generated, generatedImageId: "not-a-uuid" })).toThrow();
   });
 
   it("keeps every version through the current one decodable when it gates nothing new", () => {

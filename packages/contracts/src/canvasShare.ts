@@ -76,6 +76,10 @@ import {
   canvasDiagramUsesStyles,
   canvasPlanUsesGantt,
   decodeCanvasDefinition,
+  CANVAS_DESIGN_ASSET_MAX_BYTES,
+  CANVAS_MAX_DESIGN_ASSETS,
+  CanvasDesignAssetId,
+  CanvasDesignAssetMediaType,
   type CanvasDefinition,
   type CanvasVersion,
 } from "./canvas";
@@ -158,7 +162,13 @@ export const CANVAS_SHARE_CHOICE_SCHEMA_VERSION = 16;
 // Version 17 carries a decision form's sections and its questions' `allowNote`,
 // with Canvas schema version 29. A share never carries a person's answers.
 export const CANVAS_SHARE_DECISION_FORM_SCHEMA_VERSION = 17;
-export const CANVAS_SHARE_SCHEMA_VERSION = 17 as const;
+// Version 18 carries the images a document displays (maintainer decision,
+// 2026-11-22): an image block's generated image and the images a design
+// declares, as bytes in the document's `images`, with Canvas schema version
+// 30. A reader that never learned to draw them refuses the
+// version rather than drawing a block without its picture.
+export const CANVAS_SHARE_IMAGES_SCHEMA_VERSION = 18;
+export const CANVAS_SHARE_SCHEMA_VERSION = 18 as const;
 // The newest Canvas block version a share at this version names. Canvas
 // version 13 added only the table row id, which a share drops, so share
 // version 6 named a block authored at 13 as 12. Version 14 adds chart types a
@@ -175,10 +185,10 @@ export const CANVAS_SHARE_SCHEMA_VERSION = 17 as const;
 // whole, so share version 12 names blocks up to 23. Version 27 adds the
 // choice block, so share version 16 names blocks up to 27. Version 29 adds a
 // decision form's sections and notes, so share version 17 names blocks up to
-// 29. A later Canvas bump that
-// adds something a share
-// carries bumps the share version again.
-export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 29 as const;
+// 29. Version 30 adds an image block's generated image, which share version
+// 18 carries, so it names blocks up to 30. A later Canvas bump that adds
+// something a share carries bumps the share version again.
+export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 30 as const;
 export const CanvasShareSchemaVersion = Schema.Literal(
   1,
   2,
@@ -196,6 +206,7 @@ export const CanvasShareSchemaVersion = Schema.Literal(
   14,
   15,
   16,
+  17,
   CANVAS_SHARE_SCHEMA_VERSION,
 );
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
@@ -271,6 +282,119 @@ export const CanvasStaticExportSourceEntry = Schema.Struct({
   opaqueRef: boundedNonEmptyText(256),
 }).annotations(strict);
 export type CanvasStaticExportSourceEntry = typeof CanvasStaticExportSourceEntry.Type;
+
+/**
+ * A share's own name for one image it carries, unrelated to any id on the
+ * host: the share leaves without host, Project, thread, or image identity.
+ */
+export const CanvasShareImageRef = Schema.String.pipe(
+  Schema.pattern(/^image-[1-9][0-9]?$/),
+  Schema.brand("CanvasShareImageRef"),
+);
+export type CanvasShareImageRef = typeof CanvasShareImageRef.Type;
+
+/** At most this many images, each within the design image cap. */
+export const CANVAS_SHARE_MAX_IMAGES = 32;
+/** All of a share's images together, the same budget a saved HTML file has. */
+export const CANVAS_SHARE_IMAGES_MAX_BYTES = 4 * 1024 * 1024;
+
+/**
+ * One image a share carries: a raster the host sniffed from the bytes, never
+ * SVG, with its bytes as base64 and their SHA-256, which the approval card
+ * shows so approving it names exactly the images that leave.
+ */
+const shareImageFields = {
+  imageRef: CanvasShareImageRef,
+  mediaType: CanvasDesignAssetMediaType,
+  byteLength: Schema.Int.pipe(Schema.between(1, CANVAS_DESIGN_ASSET_MAX_BYTES)),
+  sha256: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+} as const;
+const shareImageData = Schema.String.pipe(
+  Schema.minLength(1),
+  Schema.maxLength(Math.ceil(CANVAS_DESIGN_ASSET_MAX_BYTES / 3) * 4),
+  Schema.pattern(/^[A-Za-z0-9+/]*={0,2}$/),
+);
+
+export const CanvasShareImage = Schema.Struct({
+  ...shareImageFields,
+  data: shareImageData,
+}).annotations({ parseOptions: { onExcessProperty: "error" as const } });
+export type CanvasShareImage = typeof CanvasShareImage.Type;
+
+/**
+ * An image as a shared snapshot document holds it. The snapshot the host
+ * journals names each image by its digest without its bytes, which the host
+ * keeps in its managed store for that snapshot and adds when the snapshot is
+ * read, so the journal never holds image bytes and a reader sees exactly the
+ * bytes that were shared.
+ */
+export const CanvasShareImageEntry = Schema.Struct({
+  ...shareImageFields,
+  data: Schema.optional(shareImageData),
+}).annotations({ parseOptions: { onExcessProperty: "error" as const } });
+export type CanvasShareImageEntry = typeof CanvasShareImageEntry.Type;
+
+/** The bytes base64 `data` holds, from its length and padding. */
+function shareImageDecodedBytes(data: string): number {
+  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+  return (data.length / 4) * 3 - padding;
+}
+
+/**
+ * Whether a share's images hold together: each image's bytes match its
+ * declared length, every reference names an image the share carries, no
+ * image is carried that nothing shows, and all of them fit the budget.
+ */
+export function canvasShareImagesAreConsistent(document: {
+  readonly blocks: ReadonlyArray<{
+    readonly kind: string;
+    readonly imageRef?: string | undefined;
+    readonly assets?: ReadonlyArray<{ readonly imageRef: string }> | undefined;
+  }>;
+  readonly images?: ReadonlyArray<CanvasShareImageEntry> | undefined;
+}): boolean {
+  const images = document.images ?? [];
+  const carried = new Set(images.map((image) => String(image.imageRef)));
+  if (carried.size !== images.length) return false;
+  const named = new Set<string>();
+  for (const block of document.blocks) {
+    if (block.kind === "image" && block.imageRef !== undefined) named.add(block.imageRef);
+    if (block.kind === "design") {
+      for (const asset of block.assets ?? []) named.add(asset.imageRef);
+    }
+  }
+  if (named.size !== carried.size || [...named].some((ref) => !carried.has(ref))) return false;
+  let total = 0;
+  for (const image of images) {
+    if (
+      image.data !== undefined &&
+      (image.data.length % 4 !== 0 || shareImageDecodedBytes(image.data) !== image.byteLength)
+    ) {
+      return false;
+    }
+    total += image.byteLength;
+  }
+  return total <= CANVAS_SHARE_IMAGES_MAX_BYTES;
+}
+
+/** Whether a document carries anything share version 18 introduced. */
+function carriesShareImages(document: {
+  readonly blocks: ReadonlyArray<{
+    readonly kind: string;
+    readonly imageRef?: string | undefined;
+    readonly assets?: ReadonlyArray<unknown> | undefined;
+  }>;
+  readonly images?: ReadonlyArray<unknown> | undefined;
+}): boolean {
+  return (
+    (document.images ?? []).length > 0 ||
+    document.blocks.some(
+      (block) =>
+        (block.kind === "image" && block.imageRef !== undefined) ||
+        (block.kind === "design" && block.assets !== undefined),
+    )
+  );
+}
 
 const exportBlockFields = {
   blockId: boundedToken("CanvasBlockId"),
@@ -953,6 +1077,8 @@ export const CanvasStaticExportBlock = Schema.Union(
     kind: Schema.Literal("image"),
     alt: ExportNonEmptyText,
     caption: Schema.optional(ExportText),
+    /** The picture, from share version 18: one of the document's `images`. */
+    imageRef: Schema.optional(CanvasShareImageRef),
   }).annotations(strict),
   // Layout groups carry only block ids and short pane labels, so they leave
   // as the author wrote them; the blocks they name are shared beside them.
@@ -992,6 +1118,20 @@ export const CanvasStaticExportBlock = Schema.Union(
     frames: Schema.Array(CanvasDesignFrame).pipe(
       Schema.minItems(1),
       Schema.maxItems(CANVAS_MAX_DESIGN_FRAMES),
+    ),
+    /**
+     * From share version 18, the declared images the frames name as
+     * `octant-asset:<assetId>`, each one of the document's `images`. A
+     * declared image the host could not resolve is not listed and draws as a
+     * placeholder.
+     */
+    assets: Schema.optional(
+      Schema.Array(
+        Schema.Struct({
+          assetId: CanvasDesignAssetId,
+          imageRef: CanvasShareImageRef,
+        }).annotations(strict),
+      ).pipe(Schema.maxItems(CANVAS_MAX_DESIGN_ASSETS)),
     ),
   }).annotations(strict),
   // A deck carries references and the presenter's notes never leave, so a
@@ -1120,6 +1260,10 @@ export const CanvasStaticExportDocument = Schema.Struct({
    * kinds, future schema versions, and source-bound authority fields fail closed.
    */
   blocks: Schema.Array(CanvasStaticExportBlock).pipe(Schema.maxItems(128)),
+  /** The images the blocks display, from share version 18. */
+  images: Schema.optional(
+    Schema.Array(CanvasShareImageEntry).pipe(Schema.maxItems(CANVAS_SHARE_MAX_IMAGES)),
+  ),
   threatModelId: Schema.Literal(
     "canvas-share-static-export-v1",
     "canvas-share-authenticated-snapshot-v1",
@@ -1127,6 +1271,16 @@ export const CanvasStaticExportDocument = Schema.Struct({
 })
   .annotations(strict)
   .pipe(
+    Schema.filter(
+      (document) =>
+        document.schemaVersion >= CANVAS_SHARE_IMAGES_SCHEMA_VERSION ||
+        !carriesShareImages(document),
+      { message: () => "Shared images require Canvas share version 18." },
+    ),
+    Schema.filter((document) => canvasShareImagesAreConsistent(document), {
+      message: () =>
+        "A share's images must each be named by a block, match their length, and fit the image budget.",
+    }),
     // Same version gate as the live definition: mockup blocks are declared by
     // share version 2, which accompanies Canvas schema version 3. A v1
     // document carrying one is refused at decode, not partially rendered.

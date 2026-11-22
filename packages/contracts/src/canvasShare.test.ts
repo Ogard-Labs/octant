@@ -747,7 +747,9 @@ describe("Canvas share contracts", () => {
     const dropped = (kind: string, path: string) =>
       /(?:^|\.)sourceIds?$/.test(path) ||
       flattened.has(`${kind}.${path}`) ||
-      (kind === "design" && /^assets(?:$|\[|\.)/.test(path));
+      (kind === "design" && /^assets(?:$|\[|\.)/.test(path)) ||
+      // A generated image resolves only under this host's authority.
+      (kind === "image" && path === "generatedImageId");
     const missing: string[] = [];
     for (const [kind, paths] of live) {
       const sharedPaths = shared.get(kind);
@@ -809,8 +811,64 @@ describe("Canvas share contracts", () => {
     ).toThrow();
     // And a version this runtime has not learned is still a future version.
     expect(() =>
-      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 18, blocks: [] }),
+      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 19, blocks: [] }),
     ).toThrow();
+  });
+
+  it("carries the generated images a document shows from share version 18, each named by a block and within the budget", () => {
+    const image = {
+      imageRef: "image-1",
+      mediaType: "image/png",
+      byteLength: 8,
+      sha256: "a".repeat(64),
+      data: "iVBORw0KGgo=",
+    };
+    const cover = {
+      blockId: "cover",
+      schemaVersion: 30,
+      kind: "image",
+      alt: "A lighthouse at dusk",
+      imageRef: "image-1",
+    };
+    const shared = { ...document, schemaVersion: 18, blocks: [cover], images: [image] };
+    expect(decodeCanvasStaticExportDocument(shared)).toEqual(shared);
+    // A reader that only knows version 17 never drew a shared picture.
+    expect(() => decodeCanvasStaticExportDocument({ ...shared, schemaVersion: 17 })).toThrow();
+    // Every image is shown by a block, and every block names an image carried.
+    expect(() => decodeCanvasStaticExportDocument({ ...shared, blocks: [] })).toThrow();
+    expect(() =>
+      decodeCanvasStaticExportDocument({ ...shared, blocks: [{ ...cover, imageRef: "image-2" }] }),
+    ).toThrow();
+    // The declared length is the bytes the image holds.
+    expect(() =>
+      decodeCanvasStaticExportDocument({ ...shared, images: [{ ...image, byteLength: 9 }] }),
+    ).toThrow();
+    // Only a raster image leaves.
+    expect(() =>
+      decodeCanvasStaticExportDocument({
+        ...shared,
+        images: [{ ...image, mediaType: "image/svg+xml" }],
+      }),
+    ).toThrow();
+    // A shared design carries generated images only by the share's own name.
+    expect(
+      decodeCanvasStaticExportDocument({
+        ...shared,
+        blocks: [
+          {
+            blockId: "phone",
+            schemaVersion: 30,
+            kind: "design",
+            title: "Onboarding",
+            size: "phone",
+            frames: [
+              { frameId: "home", title: "Home", html: '<img src="octant-asset:hero" alt="">' },
+            ],
+            assets: [{ assetId: "hero", imageRef: "image-1" }],
+          },
+        ],
+      }).blocks[0],
+    ).toMatchObject({ assets: [{ assetId: "hero", imageRef: "image-1" }] });
   });
 
   it("carries frame notes, a brand, and richer diagram fields from share version 11 and refuses them under an earlier one", () => {
