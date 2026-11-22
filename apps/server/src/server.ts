@@ -1275,6 +1275,7 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      hubActScopeSlot,
       transcriptionForTurn,
       imageDescriber,
       resolveThreadStrict,

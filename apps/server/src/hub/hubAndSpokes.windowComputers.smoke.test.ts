@@ -231,7 +231,10 @@ function memberCodeRoutes(member: { current?: HubTestHost }) {
       },
       // B's two threads: this file's in the named Project, the other outside it.
       read: async (_window: unknown, threadId: string) => ({
-        thread: threadId === OTHER_THREAD ? { ...thread, projectId: OTHER_PROJECT } : thread,
+        // A thread this host started is read as it was created.
+        thread:
+          started.find((entry) => (entry as { id?: string }).id === threadId) ??
+          (threadId === OTHER_THREAD ? { ...thread, projectId: OTHER_PROJECT } : thread),
         checkout: { checkoutId: thread.checkoutId },
         lastSequence: 0,
       }),
@@ -491,10 +494,12 @@ describe("a desktop window on a hub member", () => {
     // The start's first step, preparing the checkout, is held to the Act item too.
     expect((await prepare(ACT_PROJECT)).status).toBe(200);
     expect((await prepare(OTHER_PROJECT)).status).toBe(403);
+    const created = createIn(ACT_PROJECT);
+    const createdThreadId = (JSON.parse(created) as { thread: { id: string } }).thread.id;
     const named = await onStudio.authenticatedFetch({
       method: "POST",
       path: "/api/code/commands",
-      body: createIn(ACT_PROJECT),
+      body: created,
     });
     // Its first message is a turn in that thread, sent in the named Project.
     const firstTurn = await onStudio.authenticatedFetch({
@@ -503,7 +508,7 @@ describe("a desktop window on a hub member", () => {
       body: JSON.stringify({
         kind: "start-provider-turn",
         operationId: crypto.randomUUID(),
-        threadId: thread.id,
+        threadId: createdThreadId,
         checkoutId: thread.checkoutId,
         sessionId: "00000000-0000-4000-8000-0000000009a6",
         prompt: {
@@ -514,7 +519,7 @@ describe("a desktop window on a hub member", () => {
       }),
     });
     expect(firstTurn.status, await firstTurn.clone().text()).toBe(200);
-    expect(bCode.operated).toEqual([{ kind: "start-provider-turn", threadId: thread.id }]);
+    expect(bCode.operated).toEqual([{ kind: "start-provider-turn", threadId: createdThreadId }]);
     const unnamed = await onStudio.authenticatedFetch({
       method: "POST",
       path: "/api/code/commands",
