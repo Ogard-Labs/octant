@@ -2,6 +2,9 @@
 
 One or two sentences: what changes and why a user or contributor cares.
 
+Delivers: Fixes OCT-___ (or "Part of OCT-___" for one layer of a stack). The
+"One pull request per issue" check reads this keyword line, not bare mentions.
+
 ## User guide
 
 Link the companion guide PR in [octant-site](https://github.com/Ogard-Labs/octant-site),

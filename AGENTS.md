@@ -337,6 +337,12 @@ satisfy it. Ordinary issues do not acquire a blanket human-signoff gate.
   ancestry for the same task or user-visible outcome. If an existing pull
   request already owns that outcome, continue on its branch and pull request;
   do not open a sibling pull request for follow-up work that belongs there.
+- Name the issue a pull request delivers with a Linear keyword in its
+  description ("Fixes OCT-123", or "Part of OCT-123" for one layer of a
+  stack). The "One pull request per issue" check fails a pull request whose
+  delivered issue another open pull request already delivers, unless the two
+  are layers of the same linear stack. Bare mentions, such as the
+  maintainer-actions issue, are not counted.
 - If an open pull request already owns this outcome, push to that branch. Review
   fixes, docs, and follow-ups stay there.
 - Open a new pull request only for a different user-visible outcome, or when the
