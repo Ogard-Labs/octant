@@ -75,8 +75,9 @@ async function ticketUrl(handler: ReturnType<typeof setup>["handler"]): Promise<
   const response = await handler(
     request(`/api/video/jobs/${jobId}/clip-ticket`, { method: "POST" }),
   );
-  expect(response?.status).toBe(200);
-  return ((await response?.json()) as { url: string }).url;
+  if (response === undefined) throw new Error("The video routes did not answer.");
+  expect(response.status).toBe(200);
+  return ((await response.json()) as { url: string }).url;
 }
 
 describe("video routes", () => {
@@ -84,7 +85,8 @@ describe("video routes", () => {
     const { handler, loseThread } = setup();
     const path = `/api/video/jobs?threadKind=work-thread&scopeId=${scopeId}`;
     const listed = await handler(request(path));
-    expect(((await listed?.json()) as { jobs: unknown[] }).jobs).toHaveLength(1);
+    if (listed === undefined) throw new Error("The video routes did not answer.");
+    expect(((await listed.json()) as { jobs: unknown[] }).jobs).toHaveLength(1);
     loseThread();
     expect((await handler(request(path)))?.status).toBe(404);
   });

@@ -1,3 +1,4 @@
+import { VideoClientContext } from "../video/ThreadVideoClips";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { readContinuationLink } from "../continuity/continuationLink";
 import { decodeChatThreadId, decodeCodeThreadId, decodeWorkThreadId } from "@octant/contracts";
@@ -72,13 +73,17 @@ export function RemoteWorkspace(props: RemoteWorkspaceProps) {
     props.actsAsHostPerson === true,
   );
   return (
-    <ConversationInputClientContext.Provider value={props.clients.conversationInputs}>
-      <ReplyDetailSourceContext.Provider value={replyDetail}>
-        <ReplyDetailContext.Provider value={replyDetail.reading.defaultLevel}>
-          <RemoteModeSurface {...props} />
-        </ReplyDetailContext.Provider>
-      </ReplyDetailSourceContext.Provider>
-    </ConversationInputClientContext.Provider>
+    <VideoClientContext.Provider
+      value={props.actsAsHostPerson === true ? props.clients.videoResults : undefined}
+    >
+      <ConversationInputClientContext.Provider value={props.clients.conversationInputs}>
+        <ReplyDetailSourceContext.Provider value={replyDetail}>
+          <ReplyDetailContext.Provider value={replyDetail.reading.defaultLevel}>
+            <RemoteModeSurface {...props} />
+          </ReplyDetailContext.Provider>
+        </ReplyDetailSourceContext.Provider>
+      </ConversationInputClientContext.Provider>
+    </VideoClientContext.Provider>
   );
 }
 
