@@ -43,6 +43,7 @@ const CODE_OUTCOMES = {
   "gemini-native-image": "unavailable",
   "bfl-image": "unavailable",
   "ideogram-image": "unavailable",
+  "gemini-video": "unavailable",
   // Nothing admits an outside driver package yet, so no outside instance runs a turn.
   "outside-harness-endpoint": "unavailable",
   // An added agent claims nothing a conformance run would show: what it can do
@@ -63,6 +64,7 @@ describe("Code provider matrix", () => {
           "gemini-native-image",
           "bfl-image",
           "ideogram-image",
+          "gemini-video",
           "outside-harness-endpoint",
           "acp-agent",
         ]).toContain(providerKind);

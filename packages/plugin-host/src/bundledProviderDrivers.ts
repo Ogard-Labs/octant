@@ -122,6 +122,21 @@ const BUNDLED_IMAGE_DRIVERS = [
   { driverKind: "ideogram-image", displayName: "Ideogram", digestNibble: "18", uuidNibble: "19" },
 ] as const satisfies ReadonlyArray<BundledDriverSpec>;
 
+/**
+ * Video providers reach the video job service through the provider-sdk video
+ * seam, on the same component kind and activation ladder as image drivers.
+ * The seed follows every earlier one (the last ACP serial is 0x1c, whose ids
+ * end in 1d), so no earlier plugin identity moves.
+ */
+const BUNDLED_VIDEO_DRIVERS = [
+  {
+    driverKind: "gemini-video",
+    displayName: "Gemini Video",
+    digestNibble: "1e",
+    uuidNibble: "1f",
+  },
+] as const satisfies ReadonlyArray<BundledDriverSpec>;
+
 const PROVIDER_DRIVER_COMPONENT_ID = "provider-driver";
 
 export interface BundledProviderDriverPlugin {
@@ -181,6 +196,14 @@ export function bundledProviderDriverPlugins(): ReadonlyArray<BundledProviderDri
 let bundledImageDriverPluginsCache: ReadonlyArray<BundledProviderDriverPlugin> | undefined;
 export function bundledImageDriverPlugins(): ReadonlyArray<BundledProviderDriverPlugin> {
   return (bundledImageDriverPluginsCache ??= BUNDLED_IMAGE_DRIVERS.map((spec) => ({
+    driverKind: spec.driverKind,
+    manifest: bundledProviderDriverManifest(spec),
+  })));
+}
+
+let bundledVideoDriverPluginsCache: ReadonlyArray<BundledProviderDriverPlugin> | undefined;
+export function bundledVideoDriverPlugins(): ReadonlyArray<BundledProviderDriverPlugin> {
+  return (bundledVideoDriverPluginsCache ??= BUNDLED_VIDEO_DRIVERS.map((spec) => ({
     driverKind: spec.driverKind,
     manifest: bundledProviderDriverManifest(spec),
   })));
@@ -349,4 +372,15 @@ export function bundledProviderDriverCatalog(
       activation: resolveBundledProviderDriverActivation(plugin, patch),
     };
   });
+}
+
+/** The bundled video providers the activation ladder admits. */
+export function admittedBundledVideoDriverKinds(
+  patches: Readonly<Partial<Record<ProviderDriverKind, BundledProviderDriverActivationPatch>>> = {},
+): ReadonlySet<ProviderDriverKind> {
+  return new Set(
+    bundledVideoDriverPlugins().filter((plugin) =>
+      isBundledProviderDriverEffective(plugin, patches[plugin.driverKind] ?? {}),
+    ).map((plugin) => plugin.driverKind),
+  );
 }

@@ -17,7 +17,7 @@ import {
   claudeAccountUsesAssignedDirectory,
   codexAccountUsesAssignedDirectory,
   isAcpAgentInstance,
-  isImageProfileDriverKind,
+  isMediaProfileDriverKind,
   isKeyProviderDriverKind,
   isNewerProviderRelease,
   modelCanTakeDelegatedWork,
@@ -227,7 +227,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
     for (const instance of ordered) {
       if (!instance.enabled) {
         off += 1;
-      } else if (isImageProfileDriverKind(instance.driverKind)) {
+      } else if (isMediaProfileDriverKind(instance.driverKind)) {
         // Image profiles have no runtime to observe — probing one is refused —
         // so an enabled one has no readiness this summary could state.
         continue;
@@ -594,7 +594,7 @@ function AgentEligibleModelsControls(props: {
       readonly modelName: string;
     }> = [];
     for (const instance of props.instances) {
-      if (!instance.enabled || isImageProfileDriverKind(instance.driverKind)) continue;
+      if (!instance.enabled || isMediaProfileDriverKind(instance.driverKind)) continue;
       const observed = props.observedByInstance.get(instance.id);
       if (observed === undefined) continue;
       for (const model of observed.models) {

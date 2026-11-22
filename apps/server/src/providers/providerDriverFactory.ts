@@ -13,7 +13,7 @@ import {
   effectiveClaudeAccountConfigDirectory,
   isAcpAgentInstance,
   isAddedAcpAgentInstance,
-  isImageProfileDriverKind,
+  isMediaProfileDriverKind,
 } from "@octant/domain";
 import type { ProviderDriver, ProviderSessionOwnership } from "@octant/provider-sdk/driver";
 import type { McpPlanServerProvider } from "@octant/contracts/mcp-plan-read-only";
@@ -130,7 +130,7 @@ export function makeProviderDriver(
   instance: ProviderInstance,
   options: ProviderDriverFactoryOptions,
 ): ProviderDriver {
-  if (isImageProfileDriverKind(instance.driverKind)) {
+  if (isMediaProfileDriverKind(instance.driverKind)) {
     throw new ProviderDriverConfigurationError();
   }
   if (isAcpAgentInstance(instance)) {

@@ -29,7 +29,7 @@ import {
   type ProviderModelId,
   type ProviderObservedState,
 } from "@octant/contracts";
-import { isImageProfileDriverKind } from "@octant/domain";
+import { isMediaProfileDriverKind } from "@octant/domain";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { SettingsSection } from "../settings/primitives";
@@ -442,11 +442,11 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         showDetectionGroups
         instances={props.instances.filter(
           (instance) =>
-            !isImageProfileDriverKind(instance.driverKind) &&
+            !isMediaProfileDriverKind(instance.driverKind) &&
             !isModelEndpointDriverKind(instance.driverKind),
         )}
         agentEligibleInstances={props.instances.filter(
-          (instance) => !isImageProfileDriverKind(instance.driverKind),
+          (instance) => !isMediaProfileDriverKind(instance.driverKind),
         )}
         observedByInstance={props.observedByInstance}
         {...(props.presentationObservedByInstance === undefined

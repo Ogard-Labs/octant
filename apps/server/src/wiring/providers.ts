@@ -278,7 +278,7 @@ import {
   claudePlanUsageStateDirectory,
   defaultShellSettings,
   effectiveClaudeAccountConfigDirectory,
-  isImageProfileDriverKind,
+  isMediaProfileDriverKind,
   isNativeHarnessDriverKind,
   isKeyProviderDriverKind,
   providerKeepsConversation,
@@ -413,7 +413,7 @@ export function makeConfiguredProviderDriver(
   if (!instance.enabled) {
     throw new Error("Provider instance is disabled.");
   }
-  if (isImageProfileDriverKind(instance.driverKind)) {
+  if (isMediaProfileDriverKind(instance.driverKind)) {
     throw new ProviderDriverConfigurationError();
   }
   const admitted = options.admittedDriverKinds ?? admittedBundledProviderDriverKinds();
@@ -2589,7 +2589,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       listInstances: () =>
         persistence
           .readProviderInstances()
-          .filter((instance) => !isImageProfileDriverKind(instance.driverKind)),
+          .filter((instance) => !isMediaProfileDriverKind(instance.driverKind)),
       now: () => new Date().toISOString() as UtcTimestamp,
       unavailableReason: (instance) =>
         instance.driverKind === "claude" &&
