@@ -384,7 +384,7 @@ export interface VideoModelCapabilities {
     | { readonly kind: "range"; readonly min: number; readonly max: number }
     | { readonly kind: "values"; readonly values: ReadonlyArray<number> };
   readonly defaultDuration?: number;
-  /** Provider labels, e.g. "720p", "1080p", "4k", "768P". */
+  /** Provider labels, lowest first, e.g. "720p", "1080p", "4k"; "lowest" means the first. */
   readonly resolutions: ReadonlyArray<string>;
   readonly defaultResolution?: string;
   /**
@@ -394,6 +394,8 @@ export interface VideoModelCapabilities {
    */
   readonly aspectRatios: ReadonlyArray<{ readonly ratio: string; readonly needsImage?: boolean }>;
   readonly audio: "none" | "always" | "optional";
+  /** For `optional` audio, whether it is on by default; off when absent. */
+  readonly defaultAudio?: boolean;
   readonly inputs: {
     readonly firstFrame: boolean;
     readonly lastFrame: boolean;
