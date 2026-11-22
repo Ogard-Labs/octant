@@ -1,4 +1,4 @@
-import type { SpeechAudioMediaType } from "@octant/contracts";
+import type { SpeechAudioMediaType, SpeechSynthesisFormat } from "@octant/contracts";
 
 /**
  * Identify uploaded audio by its bytes, never by the declared type. A renderer
@@ -8,7 +8,9 @@ import type { SpeechAudioMediaType } from "@octant/contracts";
  */
 export function sniffSpeechAudioMediaType(bytes: Uint8Array): SpeechAudioMediaType | undefined {
   if (bytes.byteLength < 12) return undefined;
-  if (ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 12) === "WAVE") return "audio/wav";
+  const signature = ascii(bytes, 0, 4);
+  if ((signature === "RIFF" || signature === "RF64") && ascii(bytes, 8, 12) === "WAVE")
+    return "audio/wav";
   if (bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) {
     return "audio/webm";
   }
@@ -19,6 +21,37 @@ export function sniffSpeechAudioMediaType(bytes: Uint8Array): SpeechAudioMediaTy
   // A raw MPEG frame header: sync word 0xFFE or 0xFFF.
   if (bytes[0] === 0xff && ((bytes[1] ?? 0) & 0xe0) === 0xe0) return "audio/mpeg";
   return undefined;
+}
+
+/**
+ * Verify that synthesized audio bytes match the requested output format so a
+ * provider returning an error page or a different container is never saved
+ * under the requested extension.
+ */
+export function matchesSpeechSynthesisFormat(
+  bytes: Uint8Array,
+  format: SpeechSynthesisFormat,
+): boolean {
+  switch (format) {
+    case "mp3":
+      return sniffSpeechAudioMediaType(bytes) === "audio/mpeg";
+    case "wav":
+      return sniffSpeechAudioMediaType(bytes) === "audio/wav";
+    case "opus":
+      return isOggOpus(bytes);
+  }
+}
+
+function isOggOpus(bytes: Uint8Array): boolean {
+  // RFC 3533 + RFC 7845: first Ogg page starts with "OggS", byte 26 holds
+  // segment count, and the first page payload starts with "OpusHead".
+  if (bytes.byteLength < 36 || ascii(bytes, 0, 4) !== "OggS") return false;
+  const segmentCount = bytes[26] ?? 0;
+  const payloadOffset = 27 + segmentCount;
+  return (
+    payloadOffset + 8 <= bytes.byteLength &&
+    ascii(bytes, payloadOffset, payloadOffset + 8) === "OpusHead"
+  );
 }
 
 function ascii(bytes: Uint8Array, start: number, end: number): string {

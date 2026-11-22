@@ -67,6 +67,7 @@ import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
+import type { NarrationForTurn } from "../speech/narrationTool";
 import type { TranscriptionForTurn } from "../speech/transcriptionTool";
 import { attachedImageSources, workspaceImageSources } from "../image/threadImageSourcePorts";
 import { INHERITED_MARK_REFUSAL } from "../context/inheritedExternalContentMark";
@@ -351,6 +352,7 @@ import { privateListenerHostId } from "../remote/privateListenerHostIdentity";
 export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> & {
   /** Sees images; absent on a host started without one. */
   readonly imageDescriber?: ImageDescriber;
+  readonly narrationForTurn: NarrationForTurn;
   readonly transcriptionForTurn: TranscriptionForTurn;
 } & Pick<
     HarnessStateWiring,
@@ -719,45 +721,62 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           requested: readThread()?.executionPolicy ?? thread.executionPolicy,
           thread: persistence.readCodeThread(thread.id)?.executionPolicy ?? thread.executionPolicy,
         });
-      const currentRoot = async () => {
-        const current = persistence.readCodeThread(thread.id);
-        const checkout = await threadProjectAssetRoot({
-          mode: "code",
-          threadId: String(thread.id),
-          projectId: String(thread.projectId),
-        });
-        const project = persistence.readProject(thread.projectId);
-        if (checkout === undefined || current === undefined || project?.type !== "code")
-          return undefined;
-        const selected = approvedWorkingFolderRoot(project, current.workingFolderId, checkout);
-        if (selected === undefined) return undefined;
-        const root = await resolveThreadWorkingDirectory(
-          selected,
-          current.workingDirectory ?? decodeThreadWorkingDirectory("."),
-        ).catch(() => undefined);
-        return root === checkoutRoot ? root : undefined;
-      };
-      const transcription =
-        routineRun !== undefined ||
-        isRoutineHostScope(windowId) ||
-        deps.isRestrictedDeviceScope(windowId) ||
+      const pinnedCheckout =
         checkoutRoot === undefined
           ? undefined
-          : deps.transcriptionForTurn({
-              windowId,
-              threadKind: "code-thread",
-              scopeId: decodeImageGenerationScopeId(String(thread.id)),
-              toolConstraints: () => readThread()?.toolConstraints ?? thread.toolConstraints ?? [],
-              inPlan: () => thread.executionPolicy === "plan" || level() === "plan",
-              root: currentRoot,
-              allowed: () =>
-                readThread()?.lifecycle === "active" &&
-                (deps.isPairedDeviceScope(windowId)
-                  ? !deps.isRestrictedDeviceScope(windowId) &&
-                    codeProjectAccess.hasActiveCodeProject(thread.projectId)
-                  : deps.windowAuthorityStore.listWindowIds().includes(windowId) &&
-                    canAccessCodeProject(windowId, thread.projectId)),
-            });
+          : threadWorkingDirectoryCurrent(checkoutRoot, checkoutRoot);
+      const currentRoot = () =>
+        resolveCurrentCodeTurnRoot({
+          thread,
+          checkoutRoot,
+          pinnedCheckout,
+          readCodeThread: (id) => persistence.readCodeThread(id),
+          readProject: (id) => persistence.readProject(id),
+          threadProjectAssetRoot,
+        });
+      const speechTurnAllowed = () =>
+        readThread()?.lifecycle === "active" &&
+        (deps.isPairedDeviceScope(windowId)
+          ? !deps.isRestrictedDeviceScope(windowId) &&
+            codeProjectAccess.hasActiveCodeProject(thread.projectId)
+          : deps.windowAuthorityStore.listWindowIds().includes(windowId) &&
+            canAccessCodeProject(windowId, thread.projectId));
+      const speechAttended =
+        routineRun === undefined &&
+        !isRoutineHostScope(windowId) &&
+        !deps.isRestrictedDeviceScope(windowId) &&
+        checkoutRoot !== undefined;
+      const savePosture = () => {
+        if (thread.executionPolicy === "plan") return "refuse" as const;
+        const current = level();
+        return current === "plan"
+          ? ("refuse" as const)
+          : current === "approval-gated"
+            ? ("ask" as const)
+            : ("allow" as const);
+      };
+      const transcription = !speechAttended
+        ? undefined
+        : deps.transcriptionForTurn({
+            windowId,
+            threadKind: "code-thread",
+            scopeId: decodeImageGenerationScopeId(String(thread.id)),
+            toolConstraints: () => readThread()?.toolConstraints ?? thread.toolConstraints ?? [],
+            inPlan: () => thread.executionPolicy === "plan" || level() === "plan",
+            root: currentRoot,
+            allowed: speechTurnAllowed,
+          });
+      const narration = !speechAttended
+        ? undefined
+        : deps.narrationForTurn({
+            windowId,
+            threadKind: "code-thread",
+            scopeId: decodeImageGenerationScopeId(String(thread.id)),
+            toolConstraints: () => readThread()?.toolConstraints ?? thread.toolConstraints ?? [],
+            posture: savePosture,
+            root: currentRoot,
+            allowed: speechTurnAllowed,
+          });
       const images = createThreadImageAgentTools({
         windowId,
         unattended: isRoutineHostScope(windowId),
@@ -820,9 +839,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             ? "Plan mode cannot generate images. Leave Plan mode to generate one."
             : undefined,
       });
-      return transcription === undefined
+      return transcription === undefined && narration === undefined
         ? images
-        : combineAppManagedToolSets(images, transcription);
+        : combineAppManagedToolSets(images, narration, transcription);
     });
     // Sees images: a thread whose model cannot read images may ask for one
     // to be described, from its own attachments or its own folder.
@@ -3100,3 +3119,36 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
 }
 
 export type CodeRuntimeWiring = Effect.Effect.Success<ReturnType<typeof wireCodeRuntime>>;
+
+/**
+ * Resolves the active working folder for a Code turn's host media tools from
+ * the thread's checkout (existing worktree or managed linked worktree),
+ * approved extra folder, and pinned physical directory identity.
+ */
+export async function resolveCurrentCodeTurnRoot(input: {
+  readonly thread: Pick<CodeThread, "id" | "projectId">;
+  readonly checkoutRoot: string | undefined;
+  readonly pinnedCheckout?: (() => boolean) | undefined;
+  readonly readCodeThread: ServerStart["persistence"]["readCodeThread"];
+  readonly readProject: ServerStart["persistence"]["readProject"];
+  readonly threadProjectAssetRoot: CanvasWiring["threadProjectAssetRoot"];
+}): Promise<string | undefined> {
+  if (input.checkoutRoot === undefined) return undefined;
+  const current = input.readCodeThread(input.thread.id);
+  const checkout = await input.threadProjectAssetRoot({
+    mode: "code",
+    threadId: String(input.thread.id),
+    projectId: String(input.thread.projectId),
+  });
+  const project = input.readProject(input.thread.projectId);
+  if (checkout === undefined || current === undefined || project?.type !== "code") {
+    return undefined;
+  }
+  const selected = approvedWorkingFolderRoot(project, current.workingFolderId, checkout);
+  if (selected === undefined) return undefined;
+  const root = await resolveThreadWorkingDirectory(
+    selected,
+    current.workingDirectory ?? decodeThreadWorkingDirectory("."),
+  ).catch(() => undefined);
+  return root === input.checkoutRoot && input.pinnedCheckout?.() !== false ? root : undefined;
+}

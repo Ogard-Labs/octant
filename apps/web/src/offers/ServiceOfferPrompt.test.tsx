@@ -1,5 +1,9 @@
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
-import { decodeTranscriptionOffer, type ServiceOffer } from "@octant/contracts";
+import {
+  decodeNarrationOffer,
+  decodeTranscriptionOffer,
+  type ServiceOffer,
+} from "@octant/contracts";
 import type {
   ImageGenerationOffer,
   ServiceOfferDecisionResult,
@@ -109,6 +113,75 @@ describe("ServiceOfferPrompt", () => {
       );
     },
   );
+  it.each([true, false])(
+    "discloses the narration excerpt, path, voice and destination before answering: approve %s",
+    async (approve) => {
+      const fake = client([
+        decodeNarrationOffer({
+          kind: "narrate",
+          threadKind: "code-thread",
+          scopeId,
+          offerId,
+          requestedAt: "2026-11-07T10:00:00.000Z",
+          excerpt: "Welcome to the product tour",
+          characters: 420,
+          relativePath: "narration/intro.mp3",
+          voice: "nova",
+          endpointName: "Studio",
+          modelId: "tts-1",
+          format: "mp3",
+        }),
+      ]);
+      renderPrompt(fake);
+      const card = await screen.findByRole("article", { name: "Narration request" });
+      expect(card).toHaveTextContent("Welcome to the product tour…");
+      expect(card).toHaveTextContent("narration/intro.mp3");
+      expect(card).toHaveTextContent("420 characters");
+      expect(card).toHaveTextContent("Voice nova on Studio (tts-1)");
+      await userEvent.click(
+        screen.getByRole("checkbox", { name: "Don't ask again in this thread" }),
+      );
+      expect(fake.decide).not.toHaveBeenCalled();
+      await userEvent.click(
+        screen.getByRole("button", { name: approve ? "Narrate" : "Don't narrate" }),
+      );
+      expect(fake.decide).toHaveBeenCalledExactlyOnceWith(
+        approve
+          ? { offerId, decision: "narrate", rememberForThread: true }
+          : { offerId, decision: "cancel" },
+      );
+    },
+  );
+  it("hides Don't ask again on a narration card when the access level always asks", async () => {
+    const fake = client([
+      decodeNarrationOffer({
+        kind: "narrate",
+        threadKind: "code-thread",
+        scopeId,
+        offerId,
+        requestedAt: "2026-11-07T10:00:00.000Z",
+        excerpt: "Ask first narration",
+        characters: 19,
+        relativePath: "narration/ask.mp3",
+        voice: "alloy",
+        endpointName: "Studio",
+        modelId: "tts-1",
+        format: "mp3",
+        canRemember: false,
+      }),
+    ]);
+    renderPrompt(fake);
+    await screen.findByRole("article", { name: "Narration request" });
+    expect(
+      screen.queryByRole("checkbox", { name: "Don't ask again in this thread" }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Narrate" }));
+    expect(fake.decide).toHaveBeenCalledExactlyOnceWith({
+      offerId,
+      decision: "narrate",
+      rememberForThread: false,
+    });
+  });
   it("asks whether to generate the agent's picture with an image model, the suggested model chosen", async () => {
     renderPrompt(client([offer()]));
     const card = await screen.findByRole("article", { name: "Image generation request" });

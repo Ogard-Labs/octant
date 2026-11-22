@@ -28,6 +28,7 @@ import { createImageRouteHandler } from "../image/imageRoutes";
 import { imageOfferDecisionRules } from "../image/imageOfferDecisionRules";
 import { createServiceOfferRouteHandler } from "../offers/serviceOfferRoutes";
 import { createSpeechRouteHandler } from "../speech/speechRoutes";
+import { narrationDecision } from "../speech/narrationTool";
 import { transcriptionDecision } from "../speech/transcriptionTool";
 import {
   createPreviewRouteHandler,
@@ -189,6 +190,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
     rules: {
       ...imageOfferDecisionRules({ ...imageProfiles, kept: keptImageChoices }),
       transcribe: transcriptionDecision,
+      narrate: narrationDecision,
     },
     listImageProfiles: () =>
       listEligibleImageProfiles(

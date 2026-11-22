@@ -3,7 +3,8 @@ import type { ImageOfferAnswer } from "../image/imageGenerationOfferService";
 
 export type ServiceOfferAnswer =
   | ImageOfferAnswer
-  | { readonly status: "transcribe"; readonly rememberForThread: boolean };
+  | { readonly status: "transcribe"; readonly rememberForThread: boolean }
+  | { readonly status: "narrate"; readonly rememberForThread: boolean };
 
 type Prepared<Outcome> =
   | { readonly reason: string }
