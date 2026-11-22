@@ -2570,7 +2570,10 @@ memory and only for that request. The terminal then submits the complete
 response once, through the same authenticated Work request route the app uses,
 and the host validates it as it would an answer from the app. A refused
 submission starts again from the first question. If the terminal cannot read
-the request's definition, it does not offer the request at all. A Work approval
+the request's definition, it does not offer the request at all. A Work question
+that asks for a secret is never answered in the terminal, whose composer echoes
+what is typed; the panel points to the app's masked field and sends nothing.
+A Work approval
 that changes the thread's level shows, as the app's card does, the whole plan
 the agent hands over and then the level it moves to, directly above the y/n
 line. The panel ends the bottom-pinned transcript, so a long plan scrolls above

@@ -4,6 +4,7 @@ import {
   answerWorkRequest,
   readWorkRequests,
   stepWorkQuestionnaire,
+  WORK_SECRET_QUESTION_REFUSAL,
   workLevelChangeText,
   workQuestionnaireText,
 } from "./agentWorkRequests";
@@ -191,6 +192,55 @@ describe("terminal Work requests", () => {
     });
   });
 
+  it("sends nothing for a question that asks for a secret and points to the app", async () => {
+    const answers: LocalControlRequest[] = [];
+    const session: OpenedLocalControlSession = {
+      kind: "opened",
+      windowId: "test",
+      close: async () => undefined,
+      send: async (request) => {
+        if (request.path === "/api/pending-requests")
+          return {
+            status: 200,
+            body: {
+              requests: [
+                {
+                  ...pending,
+                  answer: questionAnswer,
+                  kind: "question",
+                  text: "Paste the API token",
+                  options: [],
+                  secret: true,
+                },
+              ],
+            },
+          };
+        if (request.method === "GET")
+          return {
+            status: 200,
+            body: {
+              requests: [
+                journaled(
+                  { kind: "user-input", prompt: "Paste the API token", options: [], secret: true },
+                  questionRequestId,
+                ),
+              ],
+            },
+          };
+        answers.push(request);
+        return { status: 200, body: { kind: "work-request-resolved" } };
+      },
+    };
+    const read = await readWorkRequests(session, threadId);
+    const secret = read.kind === "ready" ? read.requests[0] : undefined;
+    if (secret?.kind !== "question") throw new Error("Missing secret question");
+
+    expect(await answerWorkRequest(session, secret, "sk-test-123")).toBe(
+      WORK_SECRET_QUESTION_REFUSAL,
+    );
+    expect(answers).toEqual([]);
+  });
+
   it("reports an empty or refused answer response without throwing", async () => {
     const listing: OpenedLocalControlSession = {
       kind: "opened",
@@ -374,7 +424,7 @@ describe("terminal Work requests", () => {
         "Question 2 of 2: Which extras?",
       );
       expect(workQuestionnaireText(questionnaire, first.answers)).toContain(
-        "Type numbers separated by commas, 0 for none, or your own answer (start it with = if it is a number)",
+        "Type numbers separated by commas, 0 for none, or your own answer (start it with = if it is a number; == keeps a leading =)",
       );
       expect(stepWorkQuestionnaire(questionnaire, first.answers, "1, 2, 3")).toMatchObject({
         kind: "asking",
@@ -396,6 +446,10 @@ describe("terminal Work requests", () => {
       expect(finish("==12")).toMatchObject({
         kind: "complete",
         response: { answers: [{}, { customAnswer: "=12" }] },
+      });
+      expect(finish("= =12")).toMatchObject({
+        kind: "complete",
+        response: { answers: [{}, { customAnswer: "= =12" }] },
       });
       expect(finish("=SUM(B2:B5)")).toMatchObject({
         kind: "complete",

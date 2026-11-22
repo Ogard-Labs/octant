@@ -98,11 +98,20 @@ export async function readWorkRequests(
   }
 }
 
+/**
+ * Said instead of taking an answer to a question that asks for a secret. The
+ * host accepts a secret only through its masked field (`secretAnswer`), and a
+ * terminal composer echoes what is typed, so the terminal sends nothing.
+ */
+export const WORK_SECRET_QUESTION_REFUSAL =
+  "This question asks for a secret. Answer it in the app, where the field is masked.";
+
 export async function answerWorkRequest(
   session: OpenedLocalControlSession,
   request: AgentWorkRequest,
   text: string,
 ): Promise<string | undefined> {
+  if (request.kind === "question" && request.secret === true) return WORK_SECRET_QUESTION_REFUSAL;
   if (request.kind === "approval") {
     if (!/^(y|yes|n|no)$/i.test(text)) return "Answer the approval with y or n.";
     return resolveWorkRequest(session, request, {
@@ -196,8 +205,9 @@ function readQuestionAnswer(
   // and "=SUM(B2:B5)" is sent as written.
   const choice = /^\d+([\s,]+\d+)*$/;
   const escaped = text.startsWith("=") ? text.slice(1).trim() : undefined;
+  // The "=" run must be contiguous: "= =12" is written text, sent as typed.
   const written =
-    writes && escaped !== undefined && choice.test(escaped.replace(/^=+/, "").trim())
+    writes && escaped !== undefined && choice.test(text.replace(/^=+/, "").trim())
       ? escaped
       : undefined;
   if (written === undefined && choice.test(text)) {
@@ -293,7 +303,7 @@ export function workQuestionnaireText(
     (question.selection === "single" ? "Type a number" : "Type numbers separated by commas") +
     (min === 0 ? ", 0 for none" : "") +
     (question.allowCustom !== false
-      ? ", or your own answer (start it with = if it is a number)"
+      ? ", or your own answer (start it with = if it is a number; == keeps a leading =)"
       : "") +
     ", then Enter.";
   return [

@@ -10,6 +10,7 @@ import {
   readWorkRequests,
   stepWorkQuestionnaire,
   workLevelChangeText,
+  WORK_SECRET_QUESTION_REFUSAL,
   workQuestionnaireAwaitsComment,
   workQuestionnaireText,
   workRequestId,
@@ -1191,11 +1192,13 @@ class AgentScreen {
           ? (request.levelChange === undefined
               ? ""
               : workLevelChangeText(request.levelChange) + "\n") + "y allow · n deny — then Enter"
-          : request.questionnaire !== undefined
-            ? workQuestionnaireText(request.questionnaire, this.#answersTo(request))
-            : request.options
-                .map((option, index) => String(index + 1) + ". " + option.label)
-                .join("\n") + "\nType an answer, then Enter.");
+          : request.secret === true
+            ? WORK_SECRET_QUESTION_REFUSAL
+            : request.questionnaire !== undefined
+              ? workQuestionnaireText(request.questionnaire, this.#answersTo(request))
+              : request.options
+                  .map((option, index) => String(index + 1) + ". " + option.label)
+                  .join("\n") + "\nType an answer, then Enter.");
       this.#panel.visible = true;
     } else if (this.#codeRequest !== undefined) {
       const request = this.#codeRequest;
@@ -2058,6 +2061,7 @@ class AgentScreen {
     const questionnaireRequest = this.#workRequest;
     if (
       questionnaireRequest?.kind === "question" &&
+      questionnaireRequest.secret !== true &&
       questionnaireRequest.questionnaire !== undefined
     ) {
       const request = questionnaireRequest;
