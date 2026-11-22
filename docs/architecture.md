@@ -8078,15 +8078,37 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   are cached in host memory by thread, content, destination and language.
   Pages carry at most 32,000 characters; a missing continuation refuses
   rather than silently making another paid call.
+  An attended Work or Code agent outside Plan can also use `octant_narrate`
+  when its provider carries Octant tools and Voice synthesis is ready with a
+  voice. It accepts text of at most 4,096 characters, a confined relative path
+  under the turn's folder (the Work folder or the Code thread's own checkout,
+  including a linked worktree), and a format (`mp3` default, `wav`, or `opus`)
+  whose extension matches (`.mp3`, `.wav`, or `.ogg`); longer text, mismatched
+  extensions, paths outside the folder, protected secret paths, existing files,
+  and Plan are refused before asking. Before calling the provider, the thread's
+  offer shows up to the first 300 characters of the text, character count,
+  target path, format, voice, Voice endpoint and model, covering both synthesis
+  and the file write. A person-paired device can confirm its own turn's offer,
+  with synthesis running on the host and writing the file there without
+  streaming audio to the phone. A remembered answer lives only in host memory
+  for this thread, provider instance, endpoint address, model and voice, and
+  skips the card only at Accept edits and Full access; Ask first and Work Auto
+  still ask on the card because it is also the write confirmation. A changed
+  folder, posture, destination or lost authority while the card waits or
+  synthesis runs writes nothing, and the write is confined and create-only so
+  it never overwrites. Agent narration shares at most one synthesis slot,
+  leaving one for local read-aloud.
   Every desktop composer (Chat, Work, Code, the welcome and draft composers) and
   Navigator show a microphone beside the attach control only while
   transcription is `ready`; the clip is recorded by the browser's own encoder,
   the transcript is appended to the draft, and the person still sends. Navigator
   can read replies aloud through the configured synthesis endpoint, or with the
-  operating system's voices when none is set. A paired device reaches status
-  and transcription only: the listener forwards those two routes
-  (`speech.transcribe` is remote-approvable) and never synthesis
-  (`speech.synthesize` stays with the host), and the route holds each device
+  operating system's voices when none is set. A paired device reaches the
+  status and transcription routes only: the listener forwards those two routes
+  (`speech.transcribe` is remote-approvable) while `/api/speech/synthesis`
+  stays host-only (`speech.synthesize` stays with the host; a paired device can
+  still confirm a thread's `octant_narrate` offer so the host writes the file),
+  and the route holds each device
   to its own clip bound and budget. The phone composers show a microphone only
   while the host reports transcription `ready` and append the transcript to
   the draft; the rules are in
@@ -14474,28 +14496,29 @@ feature: usage, diagnostics, Navigator, the automations UI, browser and
 computer use, agent hierarchy, remote and mobile access, the Apple workbench,
 and the marketplace and plugin registry are no longer extraction candidates.
 
-| Surface                                                                      | Status and boundary to preserve                                                                                                                                                                                                                               |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GitHub                                                                       | Switchable bundled plugin; integration ports and contributed views, no direct host-service wiring                                                                                                                                                             |
-| Thread boards                                                                | Switchable bundled plugin; separable projection and UI, Work/Code status policy stays host-owned, and Chat has no board                                                                                                                                       |
-| Zen                                                                          | Switchable bundled plugin; appearance contributions and their scoped state                                                                                                                                                                                    |
-| Linear, Azure Resource Manager reads                                         | Bundled Integration plugins with no switch; integration ports and contributed views                                                                                                                                                                           |
-| Declarative Code tools                                                       | Installed package declarations through the public Code-tool port; credential policy, consent and execution stay host-owned                                                                                                                                    |
-| Pull request reviewers                                                       | Code-only plugin seam (`pull-request-reviewer`); host owns Plan read-only turns, head-staleness, findings, and opt-ins                                                                                                                                        |
-| Canvas, preview viewers, backgrounds, theme presets                          | Core; scoped artifact contracts, registered viewers, and appearance contributions                                                                                                                                                                             |
-| Usage, diagnostics, Navigator, automations UI                                | Core; underlying authority stays in the host                                                                                                                                                                                                                  |
-| Project memory and its agent tool                                            | Core; the journal, the person's confirmation, and purge stay host-owned                                                                                                                                                                                       |
-| Host media tools (`octant_look`, `octant_transcribe`, `octant_create_image`) | Public media tool port (`@octant/plugin-api/media-tools` and `@octant/plugin-host/media-tools`); path confinement, raw media bytes, credentials/routing, paid service offers, concurrency gates, outside-content tainting, and live admission stay host-owned |
-| Octant Harness built-in tools (`read`, `edit`, `bash`, `diagnostics`)        | Core; part of the harness loop's closed catalog, judged by the same authority path                                                                                                                                                                            |
-| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench        | Core; capability, lifecycle, and security remain app-managed                                                                                                                                                                                                  |
-| Marketplace and plugin registry                                              | Core; they stay in the host because they admit and activate other components                                                                                                                                                                                  |
-| Provider drivers                                                             | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned                                                                                                                                          |
-| Image adapters (OpenAI, Gemini, BFL, Ideogram)                               | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                                                                                                                                                         |
+| Surface                                                                                        | Status and boundary to preserve                                                                                                                                                                                                                               |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub                                                                                         | Switchable bundled plugin; integration ports and contributed views, no direct host-service wiring                                                                                                                                                             |
+| Thread boards                                                                                  | Switchable bundled plugin; separable projection and UI, Work/Code status policy stays host-owned, and Chat has no board                                                                                                                                       |
+| Zen                                                                                            | Switchable bundled plugin; appearance contributions and their scoped state                                                                                                                                                                                    |
+| Linear, Azure Resource Manager reads                                                           | Bundled Integration plugins with no switch; integration ports and contributed views                                                                                                                                                                           |
+| Declarative Code tools                                                                         | Installed package declarations through the public Code-tool port; credential policy, consent and execution stay host-owned                                                                                                                                    |
+| Pull request reviewers                                                                         | Code-only plugin seam (`pull-request-reviewer`); host owns Plan read-only turns, head-staleness, findings, and opt-ins                                                                                                                                        |
+| Canvas, preview viewers, backgrounds, theme presets                                            | Core; scoped artifact contracts, registered viewers, and appearance contributions                                                                                                                                                                             |
+| Usage, diagnostics, Navigator, automations UI                                                  | Core; underlying authority stays in the host                                                                                                                                                                                                                  |
+| Project memory and its agent tool                                                              | Core; the journal, the person's confirmation, and purge stay host-owned                                                                                                                                                                                       |
+| Host media tools (`octant_look`, `octant_narrate`, `octant_transcribe`, `octant_create_image`) | Public media tool port (`@octant/plugin-api/media-tools` and `@octant/plugin-host/media-tools`); path confinement, raw media bytes, credentials/routing, paid service offers, concurrency gates, outside-content tainting, and live admission stay host-owned |
+| Octant Harness built-in tools (`read`, `edit`, `bash`, `diagnostics`)                          | Core; part of the harness loop's closed catalog, judged by the same authority path                                                                                                                                                                            |
+| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench                          | Core; capability, lifecycle, and security remain app-managed                                                                                                                                                                                                  |
+| Marketplace and plugin registry                                                                | Core; they stay in the host because they admit and activate other components                                                                                                                                                                                  |
+| Provider drivers                                                                               | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned                                                                                                                                          |
+| Image adapters (OpenAI, Gemini, BFL, Ideogram)                                                 | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                                                                                                                                                         |
 
 **Public media tool port (built for built-in media tools).** `octant_look`,
-`octant_transcribe`, and `octant_create_image` compose through the public,
-provider-neutral `MediaToolHostPort` seam in `@octant/plugin-api/media-tools`
-and the pure host-side plugin bridge in `@octant/plugin-host/media-tools`.
+`octant_narrate`, `octant_transcribe`, and `octant_create_image` compose through
+the public, provider-neutral `MediaToolHostPort` seam in
+`@octant/plugin-api/media-tools` and the pure host-side plugin bridge in
+`@octant/plugin-host/media-tools`.
 _Rationale:_ keeping tool schemas, input validation, paging, and result
 formatting on a public capability-scoped port lets built-in media tools run
 without touching server internals and establishes the shared host bridge
@@ -16906,7 +16929,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
     under Strict, and a session whose person turned the agent's own setup
     off keeps the sandbox wherever its profile holds setup back, since the
     sandbox's deny rules are that hold-back: unwrapped, Kimi Code started a
-    trusted Project's `.mcp.json` server with no approval asked);
+    trusted Project's `.mcp.json` server with no approval asked; Windows,
+    with no sandbox to hold it back, refuses that launch instead, as
+    [Windows launches](design/provider-runtimes.md#windows-launches) says);
     OpenCode's permission rules ask Octant, as the level says, before an edit, shell command
     or outside folder below Full access, and Pi's approval bridge asks
     before every `bash`, `edit` and `write` call. Such a launch takes no egress
@@ -21079,10 +21104,21 @@ defers, and it owns the architectural rules behind it.
 
 **Where the release stands (2026-11-05).** The first release is the Apple
 Silicon technical preview with the provider-neutral plugin/skill marketplace.
+It needs macOS 15 Sequoia or later: the app bundle declares 15.0 because the
+bundled Simulator accessibility and camera tools need it, while the core
+helpers declare 14.0 and are covered by the app's floor. Macs on macOS 14
+must not update past the last version released before this requirement. The
+update feed does not guard against it (maintainer decision, 2026-11-22): an
+older installed copy on macOS 14 can still download a newer build, through the
+updater or its Install Octant Nightly button, and that build will not launch
+there. Whether Squirrel keeps the existing app when macOS refuses the new one
+is unverified. The guide and every release's notes say so instead.
 Builds of `main` are meant to publish daily on the `preview` ring as the second
 app Octant Nightly, and on-demand pre-releases of the next stable on the
 `candidate` ring as Octant's Preview channel, as GitHub pre-releases named
-`v0.1.0-<ring>.<date>.<build>`; each carries a macOS zip, a linux-x64
+`v0.1.0-<ring>.<date>.<build>` (until the first stable release, the newest
+Preview is promoted out of prerelease to carry the public download link,
+below); each carries a macOS zip, a linux-x64
 AppImage and a signed per-user Windows installer. Nightly is a usable client; a scheduled or rollback Nightly run is
 built and published only after its secret-free
 [usable-client preflight](design/nightly-app.md#the-usable-client-preflight)
@@ -21110,6 +21146,30 @@ automation at build time. The disk image is signed, notarized and stapled on
 the same condition as the app, and unsigned when the app is. The zip stays the
 only artifact the update feed lists; the disk image is a download, never an
 update source. Octant Nightly builds no disk image.
+
+GitHub's latest release carries the public download link,
+`https://github.com/Ogard-Labs/octant/releases/latest/download/Octant-darwin-arm64.dmg`.
+Only stable may hold it once the first stable release exists; until then the
+newest Preview holds it (maintainer decision, 2026-11-22). Only a last release
+job, `scripts/publish-latest-download.sh`, moves the link: release creation
+stays off latest. It runs only after every build row has published, refuses
+a disk image that is empty or not fully uploaded, attaches that image a second
+time under the fixed name `Octant-darwin-arm64.dmg`, checks the copy, and then
+marks the release latest. A new copy is uploaded under a temporary name and
+checked before it replaces an earlier one, so a failed replacement leaves the
+old copy serving. A Preview builds as a GitHub prerelease and stops
+being one only when this job promotes it, because `releases/latest` skips
+prereleases. A promoted Preview stays a non-prerelease after stable takes the
+link, so the job orders releases by tag, never by the prerelease flag. The
+Preview and stable promotion jobs share one concurrency group; when three
+overlap, GitHub cancels the one still waiting, and rerunning that job is
+safe. A candidate
+after the first stable release, or a release older than the one holding the
+link, is left as it is, so rerunning an old run's job cannot move the link
+backward. Re-promoting the release that holds the link changes nothing.
+Nightly builds and the `feed-*` mailbox releases stay prereleases, so the
+link never resolves to them. Whether an unauthenticated download of that URL
+works is verified only after a real release, not by the workflow's tests.
 
 Cross-platform desktop (macOS, Linux, Windows) remains authorized: the Linux
 desktop shell, then the Linux AppImage with its signed feed, then Windows.
@@ -21170,7 +21230,11 @@ own mode, level and Strict value (`windowsProviderLaunch`), so no earlier
 launch or cached read admits another: Claude, Codex, OpenCode, Pi and the ACP
 agents start unconfined there, read their version unconfined, and are stopped
 with their whole process tree, each launch keeping its ownership receipt. A
-launch that does not carry its Strict value is Strict. Codex below Full access
+launch that does not carry its Strict value is Strict. Below Full access an ACP
+launch whose person turned the agent's own setup off is refused, with a reason,
+wherever the profile holds setup back, since no sandbox can hold that setup back
+there (maintainer decision, 2026-11-22;
+[Windows launches](design/provider-runtimes.md#windows-launches)). Codex below Full access
 is told to keep its own sandbox (`workspace-write`, `read-only` in Plan) with
 its own approvals rather than an external one; a Codex or OpenCode process
 started outside Strict is never reused by a Strict session at the same level.

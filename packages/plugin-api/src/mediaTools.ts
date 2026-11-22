@@ -21,6 +21,7 @@ import type {
   ProviderModelId,
   ProviderToolDefinition,
   ProviderToolImage,
+  SpeechSynthesisFormat,
   SpeechTranscriptionLanguage,
 } from "@octant/contracts";
 
@@ -104,6 +105,26 @@ export interface MediaTranscriptionHostPort {
   /** Live check: transcription endpoint is ready and allowed for this turn. */
   readonly isAvailable: () => boolean;
   readonly transcribe: (input: MediaTranscriptionRequest) => Promise<MediaTranscriptionOutcome>;
+}
+
+export interface MediaNarrationRequest {
+  readonly text: string;
+  readonly relativePath: CodeRelativePath;
+  readonly format: SpeechSynthesisFormat;
+  readonly signal?: AbortSignal;
+}
+
+export type MediaNarrationOutcome =
+  | { readonly status: "saved"; readonly relativePath: string; readonly bytes: number }
+  | { readonly status: "busy"; readonly reason: string }
+  | { readonly status: "failed"; readonly reason: string }
+  | { readonly status: "refused"; readonly reason: string };
+
+/** Host-mediated text-to-speech synthesis saved as a new confined file. */
+export interface MediaNarrationHostPort {
+  /** Live check: synthesis endpoint and voice are ready and allowed for this turn. */
+  readonly isAvailable: () => boolean;
+  readonly narrate: (input: MediaNarrationRequest) => Promise<MediaNarrationOutcome>;
 }
 
 export type MediaImageDescriptionOutcome =
@@ -243,6 +264,7 @@ export interface MediaImageGenerationHostPort {
 export interface MediaToolHostPort {
   readonly turn: MediaToolTurnContext;
   readonly transcription?: MediaTranscriptionHostPort;
+  readonly narration?: MediaNarrationHostPort;
   readonly imageDescription?: MediaImageDescriptionHostPort;
   readonly imageGeneration?: MediaImageGenerationHostPort;
   /** Host-owned teardown for a shared turn port; individual `MediaToolSet.close()` calls do not invoke it. */

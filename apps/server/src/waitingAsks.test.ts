@@ -279,4 +279,38 @@ describe("waiting asks", () => {
       ),
     ).toEqual([]);
   });
+
+  it("summarizes a narration offer without exposing the text or relative path", () => {
+    const asks = waitingAsksFrom(
+      {
+        ...none,
+        serviceOffers: [
+          Schema.decodeUnknownSync(ServiceOffer)({
+            kind: "narrate",
+            offerId: "00000000-0000-4000-8000-000000000e01",
+            threadKind: "work-thread",
+            scopeId: workThread,
+            requestedAt: "2026-11-13T08:05:00.000Z",
+            excerpt: "Confidential draft intro",
+            characters: 24,
+            relativePath: "secret/narration.mp3",
+            voice: "alloy",
+            endpointName: "Studio",
+            modelId: "tts-1",
+            format: "mp3",
+          }),
+        ],
+      },
+      readThread,
+    );
+    expect(asks).toEqual([
+      expect.objectContaining({
+        kind: "service-offer",
+        text: "Narrate text to an audio file?",
+      }),
+    ]);
+    expect(asks[0]?.detail).toBeUndefined();
+    expect(asks[0]?.text).not.toContain("Confidential");
+    expect(asks[0]?.text).not.toContain("secret/narration.mp3");
+  });
 });

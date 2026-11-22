@@ -834,6 +834,36 @@ describe("a desktop window on a hub member", () => {
     }
   }, 60_000);
 
+  it("the hub tells its own devices of a member's window it admitted, by name and private address, and Remove there revokes it", async () => {
+    const { network, hub, a } = await startWorld();
+    const desktop = desktopWindow(a, network);
+
+    await desktop.sync();
+
+    const [asked] = desktop.introductions;
+    if (asked === undefined) throw new Error("The window asked for no introduction.");
+    const [device] = windowDevices(hub, publicKeyFingerprint(asked.devicePublicKey));
+    if (device === undefined) throw new Error("The hub issued the window no device.");
+    expect(hub.pairedDeviceAlerts.list()).toEqual([
+      expect.objectContaining({
+        deviceId: device.deviceId,
+        name: "Laptop window",
+        privateAddress: "100.101.102.250",
+      }),
+    ]);
+
+    // The window asks again on every refresh; the device it already holds raises nothing new.
+    await desktop.sync();
+    expect(hub.pairedDeviceAlerts.list()).toHaveLength(1);
+
+    hub.administration.revokeDevice({ deviceId: device.deviceId });
+    expect(hub.pairedDeviceAlerts.list()).toEqual([]);
+    await desktop.sync();
+    expect(
+      windowDevices(hub, publicKeyFingerprint(asked.devicePublicKey)).map((each) => each.state),
+    ).toEqual(["revoked"]);
+  }, 60_000);
+
   it("a window guest the hub removed stays off the roster when the window asks again", async () => {
     const { network, hub, a, b } = await startWorld();
     const desktop = desktopWindow(a, network);

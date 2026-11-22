@@ -2,11 +2,12 @@
  * Host-side bridge, validation, registration, and built-in media tool plugins
  * over the public `@octant/plugin-api/media-tools` port.
  *
- * Every built-in media tool (`octant_transcribe`, `octant_look`,
- * `octant_create_image`) and any third-party media tool plugin composes its
- * tool definitions and execution strictly through `MediaToolHostPort`.
- * Confinement, raw media bytes, provider credentials, paid offers, concurrency
- * gates, outside-content tainting, and live admission stay host-owned.
+ * Every built-in media tool (`octant_transcribe`, `octant_narrate`,
+ * `octant_look`, `octant_create_image`) and any third-party media tool plugin
+ * composes its tool definitions and execution strictly through
+ * `MediaToolHostPort`. Confinement, raw media bytes, provider credentials,
+ * paid offers, concurrency gates, outside-content tainting, and live admission
+ * stay host-owned.
  */
 import {
   decodeBrowserCaptureId,
@@ -14,6 +15,7 @@ import {
   decodeImageArtifactId,
   decodeProviderInstanceId,
   decodeProviderModelId,
+  decodeSpeechSynthesisFormat,
   decodeSpeechTranscriptionLanguage,
   MAX_IMAGE_PROMPT_CHARACTERS,
   MAX_IMAGE_REFERENCE_LABEL_LENGTH,
@@ -21,11 +23,14 @@ import {
   MAX_IMAGE_VARIANTS,
   MAX_LOOK_QUESTION_CHARACTERS,
   MAX_PROVIDER_TOOL_RESULT_BYTES,
+  SPEECH_SYNTHESIS_FORMATS,
+  SPEECH_SYNTHESIS_MAX_TEXT_CHARACTERS,
   type CodeRelativePath,
   type ImageArtifactId,
   type ProviderInstanceId,
   type ProviderModelId,
   type ProviderToolDefinition,
+  type SpeechSynthesisFormat,
   type SpeechTranscriptionLanguage,
 } from "@octant/contracts";
 import {
@@ -41,18 +46,23 @@ import {
 } from "@octant/plugin-api/media-tools";
 
 export const TRANSCRIBE_TOOL_NAME = "octant_transcribe" as const;
+export const NARRATE_TOOL_NAME = "octant_narrate" as const;
 export const LOOK_TOOL_NAME = "octant_look" as const;
 export const CREATE_IMAGE_TOOL_NAME = "octant_create_image" as const;
 
 export const BUILTIN_MEDIA_TOOL_NAMES = [
   TRANSCRIBE_TOOL_NAME,
+  NARRATE_TOOL_NAME,
   LOOK_TOOL_NAME,
   CREATE_IMAGE_TOOL_NAME,
 ] as const;
 
-/** Host guide lines for the three built-in media tools, 40 tokens or fewer each. */
+/** Host guide lines for the four built-in media tools, 40 tokens or fewer each. */
 export const TRANSCRIBE_TOOL_HOST_LINE =
   "Transcribe a recording from this thread's folder with octant_transcribe instead of installing speech models; page long transcripts with nextOffset.";
+
+export const NARRATE_TOOL_HOST_LINE =
+  "Turn text into a spoken audio file in this thread's folder with octant_narrate instead of installing speech tools.";
 
 export const LOOK_TOOL_HOST_LINE =
   "When you cannot read an image yourself, have octant_look ask the Sees images model to describe it, with your question if you have one.";
@@ -63,6 +73,7 @@ export const CREATE_IMAGE_TOOL_HOST_LINE =
 export const MEDIA_TOOL_HOST_LINES: Readonly<Record<string, string>> = {
   [CREATE_IMAGE_TOOL_NAME]: CREATE_IMAGE_TOOL_HOST_LINE,
   [LOOK_TOOL_NAME]: LOOK_TOOL_HOST_LINE,
+  [NARRATE_TOOL_NAME]: NARRATE_TOOL_HOST_LINE,
   [TRANSCRIBE_TOOL_NAME]: TRANSCRIBE_TOOL_HOST_LINE,
 };
 
@@ -349,6 +360,168 @@ export const TRANSCRIBE_MEDIA_TOOL_PLUGIN: MediaToolPluginDefinition = {
             return { isError: true, result: { status: "failed", reason: outcome.reason } };
           case "transcribed":
             return pageTranscript(outcome.text, args.offset);
+        }
+      },
+    };
+  },
+};
+
+const NARRATION_FORMAT_EXTENSIONS: Readonly<Record<SpeechSynthesisFormat, string>> = {
+  mp3: ".mp3",
+  wav: ".wav",
+  opus: ".ogg",
+};
+
+const NARRATION_TOO_LONG_REASON =
+  "Split the text into parts of at most 4,096 characters and narrate each to its own file.";
+
+type ParsedNarrationInput =
+  | {
+      readonly ok: true;
+      readonly text: string;
+      readonly relativePath: CodeRelativePath;
+      readonly format: SpeechSynthesisFormat;
+    }
+  | { readonly ok: false; readonly reason: string };
+
+function parseNarrationInput(json: string): ParsedNarrationInput {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch {
+    return { ok: false, reason: "Provide text and a relativePath inside this thread's folder." };
+  }
+  if (
+    !isPlainObject(raw) ||
+    !("text" in raw) ||
+    !("relativePath" in raw) ||
+    Object.keys(raw).some((key) => !["text", "relativePath", "format"].includes(key))
+  ) {
+    return {
+      ok: false,
+      reason: "Provide text, a relativePath inside this thread's folder, and an optional format.",
+    };
+  }
+  if (typeof raw["text"] !== "string") return { ok: false, reason: "Provide text to narrate." };
+  if (raw["text"].length > SPEECH_SYNTHESIS_MAX_TEXT_CHARACTERS) {
+    return { ok: false, reason: NARRATION_TOO_LONG_REASON };
+  }
+  const text = raw["text"].trim();
+  if (text.length === 0) return { ok: false, reason: "Provide text to narrate." };
+
+  let format: SpeechSynthesisFormat = "mp3";
+  if ("format" in raw && raw["format"] !== undefined) {
+    try {
+      format = decodeSpeechSynthesisFormat(raw["format"]);
+    } catch {
+      return { ok: false, reason: "Format must be mp3, wav, or opus." };
+    }
+  }
+
+  const rawPath = raw["relativePath"];
+  if (typeof rawPath !== "string" || /^[a-z][a-z0-9+.-]*:/i.test(rawPath)) {
+    return { ok: false, reason: "The save path is outside the folder." };
+  }
+  const canonical = canonicalizeRelativeReferencePath(rawPath);
+  if (canonical === undefined) {
+    return { ok: false, reason: "The save path is outside the folder." };
+  }
+  let relativePath: CodeRelativePath;
+  try {
+    relativePath = decodeCodeRelativePath(canonical);
+  } catch {
+    return { ok: false, reason: "The save path is outside the folder." };
+  }
+  if (relativePath.length > MAX_SAVE_PATH_CHARACTERS) {
+    return { ok: false, reason: "The save path is too long." };
+  }
+
+  const expectedExtension = NARRATION_FORMAT_EXTENSIONS[format];
+  if (!relativePath.toLowerCase().endsWith(expectedExtension)) {
+    return {
+      ok: false,
+      reason: `Format ${format} requires a ${expectedExtension} file extension.`,
+    };
+  }
+  return { ok: true, text, relativePath, format };
+}
+
+/**
+ * Built-in text-to-speech narration media tool plugin (`octant_narrate`),
+ * composed strictly over `MediaToolHostPort.narration`.
+ */
+export const NARRATE_MEDIA_TOOL_PLUGIN: MediaToolPluginDefinition = {
+  kind: MEDIA_TOOL_CONTRIBUTION_KIND,
+  id: "narrate",
+  modes: ["work", "code"],
+  createTools: (port) => {
+    const narration = port.narration;
+    if (
+      narration === undefined ||
+      !NARRATE_MEDIA_TOOL_PLUGIN.modes.includes(port.turn.mode) ||
+      port.turn.unattended ||
+      port.turn.inPlan() ||
+      !narration.isAvailable()
+    ) {
+      return undefined;
+    }
+    const stopped = new AbortController();
+    return {
+      definitions: [
+        {
+          name: NARRATE_TOOL_NAME,
+          description:
+            "Turn text into a spoken audio file in this thread's folder using the person's Voice synthesis endpoint and voice. Never overwrites an existing file.",
+          inputSchema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              text: { type: "string" },
+              relativePath: { type: "string" },
+              format: { type: "string", enum: [...SPEECH_SYNTHESIS_FORMATS] },
+            },
+            required: ["text", "relativePath"],
+          },
+        },
+      ],
+      taintPolicy: "none",
+      close: async () => {
+        stopped.abort();
+      },
+      execute: async (call) => {
+        const signal = combineSignals(stopped.signal, call.signal);
+        if (call.name !== NARRATE_TOOL_NAME) {
+          return transcriptionRefused("Narration is unavailable for this turn.");
+        }
+        if (port.turn.inPlan()) {
+          return transcriptionRefused("Plan mode cannot create audio files.");
+        }
+        if (signal.aborted || !port.turn.allowed()) {
+          return transcriptionRefused("Narration is unavailable for this turn.");
+        }
+        const args = parseNarrationInput(call.inputJson);
+        if (!args.ok) return transcriptionRefused(args.reason);
+        const outcome = await narration.narrate({
+          text: args.text,
+          relativePath: args.relativePath,
+          format: args.format,
+          signal,
+        });
+        switch (outcome.status) {
+          case "refused":
+            return transcriptionRefused(outcome.reason);
+          case "busy":
+            return { isError: true, result: { status: "busy", reason: outcome.reason } };
+          case "failed":
+            return { isError: true, result: { status: "failed", reason: outcome.reason } };
+          case "saved":
+            return {
+              result: {
+                status: "saved",
+                relativePath: outcome.relativePath,
+                bytes: outcome.bytes,
+              },
+            };
         }
       },
     };
@@ -903,6 +1076,7 @@ export const CREATE_IMAGE_MEDIA_TOOL_PLUGIN: MediaToolPluginDefinition = {
 
 export const BUILTIN_MEDIA_TOOL_PLUGINS: ReadonlyArray<MediaToolPluginDefinition> = [
   TRANSCRIBE_MEDIA_TOOL_PLUGIN,
+  NARRATE_MEDIA_TOOL_PLUGIN,
   LOOK_MEDIA_TOOL_PLUGIN,
   CREATE_IMAGE_MEDIA_TOOL_PLUGIN,
 ];

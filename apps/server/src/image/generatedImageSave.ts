@@ -6,8 +6,13 @@ import {
 } from "@octant/contracts";
 import { canonicalizeWorkRelativePath } from "@octant/domain";
 import type { CodeFileRootAuthorityPort } from "../code/codeService";
+import { isProtectedSecretPath } from "../process/secretGuard";
 import { writeConfinedWorkFile } from "../work/workConfinedWrite";
-import { liveWorkFilesystem, type WorkFilesystemPort } from "../work/workFilesystemPort";
+import {
+  liveWorkFilesystem,
+  type WorkFileIdentity,
+  type WorkFilesystemPort,
+} from "../work/workFilesystemPort";
 import { WorkResolutionService } from "../work/workResolutionService";
 
 export async function saveGeneratedCodeImage(
@@ -92,42 +97,158 @@ export async function saveGeneratedImageUnder(
   }
 }
 
+export type ConfinedNewFileCheck =
+  | {
+      readonly status: "ok";
+      readonly relativePath: string;
+      readonly absolutePath: string;
+      readonly rootIdentity: WorkFileIdentity;
+      readonly parentAbsolute: string;
+      readonly parentIdentity: WorkFileIdentity;
+      readonly remaining: ReadonlyArray<string>;
+    }
+  | { readonly status: "refused"; readonly reason: string };
+
+export type ConfinedNewFileWriteResult =
+  | { readonly status: "saved"; readonly relativePath: string }
+  | { readonly status: "refused"; readonly reason: string }
+  | { readonly status: "failed"; readonly reason: string };
+
 /**
- * The create check `saveGeneratedImageUnder` makes, without writing: the path
- * must resolve for create inside `root` and must not exist yet. An icon set
- * checks every file this way before writing any, so one refused path leaves
- * the folder untouched. The write still makes its own exclusive create, so a
- * file that appears between check and write is refused there.
+ * Checks whether a new file can be created under `root` without leaving it,
+ * following an escaping symlink, touching a protected secret path, or
+ * overwriting an existing entry. Used both before asking for confirmation and
+ * again at write time.
+ */
+export async function checkConfinedNewFileUnder(
+  input: {
+    readonly root: string;
+    readonly relativePath: string;
+    readonly expectedRootIdentity?: WorkFileIdentity;
+  },
+  filesystem: WorkFilesystemPort = liveWorkFilesystem,
+): Promise<ConfinedNewFileCheck> {
+  let rootIdentity: WorkFileIdentity;
+  try {
+    const canonicalRoot = await filesystem.realpath(input.root);
+    const rootStat = await filesystem.lstat(canonicalRoot);
+    if (canonicalRoot !== input.root || !rootStat.isDirectory) {
+      return { status: "refused", reason: "The save folder is unavailable." };
+    }
+    rootIdentity = { device: rootStat.device, inode: rootStat.inode };
+    if (
+      input.expectedRootIdentity !== undefined &&
+      (rootIdentity.device !== input.expectedRootIdentity.device ||
+        rootIdentity.inode !== input.expectedRootIdentity.inode)
+    ) {
+      return { status: "refused", reason: "The save folder changed." };
+    }
+  } catch {
+    return { status: "refused", reason: "The save folder is unavailable." };
+  }
+  let relativePath: string;
+  try {
+    relativePath = canonicalizeWorkRelativePath(input.relativePath);
+  } catch {
+    return { status: "refused", reason: "The save path is outside the folder." };
+  }
+  const resolution = await new WorkResolutionService(filesystem).resolveForCreate({
+    binding: {
+      canonicalRoot: input.root,
+      knownCanonicalRoot: input.root,
+      availability: "available",
+      bindingSuperseded: false,
+    },
+    relativePath,
+  });
+  if (resolution.status !== "resolved-for-create") {
+    return { status: "refused", reason: "The save path is outside the folder." };
+  }
+  if (isProtectedSecretPath(resolution.absolutePath)) {
+    return { status: "refused", reason: "The save path is protected." };
+  }
+  if (resolution.remaining.length === 1) {
+    try {
+      await filesystem.lstat(resolution.absolutePath);
+      return { status: "refused", reason: "That file already exists. Choose a new path." };
+    } catch (error) {
+      if (!isMissingFileError(error)) {
+        return { status: "refused", reason: "The save path is unavailable." };
+      }
+    }
+  }
+  return {
+    status: "ok",
+    relativePath: resolution.relativePath,
+    absolutePath: resolution.absolutePath,
+    rootIdentity,
+    parentAbsolute: resolution.parentAbsolute,
+    parentIdentity: resolution.parentIdentity,
+    remaining: resolution.remaining,
+  };
+}
+
+/**
+ * Writes a new file under `root` through the same confined, exclusive-create
+ * path as `saveGeneratedImageUnder`, also refusing protected secret paths,
+ * replaced roots, and existing files with neutral failure reasons.
+ */
+export async function writeConfinedNewFileUnder(
+  input: {
+    readonly root: string;
+    readonly relativePath: string;
+    readonly bytes: Uint8Array;
+    readonly expectedRootIdentity?: WorkFileIdentity;
+    readonly current?: () => boolean;
+  },
+  filesystem: WorkFilesystemPort = liveWorkFilesystem,
+): Promise<ConfinedNewFileWriteResult> {
+  try {
+    const check = await checkConfinedNewFileUnder(input, filesystem);
+    if (check.status !== "ok") return check;
+    if (input.current?.() === false) {
+      return { status: "refused", reason: "The save folder is unavailable." };
+    }
+    const written = await writeConfinedWorkFile({
+      filesystem,
+      canonicalPath: check.absolutePath,
+      allowCreate: true,
+      parent: {
+        absolutePath: check.parentAbsolute,
+        identity: check.parentIdentity,
+        remaining: check.remaining,
+      },
+      bytes: input.bytes,
+    });
+    return written
+      ? { status: "saved", relativePath: check.relativePath }
+      : { status: "failed", reason: "The file could not be saved." };
+  } catch {
+    return { status: "failed", reason: "The file could not be saved." };
+  }
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
+/**
+ * The create check an icon set makes for every file before writing any, so
+ * one refused path leaves the folder untouched. It is the same confined check
+ * a single new file gets, with the refusal naming the path, since an icon set
+ * writes many. Each write still makes its own exclusive create, so a file that
+ * appears between check and write is refused there.
  */
 export async function checkNewFileUnder(
   input: { readonly root: string; readonly relativePath: string },
   filesystem: WorkFilesystemPort = liveWorkFilesystem,
 ): Promise<{ readonly status: "ok" } | { readonly status: "refused"; readonly reason: string }> {
-  try {
-    const resolution = await new WorkResolutionService(filesystem).resolveForCreate({
-      binding: {
-        canonicalRoot: input.root,
-        knownCanonicalRoot: input.root,
-        availability: "available",
-        bindingSuperseded: false,
-      },
-      relativePath: canonicalizeWorkRelativePath(input.relativePath),
-    });
-    if (resolution.status !== "resolved-for-create") {
-      return { status: "refused", reason: `${input.relativePath} is outside the folder.` };
-    }
-    const existing = await filesystem.lstat(resolution.absolutePath).then(
-      () => true,
-      (error: unknown) => !isMissing(error),
-    );
-    return existing
-      ? { status: "refused", reason: `${input.relativePath} already exists.` }
-      : { status: "ok" };
-  } catch {
-    return { status: "refused", reason: `${input.relativePath} is outside the folder.` };
-  }
-}
-
-function isMissing(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+  const checked = await checkConfinedNewFileUnder(input, filesystem);
+  if (checked.status === "ok") return { status: "ok" };
+  return {
+    status: "refused",
+    reason: checked.reason.startsWith("That file already exists")
+      ? `${input.relativePath} already exists.`
+      : `${input.relativePath}: ${checked.reason}`,
+  };
 }

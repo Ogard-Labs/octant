@@ -109,6 +109,10 @@ export function createServiceOfferRouteHandler<Outcome>(input: {
           )
           .filter(
             (offer) =>
+              offer.kind !== "narrate" || (!legacy && url.searchParams.get("narration") === "1"),
+          )
+          .filter(
+            (offer) =>
               supportsReferences || offer.kind !== "generate" || offer.references === undefined,
           )
           // A client that cannot say how many files an icon set writes would
