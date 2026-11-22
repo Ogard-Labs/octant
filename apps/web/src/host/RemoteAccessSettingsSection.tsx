@@ -219,6 +219,13 @@ export function RemoteAccessSettingsSection({
   }, [refreshListener, refreshInventory]);
 
   const status = listener.kind === "ready" ? listener.status : undefined;
+  // Devices and the pause are read through the listener's gateway, which does
+  // not exist while the listener is off; once it is up they are read again,
+  // so enabling the listener shows them without reopening the page.
+  const listenerReady = status?.state === "ready";
+  useEffect(() => {
+    if (listenerReady) void refreshInventory();
+  }, [listenerReady, refreshInventory]);
   // With the listener off the host has no remote gateway to answer a device
   // inventory, so its refusal is the prerequisite this page already states
   // rather than a failure to report.

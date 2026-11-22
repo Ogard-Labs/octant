@@ -170,6 +170,35 @@ describe("RemoteAccessSettingsSection", () => {
     ).toBeInTheDocument();
   });
 
+  it("offers the pause switch once the listener it reads through has started", async () => {
+    const user = userEvent.setup();
+    let listenerOn = false;
+    const host = bridge(off, {
+      // With no listener the host has no gateway to answer, as it refuses here.
+      getRemoteDeviceInventory: async () => {
+        if (!listenerOn) throw new Error("Octant local device controls are unavailable.");
+        return [device];
+      },
+      enablePrivateListener: vi.fn(async () => {
+        listenerOn = true;
+        return listening;
+      }),
+      getRemoteAccessPaused: vi.fn(async () => false),
+      setRemoteAccessPaused: vi.fn(async (paused: boolean) => paused),
+    });
+    render(<RemoteAccessSettingsSection bridge={host} />);
+
+    expect(await screen.findByText("Off")).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Pause remote access" })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Hostname"), "192.168.1.20");
+    await user.type(screen.getByLabelText("Certificate (PEM)"), "-----BEGIN CERTIFICATE-----");
+    await user.type(screen.getByLabelText("Private key (PEM)"), "-----BEGIN PRIVATE KEY-----");
+    await user.click(screen.getByRole("button", { name: "Enable listener…" }));
+    await user.click(screen.getByRole("button", { name: "Confirm enable" }));
+
+    expect(await screen.findByRole("switch", { name: "Pause remote access" })).not.toBeChecked();
+  });
+
   it("asks for confirmation naming address, origin, and reach before enabling, and cancel changes nothing", async () => {
     const user = userEvent.setup();
     const host = bridge(off);
