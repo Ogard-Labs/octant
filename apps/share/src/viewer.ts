@@ -5,6 +5,7 @@ import {
 } from "./shareKit.ts";
 import { readLimitedBody } from "./api.ts";
 import { isHttps, type ServiceContext } from "./context.ts";
+import { carriedImageResponse } from "./images.ts";
 import { escapeHtml as e, renderBlocks } from "./render.ts";
 import { isShareId, type StoredShare } from "./store.ts";
 import { mintFrameToken, mintViewGrant, viewGrantIsValid } from "./tokens.ts";
@@ -239,16 +240,21 @@ async function viewShare(
  * One image a live share carries, served once at its own address so a page
  * that shows it many times stays small. It answers only as the page does: a
  * live share, its password grant when it has a password, and an image the
- * share's document carries by that digest. The bytes never change at an
- * address, so a reader's browser keeps them, privately and for no longer
- * than a view grant lasts.
+ * share's document carries by that digest, and it counts against the
+ * reader's image limit.
  */
-function viewImage(request: Request, ctx: ServiceContext, id: string, sha256: string): Response {
-  const missing = () =>
-    new Response("Not found", {
-      status: 404,
-      headers: { ...viewerHeaders(ctx, "text/plain; charset=utf-8") },
-    });
+function viewImage(
+  request: Request,
+  ctx: ServiceContext,
+  id: string,
+  sha256: string,
+  client: string,
+): Response {
+  const headers = viewerHeaders(ctx, "text/plain; charset=utf-8");
+  const missing = () => new Response("Not found", { status: 404, headers });
+  if (!ctx.limiter.allow("image", client)) {
+    return new Response("Too many requests", { status: 429, headers });
+  }
   if (!isShareId(id)) return missing();
   const lookup = ctx.store.lookup(id);
   if (lookup.status !== "active") return missing();
@@ -256,13 +262,9 @@ function viewImage(request: Request, ctx: ServiceContext, id: string, sha256: st
   if (share.passwordHash !== null && !hasViewGrant(ctx, request, id, share)) return missing();
   const image = (share.document.images ?? []).find((each) => each.sha256 === sha256);
   if (image?.data === undefined) return missing();
-  return new Response(Buffer.from(image.data, "base64"), {
-    status: 200,
-    headers: {
-      ...viewerHeaders(ctx, image.mediaType),
-      "cache-control": "private, max-age=3600, immutable",
-      "cross-origin-resource-policy": "same-origin",
-    },
+  return carriedImageResponse(request, image, {
+    ...headers,
+    "cross-origin-resource-policy": "same-origin",
   });
 }
 
@@ -317,7 +319,7 @@ export function handleViewer(
   const image = /^\/s\/([^/]+)\/images\/([0-9a-f]{64})$/.exec(url.pathname);
   if (image !== null) {
     return request.method === "GET"
-      ? viewImage(request, ctx, image[1] ?? "", image[2] ?? "")
+      ? viewImage(request, ctx, image[1] ?? "", image[2] ?? "", client)
       : undefined;
   }
   const match = /^\/s\/([^/]+)(\/report)?$/.exec(url.pathname);

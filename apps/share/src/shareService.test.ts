@@ -734,7 +734,13 @@ describe("share service", () => {
     const served = await fetch(`${service?.publicUrl}${viewerImage}`);
     expect(served.status).toBe(200);
     expect(served.headers.get("content-type")).toBe("image/png");
-    expect(served.headers.get("cache-control")).toContain("immutable");
+    // The browser asks again before reusing it, so a revoked link stops serving it.
+    expect(served.headers.get("cache-control")).toBe("private, no-cache");
+    expect(served.headers.get("etag")).toBe(`"${image.sha256}"`);
+    const revalidated = await fetch(`${service?.publicUrl}${viewerImage}`, {
+      headers: { "if-none-match": `"${image.sha256}"` },
+    });
+    expect(revalidated.status).toBe(304);
     expect(Buffer.from(await served.arrayBuffer()).equals(bytes)).toBe(true);
     // An image the share does not carry is not found.
     expect(
@@ -757,7 +763,12 @@ describe("share service", () => {
     );
     const drawn = await fetch(`${service?.usercontentUrl}${frameImage}`);
     expect(drawn.status).toBe(200);
+    // A sandboxed frame's own images are a cross-origin load to it.
+    expect(drawn.headers.get("access-control-allow-origin")).toBe("*");
     expect(Buffer.from(await drawn.arrayBuffer()).equals(bytes)).toBe(true);
+    // A prototype left open past its frame token still draws its images.
+    now += 11 * 60_000;
+    expect((await fetch(`${service?.usercontentUrl}${frameImage}`)).status).toBe(200);
     // The frame's image answers only under the frame's token.
     expect(
       (await fetch(`${service?.usercontentUrl}${frameImage.split("?")[0] ?? ""}`)).status,

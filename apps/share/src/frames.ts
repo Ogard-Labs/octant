@@ -7,7 +7,13 @@ import {
 } from "./shareKit.ts";
 import type { ServiceContext } from "./context.ts";
 import { escapeHtml } from "./render.ts";
-import { readFrameToken, type FrameMode } from "./tokens.ts";
+import { carriedImageResponse } from "./images.ts";
+import {
+  frameImageTokenIsValid,
+  mintFrameImageToken,
+  readFrameToken,
+  type FrameMode,
+} from "./tokens.ts";
 
 type DesignBlock = Extract<CanvasStaticExportBlock, { readonly kind: "design" }>;
 
@@ -221,12 +227,13 @@ function plain(status: number, text: string, policy: string): Response {
 }
 
 /**
- * The user-content origin: `GET /f/<id>/<blockId>?t=<token>`, a design's
- * frame page, and `GET /f/<id>/<blockId>/images/<sha256>?t=<token>`, one
- * image that frame shows, and nothing else. Both answer under the same frame
- * token, so an image is served only to a frame the viewer opened.
+ * The user-content origin: `GET /f/<id>/<blockId>?t=<frame token>`, a
+ * design's frame page, and `GET /f/<id>/<blockId>/images/<sha256>?t=<image
+ * token>`, one image that design shows, and nothing else. The frame page
+ * hands its images a token of their own, for the same link, revision and
+ * block, so an image is served only to a frame the viewer opened.
  */
-export function handleFrame(request: Request, ctx: ServiceContext): Response {
+export function handleFrame(request: Request, ctx: ServiceContext, client: string): Response {
   const refused = staticFramePolicy(ctx.publicOrigin);
   const url = new URL(request.url);
   const match = /^\/f\/([^/]+)\/([^/]+)(?:\/images\/([0-9a-f]{64}))?$/.exec(url.pathname);
@@ -239,48 +246,49 @@ export function handleFrame(request: Request, ctx: ServiceContext): Response {
   } catch {
     return plain(404, "Not found", refused);
   }
+  if (sha256 !== undefined && !ctx.limiter.allow("image", client)) {
+    return plain(429, "Too many requests", refused);
+  }
   const token = url.searchParams.get("t") ?? "";
   const lookup = ctx.store.lookup(id);
   if (lookup.status !== "active") return plain(404, "Not found", refused);
   const { share } = lookup;
-  const mode: FrameMode | undefined = readFrameToken(
-    ctx.store.frameKey(),
-    id,
-    share.revision,
-    blockId,
-    ctx.store.now(),
-    token,
-  );
-  if (mode === undefined)
-    return plain(403, "This frame address is not valid or has expired.", refused);
+  const key = ctx.store.frameKey();
+  const now = ctx.store.now();
   const block = share.document.blocks.find(
     (candidate) => candidate.kind === "design" && String(candidate.blockId) === blockId,
   );
+  // Only the images this design names, by the share's own references.
+  const named = new Set(
+    block?.kind === "design" ? (block.assets ?? []).map((asset) => String(asset.imageRef)) : [],
+  );
+  const images = (share.document.images ?? []).filter((image) => named.has(String(image.imageRef)));
+  if (sha256 !== undefined) {
+    if (!frameImageTokenIsValid(key, id, share.revision, blockId, now, token)) {
+      return plain(403, "This image address is not valid or has expired.", refused);
+    }
+    const image = images.find((each) => each.sha256 === sha256);
+    if (image?.data === undefined) return plain(404, "Not found", refused);
+    return carriedImageResponse(request, image, {
+      ...FRAME_HEADERS,
+      "content-security-policy": refused,
+      // A sandboxed frame's origin is opaque, so its own images are a
+      // cross-origin load; the token in the address is the authority.
+      "access-control-allow-origin": "*",
+      "cross-origin-resource-policy": "cross-origin",
+    });
+  }
+  const mode: FrameMode | undefined = readFrameToken(key, id, share.revision, blockId, now, token);
+  if (mode === undefined)
+    return plain(403, "This frame address is not valid or has expired.", refused);
   if (block?.kind !== "design") return plain(404, "Not found", refused);
   // A token minted for a static frame never opens the script policy, and a
   // running token only opens a design that declared it runs script.
   if (mode === "running" && block.runsScript !== true) return plain(404, "Not found", refused);
-  // Only the images this design names, by the share's own references.
-  const named = new Set((block.assets ?? []).map((asset) => String(asset.imageRef)));
-  const images = (share.document.images ?? []).filter((image) => named.has(String(image.imageRef)));
   const base = `/f/${id}/${encodeURIComponent(blockId)}/images/`;
-  if (sha256 !== undefined) {
-    const image = images.find((each) => each.sha256 === sha256);
-    if (image?.data === undefined) return plain(404, "Not found", refused);
-    return new Response(Buffer.from(image.data, "base64"), {
-      status: 200,
-      headers: {
-        ...FRAME_HEADERS,
-        "content-type": image.mediaType,
-        "content-security-policy": refused,
-        // The bytes at an address never change; the token in it expires.
-        "cache-control": "private, max-age=600, immutable",
-      },
-    });
-  }
+  const imageToken = encodeURIComponent(mintFrameImageToken(key, id, share.revision, blockId, now));
   const imagePrefix = images.length === 0 ? "" : `${new URL(ctx.usercontentOrigin).origin}${base}`;
-  const address = (image: CanvasShareImage) =>
-    `${base}${image.sha256}?t=${encodeURIComponent(token)}`;
+  const address = (image: CanvasShareImage) => `${base}${image.sha256}?t=${imageToken}`;
   return new Response(renderDesignFramePage(block, images, address), {
     status: 200,
     headers: {

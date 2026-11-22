@@ -7,6 +7,9 @@ export const RATE_LIMITS = {
   create: 10,
   owner: 60,
   view: 120,
+  // A page draws each of its images once and revalidates them as it is read
+  // again; a share carries at most 32.
+  image: 1200,
   password: 5,
   report: 5,
 } as const;

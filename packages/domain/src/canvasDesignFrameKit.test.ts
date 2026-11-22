@@ -89,6 +89,13 @@ describe("drawn design asset references", () => {
         "css",
       ),
     ).toEqual(["after-string"]);
+    // Text-only elements hold text, not markup.
+    expect(
+      drawn(
+        '<textarea><img src="octant-asset:in-textarea"></textarea><xmp><img src="octant-asset:in-xmp"></xmp><img src="octant-asset:after">',
+        "html",
+      ),
+    ).toEqual(["after"]);
   });
 
   it("does not draw a reference written as text or in an attribute that loads no image", () => {

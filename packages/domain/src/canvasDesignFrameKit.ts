@@ -838,7 +838,8 @@ function handlerComments(text: string, start: number, end: number, into: Array<[
   for (const [from, to] of local) into.push([offsets[from] ?? end, offsets[to] ?? end]);
 }
 
-const RAW_TEXT_OPEN = /<(style|script)(?=[\t\n\f\r />])[^>]*>/iy;
+const RAW_TEXT_OPEN =
+  /<(style|script|textarea|title|xmp|iframe|noembed|noframes|plaintext)(?=[\t\n\f\r />])[^>]*>/iy;
 const TAG_NAME = /<[A-Za-z][^\s/>]*/y;
 const ATTRIBUTE = /[\s/]*([^\s=/>][^\s=>]*)(?:\s*=\s*("[^"]*"?|'[^']*'?|[^\s>]*))?/y;
 /** Attributes whose value a browser loads as an image. */
@@ -924,7 +925,10 @@ export function designMarkupInertRanges(markup: string, language: "html" | "css"
       const close = closing.exec(markup);
       const bodyEnd = close === null ? markup.length : close.index;
       if (element === "style") cssComments(markup, tagEnd, bodyEnd, ranges);
-      else scriptComments(markup, tagEnd, bodyEnd, ranges);
+      else if (element === "script") scriptComments(markup, tagEnd, bodyEnd, ranges);
+      // The other elements' contents are text a browser shows or ignores,
+      // never markup: an `<img>` inside a `<textarea>` draws nothing.
+      else ranges.push([tagEnd, bodyEnd]);
       index = textStart = bodyEnd;
       continue;
     }
