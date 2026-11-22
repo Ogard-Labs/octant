@@ -37,6 +37,12 @@ export interface CodeDelegationServices {
     projectId: ProjectId,
   ) => { readonly providerInstanceId: string; readonly modelId: string } | undefined;
   /**
+   * Why a provider runs no helper, as its profile declares for its personal
+   * sign-in. A peer's task is a helper run another agent started, so the
+   * provider it would run on is checked before any thread or worktree exists.
+   */
+  readonly helperRunRefusal: (providerInstanceId: string) => string | undefined;
+  /**
    * The `owner/repository` the named remote of the Project's checkout points
    * at, as a pull request names its base. Undefined when the remote is missing
    * or is not a GitHub repository.
@@ -119,7 +125,11 @@ export function createCodeDelegationHost(services: CodeDelegationServices): Peer
       }
       const binding = project.bindingHistory?.at(-1);
       const provider = services.defaultProvider(input.projectId);
-      if (binding === undefined || provider === undefined) {
+      if (
+        binding === undefined ||
+        provider === undefined ||
+        services.helperRunRefusal(provider.providerInstanceId) !== undefined
+      ) {
         return { status: "refused", kind: "provider-unavailable" };
       }
       // A pull request names its base as `owner/repository`, so a pull-request

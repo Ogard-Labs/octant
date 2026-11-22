@@ -1,0 +1,258 @@
+import { createHash } from "node:crypto";
+import { createServer as createHttpServer, type Server } from "node:http";
+import { connect as connectTcp, type AddressInfo, type Socket } from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
+import type { RemotePortForward } from "@octant/contracts";
+import type { RemoteServerForwarderSignRequest } from "@octant/client-runtime/remote-server-forwarder";
+import { listenForPortForward } from "./remotePortForwardListener";
+import { upgradeThroughListener } from "./remoteServerPages";
+
+const HOST_ID = "11111111-1111-4111-8111-111111111111";
+const FORWARD_ID = `rpf_${"ab".repeat(32)}`;
+const cleanups: Array<() => void> = [];
+afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup();
+});
+
+/**
+ * A stand-in for the other computer's listener: it accepts the upgrade with
+ * the real handshake answer and echoes each binary message it receives back
+ * unmasked, as the host's relay sends them.
+ */
+async function echoingHost(): Promise<{
+  readonly port: number;
+  readonly upgrades: Array<{ readonly url: string; readonly proof: string | undefined }>;
+}> {
+  const upgrades: Array<{ readonly url: string; readonly proof: string | undefined }> = [];
+  const sockets: Socket[] = [];
+  const server: Server = createHttpServer();
+  server.on("upgrade", (request, socket: Socket) => {
+    sockets.push(socket);
+    const proof = request.headers["x-octant-device-proof"];
+    upgrades.push({ url: request.url ?? "", proof: typeof proof === "string" ? proof : undefined });
+    const accept = createHash("sha1")
+      .update(`${String(request.headers["sec-websocket-key"])}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest("base64");
+    socket.write(
+      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+    );
+    socket.on("data", (chunk: Buffer) => {
+      // Frames in this test are small: one byte of length, then the mask.
+      const opcode = (chunk[0] ?? 0) & 0x0f;
+      const length = (chunk[1] ?? 0) & 0x7f;
+      const mask = chunk.subarray(2, 6);
+      const payload = Buffer.from(chunk.subarray(6, 6 + length));
+      for (let index = 0; index < payload.byteLength; index += 1) {
+        payload[index] = (payload[index] ?? 0) ^ (mask[index % 4] ?? 0);
+      }
+      if (opcode === 0x2) socket.write(Buffer.concat([Buffer.from([0x82, length]), payload]));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  cleanups.push(() => {
+    for (const socket of sockets) socket.destroy();
+    server.close();
+  });
+  return { port: (server.address() as AddressInfo).port, upgrades };
+}
+
+function forward(port: number, expiresAt = Date.now() + 60_000): RemotePortForward {
+  return { forwardId: FORWARD_ID, port, expiresAt } as RemotePortForward;
+}
+
+describe("a port forward's listener on this computer", () => {
+  it("carries a local connection's bytes to the other computer and back under a signed upgrade", async () => {
+    const host = await echoingHost();
+    const signed: RemoteServerForwarderSignRequest[] = [];
+    const listening = await listenForPortForward(
+      { hostId: HOST_ID, forward: forward(0) },
+      {
+        sign: async (request) => {
+          signed.push(request);
+          return { status: "signed", headers: { "x-octant-device-proof": "proof" } };
+        },
+        upgradeToHost: (request) =>
+          upgradeThroughListener(
+            {
+              listenerOrigin: "https://192.168.1.20:9443",
+              trust: { current: { kind: "platform" } },
+            },
+            request,
+            async () => ({ status: "connected", socket: connectTcp(host.port, "127.0.0.1") }),
+          ),
+      },
+    );
+    if (listening.status !== "listening") throw new Error(listening.message);
+    cleanups.push(listening.close);
+
+    const client = connectTcp(listening.port, "127.0.0.1");
+    cleanups.push(() => client.destroy());
+    const echoed = new Promise<string>((resolve) =>
+      client.once("data", (chunk: Buffer) => resolve(chunk.toString())),
+    );
+    client.write("SELECT 1;");
+    expect(await echoed).toBe("SELECT 1;");
+    expect(signed).toEqual([
+      {
+        hostId: HOST_ID,
+        grantId: FORWARD_ID,
+        method: "GET",
+        pathQuery: `/api/server-proxy/${FORWARD_ID}`,
+        bodyDigest: createHash("sha256").update("").digest("hex"),
+      },
+    ]);
+    expect(host.upgrades).toEqual([{ url: `/api/server-proxy/${FORWARD_ID}`, proof: "proof" }]);
+  });
+
+  it("ends a local connection the window will not sign, without reaching the other computer", async () => {
+    let reached = 0;
+    const listening = await listenForPortForward(
+      { hostId: HOST_ID, forward: forward(0) },
+      {
+        sign: async () => ({ status: "refused", reason: "no-window" }),
+        upgradeToHost: async () => {
+          reached += 1;
+          throw new Error("unreachable");
+        },
+      },
+    );
+    if (listening.status !== "listening") throw new Error(listening.message);
+    cleanups.push(listening.close);
+    const client = connectTcp(listening.port, "127.0.0.1");
+    await new Promise<void>((resolve) => client.on("close", () => resolve()));
+    expect(reached).toBe(0);
+  });
+
+  it("releases the local port once the other computer says the forward has ended, but not when it is only busy", async () => {
+    let status = 503;
+    const listening = await listenForPortForward(
+      { hostId: HOST_ID, forward: forward(0) },
+      {
+        sign: async () => ({ status: "signed", headers: {} }),
+        upgradeToHost: async () => ({
+          status: "answered",
+          response: new Response(null, { status }),
+        }),
+      },
+    );
+    if (listening.status !== "listening") throw new Error(listening.message);
+    cleanups.push(listening.close);
+    const attempt = () =>
+      new Promise<void>((resolve) => {
+        const client = connectTcp(listening.port, "127.0.0.1");
+        client.on("error", () => resolve());
+        client.on("close", () => resolve());
+      });
+    await attempt();
+    // Busy: the listener stays for the next connection.
+    const again = connectTcp(listening.port, "127.0.0.1");
+    await new Promise<void>((resolve, reject) => {
+      again.once("connect", () => resolve());
+      again.once("error", reject);
+    });
+    again.destroy();
+    // One 401 may be a stale proof, not an ended session: the listener stays.
+    status = 401;
+    await attempt();
+    const stays = connectTcp(listening.port, "127.0.0.1");
+    await new Promise<void>((resolve, reject) => {
+      stays.once("connect", () => resolve());
+      stays.once("error", reject);
+    });
+    stays.destroy();
+    status = 404;
+    await attempt();
+    await expect(
+      new Promise<void>((resolve, reject) => {
+        const late = connectTcp(listening.port, "127.0.0.1");
+        late.once("connect", () => {
+          late.destroy();
+          resolve();
+        });
+        late.once("error", reject);
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("listens on the other computer's port number when it is free, and stops listening when closed", async () => {
+    const probe = createHttpServer();
+    await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", () => resolve()));
+    const free = (probe.address() as AddressInfo).port;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+
+    const listening = await listenForPortForward(
+      { hostId: HOST_ID, forward: forward(free) },
+      {
+        sign: async () => ({ status: "refused", reason: "no-window" }),
+        upgradeToHost: async () => {
+          throw new Error("unreachable");
+        },
+      },
+    );
+    if (listening.status !== "listening") throw new Error(listening.message);
+    expect(listening.port).toBe(free);
+    listening.close();
+    const refused = await new Promise<boolean>((resolve) => {
+      const socket = connectTcp(free, "127.0.0.1");
+      socket.on("error", () => resolve(true));
+      socket.on("connect", () => {
+        socket.destroy();
+        resolve(false);
+      });
+    });
+    expect(refused).toBe(true);
+  });
+
+  it("ends a connection whose far end sends a ping over the 125 bytes a control frame may carry, and echoes none of it", async () => {
+    const sockets: Socket[] = [];
+    const received: Buffer[] = [];
+    const host: Server = createHttpServer();
+    host.on("upgrade", (request, socket: Socket) => {
+      sockets.push(socket);
+      const accept = createHash("sha1")
+        .update(
+          `${String(request.headers["sec-websocket-key"])}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`,
+        )
+        .digest("base64");
+      socket.on("data", (chunk: Buffer) => received.push(chunk));
+      // A 256-byte ping: two length bytes after 126.
+      socket.write(
+        Buffer.concat([
+          Buffer.from(
+            `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+          ),
+          Buffer.from([0x89, 126, 0x01, 0x00]),
+          Buffer.alloc(256, 7),
+        ]),
+      );
+    });
+    await new Promise<void>((resolve) => host.listen(0, "127.0.0.1", () => resolve()));
+    cleanups.push(() => {
+      for (const socket of sockets) socket.destroy();
+      host.close();
+    });
+    const hostPort = (host.address() as AddressInfo).port;
+    const listening = await listenForPortForward(
+      { hostId: HOST_ID, forward: forward(0) },
+      {
+        sign: async () => ({ status: "signed", headers: { "x-octant-device-proof": "proof" } }),
+        upgradeToHost: (request) =>
+          upgradeThroughListener(
+            {
+              listenerOrigin: "https://192.168.1.20:9443",
+              trust: { current: { kind: "platform" } },
+            },
+            request,
+            async () => ({ status: "connected", socket: connectTcp(hostPort, "127.0.0.1") }),
+          ),
+      },
+    );
+    if (listening.status !== "listening") throw new Error(listening.message);
+    cleanups.push(listening.close);
+    const client = connectTcp(listening.port, "127.0.0.1");
+    cleanups.push(() => client.destroy());
+    await new Promise<void>((resolve) => client.on("close", () => resolve()));
+    // At most a close frame went back, never a 256-byte pong.
+    expect(Buffer.concat(received).byteLength).toBeLessThan(64);
+  });
+});

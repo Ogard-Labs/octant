@@ -19567,6 +19567,37 @@ describe("continuing a Code turn a restart cut off", () => {
     }
   });
 
+  it("starts no turn the host begins as itself on Google Antigravity, and takes the person's own", async () => {
+    const antigravity = provider();
+    const host = runtimeFixture({
+      provider: {
+        ...providerDriver(antigravity.connection),
+        kind: "antigravity",
+      } as ProviderDriver,
+    });
+    try {
+      // A continuation, a wake, Auto-fix, a coordinator's worker, a routine
+      // and a child's result all start a Code turn under the host's scope.
+      await expect(host.runtime.execute(ROUTINE_HOST_SCOPE_ID, start(71))).resolves.toMatchObject({
+        kind: "operation-failed",
+        admission: "refused",
+        failure: {
+          category: "unauthorized",
+          message:
+            "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Choose a provider that uses a Gemini API key, such as Gemini CLI with an API key.",
+        },
+      });
+      expect(antigravity.connection.send).not.toHaveBeenCalled();
+
+      await expect(host.runtime.execute(windowId, start(72))).resolves.toMatchObject({
+        kind: "provider-turn-state",
+        state: "running",
+      });
+    } finally {
+      host.close();
+    }
+  });
+
   it("holds a thread whose cut-off turn never reached its provider, instead of continuing the previous turn's session", async () => {
     const first = await hostRunningTurn();
     const hosts: Host[] = [first.host];

@@ -244,6 +244,40 @@ describe("server Project catalog", () => {
     expect(afterRemoval.wasRemoved(projectId)).toBe(true);
   });
 
+  it("records closed at the next start a port forward a stopped run left open, with the ports alone", () => {
+    const directory = scratch();
+    const server = answering(() => resolvedTo("/srv/app"));
+    const journal = openJournal(directory);
+    const store = storeOn(journal, server.connection);
+    const ports = { projectId: "project-1", remotePort: 5432, localPort: 5432 };
+    expect(store.recordForward({ event: "opened", ...ports })).toBe(true);
+    expect(store.recordForward({ event: "closed", ...ports, reason: "stopped" })).toBe(true);
+    expect(store.recordForward({ event: "opened", ...ports, localPort: 54321 })).toBe(true);
+
+    const restarted = storeOn(openJournal(directory), server.connection);
+    restarted.closeForwardsLeftOpen();
+    // Already closed, so a second start records nothing more.
+    storeOn(openJournal(directory), server.connection).closeForwardsLeftOpen();
+    const forwards = openJournal(directory)
+      .replayAggregateType({ aggregateType: "server-projects", afterSequence: 0, limit: 10 })
+      .map((envelope) => ({ eventName: envelope.eventName, payload: envelope.payload }));
+    expect(forwards).toEqual([
+      { eventName: "server-projects.port-forward-opened@1", payload: ports },
+      {
+        eventName: "server-projects.port-forward-closed@1",
+        payload: { ...ports, reason: "stopped" },
+      },
+      {
+        eventName: "server-projects.port-forward-opened@1",
+        payload: { ...ports, localPort: 54321 },
+      },
+      {
+        eventName: "server-projects.port-forward-closed@1",
+        payload: { ...ports, localPort: 54321, reason: "host-stopped" },
+      },
+    ]);
+  });
+
   it("keeps a Work Project apart from Code ones, and a Code Project's record as it was", async () => {
     const directory = scratch();
     const server = answering(() => resolvedTo("/srv/notes"));

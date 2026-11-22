@@ -2,6 +2,7 @@ import {
   ServerProjectPreviewTunnel,
   type ServerProjectRelayedPreviewOpener,
 } from "./ServerProjectPreviewTunnel";
+import { ServerProjectPortForward } from "./ServerProjectPortForward";
 import {
   CLOUD_MACHINE_SUSPENDED_NOTICE,
   CloudMachinesSettings,
@@ -43,6 +44,8 @@ export interface ServerProjectsSettingsProps {
         | "command"
         | "previewRead"
         | "previewCommand"
+        | "forwardRead"
+        | "forwardCommand"
         | "cloudMachinesRead"
         | "cloudMachinesCommand"
       >
@@ -431,6 +434,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
                     ? {}
                     : { onOpenRelayedPreview: props.onOpenRelayedPreview })}
                 />
+                <ServerProjectPortForward client={client} project={project} />
               </li>
             ))}
           </ul>

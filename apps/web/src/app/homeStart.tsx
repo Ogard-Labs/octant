@@ -30,7 +30,11 @@ import {
   type PullRequestCardRow,
 } from "../home/pullRequests";
 import { createPullRequestsCard } from "../home/PullRequestsCard";
-import type { RemoteOpenMode, RemoteOpenOutcome } from "../home/runningServices";
+import type {
+  RemoteForwardOutcome,
+  RemoteOpenMode,
+  RemoteOpenOutcome,
+} from "../home/runningServices";
 import { createRunningServicesCard } from "../home/RunningServicesCard";
 import { createWorkingNowCard, type WorkingNowCardSource } from "../home/WorkingNowCard";
 import type { WorkingNowThread } from "../home/workingNow";
@@ -113,12 +117,20 @@ export interface HomeStartInput {
   readonly openRunningServiceLive:
     | ((service: RunningService, mode: RemoteOpenMode) => Promise<RemoteOpenOutcome>)
     | undefined;
+  readonly forwardRunningServicePort:
+    | ((service: RunningService) => Promise<RemoteForwardOutcome>)
+    | undefined;
   readonly pendingRequestClient: LaunchedShellClients["pendingRequestClient"];
   readonly remoteRunningServicesClient: ReturnType<typeof createLocalServerClient> | undefined;
   readonly runningServicesClient: ReturnType<typeof createLocalServerClient> | undefined;
   readonly runningServicesRemoteHost:
     | { readonly status: "disconnected"; readonly hostName: string }
-    | { readonly status: "ready"; readonly hostName: string }
+    | {
+        readonly status: "ready";
+        readonly hostName: string;
+        /** That computer admitted this device because the hub introduced it. */
+        readonly throughHub?: boolean;
+      }
     | undefined;
   readonly serverUrl: string;
   readonly settings: ShellController["settings"];
@@ -177,6 +189,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
     onOpenOtherComputerAsk,
     now,
     openRunningServiceLive,
+    forwardRunningServicePort,
     pendingRequestClient,
     remoteRunningServicesClient,
     runningServicesClient,
@@ -322,6 +335,13 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
           canOpen: () => false,
           onOpenTarget: actions.openRunningService,
           ...(openRunningServiceLive === undefined ? {} : { openLive: openRunningServiceLive }),
+          ...(forwardRunningServicePort === undefined
+            ? {}
+            : { forwardPort: forwardRunningServicePort }),
+          ...(runningServicesRemoteHost.status === "ready" &&
+          runningServicesRemoteHost.throughHub === true
+            ? { forwardsThreadServersOnly: true }
+            : {}),
         }),
     createPullRequestsCard({
       available: pullRequestCardAvailable({

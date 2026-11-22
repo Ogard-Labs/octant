@@ -599,7 +599,11 @@ import {
   disconnectedRunningServicesClient,
   useRemoteServerLiveOpener,
 } from "./home/remoteServerLiveOpener";
-import type { RemoteOpenMode, RemoteOpenOutcome } from "./home/runningServices";
+import type {
+  RemoteForwardOutcome,
+  RemoteOpenMode,
+  RemoteOpenOutcome,
+} from "./home/runningServices";
 import { buildReviewEntries } from "./review/reviewModel";
 import { createReviewSource } from "./review/reviewSource";
 import type { ReviewActionOutcome } from "./review/ReviewPage";
@@ -2378,12 +2382,16 @@ function LaunchedShell(
       hostName: slot.displayName,
       origin: slot.origin,
       bridge: slot.bridge,
+      throughHub:
+        hostFederationLifecycle?.list().find((snapshot) => snapshot.hostId === hostId)?.through ===
+        "hub",
     };
     // The transport slot changes in place; the revision says when to look again.
   }, [
     remoteServerLiveOpener,
     createHostViewScope,
     hostFederationTransports,
+    hostFederationLifecycle,
     federationRevision,
     environmentNames,
   ]);
@@ -2445,6 +2453,7 @@ function LaunchedShell(
           hostId: host.hostId,
           hostName: host.hostName,
           origin: host.origin,
+          credentialKeyId: credential.keyId,
           issueSession: () => connection.issueServerProxySession(),
           sign: (payload) => deviceKey.sign(payload),
           // A computer paired through Other computers is reached through the
@@ -2459,6 +2468,44 @@ function LaunchedShell(
       );
     };
   }, [remoteServerLiveOpener, federation, pairedComputerFetch]);
+  const forwardRunningServicePort = useMemo(() => {
+    const host = runningServicesRemoteHost;
+    const openForward = remoteServerLiveOpener?.openForward;
+    const registry = federation?.registry;
+    const deviceKeyStore = federation?.deviceKeyStore;
+    if (host === undefined || host.status !== "ready" || openForward === undefined)
+      return undefined;
+    if (registry === undefined || deviceKeyStore === undefined) return undefined;
+    return async (service: RunningService): Promise<RemoteForwardOutcome> => {
+      const credential = (await registry.get(host.hostId))?.credential;
+      const connection = host.bridge.connection();
+      if (credential === undefined || connection === undefined) {
+        return {
+          kind: "refused",
+          message: `Can't reach ${host.hostName}. Check that it's on and on the same network.`,
+        };
+      }
+      const deviceKey = createPairingDeviceKeyAdapter(deviceKeyStore, credential.keyId);
+      return openForward(
+        {
+          hostId: host.hostId,
+          hostName: host.hostName,
+          origin: host.origin,
+          credentialKeyId: credential.keyId,
+          issueSession: () => connection.issueServerProxySession(),
+          sign: (payload) => deviceKey.sign(payload),
+          ...(pairedComputerFetch === undefined || !isRemotePairingOrigin(host.origin)
+            ? {}
+            : { fetch: pairedComputerFetch }),
+        },
+        // A computer that admitted this device through the hub forwards only a
+        // thread's running server, and takes the port from its own listing.
+        host.throughHub
+          ? { surface: "running-services", listenerId: service.listenerId }
+          : Number(service.port),
+      );
+    };
+  }, [runningServicesRemoteHost, remoteServerLiveOpener, federation, pairedComputerFetch]);
   const openRunningServiceLive = useMemo(() => {
     const host = runningServicesRemoteHost;
     if (host === undefined || host.status !== "ready" || openPairedComputerServer === undefined) {
@@ -2500,6 +2547,7 @@ function LaunchedShell(
           hostId: host.hostId,
           hostName: host.hostName,
           origin: host.origin,
+          credentialKeyId: credential.keyId,
           issueSession: () => connection.issueServerProxySession(),
           sign: (payload) => deviceKey.sign(payload),
           ...(pairedComputerFetch === undefined || !isRemotePairingOrigin(host.origin)
@@ -6263,6 +6311,7 @@ function LaunchedShell(
     now: snoozeClockNow.getTime(),
     onOpenExternal: rootLinkActions.openExternal,
     openRunningServiceLive,
+    forwardRunningServicePort,
     pendingRequestClient,
     remoteRunningServicesClient,
     runningServicesClient,

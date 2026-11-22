@@ -12,6 +12,7 @@ import {
   guardAgentRequest,
   type AgentSessionDependencies,
   type AgentThreadAccess,
+  chatTurnProviders,
 } from "./agentAccessSession";
 
 const grantId = "10000000-0000-4000-8000-000000000001";
@@ -50,6 +51,9 @@ const chatThread = "30000000-0000-4000-8000-000000000005";
 const turnKey = "60000000-0000-4000-8000-000000000001";
 const otherModelThread = "30000000-0000-4000-8000-000000000006";
 const workThread = "30000000-0000-4000-8000-000000000007";
+const antigravityThread = "30000000-0000-4000-8000-000000000008";
+const ANTIGRAVITY_OUTSIDE_AGENT_REFUSAL =
+  "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or use a provider that uses a Gemini API key.";
 
 function deps() {
   const recorded: Array<{ threadId: string; mode: string }> = [];
@@ -85,7 +89,8 @@ function deps() {
     threadId === autoThread ||
     threadId === chatThread ||
     threadId === workThread ||
-    threadId === otherModelThread
+    threadId === otherModelThread ||
+    threadId === antigravityThread
       ? { projectId: granted }
       : threadId === strangerThread
         ? { projectId: other }
@@ -115,7 +120,9 @@ function deps() {
                   access: "ask-first",
                   fullAccessSandbox: false,
                 }
-              : undefined;
+              : threadId === antigravityThread
+                ? { ...askFirst, outsideAgentRefusal: ANTIGRAVITY_OUTSIDE_AGENT_REFUSAL }
+                : undefined;
   return { service, threadProject, threadAccess, recorded, turned, sentTurns };
 }
 
@@ -406,6 +413,34 @@ describe("prompts an outside agent sends", () => {
     expect(order).toEqual([`marked ${projectThread}`, "sent"]);
   });
 
+  it("marks nothing and sends nothing when the thread's turn could run on Google Antigravity", async () => {
+    const { service, threadProject, threadAccess } = deps();
+    const markOutsideContent = vi.fn();
+    const dispatch = vi.fn(async () => Response.json({}));
+    const session = createAgentSession({
+      grant: grant({ threads: "project" }),
+      signal: new AbortController().signal,
+      deps: {
+        service,
+        threadProject,
+        threadAccess,
+        hostId: () => "40000000-0000-4000-8000-000000000001",
+        markOutsideContent,
+        dispatch,
+      },
+    });
+    const answer = await session.send({
+      path: "/api/code/commands",
+      method: "POST",
+      body: { kind: "start-provider-turn", operationId: turnKey, threadId: antigravityThread },
+    });
+    expect(answer.status).toBe(403);
+    // Refused before the mark, so a send that never reached the thread leaves
+    // no outside content to gate its later helpers.
+    expect(markOutsideContent).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it("sends nothing when the mark cannot be recorded", async () => {
     const { service, threadProject, threadAccess } = deps();
     const dispatch = vi.fn(async () => Response.json({}));
@@ -483,6 +518,25 @@ describe("threads the person made in a granted Project", () => {
       );
     expect(send(projectThread)).toBe("allowed");
     expect(send(otherModelThread)).toBe("refused");
+  });
+
+  it("take no prompt or answer when the thread runs on Google Antigravity, and say why", () => {
+    const check = (body: Readonly<Record<string, unknown>>, path = "/api/code/commands") =>
+      guardAgentRequest({
+        grant: grant({ threads: "project", tools: ["start_work", "answer_question"] }),
+        request: { path, method: "POST", body },
+        deps: deps(),
+      });
+    const refusal = { kind: "refused", message: ANTIGRAVITY_OUTSIDE_AGENT_REFUSAL };
+    expect(
+      check({ kind: "start-provider-turn", operationId: turnKey, threadId: antigravityThread }),
+    ).toEqual(refusal);
+    expect(check({}, `/api/native-harness/sessions/${antigravityThread}/questions`)).toEqual(
+      refusal,
+    );
+    expect(
+      check({ kind: "start-provider-turn", operationId: turnKey, threadId: projectThread }).kind,
+    ).toBe("allowed");
   });
 
   it("count toward the running-turn limit once the agent runs a turn there", async () => {
@@ -659,5 +713,36 @@ describe("the sender of each turn", () => {
         { threads: "project" },
       ),
     ).toBe("refused");
+  });
+});
+
+describe("the providers an outside agent's Chat turn could run on", () => {
+  it("takes the thread's own, the running turn's, every local pool candidate and the Chat fallback", () => {
+    expect(
+      chatTurnProviders({
+        selected: "p-thread",
+        live: "p-live",
+        pool: [
+          { hostId: "local", providerInstanceId: "p-pool" },
+          { hostId: "other-host", providerInstanceId: "p-foreign" },
+        ],
+        fallback: "p-fallback",
+      }),
+    ).toEqual(["p-thread", "p-live", "p-pool", "p-fallback"]);
+    expect(chatTurnProviders({ selected: "p-thread" })).toEqual(["p-thread"]);
+  });
+
+  it("leaves out a pool candidate or fallback that is turned off, which routing never sends to", () => {
+    expect(
+      chatTurnProviders({
+        selected: "p-thread",
+        pool: [
+          { hostId: "local", providerInstanceId: "p-pool-off" },
+          { hostId: "local", providerInstanceId: "p-pool" },
+        ],
+        fallback: "p-fallback-off",
+        isEnabled: (providerInstanceId) => !providerInstanceId.endsWith("-off"),
+      }),
+    ).toEqual(["p-thread", "p-pool"]);
   });
 });

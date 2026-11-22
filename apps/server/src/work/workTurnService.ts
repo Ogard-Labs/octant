@@ -107,6 +107,7 @@ import {
   type WorkThreadAdoptedSession,
   decodeThreadWorkingDirectory,
   ProviderNativeSessionId,
+  personalSignInRefusals,
   type ImportedSessionHistory,
 } from "@octant/contracts";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
@@ -1579,6 +1580,14 @@ export class WorkTurnService {
       driverKind: providerInstance?.driverKind,
     });
     if (sandboxRefusal !== undefined) throw this.#failure("unavailable", sandboxRefusal);
+    // A turn the host starts as itself (a routine, a wake, a goal round, a
+    // usage-limit or restart continuation, a child's result, a peer's task)
+    // has no person driving it, which some providers' personal sign-in does
+    // not cover. A person's own send carries their window, never this scope.
+    const unattended = isRoutineHostScope(authenticatedWindowId)
+      ? personalSignInRefusals(providerInstance?.driverKind ?? "")?.refusesUnattendedRuns
+      : undefined;
+    if (unattended !== undefined) throw this.#failure("unauthorized", unattended);
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
     // A thread in a server Work Project binds its turn here, before anything
     // starts: the harness's tools on the server, or why it cannot run there.

@@ -20,7 +20,8 @@ the server, with the Work sidebar, composer, and thread view that open them
 ([Work Projects](#work-projects)); routines that target a server Project,
 chosen in Automation Center's editor or confirmed from a thread there and
 run by this host's scheduler ([Routines](#routines)); person-operated
-loopback dev-server previews ([Previews](#person-operated-dev-server-previews));
+loopback dev-server previews ([Previews](#person-operated-dev-server-previews))
+and raw TCP port forwards ([Port forwards](#person-operated-port-forwards));
 and the seam, host lifecycle, host-key pinning, suspended refusal and
 Settings screen for machines in the person's own cloud account, with no
 target plugin yet
@@ -212,6 +213,23 @@ checks never change registry/configuration or journal state.
   several words because csh refuses one past about 8 KiB.
 - The script's own exit status 255 is reported as 254, so 255 always means
   ssh itself failed.
+- **A stream to a long-running program.** A program that speaks over its
+  standard streams for as long as it runs, such as a provider's app server,
+  is started through the same
+  shared connection, pinned host key, options and encoded `sh` call, with no
+  terminal so bytes pass through unchanged. Its script ends by `exec`-ing the
+  program, so the program reads standard input directly; stopping the stream
+  closes standard input and ends the connection if it is still open two
+  seconds later; output still unread when the stream has not closed by four
+  seconds after the stop is discarded, so the stream's end never waits on a caller that stopped
+  reading. As with a command, a mark goes out before the program
+  starts, so a login shell's greeting never reaches the caller, and the call
+  sets `StdinNull=no` so a person's ssh config cannot hand the program EOF.
+  Because the program replaces the shell, its exit status is reported as it
+  is: a stream's 255 may be the program's own or ssh's, and the status alone
+  cannot tell them apart, even after the program has answered. Nothing is forwarded, and no secret goes in the command line,
+  which the server's process list shows. Built; Codex's app-server and Claude
+  Code run over it ([Providers running on the server](#providers-running-on-the-server)).
 - **Fail closed.** When a call cannot reach the server (the connection drops,
   times out, is refused, or the host key does not match), that call is refused
   with `server-unreachable` and nothing runs anywhere else. There is no local
@@ -230,12 +248,147 @@ checks never change registry/configuration or journal state.
   ([Worktrees and pull requests](#worktrees-and-pull-requests)).
 - **Octant Harness, or a provider on the server.** A thread there runs on the
   Octant Harness, whose inference stays on this host and whose hands are on
-  the server. Built so far: every other runtime is refused before it launches,
-  naming why: its own tools act on this host's files. A provider that runs on
-  the server itself is designed, not built
-  ([Providers running on the server](#providers-running-on-the-server)). Delegation, Browser, Computer, connectors, and forks are not
+  the server, or in a Code Project on a provider runtime that runs on the
+  server itself ([Providers running on the server](#providers-running-on-the-server)).
+  Every other runtime is refused before it launches, naming why: its own tools
+  act on this host's files. Delegation, Browser, Computer, connectors, and forks are not
   offered there, since each acts on this host. The routine tools are offered,
   since they act only on this host's routine records ([Routines](#routines)).
+- **Providers running on the server.** A provider runtime that reports
+  `serverPlacement: "supported"` runs a Code turn on the server with no Octant
+  installed there (maintainer decisions, 2026-11-19 and 2026-11-20). Built for
+  Codex and Claude Code. OpenCode, Pi and the ACP agents report it
+  unsupported, because their Octant tools reach this host's loopback, and
+  they are not run on a server.
+  - The runtime's program starts in the Project's folder on the server through
+    the Project's connection as a stream to a long-running program (`codex
+app-server --listen stdio://` after `codex --version` there; for Claude Code,
+    the Agent SDK's own launch of `claude` after `claude --version` there), and
+    speaks its protocol over that stream. Octant's own tools travel inside that
+    protocol (Claude Code's in-process MCP server, `canUseTool` and the SDK's
+    hooks ride its stream-json control channel), so nothing on the server
+    reaches this host. The provider SDK hands the runtime a placement
+    (`ProviderServerPlacement`) that names only the program and its arguments;
+    the host owns the connection, its pinned host key and its quoting, and no
+    secret goes on the command line. Claude Code's launch passes on only the
+    SDK's fixed switches (`env CLAUDE_CODE_ENTRYPOINT=… claude …`), none of
+    this host's environment.
+  - It uses the server login's own sign-in; no credential of this host goes
+    there, including a Claude API-key or gateway account's key: on a server
+    Claude Code signs in as that login. It keeps the thread's level, which maps
+    to its own sandbox and approval policy as on this host; at Full access it
+    runs on that server with no sandbox, as it would there on its own. Plan runs
+    in the provider's own read-only plan mode; Claude Code's Plan there has no
+    shell, since the sandbox that keeps Plan's commands read-only on this host
+    cannot run there. Codex's Plan there is refused (see below).
+  - At Guarded and Accept edits, Codex's own workspace sandbox on the server
+    refuses the other providers' sign-ins there, as Octant refuses them on this
+    host: before the program starts, the host reads the login's home (`$HOME`,
+    `uname -s`, and `$CODEX_HOME`) on the server and resolves the secret
+    guard's Provider sign-ins group for it (Claude's `~/.claude` credentials,
+    other providers' auth files, after the person's Protected files choice),
+    leaving out Codex's own entry (`~/.codex/auth.json`) and anything of this
+    host. No other entry is ever dropped for lying under `CODEX_HOME`: when
+    Codex's home (trailing slashes ignored) holds a denied path or lies inside
+    one, Codex would have to reach a protected sign-in to run, so the launch
+    is refused at the sandboxed levels, naming the overlap. Full
+    access runs no sandbox there, so no list is read for it. Those paths go to
+    Codex as `deny` entries in the thread's permissions profile. A Codex there
+    older than the first release that takes a profile (0.169.0) is refused at
+    those levels, naming the server and the release, rather than run with the
+    sign-ins readable. A home that cannot be read (empty, relative, or one
+    for which the group yields no path while the person has not removed it)
+    refuses the launch; a trailing slash on `$HOME` is ignored.
+    _Rationale:_ Codex's built-in workspace sandbox limits writes but has no
+    deny field, so under the same login it could read another provider's
+    sign-in. Full access carries no such list, as Full access is no sandbox.
+    Plan refuses Codex on a server whenever the list is not empty, saying why
+    and pointing to Guarded, and the composer's first notice for Codex on a
+    server says Plan isn't available while those sign-ins are protected: Codex's built-in read-only sandbox has no deny
+    field, and the only profile Octant has measured Codex taking extends
+    `:workspace`, which can write the folder, so nothing read-only can carry
+    the list.
+  - Before a turn starts the program, the host runs the provider's own status
+    command on the server as that login (`codex login status`, whose exit
+    status answers; `claude auth status --json`, whose `loggedIn` answers) and
+    keeps nothing else it prints. A login that is not signed in refuses the
+    turn before anything starts, naming the server and telling the person to
+    sign in there, for example in the Project terminal; an answer it cannot
+    read refuses too, saying so, and an unreachable server keeps the
+    unreachable refusal. A signed-in answer is held for five minutes per
+    server and provider, so the command does not run before every turn; any
+    other answer is never held, so signing in there counts at the next turn.
+    A Codex app-server already running for the thread is reused without a
+    new check.
+  - Every program a placed runtime starts is recorded on the server, so one
+    a dropped connection leaves running is stopped. Its start runs behind a
+    shell that writes the shell's PID and start identity (on Linux the boot id
+    and `/proc/<pid>/stat` field 22, elsewhere `ps -o lstart=`) to
+    `~/.octant/server-runtimes/<host tag>.<run>.<sequence>` under umask 077,
+    then `exec`s the program, which keeps both; a program that cannot be
+    recorded does not start. The host tag is a digest of this host's id, the
+    run names this run of the host, and the host keeps in memory, per server
+    login, which of this run's programs it still holds open. When a stream
+    ends without the program's own exit (the connection dropped, or the host
+    ended a connection whose program ignored the end of its input), and at the
+    next provider call to that login (a program a runtime starts or runs
+    there; Files and Git calls do not sweep), the host runs a sweep there that takes every
+    record of its tag from an earlier run and every record of this run whose
+    stream has ended. A recorded PID that is alive, not a zombie, and still
+    has its recorded start identity gets TERM, then KILL if it is still that
+    process after five seconds; then the record is removed. A PID whose start
+    identity differs belongs to another program and is left running, and a
+    record of another host's tag, or of a program this host still holds open,
+    is never touched. A sweep that cannot reach the server keeps every record
+    for the next call. Only the recorded program itself is stopped: a child it
+    started and left behind is not recorded.
+  - Strict refuses it, naming why: Octant's own sandbox cannot run on a
+    server, and Octant claims no sandbox there. A Claude Code thread that keeps
+    Octant's sandbox at Full access, and Codex at Full access with its opt-in
+    sandbox, are refused the same way rather than run unconfined.
+  - Claude Code there reads nothing of this host's Claude account: not its
+    environment or account folder, not its instruction files (Claude Code
+    reads the server's own; where a setting source is off, such as a Project
+    whose code is not trusted, Octant reads that source's `CLAUDE.md` and
+    rules files on the server as text, skipping links and leaving imports as
+    written, and trusts nothing by reading them), not its stored task list (the panel starts empty
+    and follows the task tools), not its Git identity, sign-in check or egress
+    proxy, and it gets no Artifact tool, since a publish snapshots a file on
+    this host.
+  - Claude Code resumes its own session on the server: before each turn the
+    host asks the server whether the session's transcript is in the login's
+    `${CLAUDE_CONFIG_DIR:-~/.claude}/projects/<folder>/`, where `<folder>` comes
+    from the folder's canonical path there. A folder that does not open
+    there leaves the session as it was, like a server that does not answer.
+    A missing transcript ends the
+    resume as a stale one, so the thread carries on with the text handoff a
+    missing session gets on this host; a server that does not answer leaves
+    the session as it was. A rewind sends the text handoff, as for any server
+    thread: no session is copied on this host.
+  - Its gate judges the server's paths by name: inside the Project means
+    beneath its folder as written, since this host cannot resolve a link
+    there; the secret guard's list (outside Strict, the provider sign-ins) is
+    matched by name, and below Full access a search rooted outside the
+    Project's folders is refused whole, since the server's folders cannot be
+    walked from here for a protected file. A worktree Claude Code makes is held
+    only when its call names its path, or when it lands inside the Project's
+    folder.
+  - The thread gets none of this host's checkout tools, extensions,
+    attachments folder, Browser, Computer or forks; only the routine tools,
+    which act on this host's records, join its own. Checkpoints and change
+    observation stay off, as for any server thread.
+  - The composer offers such a runtime in a Code Project on a server, and the
+    first time a person picks it for a server, says once what it means: the
+    provider runs there as itself with its own sandbox and plan mode; its
+    model requests leave from the server, so this computer's network limits
+    don't cover them; approvals, Stop and the thread's history stay on this
+    computer. Details keeps it one click away after that. The provider is
+    listed only once this host has probed it; its models come from this
+    host's catalog for it.
+  - Not built yet: a Claude Code account this host has not signed in (its
+    model list is this host's probe, so the turn is refused until it is),
+    stopping what a recorded program started and left behind, and Work
+    Projects, which stay on the Octant Harness.
 - **Attached files.** A file the turn names by path rather than sends (any
   file but an image or a file the model takes natively) is copied before the
   turn is accepted, over the Project's own SSH connection, into the thread's
@@ -265,9 +418,12 @@ checks never change registry/configuration or journal state.
   ([Plan and Chat tool parity](../architecture.md#security-and-authority)).
 - **The same levels.** The thread's guardrail level is resolved as it is for
   any Code thread (thread, then the account default), and decides each call as
-  it does locally: Plan is read-only, Guarded asks for every command and edit,
-  Accept edits waives edits inside the folder, Reviewed hands each request to
-  the chosen reviewer, and Full access asks nobody.
+  it does locally for Octant's own tools: Plan is read-only, Guarded asks for
+  every command and edit, Accept edits waives edits inside the folder, Reviewed
+  hands each request to the chosen reviewer, and Full access asks nobody. A
+  provider running on the server (Codex, Claude Code) maps the level to its own
+  sandbox and approval policy instead, and decides its own prompts inside that
+  sandbox ([Providers running on the server](#providers-running-on-the-server)).
 - **Reviewed on a server.** Shield judges a server Project's call by that
   server's action profile, as it judges a command that names the server over
   ssh. A command is placed in the same tiers: one the profile includes passes,
@@ -511,7 +667,8 @@ Octant's window on their own computer. Designed, not built.
   terminal session at creation. _Rationale:_ the issue readers and the session
   reader read this host's accounts and folders on the thread's behalf; the
   narrower choice keeps the thread's sources on the server it works on.
-- **Turns.** A turn runs on the Octant Harness only, with the same file tools
+- **Turns.** A turn runs on the Octant Harness only (a Code Project may also
+  run a provider on the server; Work stays on the Harness), with the same file tools
   and shell on the server as a Code thread there ([Threads](#threads)): the
   same access levels and approvals, every command asking again below Full
   access, every command journaled as `shield-remote-commands.ran@1`, and no
@@ -792,7 +949,9 @@ the person's cloud account.
   upstream in place of a local port, under the relay's grant, budgets and
   WebSocket rules. The preview's limits stay (eight streams, an hour, the
   one-second sweep, `ClearAllForwardings=yes`), and its outcome is journaled
-  as `server-projects.preview-outcome@2`, naming the device as owner.
+  as `server-projects.preview-outcome@2`, naming the device as owner. A
+  device cannot forward a server Project's port
+  ([Port forwards](#person-operated-port-forwards)).
 - **Cloud machines.** Creating, binding, refreshing, suspending, resuming and
   destroying from a device follow the same rules, the destroy confirmation
   included: the host issues it to that device's session, and a confirmation
@@ -825,6 +984,9 @@ the person's cloud account.
   Settings row above, which also offers a saved-action presentation switch; a
   general Developer tools pane remains absent.
 - Extra folders in a server Project.
+- A port forward from a server Project to a paired device's own computer, and
+  more than one forward per Project at a time
+  ([Port forwards](#person-operated-port-forwards)).
 - A Project-level guardrail level or reviewer for a server Project; the
   thread and account levels apply.
 - Real servers are untested: the connection, folder check, file tools,
@@ -974,6 +1136,30 @@ The effective local URL and remote port are visible. Where a paired Octant
 host already owns the dev server, use its existing paired-host preview. An SSH
 alias is not evidence of a paired-host identity.
 
+The panel lists what the SSH login serves from the Project's folder: the
+login's own listening TCP sockets, read on the server with `lsof` or `ss` over
+the pinned connection, kept when the process works inside the folder, with only
+the port, the bound address and the process's short name returned (never a
+command line or another login's process; under a privileged login each process
+must also be owned by the login, since `ss` shows every account's). **Preview**
+on a row starts the preview for that port, offered only when the socket answers
+on `127.0.0.1` (IPv4 loopback or a wildcard bind), where the forward connects; a
+socket bound only to `[::1]`, a LAN address, or an IPv6-only wildcard (which
+`ss` writes as `[::]`, keeping `*` for a dual-stack one) is listed without it.
+`lsof` writes every wildcard as `*`, so an IPv6-only one it reports keeps
+Preview. Only a local
+window reads the list, under the same rule as starting a preview; a paired
+device is not offered it and sees no local-address guidance, since its preview
+is relayed. A server with neither tool says so.
+
+The forward is raw TCP, so any service works, not only web pages: a database on
+the server is reached at the local address with its own client. The local
+address is `127.0.0.1` on this computer, and the panel says who can reach it
+(maintainer decision, 2026-11-20): agents' guarded tool commands can't, since
+Octant's egress proxy refuses loopback unless the person adds a `localServices`
+grant for that port and thread; a Full access thread, and a provider runtime not
+routed through the proxy, can, as they can reach any local service.
+
 The plain SSH path owns a private loopback TCP listener and at most eight
 concurrent, dedicated `ssh -W` stdio streams. This carries HTTP and WebSocket
 upgrades unchanged. It uses no shared command socket, starts no remote program,
@@ -1014,3 +1200,42 @@ The journal records Project, owner window, selected ports, effective local URL
 and lifecycle outcomes as `server-projects.preview-outcome@1`. It records no
 credentials, stderr, HTTP bodies or page contents. Active listeners are not
 restored on restart. Opening a new preview requires another person action.
+
+## Person-operated port forwards
+
+A local person can open **Forward a port** under a bound Project in Settings ›
+Permissions › Servers, beside the dev-server preview, and type a port on that
+server's literal `127.0.0.1`, such as `5432` for a database. The forward carries
+raw TCP to this computer's `127.0.0.1`, on the same port number when this
+computer has it free and another free port otherwise, so a database client, a
+debugger or any other TCP tool reaches the server's port. Nothing checks that an
+HTTP server answers, and no page opens.
+
+A forward is the preview's raw relay without its link: the same dedicated
+`ssh -W` stdio stream per connection, at most eight at once, the same SSH
+options, and the same checks of the current Project, registered server, binding
+identity and owner window before listening and before each stream. A Project
+holds one forward and one preview at a time, apart from each other. A forward
+ends after one hour, when its window closes, when the Project's binding changes,
+when an SSH stream fails (shown as lost; the person stops it and forwards again),
+when the person stops it, and when the host stops. Stopping a forward leaves the
+server's program running.
+
+Only an authenticated window on this computer may start, read or stop a forward
+(`/api/server-project-forward`, not on the remote route list). The host refuses
+every device, a person-paired one too: a device's preview goes through the
+private listener's relay instead of a loopback listener, and no relay carries a
+server Project's raw TCP to a device yet.
+
+The forward listens on `127.0.0.1` alone, which any process on this computer can
+reach. A guarded tool command reaches it only with a `localServices` grant, but
+a Full access turn and a runtime not routed through Octant's proxy reach it
+without one. The row says so with the sentence a forward from another Octant
+computer shows (maintainer decision, 2026-11-20).
+
+Opening and closing are journaled as `server-projects.port-forward-opened@1` and
+`server-projects.port-forward-closed@1` with the Project, the server's port and
+the local port, never the server's address, an endpoint or what travels. A
+closing names its reason (`stopped`, `expired`, `revoked`, `lost`,
+`host-stopped`), and a starting host records closed (`host-stopped`) every
+forward the journal still shows open, since no forward outlives its run.

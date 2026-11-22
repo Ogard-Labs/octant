@@ -3,10 +3,12 @@ import {
   decodeCodeThreadId,
   decodeWorkThreadId,
   DEFAULT_WORK_ACCESS,
+  personalSignInRefusals,
   type AgentRun,
   type AgentRunAuthority,
   type AgentRunParentThreadId,
   type CodeThread,
+  type ProviderInstanceId,
   type WindowId,
   type WorkAccess,
   type WorkThread,
@@ -127,14 +129,41 @@ export function parentRunsAtFullAccess(
   }
 }
 
-export function authorizeAgentRunCreation(input: {
+type AgentRunCreationInput = {
   readonly persistence: PersistenceService;
   readonly workThreadProjection: WorkThreadProjection;
   readonly parentThreadId: AgentRunParentThreadId;
   readonly windowId: string;
   readonly codeSessionAuthority: CodeSessionAuthorityStore;
   readonly activeTurn?: CodeParentActiveTurn;
-}): AgentRunControlParentFacts | undefined {
+  /**
+   * The provider of the thread's running turn, from the live-turn registry
+   * (a turn waiting on a question still holds it); undefined with none.
+   */
+  readonly liveTurnProvider?: (threadId: string) => ProviderInstanceId | undefined;
+};
+
+export function authorizeAgentRunCreation(
+  input: AgentRunCreationInput,
+): AgentRunControlParentFacts | undefined {
+  const parent = authorizeParentThread(input);
+  if (parent === undefined) return undefined;
+  // The agent asking for a helper is the one on the thread's running turn,
+  // which a Chat model pool or provider fallback may have put on another
+  // provider than the thread's own; with no turn running, a retry or resume
+  // of an earlier helper is judged by the provider the thread has now.
+  const provider =
+    input.liveTurnProvider?.(String(parent.workspaceParent.threadId)) ??
+    parent.parentRoute.providerInstanceId;
+  const refusal = personalSignInRefusals(
+    input.persistence.readProviderInstance(provider)?.driverKind ?? "",
+  )?.refusesHelperRuns;
+  return refusal === undefined ? parent : { ...parent, helperRunRefusal: refusal };
+}
+
+function authorizeParentThread(
+  input: AgentRunCreationInput,
+): AgentRunControlParentFacts | undefined {
   const workspace = input.persistence.readWindowWorkspace(input.windowId as WindowId)?.workspace;
   if (workspace === undefined) return undefined;
 

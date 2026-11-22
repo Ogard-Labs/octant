@@ -184,6 +184,31 @@ export type RemoteServerPageBridgeOutcome =
   | { readonly kind: "opened"; readonly notice?: string }
   | { readonly kind: "refused"; readonly message: string };
 
+export type RemotePortForwardBridgeOutcome =
+  | { readonly kind: "listening"; readonly port: number }
+  | { readonly kind: "refused"; readonly message: string };
+
+function decodeRemotePortForwardOutcome(value: unknown): RemotePortForwardBridgeOutcome {
+  if (typeof value === "object" && value !== null) {
+    const record = value as {
+      readonly kind?: unknown;
+      readonly port?: unknown;
+      readonly message?: unknown;
+    };
+    if (
+      record.kind === "listening" &&
+      typeof record.port === "number" &&
+      Number.isInteger(record.port)
+    ) {
+      return { kind: "listening", port: record.port };
+    }
+    if (record.kind === "refused" && typeof record.message === "string") {
+      return { kind: "refused", message: record.message };
+    }
+  }
+  return { kind: "refused", message: "Octant could not forward this port." };
+}
+
 function decodeRemoteServerPageOutcome(value: unknown): RemoteServerPageBridgeOutcome {
   if (typeof value === "object" && value !== null) {
     const record = value as {
@@ -528,6 +553,7 @@ export interface OctantHostBridge {
    * request; the answer is opened, or refused with words for the row.
    */
   readonly openRemoteServerPage?: (request: unknown) => Promise<RemoteServerPageBridgeOutcome>;
+  readonly openRemotePortForward?: (request: unknown) => Promise<RemotePortForwardBridgeOutcome>;
   readonly forgetRemoteServerPages?: (
     hostId: string,
   ) => Promise<{ readonly status: "forgotten" | "incomplete"; readonly message?: string }>;
@@ -1394,6 +1420,17 @@ export function createHostBridge(
               return { kind: "refused", message: "Octant could not open this server." };
             }
           },
+          openRemotePortForward: async (
+            request: unknown,
+          ): Promise<RemotePortForwardBridgeOutcome> => {
+            try {
+              return decodeRemotePortForwardOutcome(
+                await ipc.invoke(IPC_CHANNELS.remotePortForwardOpen, request),
+              );
+            } catch {
+              return { kind: "refused", message: "Octant could not forward this port." };
+            }
+          },
           forgetRemoteServerPages: async (hostId: string) => {
             const outcome = (await ipc
               .invoke(IPC_CHANNELS.remoteServerPageForgetHost, hostId)
@@ -1709,6 +1746,7 @@ export const OCTANT_ONLY_BRIDGE_MEMBERS: ReadonlySet<string> = new Set([
   "requestPairedComputer",
   "introduceWindowToHub",
   "openRemoteServerPage",
+  "openRemotePortForward",
   "forgetRemoteServerPages",
   "subscribeRemoteServerPageSigning",
   "hubAdministrationRequest",

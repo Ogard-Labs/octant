@@ -25,8 +25,14 @@ import {
   SERVER_PROJECTS_AGGREGATE_ID,
   SERVER_PROJECTS_EVENT_NAMES,
   SERVER_PROJECTS_EVENT_NAMES_V2,
+  SERVER_PROJECTS_PORT_FORWARD_CLOSED,
+  SERVER_PROJECTS_PORT_FORWARD_OPENED,
   SERVER_PROJECTS_PREVIEW_OUTCOME_V1,
+  decodeServerPortForwardClosedPayload,
+  decodeServerPortForwardOpenedPayload,
   ServerFolderPath,
+  type ServerPortForwardCloseReason,
+  type ServerPortForwardOpenedPayload,
   type ServerProject,
   type ServerProjectsRefusalReason,
 } from "@octant/contracts/server-projects";
@@ -122,6 +128,8 @@ export class ServerProjectStore {
   // Ids the person removed, so a routine still naming one can say why it
   // stopped instead of reading as a Project nobody knows.
   readonly #removed = new Set<string>();
+  // Port forwards the journal shows opened and not yet closed, by Project.
+  readonly #openForwards = new Map<string, ServerPortForwardOpenedPayload>();
   #version = 0;
 
   constructor(options: ServerProjectStoreOptions) {
@@ -133,6 +141,7 @@ export class ServerProjectStore {
   load(): void {
     this.#projects.clear();
     this.#removed.clear();
+    this.#openForwards.clear();
     let after = 0;
     for (;;) {
       const batch = this.#options.journal.replayAggregateType({
@@ -410,6 +419,43 @@ export class ServerProjectStore {
     return this.#append(SERVER_PROJECTS_PREVIEW_OUTCOME_V1, payload, this.#personActor);
   }
 
+  /**
+   * A port forward's opening or closing, journaled as the person at a local
+   * window with the Project and the ports alone.
+   */
+  recordForward(
+    record:
+      | ({ readonly event: "opened" } & ServerPortForwardOpenedPayload)
+      | ({
+          readonly event: "closed";
+          readonly reason: ServerPortForwardCloseReason;
+        } & ServerPortForwardOpenedPayload),
+  ): boolean {
+    const opened = {
+      projectId: record.projectId,
+      remotePort: record.remotePort,
+      localPort: record.localPort,
+    };
+    const [eventName, payload] =
+      record.event === "opened"
+        ? [SERVER_PROJECTS_PORT_FORWARD_OPENED, opened]
+        : [SERVER_PROJECTS_PORT_FORWARD_CLOSED, { ...opened, reason: record.reason }];
+    if (!this.#append(eventName, payload, this.#personActor)) return false;
+    this.#apply(eventName, payload);
+    return true;
+  }
+
+  /**
+   * Forwards live only in the host's memory, so one the journal still shows
+   * open was left by a run that stopped without closing it. A starting host
+   * records each closed, so the journal never shows a forward nothing serves.
+   */
+  closeForwardsLeftOpen(): void {
+    for (const opened of this.#openForwards.values()) {
+      this.recordForward({ event: "closed", ...opened, reason: "host-stopped" });
+    }
+  }
+
   setDeveloperTools(input: {
     readonly projectId: string;
     readonly enabled: boolean;
@@ -461,6 +507,15 @@ export class ServerProjectStore {
   }
 
   #apply(eventName: string, payload: unknown): void {
+    if (eventName === SERVER_PROJECTS_PORT_FORWARD_OPENED) {
+      const opened = decodeServerPortForwardOpenedPayload(payload);
+      this.#openForwards.set(opened.projectId, opened);
+      return;
+    }
+    if (eventName === SERVER_PROJECTS_PORT_FORWARD_CLOSED) {
+      this.#openForwards.delete(decodeServerPortForwardClosedPayload(payload).projectId);
+      return;
+    }
     if (
       eventName === SERVER_PROJECTS_EVENT_NAMES.developerToolsChanged ||
       eventName === SERVER_PROJECTS_EVENT_NAMES_V2.developerToolsChanged

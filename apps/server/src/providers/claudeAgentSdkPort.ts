@@ -45,6 +45,8 @@ import {
 } from "./claudeAgentSdkDecoder";
 import { BoundedAsyncInput, makeClaudeCloseCoordinator } from "./claudeAgentSdkLifecycle";
 import type { ClaudeProcessPort, SpawnClaudeCodeProcess } from "./claudeProcess";
+import { CLAUDE_SERVER_PROGRAM } from "./claudeServerProcess";
+import type { ProviderServerPlacement } from "@octant/provider-sdk/driver";
 import type { ClaudeTaskToolOutput } from "./claudeTaskList";
 import type { ProviderRuntimeProxiedNetwork } from "../network/providerRuntimeNetwork";
 
@@ -190,6 +192,11 @@ export interface ClaudeOpenQueryInput {
    * through its egress proxy: the launch's listener and proxy variables.
    */
   readonly network?: ProviderRuntimeProxiedNetwork;
+  /**
+   * The server a server Project's session runs on: the runtime starts there
+   * as `claude`, through the host's connection, instead of `binaryPath` here.
+   */
+  readonly serverPlacement?: ProviderServerPlacement;
   readonly model: string;
   /** Agent SDK `effort` for the session; absent means the SDK default. */
   readonly effort?: ClaudeEffortLevel;
@@ -1256,6 +1263,15 @@ function isValidSandboxNetwork(network: unknown, blocked = false): boolean {
 }
 
 function hasValidSandbox(input: ClaudeOpenQueryInput, platform: NodeJS.Platform): boolean {
+  // On a server no Octant sandbox can run, so a placed launch carries none at
+  // any level, and one that asks for Octant's boundary is refused.
+  if (input.serverPlacement !== undefined)
+    return (
+      input.sandbox === undefined &&
+      input.strict !== true &&
+      input.fullAccessSandbox !== true &&
+      input.sandboxPolicy === undefined
+    );
   // Claude Code has no command sandbox on Windows, so a launch there carries
   // none: one asking for it with `failIfUnavailable` would leave every
   // command unable to run. Its permission modes hold the turn instead.
@@ -1650,6 +1666,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               : { readOnlyFolders: [input.attachmentsFolder] }),
             runsCommands: input.tools.includes("Bash"),
             ...(input.network === undefined ? {} : { network: input.network }),
+            ...(input.serverPlacement === undefined ? {} : { server: input.serverPlacement }),
           });
           // The runtime process this query's launch produced, kept so a stuck
           // turn can be killed without the graceful close that waits on it.
@@ -1884,7 +1901,10 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               model: input.model,
               ...(Object.keys(flagSettings).length === 0 ? {} : { settings: flagSettings }),
               ...(input.effort === undefined ? {} : { effort: input.effort }),
-              pathToClaudeCodeExecutable: input.binaryPath,
+              // A placed launch names the server's own `claude`; the SDK then
+              // passes it as the command with the CLI's arguments alone.
+              pathToClaudeCodeExecutable:
+                input.serverPlacement === undefined ? input.binaryPath : CLAUDE_SERVER_PROGRAM,
               systemPrompt: {
                 type: "preset",
                 preset: "claude_code",

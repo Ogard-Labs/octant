@@ -73,13 +73,19 @@ export function hubActScopeFromHost(sides: {
   };
 }
 
-/** The three things the Act item lets such a device do in a Project it names. */
-export type HubActAction = "start" | "answer" | "stop";
+/**
+ * What the Act item lets such a device do in a Project it names: start
+ * threads, answer their approvals and questions, Stop, and forward the port of
+ * a running server of one of its threads (maintainer decision, 2026-11-21).
+ */
+export type HubActAction = "start" | "turn" | "answer" | "stop" | "forward";
 
 const ACTION_WORDS: Readonly<Record<HubActAction, string>> = {
   start: "start threads",
+  turn: "send turns",
   answer: "answer approvals or questions",
   stop: "stop turns",
+  forward: "forward ports",
 };
 
 /** The sentence a refused request shows, naming what the member would change. */
