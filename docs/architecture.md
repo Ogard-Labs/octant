@@ -22113,8 +22113,15 @@ included (the process reads it outside the sandbox; no command needs it).
 Turns run with no approvals inside it, and a command it refuses fails rather
 than leaving it. Before a thread starts, the server asks Codex
 `windowsSandbox/readiness`; anything but `ready`, an older Codex without that
-request, a Codex before permission profiles (0.169.0), or a protected store
-Codex's globs cannot name refuses the thread by name before it starts. Nothing
+request, a Codex before permission profiles, or a protected store Codex's
+globs cannot name refuses the thread by name before it starts. The two version
+checks guard different things. Permission profiles have a measured floor:
+0.169.0 is the first release that took a named profile from a thread's config
+and refused its `deny` paths (the same floor as the guarded levels outside
+Strict, `CODEX_PERMISSION_PROFILES_RELEASE`), and without a profile the deny
+list cannot reach Codex at all. The elevated sandbox's own floor is not pinned,
+so it is never inferred from a version: the readiness request is the check, and
+a Codex that cannot answer it is refused. Nothing
 retries without the sandbox, and Codex still works with Strict off. A writable
 folder that overlaps `CODEX_HOME` and a profile-root `CODEX_HOME` keep
 refusing: Codex leaves its home out of its commands' writable roots
