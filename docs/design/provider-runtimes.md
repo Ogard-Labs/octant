@@ -1734,7 +1734,12 @@ means no sandbox of Codex's own, as every turn's external sandbox tells
 Codex (codex-rs matches `danger-full-access` against an external sandbox as
 the same mode, `collect_resume_override_mismatches`); Octant's profile holds
 the level, read-only in Plan and the Project at the guarded levels, and the
-review asks nothing, as Codex's own review asks nothing. Rationale for a
+review asks nothing, as Codex's own review asks nothing. Windows Strict at
+Full access is the exception: there no Octant profile wraps the process, so
+the review thread starts under the session's own Codex permissions profile,
+the one admitted at session start with the protected files denied, and is
+refused when no such profile was admitted
+([Codex's own sandbox on Windows](../architecture.md#codexs-own-sandbox-on-windows)). Rationale for a
 thread of its own over running inline on the session's thread, as Codex's
 terminal client does: `thread/start` takes the level at once, whereas the
 session's thread holds whatever its last turn stated; a Strict thread before

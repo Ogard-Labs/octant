@@ -455,7 +455,7 @@ Status: Built. Since: 2026-11-16. Detail: [Provider runtimes: Claude Code](provi
 
 Codex's built-in `/review` works in Octant as it does in Codex on its own: in every Work and Code mode, Plan and Strict included, Octant starts Codex's review run (`review/start`) on the thread's checkout and never refuses it there (maintainer decisions, 2026-11-16 and 2026-11-18).
 
-- The review runs at the thread's level with no approvals, as Codex's own review agent does: outside Octant's sandbox in Codex's own read-only sandbox, inside it (Strict, Plan, Full access that keeps the sandbox) under Octant's sandbox, which keeps Plan read-only.
+- The review runs at the thread's level with no approvals, as Codex's own review agent does: outside Octant's sandbox in Codex's own read-only sandbox, inside it (Strict, Plan, Full access that keeps the sandbox) under Octant's sandbox, which keeps Plan read-only. Under Windows Strict at Full access it runs under the session's admitted Codex permissions profile, protected files denied (2026-11-22).
 - Its findings show in the thread as a review result, not as edits or a plan, and reach the session's own thread so a follow-up turn sees them.
 - What the turn carries (Octant's context, waiting messages, a handoff, attached images) reaches the session's thread before the review starts. A Codex release that cannot take it there still reviews, says so in the reply, and the driver sends it with the thread's next turn.
 - Chat, which has no Project, does not start one; only a release without `review/start` reports the review unsupported.
