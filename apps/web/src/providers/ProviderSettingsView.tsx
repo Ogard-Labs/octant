@@ -13,6 +13,7 @@ import {
   type DiscoverySnapshot,
   type IdeogramImageProviderConfiguration,
   type GeminiImageProviderConfiguration,
+  type GeminiVideoProviderConfiguration,
   type OpenAiCompatibleProviderConfiguration,
   type OpenAiImageProviderConfiguration,
   type OllamaProviderConfiguration,
@@ -120,6 +121,11 @@ export interface ProviderSettingsViewProps {
     configuration: GeminiImageProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
+  readonly onCreateGeminiVideo: (
+    displayName: string,
+    configuration: GeminiVideoProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
   readonly onCreateBflImage: (
     displayName: string,
     configuration: BflImageProviderConfiguration,
@@ -182,6 +188,11 @@ export interface ProviderSettingsViewProps {
   readonly onChangeGeminiImageConfiguration: (
     instanceId: ProviderInstanceId,
     configuration: GeminiImageProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onChangeGeminiVideoConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: GeminiVideoProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
   readonly onChangeBflImageConfiguration: (
@@ -486,6 +497,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangeOpenAiCompatibleConfiguration={props.onChangeOpenAiCompatibleConfiguration}
         onChangeOpenAiImageConfiguration={props.onChangeOpenAiImageConfiguration}
         onChangeGeminiImageConfiguration={props.onChangeGeminiImageConfiguration}
+        onChangeGeminiVideoConfiguration={props.onChangeGeminiVideoConfiguration}
         onChangeBflImageConfiguration={props.onChangeBflImageConfiguration}
         onChangeIdeogramImageConfiguration={props.onChangeIdeogramImageConfiguration}
         onChangePiConfiguration={props.onChangePiConfiguration}

@@ -53,6 +53,7 @@ import {
   CodexConfigurationForm,
   FoundryConfigurationForm,
   GeminiImageConfigurationForm,
+  GeminiVideoConfigurationForm,
   HttpConfigurationForm,
   IdeogramImageConfigurationForm,
   OpenAiImageConfigurationForm,
@@ -118,6 +119,7 @@ export type ProviderSettingsListProps = Pick<
   | "onChangeAzureFoundryConfiguration"
   | "onChangeOpenAiImageConfiguration"
   | "onChangeGeminiImageConfiguration"
+  | "onChangeGeminiVideoConfiguration"
   | "onChangeBflImageConfiguration"
   | "onChangeIdeogramImageConfiguration"
   | "onProviderCredentialStatus"
@@ -228,7 +230,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
       if (!instance.enabled) {
         off += 1;
       } else if (isMediaProfileDriverKind(instance.driverKind)) {
-        // Image profiles have no runtime to observe — probing one is refused —
+        // Image and video profiles have no runtime to observe — probing one is refused —
         // so an enabled one has no readiness this summary could state.
         continue;
       } else if (
@@ -395,6 +397,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
         onChangeAzureFoundryConfiguration={props.onChangeAzureFoundryConfiguration}
         onChangeOpenAiImageConfiguration={props.onChangeOpenAiImageConfiguration}
         onChangeGeminiImageConfiguration={props.onChangeGeminiImageConfiguration}
+        onChangeGeminiVideoConfiguration={props.onChangeGeminiVideoConfiguration}
         onChangeBflImageConfiguration={props.onChangeBflImageConfiguration}
         onChangeIdeogramImageConfiguration={props.onChangeIdeogramImageConfiguration}
         onClearProviderCredential={props.onClearProviderCredential}
@@ -755,6 +758,7 @@ interface ProviderRowProps {
   readonly onChangeAzureFoundryConfiguration: ProviderSettingsViewProps["onChangeAzureFoundryConfiguration"];
   readonly onChangeOpenAiImageConfiguration: ProviderSettingsViewProps["onChangeOpenAiImageConfiguration"];
   readonly onChangeGeminiImageConfiguration: ProviderSettingsViewProps["onChangeGeminiImageConfiguration"];
+  readonly onChangeGeminiVideoConfiguration: ProviderSettingsViewProps["onChangeGeminiVideoConfiguration"];
   readonly onChangeBflImageConfiguration: ProviderSettingsViewProps["onChangeBflImageConfiguration"];
   readonly onChangeIdeogramImageConfiguration: ProviderSettingsViewProps["onChangeIdeogramImageConfiguration"];
   readonly onProviderCredentialStatus: ProviderSettingsViewProps["onProviderCredentialStatus"];
@@ -918,6 +922,9 @@ function ProviderRow(props: ProviderRowProps) {
   const isBflImage = props.instance.driverKind === "bfl-image";
   const isIdeogramImage = props.instance.driverKind === "ideogram-image";
   const isImageProfile = isOpenAiImage || isGeminiImage || isBflImage || isIdeogramImage;
+  const isGeminiVideo = props.instance.driverKind === "gemini-video";
+  // Image and video profiles hold a key and have no runtime to check.
+  const isMediaProfile = isImageProfile || isGeminiVideo;
   const outsideInstance =
     props.instance.driverKind === "outside-harness-endpoint" ? props.instance : undefined;
   const usesCredential =
@@ -925,7 +932,7 @@ function ProviderRow(props: ProviderRowProps) {
     isHttp ||
     isAnthropicHttp ||
     isFoundry ||
-    isImageProfile ||
+    isMediaProfile ||
     (isClaude && props.instance.configuration.authentication !== "subscription") ||
     acpInstance?.configuration.authentication === "api-key";
   const browserClaudeKeySetup = isClaude && usesCredential && !props.credentialManagementAvailable;
@@ -956,7 +963,9 @@ function ProviderRow(props: ProviderRowProps) {
           ? ""
           : isImageProfile
             ? "Image"
-            : "HTTP";
+            : isGeminiVideo
+              ? "Video"
+              : "HTTP";
   const toggleEnabled = async () => {
     const nextEnabled = !props.instance.enabled;
     const updated = await props.onSetEnabled(props.instance.id, nextEnabled);
@@ -1231,7 +1240,7 @@ function ProviderRow(props: ProviderRowProps) {
             </div>
           </section>
           <div className="provider-card__actions">
-            {isImageProfile ? null : (
+            {isMediaProfile ? null : (
               <OctantButton
                 aria-label={`Check connection for ${props.instance.displayName}`}
                 disabled={disabled || !props.instance.enabled}
@@ -1515,6 +1524,16 @@ function ProviderRow(props: ProviderRowProps) {
                   instance={props.instance}
                   key={`gemini-image:${props.instance.version}`}
                   onChange={props.onChangeGeminiImageConfiguration}
+                  onClearCredential={props.onClearProviderCredential}
+                />
+              ) : isGeminiVideo ? (
+                <GeminiVideoConfigurationForm
+                  credential={credential}
+                  credentialManagementAvailable={props.credentialManagementAvailable}
+                  disabled={disabled}
+                  instance={props.instance}
+                  key={`gemini-video:${props.instance.version}`}
+                  onChange={props.onChangeGeminiVideoConfiguration}
                   onClearCredential={props.onClearProviderCredential}
                 />
               ) : isBflImage ? (
@@ -1925,6 +1944,12 @@ function ProviderRow(props: ProviderRowProps) {
                     {props.instance.configuration.resolution === undefined ? null : (
                       <span>Resolution: {props.instance.configuration.resolution}</span>
                     )}
+                  </div>
+                )}
+                {!isGeminiVideo ? null : (
+                  <div className="provider-card__facts provider-card__facts--image">
+                    <span>Default model: {props.instance.configuration.defaultModel}</span>
+                    <span>Allowlist: {props.instance.configuration.modelAllowlist.join(", ")}</span>
                   </div>
                 )}
                 {!isBflImage ? null : (

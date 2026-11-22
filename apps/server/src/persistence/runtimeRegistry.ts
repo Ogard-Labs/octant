@@ -293,6 +293,12 @@ import {
   IMAGE_JOB_STATUS_CHANGED,
   ImageJobQueued,
   ImageJobStatusChanged,
+  VIDEO_JOB_PROVIDER_COPY_CHANGED,
+  VIDEO_JOB_QUEUED,
+  VIDEO_JOB_STATUS_CHANGED,
+  VideoJobProviderCopyChanged,
+  VideoJobQueued,
+  VideoJobStatusChanged,
   BROWSER_CAPTURE_KEPT,
   BROWSER_STEP_RECORDED,
   BrowserCaptureKept,
@@ -564,6 +570,7 @@ import {
   GithubCloneProjection,
 } from "./githubCloneProjection";
 import { ImageJobProjection } from "../image/imageJobProjection";
+import { VideoJobProjection } from "../video/videoJobProjection";
 import { registerBenchmarkEvents } from "../benchmarks/benchmarkEventStore";
 import { registerPullRequestReviewEvents } from "../pullRequestReviewers/pullRequestReviewService";
 import { BenchmarkProjection } from "../benchmarks/benchmarkProjection";
@@ -588,6 +595,7 @@ export interface Phase1RuntimeRegistries {
   readonly automationProjection: AutomationProjection;
   readonly githubCloneProjection: GithubCloneProjection;
   readonly imageJobProjection: ImageJobProjection;
+  readonly videoJobProjection: VideoJobProjection;
   readonly benchmarkProjection: BenchmarkProjection;
   readonly desktopLeaseProjection: DesktopLeaseProjection;
   readonly replicaMembershipProjection: ReplicaMembershipProjection;
@@ -1014,6 +1022,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(GITHUB_CLONE_TRANSITIONED, 1, GithubCloneTransitioned)
     .register(IMAGE_JOB_QUEUED, 1, ImageJobQueued)
     .register(IMAGE_JOB_STATUS_CHANGED, 1, ImageJobStatusChanged)
+    .register(VIDEO_JOB_QUEUED, 1, VideoJobQueued)
+    .register(VIDEO_JOB_STATUS_CHANGED, 1, VideoJobStatusChanged)
+    .register(VIDEO_JOB_PROVIDER_COPY_CHANGED, 1, VideoJobProviderCopyChanged)
     .register(BROWSER_CAPTURE_KEPT, 1, BrowserCaptureKept)
     .register(BROWSER_DOWNLOAD_EVENT_NAMES.saved, 1, BrowserDownloadSaved)
     .register(BROWSER_DOWNLOAD_EVENT_NAMES.selectedSaved, 1, BrowserDownloadSelectedSaved)
@@ -1091,6 +1102,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   const automationProjection = new AutomationProjection();
   const githubCloneProjection = new GithubCloneProjection();
   const imageJobProjection = new ImageJobProjection();
+  const videoJobProjection = new VideoJobProjection();
   const benchmarkProjection = new BenchmarkProjection();
   const desktopLeaseProjection = new DesktopLeaseProjection();
   const replicaMembershipProjection = new ReplicaMembershipProjection();
@@ -1104,6 +1116,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     automationProjection,
     githubCloneProjection,
     imageJobProjection,
+    videoJobProjection,
     benchmarkProjection,
     desktopLeaseProjection,
     replicaMembershipProjection,
@@ -1126,6 +1139,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(automationProjection)
       .register(githubCloneProjection)
       .register(imageJobProjection)
+      .register(videoJobProjection)
       .register(benchmarkProjection)
       .register(desktopLeaseProjection)
       .register(new ZenProjection())

@@ -1,0 +1,938 @@
+import { createHash } from "node:crypto";
+import {
+  MAX_QUEUED_VIDEO_JOBS,
+  MAX_VIDEO_PROMPT_CHARACTERS,
+  VIDEO_GENERATION_REQUEST_SHAPE,
+  VIDEO_JOB_AGGREGATE_TYPE,
+  VIDEO_JOB_HOST_CONCURRENCY,
+  VIDEO_JOB_PROVIDER_COPY_CHANGED,
+  VIDEO_JOB_QUEUED,
+  VIDEO_JOB_STATUS_CHANGED,
+  VIDEO_JOB_TIMEOUT_MS,
+  AggregateId,
+  CorrelationId,
+  EventId,
+  decodeAggregateVersion,
+  decodeSpendCeilingReservationId,
+  decodeUsageReconciliationId,
+  decodeUtcTimestamp,
+  decodeVideoClipId,
+  decodeVideoJobId,
+  type EventActor,
+  type ImageGenerationScopeId,
+  type ProviderFailure,
+  type ProviderInstance,
+  type ProviderInstanceId,
+  type ProviderModelId,
+  type SpendCeilingRefusal,
+  type SpendCeilingReservationId,
+  type UtcTimestamp,
+  type VideoClipOptions,
+  type VideoDriverKind,
+  type VideoJob,
+  type VideoJobId,
+  type VideoJobStatusChanged,
+  type VideoJobThreadKind,
+  type VideoModelCapabilities,
+  type VideoProviderCopy,
+} from "@octant/contracts";
+import {
+  checkVideoClipOptions,
+  estimateVideoCost,
+  estimateVideoPromptTokens,
+  isVideoProfileDriverKind,
+  settleVideoCostUsdMicros,
+  type VideoCostEstimate,
+} from "@octant/domain";
+import { admittedBundledVideoDriverKinds } from "@octant/plugin-host/provider-drivers";
+import {
+  videoFailure,
+  type VideoAdapterPoll,
+  type VideoAdapterUsage,
+  type VideoGenerationAdapter,
+  type VideoGenerationDriver,
+} from "@octant/provider-sdk/video-generation";
+import type { ImageAdapterReference } from "@octant/provider-sdk/image-generation";
+import type { ImageHttpFetch } from "../image/imageHttp";
+import { Schema } from "effect";
+import type { Journal } from "../persistence/journal";
+import { ConcurrencyConflict } from "../persistence/journalErrors";
+import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
+import type { SpendCeilingService } from "../spendCeilingService";
+import { geminiVideoDriver } from "./geminiVideoAdapter";
+import type { VideoClipStore } from "./videoClipStore";
+import { makeVideoGenerationPorts } from "./videoHttp";
+import type { VideoJobProjection } from "./videoJobProjection";
+
+const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
+const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
+const decodeEventId = Schema.decodeUnknownSync(EventId);
+type JournalPort = Pick<Journal, "append">;
+
+const BUNDLED_VIDEO_DRIVERS: ReadonlyArray<VideoGenerationDriver> = [geminiVideoDriver];
+const FIRST_POLL_MS = 5_000;
+const MAX_POLL_MS = 30_000;
+/** How often a removal the provider refused is tried again while the host runs. */
+export const VIDEO_REMOVAL_RETRY_MS = 15 * 60 * 1000;
+
+export class VideoJobServiceError extends Error {
+  readonly category: "invalid" | "ineligible" | "busy" | "spend-ceiling" | "conflict";
+  readonly refusal?: SpendCeilingRefusal;
+
+  constructor(
+    category: VideoJobServiceError["category"],
+    message: string,
+    refusal?: SpendCeilingRefusal,
+  ) {
+    super(message);
+    this.name = "VideoJobServiceError";
+    this.category = category;
+    if (refusal !== undefined) this.refusal = refusal;
+  }
+}
+
+export interface VideoJobInputs {
+  readonly firstFrame?: ImageAdapterReference;
+  readonly lastFrame?: ImageAdapterReference;
+  readonly references: ReadonlyArray<ImageAdapterReference>;
+}
+
+export interface EnqueueVideoJobInput extends VideoJobInputs {
+  readonly threadKind: VideoJobThreadKind;
+  readonly scopeId: ImageGenerationScopeId;
+  readonly profileInstanceId: ProviderInstanceId;
+  readonly modelId: ProviderModelId;
+  readonly prompt: string;
+  readonly options: VideoClipOptions;
+}
+
+/** What the card needs before Generate: the model's declaration, the check, and the price. */
+export type VideoQuote =
+  | {
+      readonly status: "ready";
+      readonly driverKind: VideoDriverKind;
+      readonly profileName: string;
+      readonly model: VideoModelCapabilities;
+      readonly estimate: VideoCostEstimate;
+    }
+  | { readonly status: "refused"; readonly reason: string };
+
+export interface VideoJobServiceOptions {
+  readonly journal: JournalPort;
+  readonly projection: VideoJobProjection;
+  readonly clips: VideoClipStore;
+  readonly readProviderInstance: (id: ProviderInstanceId) => ProviderInstance | undefined;
+  readonly listProviderInstances?: () => ReadonlyArray<ProviderInstance>;
+  readonly credentialResolver: ProviderCredentialResolver;
+  readonly uuid: () => string;
+  readonly clock: () => string;
+  readonly actor: typeof EventActor.Type;
+  readonly fetch?: ImageHttpFetch;
+  readonly drivers?: ReadonlyArray<VideoGenerationDriver>;
+  /** Video driver kinds the plugin activation ladder admits; bundled policy by default. */
+  readonly admittedDriverKinds?: ReadonlySet<string>;
+  readonly spendCeiling?: Pick<SpendCeilingService, "admit" | "settle" | "abandon">;
+  readonly resolveThreadProjectId?: (input: {
+    readonly threadType: VideoJobThreadKind;
+    readonly threadId: string;
+  }) => string | undefined;
+  /** Waits `ms`, or less when `signal` aborts. Injected so tests run without real time. */
+  readonly sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+  readonly now?: () => number;
+  readonly onChanged?: (job: VideoJob) => void;
+}
+
+interface Running {
+  readonly controller: AbortController;
+  readonly reservationId?: SpendCeilingReservationId;
+  stopRequested: boolean;
+}
+
+function realSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    const timer = setTimeout(done, ms);
+    function done() {
+      signal.removeEventListener("abort", done);
+      clearTimeout(timer);
+      resolve();
+    }
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
+
+function hashPrompt(prompt: string): string {
+  return createHash("sha256").update(prompt, "utf8").digest("hex");
+}
+
+function sanitizedFailure(failure: ProviderFailure): ProviderFailure {
+  return {
+    category: failure.category,
+    message: failure.message.slice(0, 2_000),
+    ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
+  };
+}
+
+/**
+ * Runs video jobs through the video seam. It owns everything provider-neutral
+ * (the poll loop and its interval, the 30-minute job time, the reservation and
+ * its settlement, clip storage, the journal, restart recovery, and when the
+ * provider's copy is cancelled or removed); a driver owns only the wire.
+ */
+export class VideoJobService {
+  readonly #options: VideoJobServiceOptions;
+  readonly #drivers: ReadonlyArray<VideoGenerationDriver>;
+  readonly #admitted: ReadonlySet<string>;
+  readonly #sleep: (ms: number, signal: AbortSignal) => Promise<void>;
+  readonly #now: () => number;
+  readonly #running = new Map<string, Running>();
+  readonly #waiting: Array<() => void> = [];
+  readonly #terminalWaiters = new Map<string, Array<(job: VideoJob) => void>>();
+  readonly #inputs = new Map<string, { readonly prompt: string } & VideoJobInputs>();
+  readonly #closing = new AbortController();
+  #active = 0;
+  #removalTimer: ReturnType<typeof setInterval> | undefined;
+
+  constructor(options: VideoJobServiceOptions) {
+    this.#options = options;
+    this.#drivers = options.drivers ?? BUNDLED_VIDEO_DRIVERS;
+    this.#admitted = options.admittedDriverKinds ?? admittedBundledVideoDriverKinds();
+    this.#sleep = options.sleep ?? realSleep;
+    this.#now = options.now ?? Date.now;
+  }
+
+  getById(id: VideoJobId): VideoJob | undefined {
+    return this.#options.projection.getById(id);
+  }
+
+  listByScope(scopeId: ImageGenerationScopeId): ReadonlyArray<VideoJob> {
+    return this.#options.projection.listByScope(scopeId);
+  }
+
+  /** The video profiles a turn may use: enabled, admitted, and declaring at least one model. */
+  async readyProfiles(): Promise<
+    ReadonlyArray<{
+      readonly instance: ProviderInstance;
+      readonly models: ReadonlyArray<VideoModelCapabilities>;
+    }>
+  > {
+    const ready: Array<{
+      readonly instance: ProviderInstance;
+      readonly models: ReadonlyArray<VideoModelCapabilities>;
+    }> = [];
+    for (const candidate of this.#candidateInstances()) {
+      const adapter = this.#adapterFor(candidate);
+      if (adapter === undefined) continue;
+      const models = await adapter.models();
+      if (models.length > 0) ready.push({ instance: candidate, models });
+    }
+    return ready;
+  }
+
+  #candidateInstances(): ReadonlyArray<ProviderInstance> {
+    const list = this.#options.listProviderInstances?.() ?? [];
+    return list.filter(
+      (instance) => instance.enabled && isVideoProfileDriverKind(instance.driverKind),
+    );
+  }
+
+  /**
+   * The card's facts before Generate: the model's declaration, whether the
+   * options are within it, and the estimate. A call that skips the card uses
+   * this same quote, so nothing outside the declaration is reserved or sent.
+   */
+  async quote(input: {
+    readonly profileInstanceId: ProviderInstanceId;
+    readonly modelId: ProviderModelId;
+    readonly prompt: string;
+    readonly options: VideoClipOptions;
+    readonly firstFrame: boolean;
+    readonly lastFrame: boolean;
+    readonly referenceCount: number;
+  }): Promise<VideoQuote> {
+    const instance = this.#options.readProviderInstance(input.profileInstanceId);
+    if (instance === undefined || !instance.enabled) {
+      return { status: "refused", reason: "That video profile is not available." };
+    }
+    const driverKind = instance.driverKind;
+    if (!isVideoProfileDriverKind(driverKind)) {
+      return { status: "refused", reason: "That video profile is not available." };
+    }
+    const adapter = this.#adapterFor(instance);
+    if (adapter === undefined) {
+      return { status: "refused", reason: "That video provider's plugin is turned off." };
+    }
+    const model = (await adapter.models()).find(
+      (candidate) => String(candidate.modelId) === String(input.modelId),
+    );
+    if (model === undefined) {
+      return { status: "refused", reason: "That video profile does not offer this model." };
+    }
+    const check = checkVideoClipOptions(model, input.options, {
+      firstFrame: input.firstFrame,
+      lastFrame: input.lastFrame,
+      referenceCount: input.referenceCount,
+    });
+    if (check.status === "refused") return { status: "refused", reason: check.reason };
+    const estimate = estimateVideoCost(model.price, input.options, {
+      promptTokens: estimateVideoPromptTokens(input.prompt),
+      imageCount: (input.firstFrame ? 1 : 0) + (input.lastFrame ? 1 : 0) + input.referenceCount,
+    });
+    if (estimate.kind === "no-rate") {
+      return { status: "refused", reason: `${model.displayName} has no price for these options.` };
+    }
+    return {
+      status: "ready",
+      driverKind,
+      profileName: instance.displayName,
+      model,
+      estimate,
+    };
+  }
+
+  /**
+   * Queues a job after the same checks the card ran. Refuses when the profile
+   * is unavailable, the options are outside the model's declaration, too many
+   * video jobs are waiting, or a spend ceiling cannot cover the estimate;
+   * nothing is sent in any of those cases.
+   */
+  async enqueue(input: EnqueueVideoJobInput): Promise<VideoJob> {
+    const prompt = input.prompt.trim();
+    if (prompt.length === 0) throw new VideoJobServiceError("invalid", "The prompt is empty.");
+    if (prompt.length > MAX_VIDEO_PROMPT_CHARACTERS) {
+      throw new VideoJobServiceError("invalid", "The prompt is too long.");
+    }
+    const quote = await this.quote({
+      profileInstanceId: input.profileInstanceId,
+      modelId: input.modelId,
+      prompt,
+      options: input.options,
+      firstFrame: input.firstFrame !== undefined,
+      lastFrame: input.lastFrame !== undefined,
+      referenceCount: input.references.length,
+    });
+    if (quote.status === "refused") throw new VideoJobServiceError("ineligible", quote.reason);
+    if (this.#options.projection.countQueued() >= MAX_QUEUED_VIDEO_JOBS) {
+      throw new VideoJobServiceError("busy", "Too many video jobs are queued.");
+    }
+    const estimatedCostUsdMicros =
+      quote.estimate.kind === "estimate" ? quote.estimate.usdMicros : ("unknown" as const);
+    let reservationId: SpendCeilingReservationId | undefined;
+    if (this.#options.spendCeiling !== undefined) {
+      const candidate = decodeSpendCeilingReservationId(this.#options.uuid());
+      const projectId = this.#options.resolveThreadProjectId?.({
+        threadType: input.threadKind,
+        threadId: String(input.scopeId),
+      });
+      const admission = this.#options.spendCeiling.admit({
+        reservationId: candidate,
+        threadId: String(input.scopeId),
+        threadType: input.threadKind,
+        ...(projectId === undefined ? {} : { projectId }),
+        countsAsTurn: false,
+        skipTurnAndRunTimeCeiling: true,
+        skipTokenCeiling: true,
+        estimatedCostUsdMicros,
+      });
+      if (admission.status !== "admitted") {
+        throw new VideoJobServiceError(
+          "spend-ceiling",
+          "A spend ceiling cannot cover this clip.",
+          admission.refusal,
+        );
+      }
+      reservationId = candidate;
+    }
+    const now = decodeUtcTimestamp(this.#options.clock());
+    const job: VideoJob = {
+      id: decodeVideoJobId(this.#options.uuid()),
+      status: "queued",
+      threadKind: input.threadKind,
+      scopeId: input.scopeId,
+      profileInstanceId: input.profileInstanceId,
+      driverKind: quote.driverKind,
+      modelId: input.modelId,
+      promptHash: hashPrompt(prompt),
+      options: input.options,
+      imageCount:
+        (input.firstFrame === undefined ? 0 : 1) +
+        (input.lastFrame === undefined ? 0 : 1) +
+        input.references.length,
+      estimatedCostUsdMicros,
+      providerCopy: "none",
+      version: decodeAggregateVersion(1),
+      createdAt: now,
+      updatedAt: now,
+    };
+    try {
+      this.#append(job.id, 0, [{ eventName: VIDEO_JOB_QUEUED, payload: { job }, occurredAt: now }]);
+    } catch (error) {
+      if (reservationId !== undefined) this.#options.spendCeiling?.abandon({ reservationId });
+      throw error;
+    }
+    this.#inputs.set(String(job.id), {
+      prompt,
+      references: input.references,
+      ...(input.firstFrame === undefined ? {} : { firstFrame: input.firstFrame }),
+      ...(input.lastFrame === undefined ? {} : { lastFrame: input.lastFrame }),
+    });
+    this.#running.set(String(job.id), {
+      controller: new AbortController(),
+      stopRequested: false,
+      ...(reservationId === undefined ? {} : { reservationId }),
+    });
+    this.#notify(job);
+    void this.#schedule(job.id);
+    return job;
+  }
+
+  /** Resolves when the job reaches a terminal state, or with its current state after `timeoutMs`. */
+  async whenTerminal(id: VideoJobId, timeoutMs?: number): Promise<VideoJob | undefined> {
+    const current = this.getById(id);
+    if (current === undefined || isTerminal(current)) return current;
+    return await new Promise((resolve) => {
+      const timer =
+        timeoutMs === undefined
+          ? undefined
+          : setTimeout(() => resolve(this.getById(id)), timeoutMs);
+      const waiters = this.#terminalWaiters.get(String(id)) ?? [];
+      waiters.push((job) => {
+        if (timer !== undefined) clearTimeout(timer);
+        resolve(job);
+      });
+      this.#terminalWaiters.set(String(id), waiters);
+    });
+  }
+
+  /**
+   * Stops a job. A queued job is cancelled and billed nothing. A running job is
+   * cancelled at the provider when its model can cancel, and the service keeps
+   * polling until the provider confirms; otherwise the wait ends here and the
+   * job settles at its estimate, because the provider may still finish it.
+   */
+  stop(id: VideoJobId): void {
+    const running = this.#running.get(String(id));
+    if (running === undefined) return;
+    running.stopRequested = true;
+    running.controller.abort();
+  }
+
+  /**
+   * Reconciles what the journal left unfinished: a queued job (nothing was
+   * sent) fails as interrupted and is billed nothing; a running job with a
+   * provider id resumes while its resume window and job time allow; one
+   * without an id settles at its estimate as interrupted; and every removal
+   * still owed is tried again.
+   */
+  async recover(): Promise<void> {
+    await this.#options.clips.recover();
+    for (const job of this.#options.projection.listUnfinished()) {
+      if (job.status === "queued") {
+        this.#finish(job, "failed", {
+          failure: videoFailure("interrupted", "The host restarted before the clip was sent."),
+        });
+        continue;
+      }
+      if (job.remoteId === undefined) {
+        this.#finish(job, "failed", {
+          failure: videoFailure(
+            "interrupted",
+            "The host restarted while the clip was being sent, so it may have been billed.",
+          ),
+          settledCostUsdMicros: estimateOrZero(job),
+          billed: true,
+        });
+        continue;
+      }
+      this.#running.set(String(job.id), {
+        controller: new AbortController(),
+        stopRequested: false,
+      });
+      void this.#resume(job);
+    }
+    await this.retryOwedRemovals();
+    if (this.#removalTimer === undefined) {
+      this.#removalTimer = setInterval(() => {
+        void this.retryOwedRemovals();
+      }, VIDEO_REMOVAL_RETRY_MS);
+      this.#removalTimer.unref?.();
+    }
+  }
+
+  /** Tries again to remove each provider copy the host still owes. */
+  async retryOwedRemovals(): Promise<void> {
+    for (const job of this.#options.projection.listOwedRemovals()) {
+      await this.#forget(job);
+    }
+  }
+
+  /** Removes a thread's clips, for a thread delete. Owed provider removals stay on their jobs. */
+  async purgeScope(scopeId: ImageGenerationScopeId): Promise<void> {
+    for (const job of this.listByScope(scopeId)) {
+      if (!isTerminal(job)) this.stop(job.id);
+    }
+    await this.#options.clips.purgeScope(scopeId);
+  }
+
+  close(): void {
+    this.#closing.abort();
+    for (const running of this.#running.values()) running.controller.abort();
+    if (this.#removalTimer !== undefined) clearInterval(this.#removalTimer);
+  }
+
+  // --- running jobs ---
+
+  async #schedule(id: VideoJobId): Promise<void> {
+    if (this.#active >= VIDEO_JOB_HOST_CONCURRENCY) {
+      await new Promise<void>((resolve) => this.#waiting.push(resolve));
+    }
+    this.#active += 1;
+    try {
+      await this.#run(id);
+    } finally {
+      this.#active -= 1;
+      this.#waiting.shift()?.();
+    }
+  }
+
+  async #run(id: VideoJobId): Promise<void> {
+    const job = this.getById(id);
+    const running = this.#running.get(String(id));
+    const inputs = this.#inputs.get(String(id));
+    this.#inputs.delete(String(id));
+    if (job === undefined || running === undefined || inputs === undefined) return;
+    if (running.stopRequested || this.#closing.signal.aborted) {
+      this.#finish(job, "cancelled", {});
+      return;
+    }
+    const instance = this.#options.readProviderInstance(job.profileInstanceId);
+    const adapter = instance === undefined ? undefined : this.#adapterFor(instance);
+    if (instance === undefined || adapter === undefined) {
+      this.#finish(job, "failed", {
+        failure: videoFailure("unsupported", "That video profile is no longer available."),
+      });
+      return;
+    }
+    // Recorded before the provider is called: a restart from here on cannot
+    // know whether the provider started the job, so it settles at the estimate.
+    const sending = this.#transition(job, "running", {
+      startedAt: decodeUtcTimestamp(this.#options.clock()),
+    });
+    const started = await adapter.start({
+      modelId: job.modelId,
+      prompt: inputs.prompt,
+      options: job.options,
+      references: inputs.references,
+      ...(inputs.firstFrame === undefined ? {} : { firstFrame: inputs.firstFrame }),
+      ...(inputs.lastFrame === undefined ? {} : { lastFrame: inputs.lastFrame }),
+      signal: running.controller.signal,
+    });
+    if (started.status === "refused") {
+      this.#finish(sending, "failed", { safetyRefusal: started.safetyRefusal });
+      return;
+    }
+    if (started.status === "failed") {
+      this.#finish(
+        sending,
+        running.stopRequested ? "cancelled" : "failed",
+        running.stopRequested ? {} : { failure: started.providerFailure },
+      );
+      return;
+    }
+    const model = (await adapter.models()).find(
+      (candidate) => String(candidate.modelId) === String(job.modelId),
+    );
+    const recorded = this.#recordRemote(sending, started.remoteId, model);
+    await this.#pollToEnd(recorded, adapter, model);
+  }
+
+  async #resume(job: VideoJob): Promise<void> {
+    const instance = this.#options.readProviderInstance(job.profileInstanceId);
+    const adapter = instance === undefined ? undefined : this.#adapterFor(instance);
+    const model =
+      adapter === undefined
+        ? undefined
+        : (await adapter.models()).find(
+            (candidate) => String(candidate.modelId) === String(job.modelId),
+          );
+    const startedAt = Date.parse(job.startedAt ?? job.createdAt);
+    const windowMs = (model?.job.resumeWindowHours ?? 0) * 3_600_000;
+    if (adapter === undefined || model === undefined || this.#now() - startedAt > windowMs) {
+      this.#finish(job, "failed", {
+        failure: videoFailure(
+          "interrupted",
+          "The host restarted and can no longer reach this clip at the provider.",
+        ),
+        settledCostUsdMicros: estimateOrZero(job),
+        billed: true,
+      });
+      return;
+    }
+    await this.#pollToEnd(job, adapter, model);
+  }
+
+  #recordRemote(
+    job: VideoJob,
+    remoteId: string,
+    model: VideoModelCapabilities | undefined,
+  ): VideoJob {
+    const copy: VideoProviderCopy = model?.job.removal.kind === "expires" ? "expires" : "held";
+    return this.#annotate(job, { remoteId, providerCopy: copy });
+  }
+
+  async #pollToEnd(
+    job: VideoJob,
+    adapter: VideoGenerationAdapter,
+    model: VideoModelCapabilities | undefined,
+  ): Promise<void> {
+    const running = this.#running.get(String(job.id));
+    const remoteId = job.remoteId;
+    if (running === undefined || remoteId === undefined) return;
+    const deadline = Date.parse(job.startedAt ?? job.createdAt) + VIDEO_JOB_TIMEOUT_MS;
+    let interval = FIRST_POLL_MS;
+    let cancelAsked = false;
+    while (true) {
+      if (running.stopRequested && !cancelAsked) {
+        cancelAsked = true;
+        if (model?.job.cancel === "running") {
+          const answer = await adapter.cancel(remoteId);
+          if (answer.status !== "running") {
+            await this.#conclude(job, answer, true);
+            return;
+          }
+        } else {
+          // The model cannot stop a running job: the wait ends here, and the
+          // job settles at its estimate because the provider may still bill it.
+          this.#finish(this.#current(job), "cancelled", {
+            settledCostUsdMicros: estimateOrZero(job),
+            billed: true,
+          });
+          await this.#forget(this.#current(job));
+          return;
+        }
+      }
+      if (this.#now() >= deadline) {
+        if (model?.job.cancel === "running") await adapter.cancel(remoteId);
+        this.#finish(this.#current(job), "failed", {
+          failure: videoFailure("unavailable", "The clip took longer than 30 minutes."),
+          settledCostUsdMicros: estimateOrZero(job),
+          billed: true,
+        });
+        await this.#forget(this.#current(job));
+        return;
+      }
+      const poll = await adapter.poll(remoteId, this.#closing.signal);
+      if (poll.status !== "running") {
+        await this.#conclude(job, poll, running.stopRequested);
+        return;
+      }
+      if (this.#closing.signal.aborted) return;
+      await this.#sleep(
+        Math.min(interval, Math.max(0, deadline - this.#now())),
+        running.controller.signal.aborted && !cancelAsked
+          ? this.#closing.signal
+          : running.controller.signal,
+      );
+      interval = Math.min(Math.round(interval * 1.5), MAX_POLL_MS);
+    }
+  }
+
+  async #conclude(
+    job: VideoJob,
+    answer: Exclude<VideoAdapterPoll, { readonly status: "running" }>,
+    stopped: boolean,
+  ): Promise<void> {
+    const current = this.#current(job);
+    switch (answer.status) {
+      case "completed": {
+        const clipId = decodeVideoClipId(this.#options.uuid());
+        const written = await this.#options.clips.write(
+          current.scopeId,
+          clipId,
+          answer.video.bytes,
+        );
+        const settled = this.#settled(current, answer.usage);
+        if (written.status !== "stored") {
+          this.#finish(current, "failed", {
+            failure: videoFailure(
+              written.status === "failed" ? "unavailable" : "protocol",
+              written.status === "failed"
+                ? "The clip could not be saved on this computer; check its free disk space."
+                : "The provider returned a clip this host refuses to keep.",
+            ),
+            settledCostUsdMicros: settled,
+            billed: true,
+            ...(answer.usage === undefined ? {} : { usage: answer.usage }),
+          });
+        } else {
+          this.#finish(current, "completed", {
+            clip: {
+              clipId,
+              hash: written.hash,
+              size: written.size,
+              durationSeconds: current.options.durationSeconds,
+              resolution: current.options.resolution,
+              aspectRatio: current.options.aspectRatio,
+            },
+            settledCostUsdMicros: settled,
+            billed: true,
+            ...(answer.usage === undefined ? {} : { usage: answer.usage }),
+          });
+        }
+        break;
+      }
+      case "refused":
+        this.#finish(current, "failed", {
+          safetyRefusal: answer.safetyRefusal,
+        });
+        break;
+      case "failed":
+        this.#finish(
+          current,
+          stopped ? "cancelled" : "failed",
+          stopped ? {} : { failure: answer.providerFailure },
+        );
+        break;
+      case "cancelled":
+        this.#finish(current, "cancelled", {
+          settledCostUsdMicros: this.#settled(current, answer.usage),
+          billed: true,
+          ...(answer.usage === undefined ? {} : { usage: answer.usage }),
+        });
+        break;
+    }
+    await this.#forget(this.#current(job));
+  }
+
+  #settled(job: VideoJob, usage: VideoAdapterUsage | undefined): number {
+    return settleWithKnownPrice(job, usage, this.#priceFor(job));
+  }
+
+  #priceFor(job: VideoJob): VideoModelCapabilities["price"] | undefined {
+    return this.#priceCache.get(`${String(job.profileInstanceId)}\n${String(job.modelId)}`);
+  }
+
+  readonly #priceCache = new Map<string, VideoModelCapabilities["price"]>();
+
+  async #forget(job: VideoJob): Promise<void> {
+    if (job.providerCopy !== "held" || job.remoteId === undefined) return;
+    const instance = this.#options.readProviderInstance(job.profileInstanceId);
+    const adapter = instance === undefined ? undefined : this.#adapterFor(instance);
+    if (adapter === undefined) return;
+    const result = await adapter.forget(job.remoteId);
+    if (result.status === "removed") {
+      const current = this.#current(job);
+      const updatedAt = decodeUtcTimestamp(this.#options.clock());
+      const version = decodeAggregateVersion(current.version + 1);
+      this.#append(current.id, current.version, [
+        {
+          eventName: VIDEO_JOB_PROVIDER_COPY_CHANGED,
+          payload: { jobId: current.id, version, updatedAt, providerCopy: "removed" },
+          occurredAt: updatedAt,
+        },
+      ]);
+      this.#notify(this.#current(job));
+    }
+  }
+
+  // --- journal ---
+
+  #current(job: VideoJob): VideoJob {
+    return this.getById(job.id) ?? job;
+  }
+
+  #transition(
+    job: VideoJob,
+    toStatus: VideoJob["status"],
+    extras: Partial<Pick<VideoJobStatusChanged, "startedAt" | "remoteId" | "providerCopy">>,
+  ): VideoJob {
+    const updatedAt = decodeUtcTimestamp(this.#options.clock());
+    const version = decodeAggregateVersion(job.version + 1);
+    this.#append(job.id, job.version, [
+      {
+        eventName: VIDEO_JOB_STATUS_CHANGED,
+        payload: { jobId: job.id, fromStatus: job.status, toStatus, version, updatedAt, ...extras },
+        occurredAt: updatedAt,
+      },
+    ]);
+    const next = this.#current(job);
+    this.#notify(next);
+    return next;
+  }
+
+  /** Records the provider job id and copy state on a running job without changing its status. */
+  #annotate(
+    job: VideoJob,
+    extras: Pick<VideoJobStatusChanged, "remoteId" | "providerCopy">,
+  ): VideoJob {
+    return this.#transition(job, job.status, extras);
+  }
+
+  #finish(
+    job: VideoJob,
+    toStatus: "completed" | "failed" | "cancelled",
+    extras: {
+      readonly clip?: VideoJob["clip"];
+      readonly failure?: ProviderFailure;
+      readonly safetyRefusal?: string;
+      readonly settledCostUsdMicros?: number;
+      readonly billed?: boolean;
+      readonly usage?: VideoAdapterUsage;
+    },
+  ): VideoJob {
+    const current = this.#current(job);
+    if (isTerminal(current)) return current;
+    const running = this.#running.get(String(job.id));
+    this.#running.delete(String(job.id));
+    const updatedAt = decodeUtcTimestamp(this.#options.clock());
+    // A billed job journals its usage beside the status change, and the
+    // aggregate's version counts both events.
+    const version = decodeAggregateVersion(current.version + (extras.billed === true ? 2 : 1));
+    const settled = extras.billed === true ? extras.settledCostUsdMicros : undefined;
+    const events: Array<{ eventName: string; payload: unknown; occurredAt: UtcTimestamp }> = [
+      {
+        eventName: VIDEO_JOB_STATUS_CHANGED,
+        payload: {
+          jobId: current.id,
+          fromStatus: current.status,
+          toStatus,
+          version,
+          updatedAt,
+          ...(extras.clip === undefined ? {} : { clip: extras.clip }),
+          ...(extras.failure === undefined ? {} : { failure: sanitizedFailure(extras.failure) }),
+          ...(extras.safetyRefusal === undefined
+            ? {}
+            : { safetyRefusal: extras.safetyRefusal.slice(0, 2_000) }),
+          ...(settled === undefined ? {} : { settledCostUsdMicros: settled }),
+        },
+        occurredAt: updatedAt,
+      },
+    ];
+    if (extras.billed === true) {
+      const inputTokens = extras.usage?.inputTokens ?? 0;
+      events.push({
+        eventName: "context.usage-reconciled@1",
+        payload: {
+          reconciliation: {
+            id: decodeUsageReconciliationId(this.#options.uuid()),
+            providerInstanceId: current.profileInstanceId,
+            modelId: current.modelId,
+            requestShape: VIDEO_GENERATION_REQUEST_SHAPE,
+            plannedInputTokens: inputTokens,
+            actualInputTokens: inputTokens,
+            actualOutputTokens: extras.usage?.outputTokens ?? 0,
+            varianceTokens: 0,
+            observedAt: updatedAt,
+            ...(extras.usage?.outputTokens === undefined && extras.usage?.inputTokens === undefined
+              ? { providerReported: false }
+              : {}),
+            ...(settled === undefined || current.estimatedCostUsdMicros === "unknown"
+              ? {}
+              : { cost: { kind: "api-estimate" as const, usdMicros: settled } }),
+          },
+        },
+        occurredAt: updatedAt,
+      });
+    }
+    this.#append(current.id, current.version, events);
+    if (running?.reservationId !== undefined) {
+      if (extras.billed === true)
+        this.#options.spendCeiling?.settle({ reservationId: running.reservationId });
+      else this.#options.spendCeiling?.abandon({ reservationId: running.reservationId });
+    }
+    const next = this.#current(current);
+    this.#notify(next);
+    const waiters = this.#terminalWaiters.get(String(current.id)) ?? [];
+    this.#terminalWaiters.delete(String(current.id));
+    for (const waiter of waiters) waiter(next);
+    return next;
+  }
+
+  #append(
+    jobId: VideoJobId,
+    expectedVersion: number,
+    events: ReadonlyArray<{
+      readonly eventName: string;
+      readonly payload: unknown;
+      readonly occurredAt: UtcTimestamp;
+    }>,
+  ): void {
+    try {
+      this.#options.journal.append({
+        aggregate: {
+          aggregateType: VIDEO_JOB_AGGREGATE_TYPE,
+          aggregateId: decodeAggregateId(String(jobId)),
+        },
+        expectedVersion: decodeAggregateVersion(expectedVersion),
+        events: events.map((event) => ({
+          eventId: decodeEventId(this.#options.uuid()),
+          eventName: event.eventName,
+          eventVersion: 1,
+          correlationId: decodeCorrelationId(this.#options.uuid()),
+          actor: this.#options.actor,
+          occurredAt: event.occurredAt,
+          payload: event.payload,
+        })),
+      });
+    } catch (error) {
+      if (error instanceof ConcurrencyConflict) {
+        throw new VideoJobServiceError(
+          "conflict",
+          "The video job changed before this update could be recorded.",
+        );
+      }
+      throw error;
+    }
+  }
+
+  #notify(job: VideoJob): void {
+    this.#options.onChanged?.(job);
+  }
+
+  #adapterFor(instance: ProviderInstance): VideoGenerationAdapter | undefined {
+    if (!this.#admitted.has(instance.driverKind)) return undefined;
+    const driver = this.#drivers.find((candidate) => candidate.driverKind === instance.driverKind);
+    if (driver === undefined) return undefined;
+    const configuration: object = instance.configuration;
+    const modelIds =
+      "modelAllowlist" in configuration && Array.isArray(configuration.modelAllowlist)
+        ? (configuration.modelAllowlist as ReadonlyArray<ProviderModelId>)
+        : [];
+    const adapter = driver.create({
+      profile: { instanceId: instance.id, modelIds },
+      ports: makeVideoGenerationPorts({
+        instanceId: String(instance.id),
+        credentialResolver: this.#options.credentialResolver,
+        providerHosts: driver.providerHosts,
+        ...(this.#options.fetch === undefined ? {} : { fetch: this.#options.fetch }),
+      }),
+    });
+    return {
+      ...adapter,
+      models: async () => {
+        const models = await adapter.models();
+        for (const model of models) {
+          this.#priceCache.set(`${String(instance.id)}\n${String(model.modelId)}`, model.price);
+        }
+        return models;
+      },
+    };
+  }
+}
+
+function isTerminal(job: VideoJob): boolean {
+  return job.status === "completed" || job.status === "failed" || job.status === "cancelled";
+}
+
+function estimateOrZero(job: VideoJob): number {
+  return job.estimatedCostUsdMicros === "unknown" ? 0 : job.estimatedCostUsdMicros;
+}
+
+function settleWithKnownPrice(
+  job: VideoJob,
+  usage: VideoAdapterUsage | undefined,
+  price: VideoModelCapabilities["price"] | undefined,
+): number {
+  const estimate = estimateOrZero(job);
+  return price === undefined ? estimate : settleVideoCostUsdMicros(price, estimate, usage);
+}

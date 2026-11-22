@@ -21,6 +21,7 @@ export {
 export {
   BflImageConfigurationForm,
   GeminiImageConfigurationForm,
+  GeminiVideoConfigurationForm,
   IdeogramImageConfigurationForm,
   OpenAiImageConfigurationForm,
 } from "./configuration/ImageConfigurationForms";
