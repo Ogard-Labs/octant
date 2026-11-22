@@ -21,12 +21,15 @@ generation, as provider plugins, and it supports more than one provider. He
 approved the three first-party drivers below the same day: the Gemini API's
 Gemini Omni Flash, Runway, and fal.
 
-It is built as one stack of three layers:
+It is built as one stack of layers:
 
 1. this design, the seam with its conformance harness, and the Gemini driver;
-2. the host: the job service, storage, recovery and spend, the agent tool and
-   its card, the viewer and the save;
-3. the Runway and fal drivers.
+2. the host's job service, storage, recovery and spend, and the Gemini video
+   profile in Settings;
+3. the agent tool and its card on every client, with the consent kept by media
+   kind;
+4. the clip routes, the viewer, Settings and the guide;
+5. the Runway and fal drivers.
 
 ## Why
 
