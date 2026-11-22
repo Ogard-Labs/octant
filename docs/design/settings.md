@@ -478,7 +478,38 @@ when it signs in with one, with quiet Change and Remove, and **Show key** for
 such a server. Show key opens a line under the row: "Add this line to
 `~/.ssh/authorized_keys` for <user> on <alias>.", the public key in the code
 font, wrapping, and a quiet Copy that reads Copied once it has; a refusal
-shows there in the alert role. The form is Alias, User, Profile, Sign in with
+shows there in the alert role. An account server's row also offers **Make
+this an Octant computer**, which opens one dialog naming the server: it
+states what Octant read over SSH and will do there (server and `uname -sm`,
+version and signature check, install location, user service, the boot
+command with a quiet Copy, a **Listens on** select of the server's private
+addresses, and the hub it joins), with **Install and join** and Cancel; once
+confirmed it lists the six steps (Copy the build, Verify it on the server,
+Install, Start the service, Turn on the listener, Join the hub), each with
+Waiting, Running…, Done, Failed with what to fix, or Not run. A refusal shows
+in the alert role, with **Open the private network guide** for a server with
+no private address
+([Hub and spokes](hub-and-spokes.md#adding-a-computer-over-ssh)). A server
+this computer made an Octant computer reads "Octant computer, version <v>"
+under its open row, and offers **Update** and **Remove Octant** in place of
+that action. Update opens a dialog stating both versions and the ring, the
+signature check, that running turns stop now and continue after the restart
+(waiting for them is not offered yet), the `octant server upgrade` swap in
+the install folder and any store migration, and what makes Octant roll back;
+it lists the five steps (Copy the build, Verify it on the server, Stop
+running turns, Swap to <v>, Confirm its signed hello) before **Update to
+<v>** and Cancel, then their states, with Roll back to <v> added after a
+failed swap or confirmation and a closing line saying why it was rolled back.
+Remove Octant opens a dialog stating that the server leaves the hub, its user
+service is stopped and removed, what is Deleted and what is Kept, with one
+**Also delete the data folder** checkbox, unticked, that moves the data
+folder from Kept to Deleted with "This cannot be undone." (Deleted always
+names the install and its install and update work folders, and Kept then names
+service logs Octant keeps outside the data folder, with example paths, since
+logs inside it go with it, and files it did not make); it lists Leave the
+hub, Stop and remove the service, and Delete the install (or the install and
+the data folder), with **Remove Octant** (or **Remove Octant and its data**)
+and Cancel. The form is Alias, User, Profile, Sign in with
 (Your SSH agent, the default, or A key Octant keeps), Deploy commands (one per
 line, shown for Operate and Admin), and Runbook path. A refusal from the host shows inline in the alert role.
 Below it, **Projects on your servers** lists each server Project as its

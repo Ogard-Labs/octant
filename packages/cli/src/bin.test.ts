@@ -98,8 +98,10 @@ function runNightly(
 }
 
 // Every case here starts fresh CLI processes; on a hosted Linux runner each
-// cold start took about 2 s, so the default 15 s per test ran out.
-describe("octant-nightly", { timeout: 60_000 }, () => {
+// cold start took about 2 s, so the default 15 s per test ran out. The
+// refusal case starts about eight in a row and took 57 s and then 60.05 s on
+// the "Package tests" job in November 2026, so 60 s was not enough headroom.
+describe("octant-nightly", { timeout: 180_000 }, () => {
   it("names itself from Nightly's identity record and lists only commands that attach", async () => {
     const home = await mkdtemp(join(tmpdir(), "octant-nightly-home-"));
     try {

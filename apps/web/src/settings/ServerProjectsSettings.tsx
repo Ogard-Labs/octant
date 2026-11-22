@@ -559,6 +559,8 @@ export function ServerAccessSettings(props: {
   readonly focusedSetting?: string | undefined;
   /** Project names by id, for the registry's Project picker. */
   readonly projectNames: ReadonlyMap<string, string>;
+  /** Opens the guide to putting a computer on Tailscale or a private network. */
+  readonly onOpenPrivateNetworkGuide?: (() => void) | undefined;
 }) {
   const { servers } = props;
   const [registryRevision, setRegistryRevision] = useState(0);
@@ -573,6 +575,7 @@ export function ServerAccessSettings(props: {
               if (result.kind === "shield-servers-updated") setRegistryRevision((n) => n + 1);
               return result;
             },
+            memberInstall: (command, signal) => servers.memberInstall(command, signal),
           },
     [servers],
   );
@@ -581,6 +584,7 @@ export function ServerAccessSettings(props: {
       <ShieldServersSettings
         client={watched}
         focusedSetting={props.focusedSetting}
+        onOpenPrivateNetworkGuide={props.onOpenPrivateNetworkGuide}
         projectNames={props.projectNames}
       />
       <ServerProjectsSettings

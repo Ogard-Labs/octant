@@ -2067,6 +2067,7 @@ export function startOctantServer(
       threadMoveAdministrationRoutes,
       hubAdministrationRoutes,
       localDeviceAdministrationRoutes,
+      memberInstallRoutes,
       agentAccessAdministrationRoutes,
       agentAccessLoopbackRoutes,
       privateListenerAdministrationRoutes,
@@ -2077,6 +2078,8 @@ export function startOctantServer(
       remoteHost,
       threadRetention,
     } = wireRemote({
+      shieldServerStore,
+      serverConnection,
       resolveThreadStrict,
       restartRecovery,
       agentGrantRouteSlot,
@@ -2274,6 +2277,7 @@ export function startOctantServer(
                 (await secretStoresRoutes(request)) ??
                 (await commandRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
+                (await memberInstallRoutes(request)) ??
                 (await agentAccessAdministrationRoutes(request)) ??
                 (await agentAccessLoopbackRoutes(request)) ??
                 (await personQuitRoutes(request)) ??
