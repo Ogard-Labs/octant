@@ -1,9 +1,8 @@
+import { decodeProviderFailure, type ProviderFailureCategory } from "@octant/contracts";
 import {
-  decodeProviderFailure,
   decodeVideoModelCapabilities,
-  type ProviderFailureCategory,
   type VideoModelCapabilities,
-} from "@octant/contracts";
+} from "@octant/contracts/video-generation";
 import {
   isVideoEndpointAllowed,
   videoFailure,

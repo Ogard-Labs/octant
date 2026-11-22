@@ -3,7 +3,7 @@ import {
   type VideoClipOptions,
   type VideoModelCapabilities,
   type VideoPrice,
-} from "@octant/contracts";
+} from "@octant/contracts/video-generation";
 
 /** The images a request carries besides its prompt. */
 export interface VideoRequestInputs {

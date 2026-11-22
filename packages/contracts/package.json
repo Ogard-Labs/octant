@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     "./owner-approvals": "./src/ownerApprovals.ts",
+    "./video-generation": "./src/videoGeneration.ts",
     "./provider-cloud-sessions": "./src/providerCloudSessions.ts",
     "./git-history": "./src/gitHistory.ts",
     ".": "./src/index.ts",

@@ -1,8 +1,5 @@
-import {
-  decodeProviderInstanceId,
-  decodeProviderModelId,
-  decodeVideoModelCapabilities,
-} from "@octant/contracts";
+import { decodeProviderInstanceId, decodeProviderModelId } from "@octant/contracts";
+import { decodeVideoModelCapabilities } from "@octant/contracts/video-generation";
 import { describe, expect, it } from "vitest";
 import { isProviderFailure } from "./imageGeneration";
 import {

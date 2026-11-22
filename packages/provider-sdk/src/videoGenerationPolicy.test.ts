@@ -1,4 +1,7 @@
-import { decodeVideoModelCapabilities, type VideoModelCapabilities } from "@octant/contracts";
+import {
+  decodeVideoModelCapabilities,
+  type VideoModelCapabilities,
+} from "@octant/contracts/video-generation";
 import { describe, expect, it } from "vitest";
 import {
   checkVideoClipOptions,

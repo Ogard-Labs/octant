@@ -1,11 +1,9 @@
+import type { ProviderFailure, ProviderInstanceId, ProviderModelId } from "@octant/contracts";
 import type {
-  ProviderFailure,
-  ProviderInstanceId,
-  ProviderModelId,
   VideoClipOptions,
   VideoDriverKind,
   VideoModelCapabilities,
-} from "@octant/contracts";
+} from "@octant/contracts/video-generation";
 import { checkVideoClipOptions } from "./videoGenerationPolicy";
 import {
   imageFailure,
