@@ -120,6 +120,7 @@ import {
   type ComposerProjectEntry,
 } from "../projects/ComposerProjectSelector";
 import { CoordinatorBoundsDialog, ProjectCreateDialog } from "./deferredSurfaces";
+import { DockModuleBoundary } from "./DockModuleBoundary";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -1600,21 +1601,23 @@ function CoordinatorDraftSettings(props: {
         Change…
       </OctantButton>
       {open ? (
-        <Suspense fallback={null}>
-          <CoordinatorBoundsDialog
-            bounds={choices.bounds}
-            onClose={() => setOpen(false)}
-            onSave={(bounds, workerLevel) => {
-              props.onChoicesChange({
-                ...(workerLevel?.level === undefined ? {} : { workerLevel: workerLevel.level }),
-                ...(Object.keys(bounds).length === 0 ? {} : { bounds }),
-              });
-              setOpen(false);
-            }}
-            title="New coordinator"
-            workerLevel={{ level: choices.workerLevel }}
-          />
-        </Suspense>
+        <DockModuleBoundary>
+          <Suspense fallback={null}>
+            <CoordinatorBoundsDialog
+              bounds={choices.bounds}
+              onClose={() => setOpen(false)}
+              onSave={(bounds, workerLevel) => {
+                props.onChoicesChange({
+                  ...(workerLevel?.level === undefined ? {} : { workerLevel: workerLevel.level }),
+                  ...(Object.keys(bounds).length === 0 ? {} : { bounds }),
+                });
+                setOpen(false);
+              }}
+              title="New coordinator"
+              workerLevel={{ level: choices.workerLevel }}
+            />
+          </Suspense>
+        </DockModuleBoundary>
       ) : null}
     </div>
   );

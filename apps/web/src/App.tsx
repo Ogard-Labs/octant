@@ -102,6 +102,7 @@ import { dockToolReads } from "./shell/dockModuleRegistry";
 import { useHomeStart } from "./app/homeStart";
 import { OctantSheet } from "./ui/base/OctantSheet";
 import { SurfaceLoading } from "./surface/SurfaceLoading";
+import { DockModuleBoundary } from "./shell/DockModuleBoundary";
 import type { ShellActions, ThreadMoveRequest } from "./app/shellActions";
 import { SidebarContainer } from "./app/SidebarContainer";
 import { ThreadPaneContainer } from "./app/ThreadPaneContainer";
@@ -2729,25 +2730,27 @@ function LaunchedShell(
     pairedComputerCodeBridge === undefined
       ? undefined
       : () => (
-          <Suspense fallback={<SurfaceLoading label="Opening computer" />}>
-            <PairedComputerCodeSurface
-              key={String(createHostId)}
-              bridge={pairedComputerCodeBridge}
-              hosts={hosts}
-              selectedHostId={createHostId}
-              onSelectHost={handleSelectCreateHost}
-              viewScope={createHostViewScope}
-              {...(pairedThreadToOpenHere === undefined
-                ? {}
-                : {
-                    initialThreadId: pairedThreadToOpenHere.threadId,
-                    initialThreadRequest: pairedThreadToOpenHere.request,
-                  })}
-              {...(pairedComputerServerOpener === undefined
-                ? {}
-                : { openServer: pairedComputerServerOpener })}
-            />
-          </Suspense>
+          <DockModuleBoundary>
+            <Suspense fallback={<SurfaceLoading label="Opening computer" />}>
+              <PairedComputerCodeSurface
+                key={String(createHostId)}
+                bridge={pairedComputerCodeBridge}
+                hosts={hosts}
+                selectedHostId={createHostId}
+                onSelectHost={handleSelectCreateHost}
+                viewScope={createHostViewScope}
+                {...(pairedThreadToOpenHere === undefined
+                  ? {}
+                  : {
+                      initialThreadId: pairedThreadToOpenHere.threadId,
+                      initialThreadRequest: pairedThreadToOpenHere.request,
+                    })}
+                {...(pairedComputerServerOpener === undefined
+                  ? {}
+                  : { openServer: pairedComputerServerOpener })}
+              />
+            </Suspense>
+          </DockModuleBoundary>
         );
   function refuseUnlessCreatableDestination(input: {
     readonly action: string;
@@ -9766,50 +9769,52 @@ function LaunchedShell(
           )
           .map((candidate) => ({ id: candidate.id, title: candidate.title }));
         return (
-          <Suspense fallback={null}>
-            <CoordinatorBoundsDialog
-              bounds={coordinator.coordinatorBounds}
-              doneWhen={{
-                value: coordinator.coordinatorDoneWhen,
-                threads: doneWhenThreads,
-                defaultRepository,
-                onSave: (bounds, nextDoneWhen) => {
-                  setCoordinatorBoundsThreadId(undefined);
-                  const boundsChanged =
-                    coordinator.coordinatorBounds?.wakesPerHour !== bounds.wakesPerHour ||
-                    coordinator.coordinatorBounds?.rounds !== bounds.rounds ||
-                    coordinator.coordinatorBounds?.startsPerHour !== bounds.startsPerHour;
-                  const doneWhenChanged = !coordinatorDoneWhenEqual(
-                    coordinator.coordinatorDoneWhen,
-                    nextDoneWhen,
-                  );
-                  void (async () => {
-                    if (boundsChanged) {
-                      const outcome = await codeController.setThreadCoordinatorBounds(
-                        coordinator.id,
-                        bounds,
-                      );
-                      if (outcome.status === "refused") {
-                        setThreadExportNotice(outcome.message);
-                        return;
+          <DockModuleBoundary>
+            <Suspense fallback={null}>
+              <CoordinatorBoundsDialog
+                bounds={coordinator.coordinatorBounds}
+                doneWhen={{
+                  value: coordinator.coordinatorDoneWhen,
+                  threads: doneWhenThreads,
+                  defaultRepository,
+                  onSave: (bounds, nextDoneWhen) => {
+                    setCoordinatorBoundsThreadId(undefined);
+                    const boundsChanged =
+                      coordinator.coordinatorBounds?.wakesPerHour !== bounds.wakesPerHour ||
+                      coordinator.coordinatorBounds?.rounds !== bounds.rounds ||
+                      coordinator.coordinatorBounds?.startsPerHour !== bounds.startsPerHour;
+                    const doneWhenChanged = !coordinatorDoneWhenEqual(
+                      coordinator.coordinatorDoneWhen,
+                      nextDoneWhen,
+                    );
+                    void (async () => {
+                      if (boundsChanged) {
+                        const outcome = await codeController.setThreadCoordinatorBounds(
+                          coordinator.id,
+                          bounds,
+                        );
+                        if (outcome.status === "refused") {
+                          setThreadExportNotice(outcome.message);
+                          return;
+                        }
                       }
-                    }
-                    if (doneWhenChanged) {
-                      const outcome = await codeController.setThreadCoordinatorDoneWhen(
-                        coordinator.id,
-                        nextDoneWhen,
-                      );
-                      if (outcome.status === "refused") setThreadExportNotice(outcome.message);
-                    }
-                  })();
-                },
-              }}
-              key={String(coordinator.id)}
-              onClose={() => setCoordinatorBoundsThreadId(undefined)}
-              onSave={() => setCoordinatorBoundsThreadId(undefined)}
-              title={coordinator.title}
-            />
-          </Suspense>
+                      if (doneWhenChanged) {
+                        const outcome = await codeController.setThreadCoordinatorDoneWhen(
+                          coordinator.id,
+                          nextDoneWhen,
+                        );
+                        if (outcome.status === "refused") setThreadExportNotice(outcome.message);
+                      }
+                    })();
+                  },
+                }}
+                key={String(coordinator.id)}
+                onClose={() => setCoordinatorBoundsThreadId(undefined)}
+                onSave={() => setCoordinatorBoundsThreadId(undefined)}
+                title={coordinator.title}
+              />
+            </Suspense>
+          </DockModuleBoundary>
         );
       })()}
       {threadExportNotice !== undefined ||
@@ -9933,29 +9938,31 @@ function LaunchedShell(
                                 {remoteTodoSlot?.bridge === undefined ? (
                                   <p>Pair with this computer to open its thread.</p>
                                 ) : (
-                                  <Suspense fallback={<SurfaceLoading label="Opening to-do" />}>
-                                    <RemoteTodoDraft
-                                      key={`${remoteTodo.hostId}:${remoteTodo.todo?.id ?? remoteTodo.thread?.threadId}`}
-                                      bridge={remoteTodoSlot.bridge}
-                                      hostId={remoteTodo.hostId}
-                                      hostName={remoteTodoSlot.displayName}
-                                      connected={remoteTodoSlot.state.kind === "ready"}
-                                      {...(remoteTodo.destination === undefined
-                                        ? {}
-                                        : { project: remoteTodo.destination.project })}
-                                      {...(remoteTodo.todo === undefined
-                                        ? {}
-                                        : { todo: remoteTodo.todo })}
-                                      {...(remoteTodo.thread === undefined
-                                        ? {}
-                                        : { thread: remoteTodo.thread })}
-                                      onCreated={async (link) => {
-                                        if (remoteTodo.todo !== undefined)
-                                          await recordTodoLink(String(remoteTodo.todo.id), link);
-                                      }}
-                                      onClose={() => setRemoteTodo(undefined)}
-                                    />
-                                  </Suspense>
+                                  <DockModuleBoundary>
+                                    <Suspense fallback={<SurfaceLoading label="Opening to-do" />}>
+                                      <RemoteTodoDraft
+                                        key={`${remoteTodo.hostId}:${remoteTodo.todo?.id ?? remoteTodo.thread?.threadId}`}
+                                        bridge={remoteTodoSlot.bridge}
+                                        hostId={remoteTodo.hostId}
+                                        hostName={remoteTodoSlot.displayName}
+                                        connected={remoteTodoSlot.state.kind === "ready"}
+                                        {...(remoteTodo.destination === undefined
+                                          ? {}
+                                          : { project: remoteTodo.destination.project })}
+                                        {...(remoteTodo.todo === undefined
+                                          ? {}
+                                          : { todo: remoteTodo.todo })}
+                                        {...(remoteTodo.thread === undefined
+                                          ? {}
+                                          : { thread: remoteTodo.thread })}
+                                        onCreated={async (link) => {
+                                          if (remoteTodo.todo !== undefined)
+                                            await recordTodoLink(String(remoteTodo.todo.id), link);
+                                        }}
+                                        onClose={() => setRemoteTodo(undefined)}
+                                      />
+                                    </Suspense>
+                                  </DockModuleBoundary>
                                 )}
                               </OctantDialog>
                             )}
