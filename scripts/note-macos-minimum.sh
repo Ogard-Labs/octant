@@ -8,7 +8,7 @@
 # notice cannot ride on whichever `gh release create` runs first. The Mac row
 # calls this once its build is attached. The minimum is read from the built
 # bundle's own Info.plist rather than assumed: a Nightly rollback can rebuild a
-# tag from before the bundle declared one, and that build gets no notice.
+# tag from before Octant declared one, and that build gets no notice.
 # Macs below the minimum must not update past the last version that supports
 # them; the update feed does not guard against it (maintainer decision,
 # 2026-11-22), so the notes say so. A rerun finds the notice and leaves the
@@ -32,6 +32,14 @@ if [ -z "$app" ]; then
 fi
 if ! minimum=$(plutil -extract LSMinimumSystemVersion raw "${app}/Contents/Info.plist" 2>/dev/null); then
   echo "${product}.app declares no minimum macOS; leaving the notes of ${tag} as they are"
+  exit 0
+fi
+
+# Builds from before Octant declared its own floor still carry the macOS 12.0
+# Electron sets by default, and no person was ever told to stop updating at
+# that one. Only a floor of macOS 15 or later, Octant's own, gets the notice.
+if [ "${minimum%%.*}" -lt 15 ] 2>/dev/null; then
+  echo "${product}.app declares macOS ${minimum}, Electron's default rather than Octant's floor; leaving the notes of ${tag} as they are"
   exit 0
 fi
 

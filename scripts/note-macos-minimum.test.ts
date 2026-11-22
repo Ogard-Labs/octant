@@ -81,13 +81,15 @@ describe("note-macos-minimum.sh", () => {
     expect(edits().trim().split("\n")).toHaveLength(1);
   });
 
-  it("adds nothing for a rollback build whose bundle declares no minimum", () => {
-    const { edits, notes, run } = release("preview build of v0.1.0-preview.1.", undefined);
+  it("adds nothing for a rollback build whose bundle declares no minimum or only Electron's default", () => {
+    for (const minimum of [undefined, "12.0"]) {
+      const { edits, notes, run } = release("preview build of v0.1.0-preview.1.", minimum);
 
-    const result = run();
+      const result = run();
 
-    expect(result.status).toBe(0);
-    expect(edits()).toBe("");
-    expect(notes()).toBe("preview build of v0.1.0-preview.1.");
+      expect(result.status).toBe(0);
+      expect(edits()).toBe("");
+      expect(notes()).toBe("preview build of v0.1.0-preview.1.");
+    }
   });
 });
