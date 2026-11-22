@@ -168,6 +168,7 @@ function harness(
     readonly providerBody?: string;
     readonly imageFetch?: (url: string) => Response;
     readonly resolve?: (hostname: string) => Promise<ReadonlyArray<string>>;
+    readonly resolveImageAddress?: (hostname: string) => Promise<ReadonlyArray<string>>;
     readonly profile?: () => OutsideImageProviderInstance;
     readonly packageState?: () => ReturnType<typeof fixturePackage>;
   } = {},
@@ -231,6 +232,9 @@ function harness(
     actor: { kind: "system", actorId: "00000000-0000-4000-8000-000000000002" as never },
     fetch: async (url) => options.imageFetch?.(String(url)) ?? new Response(null, { status: 404 }),
     spendCeiling,
+    ...(options.resolveImageAddress === undefined
+      ? {}
+      : { resolveImageAddress: options.resolveImageAddress }),
     outsideImageDrivers: {
       admits: (instance) => admission.isAdmitted(instance),
       declaredModel: (instance, modelId) =>
@@ -638,6 +642,40 @@ describe("an outside image driver's later fixes", () => {
     const job = await run.service.whenTerminal((await run.enqueue({})).id);
     expect(job.status === "failed" ? job.failure?.category : undefined).toBe("unauthorized");
     expect(imageFetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses the download when the name answers public for the check and private when the host connects", async () => {
+    const named = "https://cdn.images.example.test/out/1.png";
+    const answers: Array<string> = [];
+    const run = harness({
+      handlers: {
+        ...imageHandlers,
+        "image/generate": async (_params, context) => {
+          await context.http({
+            requestId: context.id,
+            url: "https://images.example.test/v1/generate",
+            method: "POST",
+            auth: { header: "authorization", scheme: "Bearer" },
+          });
+          return { status: "completed", images: [{ url: named }] };
+        },
+      },
+      providerBody: JSON.stringify({ url: named }),
+      // The first answer, which the driver's address check reads, is public.
+      resolve: async () => {
+        answers.push("check");
+        return ["93.184.216.34"];
+      },
+      // The second, which the download connects to, is private.
+      resolveImageAddress: async () => {
+        answers.push("connect");
+        return ["10.0.0.7"];
+      },
+    });
+    const job = await run.service.whenTerminal((await run.enqueue({})).id);
+    expect(job.status).toBe("failed");
+    expect(job.artifacts).toHaveLength(0);
+    expect(answers).toEqual(["check", "connect"]);
   });
 
   it("refuses a model the package does not declare at the bound digest before anything is reserved", async () => {

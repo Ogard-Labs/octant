@@ -13,6 +13,11 @@ import {
   type ImageGenerationPorts,
   type ImageHttpAuth,
 } from "@octant/provider-sdk/image-generation";
+import { lookup } from "node:dns/promises";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+import { isIP } from "node:net";
+import { isPublicNetworkAddress } from "@octant/domain/network-address-policy";
 import type {
   ProviderCredentialLease,
   ProviderCredentialResolver,
@@ -186,9 +191,21 @@ export function makeImageGenerationPorts(options: {
   readonly credentialResolver: ProviderCredentialResolver;
   readonly endpoint: ImageGenerationEndpoint;
   readonly fetch?: ImageHttpFetch;
+  /**
+   * The transport for the one unauthenticated approved-image GET. The job
+   * service always passes the pinned transport here; absent, a supplied
+   * `fetch` is used (a test's own), else the pinned transport, which allows a
+   * private address only on the profile's own configured base URL origin.
+   */
+  readonly approvedFetch?: ImageHttpFetch;
   readonly limits?: Partial<ImageHttpLimits>;
 }): ImageGenerationPorts {
   const fetch = options.fetch ?? globalThis.fetch;
+  const allowedOrigin = configuredOrigin(options.endpoint.baseUrl);
+  const approvedFetch =
+    options.approvedFetch ??
+    options.fetch ??
+    makePinnedImageFetch(allowedOrigin === undefined ? {} : { allowedOrigin });
   const limits: ImageHttpLimits = { ...IMAGE_HTTP_DEFAULT_LIMITS, ...options.limits };
   return {
     request: async (request) => {
@@ -211,13 +228,138 @@ export function makeImageGenerationPorts(options: {
     fetchApprovedImageUrl: (input) =>
       fetchApprovedImageUrl({
         url: input.url,
-        fetch,
+        fetch: approvedFetch,
         maxBytes: MAX_GENERATED_IMAGE_BYTES,
         timeoutMs: limits.connectionTimeoutMs,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       }),
     sniffMediaType: sniffGeneratedImageMediaType,
   };
+}
+
+function configuredOrigin(baseUrl: string | undefined): string | undefined {
+  if (baseUrl === undefined) return undefined;
+  try {
+    return new URL(baseUrl).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveAllAddresses(hostname: string): Promise<ReadonlyArray<string>> {
+  return (await lookup(hostname, { all: true })).map((entry) => entry.address);
+}
+
+/**
+ * The transport for an approved image download: it connects only to an
+ * address it has just checked. A name resolved once for a check and again by
+ * the fetch could answer a public address and then a private one (DNS
+ * rebinding); here the one resolution that is checked is the one the socket
+ * connects to, through `node:http`'s `lookup`, and the original name still
+ * reaches the server as `Host` and, over HTTPS, as the TLS server name the
+ * certificate is verified against. Every address must be publicly routable,
+ * except on `allowedOrigin`, the profile's own configured base URL, which the
+ * person chose and may be on this computer. It follows no redirect: a
+ * redirect is answered as the response it is, which the caller refuses, so
+ * every hop is this one.
+ */
+export function makePinnedImageFetch(
+  options: {
+    readonly allowedOrigin?: string;
+    readonly resolveAll?: (hostname: string) => Promise<ReadonlyArray<string>>;
+  } = {},
+): ImageHttpFetch {
+  const resolveAll = options.resolveAll ?? resolveAllAddresses;
+  return (input, init) =>
+    new Promise<Response>((resolve, reject) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const secure = url.protocol === "https:";
+      if (!secure && url.protocol !== "http:") {
+        reject(new Error("The approved image address is not HTTP or HTTPS."));
+        return;
+      }
+      const mayBePrivate =
+        options.allowedOrigin !== undefined && url.origin === options.allowedOrigin;
+      const host = url.hostname.replace(/^\[|\]$/g, "");
+      // `node:http` connects to a literal address without calling `lookup`.
+      if (isIP(host) !== 0 && !mayBePrivate && !isPublicNetworkAddress(host)) {
+        reject(new Error("The approved image address is on a private network."));
+        return;
+      }
+      const pinnedLookup = (
+        hostname: string,
+        lookupOptions: { readonly all?: boolean } | undefined,
+        callback: (
+          error: Error | null,
+          address?: string | ReadonlyArray<{ readonly address: string; readonly family: number }>,
+          family?: number,
+        ) => void,
+      ) => {
+        resolveAll(hostname).then(
+          (addresses) => {
+            if (addresses.length === 0) {
+              callback(new Error("The approved image address does not resolve."));
+              return;
+            }
+            if (!mayBePrivate && !addresses.every((address) => isPublicNetworkAddress(address))) {
+              callback(new Error("The approved image address resolves to a private network."));
+              return;
+            }
+            const entries = addresses.map((address) => ({ address, family: isIP(address) }));
+            if (lookupOptions?.all === true) callback(null, entries);
+            else callback(null, entries[0]?.address, entries[0]?.family);
+          },
+          (error: unknown) => callback(error instanceof Error ? error : new Error(String(error))),
+        );
+      };
+      const request = (secure ? httpsRequest : httpRequest)(
+        {
+          host,
+          port: url.port.length > 0 ? Number(url.port) : secure ? 443 : 80,
+          path: `${url.pathname}${url.search}`,
+          method: "GET",
+          headers: { host: url.host },
+          // A fresh connection each time: a pooled socket opened for an
+          // earlier answer would skip this lookup and its check.
+          agent: false,
+          lookup: pinnedLookup as never,
+          ...(init?.signal === undefined || init.signal === null ? {} : { signal: init.signal }),
+          ...(secure ? { servername: host } : {}),
+        },
+        (incoming) => {
+          const headers = new Headers();
+          for (const [name, value] of Object.entries(incoming.headers)) {
+            if (typeof value === "string") headers.set(name, value);
+            else if (Array.isArray(value)) headers.set(name, value.join(", "));
+          }
+          const status = incoming.statusCode ?? 502;
+          const chunks = incoming[Symbol.asyncIterator]();
+          const body =
+            status === 204 || status === 304
+              ? null
+              : new ReadableStream<Uint8Array>({
+                  async pull(controller) {
+                    const next: IteratorResult<unknown> = await chunks.next();
+                    if (next.done === true) {
+                      controller.close();
+                      return;
+                    }
+                    controller.enqueue(
+                      next.value instanceof Uint8Array
+                        ? next.value
+                        : new TextEncoder().encode(String(next.value)),
+                    );
+                  },
+                  cancel() {
+                    incoming.destroy();
+                  },
+                });
+          resolve(new Response(body, { status, headers }));
+        },
+      );
+      request.on("error", reject);
+      request.end();
+    });
 }
 
 /**

@@ -168,6 +168,10 @@ Rules, each taking the fail-closed option:
   without the key, over HTTPS to a name that resolves only to public
   addresses, or the configured origin, and only when that exact address (JSON
   escapes undone) appeared whole in a response the host relayed for this job.
+  The download connects to the very answer it checked, through the shared
+  image downloader's pinned lookup, so a name that answers public for the
+  check and private a moment later is refused (maintainer decision,
+  2026-11-22; [Architecture](../architecture.md) image generation).
   The streamed bytes of one image are capped at the host's image size bound. A safety refusal is Octant's sentence. A
   crash, a deadline (ten minutes) or an unreadable message ends the job with
   the closed reason, and a failed job charges nothing.

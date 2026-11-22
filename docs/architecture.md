@@ -8059,7 +8059,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   own result: the image is fetched exactly at the URL the provider's
   authenticated response named, without the credential, and a configured
   base URL neither rewrites that URL to the base URL's host nor approves
-  any other URL on that host.
+  any other URL on that host. That download connects only to an address it
+  has just checked (maintainer decision, 2026-11-22): the name is resolved
+  once, every answer must be publicly routable except on the profile's own
+  configured base URL origin, and the socket opens to that same answer, on a
+  fresh connection, with the original name kept as `Host` and as the TLS
+  server name the certificate is verified against. No redirect is followed,
+  so the first hop is the only one. This holds for bundled and outside image
+  drivers alike, and closes DNS rebinding between a check and the fetch.
   The **Image generator** surface (profile menu, host-wide `image-library`
   scope;
   any registered window may use the `image-library` scope, while thread scopes

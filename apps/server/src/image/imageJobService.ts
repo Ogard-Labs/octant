@@ -80,7 +80,7 @@ import {
   type GeneratedImageStore,
 } from "./generatedImageStore";
 import { ideogramImageDriver } from "./ideogramImageAdapter";
-import { makeImageGenerationPorts, type ImageHttpFetch } from "./imageHttp";
+import { makeImageGenerationPorts, makePinnedImageFetch, type ImageHttpFetch } from "./imageHttp";
 import { ImageJobProjection } from "./imageJobProjection";
 import { openAiImageDriver } from "./openAiImageAdapter";
 import { makeOpenAiCompatibleImageAdapter } from "./openAiCompatibleImageAdapter";
@@ -187,6 +187,8 @@ export interface ImageJobServiceOptions {
   readonly admittedImageDriverKinds?: ReadonlySet<ProviderDriverKind>;
   /** Absent on a host that admits no outside driver: every outside profile is refused. */
   readonly outsideImageDrivers?: OutsideImageDrivers;
+  /** Resolves an approved image address's host name for the pinned download; the system resolver by default. */
+  readonly resolveImageAddress?: (hostname: string) => Promise<ReadonlyArray<string>>;
   readonly concurrency?: number;
   /** Host spend ceilings applied to thread-scoped image generation before dispatch. */
   readonly spendCeiling?: Pick<SpendCeilingService, "admit" | "settle" | "abandon">;
@@ -233,6 +235,7 @@ export class ImageJobService {
   readonly #imageDrivers: ReadonlyArray<ImageGenerationDriver>;
   readonly #admittedImageDriverKinds: ReadonlySet<ProviderDriverKind>;
   readonly #outsideImageDrivers: OutsideImageDrivers | undefined;
+  readonly #resolveImageAddress: ImageJobServiceOptions["resolveImageAddress"];
   readonly #concurrency: number;
   readonly #spendCeiling: ImageJobServiceOptions["spendCeiling"];
   readonly #resolveThreadProjectId: ImageJobServiceOptions["resolveThreadProjectId"];
@@ -260,6 +263,7 @@ export class ImageJobService {
     this.#admittedImageDriverKinds =
       options.admittedImageDriverKinds ?? admittedBundledImageDriverKinds();
     this.#outsideImageDrivers = options.outsideImageDrivers;
+    this.#resolveImageAddress = options.resolveImageAddress;
     this.#concurrency = options.concurrency ?? IMAGE_JOB_HOST_CONCURRENCY;
     this.#spendCeiling = options.spendCeiling;
     this.#resolveThreadProjectId = options.resolveThreadProjectId;
@@ -676,6 +680,35 @@ export class ImageJobService {
     return this.#defaultAdapter(instance, fetch);
   }
 
+  /**
+   * The approved-image download transport. A test that supplies its own fetch
+   * keeps it; otherwise the pinned transport, which connects only to the
+   * address it checked, allowing a private one only on the profile's own
+   * configured base URL.
+   */
+  #approvedFetch(
+    baseUrl: string | undefined,
+    fetch: ImageHttpFetch,
+  ): { readonly approvedFetch: ImageHttpFetch } {
+    if (this.#fetch !== undefined && this.#resolveImageAddress === undefined) {
+      return { approvedFetch: fetch };
+    }
+    let allowedOrigin: string | undefined;
+    try {
+      allowedOrigin = baseUrl === undefined ? undefined : new URL(baseUrl).origin;
+    } catch {
+      allowedOrigin = undefined;
+    }
+    return {
+      approvedFetch: makePinnedImageFetch({
+        ...(allowedOrigin === undefined ? {} : { allowedOrigin }),
+        ...(this.#resolveImageAddress === undefined
+          ? {}
+          : { resolveAll: this.#resolveImageAddress }),
+      }),
+    };
+  }
+
   #defaultAdapter(instance: ProviderInstance, fetch: ImageHttpFetch): ImageGenerationAdapter {
     if (instance.driverKind === "outside-image") {
       if (this.#outsideImageDrivers === undefined) return unavailableImageAdapter;
@@ -686,6 +719,7 @@ export class ImageJobService {
         credentialResolver: this.#credentialResolver,
         endpoint: { providerHosts: [], baseUrl: instance.configuration.baseUrl },
         fetch,
+        ...this.#approvedFetch(instance.configuration.baseUrl, fetch),
       });
       return this.#outsideImageDrivers.adapter(instance, {
         fetchApprovedImageUrl: ports.fetchApprovedImageUrl,
@@ -713,6 +747,7 @@ export class ImageJobService {
             ...(baseUrl === undefined ? {} : { baseUrl }),
           },
           fetch,
+          ...this.#approvedFetch(baseUrl, fetch),
         }),
       });
     }

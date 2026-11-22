@@ -1,6 +1,13 @@
 import { MAX_GENERATED_IMAGE_BYTES, MAX_IMAGE_VARIANTS } from "@octant/contracts";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
-import { fetchApprovedImageUrl, makeImageGenerationPorts, type ImageHttpFetch } from "./imageHttp";
+import {
+  fetchApprovedImageUrl,
+  makeImageGenerationPorts,
+  makePinnedImageFetch,
+  type ImageHttpFetch,
+} from "./imageHttp";
 
 const APPROVED_URL = "https://provider.example/signed/generated.png?token=secret";
 const png = Uint8Array.from(
@@ -153,5 +160,60 @@ describe("image generation ports", () => {
     });
 
     expect(response.status).toBe(200);
+  });
+});
+
+describe("the pinned approved-image transport", () => {
+  const fetchWith = (fetch: ImageHttpFetch, url: string) =>
+    fetchApprovedImageUrl({ url, fetch, maxBytes: 1_000_000, timeoutMs: 5_000 });
+
+  it("refuses a name whose answer at connect time is private, without opening a connection", async () => {
+    const resolveAll = vi.fn(async () => ["10.0.0.7"]);
+    const result = await fetchWith(
+      makePinnedImageFetch({ resolveAll }),
+      "https://cdn.provider.example/out.png",
+    );
+    expect(result).toMatchObject({ failure: { category: "unavailable" } });
+    expect(resolveAll).toHaveBeenCalledWith("cdn.provider.example");
+  });
+
+  it("refuses a literal private address and any address beside a private one", async () => {
+    const literal = await fetchWith(makePinnedImageFetch(), "https://10.0.0.7/out.png");
+    expect("failure" in literal).toBe(true);
+    const mixed = await fetchWith(
+      makePinnedImageFetch({ resolveAll: async () => ["93.184.216.34", "127.0.0.1"] }),
+      "https://cdn.provider.example/out.png",
+    );
+    expect("failure" in mixed).toBe(true);
+  });
+
+  it("connects to the address it checked, sending the original name as Host, and allows the profile's own configured origin", async () => {
+    const hosts: Array<string | undefined> = [];
+    const server = createServer((request, response) => {
+      hosts.push(request.headers.host);
+      response.writeHead(200, { "content-type": "image/png" });
+      response.end(Buffer.from(png));
+    });
+    await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const origin = `http://images.proxy.test:${port}`;
+      const resolveAll = vi.fn(async () => ["127.0.0.1"]);
+      const allowed = await fetchWith(
+        makePinnedImageFetch({ resolveAll, allowedOrigin: origin }),
+        `${origin}/out.png`,
+      );
+      expect(allowed).toEqual({ bytes: png });
+      expect(hosts).toEqual([`images.proxy.test:${port}`]);
+      // The same loopback answer for any other origin is refused.
+      const refused = await fetchWith(
+        makePinnedImageFetch({ resolveAll }),
+        `http://images.proxy.test:${port}/out.png`,
+      );
+      expect("failure" in refused).toBe(true);
+      expect(hosts).toHaveLength(1);
+    } finally {
+      await new Promise<void>((closed) => server.close(() => closed()));
+    }
   });
 });
