@@ -190,6 +190,35 @@ export type MediaImageSaveOutcome =
   | { readonly status: "not-saved" }
   | { readonly status: "refused"; readonly error: string; readonly saveStatus?: string };
 
+/** What an icon set is for: an Xcode app icon set, Android launcher icons, or web favicons. */
+export const MEDIA_ICON_SET_TARGETS = ["apple-ios", "apple-macos", "android", "web"] as const;
+export type MediaIconSetTarget = (typeof MEDIA_ICON_SET_TARGETS)[number];
+
+export interface MediaImageIconSetRequest {
+  readonly attachmentId: ImageArtifactId;
+  readonly target: MediaIconSetTarget;
+  /** A directory relative to the turn's folder; the host confines it again. */
+  readonly directory: string;
+  readonly signal?: AbortSignal;
+}
+
+export type MediaImageIconSetOutcome =
+  | {
+      readonly status: "saved";
+      readonly directory: string;
+      /** Paths relative to the turn's folder, in the order they were written. */
+      readonly files: ReadonlyArray<string>;
+      /** For `web`: the `<link>` tags and the manifest `icons` JSON for the agent to place. */
+      readonly snippets?: { readonly html: string; readonly manifestIcons: string };
+    }
+  | { readonly status: "not-saved" }
+  | { readonly status: "refused"; readonly error: string }
+  /**
+   * A write failed after every path passed its check. Nothing is rolled back,
+   * so the files already written are named.
+   */
+  | { readonly status: "failed"; readonly error: string; readonly written: ReadonlyArray<string> };
+
 /** Host-mediated image generation, revision, and confined folder saving. */
 export interface MediaImageGenerationHostPort {
   /** Live check: at least one eligible image profile is available for this turn. */
@@ -199,6 +228,12 @@ export interface MediaImageGenerationHostPort {
   readonly generate: (input: MediaImageGenerateRequest) => Promise<MediaImageGenerateOutcome>;
   /** Absent when the thread has no working folder (for example Chat). */
   readonly save?: (input: MediaImageSaveRequest) => Promise<MediaImageSaveOutcome>;
+  /**
+   * Resizes a finished image into an icon set under the turn's folder. Absent
+   * where the host cannot resize images itself or the thread has no folder,
+   * and then the operation is not offered at all.
+   */
+  readonly iconSet?: (input: MediaImageIconSetRequest) => Promise<MediaImageIconSetOutcome>;
 }
 
 /**

@@ -488,4 +488,46 @@ describe("public media tool host bridge and built-in plugins", () => {
       },
     });
   });
+
+  it("offers icon sets only where the host port can make them, inside the folder", async () => {
+    const attachmentId = decodeImageArtifactId("10000000-0000-4000-8000-000000000222");
+    const generate = vi.fn(async () => ({ status: "agent-draws" as const }));
+    const iconSet = vi.fn(async () => ({
+      status: "saved" as const,
+      directory: "public",
+      files: ["public/favicon-16.png"],
+      snippets: { html: "<link>", manifestIcons: "[]" },
+    }));
+    const without = CREATE_IMAGE_MEDIA_TOOL_PLUGIN.createTools(
+      basePort({ imageGeneration: { isAvailable: () => true, generate } }),
+    );
+    expect(JSON.stringify(without?.definitions)).not.toContain("icon-set");
+    const offered = CREATE_IMAGE_MEDIA_TOOL_PLUGIN.createTools(
+      basePort({ imageGeneration: { isAvailable: () => true, generate, iconSet } }),
+    );
+    expect(JSON.stringify(offered?.definitions)).toContain("icon-set");
+    const run = (input: Record<string, unknown>) =>
+      offered?.execute({ name: CREATE_IMAGE_TOOL_NAME, inputJson: JSON.stringify(input) });
+    const request = { operation: "icon-set", attachmentId, target: "web", directory: "public/" };
+
+    expect(await run({ ...request, directory: "../site" })).toMatchObject({ isError: true });
+    expect(await run({ ...request, directory: "/abs" })).toMatchObject({ isError: true });
+    expect(await run({ ...request, target: "windows" })).toMatchObject({ isError: true });
+    expect(iconSet).not.toHaveBeenCalled();
+
+    expect(await run(request)).toEqual({
+      result: {
+        status: "saved",
+        directory: "public",
+        files: ["public/favicon-16.png"],
+        html: "<link>",
+        manifestIcons: "[]",
+        message:
+          "Octant did not edit any HTML or manifest file. Place the link tags and manifest icons yourself.",
+      },
+    });
+    expect(iconSet).toHaveBeenCalledWith(
+      expect.objectContaining({ attachmentId, target: "web", directory: "public" }),
+    );
+  });
 });

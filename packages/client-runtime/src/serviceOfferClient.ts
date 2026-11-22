@@ -64,7 +64,7 @@ function serviceOfferClient(
         await request({
           method: "GET",
           path: SERVICE_OFFERS_PATH,
-          query: `?${new URLSearchParams({ threadKind, scopeId: String(scopeId), referenceImages: "1", transcription: "1" }).toString()}`,
+          query: `?${new URLSearchParams({ threadKind, scopeId: String(scopeId), referenceImages: "1", transcription: "1", iconSets: "1" }).toString()}`,
         }),
       );
     },

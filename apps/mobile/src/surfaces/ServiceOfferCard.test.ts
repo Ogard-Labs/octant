@@ -161,7 +161,7 @@ it.each([false, true])(
       expect(authenticatedFetch.mock.calls[0]?.[0]).toMatchObject({
         method: "GET",
         path: "/api/offers",
-        query: `?threadKind=chat-thread&scopeId=${threadId}&referenceImages=1&transcription=1`,
+        query: `?threadKind=chat-thread&scopeId=${threadId}&referenceImages=1&transcription=1&iconSets=1`,
       });
       if (references) {
         expect(node.textContent).toContain(

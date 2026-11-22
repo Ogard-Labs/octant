@@ -748,6 +748,30 @@ describe("image routes", () => {
       serviceOffers.close();
     });
 
+    it("shows an icon set's save only to clients that say how many files it writes", async () => {
+      const { handler, offers, serviceOffers } = setup();
+      void offers.offer({
+        windowId: windowId as never,
+        offer: {
+          ...scope,
+          kind: "save",
+          jobId: jobId as never,
+          attachmentId: attachmentId as never,
+          relativePath: "App/Assets.xcassets",
+          fileCount: 11,
+        },
+      });
+      const query = `threadKind=code-thread&scopeId=${scopeId}`;
+      expect(await listed(handler)).toEqual([]);
+      const oldClient = await handler(request(`/api/offers?${query}&referenceImages=1`));
+      expect(decodeServiceOffersResponse(await oldClient?.json()).offers).toEqual([]);
+      const currentClient = await handler(request(`/api/offers?${query}&iconSets=1`));
+      expect(decodeServiceOffersResponse(await currentClient?.json()).offers).toMatchObject([
+        { kind: "save", relativePath: "App/Assets.xcassets", fileCount: 11 },
+      ]);
+      serviceOffers.close();
+    });
+
     it("does not list offers for a thread the window cannot open", async () => {
       const { handler } = setup({ authorized: false });
       const response = await handler(

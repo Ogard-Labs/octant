@@ -374,6 +374,9 @@ export type ImageGenerationGenerateOffer = typeof ImageGenerationGenerateOffer.T
  * works in. The path is relative to that folder; the host confines it there
  * and never overwrites a file.
  */
+/** The largest icon set an agent can save: the macOS app icon's ten sizes and its Contents.json. */
+export const MAX_ICON_SET_FILES = 11;
+
 export const ImageGenerationSaveOffer = Schema.Struct({
   offerId: ImageGenerationOfferId,
   kind: Schema.Literal("save"),
@@ -382,6 +385,11 @@ export const ImageGenerationSaveOffer = Schema.Struct({
   jobId: ImageJobId,
   attachmentId: ImageArtifactId,
   relativePath: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  /**
+   * Set when the agent saves an icon set: `relativePath` is then the directory
+   * and this many new files go into it.
+   */
+  fileCount: Schema.optional(PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_ICON_SET_FILES))),
   requestedAt: UtcTimestamp,
 }).annotations(strict);
 export type ImageGenerationSaveOffer = typeof ImageGenerationSaveOffer.Type;

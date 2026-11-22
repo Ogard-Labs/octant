@@ -91,3 +91,43 @@ export async function saveGeneratedImageUnder(
     return { status: "failed", reason: "The image could not be saved." };
   }
 }
+
+/**
+ * The create check `saveGeneratedImageUnder` makes, without writing: the path
+ * must resolve for create inside `root` and must not exist yet. An icon set
+ * checks every file this way before writing any, so one refused path leaves
+ * the folder untouched. The write still makes its own exclusive create, so a
+ * file that appears between check and write is refused there.
+ */
+export async function checkNewFileUnder(
+  input: { readonly root: string; readonly relativePath: string },
+  filesystem: WorkFilesystemPort = liveWorkFilesystem,
+): Promise<{ readonly status: "ok" } | { readonly status: "refused"; readonly reason: string }> {
+  try {
+    const resolution = await new WorkResolutionService(filesystem).resolveForCreate({
+      binding: {
+        canonicalRoot: input.root,
+        knownCanonicalRoot: input.root,
+        availability: "available",
+        bindingSuperseded: false,
+      },
+      relativePath: canonicalizeWorkRelativePath(input.relativePath),
+    });
+    if (resolution.status !== "resolved-for-create") {
+      return { status: "refused", reason: `${input.relativePath} is outside the folder.` };
+    }
+    const existing = await filesystem.lstat(resolution.absolutePath).then(
+      () => true,
+      (error: unknown) => !isMissing(error),
+    );
+    return existing
+      ? { status: "refused", reason: `${input.relativePath} already exists.` }
+      : { status: "ok" };
+  } catch {
+    return { status: "refused", reason: `${input.relativePath} is outside the folder.` };
+  }
+}
+
+function isMissing(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}

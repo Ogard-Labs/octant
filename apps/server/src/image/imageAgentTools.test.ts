@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -14,6 +14,7 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { SpendCeilingService } from "../spendCeilingService";
+import { checkNewFileUnder, saveGeneratedImageUnder } from "./generatedImageSave";
 import { GeneratedImageStore } from "./generatedImageStore";
 import { createImageAgentTools, IMAGE_TOOL_NAME, type ImageAgentToolPort } from "./imageAgentTools";
 import type {
@@ -130,6 +131,7 @@ function tools(
         | { readonly status: "refused" | "failed"; readonly reason: string }
       >;
     };
+    readonly iconSets?: ImageAgentToolPort["iconSets"];
   } = {},
 ) {
   const enqueue = vi.fn<ImageAgentToolPort["enqueue"]>(async () => job());
@@ -164,6 +166,7 @@ function tools(
         : { defaultProfileInstanceId: () => options.defaultProfileInstanceId }),
       ...(options.unattended === undefined ? {} : { unattended: options.unattended }),
       ...(options.refusal === undefined ? {} : { refusal: options.refusal }),
+      ...(options.iconSets === undefined ? {} : { iconSets: options.iconSets }),
       ...(options.save === undefined
         ? {}
         : {
@@ -680,6 +683,125 @@ describe("createImageAgentTools", () => {
       expect((await call(elsewhere.set, save)).isError).toBe(true);
       expect(plan.write).not.toHaveBeenCalled();
       expect(other.write).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("saving an icon set from an image the thread made", () => {
+    const folders: Array<string> = [];
+    afterEach(() => {
+      for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true });
+    });
+    const webIcons = ["favicon-16.png", "favicon-32.png", "apple-touch-icon.png"];
+    /** A real folder and the host's own confined check and write, with a stand-in resizer. */
+    function iconSetFolder(posture: "refuse" | "ask" | "allow") {
+      const root = mkdtempSync(join(tmpdir(), "octant-icon-set-"));
+      folders.push(root);
+      const write = vi.fn((relativePath: string, bytes: Uint8Array) =>
+        saveGeneratedImageUnder({ root, relativePath, bytes }),
+      );
+      return {
+        root,
+        write,
+        save: { posture: () => posture, write },
+        iconSets: {
+          render: vi.fn(async () => ({
+            status: "rendered" as const,
+            files: webIcons.map((path) => ({ path, bytes: Uint8Array.from([1, 2, 3]) })),
+          })),
+          check: (relativePath: string) => checkNewFileUnder({ root, relativePath }),
+        },
+      };
+    }
+    const iconSet = {
+      operation: "icon-set",
+      attachmentId: parentAttachmentId,
+      target: "web",
+      directory: "public",
+    };
+
+    it("writes every file at once at a level that lets edits through, with the web snippets", async () => {
+      const folder = iconSetFolder("allow");
+      const { ask, set } = tools([imageProfile()], [job("completed")], [], folder);
+      const outcome = await call(set, iconSet);
+      expect(ask).not.toHaveBeenCalled();
+      expect(outcome.result).toMatchObject({
+        status: "saved",
+        directory: "public",
+        files: webIcons.map((name) => `public/${name}`),
+        html: expect.stringContaining('rel="apple-touch-icon"'),
+        manifestIcons: expect.stringContaining("/icon-512.png"),
+      });
+      expect(readdirSync(join(folder.root, "public")).sort()).toEqual([...webIcons].sort());
+    });
+
+    it("writes nothing when any one of the files already exists", async () => {
+      const folder = iconSetFolder("allow");
+      mkdirSync(join(folder.root, "public"));
+      writeFileSync(join(folder.root, "public", "apple-touch-icon.png"), "mine");
+      const { set } = tools([imageProfile()], [job("completed")], [], folder);
+      const outcome = await call(set, iconSet);
+      expect(outcome.isError).toBe(true);
+      expect(outcome.result).toMatchObject({
+        error: expect.stringContaining("public/apple-touch-icon.png already exists"),
+      });
+      expect(folder.write).not.toHaveBeenCalled();
+      expect(readdirSync(join(folder.root, "public"))).toEqual(["apple-touch-icon.png"]);
+    });
+
+    it("refuses a directory outside the folder before resizing anything", async () => {
+      const folder = iconSetFolder("allow");
+      const { set } = tools([imageProfile()], [job("completed")], [], folder);
+      const outcome = await call(set, { ...iconSet, directory: "../elsewhere" });
+      expect(outcome.isError).toBe(true);
+      expect(folder.iconSets.render).not.toHaveBeenCalled();
+      expect(folder.write).not.toHaveBeenCalled();
+    });
+
+    it("asks with the directory and file count at Ask first, and writes nothing on no", async () => {
+      const folder = iconSetFolder("ask");
+      const { ask, set } = tools([imageProfile()], [job("completed")], [], {
+        ...folder,
+        answer: () => ({ status: "cancelled" }),
+      });
+      const outcome = await call(set, iconSet);
+      expect(ask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          offer: expect.objectContaining({ kind: "save", relativePath: "public", fileCount: 3 }),
+        }),
+      );
+      expect(outcome.result).toMatchObject({ status: "not-saved" });
+      expect(existsSync(join(folder.root, "public"))).toBe(false);
+    });
+
+    it("refuses in Plan without resizing, and a source the resizer refuses", async () => {
+      const plan = iconSetFolder("refuse");
+      const inPlan = tools([imageProfile()], [job("completed")], [], plan);
+      expect((await call(inPlan.set, iconSet)).result).toMatchObject({
+        error: expect.stringMatching(/Plan mode/),
+      });
+      expect(plan.iconSets.render).not.toHaveBeenCalled();
+
+      const folder = iconSetFolder("allow");
+      folder.iconSets.render.mockResolvedValueOnce({
+        status: "refused",
+        reason: "Icon sets need a square image; this one is 1024×768.",
+      } as never);
+      const square = tools([imageProfile()], [job("completed")], [], folder);
+      expect((await call(square.set, iconSet)).result).toMatchObject({
+        error: expect.stringMatching(/square/),
+      });
+      expect(folder.write).not.toHaveBeenCalled();
+    });
+
+    it("is not offered where the host cannot resize images", async () => {
+      const folder = iconSetFolder("allow");
+      const { set } = tools([imageProfile()], [job("completed")], [], { save: folder.save });
+      expect(JSON.stringify(set?.definitions)).not.toContain("icon-set");
+      expect((await call(set, iconSet)).result).toMatchObject({
+        error: "The operation is generate or save.",
+      });
+      const offered = tools([imageProfile()], [job("completed")], [], folder);
+      expect(JSON.stringify(offered.set?.definitions)).toContain("icon-set");
     });
   });
 

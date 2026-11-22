@@ -19,8 +19,11 @@ import {
   listEligibleImageProfiles,
 } from "@octant/domain";
 import type {
+  MediaIconSetTarget,
   MediaImageGenerateOutcome,
   MediaImageGenerateRequest,
+  MediaImageIconSetOutcome,
+  MediaImageIconSetRequest,
   MediaImageSaveOutcome,
   MediaImageSaveRequest,
   MediaToolHostPort,
@@ -36,6 +39,7 @@ import type {
   ImageGenerationOfferOutcome,
   ImageGenerationOfferService,
 } from "./imageGenerationOfferService";
+import { webIconSnippets, type IconSetRenderOutcome } from "./iconSetRenderer";
 import type { EnqueueImageJobInput, ImageJobService } from "./imageJobService";
 import type { KeptImageGenerationChoices } from "./keptImageGenerationChoices";
 import {
@@ -100,6 +104,23 @@ export interface ImageAgentToolPort {
     /** Writes a new file under the turn's folder; never overwrites. */
     readonly write: (relativePath: string, bytes: Uint8Array) => Promise<ImageGenerationSaveResult>;
   };
+  /**
+   * Resizing a finished image into an icon set saved through `save`. Absent
+   * where the host cannot resize images (off macOS), and then not offered.
+   */
+  readonly iconSets?: ImageIconSetPort;
+}
+
+export interface ImageIconSetPort {
+  readonly render: (source: {
+    readonly bytes: Uint8Array;
+    readonly mime: string;
+    readonly target: MediaIconSetTarget;
+  }) => Promise<IconSetRenderOutcome>;
+  /** Whether a new file can be created at this path under the turn's folder, without writing. */
+  readonly check: (
+    relativePath: string,
+  ) => Promise<{ readonly status: "ok" } | { readonly status: "refused"; readonly reason: string }>;
 }
 
 /** What the tool asks the person; the binding adds the thread it asks in. */
@@ -157,6 +178,11 @@ export function createImageAgentTools(options: {
       ...(options.port.save === undefined || options.port.readArtifact === undefined
         ? {}
         : { save: (request) => executeHostImageSave(options, request) }),
+      ...(options.port.save === undefined ||
+      options.port.readArtifact === undefined ||
+      options.port.iconSets === undefined
+        ? {}
+        : { iconSet: (request) => executeHostIconSet(options, request) }),
     },
   };
   const tools = CREATE_IMAGE_MEDIA_TOOL_PLUGIN.createTools(mediaPort);
@@ -400,6 +426,107 @@ async function executeHostImageSave(
     : { status: "refused", saveStatus: saved.status, error: saved.reason };
 }
 
+/**
+ * Resizes a finished image of this thread into an icon set and saves every
+ * file as new under the folder the turn works in. Every path is checked for
+ * create before anything is written, so one existing file or one path outside
+ * the folder writes nothing. The level decides as for a single save, and the
+ * card names the directory and the number of files.
+ */
+async function executeHostIconSet(
+  options: {
+    readonly scopeId: ImageGenerationScopeId;
+    readonly port: ImageAgentToolPort;
+  },
+  request: MediaImageIconSetRequest,
+): Promise<MediaImageIconSetOutcome> {
+  const { save, readArtifact, iconSets } = options.port;
+  if (save === undefined || readArtifact === undefined || iconSets === undefined) {
+    return { status: "refused", error: "This thread cannot save icon sets." };
+  }
+  const found = findCompletedJobArtifact(
+    options.port.listJobs(options.scopeId),
+    String(request.attachmentId),
+  );
+  if (found === undefined) {
+    return { status: "refused", error: "That image is not a finished image of this thread." };
+  }
+  if (save.posture() === "refuse") {
+    return { status: "refused", error: "Plan mode cannot save files." };
+  }
+  const read = await readArtifact(found.job.id, found.artifact.attachmentId).catch(() => undefined);
+  if (read === undefined) {
+    return { status: "refused", error: "The generated image is unavailable." };
+  }
+  const rendered = await iconSets.render({
+    bytes: read.bytes,
+    mime: found.artifact.mime,
+    target: request.target,
+  });
+  if (rendered.status === "refused") return { status: "refused", error: rendered.reason };
+  if (request.signal?.aborted) return { status: "not-saved" };
+  const files = rendered.files.map((file) => ({
+    relativePath: `${request.directory}/${file.path}`,
+    bytes: file.bytes,
+  }));
+  const checkAll = async (): Promise<string | undefined> => {
+    for (const file of files) {
+      const checked = await iconSets.check(file.relativePath);
+      if (checked.status === "refused") return `${checked.reason} Nothing was written.`;
+    }
+    return undefined;
+  };
+  const refusedBefore = await checkAll();
+  if (refusedBefore !== undefined) return { status: "refused", error: refusedBefore };
+  let confirmed = false;
+  for (;;) {
+    const posture = save.posture();
+    if (posture === "refuse") {
+      return { status: "refused", error: "Plan mode cannot save files." };
+    }
+    if (posture === "allow" || confirmed) break;
+    const outcome = await options.port.ask({
+      offer: {
+        kind: "save",
+        jobId: found.job.id,
+        attachmentId: found.artifact.attachmentId,
+        relativePath: request.directory,
+        fileCount: files.length,
+      },
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
+    });
+    if (outcome.status !== "save") return { status: "not-saved" };
+    confirmed = true;
+  }
+  // The card can stay open for minutes, so the paths are checked again: a
+  // file that appeared meanwhile still writes nothing.
+  if (confirmed) {
+    const refusedAfter = await checkAll();
+    if (refusedAfter !== undefined) return { status: "refused", error: refusedAfter };
+    if (save.posture() === "refuse") {
+      return { status: "refused", error: "Plan mode cannot save files." };
+    }
+  }
+  const written: string[] = [];
+  for (const file of files) {
+    const saved = await save.write(file.relativePath, file.bytes);
+    if (saved.status !== "saved") {
+      return {
+        status: "failed",
+        error: `${file.relativePath}: ${saved.reason}`,
+        written,
+      };
+    }
+    written.push(saved.relativePath);
+  }
+  return {
+    status: "saved",
+    directory: request.directory,
+    files: written,
+    ...(request.target === "web" ? { snippets: webIconSnippets() } : {}),
+  };
+}
+
 function findCompletedJobArtifact(jobs: ReadonlyArray<ImageJob>, attachmentId: string) {
   for (const job of jobs) {
     if (job.status !== "completed") continue;
@@ -525,6 +652,8 @@ export function createThreadImageAgentTools(input: {
   readonly imageSources?: ThreadImageSources;
   /** Saving under the turn's folder; Work and Code only. */
   readonly save?: ImageAgentToolPort["save"];
+  /** Icon sets under the turn's folder; Work and Code on a host that can resize images. */
+  readonly iconSets?: ImageIconSetPort;
 }): AppManagedToolSet | undefined {
   const scope = { threadKind: input.threadKind, scopeId: input.scopeId };
   const { threadKind, scopeId } = scope;
@@ -567,6 +696,9 @@ export function createThreadImageAgentTools(input: {
       ...(input.imageSources === undefined ? {} : { imageSources: input.imageSources }),
       ...(input.refusal === undefined ? {} : { refusal: input.refusal }),
       ...(input.save === undefined || threadKind === "chat-thread" ? {} : { save: input.save }),
+      ...(input.iconSets === undefined || threadKind === "chat-thread"
+        ? {}
+        : { iconSets: input.iconSets }),
     },
   });
 }

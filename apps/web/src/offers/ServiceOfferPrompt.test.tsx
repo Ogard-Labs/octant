@@ -268,4 +268,25 @@ describe("ServiceOfferPrompt", () => {
       expect(fake.decide).toHaveBeenCalledExactlyOnceWith({ offerId, decision: "save" }),
     );
   });
+
+  it("names the directory and how many files an icon set writes", async () => {
+    const fake = client([
+      {
+        offerId,
+        kind: "save",
+        threadKind: "code-thread",
+        scopeId,
+        jobId: "cc000000-0000-4000-8000-000000000030",
+        attachmentId: "cc000000-0000-4000-8000-000000000031",
+        relativePath: "App/Assets.xcassets",
+        fileCount: 11,
+        requestedAt: "2026-11-07T10:00:00.000Z",
+      } as ImageGenerationOffer,
+    ]);
+    renderPrompt(fake);
+    const card = await screen.findByRole("article", { name: "Icon set save request" });
+    expect(card).toHaveTextContent("11 new files");
+    expect(card).toHaveTextContent("App/Assets.xcassets");
+    expect(card).toHaveTextContent("nothing is written");
+  });
 });

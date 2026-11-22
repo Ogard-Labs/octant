@@ -134,7 +134,9 @@ function OfferCard(props: {
         {offer.kind === "transcribe"
           ? "Transcribe this recording?"
           : offer.kind === "save"
-            ? "Save this image as a new file?"
+            ? offer.fileCount === undefined
+              ? "Save this image as a new file?"
+              : `Save an icon set as ${String(offer.fileCount)} new files in this directory?`
             : "Generate this image?"}
       </Text>
       <Text style={text}>{offer.kind === "generate" ? offer.prompt : offer.relativePath}</Text>
@@ -145,7 +147,9 @@ function OfferCard(props: {
         </Text>
       ) : offer.kind === "save" ? (
         <Text style={text}>
-          The image saves under the thread’s folder without replacing a file.
+          {offer.fileCount === undefined
+            ? "The image saves under the thread’s folder without replacing a file."
+            : "The icons save under the thread’s folder; if any file already exists, nothing is written."}
         </Text>
       ) : (
         <>

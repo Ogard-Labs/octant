@@ -66,6 +66,7 @@ import { createGhCommandPort } from "../code/ghPullRequestPort";
 import { GhPullRequestSwitchPort } from "../code/ghPullRequestSwitchPort";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
+import { hostIconSetsUnder } from "../image/iconSetRenderer";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import type { TranscriptionForTurn } from "../speech/transcriptionTool";
 import { attachedImageSources, workspaceImageSources } from "../image/threadImageSourcePorts";
@@ -812,6 +813,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                 write: (relativePath: string, bytes: Uint8Array) =>
                   saveGeneratedImageUnder({ root: checkoutRoot, relativePath, bytes }),
               },
+              ...hostIconSetsUnder(checkoutRoot, persistence.dataDirectory),
             }),
         // Plan changes nothing on the host or outside it, and a generation
         // calls a paid provider and stores the image.

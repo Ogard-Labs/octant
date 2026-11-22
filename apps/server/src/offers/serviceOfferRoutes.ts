@@ -110,6 +110,14 @@ export function createServiceOfferRouteHandler<Outcome>(input: {
           .filter(
             (offer) =>
               supportsReferences || offer.kind !== "generate" || offer.references === undefined,
+          )
+          // A client that cannot say how many files an icon set writes would
+          // show only its directory, so it is not shown the offer to approve.
+          .filter(
+            (offer) =>
+              (!legacy && url.searchParams.get("iconSets") === "1") ||
+              offer.kind !== "save" ||
+              offer.fileCount === undefined,
           );
         const response = { offers: legacy ? waiting.filter(isImageOffer) : waiting };
         return reply(
