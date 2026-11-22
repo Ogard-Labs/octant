@@ -1,13 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { createHash, generateKeyPairSync, randomUUID } from "node:crypto";
+import { createHash, createPrivateKey, generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import {
   chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
-  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -25,13 +25,17 @@ import {
   SHIELD_SERVERS_AGGREGATE,
   SHIELD_SERVERS_EVENT_NAMES,
   MemberInstallResult,
+  type MemberUpdateDrain,
 } from "@octant/contracts/shield-servers";
 import { Schema } from "effect";
+import { decodeHeadlessBuildRelease } from "@octant/contracts/app-updates";
+import { canonicalHeadlessReleaseBytes } from "@octant/domain";
 import {
   encodeHeadlessArtifactManifest,
   encodeHeadlessArtifactSignature,
   signHeadlessArtifactManifest,
   type HeadlessArtifactManifest,
+  type ReleaseRing,
 } from "@octant/host-runtime";
 import { AGENT_ACCESS_ORIGIN } from "../clientPrincipal";
 import { Journal } from "../persistence/journal";
@@ -42,7 +46,7 @@ import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { ServerConnection } from "../serverProjects/serverConnection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
-import { createHeadlessBuilds } from "./headlessBuilds";
+import { createHeadlessBuilds, type HeadlessBuildFeed } from "./headlessBuilds";
 import {
   MemberInstallService,
   MemberServerWork,
@@ -83,7 +87,9 @@ const decodeMemberInstallResult = Schema.decodeUnknownSync(MemberInstallResult);
  * computer's approval, which the stand-in hub writes as `$HOME/approved`.
  * Its `server upgrade` swaps the `current` link, and when `$HOME/unhealthy`
  * exists it fails its health check and puts the previous version back, as
- * the real one does. Like the real one, a migrating upgrade takes its backup
+ * the real one does. Its `server drain --wait` says `drained`, or
+ * `timed-out` with the count `$HOME/turns-running` holds; its `server stop`
+ * fails while `$HOME/stop-fails` exists. Like the real one, a migrating upgrade takes its backup
  * through the running owner, so it refuses once \`server stop\` stopped it;
  * \`$HOME/start-fails\` makes the new version's service start fail after the
  * swap, and \`$HOME/old-cli\` makes it a build whose usage predates
@@ -128,7 +134,17 @@ case "$1 $2" in
     mkdir -p "$HOME/.config/systemd/user" && echo "[Unit]" > "$HOME/.config/systemd/user/octant.service"
     echo "enabled" ;;
   "server start") rm -f "$HOME/owner-stopped"; echo "ready" ;;
-  "server stop") touch "$HOME/owner-stopped"; echo "stopped" ;;
+  "server stop")
+    [ -f "$HOME/stop-fails" ] && { echo "Octant did not stop." >&2; exit 1; }
+    touch "$HOME/owner-stopped"; echo "stopped" ;;
+  "server drain")
+    if [ "$3" = "--lift" ]; then echo "lifted: this computer admits new turns again."; exit 0; fi
+    if [ -f "$HOME/turns-running" ]; then
+      echo "draining: $(cat "$HOME/turns-running") turns running. New turns are refused."
+      echo "timed-out: $(cat "$HOME/turns-running") turns still running after $4 minutes. New turns are refused."
+    else
+      echo "drained: no turn is running. New turns are refused."
+    fi ;;
   "server disable")
     if [ "$3" = "--remove-service" ]; then rm -f "$HOME/.config/systemd/user/octant.service"; fi
     echo "disabled" ;;
@@ -177,6 +193,7 @@ function signedBuild(
   signingKey: string,
   version = "1.2.3",
   storeVersion = 1,
+  ring: ReleaseRing = "preview",
 ): string {
   const work = scratchDirectory();
   const name = `octant-${version}-linux-x64`;
@@ -218,7 +235,7 @@ function signedBuild(
   writeFileSync(join(root, "octant-artifact.json"), encodeHeadlessArtifactManifest(manifest));
   writeFileSync(
     join(root, "octant-artifact.sig"),
-    encodeHeadlessArtifactSignature(signHeadlessArtifactManifest(manifest, "preview", signingKey)),
+    encodeHeadlessArtifactSignature(signHeadlessArtifactManifest(manifest, ring, signingKey)),
   );
   mkdirSync(folder, { recursive: true });
   const tarball = join(folder, `${name}.tar.gz`);
@@ -357,6 +374,14 @@ function setUp(
     readonly addresses?: ReadonlyArray<string>;
     readonly claimCode?: string;
     readonly trusted?: boolean;
+    /** The build the person placed on this computer, or none. */
+    readonly placed?: "1.2.3" | "none";
+    readonly unreadDownloadMs?: number;
+    /** Where this computer downloads builds from; none by default. */
+    readonly feed?: (keys: {
+      readonly releaseKey: ReturnType<typeof keyPair>;
+      readonly otherKey: ReturnType<typeof keyPair>;
+    }) => HeadlessBuildFeed;
     readonly recordsIdentity?: boolean;
   } = {},
 ) {
@@ -364,10 +389,12 @@ function setUp(
   const releaseKey = keyPair();
   const otherKey = keyPair();
   const builds = join(scratchDirectory(), "headless-builds");
-  signedBuild(
-    builds,
-    options.trusted === false ? otherKey.privateKeyBase64 : releaseKey.privateKeyBase64,
-  );
+  if (options.placed !== "none") {
+    signedBuild(
+      builds,
+      options.trusted === false ? otherKey.privateKeyBase64 : releaseKey.privateKeyBase64,
+    );
+  }
   const journal = openJournal();
   const store = new ShieldServerStore({
     journal,
@@ -390,6 +417,10 @@ function setUp(
       preview: [releaseKey.publicKeyBase64],
       candidate: [releaseKey.publicKeyBase64],
     },
+    ...(options.feed === undefined ? {} : { feed: options.feed({ releaseKey, otherKey }) }),
+    ...(options.unreadDownloadMs === undefined
+      ? {}
+      : { unreadDownloadMs: options.unreadDownloadMs }),
   });
   const work = new MemberServerWork();
   const serviceOptions: ConstructorParameters<typeof MemberInstallService>[0] = {
@@ -899,10 +930,13 @@ async function settledRemoval(setup: ReturnType<typeof setUp>, removalId: string
   }
 }
 
-async function updateOver(setup: ReturnType<typeof setUp>) {
+async function updateOver(
+  setup: ReturnType<typeof setUp>,
+  drain: MemberUpdateDrain = { kind: "stop-now" },
+) {
   const plan = updatePlanOf(await setup.upkeep.prepareUpdate(setup.serverId, person));
   const confirmed = await setup.upkeep.confirmUpdate(
-    { planId: String(plan.planId), drain: "stop-now" },
+    { planId: String(plan.planId), drain },
     person,
   );
   if (confirmed.kind !== "member-update-progress") throw new Error(JSON.stringify(confirmed));
@@ -937,10 +971,10 @@ describe("updating a member and removing Octant from it over SSH", () => {
       signature: "verified",
       installRoot: `${setup.server.state}/install`,
       storeMigration: false,
-      drains: ["stop-now"],
+      drains: ["wait", "stop-now"],
     });
     const confirmed = await setup.upkeep.confirmUpdate(
-      { planId: String(plan.planId), drain: "stop-now" },
+      { planId: String(plan.planId), drain: { kind: "stop-now" } },
       person,
     );
     if (confirmed.kind !== "member-update-progress") throw new Error(JSON.stringify(confirmed));
@@ -967,7 +1001,10 @@ describe("updating a member and removing Octant from it over SSH", () => {
     ).toBe(false);
     // The confirmation was spent, and there is nothing newer to update to.
     expect(
-      await setup.upkeep.confirmUpdate({ planId: String(plan.planId), drain: "stop-now" }, person),
+      await setup.upkeep.confirmUpdate(
+        { planId: String(plan.planId), drain: { kind: "stop-now" } },
+        person,
+      ),
     ).toMatchObject({ reason: "plan-expired" });
     expect(await setup.upkeep.prepareUpdate(setup.serverId, person)).toMatchObject({
       kind: "member-install-refused",
@@ -995,7 +1032,10 @@ describe("updating a member and removing Octant from it over SSH", () => {
     const plan = updatePlanOf(await setup.upkeep.prepareUpdate(setup.serverId, person));
     setup.upkeepHub.roster.roleOn = false;
     expect(
-      await setup.upkeep.confirmUpdate({ planId: String(plan.planId), drain: "stop-now" }, person),
+      await setup.upkeep.confirmUpdate(
+        { planId: String(plan.planId), drain: { kind: "stop-now" } },
+        person,
+      ),
     ).toMatchObject({ kind: "member-install-refused", reason: "not-a-member" });
     expect(callsSince(setup, before)).toEqual([]);
   });
@@ -1077,6 +1117,147 @@ describe("updating a member and removing Octant from it over SSH", () => {
     expect(silent.store.memberComputer(silent.serverId)?.artifactVersion).toBe("1.2.3");
   });
 
+  it("an update that waits drains the member before swapping", async () => {
+    const setup = setUp();
+    const before = await memberAt123(setup);
+    signedBuild(setup.builds, setup.releaseKey.privateKeyBase64, "1.2.4");
+    const { progress } = await updateOver(setup, { kind: "wait", minutes: 10 });
+    expect(progress.state).toBe("updated");
+    const root = `${setup.server.state}/install`;
+    // The member refuses new turns and waits for running ones before it
+    // stops, and only then is the build swapped.
+    expect(callsSince(setup, before)).toEqual([
+      "server drain --wait 10",
+      "server stop",
+      expect.stringMatching(new RegExp(`^server upgrade --artifact /.+ --install-root ${root}$`)),
+    ]);
+    expect(progress.steps.find((step) => step.step === "drain")).toEqual({
+      step: "drain",
+      state: "succeeded",
+    });
+    const requested = upkeepRecords(setup)[0];
+    expect(requested?.eventName).toBe("shield-servers.member-update-requested@2");
+    expect(decodeMemberUpdateRequestedPayload(requested?.payload).drain).toEqual({
+      kind: "wait",
+      minutes: 10,
+    });
+
+    // Turns still running when the wait ends are stopped, as the person
+    // chose, and the sheet says so; restart continuation resumes them.
+    const slow = setUp();
+    const slowBefore = await memberAt123(slow);
+    signedBuild(slow.builds, slow.releaseKey.privateKeyBase64, "1.2.4");
+    writeFileSync(join(slow.server.home, "turns-running"), "2");
+    const timedOut = await updateOver(slow, { kind: "wait", minutes: 10 });
+    expect(timedOut.progress.state).toBe("updated");
+    expect(callsSince(slow, slowBefore).slice(0, 2)).toEqual([
+      "server drain --wait 10",
+      "server stop",
+    ]);
+    expect(timedOut.progress.steps.find((step) => step.step === "drain")).toMatchObject({
+      state: "succeeded",
+      message: expect.stringContaining("2 turns were still running after 10 minutes"),
+    });
+  });
+
+  it("a failed update lifts the drain and leaves no staged build behind", async () => {
+    const setup = setUp();
+    const before = await memberAt123(setup);
+    signedBuild(setup.builds, setup.releaseKey.privateKeyBase64, "1.2.4");
+    writeFileSync(join(setup.server.home, "stop-fails"), "");
+    const { progress } = await updateOver(setup, { kind: "wait", minutes: 5 });
+    expect(progress.state).toBe("rolled-back");
+    expect(progress.steps.map((step) => [step.step, step.state])).toEqual([
+      ["copy", "succeeded"],
+      ["verify", "succeeded"],
+      ["drain", "failed"],
+      ["swap", "not-run"],
+      ["confirm", "not-run"],
+      ["roll-back", "succeeded"],
+    ]);
+    // Nothing was swapped; the member that was refusing turns admits them
+    // again and runs the version it ran before.
+    expect(callsSince(setup, before)).toEqual([
+      "server drain --wait 5",
+      "server stop",
+      "server drain --lift",
+      "server start",
+    ]);
+    expect(currentVersion(setup)).toBe("1.2.3");
+    expect(setup.store.memberComputer(setup.serverId)?.artifactVersion).toBe("1.2.3");
+    // The attempt's copied and unpacked build does not stay behind.
+    expect(existsSync(join(setup.server.state, "member-update", String(progress.updateId)))).toBe(
+      false,
+    );
+
+    // Stopping now never drained, so a failed stop has nothing to lift.
+    const stopNow = setUp();
+    const stopNowBefore = await memberAt123(stopNow);
+    signedBuild(stopNow.builds, stopNow.releaseKey.privateKeyBase64, "1.2.4");
+    writeFileSync(join(stopNow.server.home, "stop-fails"), "");
+    expect((await updateOver(stopNow)).progress.state).toBe("rolled-back");
+    expect(callsSince(stopNow, stopNowBefore)).toEqual(["server stop", "server start"]);
+  });
+
+  it("an update journaled before waiting was offered still moves the member's version on", async () => {
+    const setup = setUp();
+    await memberAt123(setup);
+    const updateId = randomUUID();
+    const version =
+      setup.journal
+        .aggregateVersions(SHIELD_SERVERS_AGGREGATE)
+        .find((entry) => entry.aggregateId === setup.serverId)?.aggregateVersion ?? 0;
+    setup.journal.append({
+      aggregate: {
+        aggregateType: SHIELD_SERVERS_AGGREGATE,
+        aggregateId: setup.serverId as never,
+      },
+      expectedVersion: version as never,
+      events: [
+        {
+          eventId: randomUUID() as never,
+          eventName: SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequestedV1 as never,
+          eventVersion: 1,
+          correlationId: randomUUID() as never,
+          actor: person.actor,
+          occurredAt: "2026-11-20T12:00:00.000Z" as never,
+          payload: {
+            updateId,
+            serverId: setup.serverId,
+            target: "linux-x64",
+            fromVersion: "1.2.3",
+            toVersion: "1.2.4",
+            ring: "preview",
+            drain: "stop-now",
+          },
+        },
+      ],
+    });
+    const reopened = new ShieldServerStore({
+      journal: setup.journal,
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => "2026-11-20T12:00:00.000Z",
+    });
+    reopened.load();
+    expect(
+      reopened.recordMemberUpdate(
+        {
+          event: "step",
+          payload: {
+            updateId: updateId as never,
+            serverId: setup.serverId as never,
+            step: "confirm",
+            outcome: "succeeded",
+          },
+        },
+        person.actor,
+      ),
+    ).toBe(true);
+    expect(reopened.memberComputer(setup.serverId)?.artifactVersion).toBe("1.2.4");
+  });
+
   it("refuses an update build whose signature does not verify, and changes nothing", async () => {
     const untrusted = setUp();
     const before = await memberAt123(untrusted);
@@ -1099,7 +1280,7 @@ describe("updating a member and removing Octant from it over SSH", () => {
     signedBuild(swapped.builds, swapped.otherKey.privateKeyBase64, "1.2.4");
     expect(
       await swapped.upkeep.confirmUpdate(
-        { planId: String(plan.planId), drain: "stop-now" },
+        { planId: String(plan.planId), drain: { kind: "stop-now" } },
         person,
       ),
     ).toMatchObject({ kind: "member-install-refused", reason: "build-unverified" });
@@ -1143,7 +1324,7 @@ describe("updating a member and removing Octant from it over SSH", () => {
     const first = updatePlanOf(await setup.upkeep.prepareUpdate(setup.serverId, person));
     const second = updatePlanOf(await setup.upkeep.prepareUpdate(setup.serverId, person));
     const confirmed = await setup.upkeep.confirmUpdate(
-      { planId: String(first.planId), drain: "stop-now" },
+      { planId: String(first.planId), drain: { kind: "stop-now" } },
       person,
     );
     if (confirmed.kind !== "member-update-progress") throw new Error(JSON.stringify(confirmed));
@@ -1151,7 +1332,7 @@ describe("updating a member and removing Octant from it over SSH", () => {
     const afterFirst = setup.server.calls().length;
     expect(
       await setup.upkeep.confirmUpdate(
-        { planId: String(second.planId), drain: "stop-now" },
+        { planId: String(second.planId), drain: { kind: "stop-now" } },
         person,
       ),
     ).toMatchObject({ kind: "member-install-refused", reason: "plan-expired" });
@@ -1332,7 +1513,7 @@ describe("updating a member and removing Octant from it over SSH", () => {
     const updating = await askResult({
       kind: "confirm-member-update",
       planId: plan.planId,
-      drain: "stop-now",
+      drain: { kind: "stop-now" },
     });
     if (updating.kind !== "member-update-progress") throw new Error(JSON.stringify(updating));
     expect((await settledUpdate(setup, String(updating.progress.updateId))).state).toBe("updated");
@@ -1374,7 +1555,7 @@ describe("updating a member and removing Octant from it over SSH", () => {
       fromVersion: "1.2.3",
       toVersion: "1.2.4",
       ring: "preview",
-      drain: "stop-now",
+      drain: { kind: "stop-now" },
     });
     expect(
       updateSteps.map((envelope) => {
@@ -1431,7 +1612,7 @@ describe("updating a member and removing Octant from it over SSH", () => {
       expect(await setup.upkeep.prepareUpdate(setup.serverId, requester)).toMatchObject(refusal);
       expect(
         await setup.upkeep.confirmUpdate(
-          { planId: String(update.planId), drain: "stop-now" },
+          { planId: String(update.planId), drain: { kind: "stop-now" } },
           requester,
         ),
       ).toMatchObject(refusal);
@@ -1446,7 +1627,7 @@ describe("updating a member and removing Octant from it over SSH", () => {
     // The route reads who is asking from the authenticated principal.
     for (const body of [
       { kind: "prepare-member-update", serverId: setup.serverId },
-      { kind: "confirm-member-update", planId: update.planId, drain: "stop-now" },
+      { kind: "confirm-member-update", planId: update.planId, drain: { kind: "stop-now" } },
       { kind: "prepare-member-removal", serverId: setup.serverId },
       { kind: "confirm-member-removal", planId: removal.planId, deleteData: true },
     ]) {
@@ -1467,5 +1648,348 @@ describe("updating a member and removing Octant from it over SSH", () => {
     });
     expect(paired.status).toBe(200);
     expect(await paired.json()).toMatchObject({ kind: "member-update-plan" });
+  });
+});
+
+const FEED_BASE = "https://octant.sh/updates";
+const LISTING_URL = `${FEED_BASE}/candidate/linux-x64.octant-headless.json`;
+/** Where octant.sh sends the listing, as it redirects every feed file to the ring's mailbox release. */
+const MAILBOX_URL =
+  "https://github.com/Ogard-Labs/octant/releases/download/feed-candidate/linux-x64.octant-headless.json";
+
+function buildUrl(version: string): string {
+  return `https://github.com/Ogard-Labs/octant/releases/download/v${version}/octant-${version}-linux-x64.tar.gz`;
+}
+
+/** A candidate build packed as the release attaches it, kept off this computer's builds folder. */
+function releasedBuild(signingKey: string, version: string): Buffer {
+  return readFileSync(signedBuild(scratchDirectory(), signingKey, version, 1, "candidate"));
+}
+
+/** The ring's signed listing of one build, as `scripts/sign-update-feed.ts --headless` writes it. */
+function listingOf(input: {
+  readonly version: string;
+  readonly bytes: Uint8Array;
+  readonly signingKey: string;
+}): string {
+  const release = decodeHeadlessBuildRelease({
+    product: "octant",
+    version: input.version,
+    target: "linux-x64",
+    ring: "candidate",
+    url: buildUrl(input.version),
+    sha256: createHash("sha256").update(input.bytes).digest("hex"),
+    releasedAt: "2026-11-20T12:00:00.000Z",
+  });
+  const key = createPrivateKey({
+    key: Buffer.from(input.signingKey, "base64"),
+    format: "der",
+    type: "pkcs8",
+  });
+  const signature = sign(null, canonicalHeadlessReleaseBytes(release), key).toString("base64");
+  return JSON.stringify({ schemaVersion: 1, release, signature });
+}
+
+/**
+ * The release host as the feed reaches it, injected the way the desktop
+ * updater's tests inject theirs: the listing behind octant.sh's redirect to
+ * the mailbox release, and the build on its release. Offline, every request
+ * fails as a dropped connection does. It records each URL asked for.
+ */
+function standInReleaseHost(files: {
+  readonly listing?: string;
+  readonly builds?: Readonly<Record<string, Uint8Array>>;
+  readonly offline?: boolean;
+  /** Holds the listing's answer until it settles; a cancelled request fails at once. */
+  readonly listingAnswered?: Promise<void>;
+}) {
+  const requested: string[] = [];
+  const cancelled: string[] = [];
+  const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = input instanceof Request ? input.url : String(input);
+    requested.push(url);
+    if (files.offline === true) throw new TypeError("fetch failed");
+    if (url === MAILBOX_URL && files.listingAnswered !== undefined) {
+      const signal = init?.signal ?? undefined;
+      await new Promise<void>((done, fail) => {
+        signal?.addEventListener("abort", () => {
+          cancelled.push(url);
+          fail(new DOMException("aborted", "AbortError"));
+        });
+        void files.listingAnswered?.then(done);
+      });
+    }
+    if (url === LISTING_URL) {
+      return new Response(null, { status: 302, headers: { location: MAILBOX_URL } });
+    }
+    if (url === MAILBOX_URL && files.listing !== undefined) {
+      return new Response(files.listing, { status: 200 });
+    }
+    const build = files.builds?.[url];
+    if (build !== undefined) return new Response(new Uint8Array(build), { status: 200 });
+    return new Response("Not Found", { status: 404 });
+  }) as typeof globalThis.fetch;
+  const feed: HeadlessBuildFeed = { baseUrl: FEED_BASE, ring: () => "candidate", fetch };
+  return { feed, requested, cancelled };
+}
+
+/** Reads a download, as the sheet does, until it is ready or refused. */
+async function settledDownload(setup: ReturnType<typeof setUp>, result: MemberInstallResult) {
+  if (result.kind !== "member-build-download") throw new Error(JSON.stringify(result));
+  for (;;) {
+    const read = setup.service.downloadProgress(String(result.download.downloadId), person);
+    if (read.kind !== "member-build-download") throw new Error(JSON.stringify(read));
+    const { state } = read.download;
+    if (state === "ready" || state === "refused") return read.download;
+    await new Promise((done) => setTimeout(done, 10));
+  }
+}
+
+function folderEntries(folder: string): ReadonlyArray<string> {
+  return existsSync(folder) ? readdirSync(folder) : [];
+}
+
+describe("downloading the build from this computer's ring", () => {
+  it("downloads the server's build from the ring when none is on this computer, and installs it", async () => {
+    let host: ReturnType<typeof standInReleaseHost> | undefined;
+    const setup = setUp({
+      placed: "none",
+      feed: ({ releaseKey }) => {
+        const bytes = releasedBuild(releaseKey.privateKeyBase64, "1.2.3");
+        host = standInReleaseHost({
+          listing: listingOf({ version: "1.2.3", bytes, signingKey: releaseKey.privateKeyBase64 }),
+          builds: { [buildUrl("1.2.3")]: bytes },
+        });
+        return host.feed;
+      },
+    });
+    const started = await setup.service.prepare(setup.serverId, person);
+    expect(started).toMatchObject({
+      kind: "member-build-download",
+      download: { target: "linux-x64", ring: "candidate", state: "downloading" },
+    });
+    const download = await settledDownload(setup, started);
+    expect(download).toMatchObject({ state: "ready", version: "1.2.3" });
+    // The listing behind the feed's redirect, then the build it names, and
+    // nothing about this computer in either request.
+    expect(host?.requested).toEqual([LISTING_URL, MAILBOX_URL, buildUrl("1.2.3")]);
+    // Kept under the release's own name, with nothing staged left beside it.
+    expect(folderEntries(setup.builds)).toEqual(["octant-1.2.3-linux-x64.tar.gz"]);
+    // Downloading changed nothing on the server.
+    expect(setup.server.calls()).toBe("");
+
+    const { plan, progress } = await installOver(setup);
+    expect(plan).toMatchObject({ artifactVersion: "1.2.3", ring: "candidate" });
+    expect(progress.state).toBe("joined");
+    expect(currentVersion(setup)).toBe("1.2.3");
+  });
+
+  it("stops the download, cancelling the listing request, when its only sheet closes before the listing answers", async () => {
+    let host: ReturnType<typeof standInReleaseHost> | undefined;
+    let answer = () => {};
+    const listingAnswered = new Promise<void>((done) => {
+      answer = done;
+    });
+    const setup = setUp({
+      placed: "none",
+      feed: ({ releaseKey }) => {
+        const bytes = releasedBuild(releaseKey.privateKeyBase64, "1.2.3");
+        host = standInReleaseHost({
+          listing: listingOf({ version: "1.2.3", bytes, signingKey: releaseKey.privateKeyBase64 }),
+          builds: { [buildUrl("1.2.3")]: bytes },
+          listingAnswered,
+        });
+        return host.feed;
+      },
+    });
+    const started = await setup.service.prepare(setup.serverId, person);
+    if (started.kind !== "member-build-download") throw new Error(JSON.stringify(started));
+    await new Promise((done) => setTimeout(done, 20));
+    expect(setup.service.leaveDownload(String(started.download.downloadId), person)).toMatchObject({
+      kind: "member-build-download",
+      download: { state: "refused" },
+    });
+    answer();
+    expect(await settledDownload(setup, started)).toMatchObject({ state: "refused" });
+    expect(host?.cancelled).toEqual([MAILBOX_URL]);
+    expect(host?.requested).not.toContain(buildUrl("1.2.3"));
+    expect(folderEntries(setup.builds)).toEqual([]);
+  });
+
+  it("stops a download no sheet reads any more even though its sheet never said it closed", async () => {
+    let answer = () => {};
+    const listingAnswered = new Promise<void>((done) => {
+      answer = done;
+    });
+    let host: ReturnType<typeof standInReleaseHost> | undefined;
+    const setup = setUp({
+      placed: "none",
+      unreadDownloadMs: 50,
+      feed: ({ releaseKey }) => {
+        const bytes = releasedBuild(releaseKey.privateKeyBase64, "1.2.3");
+        host = standInReleaseHost({
+          listing: listingOf({ version: "1.2.3", bytes, signingKey: releaseKey.privateKeyBase64 }),
+          builds: { [buildUrl("1.2.3")]: bytes },
+          listingAnswered,
+        });
+        return host.feed;
+      },
+    });
+    const started = await setup.service.prepare(setup.serverId, person);
+    if (started.kind !== "member-build-download") throw new Error(JSON.stringify(started));
+    // The window closed without a leave: nothing reads the download.
+    await new Promise((done) => setTimeout(done, 150));
+    answer();
+    expect(await settledDownload(setup, started)).toMatchObject({ state: "refused" });
+    expect(host?.cancelled).toEqual([MAILBOX_URL]);
+    expect(folderEntries(setup.builds)).toEqual([]);
+  });
+
+  it("keeps downloading for the sheet still open when another sheet reading the same build closes", async () => {
+    let answer = () => {};
+    const listingAnswered = new Promise<void>((done) => {
+      answer = done;
+    });
+    const setup = setUp({
+      placed: "none",
+      feed: ({ releaseKey }) => {
+        const bytes = releasedBuild(releaseKey.privateKeyBase64, "1.2.3");
+        return standInReleaseHost({
+          listing: listingOf({ version: "1.2.3", bytes, signingKey: releaseKey.privateKeyBase64 }),
+          builds: { [buildUrl("1.2.3")]: bytes },
+          listingAnswered,
+        }).feed;
+      },
+    });
+    const first = await setup.service.prepare(setup.serverId, person);
+    const second = await setup.service.prepare(setup.serverId, person);
+    if (first.kind !== "member-build-download" || second.kind !== "member-build-download") {
+      throw new Error(JSON.stringify([first, second]));
+    }
+    expect(String(second.download.downloadId)).toBe(String(first.download.downloadId));
+    setup.service.leaveDownload(String(first.download.downloadId), person);
+    answer();
+    expect(await settledDownload(setup, second)).toMatchObject({
+      state: "ready",
+      version: "1.2.3",
+    });
+    expect(folderEntries(setup.builds)).toEqual(["octant-1.2.3-linux-x64.tar.gz"]);
+  });
+
+  it("refuses a downloaded build whose digest or signature does not match the feed, and keeps nothing", async () => {
+    // The bytes served are not the ones the signed listing names.
+    const substituted = setUp({
+      placed: "none",
+      feed: ({ releaseKey }) => {
+        const listed = releasedBuild(releaseKey.privateKeyBase64, "1.2.3");
+        const served = releasedBuild(releaseKey.privateKeyBase64, "1.2.3");
+        return standInReleaseHost({
+          listing: listingOf({
+            version: "1.2.3",
+            bytes: listed,
+            signingKey: releaseKey.privateKeyBase64,
+          }),
+          builds: { [buildUrl("1.2.3")]: Buffer.concat([served, Buffer.from("tampered")]) },
+        }).feed;
+      },
+    });
+    expect(
+      await settledDownload(
+        substituted,
+        await substituted.service.prepare(substituted.serverId, person),
+      ),
+    ).toMatchObject({ state: "refused", refusal: "digest-mismatch" });
+    expect(folderEntries(substituted.builds)).toEqual([]);
+
+    // A listing no key trusted for the ring signed: the build is never asked for.
+    let untrustedHost: ReturnType<typeof standInReleaseHost> | undefined;
+    const untrusted = setUp({
+      placed: "none",
+      feed: ({ releaseKey, otherKey }) => {
+        const bytes = releasedBuild(releaseKey.privateKeyBase64, "1.2.3");
+        untrustedHost = standInReleaseHost({
+          listing: listingOf({ version: "1.2.3", bytes, signingKey: otherKey.privateKeyBase64 }),
+          builds: { [buildUrl("1.2.3")]: bytes },
+        });
+        return untrustedHost.feed;
+      },
+    });
+    expect(
+      await settledDownload(untrusted, await untrusted.service.prepare(untrusted.serverId, person)),
+    ).toMatchObject({ state: "refused", refusal: "untrusted-listing" });
+    expect(untrustedHost?.requested).not.toContain(buildUrl("1.2.3"));
+    expect(folderEntries(untrusted.builds)).toEqual([]);
+
+    // A genuine listing of a build whose own release signature is not trusted.
+    const unsigned = setUp({
+      placed: "none",
+      feed: ({ releaseKey, otherKey }) => {
+        const bytes = releasedBuild(otherKey.privateKeyBase64, "1.2.3");
+        return standInReleaseHost({
+          listing: listingOf({ version: "1.2.3", bytes, signingKey: releaseKey.privateKeyBase64 }),
+          builds: { [buildUrl("1.2.3")]: bytes },
+        }).feed;
+      },
+    });
+    expect(
+      await settledDownload(unsigned, await unsigned.service.prepare(unsigned.serverId, person)),
+    ).toMatchObject({ state: "refused", refusal: "build-unverified" });
+    expect(folderEntries(unsigned.builds)).toEqual([]);
+
+    for (const setup of [substituted, untrusted, unsigned]) {
+      expect(setup.server.calls()).toBe("");
+      expect(setup.records()).toEqual([]);
+    }
+  });
+
+  it("keeps the hand-placed build when one is newer than the ring's", async () => {
+    let host: ReturnType<typeof standInReleaseHost> | undefined;
+    const setup = setUp({
+      feed: ({ releaseKey }) => {
+        const bytes = releasedBuild(releaseKey.privateKeyBase64, "1.2.9");
+        host = standInReleaseHost({
+          listing: listingOf({ version: "1.2.9", bytes, signingKey: releaseKey.privateKeyBase64 }),
+          builds: { [buildUrl("1.2.9")]: bytes },
+        });
+        return host.feed;
+      },
+    });
+    await memberAt123(setup);
+    // The person placed 1.3.0, newer than both the member and the ring's 1.2.9.
+    const placed = signedBuild(setup.builds, setup.releaseKey.privateKeyBase64, "1.3.0");
+    const plan = updatePlanOf(await setup.upkeep.prepareUpdate(setup.serverId, person));
+    expect(plan).toMatchObject({ fromVersion: "1.2.3", toVersion: "1.3.0" });
+    expect(host?.requested).toEqual([]);
+
+    // With no build newer than the member's on this computer, the ring's is downloaded.
+    rmSync(placed);
+    const download = await settledDownload(
+      setup,
+      await setup.upkeep.prepareUpdate(setup.serverId, person),
+    );
+    expect(download).toMatchObject({ state: "ready", version: "1.2.9" });
+    expect(updatePlanOf(await setup.upkeep.prepareUpdate(setup.serverId, person))).toMatchObject({
+      fromVersion: "1.2.3",
+      toVersion: "1.2.9",
+      ring: "candidate",
+    });
+  });
+
+  it("says where to place a build when the ring cannot be reached", async () => {
+    const setup = setUp({
+      placed: "none",
+      feed: () => standInReleaseHost({ offline: true }).feed,
+    });
+    const download = await settledDownload(
+      setup,
+      await setup.service.prepare(setup.serverId, person),
+    );
+    expect(download).toMatchObject({ state: "refused", refusal: "unreachable" });
+    expect(download.message).toContain("No signed Octant build for linux-x64 is on this computer");
+    expect(download.message).toContain(
+      `Put octant-<version>-linux-x64.tar.gz from Octant's release in ${setup.builds}`,
+    );
+    expect(folderEntries(setup.builds)).toEqual([]);
+    expect(setup.server.calls()).toBe("");
   });
 });

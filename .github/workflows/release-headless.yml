@@ -13,7 +13,10 @@
 #          built there, and holds no secret.
 #   sign   reads only the ring's key and runs only this workflow's own
 #          scripts: it checks every file against the manifest, signs the
-#          manifest, packs the build again and attaches it to the release.
+#          manifest, packs the build again and attaches it to the release,
+#          then signs the listing of that build (its URL and digest) into
+#          the ring's feed, `<ring>/<target>.octant-headless.json`, and
+#          publishes it to the ring's feed mailbox.
 #
 # Signing fails closed: with the ring's key unset, or a key `octant` does not
 # trust for the ring, nothing is attached. `octant server install` refuses a
@@ -151,3 +154,32 @@ jobs:
               --notes "${RING} build of ${GITHUB_REF_NAME} at ${GITHUB_SHA}. Not a stable release." \
               || gh release upload "$tag" "$file" --clobber
           fi
+      # Listed in the ring's signed feed only once the build is attached, so
+      # a host that reads the listing finds the build it names. A host
+      # downloading a build for a server it installs over SSH trusts this
+      # listing's signature and digest, as the desktop updater trusts its own
+      # feed; the build's own release signature is checked after that.
+      - name: List it in the ring's feed
+        env:
+          OCTANT_UPDATE_FEED_PRIVATE_KEY: ${{ inputs.ring == 'stable' && secrets.OCTANT_UPDATE_FEED_PRIVATE_KEY || '' }}
+          OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY: ${{ inputs.ring != 'stable' && secrets.OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY || '' }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          RING: ${{ inputs.ring }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          name="octant-${VERSION}-${TARGET}.tar.gz"
+          # Constructed from the tag and the file name, as the desktop feed's
+          # artifact URL is, never read back from a list query.
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/${name}"
+          out="${RUNNER_TEMP}/feed/$(bun scripts/sign-update-feed.ts --print-feed-path --headless --ring "$RING" --target "$TARGET")"
+          bun scripts/sign-update-feed.ts --headless \
+            --version "$VERSION" \
+            --ring "$RING" \
+            --target "$TARGET" \
+            --url "$url" \
+            --artifact "${RUNNER_TEMP}/signed/${name}" \
+            --released-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+            --out "$out"
+          scripts/publish-update-feed.sh "$RING" "$out"

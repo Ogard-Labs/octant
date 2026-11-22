@@ -333,6 +333,7 @@ import {
   MemberRemovalRequestedPayload,
   MemberRemovalStepRecordedPayload,
   MemberUpdateRequestedPayload,
+  MemberUpdateRequestedPayloadV1,
   MemberUpdateStepRecordedPayload,
   SHIELD_REMOTE_COMMAND_EVENT_NAMES,
   SHIELD_SERVERS_EVENT_NAMES,
@@ -772,6 +773,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       1,
       MemberInstallStepRecordedPayload,
     )
+    .register(SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequestedV1, 1, MemberUpdateRequestedPayloadV1)
     .register(SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequested, 1, MemberUpdateRequestedPayload)
     .register(
       SHIELD_SERVERS_EVENT_NAMES.memberUpdateStepRecorded,

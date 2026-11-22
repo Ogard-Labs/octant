@@ -4,6 +4,7 @@ import {
   type ConversationInputPolicy,
   type ConversationInputReceipt,
 } from "@octant/contracts/conversation-inputs";
+import type { TurnAcceptance } from "../hostDrain";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
@@ -882,6 +883,11 @@ export interface ChatServiceOptions {
     }) => TurnToolEffects;
     /** Absent means every turn is admitted. */
     readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
+    /**
+     * Rechecks the host drain right before a prepared turn is accepted and
+     * counts the turn as running; the refusal, or nothing when admitted.
+     */
+    readonly acceptTurn?: (scope: NativeHarnessTurnScope) => TurnAcceptance;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
     /** Every turn's end, whatever its outcome, with what the turn cost and how it ran. */
     readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
@@ -3023,7 +3029,10 @@ export class ChatService {
     return { kind: "thread-updated", thread: next };
   }
 
-  /** A paused harness session refuses a new prompt, whether sent or edited in. */
+  /**
+   * A paused harness session refuses a new prompt, whether sent or edited in,
+   * and so does a host draining before an update.
+   */
   #admitHarnessTurn(thread: ChatThread): void {
     const admission = this.#nativeHarness?.admitTurn?.({
       threadId: String(thread.id),
@@ -3032,6 +3041,11 @@ export class ChatService {
       modelId: decodeProviderModelId(thread.modelId),
       ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
     });
+    if (admission?.kind === "draining") {
+      throw new ChatServiceError(
+        decodeChatFailure({ category: "unavailable", message: admission.detail }),
+      );
+    }
     if (admission?.kind === "paused") {
       throw new ChatServiceError(
         decodeChatFailure({
@@ -3200,34 +3214,56 @@ export class ChatService {
           message: "Queued Chat admission was revoked during preparation.",
         });
       }
-      this.#persistence.journal.append(
-        {
-          aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
-          expectedVersion: command.expectedVersion,
-          events: [
-            this.#pending("chat.thread-updated@1", {
-              kind: "thread-updated",
-              thread: updatedThread,
-            }),
-            this.#pending("chat.turn-created@1", { kind: "turn-created", turn }),
-            ...(routing !== undefined && routing.decision.decision.kind === "selected"
-              ? [
-                  this.#pending("chat.turn-route-decided@1", {
-                    kind: "turn-route-decided",
-                    decision: routing.decision,
-                  }),
-                ]
-              : []),
-          ],
-        },
-        {
-          beforeEvents: (connection) => {
-            this.#writePreparedContent(connection, userMessage);
-            for (const content of prepared.describedContents ?? [])
-              this.#writePreparedContent(connection, content);
+      // A drain that began while the send was prepared refuses it here; from
+      // here the drain counts it, before its provider reports a start.
+      const acceptance = this.#nativeHarness?.acceptTurn?.({
+        threadId: String(thread.id),
+        mode: "chat",
+        providerInstanceId: decodeProviderInstanceId(thread.providerInstanceId),
+        modelId: decodeProviderModelId(thread.modelId),
+        ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+      });
+      if (acceptance?.status === "refused") {
+        await prepared.appManagedTools?.close?.().catch(() => undefined);
+        throw new ChatServiceError(
+          decodeChatFailure({ category: "unavailable", message: acceptance.message }),
+        );
+      }
+      // A send whose journal write fails never starts, so it stops counting.
+      const releaseDrain = acceptance?.status === "accepted" ? acceptance.release : () => {};
+      try {
+        this.#persistence.journal.append(
+          {
+            aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+            expectedVersion: command.expectedVersion,
+            events: [
+              this.#pending("chat.thread-updated@1", {
+                kind: "thread-updated",
+                thread: updatedThread,
+              }),
+              this.#pending("chat.turn-created@1", { kind: "turn-created", turn }),
+              ...(routing !== undefined && routing.decision.decision.kind === "selected"
+                ? [
+                    this.#pending("chat.turn-route-decided@1", {
+                      kind: "turn-route-decided",
+                      decision: routing.decision,
+                    }),
+                  ]
+                : []),
+            ],
           },
-        },
-      );
+          {
+            beforeEvents: (connection) => {
+              this.#writePreparedContent(connection, userMessage);
+              for (const content of prepared.describedContents ?? [])
+                this.#writePreparedContent(connection, content);
+            },
+          },
+        );
+      } catch (error) {
+        releaseDrain();
+        throw error;
+      }
       return {
         kind: "accepted" as const,
         thread: updatedThread,

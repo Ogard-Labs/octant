@@ -17,6 +17,7 @@ export type HostControlOperation =
   | "status"
   | "data-map"
   | "stop"
+  | "drain"
   | "restart"
   | "enable"
   | "disable"
@@ -37,6 +38,7 @@ export const HOST_CONTROL_ACTION_NAMES: Readonly<Record<HostControlOperation, st
   status: "host.service.status",
   "data-map": "host.store.data-map",
   stop: "host.service.stop",
+  drain: "host.service.drain",
   restart: "host.service.restart",
   enable: "host.service.enable",
   disable: "host.service.disable",

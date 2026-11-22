@@ -611,15 +611,54 @@ keys when it has them) and changes nothing anywhere. The sheet states:
 - that it joins this computer's hub, and that confirming also approves that
   one join.
 
-**Where the build comes from.** Octant downloads no build itself yet: the
-newest `octant-<version>-<target>.tar.gz` in the `headless-builds` folder of
-this computer's Octant data folder is used, as the release publishes it; a
-final release outranks the candidate or preview build of the same version
-that led to it. An archive that would unpack to more than 2 GiB is refused
-before it is unpacked. A build that is unsigned, signed by a key not trusted for its ring, or whose
-files differ from its manifest is refused before a byte is sent; it is
-checked again when the person confirms, and a build changed since the sheet
-was read is refused.
+**Where the build comes from.** The newest `octant-<version>-<target>.tar.gz`
+in the `headless-builds` folder of this computer's Octant data folder is
+used, as the release publishes it; a final release outranks the candidate or
+preview build of the same version that led to it. An archive that would
+unpack to more than 2 GiB is refused before it is unpacked. A build the person placed there by hand is
+kept: while one for the server's target is there (for an update, one newer
+than the installed version), Octant asks no release for anything. Otherwise
+preparing downloads the build for the server's target from the ring this
+computer follows (Settings › Updates; the ring its own version names until
+the person picks one), as its own updater does (maintainer decision,
+2026-11-19), and the sheet shows **downloading**, **verifying** and
+**ready**, then reads the plan again. This computer downloads it; the server
+needs no internet access to the release host. The download lasts only while
+a sheet reads it: a sheet closed while its server is read starts none, sheets
+asking for the same build share one, and when the last of them closes the
+listing or build request is cancelled and nothing is kept. A sheet reads its
+download once a second; a download no sheet has read for 30 seconds (a
+window that closed or lost its connection without saying it left) stops the
+same way.
+
+1. **Listing.** The ring's signed listing of the build,
+   `<ring>/<target>.octant-headless.json` under the updater's feed base (see
+   [Architecture: the feed is published to GitHub
+   releases](../architecture.md#security-and-authority)), names the version,
+   target, ring, the build's URL on its release and its SHA-256. It is read
+   through the updater's own transport, and nothing in it is believed until
+   its signature verifies against the release keys of the ring it names; that
+   ring must be the one this computer follows and the target the server's.
+   For an update, a listed version not newer than the installed one is
+   refused.
+2. **Digest.** The build is downloaded over HTTPS (the updater's redirect,
+   size and time limits) and must hash to the listed digest.
+3. **Signature.** The build then passes the same check as a placed build:
+   every file against its manifest, and the manifest's own release signature
+   against the keys of its ring; its version and ring must be the listed
+   ones.
+4. **Kept.** It is written to a hidden temporary file in `headless-builds`,
+   checked there, and only then renamed to its release name. A build that
+   fails any step is deleted, so nothing unverified is ever kept or found.
+
+A computer following Octant Nightly's preview ring asks nothing, because
+Nightly releases carry no headless build. When the ring cannot be reached,
+lists no build for the target, or refuses one, the sheet keeps the sentence
+it shows when no build is on this computer and says where to place a build
+by hand. A build that is unsigned, signed by a key not trusted for its ring,
+or whose files differ from its manifest is refused before a byte is sent; it
+is checked again when the person confirms, and a build changed since the
+sheet was read is refused.
 
 **The steps.** The person's one confirmation journals the request, then runs
 copy, verify, install, start, listen and join over the same connection. Each
@@ -675,28 +714,46 @@ an install whose join succeeded, and no removal since) offers **Update** and
 principals on the same route, decided before anything is read. Preparing
 reads the install over SSH (the version its `current` link names, that
 version's manifest, and the login's state and data folders) and this
-computer's build, and changes nothing. It refuses a server this hub does not
-list as a member, a build that is not newer than the installed one, and an
-unsigned or untrusted build, exactly as the install does. The sheet states
+computer's build, and changes nothing on the server. When no build newer
+than the installed one is on this computer it downloads one from the ring,
+as the install does. It refuses a server this hub does not list as a member,
+a build that is not newer than the installed one, and an unsigned or
+untrusted build, exactly as the install does. The sheet states
 the two versions and the ring, that the signature and every file were checked
-here, how running turns stop, that the store is migrated when the new build's
-store version is higher, and what makes Octant roll back. The one
-confirmation reads the install again and refuses a plan whose starting
-version is no longer current (another sheet finished an update since).
-Both reading the sheet and confirming it need the hub role on and the running
-hub listing the member, since no signed hello is believed while it is off and
-a swapped member could never be confirmed. It then
-journals the request and runs over the same connection:
+here, how running turns stop (the person picks **Wait up to N minutes for
+running work**, ten unless they pick another bound from 1 to 60, or **Stop
+now**), that the store is migrated when the new build's store version is
+higher, and what makes Octant roll back. The one confirmation reads the
+install again and refuses a plan whose starting version is no longer current
+(another sheet finished an update since). Both reading the sheet and
+confirming it need the hub role on and the running hub listing the member,
+since no signed hello is believed while it is off and a swapped member could
+never be confirmed. It then journals the request and runs over the same
+connection:
 
 1. **Copy** and **Verify**, exactly as the install does.
-2. **Drain.** `octant server stop` from the installed copy: the member's owner
-   stops gracefully, and the turns that stop cuts off continue by themselves
-   once it starts again (restart continuation). Only **stop now** is built;
-   waiting up to a chosen number of minutes for running turns is not, because
-   no host stops admitting new turns while letting running ones finish.
-   An update that migrates the store skips this stop: `octant server upgrade`
-   takes its verified backup through the running owner's control socket and
-   then stops the owner gracefully itself.
+2. **Drain.** As the person chose (maintainer decision, 2026-11-19). **Wait**
+   runs `octant server drain --wait <minutes>` from the installed copy: the
+   member refuses every new turn and routine run at once, lets running turns
+   finish, and answers `drained` once none runs or `timed-out` with how many
+   still run when the wait passes
+   ([Architecture: draining before an update](../architecture.md#draining-before-an-update)).
+   Then `octant server stop`; a turn still running is stopped then, and the
+   step says how many were. **Stop now** runs only `octant server stop`.
+   Either way the member's owner stops gracefully and the turns the stop cuts
+   off continue by themselves once it starts again (restart continuation).
+   When the drain or the stop fails nothing is swapped: Roll back lifts the
+   drain and starts the member on the version it runs, and the attempt's
+   copied build is removed from the member. Octant never stops a
+   member asked to wait without that wait first; a member whose installed CLI
+   cannot drain fails the step and is rolled back, and the person can update it
+   with Stop now. A routine run waiting for provider capacity, a due thread
+   wake-up, and a usage-limit continuation are held rather than refused while
+   the member drains, and are offered again once it lifts or the member
+   restarts. A held wake-up keeps its on-time standing while the host stays
+   up, however long the drain; a restart judges it by its due time again. An update that migrates the store skips the `octant server stop`:
+   `octant server upgrade` takes its verified backup through the running owner
+   and then stops it gracefully itself.
 3. **Swap.** The installed copy's `octant server upgrade --artifact …
 --install-root …`, so the user service it rewrites keeps naming the
    install's `current` link. It checks the signature again, stages the new
@@ -709,13 +766,15 @@ journals the request and runs over the same connection:
    signed it. The update is confirmed when the hello names the installed
    version and its protocol range covers this computer.
 
-**Roll back.** After a failed swap that left the previous version current, a
-swap at the same store version whose new service did not start, or
-a confirmation that fails because the hello does not come within two minutes
-(the health check), is not signed by the member's key, names another version,
-or has a protocol range that does not cover this computer, the **Roll back**
-step points `current` at the previous version again, starts it, and deletes
-the refused version so the update can be tried again; the sheet says why. A
+**Roll back.** After a failed drain or stop, a failed swap that left the
+previous version current, a swap at the same store version whose new service
+did not start, or a confirmation that fails because the hello does
+not come within two minutes (the health check), is not signed by the member's
+key, names another version, or has a protocol range that does not cover this
+computer, the **Roll back** step points `current` at the previous version
+again, lifts the drain with `octant server drain --lift` when the member was
+asked to wait and nothing was swapped, starts it, and deletes the refused
+version so the update can be tried again; the sheet says why. A
 swap that `octant server upgrade` left stopped for a store restore
 (`recovery-required`) is not rolled back, and neither is a confirmed swap
 whose store was migrated: Octant never starts the previous build against a
@@ -761,8 +820,10 @@ confirmation journals the request and runs:
    logs kept outside it (for example `~/.local/state/octant/logs` on Linux or
    `~/Library/Logs/Octant` on a Mac) stay, and the sheet says so.
 
-**Journal.** An update journals `shield-servers.member-update-requested@1`
-(both versions, ring, target, and the drain chosen) and
+**Journal.** An update journals `shield-servers.member-update-requested@2`
+(both versions, ring, target, and the drain chosen: `{ kind: "stop-now" }` or
+`{ kind: "wait", minutes }`; `@1`, written before waiting was offered, is read
+back as stop now) and
 `shield-servers.member-update-step@1` for each step including Roll back (step,
 outcome, a closed failure reason); a removal journals
 `shield-servers.member-removal-requested@1` (whether the data folder is
@@ -775,8 +836,6 @@ the new login may hold another install, until it is made one again.
 
 **Not built yet.**
 
-- Downloading the build from its ring: today the person places the signed
-  release build in the folder named above.
 - Joining a hub from a computer that is only a member: the ticket is approved
   on the hub, and the owner routes offer no pairing approval, so a member's
   window refuses with a sentence and the person uses the hub's window.
@@ -784,8 +843,8 @@ the new login may hold another install, until it is made one again.
   computer's claim lives in the desktop app, not in the server, so a computer
   with no hub role refuses with a sentence.
 - Starting a Mac at boot with no login; the sheet says so.
-- Draining by waiting for running turns: an update stops the member now, and
-  restart continuation resumes the turns the stop cut off.
+- Offering Wait only to a member whose CLI can drain: an older member fails
+  the Drain step and is rolled back.
 - Rolling back after a confirmed swap that migrated the store, which needs a
   store restore on the member; the sheet names the backup instead.
 - Reading the hello again after a roll-back: the roll-back step succeeds when
@@ -3676,16 +3735,20 @@ passed in the same session and the join approved for its one ticket when the
 comparison code read over SSH matches, then updates that drain, swap and roll
 back. Built for a hub: Make this an Octant computer on a registered server's
 row, the sheet, the six steps, and their journal events; then Update (copy,
-verify, stop now, `octant server upgrade`, the signed hello confirmed, and a
+verify, drain by waiting up to the chosen minutes for running turns or stop
+now, `octant server upgrade`, the signed hello confirmed, and a
 roll-back when the hello does not come, is not the member's, names another
 version or does not cover this computer) and Remove Octant (leave, stop and
 remove the service, delete the install, the data folder only when ticked),
-with their journal events. Not built: the download from the ring, a join made
-from a member's window, pairing with no hub, draining by waiting for running
-turns, and rolling back a swap that migrated the store. Verification: server
-tests against a stand-in `ssh` that runs the remote command in `sh` with a
-stand-in signed build and a stand-in hello, and component tests of the
-sheets; a real machine is a maintainer gate.
+with their journal events; and, when no suitable build is on this computer,
+the build downloaded from its ring through the signed feed listing, its
+digest and its own signature checked before it is kept. Not built: a join
+made from a member's window, pairing with no hub, and rolling back a swap
+that migrated the store.
+Verification: server tests against a stand-in `ssh` that runs the remote
+command in `sh` with a stand-in signed build, a stand-in hello and a
+stand-in release host serving a signed listing, and component tests of the
+sheets; a real machine and a published listing are maintainer gates.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

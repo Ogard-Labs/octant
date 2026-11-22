@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readPrivateListener } from "../hub/privateListenerReading";
-import { createHeadlessBuilds } from "../shield/headlessBuilds";
+import { createHeadlessBuilds, headlessBuildFeedFor } from "../shield/headlessBuilds";
 import { MemberInstallService, MemberServerWork } from "../shield/memberInstall";
 import { createMemberInstallRouteHandler } from "../shield/memberInstallRoutes";
 import { MemberUpkeepService } from "../shield/memberUpkeep";
@@ -252,7 +252,10 @@ export type RemoteDependencies = {
     readonly bind: (routes: ReadonlyArray<PairedDeviceRoutes>) => void;
   };
 } & Pick<ServerStart, "options" | "persistence" | "serve" | "startedAt" | "version"> &
-  Pick<HarnessWiring, "beginGoogleCliChange" | "shieldServerStore" | "webSearchSettings"> &
+  Pick<
+    HarnessWiring,
+    "beginGoogleCliChange" | "hostDrain" | "shieldServerStore" | "webSearchSettings"
+  > &
   Pick<
     AuthorityWiring,
     | "browserCaptureStore"
@@ -687,9 +690,17 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   // Making a registered server an Octant computer: installed over its SSH
   // connection and joined to this hub, whose pairing decides the one claim
-  // whose comparison code the server printed.
+  // whose comparison code the server printed. A build the person placed is
+  // used; otherwise one is downloaded from this computer's ring through the
+  // updater's own feed, trusted only by its signed listing.
+  const headlessFeed = headlessBuildFeedFor({
+    environment: process.env,
+    chosenRing: () => persistence.readShellSettings()?.settings.releaseRing,
+    version,
+  });
   const headlessBuilds = createHeadlessBuilds({
     folder: join(providerDataDirectory, "headless-builds"),
+    ...(headlessFeed === undefined ? {} : { feed: headlessFeed }),
   });
   const memberServerWork = new MemberServerWork();
   // A server that signs in with a key Octant keeps is reached with that key
@@ -2603,6 +2614,7 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   const hostControlRoutes = createHostControlRouteHandler({
     windowAuthorityStore,
+    drain: deps.hostDrain,
     diagnostics: composeHostDiagnostics,
     memory: () => hostMemoryGuard.report(),
     restartRecovery: deps.restartRecovery,

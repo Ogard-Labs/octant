@@ -1,12 +1,16 @@
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
 import {
   MEMBER_REMOVAL_STEPS,
+  MEMBER_UPDATE_MAX_WAIT_MINUTES,
   MEMBER_UPDATE_STEPS,
+  type MemberBuildDownload,
   type MemberInstallRefusalReason,
   type MemberInstallResult,
   type MemberRemovalPlan,
   type MemberRemovalProgress,
   type MemberRemovalStep,
+  type MemberUpdateDrain,
+  type MemberUpdateDrainKind,
   type MemberUpdateFailure,
   type MemberUpdatePlan,
   type MemberUpdateProgress,
@@ -18,6 +22,9 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { MemberBuildDownloadStatus } from "./MemberBuildDownloadStatus";
+import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
+import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 
 export const MEMBER_UPDATE_ACTION = "Update";
 export const MEMBER_REMOVAL_ACTION = "Remove Octant";
@@ -34,6 +41,9 @@ const STATE_LABELS: Readonly<Record<StepRunState, string>> = {
 
 /** How often a sheet reads its running steps. */
 const PROGRESS_POLL_MS = 1_000;
+
+/** How long an update waits for running work unless the person picks another bound. */
+const DEFAULT_WAIT_MINUTES = 10;
 
 /** Why the swapped build was rolled back, as the sheet says it. */
 const ROLLBACK_REASONS: Readonly<Record<MemberUpdateFailure, string>> = {
@@ -58,7 +68,8 @@ type Sheet<Plan, Progress> =
       readonly reason: MemberInstallRefusalReason;
       readonly message: string;
     }
-  | { readonly kind: "progress"; readonly progress: Progress };
+  | { readonly kind: "progress"; readonly progress: Progress }
+  | { readonly kind: "download"; readonly download: MemberBuildDownload };
 
 interface MemberSheetProps {
   readonly server: ShieldServer;
@@ -69,7 +80,8 @@ interface MemberSheetProps {
 /**
  * Reads the plan once, then a running progress every second until it stops.
  * `pick` turns an answer into the sheet's next state, or nothing for an
- * answer this sheet does not show.
+ * answer this sheet does not show. `readAgain` reads the plan again, once a
+ * build downloaded for the server is ready.
  */
 function useMemberSheet<Plan, Progress extends { readonly state: string }>(input: {
   readonly client: Pick<ShieldServersClient, "memberInstall">;
@@ -80,11 +92,15 @@ function useMemberSheet<Plan, Progress extends { readonly state: string }>(input
 }) {
   const { client, prepare, read, pick, failure } = input;
   const [state, setState] = useState<Sheet<Plan, Progress>>({ kind: "reading" });
+  const [attempt, setAttempt] = useState(0);
   const prepareKey = JSON.stringify(prepare);
 
   useEffect(() => {
     let current = true;
-    client.memberInstall(prepare).then(
+    // Closing the sheet ends its prepare request, so the host starts no
+    // download for a sheet that is gone.
+    const request = new AbortController();
+    client.memberInstall(prepare, request.signal).then(
       (result) => {
         const next = pick(result);
         if (current && next !== undefined) setState(next);
@@ -95,9 +111,10 @@ function useMemberSheet<Plan, Progress extends { readonly state: string }>(input
     );
     return () => {
       current = false;
+      request.abort();
     };
     // The prepare command is read by its contents; a new object each render is the same read.
-  }, [client, prepareKey]);
+  }, [attempt, client, prepareKey]);
 
   const running = state.kind === "progress" && state.progress.state === "running";
   useEffect(() => {
@@ -138,7 +155,8 @@ function useMemberSheet<Plan, Progress extends { readonly state: string }>(input
     // operation's id, read once when it starts running, drives the poll.
   }, [client, running]);
 
-  return [state, setState] as const;
+  const readAgain = () => setAttempt((count) => count + 1);
+  return [state, setState, readAgain] as const;
 }
 
 function StepList<Step extends string>(props: {
@@ -183,24 +201,31 @@ function updateStepLabels(from: string, to: string): Readonly<Record<MemberUpdat
   return {
     copy: "Copy the build",
     verify: "Verify it on the server",
-    drain: "Stop running turns",
+    drain: "Drain running turns",
     swap: `Swap to ${to}`,
     confirm: "Confirm its signed hello",
     "roll-back": `Roll back to ${from}`,
   };
 }
 
+function minutesText(minutes: number): string {
+  return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+}
+
 /**
  * Update: one sheet that states, before anything runs, which signed build
- * replaces which, how running turns stop, and what makes Octant roll the
- * member back, then shows each step as it runs. The host checks the person,
- * the build and the member's hello itself.
+ * replaces which, how running turns stop (waiting up to a bound the person
+ * picks, or stopping now), and what makes Octant roll the member back, then
+ * shows each step as it runs. The host checks the person, the build and the
+ * member's hello itself.
  */
 export function MemberUpdateSheet(props: MemberSheetProps) {
   const { server, client } = props;
   const titleId = useId();
   const [confirming, setConfirming] = useState(false);
-  const [state, setState] = useMemberSheet<MemberUpdatePlan, MemberUpdateProgress>({
+  const [drainKind, setDrainKind] = useState<MemberUpdateDrainKind>("wait");
+  const [waitMinutes, setWaitMinutes] = useState(DEFAULT_WAIT_MINUTES);
+  const [state, setState, readAgain] = useMemberSheet<MemberUpdatePlan, MemberUpdateProgress>({
     client,
     prepare: { kind: "prepare-member-update", serverId: server.serverId },
     read: (progress) => ({ kind: "read-member-update", updateId: progress.updateId }),
@@ -209,9 +234,11 @@ export function MemberUpdateSheet(props: MemberSheetProps) {
         ? { kind: "plan", plan: result.plan }
         : result.kind === "member-update-progress"
           ? { kind: "progress", progress: result.progress }
-          : result.kind === "member-install-refused"
-            ? { kind: "refused", reason: result.reason, message: result.message }
-            : undefined,
+          : result.kind === "member-build-download"
+            ? { kind: "download", download: result.download }
+            : result.kind === "member-install-refused"
+              ? { kind: "refused", reason: result.reason, message: result.message }
+              : undefined,
     failure: "Octant could not read the server. Try again.",
   });
   // The confirmed plan's versions stay known while the steps run, for their labels.
@@ -224,11 +251,15 @@ export function MemberUpdateSheet(props: MemberSheetProps) {
   async function confirm(plan: MemberUpdatePlan) {
     setConfirming(true);
     setVersions({ from: plan.fromVersion, to: plan.toVersion });
+    const drain: MemberUpdateDrain =
+      drainKind === "wait" && plan.drains.includes("wait")
+        ? { kind: "wait", minutes: waitMinutes }
+        : { kind: "stop-now" };
     try {
       const result = await client.memberInstall({
         kind: "confirm-member-update",
         planId: plan.planId,
-        drain: "stop-now",
+        drain,
       });
       if (result.kind === "member-update-progress") {
         setState({ kind: "progress", progress: result.progress });
@@ -262,6 +293,21 @@ export function MemberUpdateSheet(props: MemberSheetProps) {
           Reading {server.alias} over SSH…
         </p>
       ) : null}
+      {state.kind === "download" ? (
+        <>
+          <MemberBuildDownloadStatus
+            client={client}
+            download={state.download}
+            key={state.download.downloadId}
+            onReady={readAgain}
+          />
+          <div className="member-install__actions">
+            <OctantButton onClick={props.onClose} type="button" variant="ghost">
+              Close
+            </OctantButton>
+          </div>
+        </>
+      ) : null}
       {state.kind === "refused" ? (
         <Refusal message={state.message} onClose={props.onClose} />
       ) : null}
@@ -280,9 +326,51 @@ export function MemberUpdateSheet(props: MemberSheetProps) {
             </dd>
             <dt>Running turns</dt>
             <dd>
-              Octant on {state.plan.alias} stops now, before the swap. Turns the stop cuts off
-              continue by themselves once it starts again. Waiting for running turns to finish first
-              is not offered yet.
+              <div
+                aria-label="Before the swap"
+                className="member-update__drains"
+                onKeyDown={moveWithinRadioGroup}
+                role="radiogroup"
+              >
+                {state.plan.drains.map((kind) => (
+                  <OctantButton
+                    aria-checked={drainKind === kind}
+                    key={kind}
+                    onClick={() => setDrainKind(kind)}
+                    role="radio"
+                    tabIndex={drainKind === kind ? 0 : -1}
+                    type="button"
+                    variant={drainKind === kind ? "secondary" : "ghost"}
+                  >
+                    {kind === "wait"
+                      ? `Wait up to ${minutesText(waitMinutes)} for running work`
+                      : "Stop now"}
+                  </OctantButton>
+                ))}
+              </div>
+              {drainKind === "wait" ? (
+                <>
+                  <OctantNumberStepper
+                    field
+                    label="Minutes to wait for running work"
+                    max={MEMBER_UPDATE_MAX_WAIT_MINUTES}
+                    min={1}
+                    onChange={setWaitMinutes}
+                    suffix="min"
+                    value={waitMinutes}
+                  />
+                  <span>
+                    {state.plan.alias} refuses new turns at once and lets running ones finish, for
+                    up to {minutesText(waitMinutes)}. Then it stops; any turn still running
+                    continues by itself once it starts again.
+                  </span>
+                </>
+              ) : (
+                <span>
+                  {state.plan.alias} refuses new turns and stops now, before the swap. Turns the
+                  stop cuts off continue by themselves once it starts again.
+                </span>
+              )}
             </dd>
             <dt>Swap</dt>
             <dd>

@@ -80,7 +80,11 @@ import {
   type NativeHarnessSessionRouteDependencies,
 } from "../harness/nativeHarnessSessionRoutes";
 import { createNativeHarnessEgressRouteHandler } from "../harness/nativeHarnessEgressRoutes";
-import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
+import {
+  NativeHarnessTurnObserver,
+  type NativeHarnessTurnAdmission,
+} from "../harness/nativeHarnessTurnObserver";
+import { HostDrain } from "../hostDrain";
 import { openPromptDigester } from "../metrics/promptDigest";
 import { toTurnMetricsRecord, type TurnEndSummary } from "../metrics/turnEnd";
 import { followUpSuggestionInstructionsFor } from "../followUps/followUpSuggestionInstructions";
@@ -871,6 +875,11 @@ export function wireHarness(deps: HarnessDependencies) {
     join(providerDataDirectory, "metrics", "prompt-digest.key"),
   );
   const { toolEffectLedger } = deps;
+  // Draining before an update is decided here, where a Chat send, a Work turn
+  // and a Code turn each ask to start and every mode reports a turn starting
+  // and ending, so the refusal and the count of running turns sit at the one
+  // admission all three modes share.
+  const hostDrain = new HostDrain({ now: Date.now });
   const nativeHarnessHooks = {
     toolEffects: (turn: Parameters<ToolEffectLedger["forTurn"]>[0]) =>
       toolEffectLedger.forTurn(turn),
@@ -893,9 +902,18 @@ export function wireHarness(deps: HarnessDependencies) {
       ...turnDecisionInstructions(scope.mode),
       followUpSuggestionInstructionsFor(predictsNextMessage(scope.mode)),
     ],
-    admitTurn: (scope: Parameters<NativeHarnessTurnObserver["admitTurn"]>[0]) =>
-      nativeHarnessObserver.admitTurn(scope),
+    admitTurn: (
+      scope: Parameters<NativeHarnessTurnObserver["admitTurn"]>[0],
+    ): NativeHarnessTurnAdmission => {
+      const refusal = hostDrain.refusal();
+      return refusal === undefined
+        ? nativeHarnessObserver.admitTurn(scope)
+        : { kind: "draining", detail: refusal };
+    },
+    acceptTurn: (scope: Parameters<NativeHarnessTurnObserver["turnStarted"]>[0]) =>
+      hostDrain.accept(scope),
     turnStarted: (scope: Parameters<NativeHarnessTurnObserver["turnStarted"]>[0]) => {
+      hostDrain.turnStarted(scope);
       nativeHarnessObserver.turnStarted(scope);
       nativeHarnessLeadFallback.turnStarted(scope);
       try {
@@ -919,6 +937,7 @@ export function wireHarness(deps: HarnessDependencies) {
       scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0],
       turn?: TurnEndSummary,
     ) => {
+      hostDrain.turnEnded(scope);
       nativeHarnessObserver.turnEnded(scope, turn);
       nativeHarnessLeadFallback.turnEnded(scope);
       if (turn === undefined) return;
@@ -1360,6 +1379,7 @@ export function wireHarness(deps: HarnessDependencies) {
     serverProjectRoutes,
     serverPreviewTunnels,
     nativeHarnessHooks,
+    hostDrain,
     observeTurnEnded,
     nativeHarnessSessionRoutes,
     onHarnessPausedByPerson,

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   decodeHostBackupOutcome,
   decodeHostControlStatus,
+  decodeHostDrainStatus,
   decodeHostLifecycleOutcome,
   decodeHostRestoreOutcome,
   decodeSetHostMemoryLimitsOutcome,
@@ -27,6 +28,7 @@ import {
   createHostControlRouteHandler,
   type HostControlRouteDependencies,
 } from "./hostControlRoutes";
+import { HostDrain } from "./hostDrain";
 
 const nowMs = new Date("2026-08-11T12:00:00.000Z").getTime();
 const windowId = "70000000-0000-4000-8000-000000000002";
@@ -827,6 +829,41 @@ describe("host control from a paired device", () => {
     );
     expect(decodeHostLifecycleOutcome(await stopped?.json())).toMatchObject({ kind: "accepted" });
     expect(requestOwnerStop).toHaveBeenCalledOnce();
+  });
+
+  it("drains only for the host's person: a window drains, reads and lifts, and a hub-introduced device changes nothing", async () => {
+    const drain = new HostDrain({ now: () => nowMs });
+    const { handler } = setup({ drain });
+    const path = "/api/host-control/drain";
+    drain.turnStarted({ mode: "work", threadId: "w1" });
+
+    const introduced = await handler(
+      await fromDevice(path, "hub-roster", { body: { action: "drain", minutes: 10 } }),
+    );
+    expect(introduced?.status).toBe(403);
+    const withoutCapability = await handler(
+      makeRequest(path, { body: { action: "drain", minutes: 10 } }),
+    );
+    expect(withoutCapability?.status).toBe(401);
+    const tooLong = await handler(
+      makeRequest(path, { capability, body: { action: "drain", minutes: 61 } }),
+    );
+    expect(tooLong?.status).toBe(400);
+    expect(drain.refusal()).toBeUndefined();
+
+    const entered = await handler(
+      makeRequest(path, { capability, body: { action: "drain", minutes: 10 } }),
+    );
+    expect(decodeHostDrainStatus(await entered?.json())).toEqual({
+      state: "draining",
+      running: 1,
+    });
+    drain.turnEnded({ mode: "work", threadId: "w1" });
+    const read = await handler(makeRequest(path, { capability, body: { action: "read" } }));
+    expect(decodeHostDrainStatus(await read?.json())).toEqual({ state: "drained" });
+    const lifted = await handler(makeRequest(path, { capability, body: { action: "lift" } }));
+    expect(decodeHostDrainStatus(await lifted?.json())).toEqual({ state: "not-draining" });
+    expect(drain.refusal()).toBeUndefined();
   });
 
   it("refuses a hub-introduced device and an unproved pairing every read and change, with no effect", async () => {
