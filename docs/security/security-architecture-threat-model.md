@@ -207,7 +207,9 @@ does not end their reach: the person revokes every device they do not recognize.
 Since 2026-11-22 the person may narrow this (maintainer decision): a device
 paired at Approve and steer or Read only is not the person and is held to the
 remote action catalogue, or to its reads, before any side effect; Pause remote
-access refuses every paired device at once while keeping their pairings, and
+access refuses every paired device and outside agent at once, leaving only the
+hub links between the person's own computers, while keeping their pairings and
+grants, and
 Sign out all other devices revokes every device but the one asking. Full stays
 the default, so the residual above stands for every device left at Full.
 The attacks this class still names are a replayed or expired session, an

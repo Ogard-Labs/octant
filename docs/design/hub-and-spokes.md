@@ -1172,8 +1172,8 @@ window holds there with no owner mark and no unlock (maintainer decision, 2026-1
 holds at the Full access level, the default; a device the person paired at
 Approve and steer or Read only is held to that level instead (maintainer
 decision, 2026-11-22). Pausing remote access on a host refuses its paired
-devices only: the member-to-member routes between the person's own computers
-keep working.
+devices and outside agents: only the member-to-member routes between the
+person's own computers keep working.
 Owner devices keep meaning only where the hub's own rules need a named owner:
 the owner list and its changes, confirming new members, failover and standby
 promotion, a thread move's ticket, and acting on a host the device was never

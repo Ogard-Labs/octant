@@ -75,6 +75,7 @@ import {
 import {
   createRemoteHttpAuthentication,
   REMOTE_AUTH_ROUTE_IDS,
+  remoteAccessPausedResponse,
   type RemoteClientPrincipalHandoff,
   type RemoteCredentialSelfServicePort,
   type RemoteHttpAuthentication,
@@ -942,7 +943,12 @@ function assembleServices(
         : HUB_LINK_ROUTE_IDS.has(route.id)
           ? options.hubLink?.(request, facts)
           : AGENT_ACCESS_ROUTE_IDS.has(route.id)
-            ? options.agentAccess?.(request, facts)
+            ? // A pause leaves nothing remote but the person's own computers'
+              // hub links, so an outside agent's claim and calls are refused
+              // too; its grant is kept for when access resumes.
+              remoteAccessPaused()
+              ? remoteAccessPausedResponse()
+              : options.agentAccess?.(request, facts)
             : handlePreAuthRoute(request, route, facts, protocol, auth, clockPosture),
     authenticatedProduct: async (request, route, facts) =>
       handleAuthenticatedRoute(request, route, facts, auth),

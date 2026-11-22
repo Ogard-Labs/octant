@@ -18423,9 +18423,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
     proxy sessions, and keeps every device record, key and session row; a
     client keeps its pairing and says remote access is paused. A window turns it
     on or off; a Full device may turn it on, which takes its own access too,
-    and never off. The hub's member-to-member routes between this person's own
-    computers and an agent grant's routes authenticate themselves on the
-    pre-auth surface, are not paired devices, and keep working. **Sign out all
+    and never off. Pausing means nothing remote reaches the host except the
+    person's own computers, so an outside agent's key claim and MCP calls
+    (`/api/agent-access/claim`, `/api/agent-access/mcp`) get the same refusal
+    and its grant is kept for when access resumes. Only the hub's
+    member-to-member routes between this person's own computers, which each
+    member signs with its identity key, keep working. **Sign out all
     other devices** (`/api/remote/devices/sign-out-others`) revokes every other
     paired device's key and sessions and keeps the asking device; a window has
     no device of its own and uses Revoke all.
