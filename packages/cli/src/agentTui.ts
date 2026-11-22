@@ -148,6 +148,11 @@ type TuiListing =
   | "files"
   | undefined;
 
+type ComposerDraftProvenance = {
+  readonly threadId: string;
+  readonly requestId?: string;
+};
+
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 const SHOWN_TOOL_LINES = 4;
 const SHOWN_TASKS = 6;
@@ -212,7 +217,8 @@ class AgentScreen {
   #destroyed = false;
   #refreshSequence = 0;
   #lastAskId: string | undefined;
-  #staleAnswer = false;
+  #composerDraft: ComposerDraftProvenance | undefined;
+  #settingComposerText = false;
   #requestReadRefusal: string | undefined;
   #note = "";
   #drawn = "";
@@ -363,6 +369,7 @@ class AgentScreen {
         { name: "return", action: "submit" },
         { name: "return", shift: true, action: "newline" },
       ],
+      onContentChange: () => this.#recordComposerContent(),
       onSubmit: () =>
         void this.#submit().catch(() => {
           this.#note = "The host request failed. Retry the command.";
@@ -436,6 +443,7 @@ class AgentScreen {
           this.#draw();
         } else if ((key.ctrl && key.name === "j") || key.sequence === "\n") {
           // Ctrl+J is a raw line feed on terminals without modified-key support.
+          key.preventDefault();
           void this.#openNextWaiting();
         } else if (key.ctrl && key.name === "p") {
           this.#listing = this.#listing === "palette" ? undefined : "palette";
@@ -448,7 +456,7 @@ class AgentScreen {
             this.#suggestions.kind === "file"
               ? completeAgentFileMention(suggestion.slice(1))
               : suggestion;
-          this.#composer.setText(
+          this.#setComposerText(
             this.#composer.plainText.replace(
               /(^|\s)([@#])(?:"(?:\\.|[^"\\])*"?|[^\s@#]*)$/,
               (_match, leading: string) => leading + completed + " ",
@@ -496,7 +504,7 @@ class AgentScreen {
         // Through the composer, so @file mentions and slash commands in the
         // opening prompt behave exactly as they would typed.
         void this.refresh().then(() => {
-          this.#composer.setText(opening);
+          this.#setComposerText(opening);
           return this.#submit();
         });
       }
@@ -521,6 +529,37 @@ class AgentScreen {
     this.#feed.abort();
     this.#feed = new AbortController();
     followAgentThread(this.#input.session, mode, this.#threadId, this.#wake, this.#feed.signal);
+  }
+
+  #captureComposerDraft(): ComposerDraftProvenance {
+    return {
+      threadId: this.#threadId,
+      ...(this.#lastAskId === undefined ? {} : { requestId: this.#lastAskId }),
+    };
+  }
+
+  #recordComposerContent(): void {
+    if (this.#settingComposerText) return;
+    const text = this.#composer.plainText;
+    if (text.length === 0) {
+      this.#composerDraft = undefined;
+      return;
+    }
+    this.#composerDraft ??= this.#captureComposerDraft();
+  }
+
+  #setComposerText(
+    text: string,
+    provenance: ComposerDraftProvenance | undefined = this.#composerDraft,
+  ): void {
+    this.#settingComposerText = true;
+    try {
+      this.#composer.setText(text);
+    } finally {
+      this.#settingComposerText = false;
+    }
+    this.#composerDraft =
+      text.length === 0 ? undefined : (provenance ?? this.#captureComposerDraft());
   }
 
   async refresh(): Promise<void> {
@@ -742,7 +781,7 @@ class AgentScreen {
       this.#draw();
       return;
     }
-    if (this.#lastAskId !== undefined || this.#staleAnswer) this.#composer.setText("");
+    if (this.#composerDraft?.requestId !== undefined) this.#setComposerText("");
     this.#diff = undefined;
     this.#checkoutChanges = undefined;
     this.#checkoutChangesReadAt = undefined;
@@ -759,7 +798,6 @@ class AgentScreen {
     this.#updateStreaming = undefined;
     this.#streamingStructure = "";
     this.#lastAskId = undefined;
-    this.#staleAnswer = false;
     this.#listing = undefined;
     this.#children = [];
     this.#childLines = [];
@@ -992,12 +1030,6 @@ class AgentScreen {
       pending?.id ??
       session?.approvals?.find((entry) => entry.status === "pending")?.id ??
       this.#siteApproval?.id;
-    if (
-      this.#lastAskId !== undefined &&
-      nextAskId !== this.#lastAskId &&
-      this.#composer.plainText.trim().length > 0
-    )
-      this.#staleAnswer = true;
     this.#lastAskId = nextAskId;
     // A new ask must not be hidden behind review.
     if (
@@ -1643,17 +1675,10 @@ class AgentScreen {
   }
 
   async #submit(): Promise<void> {
-    const entered = this.#composer.plainText.trim();
-    if (
-      this.#requestReadRefusal !== undefined &&
-      this.#lastAskId !== undefined &&
-      entered.length > 0 &&
-      !entered.startsWith("/")
-    ) {
-      this.#note = `Provider requests are unavailable: ${this.#requestReadRefusal}`;
-      this.#draw();
-      return;
-    }
+    const originalText = this.#composer.plainText;
+    const originalDraft =
+      this.#composerDraft ?? (originalText.length === 0 ? undefined : this.#captureComposerDraft());
+    const entered = originalText.trim();
     const text =
       this.#listing === "files" && /^\d+$/.test(entered)
         ? `/diff ${entered}`
@@ -1663,7 +1688,7 @@ class AgentScreen {
             : `/${entered}`
           : entered;
     if (this.#listing === "palette") this.#listing = undefined;
-    this.#composer.setText("");
+    this.#setComposerText("");
     if (this.#showHelp) {
       this.#showHelp = false;
       this.#draw();
@@ -1674,12 +1699,6 @@ class AgentScreen {
       return;
     }
     if (text.length === 0) return;
-    if (this.#staleAnswer && !text.startsWith("/")) {
-      this.#staleAnswer = false;
-      this.#note = "The request changed or was answered elsewhere. Review the current request.";
-      this.#draw();
-      return;
-    }
     this.#note = "";
     if (text === "/notes" || text.startsWith("/notes ")) {
       const threadId = this.#threadId;
@@ -1929,20 +1948,12 @@ class AgentScreen {
     // /goal toggles its own panel, so it needs the listing this command found.
     const listingBefore = this.#listing;
     this.#listing = undefined;
-    if (this.#pendingFollowUp !== undefined) {
-      const pending = this.#pendingFollowUp;
-      this.#pendingFollowUp = undefined;
-      if (/^y(es)?$/i.test(text)) await this.#activateFollowUp(pending);
-      else this.#note = "Left as a suggestion.";
-      this.#draw();
-      return;
-    }
     if (text === "/next" || text.startsWith("/next ")) {
       await this.#previewFollowUp(text.slice("/next".length).trim());
       return;
     }
     if (text === "/side" || text.startsWith("/side ")) {
-      await this.#side(text.slice("/side".length).trim());
+      await this.#side(text.slice("/side".length).trim(), originalDraft);
       return;
     }
     if (text === "/back") {
@@ -1971,6 +1982,36 @@ class AgentScreen {
     }
     if (text.startsWith("/steer ")) {
       await this.#steer(text.slice("/steer".length).trim());
+      return;
+    }
+    const requestBoundDraftChanged =
+      originalDraft?.requestId !== undefined &&
+      (originalDraft.threadId !== this.#threadId || originalDraft.requestId !== this.#lastAskId);
+    const ordinaryDraftWouldAnswer =
+      originalDraft !== undefined &&
+      originalDraft.requestId === undefined &&
+      this.#lastAskId !== undefined;
+    if (
+      this.#requestReadRefusal !== undefined ||
+      requestBoundDraftChanged ||
+      ordinaryDraftWouldAnswer
+    ) {
+      this.#setComposerText(originalText, originalDraft);
+      this.#note =
+        this.#requestReadRefusal !== undefined
+          ? "Provider requests are unavailable. Review or clear the draft before answering."
+          : requestBoundDraftChanged
+            ? "The request changed or was answered elsewhere. Review or clear the draft before answering."
+            : "A request appeared after this draft. Review or clear this draft before answering.";
+      this.#draw();
+      return;
+    }
+    if (this.#pendingFollowUp !== undefined) {
+      const pending = this.#pendingFollowUp;
+      this.#pendingFollowUp = undefined;
+      if (/^y(es)?$/i.test(text)) await this.#activateFollowUp(pending);
+      else this.#note = "Left as a suggestion.";
+      this.#draw();
       return;
     }
     if (this.#workRequest !== undefined) {
@@ -2086,7 +2127,7 @@ class AgentScreen {
     }
     const resolved = await this.#resolveMentions(text);
     if (resolved.refused.length > 0) {
-      this.#composer.setText(text);
+      this.#setComposerText(text, originalDraft);
       this.#note = resolved.refused.join(" ");
       this.#draw();
       return;
@@ -2096,7 +2137,7 @@ class AgentScreen {
       threadMentionIds: resolved.threadMentionIds,
     });
     if (sent.kind === "refused") {
-      this.#composer.setText(text);
+      this.#setComposerText(text, originalDraft);
       this.#note = sent.message;
     }
     await this.refresh();
@@ -2128,7 +2169,7 @@ class AgentScreen {
    * thread and answers about it while the lead keeps working, and can never
    * change it. The thread's own turn is not interrupted or added to.
    */
-  async #side(question: string): Promise<void> {
+  async #side(question: string, provenance: ComposerDraftProvenance | undefined): Promise<void> {
     if (this.#home === undefined) {
       const opened = await openAgentSideChat(this.#input.session, this.#threadId);
       if (opened.kind === "refused") {
@@ -2146,7 +2187,7 @@ class AgentScreen {
     }
     const sent = await this.#port.send(question);
     if (sent.kind === "refused") {
-      this.#composer.setText(question);
+      this.#setComposerText(question, provenance);
       this.#note = sent.message;
     }
     await this.refresh();
@@ -2422,7 +2463,7 @@ class AgentScreen {
       if (suggestion !== undefined && this.#thread !== undefined) {
         const sent = await this.#port.send(suggestion.prompt);
         if (sent.kind === "refused") {
-          this.#composer.setText(suggestion.prompt);
+          this.#setComposerText(suggestion.prompt);
           this.#note = sent.message;
         }
       }

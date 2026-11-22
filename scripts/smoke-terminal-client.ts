@@ -277,25 +277,48 @@ const codeProject = {
 let pendingCodeRequests = true;
 let requestListUnavailable = false;
 let checkoutReadRefused = false;
+let codeQuestionMode = false;
 let codeAnswers = 0;
+let codeAnswerCalls = 0;
 let otherCodeCommands = 0;
-const codeRequest = (id: string, title: string) => ({
-  mode: "code",
-  projectId: codeProjectId,
-  threadId: id,
-  threadTitle: title,
-  requestedAt: now,
-  kind: "approval",
-  text: `Approve ${title}?`,
-  answer: {
-    threadId: id,
-    checkoutId,
-    approvalId:
-      id === codeThreadId
-        ? "6a000000-0000-4000-8000-000000000001"
-        : "6a000000-0000-4000-8000-000000000002",
-  },
-});
+const answeredCodeThreads: string[] = [];
+const codeRequest = (id: string, title: string) =>
+  codeQuestionMode
+    ? {
+        mode: "code",
+        projectId: codeProjectId,
+        threadId: id,
+        threadTitle: title,
+        requestedAt: now,
+        kind: "question",
+        text: `Answer ${title}?`,
+        options: [{ label: "Proceed" }],
+        answer: {
+          threadId: id,
+          checkoutId,
+          requestId:
+            id === codeThreadId
+              ? "6a000000-0000-4000-8000-000000000003"
+              : "6a000000-0000-4000-8000-000000000004",
+        },
+      }
+    : {
+        mode: "code",
+        projectId: codeProjectId,
+        threadId: id,
+        threadTitle: title,
+        requestedAt: now,
+        kind: "approval",
+        text: `Approve ${title}?`,
+        answer: {
+          threadId: id,
+          checkoutId,
+          approvalId:
+            id === codeThreadId
+              ? "6a000000-0000-4000-8000-000000000001"
+              : "6a000000-0000-4000-8000-000000000002",
+        },
+      };
 const codeSession = {
   kind: "opened" as const,
   windowId: "test",
@@ -369,10 +392,28 @@ const codeSession = {
           hasLater: false,
         },
       };
+    if (request.path === "/api/code/evidence") {
+      codeAnswerCalls++;
+      return {
+        status: 200,
+        body: {
+          contentId: "6a000000-0000-4000-8000-000000000005",
+          digest: "d".repeat(64),
+          byteLength: 9,
+        },
+      };
+    }
     if (request.path === "/api/code/commands") {
-      const body = request.body as { kind?: string; operationId?: string; gitOperationId?: string };
-      if (body.kind === "answer-provider-approval") {
+      const body = request.body as {
+        kind?: string;
+        operationId?: string;
+        gitOperationId?: string;
+        threadId?: string;
+      };
+      if (body.kind === "answer-provider-approval" || body.kind === "answer-provider-input") {
+        codeAnswerCalls++;
         codeAnswers++;
+        if (body.threadId !== undefined) answeredCodeThreads.push(body.threadId);
         pendingCodeRequests = false;
         return { status: 200, body: { kind: "provider-turn-state", state: "running" } };
       }
@@ -431,6 +472,11 @@ try {
   await screen.refresh();
   await codeRender.renderOnce();
   const running = screen.run();
+  const clearComposer = async () => {
+    codeRender.mockInput.pressKey("u", { ctrl: true });
+    codeRender.mockInput.pressKey("k", { ctrl: true });
+    await codeRender.renderOnce();
+  };
   await codeRender.waitForFrame((frame) => frame.includes("Approve Code task A?"));
   await codeRender.mockInput.typeText("y");
   codeRender.mockInput.pressKey("j", { ctrl: true });
@@ -473,11 +519,71 @@ try {
   );
   if (codeAnswers !== 0 || otherCodeCommands !== 0)
     throw new Error("A failed request read converted its draft into a prompt.");
+
+  await clearComposer();
+  pendingCodeRequests = true;
+  codeQuestionMode = true;
+  requestListUnavailable = false;
+  await screen.refresh();
+  await codeRender.waitForFrame((frame) => frame.includes("Answer Code task B?"));
+  await codeRender.mockInput.typeText("/tmp/file");
+  requestListUnavailable = true;
+  await screen.refresh();
+  codeRender.mockInput.pressEnter();
+  await codeRender.waitForFrame(
+    (frame) => frame.includes("Provider requests are unavailable") && frame.includes("/tmp/file"),
+  );
+  if (codeAnswerCalls !== 0 || otherCodeCommands !== 0)
+    throw new Error("A slash-prefixed draft reached a provider answer or prompt.");
+
+  await clearComposer();
+  await codeRender.mockInput.typeText("/next-waiting");
+  codeRender.mockInput.pressEnter();
+  await codeRender.waitForFrame(
+    (frame) => frame.split("\n", 1)[0]?.includes("Code task A") === true,
+  );
+  if (codeAnswerCalls !== 0 || otherCodeCommands !== 0)
+    throw new Error("A local command submitted a provider answer or prompt.");
+
+  codeQuestionMode = false;
+  pendingCodeRequests = false;
+  requestListUnavailable = false;
+  await screen.refresh();
+  await clearComposer();
+  await codeRender.mockInput.typeText("ordinary draft before request");
+  await codeRender.waitForFrame((frame) => frame.includes("│ ordinary draft before request"));
+  pendingCodeRequests = true;
+  await screen.refresh();
+  await codeRender.waitForFrame((frame) => frame.includes("Approve Code task A?"));
+  codeRender.mockInput.pressKey("j", { ctrl: true });
+  await codeRender.waitForFrame(
+    (frame) =>
+      frame.split("\n", 1)[0]?.includes("Code task B") === true &&
+      frame.includes("│ ordinary draft before request"),
+  );
+  codeRender.mockInput.pressEnter();
+  await codeRender.waitForFrame(
+    (frame) =>
+      frame.includes("Review or clear this draft before answering") &&
+      frame.includes("│ ordinary draft before request"),
+  );
+  if (codeAnswerCalls !== 0 || codeAnswers !== 0 || otherCodeCommands !== 0)
+    throw new Error(
+      "A draft typed before the request approved or prompted the destination thread.",
+    );
+
+  await clearComposer();
+  await codeRender.mockInput.typeText("y");
+  codeRender.mockInput.pressEnter();
+  await codeRender.waitForFrame(() => codeAnswers === 1);
+  if (answeredCodeThreads.at(-1) !== waitingCodeThreadId)
+    throw new Error("A replacement answer did not target the destination request.");
   codeRender.mockInput.pressCtrlC();
   await running;
 } finally {
   codeRender.renderer.destroy();
 }
+console.log("Rendered draft provenance and slash-prefixed request-read refusal");
 
 // Measure a growing 2,000-line reply across ordinary, block, newline, and table boundaries.
 let reply = Array.from(
