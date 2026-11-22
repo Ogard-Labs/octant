@@ -74,6 +74,27 @@ const finished: VideoJob = decodeVideoJob({
   updatedAt: now,
 });
 
+// The same job while the provider is still working on it, for a call that
+// leaves its wait.
+const running: VideoJob = decodeVideoJob({
+  id: finished.id,
+  status: "running",
+  threadKind: "work-thread",
+  scopeId,
+  profileInstanceId: profileId,
+  driverKind: "gemini-video",
+  modelId: model.modelId,
+  promptHash: "a".repeat(64),
+  options: { durationSeconds: 10, resolution: "720p", aspectRatio: "16:9", audio: true },
+  imageCount: 0,
+  estimatedCostUsdMicros: 695_040,
+  remoteId: "remote-1",
+  providerCopy: "held",
+  version: 1,
+  createdAt: now,
+  updatedAt: now,
+});
+
 function harness(options: {
   readonly kept?: {
     readonly profileInstanceId: typeof profileId;
@@ -101,7 +122,7 @@ function harness(options: {
             reason: `Gemini Omni Flash does not offer ${input.options.resolution}.`,
           },
   );
-  const enqueue = vi.fn(async () => finished);
+  const enqueue = vi.fn(async () => (options.pending === true ? running : finished));
   const stop = vi.fn();
   const askGenerate = vi.fn(async () => options.answer ?? { status: "cancelled" as const });
   const askSave = vi.fn(async () => ({ status: "video-save" as const }));
@@ -196,7 +217,7 @@ describe("octant_create_video on the host", () => {
     await vi.waitFor(() => expect(stopped.enqueue).toHaveBeenCalled());
     controller.abort();
     expect((await outcome).result).toMatchObject({ status: "generating" });
-    expect(stopped.stop).toHaveBeenCalledWith(finished.id);
+    expect(stopped.stop).toHaveBeenCalledWith(running.id);
 
     const slow = harness({
       pending: true,

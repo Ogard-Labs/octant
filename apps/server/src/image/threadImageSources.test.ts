@@ -7,7 +7,7 @@ import {
   MAX_GENERATED_IMAGE_BYTES,
 } from "@octant/contracts";
 import { expect, it, vi } from "vitest";
-import { workspaceImageSources } from "./threadImageSourcePorts";
+import { attachedImageSources, workspaceImageSources } from "./threadImageSourcePorts";
 import {
   describeImageSources,
   parseImageSourceRequests,
@@ -120,10 +120,14 @@ it("checks the expanded count and recorded size before reading, then sniffs rath
 
 it("resolves a named upload by its file name, not by a suffix of a longer one", async () => {
   const read = vi.fn(async () => png);
-  const attachments = [
-    { label: "your attached photo logo.png", name: "logo.png", size: 3, read },
-    { label: "your attached photo new logo.png", name: "new logo.png", size: 3, read },
-  ];
+  const upload = (displayName: string) => ({
+    displayName,
+    mediaType: "image/png",
+    byteLength: 3,
+  });
+  const attachments = attachedImageSources([upload("logo.png"), upload("new logo.png")], () =>
+    read(),
+  );
   const described = await describeImageSources(
     [{ kind: "attachment", name: "logo.png" }],
     { latestAttachments: () => attachments },
