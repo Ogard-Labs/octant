@@ -155,6 +155,7 @@ describe("PlaywrightDownloadHold", () => {
     // concurrent stat and open calls can complete out of order on a busy host.
     const kept = ["d2", "d3", "d4", "d5", "d6"].map((id) => hold.claim(id));
     expect(hold.claim("d1")).toBeUndefined();
+    expect(kept.every((path) => path !== undefined)).toBe(true);
     expect(new Set(kept).size).toBe(5);
     const deleted = downloads.filter((download) => vi.mocked(download.delete).mock.calls.length);
     expect(deleted).toHaveLength(1);
