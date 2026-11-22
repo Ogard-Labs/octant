@@ -52,7 +52,6 @@ export const GEMINI_OMNI_FLASH: VideoModelCapabilities = decodeVideoModelCapabil
     lastFrame: true,
     maxDurationSecondsWithBothFrames: MAX_INTERPOLATION_SECONDS,
     maxReferenceImages: 6,
-    firstAndLastFrameMaxSeconds: MAX_INTERPOLATION_SECONDS,
   },
   price: {
     kind: "per-token",

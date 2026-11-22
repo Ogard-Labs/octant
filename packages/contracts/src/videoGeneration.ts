@@ -126,8 +126,6 @@ export const VideoModelCapabilities = Schema.Struct({
     maxDurationSecondsWithBothFrames: Schema.optional(PositiveInt),
     /** 0 when the model takes no reference images. */
     maxReferenceImages: NonNegativeInt,
-    /** Longest clip when both a first and a last frame are given; absent for no extra bound. */
-    firstAndLastFrameMaxSeconds: Schema.optional(PositiveInt),
   }).annotations(strict),
   price: VideoPrice,
   job: VideoJobControl,

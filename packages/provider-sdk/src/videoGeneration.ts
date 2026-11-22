@@ -154,8 +154,12 @@ export interface VideoGenerationDriverContext {
  */
 export interface VideoGenerationDriver {
   readonly driverKind: VideoDriverKind;
-  /** Who receives the prompt and images, named on the card; not the profile alias. */
-  readonly providerName: string;
+  /**
+   * Who receives the prompt and images, named on the card; not the editable
+   * profile alias. Optional so a third-party driver built before the card
+   * named the recipient still satisfies the seam; the kind is named instead.
+   */
+  readonly providerName?: string;
   /**
    * The hosts the provider's own API answers on, fixed in the driver.
    * `*.example.com` also matches every subdomain. The host sends the

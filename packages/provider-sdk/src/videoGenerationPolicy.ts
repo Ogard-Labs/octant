@@ -187,17 +187,6 @@ export function checkVideoClipOptions(
       `${capabilities.displayName} does not make ${options.durationSeconds}-second clips.`,
     );
   }
-  const interpolationMax = capabilities.inputs.firstAndLastFrameMaxSeconds;
-  if (
-    inputs.firstFrame &&
-    inputs.lastFrame &&
-    interpolationMax !== undefined &&
-    options.durationSeconds > interpolationMax
-  ) {
-    return refused(
-      `${capabilities.displayName} makes clips from a first and a last frame only up to ${String(interpolationMax)} seconds.`,
-    );
-  }
   if (!capabilities.resolutions.includes(options.resolution)) {
     return refused(`${capabilities.displayName} does not offer ${options.resolution}.`);
   }

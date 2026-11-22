@@ -138,11 +138,6 @@ export function describeReadyModels(ready: ReadonlyArray<ReadyProfile>): string 
               ? "always with audio,"
               : "no audio,",
           `first frame ${model.inputs.firstFrame ? "yes" : "no"}, last frame ${model.inputs.lastFrame ? "yes" : "no"},`,
-          ...(model.inputs.firstAndLastFrameMaxSeconds === undefined
-            ? []
-            : [
-                `first+last frame clips up to ${String(model.inputs.firstAndLastFrameMaxSeconds)} s,`,
-              ]),
           `up to ${String(model.inputs.maxReferenceImages)} reference images.`,
         ].join(" ");
       }),
