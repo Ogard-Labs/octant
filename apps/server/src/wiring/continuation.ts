@@ -98,7 +98,7 @@ export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
     | "codeThreadWakeupPort"
   > &
   Pick<ChatWiring, "chatAttemptsCutOffByRestart" | "chatService"> &
-  Pick<HarnessWiring, "liftRestartRecovery"> &
+  Pick<HarnessWiring, "liftRestartRecovery" | "hostDrain"> &
   Pick<
     WorkWiring,
     "goalLoopService" | "threadMessageQueue" | "workTurnService" | "workThreadWakeupPort"
@@ -129,6 +129,7 @@ export function wireContinuation(deps: ContinuationDependencies) {
     threadWakeups,
     workThreadWakeupPort,
     codeThreadWakeupPort,
+    hostDrain,
   } = deps;
   return Effect.gen(function* () {
     // Wake-ups a thread's agent asked for: the journal is the record, the
@@ -140,6 +141,7 @@ export function wireContinuation(deps: ContinuationDependencies) {
       clock: () => new Date(),
       uuid: randomUUID,
       ports: { work: workThreadWakeupPort, code: codeThreadWakeupPort },
+      refusesNewTurns: () => hostDrain.refusal() !== undefined,
       limits: () => {
         const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
         return {
@@ -165,6 +167,7 @@ export function wireContinuation(deps: ContinuationDependencies) {
     // is the opt-in, the projection rebuilds what is armed after a restart, and
     // every reset fires through the mode's ordinary turn admission.
     const usageResumeService = new UsageResumeService({
+      refusesNewTurns: () => hostDrain.refusal() !== undefined,
       journal: persistence.journal,
       connection: persistence.connection,
       clock: () => new Date(),

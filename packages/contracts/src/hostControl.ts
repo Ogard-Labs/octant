@@ -369,6 +369,42 @@ export const HostRestoreOutcome = Schema.Struct({
 }).annotations(strict);
 export type HostRestoreOutcome = typeof HostRestoreOutcome.Type;
 
+// ── Drain before an update ──────────────────────────────────────────────────
+
+/** The longest a drain waits for running turns before the update stops the host anyway. */
+export const HOST_DRAIN_MAX_MINUTES = 60;
+
+/**
+ * `octant server drain`. Draining refuses every new Chat, Work and Code turn
+ * and routine run and lets running turns go on; reading changes nothing;
+ * lifting admits new turns again. Canonical: docs/architecture.md
+ * § Draining before an update.
+ */
+export const HostDrainRequest = Schema.Union(
+  Schema.Struct({
+    action: Schema.Literal("drain"),
+    minutes: Schema.Int.pipe(Schema.between(1, HOST_DRAIN_MAX_MINUTES)),
+  }).annotations(strict),
+  Schema.Struct({ action: Schema.Literal("read") }).annotations(strict),
+  Schema.Struct({ action: Schema.Literal("lift") }).annotations(strict),
+);
+export type HostDrainRequest = typeof HostDrainRequest.Type;
+
+const RunningTurns = Schema.Int.pipe(Schema.between(1, 100_000));
+
+/**
+ * How a drain stands. `drained` once no turn runs; `timed-out` once the wait
+ * the drain was given passed with turns still running. Both keep refusing
+ * new turns until the host stops or the drain lifts.
+ */
+export const HostDrainStatus = Schema.Union(
+  Schema.Struct({ state: Schema.Literal("not-draining") }).annotations(strict),
+  Schema.Struct({ state: Schema.Literal("draining"), running: RunningTurns }).annotations(strict),
+  Schema.Struct({ state: Schema.Literal("drained") }).annotations(strict),
+  Schema.Struct({ state: Schema.Literal("timed-out"), running: RunningTurns }).annotations(strict),
+);
+export type HostDrainStatus = typeof HostDrainStatus.Type;
+
 // ── Decoders ────────────────────────────────────────────────────────────────
 
 export const decodeHostControlStatus = Schema.decodeUnknownSync(HostControlStatus, {
@@ -401,5 +437,11 @@ export const decodeSetHostMemoryLimitsOutcome = Schema.decodeUnknownSync(
   { onExcessProperty: "error" },
 );
 export const decodeHostMemoryLimitsChanged = Schema.decodeUnknownSync(HostMemoryLimitsChanged, {
+  onExcessProperty: "error",
+});
+export const decodeHostDrainRequest = Schema.decodeUnknownSync(HostDrainRequest, {
+  onExcessProperty: "error",
+});
+export const decodeHostDrainStatus = Schema.decodeUnknownSync(HostDrainStatus, {
   onExcessProperty: "error",
 });

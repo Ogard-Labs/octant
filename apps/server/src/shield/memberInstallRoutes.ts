@@ -22,7 +22,10 @@ const BODY_LIMIT = 4_096;
 
 export interface MemberInstallRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
-  readonly service: Pick<MemberInstallService, "prepare" | "confirm" | "progress">;
+  readonly service: Pick<
+    MemberInstallService,
+    "prepare" | "confirm" | "progress" | "downloadProgress" | "leaveDownload"
+  >;
   readonly upkeep: Pick<
     MemberUpkeepService,
     | "members"
@@ -68,11 +71,12 @@ async function answer(
   dependencies: MemberInstallRouteDependencies,
   command: MemberInstallCommand,
   requester: MemberInstallRequester,
+  signal: AbortSignal,
 ): Promise<MemberInstallResult> {
   const { service, upkeep } = dependencies;
   switch (command.kind) {
     case "prepare-member-install":
-      return await service.prepare(String(command.serverId), requester);
+      return await service.prepare(String(command.serverId), requester, signal);
     case "confirm-member-install":
       return await service.confirm(
         { planId: String(command.planId), listenAddress: command.listenAddress },
@@ -83,7 +87,7 @@ async function answer(
     case "list-member-computers":
       return upkeep.members(requester);
     case "prepare-member-update":
-      return await upkeep.prepareUpdate(String(command.serverId), requester);
+      return await upkeep.prepareUpdate(String(command.serverId), requester, signal);
     case "confirm-member-update":
       return await upkeep.confirmUpdate(
         { planId: String(command.planId), drain: command.drain },
@@ -100,6 +104,10 @@ async function answer(
       );
     case "read-member-removal":
       return upkeep.removalProgress(String(command.removalId), requester);
+    case "read-member-build-download":
+      return service.downloadProgress(String(command.downloadId), requester);
+    case "leave-member-build-download":
+      return service.leaveDownload(String(command.downloadId), requester);
   }
 }
 
@@ -152,7 +160,7 @@ export function createMemberInstallRouteHandler(dependencies: MemberInstallRoute
     } catch {
       return json({ error: "Server command is invalid." }, 400, origin);
     }
-    const result = await answer(dependencies, command, requester);
+    const result = await answer(dependencies, command, requester, request.signal);
     return json(
       result,
       result.kind !== "member-install-refused"

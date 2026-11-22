@@ -29,7 +29,7 @@ import {
   UPDATE_FEED_BASE_URL_ENVIRONMENT_VARIABLE,
   updateFeedUrl,
 } from "./appUpdateFeed";
-import { createPinnedUpdateFetch, isPrivateAddress } from "./updateHttpsTransport";
+import { createPinnedUpdateFetch, isPrivateAddress } from "@octant/host-runtime";
 import type {
   WindowsInstallerApplyResult,
   WindowsInstallerPort,

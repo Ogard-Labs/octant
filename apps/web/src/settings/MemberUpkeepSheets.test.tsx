@@ -33,7 +33,7 @@ const UPDATE_PLAN = {
   signature: "verified",
   installRoot: "/home/build/.local/state/octant/install",
   storeMigration: false,
-  drains: ["stop-now"],
+  drains: ["wait", "stop-now"],
 } as MemberUpdatePlan;
 
 const REMOVAL_PLAN = {
@@ -86,13 +86,13 @@ describe("Update and Remove Octant on an Octant computer", () => {
     render(<MemberUpdateSheet client={{ memberInstall }} onClose={() => {}} server={SERVER} />);
 
     const facts = await screen.findByLabelText("What the update will do");
+    await user.click(screen.getByRole("radio", { name: "Stop now" }));
     const text = facts.textContent ?? "";
     expect(text).toContain("build@devbox");
     expect(text).toContain("From 1.2.3 to 1.2.4, from the stable release");
     expect(text).toContain("release signature and every file's digest were checked");
-    expect(text).toContain("stops now, before the swap");
+    expect(text).toContain("refuses new turns and stops now, before the swap");
     expect(text).toContain("continue by themselves once it starts again");
-    expect(text).toContain("Waiting for running turns to finish first is not offered yet");
     expect(text).toContain("octant server upgrade");
     expect(text).toContain("/home/build/.local/state/octant/install");
     expect(text).toContain("signed hello");
@@ -100,7 +100,7 @@ describe("Update and Remove Octant on an Octant computer", () => {
     expect(itemsOf(screen.getByRole("list", { name: "Steps" }))).toEqual([
       "Copy the build",
       "Verify it on the server",
-      "Stop running turns",
+      "Drain running turns",
       "Swap to 1.2.4",
       "Confirm its signed hello",
     ]);
@@ -113,7 +113,7 @@ describe("Update and Remove Octant on an Octant computer", () => {
     expect(memberInstall).toHaveBeenCalledWith({
       kind: "confirm-member-update",
       planId: UPDATE_PLAN.planId,
-      drain: "stop-now",
+      drain: { kind: "stop-now" },
     });
     expect(
       await screen.findByText(
@@ -123,11 +123,50 @@ describe("Update and Remove Octant on an Octant computer", () => {
     expect(itemsOf(screen.getByRole("list", { name: "Steps" }))).toEqual([
       "Copy the buildDone",
       "Verify it on the serverDone",
-      "Stop running turnsDone",
+      "Drain running turnsDone",
       "Swap to 1.2.4Done",
       "Confirm its signed helloFailedOctant 1.2.4 on devbox speaks protocol 2 to 3.",
       "Roll back to 1.2.3Done",
     ]);
+  });
+
+  it("the Update sheet waits up to ten minutes for running work unless the person picks another bound", async () => {
+    const progress = {
+      updateId: "7c0e8d51-0000-4000-8000-000000000004" as MemberUpdateProgress["updateId"],
+      serverId: SERVER.serverId,
+      state: "running",
+      steps: [{ step: "copy", state: "running" }],
+    } as MemberUpdateProgress;
+    const memberInstall = sheetClient((command) =>
+      command.kind === "prepare-member-update"
+        ? { kind: "member-update-plan", plan: UPDATE_PLAN }
+        : { kind: "member-update-progress", progress },
+    );
+    const user = userEvent.setup();
+    render(<MemberUpdateSheet client={{ memberInstall }} onClose={() => {}} server={SERVER} />);
+
+    const wait = await screen.findByRole("radio", {
+      name: "Wait up to 10 minutes for running work",
+    });
+    expect(wait.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "Stop now" }).getAttribute("aria-checked")).toBe(
+      "false",
+    );
+    const facts = screen.getByLabelText("What the update will do").textContent ?? "";
+    expect(facts).toContain("refuses new turns at once and lets running ones finish");
+
+    const minutes = screen.getByRole("spinbutton", { name: "Minutes to wait for running work" });
+    await user.clear(minutes);
+    await user.type(minutes, "25");
+    expect(
+      screen.getByRole("radio", { name: "Wait up to 25 minutes for running work" }),
+    ).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Update to 1.2.4" }));
+    expect(memberInstall).toHaveBeenCalledWith({
+      kind: "confirm-member-update",
+      planId: UPDATE_PLAN.planId,
+      drain: { kind: "wait", minutes: 25 },
+    });
   });
 
   it("the Remove Octant sheet says what is deleted and kept, deletes the data folder only when ticked, and shows its steps", async () => {
@@ -268,9 +307,9 @@ describe("Update and Remove Octant on an Octant computer", () => {
     ).toBeNull();
     await user.click(screen.getByRole("button", { name: "Update Octant on devbox" }));
     expect(await screen.findByRole("dialog", { name: "Update Octant on devbox" })).toBeTruthy();
-    expect(memberInstall).toHaveBeenCalledWith({
-      kind: "prepare-member-update",
-      serverId: SERVER.serverId,
-    });
+    expect(memberInstall).toHaveBeenCalledWith(
+      { kind: "prepare-member-update", serverId: SERVER.serverId },
+      expect.any(AbortSignal),
+    );
   });
 });

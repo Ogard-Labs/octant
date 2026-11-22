@@ -61,7 +61,7 @@ import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
 import { WorkTurnFileObserver } from "../work/workTurnFileObserver";
 import { WorkThreadService } from "../work/workThreadService";
 import { WorkTurnRuntime, workSessionKey, workSessionTerms } from "../work/workTurnRuntime";
-import { WorkTurnService } from "../work/workTurnService";
+import { WorkTurnService, wakeupTurnOutcome } from "../work/workTurnService";
 import { withWorkflowLifecycle } from "../work/workThreadWorkflowHook";
 import { WorkflowEventStore } from "../work/workflowEventStore";
 import { WorkflowProjection } from "../work/workflowProjection";
@@ -2024,28 +2024,28 @@ export function wireWork(deps: WorkDependencies) {
         }
         if (workTurnService.isTurnActive(thread.id)) return { status: "busy" };
         const requestId = randomUUID();
-        const result = await workTurnService.startFirstTurn(ROUTINE_HOST_SCOPE_ID, {
-          kind: "start-work-thread-turn",
-          requestId: decodeWorkTurnRequestId(requestId),
-          threadId: thread.id,
-          turnId: decodeWorkTurnId(randomUUID()),
-          prompt,
-          authority: {
-            hostId: LOCAL_HOST_ID,
-            projectId: thread.projectId,
-            bindingRevisionId: thread.bindingRevisionId,
-            workingDirectory: thread.workingDirectory ?? ".",
-            ...(thread.workingFolderId === undefined
-              ? {}
-              : { workingFolderId: thread.workingFolderId }),
-            confinementPosture: "project-root-confined",
-            providerInstanceId: thread.providerInstanceId,
-            modelId: thread.modelId,
-          },
-        });
-        return result.kind === "accepted"
-          ? { status: "started", turnId: requestId }
-          : { status: "refused", message: "The turn was not admitted." };
+        return await wakeupTurnOutcome(
+          workTurnService.startHostTurn(ROUTINE_HOST_SCOPE_ID, {
+            kind: "start-work-thread-turn",
+            requestId: decodeWorkTurnRequestId(requestId),
+            threadId: thread.id,
+            turnId: decodeWorkTurnId(randomUUID()),
+            prompt,
+            authority: {
+              hostId: LOCAL_HOST_ID,
+              projectId: thread.projectId,
+              bindingRevisionId: thread.bindingRevisionId,
+              workingDirectory: thread.workingDirectory ?? ".",
+              ...(thread.workingFolderId === undefined
+                ? {}
+                : { workingFolderId: thread.workingFolderId }),
+              confinementPosture: "project-root-confined",
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+            },
+          }),
+          requestId,
+        );
       },
     };
     // The runtime's own turn runs at the thread's level as the host, like a

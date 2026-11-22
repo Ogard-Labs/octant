@@ -118,7 +118,10 @@ The design rests on a small set of invariants that every package obeys:
   on. Remote access is host-to-device over the user's
   own network; traffic among a person's own hub and spokes there is not a
   third-party call ([Hub and spokes](design/hub-and-spokes.md), built). Four host-initiated
-  HTTPS calls exist in code: desktop update checks against a signed feed, managed
+  HTTPS calls exist in code: desktop update checks against a signed feed (the
+  same feed serves a host the headless build it installs on a server over SSH,
+  only while the person has that sheet open and no suitable build is on the
+  host), managed
   device-tool update checks against the npm registry, server marketplace
   fetches when the person searches, inspects, previews, or installs from the
   catalog, calls to the public Canvas share service when the person
@@ -583,7 +586,8 @@ canonical bytes, which name every file's digest. Each target is built on its
 own runner with no key, and a separate job that holds only the ring's key and
 runs only the workflow's own scripts checks every file against the manifest,
 signs it and attaches the build to the release
-(`.github/workflows/release-headless.yml`). Octant Nightly releases carry no
+(`.github/workflows/release-headless.yml`), then signs the build's listing in
+the ring's feed with the same key and publishes it to the ring's mailbox. Octant Nightly releases carry no
 headless build. `octant server install` and `upgrade` refuse a build whose
 signature is missing, unreadable, or not made by a key trusted for the ring it
 names, before anything is staged, and check the staged copy again;
@@ -592,11 +596,15 @@ because an unsigned build proves nothing about who produced it. The server's
 own start-up check and the build's self-inspection need no signature. A host
 can install a build on one of the person's registered servers over SSH
 ([Hub and spokes: adding a computer over SSH](design/hub-and-spokes.md#adding-a-computer-over-ssh)):
-it checks the signed release build placed in its data folder's
-`headless-builds` folder with the same code, copies it with its digest
-checked, and runs that build's own `octant server install` into the login's
-state folder, which checks the signature again; it never passes
-`--self-built`, never runs sudo, and does not download the build itself yet.
+it checks the signed release build in its data folder's `headless-builds`
+folder with the same code, copies it with its digest checked, and runs that
+build's own `octant server install` into the login's state folder, which
+checks the signature again; it never passes `--self-built` and never runs
+sudo. When no suitable build is there, the host downloads the build for the
+server's target from the ring it follows, trusted only by the ring's signed
+listing (see the feed rules under [Security and
+authority](#security-and-authority)); the server itself contacts no release
+host.
 It updates such a member the same way, through the installed copy's
 `octant server upgrade`, then reads the member's signed hello and restores
 the previous `current` link when the hello does not confirm the build; and it
@@ -1385,6 +1393,46 @@ rather than as its own file or a long reply; its text is owned by
 [Canvas](design/canvas.md#agent-tool-and-recipes). Neither instruction offers
 tools or authority, and the Canvas one is absent wherever the tool is not
 offered.
+
+### Draining before an update
+
+An update Octant runs on a member over SSH can ask the member to drain first
+([Hub and spokes: adding a computer over SSH](design/hub-and-spokes.md#adding-a-computer-over-ssh)).
+`octant server drain --wait <minutes>` (1 to 60) asks the member's own host,
+through the CLI's local control session and `POST /api/host-control/drain`,
+to refuse new turns and let running ones go on. The host decides admission,
+never the client:
+
+- **New turns.** The turn admission every Chat send, Work turn and Code turn
+  asks before it starts, the one a paused harness session answers, refuses
+  with "This computer is about to update. Try again in a few minutes." A
+  subagent's result delivered to its parent is refused the same way.
+- **Routine runs.** The dispatcher starts none: a due run waits as dispatching
+  with no thread, and the scheduler's lease recovery offers it again once the
+  drain lifts or the updated host starts.
+- **Running turns** go on, with what they started. Nothing in the drain
+  cancels a turn; only the update's stop does, after the wait or at once when
+  the person chose Stop now.
+
+The host counts running turns from the start and end every mode reports for a
+turn, one per thread. A prepared turn counts from its final acceptance; one
+that ends before its provider starts (a spend ceiling refusal, a failed
+journal write) releases that acceptance, which forgets only its own
+registration, never a later turn's on the same thread. A drain that begins
+while a due Work wake-up prepares its turn refuses it as busy, so the wake-up
+is offered again once the drain lifts. The CLI reads the drain once a second and prints
+`drained` once no turn runs, or `timed-out` with the count still running once
+the wait passes. The drain keeps refusing until the host stops, `octant server
+drain --lift` lifts it (an update that fails before its swap does), or five
+minutes after its wait ended, which lifts a drain whose update never came
+back. It lives in the host process and journals nothing: a restart admits
+turns again, and restart continuation resumes the turns a stop cut off. Only
+the host's own person drains (`host.service.drain`, beside
+`host.service.stop`: a local window, or a device that person paired), and the
+private listener does not forward the route, so in practice the member's own
+CLI is the caller. Not refused while draining: a Chat Retry or resumed attempt,
+a context compaction, and a helper agent a running turn starts, which do not
+pass the turn admission.
 
 ### Desktop menu bar
 
@@ -19825,6 +19873,31 @@ approval-gated` command that undoes it. The terminal shows no one-time
   mailbox tags do not start with `v`, so no rule scoped to version tags reaches
   them. Whoever can write release assets in the repository can withhold a
   ring's updates, and nothing more, for the reason above.
+- **The feed lists each headless build.** Beside the desktop documents, each
+  Octant ring's mailbox holds `<ring>/<target>.octant-headless.json` for
+  darwin-arm64, linux-x64 and linux-arm64: the version, target, ring, the
+  build's URL on its release and its SHA-256, signed with that ring's feed
+  key over their canonical encoding. Its fields differ from a desktop
+  release's (`target` where those name `platform` and `arch`), so neither
+  kind's signature verifies as the other, and no desktop install reads the
+  name. The release workflow's signing job writes it with
+  `scripts/sign-update-feed.ts --headless` once the build is attached, using
+  the key that job already holds; Octant Nightly's preview ring lists none.
+  It is how a host downloads a build for a server it installs or updates
+  over SSH ([Hub and spokes: adding a computer over
+  SSH](design/hub-and-spokes.md#adding-a-computer-over-ssh)): only when no
+  suitable build is in its data folder's `headless-builds` folder and the
+  person has that sheet open, the host requests the listing for the server's
+  target from the ring it follows, at the updater's feed base
+  (`https://octant.sh/updates`, or `OCTANT_UPDATE_FEED_BASE_URL`; an unusable
+  override turns downloads off), with the same transport, redirect rules and
+  limits as the updater, then the build from its release on GitHub, the host
+  octant.sh already redirects the feed to. The request names the ring and the
+  target in its path and sends no version, account, cookie or identifier.
+  Nothing in the listing is believed before its signature verifies; the
+  build must then hash to its digest and pass its own release signature
+  check before it is kept. The listing's signature, not the host, is the
+  trust root, so this adds no host and no key beyond the updater's.
 
 **Proposed, not accepted: Claude sign-in inside Anthropic's terms.** Octant
 would not mint, store, or inject a Claude setup or OAuth token. Claude
@@ -20338,8 +20411,10 @@ listen address and port) and `shield-servers.member-install-step@1` (step,
 outcome, and a closed failure reason), with the person or their paired device
 as the actor and never a join code, ticket, comparison code or key. Such a
 server's row then offers **Update** and **Remove Octant** on the same route,
-journaled the same way as `shield-servers.member-update-requested@1` (both
-versions, ring, target, drain), `shield-servers.member-update-step@1` (copy,
+journaled the same way as `shield-servers.member-update-requested@2` (both
+versions, ring, target, and the drain: stop now, or wait with its minutes;
+`@1`, whose only drain was stop now, is still read),
+`shield-servers.member-update-step@1` (copy,
 verify, drain, swap, confirm or roll-back, with outcome and a closed failure
 reason, among them why the swapped build was rolled back),
 `shield-servers.member-removal-requested@1` (whether the data folder is

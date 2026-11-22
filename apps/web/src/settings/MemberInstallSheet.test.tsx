@@ -157,6 +157,175 @@ describe("Make this an Octant computer", () => {
     ]);
   });
 
+  it("downloads the build when none is on this computer, shows downloading, verifying and ready, then states the plan", async () => {
+    const download = {
+      downloadId: "3d2c1b0a-0000-4000-8000-000000000001",
+      target: "linux-x64",
+      ring: "candidate",
+    } as Extract<MemberInstallResult, { kind: "member-build-download" }>["download"];
+    const reads = [
+      { ...download, state: "verifying", version: "1.2.3" },
+      { ...download, state: "ready", version: "1.2.3" },
+    ] as const;
+    let prepares = 0;
+    let read = 0;
+    const { memberInstall } = setup((command) => {
+      if (command.kind === "prepare-member-install") {
+        prepares += 1;
+        return prepares === 1
+          ? { kind: "member-build-download", download: { ...download, state: "downloading" } }
+          : { kind: "member-install-plan", plan: PLAN };
+      }
+      const next = reads[Math.min(read, reads.length - 1)];
+      read += 1;
+      return { kind: "member-build-download", download: { ...download, ...next } };
+    });
+
+    const stages = await screen.findByRole("list", { name: "Download" });
+    expect(
+      within(stages)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual([
+      "Download Octant for linux-x64 from the candidate releaseRunning…",
+      "Verify the release's signed listing, the digest and the build's signatureWaiting",
+      "ReadyWaiting",
+    ]);
+    expect(
+      await screen.findByText("Download Octant 1.2.3 for linux-x64 from the candidate release"),
+    ).toBeTruthy();
+    // Once the build is ready the sheet reads its plan again, and only then
+    // offers the install.
+    expect(
+      await screen.findByLabelText("What Octant will do", {}, { timeout: 4_000 }),
+    ).toBeTruthy();
+    expect(memberInstall.mock.calls.map(([command]) => command.kind)).toEqual([
+      "prepare-member-install",
+      "read-member-build-download",
+      "read-member-build-download",
+      "prepare-member-install",
+    ]);
+  });
+
+  it("closing the sheet ends its prepare request and stops reading the build it was downloading", async () => {
+    const download = {
+      downloadId: "3d2c1b0a-0000-4000-8000-000000000004",
+      target: "linux-x64",
+      ring: "candidate",
+      state: "downloading",
+    } as Extract<MemberInstallResult, { kind: "member-build-download" }>["download"];
+    const signals: AbortSignal[] = [];
+    const memberInstall = vi.fn(
+      async (command: MemberInstallCommand, signal?: AbortSignal): Promise<MemberInstallResult> => {
+        if (signal !== undefined) signals.push(signal);
+        return { kind: "member-build-download", download };
+      },
+    );
+    const sheet = (
+      <MemberInstallSheet
+        client={{ memberInstall }}
+        onClose={() => {}}
+        onOpenPrivateNetworkGuide={() => {}}
+        server={SERVER}
+      />
+    );
+    // Dismissed before the host answered: its prepare request is aborted.
+    const early = render(sheet);
+    early.unmount();
+    expect(signals[0]?.aborted).toBe(true);
+
+    // Dismissed while the build downloads: the host hears that this sheet left.
+    const late = render(sheet);
+    await screen.findByRole("list", { name: "Download" });
+    late.unmount();
+    expect(memberInstall.mock.calls.map(([command]) => command)).toContainEqual({
+      kind: "leave-member-build-download",
+      downloadId: download.downloadId,
+    });
+  });
+
+  it("keeps reading its download when Settings re-renders the open sheet with a new client", async () => {
+    const download = {
+      downloadId: "3d2c1b0a-0000-4000-8000-000000000005",
+      target: "linux-x64",
+      ring: "candidate",
+      state: "downloading",
+    } as Extract<MemberInstallResult, { kind: "member-build-download" }>["download"];
+    const memberInstall = vi.fn(
+      async (_command: MemberInstallCommand): Promise<MemberInstallResult> => ({
+        kind: "member-build-download",
+        download,
+      }),
+    );
+    const sheet = () => (
+      <MemberInstallSheet
+        client={{ memberInstall }}
+        onClose={() => {}}
+        onOpenPrivateNetworkGuide={() => {}}
+        server={SERVER}
+      />
+    );
+    const view = render(sheet());
+    await screen.findByRole("list", { name: "Download" });
+    view.rerender(sheet());
+    view.rerender(sheet());
+    expect(memberInstall.mock.calls.map(([command]) => command.kind)).not.toContain(
+      "leave-member-build-download",
+    );
+    view.unmount();
+    expect(
+      memberInstall.mock.calls.filter(
+        ([command]) => command.kind === "leave-member-build-download",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("keeps reading a download after one read fails, then states the plan", async () => {
+    const download = {
+      downloadId: "3d2c1b0a-0000-4000-8000-000000000003",
+      target: "linux-x64",
+      ring: "candidate",
+    } as Extract<MemberInstallResult, { kind: "member-build-download" }>["download"];
+    let prepares = 0;
+    let reads = 0;
+    const { memberInstall } = setup((command) => {
+      if (command.kind === "prepare-member-install") {
+        prepares += 1;
+        return prepares === 1
+          ? { kind: "member-build-download", download: { ...download, state: "downloading" } }
+          : { kind: "member-install-plan", plan: PLAN };
+      }
+      reads += 1;
+      if (reads === 1) throw new Error("connection lost");
+      return {
+        kind: "member-build-download",
+        download: { ...download, state: "ready", version: "1.2.3" },
+      };
+    });
+    expect(
+      await screen.findByLabelText("What Octant will do", {}, { timeout: 4_000 }),
+    ).toBeTruthy();
+    expect(reads).toBe(2);
+    expect(memberInstall.mock.calls.at(-1)?.[0].kind).toBe("prepare-member-install");
+  });
+
+  it("says where to place a build when the download is refused", async () => {
+    setup(() => ({
+      kind: "member-build-download",
+      download: {
+        downloadId: "3d2c1b0a-0000-4000-8000-000000000002",
+        target: "linux-x64",
+        ring: "candidate",
+        state: "refused",
+        refusal: "unreachable",
+        message:
+          "No signed Octant build for linux-x64 is on this computer, and the candidate release could not be reached or lists none. Put octant-<version>-linux-x64.tar.gz from Octant's release in /data/headless-builds, then try again.",
+      } as Extract<MemberInstallResult, { kind: "member-build-download" }>["download"],
+    }));
+    expect(await screen.findByText(/in \/data\/headless-builds, then try again/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Install and join" })).toBeNull();
+  });
+
   it("keeps showing progress after a progress read fails once", async () => {
     const steps: MemberInstallProgress["steps"] = [
       { step: "copy", state: "succeeded" },
@@ -273,9 +442,9 @@ describe("Make this an Octant computer", () => {
     expect(
       await screen.findByRole("dialog", { name: "Make devbox an Octant computer" }),
     ).toBeTruthy();
-    expect(memberInstall).toHaveBeenCalledWith({
-      kind: "prepare-member-install",
-      serverId: SERVER.serverId,
-    });
+    expect(memberInstall).toHaveBeenCalledWith(
+      { kind: "prepare-member-install", serverId: SERVER.serverId },
+      expect.any(AbortSignal),
+    );
   });
 });

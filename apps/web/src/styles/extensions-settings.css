@@ -1170,6 +1170,13 @@
   gap: var(--oct-space-2);
 }
 
+/* Update: how running turns stop before the swap, one of two. */
+.member-update__drains {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}
+
 /* Remove Octant: the one tick that also deletes the data folder. */
 .member-install__choice {
   display: flex;

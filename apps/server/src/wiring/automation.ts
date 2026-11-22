@@ -123,7 +123,7 @@ export type AutomationDependencies = {
     AgentRunsWiring,
     "capacityScheduler" | "agentRunOrchestration" | "externalContentIngestionStore"
   > &
-  Pick<HarnessWiring, "readHarnessProcessReceipts"> &
+  Pick<HarnessWiring, "readHarnessProcessReceipts" | "hostDrain"> &
   Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
   Pick<WorkspaceWiring, "projectService"> &
   Pick<
@@ -148,6 +148,7 @@ export function wireAutomation(deps: AutomationDependencies) {
     agentRunOrchestration,
     externalContentIngestionStore,
     readHarnessProcessReceipts,
+    hostDrain,
     chatService,
     contributeChatTools,
     codeCompletedThreadSource,
@@ -650,6 +651,7 @@ export function wireAutomation(deps: AutomationDependencies) {
   }
   const automationDispatch = new AutomationDispatchService({
     store: automationEventStore,
+    refusesNewRuns: () => hostDrain.refusal() !== undefined,
     projection: persistence.automationProjection,
     code: automationCodeDispatch,
     work: automationWorkDispatch,
