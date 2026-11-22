@@ -56,7 +56,7 @@ type AskOutcome = VideoOfferOutcome | { readonly status: "too-many-waiting" };
 export interface VideoAgentToolPort {
   readonly jobs: Pick<
     VideoJobService,
-    "readyProfilesNow" | "quote" | "enqueue" | "whenTerminal" | "listByScope" | "readClip"
+    "readyProfilesNow" | "quote" | "enqueue" | "stop" | "whenTerminal" | "listByScope" | "readClip"
   >;
   readonly askGenerate: (
     offer: Omit<VideoGenerateOffer, "offerId" | "requestedAt" | "threadKind" | "scopeId">,
@@ -432,7 +432,12 @@ async function settledOutcome(
     port.waitMs ?? VIDEO_TOOL_WAIT_MS,
     signal,
   );
-  if (job === undefined) return generating;
+  if (job === undefined) {
+    // A stopped turn owes the provider a cancel; a timed-out wait leaves the
+    // job running and answers "generating" so it can be picked up later.
+    if (signal?.aborted) port.jobs.stop(queued.id);
+    return generating;
+  }
   if (job.status === "cancelled") {
     return { status: "cancelled", jobId: job.id, reason: "job-cancelled" };
   }

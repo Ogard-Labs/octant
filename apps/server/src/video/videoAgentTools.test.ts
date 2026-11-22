@@ -100,6 +100,7 @@ function harness(options: {
           },
   );
   const enqueue = vi.fn(async () => finished);
+  const stop = vi.fn();
   const askGenerate = vi.fn(async () => options.answer ?? { status: "cancelled" as const });
   const askSave = vi.fn(async () => ({ status: "video-save" as const }));
   const write = vi.fn(
@@ -116,6 +117,7 @@ function harness(options: {
         readyProfilesNow: () => [{ instance, models: [model] }],
         quote,
         enqueue,
+        stop,
         whenTerminal: async () => finished,
         listByScope: () => [finished],
         readClip: async () => new Uint8Array(2048),
@@ -132,7 +134,7 @@ function harness(options: {
   if (set === undefined) throw new Error("The video tool was not offered.");
   const call = (input: Record<string, unknown>) =>
     set.execute({ name: CREATE_VIDEO_TOOL_NAME, inputJson: JSON.stringify(input) });
-  return { call, quote, enqueue, askGenerate, askSave, write };
+  return { call, quote, enqueue, stop, askGenerate, askSave, write };
 }
 
 describe("octant_create_video on the host", () => {

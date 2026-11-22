@@ -118,7 +118,11 @@ export async function describeImageSources(
       request.kind === "attachment"
         ? request.name === undefined
           ? attachments
-          : attachments.filter((image) => image.label === request.name)
+          : // An upload's label is prefixed ("your attached photo x.png"); the
+            // agent names the file, so match its own name too.
+            attachments.filter(
+              (image) => image.label === request.name || image.label.endsWith(` ${request.name}`),
+            )
         : source === undefined
           ? []
           : [source];
