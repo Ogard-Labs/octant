@@ -1,4 +1,5 @@
-import type { ShellSettings } from "@octant/contracts";
+import type { ProviderExecutionPolicy, ShellSettings } from "@octant/contracts";
+import { isAcpAgentKind } from "@octant/contracts/acp-agent-profiles";
 import type { ProviderDriver, ProviderOwnChannels } from "@octant/provider-sdk";
 import { Effect } from "effect";
 
@@ -15,11 +16,83 @@ export const DEFAULT_PROVIDER_OWN_CHANNELS: ProviderOwnChannels = {
 
 const CLOSED_PROVIDER_OWN_CHANNELS: ProviderOwnChannels = { telemetry: false, selfUpdate: false };
 
-/** The person's two switches in Settings › Providers & Models. */
+/**
+ * The person's two switches in Settings › Providers & Models, and the host
+ * credentials they let through to this provider (by driver kind).
+ */
 export function providerOwnChannelsFromSettings(
-  settings: Pick<ShellSettings, "providerTelemetry" | "providerSelfUpdate">,
+  settings: Pick<
+    ShellSettings,
+    "providerTelemetry" | "providerSelfUpdate" | "providerCredentialPassThrough"
+  >,
+  driverKind: string,
 ): ProviderOwnChannels {
-  return { telemetry: settings.providerTelemetry, selfUpdate: settings.providerSelfUpdate };
+  const credentialPassThrough = providerCredentialPassThrough(settings, driverKind);
+  return {
+    telemetry: settings.providerTelemetry,
+    selfUpdate: settings.providerSelfUpdate,
+    ...(credentialPassThrough.length === 0 ? {} : { credentialPassThrough }),
+  };
+}
+
+/** What decides whether a launch reads the pass-through list at all. */
+export interface CredentialLaunchPosture {
+  readonly strict: boolean;
+  readonly executionPolicy: ProviderExecutionPolicy;
+  /** The thread keeps its sandbox at Full access. */
+  readonly fullAccessSandbox: boolean;
+  /** The launch runs under an explicit sandbox policy. */
+  readonly sandboxPolicy: boolean;
+}
+
+/**
+ * Whether a launch of this driver kind and posture takes the person's
+ * pass-through list, as each driver builds its environment. Strict never
+ * does. Claude Code and the ACP agents also build the Strict environment for
+ * a thread that keeps or chose a sandbox (`claudeDriver` closes its own
+ * channels there; `acpProcess` sets `environmentStrict`), an ACP agent only
+ * at Full access, where its driver passes the kept sandbox on. Codex and Pi
+ * read only Strict.
+ */
+export function credentialPassThroughApplies(
+  driverKind: string,
+  posture: CredentialLaunchPosture,
+): boolean {
+  if (posture.strict) return false;
+  if (driverKind === "claude") return !posture.fullAccessSandbox && !posture.sandboxPolicy;
+  if (isAcpAgentKind(driverKind) || driverKind === "acp-agent") {
+    const keptSandbox = posture.executionPolicy === "full-access" && posture.fullAccessSandbox;
+    return !keptSandbox && !posture.sandboxPolicy;
+  }
+  return true;
+}
+
+/**
+ * The credentials a launch of this posture actually lets through, as one
+ * comparable string, so a kept session launched with other grants is told
+ * apart and one whose grants did not change is left alone. A posture that
+ * discards the list, or a thread whose provider is gone, lets nothing
+ * through.
+ */
+export function launchCredentialsKey(
+  settings: Pick<ShellSettings, "providerCredentialPassThrough"> | undefined,
+  driverKind: string | undefined,
+  posture: CredentialLaunchPosture,
+): string {
+  const names =
+    driverKind === undefined || !credentialPassThroughApplies(driverKind, posture)
+      ? []
+      : providerCredentialPassThrough(settings, driverKind);
+  return JSON.stringify([...new Set(names)].sort());
+}
+
+/** The host credentials the person lets through to a provider of this driver kind. */
+export function providerCredentialPassThrough(
+  settings: Pick<ShellSettings, "providerCredentialPassThrough"> | undefined,
+  driverKind: string,
+): ReadonlyArray<string> {
+  const lists = settings?.providerCredentialPassThrough;
+  return lists !== undefined && Object.hasOwn(lists, driverKind) ? (lists[driverKind] ?? []) : [];
 }
 
 /**

@@ -5,6 +5,7 @@ import { acpAgentProfile } from "@octant/contracts/acp-agent-profiles";
 import { isAcpAgentInstance, providerTerminalName } from "@octant/domain";
 import { sanitizeAcpEnvironment } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind, type AcpSessionMode } from "./acpProfiles";
+import { DEFAULT_PROVIDER_OWN_CHANNELS } from "./providerOwnChannels";
 import { resolveProviderToolingAccount } from "./providerToolingAccount";
 
 /**
@@ -45,6 +46,13 @@ export function resolveProviderTerminal(input: {
   readonly fullAccessSandbox?: boolean | undefined;
   /** Where an ACP agent instance keeps its managed home, as its driver is given. */
   readonly acpHome?: (kind: AcpProviderKind, instanceId: ProviderInstance["id"]) => string;
+  /**
+   * The host credentials the person lets through to each provider, by driver
+   * kind, as a turn outside Strict would get them.
+   */
+  readonly credentialPassThrough?: (
+    driverKind: ProviderInstance["driverKind"],
+  ) => ReadonlyArray<string>;
 }): ProviderTerminalLaunch {
   const instance = input.instance;
   if (instance === undefined || !instance.enabled)
@@ -85,6 +93,7 @@ function toolingProgram(
     input.hostEnvironment,
     input.homeDirectory,
     input.strict,
+    input.credentialPassThrough?.(instance.driverKind) ?? [],
   );
   return account === undefined
     ? undefined
@@ -116,8 +125,13 @@ function acpProgram(
   } catch {
     return undefined;
   }
+  const credentialPassThrough = input.credentialPassThrough?.(instance.driverKind) ?? [];
   const environment = sanitizeAcpEnvironment(profile, input.hostEnvironment, {
     managedHome,
+    // The provider's channels stay closed here, as before this list existed.
+    ...(credentialPassThrough.length === 0
+      ? {}
+      : { ownChannels: { ...DEFAULT_PROVIDER_OWN_CHANNELS, credentialPassThrough } }),
     executionPolicy: input.executionPolicy ?? "approval-gated",
     mode: input.mode ?? "code",
     // A TTY, not the ACP stream: the CLI keeps its colour.

@@ -100,6 +100,27 @@ describe("provider terminal", () => {
     expect(launch.environment.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
+  it("opens a provider terminal outside Strict without GH_TOKEN unless that provider's pass-through list names it", () => {
+    for (const kind of ["claude", "codex"] as const) {
+      const open = (credentialPassThrough: ReadonlyArray<string>) => {
+        const launch = resolveProviderTerminal({
+          instance: instance(kind),
+          hostEnvironment: { ...HOST, GH_TOKEN: "gh-canary", NPM_TOKEN: "npm-canary" },
+          homeDirectory: "/Users/person",
+          platform: "darwin",
+          shell: "/bin/zsh",
+          strict: false,
+          credentialPassThrough: (driverKind) => (driverKind === kind ? credentialPassThrough : []),
+        });
+        if (launch.status !== "resolved") throw new Error("expected a launch");
+        return launch.environment;
+      };
+      expect(open([]).GH_TOKEN, kind).toBeUndefined();
+      expect(open(["GH_TOKEN"]).GH_TOKEN, kind).toBe("gh-canary");
+      expect(open(["GH_TOKEN"]).NPM_TOKEN, kind).toBeUndefined();
+    }
+  });
+
   it("starts Codex with the account's own CODEX_HOME and without the host's key", () => {
     const launch = resolve(instance("codex"));
     expect(launch).toMatchObject({

@@ -795,6 +795,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="browser-hub-claim"],
 .setrow[data-setting-id="skill-folders-added"],
 .setrow[data-setting-id="sandbox-policy-add-folder"],
+.setrow[data-setting-id="provider-credential-pass-through-add"],
 .setrow:has(> .setrow-control .settings-accent) {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -815,6 +816,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="browser-hub-claim"] > .setrow-control,
 .setrow[data-setting-id="skill-folders-added"] > .setrow-control,
 .setrow[data-setting-id="sandbox-policy-add-folder"] > .setrow-control,
+.setrow[data-setting-id="provider-credential-pass-through-add"] > .setrow-control,
 .setrow:has(> .setrow-control .settings-accent) > .setrow-control {
   grid-column: 1;
   grid-row: auto;
@@ -3890,6 +3892,28 @@ html[data-octant-increased-contrast="true"]
 .protected-files__add > .settings-view__text-input {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* Credentials let through: a variable name is one long word, so it keeps its
+   width and the provider beside it is cut first; past 70% of the row it
+   wraps. The add form wraps on a narrow page instead of squeezing the name
+   field to a few characters. */
+.provider-credentials .crow__name {
+  flex-shrink: 0;
+  max-width: 70%;
+}
+
+.provider-credentials__add {
+  flex-wrap: wrap;
+}
+
+.provider-credentials__add > * {
+  flex: 1 1 9rem;
+  min-width: 0;
+}
+
+.provider-credentials__add > button[type="submit"] {
+  flex: 0 0 auto;
 }
 
 .protected-files__paths {

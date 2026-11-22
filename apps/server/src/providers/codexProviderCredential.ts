@@ -159,8 +159,10 @@ interface CodexActiveModelProvider {
 /**
  * The `model_provider` a `config.toml` selects and the `env_key` its
  * `[model_providers.<id>]` table declares, when it declares one. This is a
- * field read, not a TOML parser: it answers the two settings the probe needs
- * and treats anything it cannot read plainly as absent.
+ * field read, not a TOML parser: it answers the two settings the probe and the
+ * Bedrock launch need, with each key bare or quoted, and treats anything it
+ * cannot read plainly as absent. No TOML parser is a dependency of the server,
+ * and Bun's built-in one is not there where this runs under Node.
  */
 export function codexActiveModelProvider(text: string): CodexActiveModelProvider | undefined {
   let id: string | undefined;
@@ -174,9 +176,11 @@ export function codexActiveModelProvider(text: string): CodexActiveModelProvider
       table = parseProviderTableName(header[1] ?? "");
       continue;
     }
-    const assignment = /^([A-Za-z0-9_-]+)\s*=\s*(.+?)\s*$/.exec(line);
+    // A key is bare or quoted, basic or literal: `"model_provider" = ...` is
+    // the same key as `model_provider = ...` in TOML.
+    const assignment = /^([A-Za-z0-9_-]+|"[^"\\]*"|'[^']*')\s*=\s*(.+?)\s*$/.exec(line);
     if (assignment === null) continue;
-    const key = assignment[1];
+    const key = parseTomlString(assignment[1] ?? "");
     const value = parseTomlString(assignment[2] ?? "");
     if (value === undefined) continue;
     if (table === undefined && key === "model_provider") {

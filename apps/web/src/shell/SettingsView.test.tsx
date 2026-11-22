@@ -1453,6 +1453,70 @@ describe("SettingsView", () => {
     expect(within(modeSwitcher).getByRole("button", { name: "Buttons" })).toHaveFocus();
   });
 
+  it.each([
+    ["Let a credential through", { claude: ["GH_TOKEN"] }],
+    // An empty list has no row to focus, so its result lands on the add row.
+    ["Credentials let through", {}],
+  ] as const)(
+    "search for %s lands on the row that lets a credential through",
+    async (label, providerCredentialPassThrough) => {
+      const user = userEvent.setup();
+      renderSettingsWithSearch("", {
+        providerController: providerControllerFixture(),
+        discoveryController: discoveryControllerFixture(),
+        settings: { ...defaultShellSettings(), providerCredentialPassThrough },
+      });
+      await user.type(
+        screen.getByRole("searchbox", { name: "Search settings" }),
+        "credential through",
+      );
+      const options = await screen.findAllByRole("option");
+      const result = options.find(
+        (option) => option.querySelector(".settings-search-results__label")?.textContent === label,
+      );
+      if (result === undefined) throw new Error(`No search result for ${label}`);
+      await user.click(result);
+      // The row's first control, the provider picker, takes focus.
+      await waitFor(() =>
+        expect(
+          document.activeElement?.closest(
+            "[data-setting-id='provider-credential-pass-through-add']",
+          ),
+        ).not.toBeNull(),
+      );
+      expect(document.activeElement).toHaveAccessibleName("Provider");
+    },
+  );
+
+  it("search for the credential list lands on its first row once it has one", async () => {
+    const user = userEvent.setup();
+    renderSettingsWithSearch("", {
+      providerController: providerControllerFixture(),
+      discoveryController: discoveryControllerFixture(),
+      settings: {
+        ...defaultShellSettings(),
+        providerCredentialPassThrough: { codex: ["GH_TOKEN"] },
+      },
+    });
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search settings" }),
+      "credential through",
+    );
+    const options = await screen.findAllByRole("option");
+    const result = options.find(
+      (option) =>
+        option.querySelector(".settings-search-results__label")?.textContent ===
+        "Credentials let through",
+    );
+    if (result === undefined) throw new Error("No search result for the credential list");
+    await user.click(result);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Stop letting GH_TOKEN through to Codex" }),
+      ).toHaveFocus(),
+    );
+  });
+
   it("applies an initial deep link on mount to open a section and focus a setting", () => {
     // Mode switcher moved from Appearance to Sidebar; its old link still lands.
     renderSettings({ initialDeepLink: { section: "appearance", setting: "mode-switcher" } });

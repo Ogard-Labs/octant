@@ -234,6 +234,7 @@ export function defaultShellSettings(): ShellSettings {
     backgroundSessionIdleLimitMinutes: DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES,
     providerTelemetry: false,
     providerSelfUpdate: false,
+    providerCredentialPassThrough: {},
     threadWakeupsWaitingLimit: DEFAULT_THREAD_WAKEUPS_WAITING,
     threadWakeupsRunMissedOnReturn: false,
     messageWakesPerHour: DEFAULT_COORDINATOR_WAKES_PER_HOUR,
