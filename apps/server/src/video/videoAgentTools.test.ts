@@ -82,6 +82,8 @@ function harness(options: {
   readonly fullAccess?: boolean;
   readonly posture?: "refuse" | "ask" | "allow";
   readonly answer?: Awaited<ReturnType<VideoAgentToolPort["askGenerate"]>>;
+  readonly pending?: boolean;
+  readonly waitMs?: number;
 }) {
   const quote = vi.fn(
     async (input: { readonly options: { readonly resolution: string } }): Promise<VideoQuote> =>
@@ -118,10 +120,11 @@ function harness(options: {
         quote,
         enqueue,
         stop,
-        whenTerminal: async () => finished,
+        whenTerminal: options.pending === true ? () => new Promise(() => {}) : async () => finished,
         listByScope: () => [finished],
         readClip: async () => new Uint8Array(2048),
       },
+      ...(options.waitMs === undefined ? {} : { waitMs: options.waitMs }),
       askGenerate,
       askSave,
       remembered: () => options.kept,
@@ -132,8 +135,12 @@ function harness(options: {
     },
   });
   if (set === undefined) throw new Error("The video tool was not offered.");
-  const call = (input: Record<string, unknown>) =>
-    set.execute({ name: CREATE_VIDEO_TOOL_NAME, inputJson: JSON.stringify(input) });
+  const call = (input: Record<string, unknown>, signal?: AbortSignal) =>
+    set.execute({
+      name: CREATE_VIDEO_TOOL_NAME,
+      inputJson: JSON.stringify(input),
+      ...(signal === undefined ? {} : { signal }),
+    });
   return { call, quote, enqueue, stop, askGenerate, askSave, write };
 }
 
@@ -176,6 +183,30 @@ describe("octant_create_video on the host", () => {
     await call({ prompt: "A paper boat on a pond", resolution: "4k" });
     expect(askGenerate).not.toHaveBeenCalled();
     expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("stops the clip a stopped turn was waiting on, while a timed-out wait leaves it running", async () => {
+    const options = { durationSeconds: 5, resolution: "720p", aspectRatio: "16:9", audio: true };
+    const stopped = harness({
+      pending: true,
+      answer: { status: "video-generate", options, rememberForThread: false },
+    });
+    const controller = new AbortController();
+    const outcome = stopped.call({ prompt: "A paper boat on a pond" }, controller.signal);
+    await vi.waitFor(() => expect(stopped.enqueue).toHaveBeenCalled());
+    controller.abort();
+    expect((await outcome).result).toMatchObject({ status: "generating" });
+    expect(stopped.stop).toHaveBeenCalledWith(finished.id);
+
+    const slow = harness({
+      pending: true,
+      waitMs: 1,
+      answer: { status: "video-generate", options, rememberForThread: false },
+    });
+    expect((await slow.call({ prompt: "A paper boat on a pond" })).result).toMatchObject({
+      status: "generating",
+    });
+    expect(slow.stop).not.toHaveBeenCalled();
   });
 
   it("saves a finished clip at the turn's level: asks first, and Plan refuses", async () => {
