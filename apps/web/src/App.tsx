@@ -6452,6 +6452,27 @@ function LaunchedShell(
     agentsCenterOpen ||
     artifactLibraryOpen ||
     imageLibraryOpen;
+  // Names the open reader, so its failure boundary starts fresh when the
+  // sidebar switches readers: that switch never renders with none open.
+  const readerKey = [
+    projectsListOpen,
+    railPlaceholder !== undefined,
+    inboxOpen,
+    todosOpen,
+    reviewOpen,
+    codeBoardOpen,
+    workBoardOpen,
+    codePullRequestsOpen,
+    githubIssuesOpen,
+    linearIssuesOpen,
+    archiveOpen,
+    automationCenterOpen,
+    agentsCenterOpen,
+    artifactLibraryOpen,
+    imageLibraryOpen,
+  ]
+    .map(Number)
+    .join("");
   // Readers hide unrelated thread tools. Selecting a pull request explicitly
   // opens its Review beside that list, so the detail must remain visible.
   const dockPresentedOpen =
@@ -8955,7 +8976,9 @@ function LaunchedShell(
   // Settings' own boundary lives inside the lazy chunk, so it cannot catch
   // that chunk failing to load; this one keeps the workspace mounted.
   const settingsContainer = (surface: "settings" | "usage", presentation: "page" | "sheet") => (
-    <DockModuleBoundary onClose={controller.closeSettings}>
+    <DockModuleBoundary
+      onClose={surface === "usage" ? () => setUsageOpen(false) : controller.closeSettings}
+    >
       <Suspense
         fallback={
           <SurfaceLoading label={surface === "settings" ? "Opening Settings" : "Opening Usage"} />
@@ -9192,7 +9215,7 @@ function LaunchedShell(
             <ThreadNotesProvider services={launchedClients.threadNotesClient}>
               <div className="primary-workspace-layer">
                 {readerOpen ? (
-                  <DockModuleBoundary>
+                  <DockModuleBoundary key={readerKey}>
                     <Suspense fallback={<SurfaceLoading label="Opening page" />}>
                       <ReaderPagesContainer
                         actions={actions}
