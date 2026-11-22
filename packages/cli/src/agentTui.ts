@@ -437,21 +437,25 @@ class AgentScreen {
         const request = this.#secretQuestion();
         if (request === undefined) return;
         event.preventDefault();
-        this.#typeSecret(request, new TextDecoder().decode(event.bytes).replace(/[\r\n]/g, ""));
+        // Kept as pasted (a PEM key spans lines); Enter, not a pasted newline, sends it.
+        this.#typeSecret(request, new TextDecoder().decode(event.bytes).replace(/\r\n?/g, "\n"));
       });
       this.#renderer.keyInput.on("keypress", (key) => {
         const secretRequest = this.#secretQuestion();
         if (secretRequest !== undefined && !key.ctrl && !key.meta) {
           const typed = key.sequence;
-          if (key.name === "return") {
+          if (key.name === "return" || key.name === "kpenter") {
             key.preventDefault();
             void this.#sendSecret(secretRequest);
             return;
           }
           if (key.name === "escape" || key.name === "backspace") {
             key.preventDefault();
-            const value = this.#secret?.value ?? "";
-            this.#typeSecret(secretRequest, "", key.name === "escape" ? 0 : value.length - 1);
+            this.#typeSecret(
+              secretRequest,
+              "",
+              key.name === "escape" ? 0 : lastGraphemeStart(this.#secret?.value ?? ""),
+            );
             return;
           }
           if (
@@ -1254,8 +1258,10 @@ class AgentScreen {
 
     // A secret is typed into the masked entry, never the composer that echoes it.
     const masking = this.#secretQuestion() !== undefined;
+    // Not focusable either, so a click cannot hand the composer keys meant for the secret.
     if (masking && this.#composer.focused) this.#composer.blur();
-    else if (!masking && !this.#composer.focused) this.#composer.focus();
+    this.#composer.focusable = !masking;
+    if (!masking && !this.#composer.focused) this.#composer.focus();
     const approval = session?.approvals?.find((entry) => entry.status === "pending");
     const site = this.#siteApproval;
     if (this.#workRequest !== undefined) {
@@ -2652,4 +2658,12 @@ async function scanFiles(root: string): Promise<ReadonlyArray<string>> {
     }
   }
   return found.sort();
+}
+
+/** Where the last user-perceived character starts, so Backspace never splits one. */
+function lastGraphemeStart(value: string): number {
+  let start = 0;
+  for (const { index } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(value))
+    start = index;
+  return start;
 }

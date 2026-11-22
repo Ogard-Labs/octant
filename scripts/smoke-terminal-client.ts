@@ -1262,7 +1262,6 @@ try {
 // never appears on screen, and goes only as the command's secretAnswer.
 const secretRender = await createTestRenderer({ width: 100, height: 24 });
 try {
-  workSecretPending = true;
   workAnswers.length = 0;
   const screen = mountAgentScreen(tui, secretRender.renderer, paletteFor(undefined, "dark"), {
     session: workSession,
@@ -1272,12 +1271,22 @@ try {
   });
   await screen.refresh();
   const running = screen.run();
+  // An unsent draft survives the masked entry, even a click on the composer and Ctrl+U.
+  await secretRender.mockInput.typeText("draft keeps");
+  workSecretPending = true;
+  await screen.refresh();
   await secretRender.waitForFrame((frame) => frame.includes("Paste the export API token"));
+  await secretRender.mockMouse.click(20, 20);
+  secretRender.mockInput.pressKey("u", { ctrl: true });
   await secretRender.mockInput.typeText("zq7x-");
-  secretRender.mockInput.pasteBracketedText("live-1234");
+  // A pasted secret keeps its line breaks; Backspace removes a whole emoji.
+  secretRender.mockInput.pasteBracketedText("live\r\n1234🔑");
+  secretRender.mockInput.pressBackspace();
   await secretRender.waitForFrame((frame) => frame.includes("14 characters typed."));
+  if (!secretRender.captureCharFrame().includes("draft keeps"))
+    throw new Error("The masked entry changed the composer draft.");
   const typedFrame = secretRender.captureCharFrame();
-  if (typedFrame.includes("zq7x") || typedFrame.includes("live-1234"))
+  if (typedFrame.includes("zq7x") || typedFrame.includes("live") || typedFrame.includes("1234"))
     throw new Error(`The secret was shown while typed.\n${typedFrame}`);
   secretRender.mockInput.pressEnter();
   await secretRender.waitFor(() => workAnswers.length === 1);
@@ -1288,13 +1297,13 @@ try {
       requestId: workSecretId,
       expectedVersion: 1,
       resolution: { kind: "user-input", secret: true },
-      secretAnswer: "zq7x-live-1234",
+      secretAnswer: "zq7x-live\n1234",
     })
   )
     throw new Error("The secret was not sent only as secretAnswer.");
   await secretRender.waitForFrame((frame) => !frame.includes("Paste the export API token"));
   const sentFrame = secretRender.captureCharFrame();
-  if (sentFrame.includes("zq7x") || sentFrame.includes("live-1234"))
+  if (sentFrame.includes("zq7x") || sentFrame.includes("live") || sentFrame.includes("1234"))
     throw new Error(`The secret appeared after it was sent.\n${sentFrame}`);
   secretRender.mockInput.pressCtrlC();
   await running;
