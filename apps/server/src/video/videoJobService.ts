@@ -61,6 +61,8 @@ import { redactHostSecrets } from "../process/secretRedaction";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
 import type { SpendCeilingService } from "../spendCeilingService";
 import { geminiVideoDriver } from "./geminiVideoAdapter";
+import { falVideoDriver } from "./falVideoAdapter";
+import { runwayVideoDriver } from "./runwayVideoAdapter";
 import type { VideoClipStore } from "./videoClipStore";
 import { makeVideoGenerationPorts, type VideoSendRecord } from "./videoHttp";
 import type { VideoJobProjection } from "./videoJobProjection";
@@ -70,7 +72,11 @@ const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 type JournalPort = Pick<Journal, "append">;
 
-const BUNDLED_VIDEO_DRIVERS: ReadonlyArray<VideoGenerationDriver> = [geminiVideoDriver];
+const BUNDLED_VIDEO_DRIVERS: ReadonlyArray<VideoGenerationDriver> = [
+  geminiVideoDriver,
+  runwayVideoDriver,
+  falVideoDriver,
+];
 const FIRST_POLL_MS = 5_000;
 const MAX_POLL_MS = 30_000;
 /** How long the host waits on a provider's stop once a job's time has run out. */

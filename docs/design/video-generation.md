@@ -152,16 +152,31 @@ activation ladder.
    - It is a dedicated video provider with self-serve keys and a published
      price.
    - One call cancels a running task or deletes a finished one.
+   - It reports each task's charged credits, so a job settles at what Runway
+     charged; it keeps credits for input-safety refusals, so such a refusal
+     settles at its charge rather than at nothing.
+   - The driver offers Gen-4.5 (from text or a first frame) and Gen-4 Turbo
+     (first frame only), 2-10 s at 720p, with no audio.
    - It resells several other providers' models under the same key.
 3. **fal.**
    - One key reaches most other video models the survey lists: Veo, Kling,
      Hailuo, Seedance, Wan, Grok Imagine and Luma.
    - Its pricing API gives each endpoint's unit price, so the card can show a
      real price.
-   - Its queue cancels, and its delete removes stored payloads and output
-     files.
+   - Its queue cancels.
    - The driver sends `X-Fal-Store-IO: 0`, so fal keeps no 90-day copy of the
-     request.
+     request, and `X-Fal-Object-Lifecycle-Preference` with a two-hour
+     expiry, so fal's CDN copy of the clip is gone two hours after it is made.
+   - Rationale: fal's payload delete removes stored payloads and output files,
+     but it needs a key with the `models:requests:write` and `assets:write`
+     permissions (fal's FULL preset), which an ordinary API key lacks, so
+     every removal would fail and be retried without end. The expiry header
+     works with any key. With request history off, fal keeps a queue result
+     for one hour, so the fal driver's resume window is one hour.
+   - Each endpoint's options are read from its published queue schema, and
+     its price from fal's pricing API (a per-second unit is a per-second rate,
+     a per-video unit a flat rate for the endpoint's default clip, anything
+     else unpublished).
 
 Between them, these three reach every live model family in the survey except
 Pika's own models. Runway also resells MiniMax H3, which fal does not host.

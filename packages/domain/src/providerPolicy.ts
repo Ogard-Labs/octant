@@ -59,6 +59,10 @@ import type {
   GeminiImageProviderInstance,
   GeminiVideoProviderConfiguration,
   GeminiVideoProviderInstance,
+  RunwayVideoProviderConfiguration,
+  RunwayVideoProviderInstance,
+  FalVideoProviderConfiguration,
+  FalVideoProviderInstance,
   GeminiImageResolution,
   IdeogramImageProviderConfiguration,
   IdeogramImageProviderInstance,
@@ -136,8 +140,10 @@ export function isImageProfileDriverKind(
  */
 export function isVideoProfileDriverKind(
   driverKind: ProviderDriverKind,
-): driverKind is "gemini-video" {
-  return driverKind === "gemini-video";
+): driverKind is "gemini-video" | "runway-video" | "fal-video" {
+  return (
+    driverKind === "gemini-video" || driverKind === "runway-video" || driverKind === "fal-video"
+  );
 }
 
 /** A media profile, image or video: one that generates media and cannot start a turn. */
@@ -1919,6 +1925,94 @@ export function createGeminiVideoProvider(
     version: nextVersion(input.expectedVersion),
     createdAt: input.createdAt,
     updatedAt: input.createdAt,
+  };
+}
+
+/** A Runway or fal video profile's settings: its models and the one it starts with. */
+export interface VideoModelSelectionInput {
+  readonly modelAllowlist: ReadonlyArray<string>;
+  readonly defaultModel: string;
+}
+
+interface CreateVideoProviderInput {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: VideoModelSelectionInput;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+  readonly enabled?: boolean;
+}
+
+function newVideoInstance(input: CreateVideoProviderInput) {
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    enabled: input.enabled ?? true,
+    environmentPolicy: "inherit-host" as const,
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+function runwayVideoConfiguration(
+  input: VideoModelSelectionInput,
+): RunwayVideoProviderConfiguration {
+  return {
+    kind: "runway-video-http",
+    ...normalizeImageModelSelection(input.modelAllowlist, input.defaultModel),
+  };
+}
+
+function falVideoConfiguration(input: VideoModelSelectionInput): FalVideoProviderConfiguration {
+  return {
+    kind: "fal-video-http",
+    ...normalizeImageModelSelection(input.modelAllowlist, input.defaultModel),
+  };
+}
+
+export function createRunwayVideoProvider(
+  input: CreateVideoProviderInput,
+): RunwayVideoProviderInstance {
+  return {
+    ...newVideoInstance(input),
+    driverKind: "runway-video",
+    configuration: runwayVideoConfiguration(input.configuration),
+  };
+}
+
+export function createFalVideoProvider(input: CreateVideoProviderInput): FalVideoProviderInstance {
+  return {
+    ...newVideoInstance(input),
+    driverKind: "fal-video",
+    configuration: falVideoConfiguration(input.configuration),
+  };
+}
+
+export function changeRunwayVideoConfiguration(
+  current: RunwayVideoProviderInstance,
+  input: VideoModelSelectionInput,
+  updatedAt: UtcTimestamp,
+): RunwayVideoProviderInstance {
+  return {
+    ...current,
+    configuration: runwayVideoConfiguration(input),
+    version: nextVersion(current.version),
+    updatedAt,
+  };
+}
+
+export function changeFalVideoConfiguration(
+  current: FalVideoProviderInstance,
+  input: VideoModelSelectionInput,
+  updatedAt: UtcTimestamp,
+): FalVideoProviderInstance {
+  return {
+    ...current,
+    configuration: falVideoConfiguration(input),
+    version: nextVersion(current.version),
+    updatedAt,
   };
 }
 
