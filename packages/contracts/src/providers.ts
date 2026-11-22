@@ -1784,6 +1784,15 @@ export const ProviderCapabilities = Schema.Struct({
    */
   forceStop: Schema.optional(ProviderCapabilitySupport),
   /**
+   * Whether the runtime can run a Code turn on a server Project's server over
+   * the host's SSH connection, with no Octant there: its own program runs on
+   * the server and speaks to the host over that connection's standard
+   * streams, and everything Octant adds travels inside its own protocol. A
+   * runtime whose Octant tools reach this host's loopback cannot. Absent
+   * reads as unsupported.
+   */
+  serverPlacement: Schema.optional(ProviderCapabilitySupport),
+  /**
    * Whether the runtime compacts a session it holds when asked, per mode,
    * through the connection's `compact`: `unavailable` when this install is too
    * old for the request. Absent reads as unsupported in every mode. A host

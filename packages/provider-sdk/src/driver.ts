@@ -24,6 +24,7 @@ import type {
   ProviderFileReviewRead,
 } from "@octant/contracts";
 import type { Effect, Scope, Stream } from "effect";
+import type { Readable, Writable } from "node:stream";
 import type { ProviderContextFactsSource, ProviderLocalUsageHistorySource } from "./contextFacts";
 import type { CloudSessionDriver } from "./cloudSessions";
 import type { ProviderProjectFolderDiscoveryPort } from "./projectFolderDiscovery";
@@ -39,6 +40,48 @@ export { ProviderOutputStopReason } from "@octant/contracts";
 
 export interface ProviderProbeInput {
   readonly instanceId: ProviderInstanceId;
+}
+
+/** One program's standard streams on a server, held open until stopped. */
+export type ProviderServerStream =
+  | {
+      readonly status: "open";
+      readonly stdin: Writable;
+      readonly stdout: Readable;
+      readonly stderr: Readable;
+      /** Ends the program: closes its standard input, then the connection. */
+      readonly stop: () => void;
+      readonly exited: Promise<{ readonly exitCode: number | null }>;
+    }
+  | { readonly status: "unreachable"; readonly message: string };
+
+/** What a short program printed on a server, or why it could not run. */
+export type ProviderServerRun =
+  | {
+      readonly status: "ran";
+      readonly exitCode: number;
+      readonly output: string;
+      readonly errorOutput: string;
+    }
+  | { readonly status: "unreachable"; readonly message: string };
+
+/**
+ * The host's connection to the server a thread's Project lives on. The host
+ * owns the connection, its pinned host key and its shell quoting; a runtime
+ * names only the program and its arguments, which run in the Project's
+ * folder there. No secret may travel as an argument, because the server's
+ * process list shows them.
+ */
+export interface ProviderServerPlacement {
+  /** The server's name as the person registered it, for the words they read. */
+  readonly serverName: string;
+  /** Starts a long-running program in the folder, its streams passed through unchanged. */
+  readonly start: (program: ReadonlyArray<string>) => ProviderServerStream;
+  /** Runs a short program in the folder and returns what it printed. */
+  readonly run: (
+    program: ReadonlyArray<string>,
+    options: { readonly timeoutMs: number },
+  ) => Promise<ProviderServerRun>;
 }
 
 export interface ProviderAcquireInput {
@@ -64,6 +107,13 @@ export interface ProviderAcquireInput {
    * Absent means the thread has none.
    */
   readonly attachmentsFolder?: string;
+  /**
+   * Present when the turn runs on a server Project's server: `projectRoot` is
+   * then a folder on that server, and the runtime's program must be started
+   * there through this placement, never on this host. Only a runtime that
+   * reports `serverPlacement: "supported"` is given one.
+   */
+  readonly serverPlacement?: ProviderServerPlacement;
   readonly mode?: "chat" | "work" | "code";
   /** Context used by the server-owned Work request projection subscriber. */
   readonly workRequest?: {

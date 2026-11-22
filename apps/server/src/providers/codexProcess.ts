@@ -65,7 +65,10 @@ import {
   type ProviderServerAccess,
   type ProviderServerAccessPort,
 } from "../network/providerRuntimeNetwork";
+import type { ProviderServerPlacement } from "@octant/provider-sdk/driver";
 import { decodeInitializeResult } from "./codexProtocol";
+import { readCodexSignInOnServer, startCodexOnServer } from "./codexServerProcess";
+import { ServerSignIns } from "./serverSignIn";
 import {
   CodexRpcClientFailure,
   makeCodexRpcClient,
@@ -74,6 +77,13 @@ import {
 } from "./codexRpcClient";
 import { awsProfileReadPaths, providerHostEnvironment } from "./providerHostEnvironment";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
+
+/** Said when Strict is on for a thread whose provider would run on its server. */
+export const SERVER_STRICT_REFUSAL =
+  "Strict needs Octant's own sandbox, which can't run on a server. Turn Strict off for this thread to run Codex there.";
+
+export const SERVER_FULL_ACCESS_SANDBOX_REFUSAL =
+  "Full access with a sandbox needs Octant's own sandbox, which can't run on a server. Turn the sandbox off or choose another level to run Codex there.";
 
 export interface CodexBinaryProbe {
   readonly binaryPath: string;
@@ -87,6 +97,16 @@ export interface CodexAppServerConnection {
   readonly exited: Promise<void>;
   /** Set when the launch took no egress proxy, so the process keeps open network. */
   readonly networkOpen?: boolean;
+  /**
+   * Codex on a server: the other providers' sign-ins there, resolved for the
+   * server login, that Codex's own sandbox refuses (see
+   * `readCodexProtectedSignInsOnServer`). Absent for a local launch, whose
+   * list comes from this host.
+   */
+  readonly protectedSignIns?: {
+    readonly denied: ReadonlyArray<string>;
+    readonly allowed: ReadonlyArray<string>;
+  };
 }
 
 /**
@@ -196,6 +216,12 @@ export interface CodexProcessPort {
   readonly start: (input: {
     readonly binaryPath: string;
     readonly authority: CodexLaunchAuthority;
+    /**
+     * The server a server Project's thread runs on. The app-server then
+     * starts there through the host's connection, and nothing of this host's
+     * launch (binary, sandbox, egress, account home) applies.
+     */
+    readonly server?: ProviderServerPlacement;
     readonly environment?: NodeJS.ProcessEnv;
     readonly onProcessStarted?: ProviderProcessStartedListener;
   }) => Effect.Effect<CodexAppServerConnection, ProviderFailure, Scope.Scope>;
@@ -1647,10 +1673,36 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
       platform,
       ...(windowsConfinement === undefined ? {} : { windowsConfinement }),
     });
+  // One port serves every Codex instance, and on a server each signs in as
+  // that server's login, so its answer is held per server alone.
+  const serverSignIns = new ServerSignIns(readCodexSignInOnServer);
 
   return {
-    start: ({ binaryPath, authority: requested, environment, onProcessStarted }) =>
+    start: ({ binaryPath, authority: requested, environment, onProcessStarted, server }) =>
       Effect.suspend(() => {
+        if (server !== undefined) {
+          // Octant's own sandbox cannot run on a server, so a Strict launch
+          // there is refused rather than run without the sandbox it promises.
+          if (requested.kind !== "thread" || requested.strict !== false) {
+            return Effect.fail(failure("unsupported", SERVER_STRICT_REFUSAL));
+          }
+          // Full access's opt-in sandbox is Octant's profile too, so it is
+          // refused there rather than run unconfined and unprompted.
+          if (requested.fullAccessSandbox === true) {
+            return Effect.fail(failure("unsupported", SERVER_FULL_ACCESS_SANDBOX_REFUSAL));
+          }
+          return startCodexOnServer({
+            placement: server,
+            octantVersion: resolved.octantVersion,
+            signIns: serverSignIns,
+            sandboxed: requested.executionPolicy !== "full-access",
+            args: (version) =>
+              codexAppServerArgs(version, {
+                ...(requested.ownSubagents === true ? { ownSubagents: true } : {}),
+                ...(requested.ownMemory === true ? { ownMemory: true } : {}),
+              }),
+          });
+        }
         let terminate: (() => Promise<void>) | undefined;
         const authority: CodexLaunchAuthority =
           requested.kind === "catalog" && platform === "win32"

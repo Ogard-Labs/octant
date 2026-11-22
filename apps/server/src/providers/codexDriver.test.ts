@@ -14,7 +14,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderToolDefinition,
 } from "@octant/contracts";
-import { Effect, Exit, Fiber, Scope, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, Scope, Stream } from "effect";
 import {
   PROVIDER_CONTEXT_RESTATED,
   renderProviderContextSections,
@@ -175,6 +175,7 @@ function fixture(
       readonly turn: { readonly id: string; readonly status: "inProgress" };
     }>;
     readonly version?: string;
+    readonly serverSignIns?: CodexAppServerConnection["protectedSignIns"];
     readonly threadCompactStart?: (input: { readonly threadId: string }) => Promise<void>;
     readonly threadInjectItems?: (input: unknown) => Promise<void>;
     readonly threadFork?: NonNullable<CodexClientPort["threadFork"]>;
@@ -315,6 +316,7 @@ function fixture(
             pid: starts,
             rpc: {} as CodexAppServerConnection["rpc"],
             exited,
+            ...(input.serverSignIns === undefined ? {} : { protectedSignIns: input.serverSignIns }),
           };
         }),
         () => Effect.sync(() => void (closes += 1)),
@@ -3116,6 +3118,198 @@ describe("Codex execution authority and approvals", () => {
     expect(windows.turn).toMatchObject({ sandboxPolicy: { type: "readOnly" } });
     const linux = await planTurn("linux");
     expect(linux.turn).toMatchObject({ sandboxPolicy: { type: "externalSandbox" } });
+  });
+
+  it("keeps a Plan session on a server in Codex's own read-only sandbox, since no outside sandbox runs there", async () => {
+    // Octant's profile cannot run on a server, so naming the sandbox external
+    // with `never` would leave Plan's commands free to write there.
+    // An empty sign-in list is a person who removed the Provider sign-ins group.
+    const f = fixture({ serverSignIns: { denied: [], allowed: [] } });
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      makeCodexDriver(f.options({ platform: "linux" }))
+        .acquire({
+          instanceId,
+          projectRoot,
+          mode: "code",
+          serverPlacement: {
+            serverName: "devbox",
+            start: () => ({ status: "unreachable", message: "Not reached." }),
+            run: async () => ({ status: "unreachable", message: "Not reached." }),
+          },
+        })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    await Effect.runPromise(
+      connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "plan",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(
+      connection.send({ sessionId, prompt: "go", attachments: [], tools: [] }),
+    );
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
+      sandbox: "read-only",
+      approvalPolicy: "never",
+    });
+    expect(f.calls.find(({ method }) => method === "turn/start")?.input).toMatchObject({
+      sandboxPolicy: { type: "readOnly" },
+    });
+  });
+
+  it("denies the server login's other provider sign-ins to Codex's own sandbox at Guarded on a server", async () => {
+    const serverSignIns = {
+      denied: [
+        "/home/build/.claude/.credentials.json",
+        "/home/build/.local/share/opencode/auth.json",
+      ],
+      allowed: [],
+    };
+    const guardedOnServer = async (version: string) => {
+      const f = fixture({ version, serverSignIns });
+      const scope = await Effect.runPromise(Scope.make());
+      const connection = await Effect.runPromise(
+        makeCodexDriver(f.options({ platform: "linux" }))
+          .acquire({
+            instanceId,
+            projectRoot,
+            mode: "code",
+            serverPlacement: {
+              serverName: "devbox",
+              start: () => ({ status: "unreachable", message: "Not reached." }),
+              run: async () => ({ status: "unreachable", message: "Not reached." }),
+            },
+          })
+          .pipe(Effect.provideService(Scope.Scope, scope)),
+      );
+      const started = await Effect.runPromiseExit(
+        connection.start({
+          sessionId,
+          modelId: "gpt-5.4" as never,
+          executionPolicy: "approval-gated",
+          strict: false,
+        }),
+      );
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      return { started, thread: f.calls.find(({ method }) => method === "thread/start")?.input };
+    };
+    const current = await guardedOnServer("0.170.0");
+    expect(Exit.isSuccess(current.started)).toBe(true);
+    expect(current.thread).toMatchObject({
+      config: {
+        permissions: {
+          [CODEX_OCTANT_PROFILE]: {
+            filesystem: {
+              [projectRoot]: "write",
+              "/home/build/.claude/.credentials.json": "deny",
+              "/home/build/.local/share/opencode/auth.json": "deny",
+            },
+          },
+        },
+      },
+    });
+    // A release that cannot carry deny paths is refused rather than run open.
+    const older = await guardedOnServer("0.168.0");
+    expect(Exit.isFailure(older.started)).toBe(true);
+    expect(older.thread).toBeUndefined();
+  });
+
+  it("refuses Codex on a server when no sign-in list was read for the login", async () => {
+    const f = fixture({ version: "0.170.0" });
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      makeCodexDriver(f.options({ platform: "linux" }))
+        .acquire({
+          instanceId,
+          projectRoot,
+          mode: "code",
+          serverPlacement: {
+            serverName: "devbox",
+            start: () => ({ status: "unreachable", message: "Not reached." }),
+            run: async () => ({ status: "unreachable", message: "Not reached." }),
+          },
+        })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    const started = await Effect.runPromiseExit(
+      connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    expect(Exit.isFailure(started)).toBe(true);
+    expect(f.calls.find(({ method }) => method === "thread/start")).toBeUndefined();
+  });
+  it("starts Full access for Codex on a server with no sign-in list, since it runs no sandbox there", async () => {
+    const f = fixture({ version: "0.170.0" });
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      makeCodexDriver(f.options({ platform: "linux" }))
+        .acquire({
+          instanceId,
+          projectRoot,
+          mode: "code",
+          serverPlacement: {
+            serverName: "devbox",
+            start: () => ({ status: "unreachable", message: "Not reached." }),
+            run: async () => ({ status: "unreachable", message: "Not reached." }),
+          },
+        })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    const started = await Effect.runPromiseExit(
+      connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    expect(Exit.isSuccess(started)).toBe(true);
+  });
+
+  it("refuses Plan for Codex on a server, whose read-only sandbox cannot deny the login's other sign-ins", async () => {
+    const f = fixture({
+      version: "0.170.0",
+      serverSignIns: { denied: ["/home/build/.claude/.credentials.json"], allowed: [] },
+    });
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      makeCodexDriver(f.options({ platform: "linux" }))
+        .acquire({
+          instanceId,
+          projectRoot,
+          mode: "code",
+          serverPlacement: {
+            serverName: "devbox",
+            start: () => ({ status: "unreachable", message: "Not reached." }),
+            run: async () => ({ status: "unreachable", message: "Not reached." }),
+          },
+        })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    const started = await Effect.runPromiseExit(
+      connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "plan",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    expect(Exit.isFailure(started)).toBe(true);
+    expect(String(Exit.isFailure(started) ? Cause.pretty(started.cause) : "")).toContain(
+      "Plan can't run Codex on devbox",
+    );
+    expect(f.calls.find(({ method }) => method === "thread/start")).toBeUndefined();
   });
 
   it("tells Codex its sandbox has network when the launch took no egress proxy", () => {
