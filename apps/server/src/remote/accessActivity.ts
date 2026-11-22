@@ -231,6 +231,7 @@ export function readChangeNotices(
     if (record.keyChange === undefined) continue;
     const instanceId = String(record.instanceId);
     const providerName = names.providerName?.(instanceId);
+    const changedSince = (lastChange.get(instanceId) ?? sequence) > sequence;
     records.push({
       sequence,
       actorDeviceId: row.actor_id,
@@ -238,7 +239,7 @@ export function readChangeNotices(
       ...(record.keyChange === "added" && record.keyId !== undefined
         ? { keyId: record.keyId }
         : {}),
-      changedSince: (lastChange.get(instanceId) ?? sequence) > sequence,
+      changedSince,
       notice: {
         kind: record.keyChange === "added" ? "provider-key-added" : "provider-key-replaced",
         noticeId: row.event_id,
@@ -248,6 +249,9 @@ export function readChangeNotices(
         ...(providerName === undefined || providerName.length === 0
           ? {}
           : { providerName: providerName.slice(0, 256) }),
+        ...(record.keyChange === "added" && record.keyId !== undefined && !changedSince
+          ? { keyId: record.keyId }
+          : {}),
       },
     });
   }

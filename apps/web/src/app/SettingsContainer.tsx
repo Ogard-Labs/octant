@@ -127,7 +127,6 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     hostControlClient,
     protectedFilesClient,
     newDeviceAlertsClient,
-    accessActivityClient,
     blockedToolsClient,
     sandboxRestrictionsClient,
     archivedWorktreesClient,
@@ -302,7 +301,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       protectedFilesClient={protectedFilesClient}
       newDeviceAlertsClient={newDeviceAlertsClient}
       accessActivity={{
-        client: accessActivityClient,
+        port: props.clients.accessActivityPort,
         activityRevision: props.accessActivityRevisions?.activity ?? 0,
         noticesRevision: props.accessActivityRevisions?.notices ?? 0,
       }}

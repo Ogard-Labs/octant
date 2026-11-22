@@ -35,6 +35,7 @@ const tablet = "33333333-3333-4333-8333-333333333333";
 const localActorId = "44444444-4444-4444-8444-444444444444";
 const providerId = "55555555-5555-4555-8555-555555555555";
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const bridgeSecret = "desktop-bridge-secret";
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000801");
 
 const local: EventActor = { kind: "local-user", actorId: localActorId } as EventActor;
@@ -187,6 +188,7 @@ function routes(target: Host, overrides: Partial<AccessActivityRouteDependencies
     connection: target.connection,
     journal: target.journal,
     windowAuthorityStore: store,
+    desktopBridgeSecret: bridgeSecret,
     names: { threadTitle: () => "Fix login", providerName: () => "Anthropic" },
     threadLevel: () => "full-access",
     setThreadLevel: async (input) => {
@@ -216,6 +218,19 @@ function fromWindow(path: string, body?: unknown): Request {
     method: body === undefined ? "GET" : "POST",
     headers: { "x-octant-window-capability": capability, "content-type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+}
+
+/** The desktop's own host-local caller: the bridge secret, a window capability, and no Origin. */
+function fromDesktopBridge(path: string, body: unknown): Request {
+  return new Request(`http://127.0.0.1${path}`, {
+    method: "POST",
+    headers: {
+      "x-octant-window-capability": capability,
+      "x-octant-desktop-secret": bridgeSecret,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
   });
 }
 
@@ -418,20 +433,56 @@ describe("change notices", () => {
     const { handler, calls } = routes(target);
 
     expect(
-      (await handler(fromWindow(CHANGE_NOTICE_ACTION_PATHS.undo, { noticeId: replaced })))?.status,
+      (await handler(fromDesktopBridge(CHANGE_NOTICE_ACTION_PATHS.undo, { noticeId: replaced })))
+        ?.status,
     ).toBe(409);
     // The replace came after the add, so the add's Undo is refused too.
     expect(
-      (await handler(fromWindow(CHANGE_NOTICE_ACTION_PATHS.undo, { noticeId: added })))?.status,
+      (await handler(fromDesktopBridge(CHANGE_NOTICE_ACTION_PATHS.undo, { noticeId: added })))
+        ?.status,
     ).toBe(409);
     expect(calls.removed).toEqual([]);
 
     const fresh = randomUUID();
     const latest = keyChange(target, byDevice(phone), { kind: "added", keyId: fresh });
+    // The read names the key while Undo can still remove exactly it, and no longer once changed.
+    const listed = await notices(handler, fromWindow(CHANGE_NOTICES_PATH));
+    expect(listed.find((notice) => notice.noticeId === latest)).toMatchObject({ keyId: fresh });
+    expect(listed.find((notice) => notice.noticeId === added)?.keyId).toBeUndefined();
     expect(
-      (await handler(fromWindow(CHANGE_NOTICE_ACTION_PATHS.undo, { noticeId: latest })))?.status,
+      (await handler(fromDesktopBridge(CHANGE_NOTICE_ACTION_PATHS.undo, { noticeId: latest })))
+        ?.status,
     ).toBe(200);
     expect(calls.removed.map((call) => call.keyId)).toEqual([fresh]);
+  });
+
+  it("holds a window's key Undo and revoke to the desktop bridge secret, as the routes they stand in for", async () => {
+    const target = host();
+    pair(target, phone, "Ada's phone", local);
+    const keyNotice = keyChange(target, byDevice(phone), { kind: "added", keyId: randomUUID() });
+    const raised = raise(target, byDevice(phone), "ask-first", "full-access");
+    const { handler, calls } = routes(target);
+
+    for (const [path, noticeId] of [
+      [CHANGE_NOTICE_ACTION_PATHS.undo, keyNotice],
+      [CHANGE_NOTICE_ACTION_PATHS.revoke, raised],
+    ] as const) {
+      expect((await handler(fromWindow(path, { noticeId })))?.status).toBe(403);
+      const withOrigin = fromDesktopBridge(path, { noticeId });
+      withOrigin.headers.set("origin", "http://127.0.0.1:5173");
+      expect((await handler(withOrigin))?.status).toBe(403);
+    }
+    expect(calls.removed).toEqual([]);
+    expect(calls.revoked).toEqual([]);
+    // A thread level's Undo runs the thread's own level command, which a window may run.
+    expect(
+      (await handler(fromWindow(CHANGE_NOTICE_ACTION_PATHS.undo, { noticeId: raised })))?.status,
+    ).toBe(200);
+    expect(
+      (await handler(fromDesktopBridge(CHANGE_NOTICE_ACTION_PATHS.revoke, { noticeId: keyNotice })))
+        ?.status,
+    ).toBe(200);
+    expect(calls.revoked).toEqual([phone]);
   });
 
   it("revokes the device that made the change", async () => {

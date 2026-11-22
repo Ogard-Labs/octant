@@ -70,4 +70,41 @@ describe("change notices", () => {
     expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
     expect(screen.getByRole("button", { name: "End Build bot's access" })).toBeTruthy();
   });
+
+  it("from a window, removes an added key and revokes the device through this computer's own controls", async () => {
+    const keyId = "00000000-0000-4000-8000-000000000a11";
+    const added: ChangeNotice = {
+      kind: "provider-key-added",
+      noticeId: "00000000-0000-4000-8000-000000000c03",
+      at: "2026-11-22T20:02:00.000Z",
+      actor: raised.actor,
+      providerInstanceId: "00000000-0000-4000-8000-000000000f01",
+      providerName: "Anthropic",
+      keyId,
+    };
+    const { value, acted } = client([added]);
+    const local = {
+      removeProviderApiKey: vi.fn(async () => undefined),
+      revokeDevice: vi.fn(async () => undefined),
+      endAgentGrant: vi.fn(async () => undefined),
+    };
+    render(<ChangeNotices client={value} localActions={local} />);
+    expect(await screen.findByText("Ada's phone added a key for Anthropic")).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() =>
+      expect(local.removeProviderApiKey).toHaveBeenCalledWith(added.providerInstanceId, keyId),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Revoke Ada's phone" }));
+    await waitFor(() =>
+      expect(local.revokeDevice).toHaveBeenCalledWith(
+        raised.actor.kind === "device" ? raised.actor.deviceId : "",
+      ),
+    );
+    // The host's notice routes only record the dismissal; neither change goes through them.
+    expect(acted).toEqual([
+      ["dismiss", added.noticeId],
+      ["dismiss", added.noticeId],
+    ]);
+  });
 });
