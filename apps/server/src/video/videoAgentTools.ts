@@ -1,14 +1,15 @@
-import type {
-  ImageGenerationSaveResult,
-  ImageGenerationScopeId,
-  ProviderInstance,
-  VideoClipOptions,
-  VideoGenerateOffer,
-  VideoJob,
-  VideoModelCapabilities,
-  VideoOfferImage,
-  VideoSaveOffer,
-  WindowId,
+import {
+  MAX_VIDEO_REFERENCES,
+  type ImageGenerationSaveResult,
+  type ImageGenerationScopeId,
+  type ProviderInstance,
+  type VideoClipOptions,
+  type VideoGenerateOffer,
+  type VideoJob,
+  type VideoModelCapabilities,
+  type VideoOfferImage,
+  type VideoSaveOffer,
+  type WindowId,
 } from "@octant/contracts";
 import { imageGenerationWithoutAsking } from "@octant/domain";
 import type {
@@ -137,6 +138,11 @@ export function describeReadyModels(ready: ReadonlyArray<ReadyProfile>): string 
               ? "always with audio,"
               : "no audio,",
           `first frame ${model.inputs.firstFrame ? "yes" : "no"}, last frame ${model.inputs.lastFrame ? "yes" : "no"},`,
+          ...(model.inputs.firstAndLastFrameMaxSeconds === undefined
+            ? []
+            : [
+                `first+last frame clips up to ${String(model.inputs.firstAndLastFrameMaxSeconds)} s,`,
+              ]),
           `up to ${String(model.inputs.maxReferenceImages)} reference images.`,
         ].join(" ");
       }),
@@ -144,7 +150,11 @@ export function describeReadyModels(ready: ReadonlyArray<ReadyProfile>): string 
     .join(" ");
 }
 
-type DescribedImage = { readonly label: string; readonly source: ImageSource };
+type DescribedImage = {
+  readonly label: string;
+  readonly source: ImageSource;
+  readonly signedIn?: true;
+};
 type DescribedImages = {
   readonly firstFrame?: DescribedImage;
   readonly lastFrame?: DescribedImage;
@@ -172,13 +182,20 @@ async function describeMany(
   | { readonly error: string }
 > {
   if (inputs.length === 0) return [];
-  const requests = parseImageSourceRequests(inputs);
+  const requests = parseImageSourceRequests(inputs, MAX_VIDEO_REFERENCES);
   if ("error" in requests) return requests;
-  const described = await describeImageSources(requests, port.imageSources, (id) =>
-    port.generatedImage?.(id),
+  const described = await describeImageSources(
+    requests,
+    port.imageSources,
+    (id) => port.generatedImage?.(id),
+    MAX_VIDEO_REFERENCES,
   );
   if ("error" in described) return described;
-  return described.map(({ reference, source }) => ({ label: reference.label, source }));
+  return described.map(({ reference, source }) => ({
+    label: reference.label,
+    source,
+    ...(reference.signedIn === true ? { signedIn: true as const } : {}),
+  }));
 }
 
 async function describeImages(
@@ -201,14 +218,15 @@ async function describeImages(
 }
 
 function offerImages(images: DescribedImages): ReadonlyArray<VideoOfferImage> {
+  const entry = (role: VideoOfferImage["role"], image: DescribedImage): VideoOfferImage => ({
+    role,
+    label: image.label,
+    ...(image.signedIn === true ? { signedIn: true as const } : {}),
+  });
   return [
-    ...(images.firstFrame === undefined
-      ? []
-      : [{ role: "first-frame" as const, label: images.firstFrame.label }]),
-    ...(images.lastFrame === undefined
-      ? []
-      : [{ role: "last-frame" as const, label: images.lastFrame.label }]),
-    ...images.references.map((image) => ({ role: "reference" as const, label: image.label })),
+    ...(images.firstFrame === undefined ? [] : [entry("first-frame", images.firstFrame)]),
+    ...(images.lastFrame === undefined ? [] : [entry("last-frame", images.lastFrame)]),
+    ...images.references.map((image) => entry("reference", image)),
   ];
 }
 
@@ -340,7 +358,7 @@ async function generateVideo(
         images: offerImages(images),
         profileInstanceId: found.instance.id,
         profileName: first.profileName,
-        providerName: first.profileName,
+        providerName: first.providerName,
         model: first.model,
         options: proposed,
         canRemember: !withImages,
@@ -496,6 +514,10 @@ async function saveVideo(
     const posture = save.posture();
     if (posture === "refuse") return { status: "refused", error: "Plan mode cannot save files." };
     if (posture === "allow" || confirmed) break;
+    // A routine's host scope has no client to answer a save card.
+    if (port.unattended === true) {
+      return { status: "refused", error: "Nobody is at this thread to approve a save." };
+    }
     const answer = await port.askSave(
       {
         kind: "video-save",

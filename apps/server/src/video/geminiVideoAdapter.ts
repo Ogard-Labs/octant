@@ -52,6 +52,7 @@ export const GEMINI_OMNI_FLASH: VideoModelCapabilities = decodeVideoModelCapabil
     lastFrame: true,
     maxDurationSecondsWithBothFrames: MAX_INTERPOLATION_SECONDS,
     maxReferenceImages: 6,
+    firstAndLastFrameMaxSeconds: MAX_INTERPOLATION_SECONDS,
   },
   price: {
     kind: "per-token",
@@ -435,6 +436,7 @@ async function forget(ports: VideoGenerationPorts, remoteId: string): Promise<Vi
  */
 export const geminiVideoDriver: VideoGenerationDriver = {
   driverKind: "gemini-video",
+  providerName: "Google",
   providerHosts: ["generativelanguage.googleapis.com"],
   create: ({ profile, ports }) => ({
     models: async () => declaredFor(profile),

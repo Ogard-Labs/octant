@@ -446,6 +446,30 @@ export function wireChat(deps: ChatDependencies) {
       for (const threadId of navigatorAssistantBindings.hiddenThreadIds()) hidden.add(threadId);
       return hidden;
     };
+    // A thread's latest message images, for a turn's image references; a
+    // routine's host-run turn reads them without a window too.
+    const chatImageSourcesFor = (thread: { readonly id: ChatThreadId }) => ({
+      latestAttachments: () => {
+        const view = persistence.readChatThreadView(thread.id);
+        const latest = view?.turns.findLast((turn) => turn.delivery === undefined);
+        if (view === undefined || latest === undefined) return [];
+        return attachedImageSources(
+          view.attachments.filter(
+            (attachment) =>
+              attachment.status === "finalized" && latest.attachmentIds.includes(attachment.id),
+          ),
+          (attachment) =>
+            chatAttachmentStore.read({
+              chatThreadId: thread.id,
+              chatAttachmentId: attachment.id,
+              displayName: attachment.displayName,
+              size: attachment.byteLength,
+              hash: attachment.digest,
+              finalizedAt: attachment.createdAt,
+            }),
+        );
+      },
+    });
     const chatService = new ChatService({
       stalledTurnLimitMs: (turn) =>
         stalledTurnLimitMs(
@@ -497,20 +521,35 @@ export function wireChat(deps: ChatDependencies) {
       },
       agentRuns: agentRunPersistence,
       // A routine's or a follow-up's turn runs as the host with no window, so
-      // it takes only the Canvas, bound to the thread's own Chat Project, the
-      // scope a window showing that Project would give. Chat has no Browser
-      // at all, and the other window tools need the window they are keyed on.
-      // The Canvas tool asks the person nothing, so no answer is borrowed.
+      // it takes the Canvas, bound to the thread's own Chat Project, the
+      // scope a window showing that Project would give, and the video tool a
+      // kept Project choice can answer for; without one it is not offered,
+      // since nobody could answer its card. Chat has no Browser at all, and
+      // the other window tools need the window they are keyed on. The Canvas
+      // tool asks the person nothing, so no answer is borrowed.
       resolveHostRunTools: ({ thread }) =>
         withheldFromSideChat({
           sideChat: sideChatSidecars.findBySidecarThread(thread.id) !== undefined,
           tools: () =>
-            createCanvasAgentTools({
-              windowId: ROUTINE_HOST_SCOPE_ID,
-              hostRun: true,
-              thread,
-              port: canvasAgentToolPort,
-            }),
+            combineAppManagedToolSets(
+              createCanvasAgentTools({
+                windowId: ROUTINE_HOST_SCOPE_ID,
+                hostRun: true,
+                thread,
+                port: canvasAgentToolPort,
+              }),
+              createThreadVideoAgentTools({
+                windowId: ROUTINE_HOST_SCOPE_ID,
+                threadKind: "chat-thread",
+                scopeId: decodeImageGenerationScopeId(String(thread.id)),
+                offers: videoOffers,
+                kept: keptVideoChoices,
+                jobs: videoJobService,
+                imageSources: chatImageSourcesFor(thread),
+                imageJobs: imageJobService,
+                unattended: true,
+              }),
+            ),
         }),
       resolveComputerUseTools: ({ windowId, thread }) =>
         withheldFromSideChat({
@@ -613,28 +652,7 @@ export function wireChat(deps: ChatDependencies) {
         coordinationDepth,
       }) => {
         const sideChat = sideChatSidecars.findBySidecarThread(thread.id) !== undefined;
-        const chatImageSources = {
-          latestAttachments: () => {
-            const view = persistence.readChatThreadView(thread.id);
-            const latest = view?.turns.findLast((turn) => turn.delivery === undefined);
-            if (view === undefined || latest === undefined) return [];
-            return attachedImageSources(
-              view.attachments.filter(
-                (attachment) =>
-                  attachment.status === "finalized" && latest.attachmentIds.includes(attachment.id),
-              ),
-              (attachment) =>
-                chatAttachmentStore.read({
-                  chatThreadId: thread.id,
-                  chatAttachmentId: attachment.id,
-                  displayName: attachment.displayName,
-                  size: attachment.byteLength,
-                  hash: attachment.digest,
-                  finalizedAt: attachment.createdAt,
-                }),
-            );
-          },
-        };
+        const chatImageSources = chatImageSourcesFor(thread);
         return combineAppManagedToolSets(
           taintAppManagedToolResults({
             tools: combineAppManagedToolSets(

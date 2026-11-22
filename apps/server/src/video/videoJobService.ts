@@ -136,6 +136,8 @@ export type VideoQuote =
       readonly status: "ready";
       readonly driverKind: VideoDriverKind;
       readonly profileName: string;
+      /** Who receives and bills the clip, from the driver; never the editable alias. */
+      readonly providerName: string;
       readonly model: VideoModelCapabilities;
       readonly estimate: VideoCostEstimate;
     }
@@ -388,6 +390,10 @@ export class VideoJobService {
       status: "ready",
       driverKind,
       profileName: instance.displayName,
+      // The driver is present: `#adapterFor` built this adapter from it.
+      providerName:
+        this.#drivers.find((candidate) => candidate.driverKind === driverKind)?.providerName ??
+        driverKind,
       model,
       estimate,
     };

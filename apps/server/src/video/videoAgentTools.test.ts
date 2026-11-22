@@ -90,6 +90,7 @@ function harness(options: {
             status: "ready",
             driverKind: "gemini-video",
             profileName: "Gemini Video",
+            providerName: "Google",
             model,
             estimate: { kind: "estimate", usdMicros: 695_040 },
           }

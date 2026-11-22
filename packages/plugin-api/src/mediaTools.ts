@@ -156,7 +156,11 @@ export interface MediaImageDescriptionHostPort {
 }
 
 export type MediaImageReferenceInput =
-  | { readonly kind: "attachment" }
+  | {
+      readonly kind: "attachment";
+      /** One named attachment of the latest message; absent names the whole set. */
+      readonly name?: string;
+    }
   | { readonly kind: "browser-capture"; readonly captureId: BrowserCaptureId }
   | { readonly kind: "file"; readonly relativePath: string }
   | { readonly kind: "generated-image"; readonly attachmentId: ImageArtifactId };

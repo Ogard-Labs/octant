@@ -24,6 +24,7 @@ import {
   MAX_IMAGE_VARIANTS,
   MAX_LOOK_QUESTION_CHARACTERS,
   MAX_PROVIDER_TOOL_RESULT_BYTES,
+  MAX_VIDEO_REFERENCES,
   SPEECH_SYNTHESIS_FORMATS,
   SPEECH_SYNTHESIS_MAX_TEXT_CHARACTERS,
   type CodeRelativePath,
@@ -177,6 +178,7 @@ const IMAGE_INPUT_SCHEMA = {
         type: "object",
         properties: {
           kind: { enum: ["attachment", "browser-capture", "file", "generated-image"] },
+          name: { type: "string" },
           captureId: { type: "string" },
           relativePath: { type: "string" },
           attachmentId: { type: "string" },
@@ -720,9 +722,10 @@ function canonicalizeRelativeReferencePath(raw: string): string | undefined {
 
 function parseImageReferenceInputs(
   value: unknown,
+  max: number = MAX_IMAGE_REFERENCES,
 ): ReadonlyArray<MediaImageReferenceInput> | { readonly error: string } {
-  if (!Array.isArray(value) || value.length > MAX_IMAGE_REFERENCES) {
-    return { error: "Use at most four image references." };
+  if (!Array.isArray(value) || value.length > max) {
+    return { error: `Use at most ${String(max)} image references.` };
   }
   const requests: MediaImageReferenceInput[] = [];
   for (const item of value) {
@@ -731,6 +734,14 @@ function parseImageReferenceInputs(
     try {
       if (kind === "attachment" && Object.keys(fields).length === 0) {
         requests.push({ kind });
+      } else if (
+        kind === "attachment" &&
+        Object.keys(fields).length === 1 &&
+        typeof fields["name"] === "string" &&
+        fields["name"].trim().length > 0 &&
+        fields["name"].length <= MAX_IMAGE_REFERENCE_LABEL_LENGTH
+      ) {
+        requests.push({ kind, name: fields["name"].trim() });
       } else if (kind === "browser-capture" && Object.keys(fields).length === 1) {
         requests.push({ kind, captureId: decodeBrowserCaptureId(fields["captureId"]) });
       } else if (kind === "generated-image" && Object.keys(fields).length === 1) {
@@ -1084,12 +1095,13 @@ export const CREATE_IMAGE_MEDIA_TOOL_PLUGIN: MediaToolPluginDefinition = {
 };
 
 const VIDEO_DESCRIPTION =
-  "Generate a short video clip with a video model the person set up in Octant. Call it only when the person asks for a video, instead of writing an animation by hand. Octant shows the person a card in this thread with the price, where they confirm, because each clip is billed to their video provider; nothing runs until they answer, unless they already said not to ask again or the thread runs at Full access. Describe the clip in prompt. durationSeconds, resolution, aspectRatio and audio are optional and must be ones the model declares; absent ones take the model's defaults. Use firstFrame, lastFrame and references (the same reference forms as octant_create_image) where the model takes them; images always require confirmation. The result says what happened: completed with a clipId (the clip is shown in this thread), generating with a jobId when it takes longer than the call waits (it appears when done; do not start another), failed with the reason, or cancelled (do not ask again unless they do). In a Work or Code thread, operation save with a clipId from this thread and a relativePath ending in .mp4 stores the clip as a new file in the folder you work in: it never overwrites a file, Plan refuses it, and at Ask first the person confirms the path. Never invent a video URL.";
+  "Generate a short video clip with a video model the person set up in Octant. Call it only when the person asks for a video, instead of writing an animation by hand. Octant shows the person a card in this thread with the price, where they confirm, because each clip is billed to their video provider; nothing runs until they answer, unless they already said not to ask again or the thread runs at Full access. Describe the clip in prompt. durationSeconds, resolution, aspectRatio and audio are optional and must be ones the model declares; absent ones take the model's defaults. Use firstFrame, lastFrame and references (the same reference forms as octant_create_image; an attachment may also carry name to pick one upload, which a frame requires) where the model takes them; images always require confirmation. The result says what happened: completed with a clipId (the clip is shown in this thread), generating with a jobId when it takes longer than the call waits (it appears when done; do not start another), failed with the reason, or cancelled (do not ask again unless they do). In a Work or Code thread, operation save with a clipId from this thread and a relativePath ending in .mp4 stores the clip as a new file in the folder you work in: it never overwrites a file, Plan refuses it, and at Ask first the person confirms the path. Never invent a video URL.";
 
 const VIDEO_REFERENCE_SCHEMA = {
   type: "object",
   properties: {
     kind: { enum: ["attachment", "browser-capture", "file", "generated-image"] },
+    name: { type: "string" },
     captureId: { type: "string" },
     relativePath: { type: "string" },
     attachmentId: { type: "string" },
@@ -1111,7 +1123,7 @@ const VIDEO_INPUT_SCHEMA = {
     audio: { type: "boolean" },
     firstFrame: VIDEO_REFERENCE_SCHEMA,
     lastFrame: VIDEO_REFERENCE_SCHEMA,
-    references: { type: "array", maxItems: MAX_IMAGE_REFERENCES, items: VIDEO_REFERENCE_SCHEMA },
+    references: { type: "array", maxItems: MAX_VIDEO_REFERENCES, items: VIDEO_REFERENCE_SCHEMA },
     clipId: { type: "string" },
     relativePath: { type: "string" },
   },
@@ -1172,7 +1184,9 @@ function parseVideoToolInput(inputJson: string): ParsedVideoInput {
     return { error: "Describe the clip in prompt." };
   }
   const references =
-    raw["references"] === undefined ? [] : parseImageReferenceInputs(raw["references"]);
+    raw["references"] === undefined
+      ? []
+      : parseImageReferenceInputs(raw["references"], MAX_VIDEO_REFERENCES);
   if ("error" in references) return references;
   const firstFrame = parseOneVideoReference(raw["firstFrame"]);
   if (firstFrame !== undefined && "error" in firstFrame) return firstFrame;

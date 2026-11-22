@@ -74,7 +74,7 @@ function serviceOfferClient(
         await request({
           method: "GET",
           path: SERVICE_OFFERS_PATH,
-          query: `?${new URLSearchParams({ threadKind, scopeId: String(scopeId), referenceImages: "1", transcription: "1", narration: "1", iconSets: "1" }).toString()}`,
+          query: `?${new URLSearchParams({ threadKind, scopeId: String(scopeId), referenceImages: "1", transcription: "1", narration: "1", iconSets: "1", video: "1" }).toString()}`,
         }),
       );
     },
@@ -142,10 +142,17 @@ function videoOfferInputs(offer: VideoGenerateOffer) {
 
 /** What a video card lets the person choose: exactly what the offered model declares. */
 export function videoOfferChoices(offer: VideoGenerateOffer) {
+  const inputs = videoOfferInputs(offer);
+  const interpolationMax = offer.model.inputs.firstAndLastFrameMaxSeconds;
   return {
-    durations: videoDurationValues(offer.model),
+    durations: videoDurationValues(offer.model).filter(
+      (seconds) =>
+        !(inputs.firstFrame && inputs.lastFrame) ||
+        interpolationMax === undefined ||
+        seconds <= interpolationMax,
+    ),
     resolutions: offer.model.resolutions,
-    aspectRatios: videoAspectRatioChoices(offer.model, videoOfferInputs(offer).firstFrame),
+    aspectRatios: videoAspectRatioChoices(offer.model, inputs.firstFrame),
     audio: videoAudioChoices(offer.model),
   };
 }

@@ -126,6 +126,8 @@ export const VideoModelCapabilities = Schema.Struct({
     maxDurationSecondsWithBothFrames: Schema.optional(PositiveInt),
     /** 0 when the model takes no reference images. */
     maxReferenceImages: NonNegativeInt,
+    /** Longest clip when both a first and a last frame are given; absent for no extra bound. */
+    firstAndLastFrameMaxSeconds: Schema.optional(PositiveInt),
   }).annotations(strict),
   price: VideoPrice,
   job: VideoJobControl,
@@ -258,9 +260,18 @@ export const VideoJobProviderCopyChanged = Schema.Struct({
 export type VideoJobProviderCopyChanged = typeof VideoJobProviderCopyChanged.Type;
 
 /** One image a video offer names: where it comes from, as the person will recognize it. */
+/**
+ * The most images one video request names: two frames plus the reference
+ * images the largest declared model takes. The model's own declaration still
+ * bounds the request.
+ */
+export const MAX_VIDEO_REFERENCES = 8;
+
 export const VideoOfferImage = Schema.Struct({
   role: Schema.Literal("first-frame", "last-frame", "reference"),
   label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200)),
+  /** The image came from a page the person is signed in to; the card says so. */
+  signedIn: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type VideoOfferImage = typeof VideoOfferImage.Type;
 

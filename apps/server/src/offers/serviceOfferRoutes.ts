@@ -111,6 +111,13 @@ export function createServiceOfferRouteHandler<Outcome>(input: {
             (offer) =>
               offer.kind !== "narrate" || (!legacy && url.searchParams.get("narration") === "1"),
           )
+          // A client that cannot decode the video kinds loses its whole list
+          // to one unknown offer, so it is sent none of them.
+          .filter(
+            (offer) =>
+              (offer.kind !== "video-generate" && offer.kind !== "video-save") ||
+              (!legacy && url.searchParams.get("video") === "1"),
+          )
           .filter(
             (offer) =>
               supportsReferences || offer.kind !== "generate" || offer.references === undefined,

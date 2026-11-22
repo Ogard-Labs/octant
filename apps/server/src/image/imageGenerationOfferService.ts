@@ -74,7 +74,8 @@ export class ImageGenerationOfferService {
     );
     return outcome.status === "generate" ||
       outcome.status === "agent-draws" ||
-      outcome.status === "save"
+      outcome.status === "save" ||
+      outcome.status === "too-many-waiting"
       ? outcome
       : { status: "cancelled" };
   }

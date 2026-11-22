@@ -75,6 +75,7 @@ export function VideoGenerateOfferCard(props: VideoOfferCardProps) {
             {pending.images.map((image, index) => (
               <li key={index}>
                 {ROLE_LABELS[image.role]}: {image.label}
+                {image.signedIn === true ? " (signed-in page)" : ""}
               </li>
             ))}
           </ul>

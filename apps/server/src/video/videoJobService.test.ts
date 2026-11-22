@@ -102,6 +102,7 @@ function fakeDriver(script: Script) {
   let modelsFailOnce = script.modelsFail === "once";
   const driver: VideoGenerationDriver = {
     driverKind: "gemini-video",
+    providerName: "Example Video",
     providerHosts: ["video.example.test"],
     create: ({ ports }) => {
       return {
