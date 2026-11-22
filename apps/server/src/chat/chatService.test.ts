@@ -184,9 +184,45 @@ import { erasePurgedThread } from "../persistence/threadPurge";
 import { buildDocxFixture } from "../preview/previewTestFixtures";
 import { MAX_CHAT_ATTACHED_TEXT_CHARACTERS } from "./chatAttachedFiles";
 import { ChatAttachmentStore } from "./chatAttachmentStore";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 
 const directories: Array<string> = [];
 const now = "2026-07-19T22:10:00.000Z";
+const ANTIGRAVITY_UNATTENDED_REFUSAL =
+  "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Choose a provider that uses a Gemini API key, such as Gemini CLI with an API key.";
+/**
+ * Answers each question a parked turn still asks, as its person would, and
+ * waits until the turn has completed, so a test leaves no turn running.
+ */
+async function finishParkedTurn(
+  service: { execute: ChatService["execute"]; read: ChatService["read"] },
+  threadId: ChatThreadId,
+): Promise<void> {
+  const window = decodeWindowId("84000000-0000-4000-8000-0000000000ff");
+  await until(() => {
+    const view = service.read(threadId);
+    const turn = view.turns.at(-1);
+    const attempt = turn?.attempts.at(-1);
+    const question = attempt?.pendingQuestion;
+    if (turn !== undefined && attempt !== undefined && question !== undefined)
+      void service
+        .execute(
+          {
+            kind: "answer-chat-turn-question",
+            threadId,
+            expectedVersion: view.thread.version,
+            turnId: turn.id,
+            attemptId: attempt.id,
+            requestId: question.requestId,
+            answer: question.options[0]?.label ?? "Yes",
+          },
+          { windowId: window },
+        )
+        .catch(() => undefined);
+    return attempt?.outcome === "completed";
+  });
+}
+
 const ids = {
   actor: "84000000-0000-4000-8000-000000000001",
   correlation: "84000000-0000-4000-8000-000000000002",
@@ -304,6 +340,8 @@ function openFixture(options?: {
   readonly contextFacts?: ProviderDriver["contextFacts"];
   readonly seedSettings?: boolean;
   readonly providerEnabled?: boolean;
+  /** The driver kind each provider instance reports; absent reads as an OpenAI-compatible endpoint. */
+  readonly driverKindFor?: (providerInstanceId: string) => string;
   /** Per-instance enablement; overrides `providerEnabled` when provided. */
   readonly providerEnabledFor?: (providerInstanceId: string) => boolean;
   readonly missingProviderInstanceIds?: ReadonlyArray<string>;
@@ -509,7 +547,7 @@ function openFixture(options?: {
       return {
         id: decodeProviderInstanceId(id),
         displayName: "Fixture provider",
-        driverKind: "openai-compatible",
+        driverKind: options?.driverKindFor?.(id) ?? "openai-compatible",
         enabled: options?.providerEnabledFor?.(id) ?? options?.providerEnabled ?? true,
         configuration: {},
         version: 1,
@@ -1430,6 +1468,133 @@ function providerSearchComposition(tainted: ReadonlySet<string>) {
 }
 
 describe("ChatService", () => {
+  it("sends no turn nobody sent that would fall back onto Google Antigravity, and takes the person's own", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000012");
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    let fallbackProbes = 0;
+    const { service } = openFixture({
+      probe: probeFixture({ models: [] }),
+      probeFor: (providerInstanceId) => {
+        if (providerInstanceId !== fallbackProvider) return undefined;
+        fallbackProbes += 1;
+        return probeFixture({ instanceId: decodeProviderInstanceId(fallbackProvider) });
+      },
+      driverKindFor: (providerInstanceId) =>
+        providerInstanceId === fallbackProvider ? "antigravity" : "openai-compatible",
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Fallback onto Antigravity",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const send = (context: Parameters<typeof service.execute>[1]) =>
+      service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Keep going.",
+        },
+        context,
+      );
+
+    // The thread's own provider is not Antigravity; the turn would run there
+    // only through the fallback, which is what the check reads.
+    await expect(send(undefined)).rejects.toMatchObject({
+      failure: { category: "unauthorized", message: ANTIGRAVITY_UNATTENDED_REFUSAL },
+    });
+    expect(service.read(created.thread.id).turns).toHaveLength(0);
+    // Refused from the fallback's declaration, before it is probed, so no
+    // Antigravity session opens for a turn that will not run.
+    expect(fallbackProbes).toBe(0);
+    // An outside agent's send carries its grant's scope as a window, yet is
+    // never the person: its grant checked only the thread's own provider.
+    await expect(send({ windowId: window, fromOutsideAgent: true })).rejects.toMatchObject({
+      failure: {
+        category: "unauthorized",
+        message:
+          "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or use a provider that uses a Gemini API key.",
+      },
+    });
+    expect(service.read(created.thread.id).turns).toHaveLength(0);
+
+    // The person's own send their fallback routes there runs (maintainer
+    // decision, 2026-11-21).
+    await expect(send({ windowId: window })).resolves.toMatchObject({ kind: "turn-created" });
+    expect(service.read(created.thread.id).turns[0]?.attempts[0]?.providerInstanceId).toBe(
+      fallbackProvider,
+    );
+  });
+
+  it("still refuses a turn nobody sent on a thread whose own Google Antigravity provider is turned off", async () => {
+    let on = true;
+    const { service, fakeDriver } = openFixture({
+      driverKindFor: () => "antigravity",
+      providerEnabledFor: () => on,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Antigravity, turned off",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    on = false;
+
+    // Only a pool candidate or the fallback is skipped while off; the
+    // thread's own provider is judged by what it declares, on or off.
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Hello",
+      }),
+    ).rejects.toMatchObject({
+      failure: { category: "unauthorized", message: ANTIGRAVITY_UNATTENDED_REFUSAL },
+    });
+    expect(fakeDriver.sentTurns).toHaveLength(0);
+  });
+
+  it("sends no turn nobody sent on a thread running on Google Antigravity, and takes the person's own", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000011");
+    const { service, fakeDriver } = openFixture({ driverKindFor: () => "antigravity" });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Antigravity",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const send = (context: Parameters<typeof service.execute>[1]) =>
+      service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Hello",
+        },
+        context,
+      );
+
+    // The host's own send (a restart continuation, a benchmark run), the
+    // routine scope, and another thread's message are each refused.
+    for (const context of [
+      undefined,
+      { windowId: ROUTINE_HOST_SCOPE_ID },
+      { windowId: window, coordinationDepth: 1 },
+    ])
+      await expect(send(context)).rejects.toMatchObject({
+        failure: { category: "unauthorized", message: ANTIGRAVITY_UNATTENDED_REFUSAL },
+      });
+    expect(fakeDriver.sentTurns).toHaveLength(0);
+
+    await expect(send({ windowId: window })).resolves.toMatchObject({ kind: "turn-created" });
+  });
+
   it("checks the thread's model for tools by itself before each sent turn, and sends the turn when the check fails", async () => {
     const order: Array<string> = [];
     const verifyModelToolsOnFirstUse = vi.fn(async () => {
@@ -7599,6 +7764,117 @@ describe("ChatService", () => {
     ]);
   });
 
+  it("keeps the routed provider of a turn waiting on a question as the live turn's, for the helper check to read", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000014");
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const liveTurns = new LiveTurnRegistry();
+    const { service } = openFixture({
+      driver: questionDriver([], []),
+      liveTurns,
+      probe: probeFixture({ models: [] }),
+      probeFor: (providerInstanceId) =>
+        providerInstanceId === fallbackProvider
+          ? probeFixture({ instanceId: decodeProviderInstanceId(fallbackProvider) })
+          : undefined,
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Routed and waiting",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sending = service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Ask me anything",
+      },
+      { windowId: window },
+    );
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.pendingQuestion !== undefined,
+    );
+    // The lookup the host hands `authorizeAgentRunCreation` reads the turn's
+    // fallback provider, not the thread's own, while the turn waits.
+    expect(String(liveTurns.connection(String(created.thread.id))?.providerInstanceId)).toBe(
+      fallbackProvider,
+    );
+    expect(String(created.thread.providerInstanceId)).not.toBe(fallbackProvider);
+    await finishParkedTurn(service, created.thread.id);
+    // The send settles with its turn.
+    await sending.catch(() => undefined);
+    await until(() => liveTurns.read(String(created.thread.id)) === undefined);
+  });
+
+  it("takes no outside agent's answer to a question from an attempt running on Google Antigravity", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000013");
+    const sent: Array<SentTurn> = [];
+    const answered: Array<{ requestId: string; answer: string }> = [];
+    const { service } = openFixture({
+      driver: questionDriver(sent, answered),
+      driverKindFor: () => "antigravity",
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Antigravity question",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sending = service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Ask me anything",
+      },
+      { windowId: window },
+    );
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.pendingQuestion !== undefined,
+    );
+    const waiting = service.read(created.thread.id);
+    const attempt = waiting.turns[0]!.attempts[0]!;
+    const answer = (context: Parameters<typeof service.execute>[1]) =>
+      service.execute(
+        {
+          kind: "answer-chat-turn-question",
+          threadId: created.thread.id,
+          expectedVersion: waiting.thread.version,
+          turnId: waiting.turns[0]!.id,
+          attemptId: attempt.id,
+          requestId: "q-first",
+          answer: "Yes",
+        },
+        context,
+      );
+
+    // The attempt's own provider is read, which a pool or fallback chose.
+    await expect(answer({ windowId: window, fromOutsideAgent: true })).rejects.toMatchObject({
+      failure: {
+        category: "unauthorized",
+        message:
+          "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or use a provider that uses a Gemini API key.",
+      },
+    });
+    expect(answered).toEqual([]);
+    await expect(answer({ windowId: window })).resolves.toMatchObject({
+      kind: "attempt-updated",
+    });
+    // The set's next question parks the turn again; stop it so nothing runs on.
+    await until(
+      () =>
+        service.read(created.thread.id).turns[0]?.attempts[0]?.pendingQuestion?.questionIndex === 2,
+    );
+    await finishParkedTurn(service, created.thread.id);
+    // The send settles with its turn.
+    await sending.catch(() => undefined);
+  });
+
   it("shows and answers a provider's question set, one question at a time", async () => {
     const sent: Array<SentTurn> = [];
     const answered: Array<{ requestId: string; answer: string }> = [];
@@ -9754,6 +10030,45 @@ describe("ChatService", () => {
       if (updated.kind !== "thread-updated") throw new Error("Expected thread-updated result.");
       return { ...fixture, thread: updated.thread };
     }
+
+    it("takes an unattended turn on a pool whose Google Antigravity entry is turned off, and refuses it once it is on", async () => {
+      const antigravity = "84000000-0000-4000-8000-000000000031";
+      let antigravityOn = false;
+      const antigravityCandidate = {
+        hostId: "local" as HostId,
+        providerInstanceId: antigravity,
+        modelId: "model-a",
+      } as MultiModelPoolCandidate;
+      const { service, thread } = await threadWithPool(
+        async ({ pool: p }) =>
+          p.candidates.map((candidate) =>
+            String(candidate.providerInstanceId) === antigravity
+              ? poolFacts(candidate, { readiness: "unavailable", authorityAllowed: false })
+              : poolFacts(candidate),
+          ),
+        { candidates: [poolCandidate("model-a"), antigravityCandidate] },
+        {
+          driverKindFor: (id) => (id === antigravity ? "antigravity" : "openai-compatible"),
+          providerEnabledFor: (id) => id !== antigravity || antigravityOn,
+        },
+      );
+      const send = (prompt: string) =>
+        service.execute({
+          kind: "send-chat-turn",
+          threadId: thread.id,
+          expectedVersion: service.read(thread.id).thread.version,
+          prompt,
+        });
+      // Routing never sends a turn to a provider that is off, so a pool that
+      // still lists one does not block the routine's send.
+      await expect(send("While it is off")).resolves.toMatchObject({ kind: "turn-created" });
+      await until(() => service.read(thread.id).turns[0]?.attempts[0]?.outcome === "completed");
+
+      antigravityOn = true;
+      await expect(send("Once it is on")).rejects.toMatchObject({
+        failure: { category: "unauthorized", message: ANTIGRAVITY_UNATTENDED_REFUSAL },
+      });
+    });
 
     it("persists exactly one selected route decision for the requested candidate before provider execution starts", async () => {
       const { service, thread } = await threadWithPool(async ({ pool: p }) =>

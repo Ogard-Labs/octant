@@ -296,6 +296,12 @@ export interface AgentRunSessionRuntimeOptions {
     readonly providerInstanceId: ProviderInstanceId;
     readonly modelId: ProviderModelId;
   }) => boolean;
+  /**
+   * Why a provider runs no helper, as its profile declares for its personal
+   * sign-in; read when the child starts or resumes, so a child admitted before
+   * its provider declared it, or on a later retry, still never runs there.
+   */
+  readonly helperRunRefusal?: (providerInstanceId: ProviderInstanceId) => string | undefined;
   /** Resolves the configured driver for a provider instance, or undefined. */
   readonly resolveDriver: (
     providerInstanceId: ProviderInstanceId,
@@ -493,7 +499,7 @@ export function createAgentRunSessionRuntime(
     return values;
   };
 
-  const refuseTargetOutsideProjectPolicy = (
+  const refuseDisallowedTarget = (
     run: AgentRun,
     target: ReturnType<typeof effectiveAgentRunExecutionTarget>,
   ) => {
@@ -508,6 +514,8 @@ export function createAgentRunSessionRuntime(
         "provider-unavailable",
         "The Project's provider policy does not allow this child's provider or model. Delegate a new child on an allowed provider.",
       );
+    const refusal = options.helperRunRefusal?.(target.providerInstanceId);
+    if (refusal !== undefined) throw new AgentRunSessionError("provider-unavailable", refusal);
   };
 
   const savedConversation = (run: AgentRun): AgentRunSessionRecord => {
@@ -523,7 +531,7 @@ export function createAgentRunSessionRuntime(
       );
     }
     const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
-    refuseTargetOutsideProjectPolicy(run, target);
+    refuseDisallowedTarget(run, target);
     const driver = options.resolveDriver(target.providerInstanceId, run);
     clampAgentRunSessionAuthority(run);
     const projectRoot = resolveProjectRoot(run, options.scratchRoot);
@@ -580,7 +588,7 @@ export function createAgentRunSessionRuntime(
     // widened since admission, and a child must never gain from that.
     const authority = clampAgentRunSessionAuthority(run);
     const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
-    refuseTargetOutsideProjectPolicy(run, target);
+    refuseDisallowedTarget(run, target);
     const driver = options.resolveDriver(target.providerInstanceId, run);
     if (driver === undefined) {
       throw new AgentRunSessionError(

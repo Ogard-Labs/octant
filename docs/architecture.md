@@ -4456,7 +4456,13 @@ Chat still take no app-managed tools.
   Work turn cannot withhold them and a routine never runs above its snapshot.
   The catalog offers an approval-gated Work-compatible profile with that same
   filesystem, shell, and Git authority; it needs no additional Code-only
-  profile. A routine asks first by default: a Full access profile is not eligible,
+  profile. A provider whose profile declares that its personal sign-in does
+  not cover unattended runs (Google Antigravity) blocks at dispatch as
+  `provider-capability-mismatch` with the profile's own sentence, before any
+  thread exists, and every other turn the host starts as itself on it is refused;
+  the same declaration keeps it from helper runs and outside
+  agents ([Provider runtimes: Google Antigravity](design/provider-runtimes.md#google-antigravity)).
+  A routine asks first by default: a Full access profile is not eligible,
   whether or not it was remembered elsewhere (the contract refuses it on the
   snapshot and dispatch blocks it as `full-access-ineligible`), Code runs are
   created approval-gated, and a Work run's unattended first turn runs

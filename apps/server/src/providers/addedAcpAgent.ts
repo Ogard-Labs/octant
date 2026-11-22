@@ -12,7 +12,12 @@ import { ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import type { AddedAcpAgentProviderInstance, ProviderToolDefinition } from "@octant/contracts";
 import { addedAcpAgentSteps } from "@octant/domain";
-import { decideAcpAgentLaunch, type AcpAgentSteps } from "@octant/plugin-host/acp-agents";
+import {
+  addedAcpAgentLimitedProfile,
+  addedAcpAgentLimitedProfileRefusal,
+  decideAcpAgentLaunch,
+  type AcpAgentSteps,
+} from "@octant/plugin-host/acp-agents";
 import { HOST_PASSTHROUGH_VARIABLES, type AcpProviderProfile } from "./acpProfiles";
 
 /**
@@ -131,6 +136,13 @@ export function withAddedAcpAgentLaunch(
         }),
       ),
     acquire: (input) => {
+      // An agent added before such copies were refused still never starts.
+      const limited = addedAcpAgentLimitedProfile(instance.configuration.source);
+      if (limited !== undefined)
+        return Effect.fail({
+          category: "unavailable" as const,
+          message: addedAcpAgentLimitedProfileRefusal(limited),
+        });
       const refusal = decideAcpAgentLaunch({ steps, executionPolicy: "approval-gated" });
       if (refusal.status === "refused")
         return Effect.fail({

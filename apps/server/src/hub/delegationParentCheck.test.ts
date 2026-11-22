@@ -63,6 +63,20 @@ describe("what a parent thread must satisfy before it starts a child on another 
     });
   });
 
+  it("refuses a child on another host from a thread running on Google Antigravity", () => {
+    const antigravityParent: DelegationParentRules = {
+      ...rules(undefined),
+      authorizeCreation: () => ({
+        ...WORK_PARENT,
+        helperRunRefusal: "Google doesn't support Google Antigravity as a helper agent.",
+      }),
+    };
+    expect(checkDelegationParent(antigravityParent, ASK)).toEqual({
+      status: "refused",
+      kind: "subagents-not-allowed",
+    });
+  });
+
   it("outside Strict hands work to another spoke unasked from a thread that read outside content", () => {
     const parent = markedParent("approval-gated");
     expect(checkDelegationParent({ ...parent.rules, strict: () => false }, ASK)).toEqual({
