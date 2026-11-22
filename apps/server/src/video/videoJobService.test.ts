@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -402,6 +402,25 @@ describe("video jobs", () => {
       status: "running",
       remoteId: "remote-1",
     });
+  });
+
+  it("keeps a deleted thread's late clip off disk and ends its job cancelled", async () => {
+    let releasePoll: ((answer: VideoAdapterPoll) => void) | undefined;
+    const { service, root } = harness({
+      poll: () => new Promise((resolve) => (releasePoll = resolve)),
+    });
+    const queued = await enqueue(service);
+    await vi.waitFor(() => expect(service.getById(queued.id)?.remoteId).toBe("remote-1"));
+    const purged = service.purgeScope(scopeId);
+    releasePoll?.({
+      status: "completed",
+      video: { bytes: CONFORMANCE_MP4_BYTES, mediaType: "video/mp4" },
+      usage: { outputTokens: 5792 },
+    });
+    await purged;
+    const done = await service.whenTerminal(queued.id);
+    expect(done).toMatchObject({ status: "cancelled", settledCostUsdMicros: 69_504 });
+    expect(existsSync(join(root, "generated-video", String(scopeId)))).toBe(false);
   });
 
   it("leaves a job running for the next host when shutdown interrupts its poll", async () => {

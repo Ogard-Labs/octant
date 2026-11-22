@@ -17,7 +17,10 @@ export function sniffVideoClipMediaType(bytes: Uint8Array): "video/mp4" | undefi
 
 export type VideoClipWrite =
   | { readonly status: "stored"; readonly hash: string; readonly size: number }
-  | { readonly status: "refused"; readonly reason: "too-large" | "not-mp4" | "empty" }
+  | {
+      readonly status: "refused";
+      readonly reason: "too-large" | "not-mp4" | "empty" | "purged";
+    }
   | { readonly status: "failed"; readonly reason: "disk" };
 
 export interface VideoClipRange {
@@ -35,6 +38,13 @@ export interface VideoClipRange {
  */
 export class VideoClipStore {
   readonly #root: string;
+  /**
+   * Scopes a thread delete closed: a write admitted after that is refused
+   * rather than recreating a directory the delete already removed.
+   */
+  readonly #purgedScopes = new Set<string>();
+  readonly #openWrites = new Map<string, number>();
+  readonly #writeWaiters = new Map<string, Array<() => void>>();
 
   constructor(dataDirectory: string) {
     this.#root = join(dataDirectory, "generated-video");
@@ -58,6 +68,9 @@ export class VideoClipStore {
     if (sniffVideoClipMediaType(bytes) === undefined) {
       return { status: "refused", reason: "not-mp4" };
     }
+    const scopeKey = String(scopeId);
+    if (this.#purgedScopes.has(scopeKey)) return { status: "refused", reason: "purged" };
+    this.#openWrites.set(scopeKey, (this.#openWrites.get(scopeKey) ?? 0) + 1);
     const directory = this.#scopeDirectory(scopeId);
     const target = this.#clipPath(scopeId, clipId);
     const temporary = `${target}.partial`;
@@ -68,6 +81,15 @@ export class VideoClipStore {
     } catch {
       await rm(temporary, { force: true }).catch(() => undefined);
       return { status: "failed", reason: "disk" };
+    } finally {
+      const left = (this.#openWrites.get(scopeKey) ?? 1) - 1;
+      if (left <= 0) {
+        this.#openWrites.delete(scopeKey);
+        for (const waiter of this.#writeWaiters.get(scopeKey) ?? []) waiter();
+        this.#writeWaiters.delete(scopeKey);
+      } else {
+        this.#openWrites.set(scopeKey, left);
+      }
     }
     return {
       status: "stored",
@@ -122,8 +144,57 @@ export class VideoClipStore {
     await rm(this.#clipPath(scopeId, clipId), { force: true });
   }
 
+  /**
+   * Streams a whole clip for a download or save, bounded by the read rather
+   * than held in memory.
+   */
+  async stream(
+    scopeId: ImageGenerationScopeId,
+    clipId: VideoClipId,
+  ): Promise<{ readonly body: ReadableStream<Uint8Array>; readonly size: number } | undefined> {
+    let handle;
+    try {
+      handle = await open(this.#clipPath(scopeId, clipId), "r");
+    } catch {
+      return undefined;
+    }
+    const size = (await handle.stat()).size;
+    const body = new ReadableStream<Uint8Array>({
+      pull: async (controller) => {
+        try {
+          const chunk = new Uint8Array(1024 * 1024);
+          const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength);
+          if (bytesRead === 0) {
+            await handle.close().catch(() => undefined);
+            controller.close();
+            return;
+          }
+          controller.enqueue(chunk.subarray(0, bytesRead));
+        } catch (error) {
+          await handle.close().catch(() => undefined);
+          controller.error(error);
+        }
+      },
+      cancel: async () => {
+        await handle.close().catch(() => undefined);
+      },
+    });
+    return { body, size };
+  }
+
   /** Removes every clip of a thread, for a thread delete. */
   async purgeScope(scopeId: ImageGenerationScopeId): Promise<void> {
+    // Admission closes before the delete so a write that began while the
+    // provider answered can finish but no later write recreates the folder.
+    const scopeKey = String(scopeId);
+    this.#purgedScopes.add(scopeKey);
+    while ((this.#openWrites.get(scopeKey) ?? 0) > 0) {
+      await new Promise<void>((resolve) => {
+        const waiters = this.#writeWaiters.get(scopeKey) ?? [];
+        waiters.push(resolve);
+        this.#writeWaiters.set(scopeKey, waiters);
+      });
+    }
     await rm(this.#scopeDirectory(scopeId), { recursive: true, force: true });
   }
 

@@ -711,7 +711,16 @@ export class VideoJobService {
           answer.video.bytes,
         );
         const settled = this.#settled(current, answer.usage);
-        if (written.status !== "stored") {
+        if (written.status === "refused" && written.reason === "purged") {
+          // The thread was deleted while the provider finished: nothing is
+          // written back, and the job ends cancelled rather than failed on a
+          // folder that is gone. The billed cost still settles.
+          this.#finish(current, "cancelled", {
+            settledCostUsdMicros: settled,
+            billed: true,
+            ...(answer.usage === undefined ? {} : { usage: answer.usage }),
+          });
+        } else if (written.status !== "stored") {
           this.#finish(current, "failed", {
             failure: videoFailure(
               written.status === "failed" ? "unavailable" : "protocol",
