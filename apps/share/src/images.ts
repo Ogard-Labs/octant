@@ -14,7 +14,10 @@ export function carriedImageResponse(
   headers: Readonly<Record<string, string>>,
 ): Response {
   const tag = `"${image.sha256}"`;
-  const common = { ...headers, etag: tag, "cache-control": "private, no-cache" };
+  // The route's own content type is for its refusals; a 304 carries none, so
+  // a cache keeps the raster's type.
+  const { "content-type": _refusalType, ...rest } = headers;
+  const common = { ...rest, etag: tag, "cache-control": "private, no-cache" };
   if (request.headers.get("if-none-match") === tag) {
     return new Response(null, { status: 304, headers: common });
   }

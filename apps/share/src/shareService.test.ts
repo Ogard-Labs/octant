@@ -741,6 +741,7 @@ describe("share service", () => {
       headers: { "if-none-match": `"${image.sha256}"` },
     });
     expect(revalidated.status).toBe(304);
+    expect(revalidated.headers.get("content-type")).toBeNull();
     expect(Buffer.from(await served.arrayBuffer()).equals(bytes)).toBe(true);
     // An image the share does not carry is not found.
     expect(

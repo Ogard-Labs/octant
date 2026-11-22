@@ -109,6 +109,9 @@ describe("drawn design asset references", () => {
         "html",
       ),
     ).toEqual(["after"]);
+    expect(drawn('<svg><title/></svg><img src="octant-asset:after-svg">', "html")).toEqual([
+      "after-svg",
+    ]);
   });
 
   it("does not draw a reference written as text or in an attribute that loads no image", () => {
