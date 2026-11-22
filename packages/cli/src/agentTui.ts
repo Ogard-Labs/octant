@@ -5,9 +5,13 @@ import {
   type AgentCodeRequest,
 } from "./agentCodeRequests";
 import {
+  answerWorkQuestionnaire,
   answerWorkRequest,
   readWorkRequests,
+  stepWorkQuestionnaire,
+  workQuestionnaireText,
   workRequestId,
+  type AgentQuestionnaireAnswer,
   type AgentWorkRequest,
 } from "./agentWorkRequests";
 import type {
@@ -214,6 +218,10 @@ class AgentScreen {
     | undefined;
   #codeRequest: AgentCodeRequest | undefined;
   #workRequest: AgentWorkRequest | undefined;
+  /** The answers given so far to the waiting Work questionnaire, bound to its request. */
+  #questionnaireAnswers:
+    | { readonly requestId: string; readonly answers: ReadonlyArray<AgentQuestionnaireAnswer> }
+    | undefined;
   #destroyed = false;
   #refreshSequence = 0;
   #lastAskId: string | undefined;
@@ -562,6 +570,12 @@ class AgentScreen {
       text.length === 0 ? undefined : (provenance ?? this.#captureComposerDraft());
   }
 
+  #answersTo(request: AgentWorkRequest): ReadonlyArray<AgentQuestionnaireAnswer> {
+    return this.#questionnaireAnswers?.requestId === workRequestId(request)
+      ? this.#questionnaireAnswers.answers
+      : [];
+  }
+
   async refresh(): Promise<void> {
     const refreshSequence = ++this.#refreshSequence;
     const readingThreadId = this.#threadId;
@@ -632,6 +646,12 @@ class AgentScreen {
     if (refusedRequestRead === undefined) {
       this.#codeRequest = codeRequests.kind === "ready" ? codeRequests.requests[0] : undefined;
       this.#workRequest = workRequests.kind === "ready" ? workRequests.requests[0] : undefined;
+      if (
+        this.#questionnaireAnswers !== undefined &&
+        (this.#workRequest === undefined ||
+          workRequestId(this.#workRequest) !== this.#questionnaireAnswers.requestId)
+      )
+        this.#questionnaireAnswers = undefined;
       if (this.#note.startsWith("Provider requests are unavailable: ")) this.#note = "";
     } else {
       this.#note = `Provider requests are unavailable: ${refusedRequestRead.message}`;
@@ -788,6 +808,7 @@ class AgentScreen {
     this.#requestReadRefusal = undefined;
     this.#codeRequest = undefined;
     this.#workRequest = undefined;
+    this.#questionnaireAnswers = undefined;
     this.#hostTicks = undefined;
     mode = opened.mode;
     this.#threadId = threadId;
@@ -1157,9 +1178,11 @@ class AgentScreen {
           : `Request status unavailable: ${this.#requestReadRefusal}\n`) +
         (request.kind === "approval"
           ? "y allow · n deny — then Enter"
-          : request.options
-              .map((option, index) => String(index + 1) + ". " + option.label)
-              .join("\n") + "\nType an answer, then Enter.");
+          : request.questionnaire !== undefined
+            ? workQuestionnaireText(request.questionnaire, this.#answersTo(request))
+            : request.options
+                .map((option, index) => String(index + 1) + ". " + option.label)
+                .join("\n") + "\nType an answer, then Enter.");
       this.#panel.visible = true;
     } else if (this.#codeRequest !== undefined) {
       const request = this.#codeRequest;
@@ -2016,6 +2039,30 @@ class AgentScreen {
       if (/^y(es)?$/i.test(text)) await this.#activateFollowUp(pending);
       else this.#note = "Left as a suggestion.";
       this.#draw();
+      return;
+    }
+    const questionnaireRequest = this.#workRequest;
+    if (
+      questionnaireRequest?.kind === "question" &&
+      questionnaireRequest.questionnaire !== undefined
+    ) {
+      const request = questionnaireRequest;
+      const step = stepWorkQuestionnaire(
+        questionnaireRequest.questionnaire,
+        this.#answersTo(request),
+        text,
+      );
+      if (step.kind === "asking") {
+        this.#questionnaireAnswers = { requestId: workRequestId(request), answers: step.answers };
+        this.#note = step.note ?? "";
+        this.#draw();
+        return;
+      }
+      const refusal = await answerWorkQuestionnaire(this.#input.session, request, step.response);
+      // A refused answer starts the questionnaire again rather than keep choices the host rejected.
+      this.#questionnaireAnswers = undefined;
+      this.#note = refusal ?? "";
+      await this.refresh();
       return;
     }
     if (this.#workRequest !== undefined) {

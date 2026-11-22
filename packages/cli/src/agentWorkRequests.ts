@@ -1,12 +1,29 @@
-import { decodeHostAnswer } from "@octant/contracts";
+import {
+  decodeHostAnswer,
+  decodeWorkQuestionnaireResponse,
+  decodeWorkRequestList,
+  type Questionnaire,
+  type QuestionnaireQuestion,
+  type QuestionnaireResponse,
+} from "@octant/contracts";
 import { PendingRequest } from "@octant/contracts/pending-requests";
+import { questionAnswerIsAllowed } from "@octant/domain";
 import type { OpenedLocalControlSession } from "./localControl";
 import { refusalMessage } from "./agentHost";
 
-export type AgentWorkRequest = Extract<
-  PendingRequest,
-  { mode: "work"; kind: "approval" | "question" }
->;
+type PendingWorkRequest = Extract<PendingRequest, { mode: "work"; kind: "approval" | "question" }>;
+/**
+ * A pending Work request as the terminal answers it. The pending-request list
+ * flattens a questionnaire to its prompt, so a question that carries one also
+ * holds the journaled questionnaire, read from the Work request route the
+ * app's thread view uses.
+ */
+export type AgentWorkRequest =
+  | Extract<PendingWorkRequest, { kind: "approval" }>
+  | (Extract<PendingWorkRequest, { kind: "question" }> & {
+      readonly questionnaire?: Questionnaire;
+    });
+export type AgentQuestionnaireAnswer = QuestionnaireResponse["answers"][number];
 export type AgentWorkRequestRead =
   | { readonly kind: "ready"; readonly requests: ReadonlyArray<AgentWorkRequest> }
   | { readonly kind: "refused"; readonly message: string };
@@ -32,13 +49,40 @@ export async function readWorkRequests(
         : undefined;
     if (!Array.isArray(rows))
       return { kind: "refused", message: "Provider requests are unavailable." };
-    const requests = rows.flatMap((row: unknown) => {
+    const pending = rows.flatMap((row: unknown) => {
       const request = decodeHostAnswer(PendingRequest)(row);
       return request.mode === "work" &&
         String(request.threadId) === threadId &&
         (request.kind === "approval" || request.kind === "question")
         ? [request]
         : [];
+    });
+    const question = pending.find((request) => request.kind === "question");
+    if (question === undefined) return { kind: "ready", requests: pending };
+    // A questionnaire answered as plain text is refused by the host, so a
+    // question whose definition cannot be read is not offered at all.
+    const details = await session.send({
+      path: `/api/work/requests?projectId=${encodeURIComponent(String(question.projectId))}&threadId=${encodeURIComponent(threadId)}`,
+      method: "GET",
+    });
+    if (details.status !== 200)
+      return {
+        kind: "refused",
+        message: refusalMessage(details, "Provider requests are unavailable."),
+      };
+    const questionnaires = new Map(
+      decodeWorkRequestList(details.body).requests.flatMap((request) =>
+        request.detail.kind === "user-input" && request.detail.questionnaire !== undefined
+          ? [[String(request.requestId), request.detail.questionnaire] as const]
+          : [],
+      ),
+    );
+    const requests = pending.map((request): AgentWorkRequest => {
+      const questionnaire =
+        request.kind === "question" ? questionnaires.get(workRequestId(request)) : undefined;
+      return request.kind === "question" && questionnaire !== undefined
+        ? { ...request, questionnaire }
+        : request;
     });
     return { kind: "ready", requests };
   } catch {
@@ -51,19 +95,102 @@ export async function answerWorkRequest(
   request: AgentWorkRequest,
   text: string,
 ): Promise<string | undefined> {
-  let resolution:
-    | { readonly kind: "approval"; readonly approved: boolean }
-    | {
-        readonly kind: "user-input";
-        readonly answer: string;
-      };
   if (request.kind === "approval") {
     if (!/^(y|yes|n|no)$/i.test(text)) return "Answer the approval with y or n.";
-    resolution = { kind: "approval", approved: /^(y|yes)$/i.test(text) };
-  } else {
-    const selected = /^\d+$/.test(text) ? request.options[Number(text) - 1]?.label : undefined;
-    resolution = { kind: "user-input", answer: selected ?? text };
+    return resolveWorkRequest(session, request, {
+      kind: "approval",
+      approved: /^(y|yes)$/i.test(text),
+    });
   }
+  const selected = /^\d+$/.test(text) ? request.options[Number(text) - 1]?.label : undefined;
+  return resolveWorkRequest(session, request, { kind: "user-input", answer: selected ?? text });
+}
+
+export type QuestionnaireStep =
+  | {
+      readonly kind: "asking";
+      readonly answers: ReadonlyArray<AgentQuestionnaireAnswer>;
+      readonly note?: string;
+    }
+  | { readonly kind: "complete"; readonly response: QuestionnaireResponse };
+
+/**
+ * One answer typed at the terminal for the questionnaire's next unanswered
+ * question: option numbers (comma or space separated), `0` for no choice
+ * where the question allows none, or a written alternative where it allows
+ * one. A refused line keeps the earlier answers and asks the same question
+ * again. The last answer completes the response the host validates whole.
+ */
+export function stepWorkQuestionnaire(
+  questionnaire: Questionnaire,
+  answers: ReadonlyArray<AgentQuestionnaireAnswer>,
+  text: string,
+): QuestionnaireStep {
+  const question = questionnaire.questions[answers.length];
+  if (question === undefined)
+    return { kind: "complete", response: { version: 1, answers: [...answers] } };
+  const answer = readQuestionAnswer(question, text.trim());
+  if (typeof answer === "string") return { kind: "asking", answers, note: answer };
+  const next = [...answers, answer];
+  return next.length === questionnaire.questions.length
+    ? { kind: "complete", response: { version: 1, answers: next } }
+    : { kind: "asking", answers: next };
+}
+
+function readQuestionAnswer(
+  question: QuestionnaireQuestion,
+  text: string,
+): AgentQuestionnaireAnswer | string {
+  const min = question.minSelections ?? 1;
+  const max =
+    question.maxSelections ?? (question.selection === "single" ? 1 : question.options.length);
+  const limits =
+    question.selection === "single"
+      ? "Choose one option by number"
+      : `Choose ${min === max ? String(min) : `${String(min)} to ${String(max)}`} options by number`;
+  const writes = question.allowCustom !== false;
+  const refusal = `${limits}${writes ? ", or type your own answer" : ""}.`;
+  if (/^\d+([\s,]+\d+)*$/.test(text)) {
+    const numbers = text.split(/[\s,]+/).map(Number);
+    const selectedOptionIds =
+      numbers.length === 1 && numbers[0] === 0
+        ? []
+        : numbers.map((number) => question.options[number - 1]?.id);
+    const answer = {
+      questionId: question.id,
+      selectedOptionIds: selectedOptionIds.filter((id) => id !== undefined),
+    };
+    return selectedOptionIds.every((id) => id !== undefined) &&
+      questionAnswerIsAllowed(question, answer)
+      ? answer
+      : refusal;
+  }
+  if (!writes) return refusal;
+  const answer = { questionId: question.id, selectedOptionIds: [], customAnswer: text };
+  try {
+    // Work answers carry no path or link; refuse here rather than after the last question.
+    decodeWorkQuestionnaireResponse({ version: 1, answers: [answer] });
+  } catch {
+    return "Work cannot deliver that answer. Leave out paths and links.";
+  }
+  return answer;
+}
+
+export async function answerWorkQuestionnaire(
+  session: OpenedLocalControlSession,
+  request: AgentWorkRequest,
+  response: QuestionnaireResponse,
+): Promise<string | undefined> {
+  return resolveWorkRequest(session, request, { kind: "user-input", answer: response });
+}
+
+async function resolveWorkRequest(
+  session: OpenedLocalControlSession,
+  request: AgentWorkRequest,
+  resolution:
+    | { readonly kind: "approval"; readonly approved: boolean }
+    | { readonly kind: "user-input"; readonly answer: string | QuestionnaireResponse },
+): Promise<string | undefined> {
   const response = await session.send({
     path: "/api/work/requests/commands",
     method: "POST",
@@ -89,4 +216,30 @@ export async function answerWorkRequest(
   if (response.status !== 200 || kind !== "work-request-resolved")
     return refusalMessage(response, failureMessage ?? "The answer was refused.");
   return undefined;
+}
+
+/** The questionnaire's next question as the terminal's request panel shows it. */
+export function workQuestionnaireText(
+  questionnaire: Questionnaire,
+  answers: ReadonlyArray<AgentQuestionnaireAnswer>,
+): string {
+  const question = questionnaire.questions[answers.length];
+  if (question === undefined) return "";
+  const min = question.minSelections ?? 1;
+  const options = question.options.map(
+    (option, index) =>
+      `${String(index + 1)}. ${option.label}` +
+      (option.recommended === true ? " (recommended)" : "") +
+      (option.description === undefined ? "" : ` — ${option.description}`),
+  );
+  const hint =
+    (question.selection === "single" ? "Type a number" : "Type numbers separated by commas") +
+    (min === 0 ? ", 0 for none" : "") +
+    (question.allowCustom !== false ? ", or your own answer" : "") +
+    ", then Enter.";
+  return [
+    `Question ${String(answers.length + 1)} of ${String(questionnaire.questions.length)}: ${question.prompt}`,
+    ...options,
+    hint,
+  ].join("\n");
 }

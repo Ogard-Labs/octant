@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { answerWorkRequest, readWorkRequests } from "./agentWorkRequests";
+import {
+  answerWorkQuestionnaire,
+  answerWorkRequest,
+  readWorkRequests,
+  stepWorkQuestionnaire,
+  workQuestionnaireText,
+} from "./agentWorkRequests";
 import type { LocalControlRequest, OpenedLocalControlSession } from "./localControl";
 
 const threadId = "00000000-0000-4000-8000-000000000001";
@@ -20,33 +26,35 @@ describe("terminal Work requests", () => {
       kind: "opened",
       windowId: "test",
       close: async () => undefined,
-      send: async () => ({
+      send: async (request) => ({
         status: 200,
         body: {
-          requests: [
-            { ...pending, kind: "approval", text: "Run the command?" },
-            {
-              ...pending,
-              kind: "question",
-              text: "Which format?",
-              options: [{ label: "PDF" }],
-            },
-            {
-              mode: "work",
-              projectId,
-              threadId,
-              threadTitle: "Task",
-              requestedAt: "2026-11-16T12:00:00.000Z",
-              kind: "lead-question",
-              text: "What next?",
-            },
-            {
-              ...pending,
-              kind: "approval",
-              threadId: "00000000-0000-4000-8000-000000000004",
-              text: "Other thread",
-            },
-          ],
+          requests: request.path.startsWith("/api/work/requests")
+            ? []
+            : [
+                { ...pending, kind: "approval", text: "Run the command?" },
+                {
+                  ...pending,
+                  kind: "question",
+                  text: "Which format?",
+                  options: [{ label: "PDF" }],
+                },
+                {
+                  mode: "work",
+                  projectId,
+                  threadId,
+                  threadTitle: "Task",
+                  requestedAt: "2026-11-16T12:00:00.000Z",
+                  kind: "lead-question",
+                  text: "What next?",
+                },
+                {
+                  ...pending,
+                  kind: "approval",
+                  threadId: "00000000-0000-4000-8000-000000000004",
+                  text: "Other thread",
+                },
+              ],
         },
       }),
     };
@@ -125,6 +133,7 @@ describe("terminal Work requests", () => {
       send: async (request) => {
         if (request.path === "/api/pending-requests")
           return { status: 200, body: { requests: [approvalInput, questionInput] } };
+        if (request.method === "GET") return { status: 200, body: { requests: [] } };
         seen.push(request);
         return { status: 200, body: { kind: "work-request-resolved" } };
       },
@@ -193,5 +202,168 @@ describe("terminal Work requests", () => {
 
     expect(await answerWorkRequest(empty, approval, "yes")).toContain("refused");
     expect(await answerWorkRequest(refused, approval, "yes")).toContain("already resolved");
+  });
+
+  describe("questionnaires", () => {
+    const questionnaire = {
+      questions: [
+        {
+          id: "format",
+          prompt: "Which format?",
+          selection: "single" as const,
+          options: [
+            { id: "pdf", label: "PDF", recommended: true },
+            { id: "md", label: "Markdown", description: "Plain text" },
+          ],
+          allowCustom: false,
+        },
+        {
+          id: "extras",
+          prompt: "Which extras?",
+          selection: "multiple" as const,
+          options: [
+            { id: "toc", label: "Contents" },
+            { id: "index", label: "Index" },
+            { id: "notes", label: "Notes" },
+          ],
+          minSelections: 0,
+          maxSelections: 2,
+        },
+      ],
+    };
+    const workRequest = {
+      requestId,
+      projectId,
+      threadId,
+      providerInstanceId: "00000000-0000-4000-8000-000000000005",
+      providerSessionId: "00000000-0000-4000-8000-000000000006",
+      providerRequestId: "provider-request",
+      status: "pending",
+      requestedAt: "2026-11-16T12:00:00.000Z",
+      version: 4,
+      detail: {
+        kind: "user-input",
+        prompt: "Choose the export",
+        options: [],
+        questionnaire,
+      },
+    };
+    const questionRow = { ...pending, kind: "question", text: "Choose the export", options: [] };
+
+    it("reads the journaled questionnaire from the Work request route the app uses", async () => {
+      const seen: string[] = [];
+      const session: OpenedLocalControlSession = {
+        kind: "opened",
+        windowId: "test",
+        close: async () => undefined,
+        send: async (request) => {
+          seen.push(request.path);
+          return request.path === "/api/pending-requests"
+            ? { status: 200, body: { requests: [questionRow] } }
+            : { status: 200, body: { requests: [workRequest] } };
+        },
+      };
+
+      const result = await readWorkRequests(session, threadId);
+
+      expect(seen[1]).toBe(`/api/work/requests?projectId=${projectId}&threadId=${threadId}`);
+      expect(result).toMatchObject({ kind: "ready", requests: [{ questionnaire }] });
+    });
+
+    it("refuses to offer a question whose questionnaire cannot be read", async () => {
+      const session: OpenedLocalControlSession = {
+        kind: "opened",
+        windowId: "test",
+        close: async () => undefined,
+        send: async (request) =>
+          request.path === "/api/pending-requests"
+            ? { status: 200, body: { requests: [questionRow] } }
+            : { status: 401, body: { failure: { message: "Work request is unauthorized." } } },
+      };
+
+      expect(await readWorkRequests(session, threadId)).toMatchObject({ kind: "refused" });
+    });
+
+    it("asks each question in turn and submits the whole response once", async () => {
+      expect(workQuestionnaireText(questionnaire, [])).toBe(
+        [
+          "Question 1 of 2: Which format?",
+          "1. PDF (recommended)",
+          "2. Markdown — Plain text",
+          "Type a number, then Enter.",
+        ].join("\n"),
+      );
+      const written = stepWorkQuestionnaire(questionnaire, [], "Word please");
+      expect(written).toMatchObject({ kind: "asking", answers: [], note: expect.any(String) });
+      expect(stepWorkQuestionnaire(questionnaire, [], "3")).toMatchObject({ answers: [] });
+      const first = stepWorkQuestionnaire(questionnaire, [], "2");
+      if (first.kind !== "asking") throw new Error("The questionnaire ended early");
+      expect(first.note).toBeUndefined();
+      expect(workQuestionnaireText(questionnaire, first.answers)).toContain(
+        "Question 2 of 2: Which extras?",
+      );
+      expect(workQuestionnaireText(questionnaire, first.answers)).toContain(
+        "Type numbers separated by commas, 0 for none, or your own answer",
+      );
+      expect(stepWorkQuestionnaire(questionnaire, first.answers, "1, 2, 3")).toMatchObject({
+        kind: "asking",
+        answers: first.answers,
+      });
+      expect(
+        stepWorkQuestionnaire(questionnaire, first.answers, "see https://example.com"),
+      ).toMatchObject({ kind: "asking", note: expect.stringContaining("links") });
+      expect(stepWorkQuestionnaire(questionnaire, first.answers, "0")).toEqual({
+        kind: "complete",
+        response: {
+          version: 1,
+          answers: [
+            { questionId: "format", selectedOptionIds: ["md"] },
+            { questionId: "extras", selectedOptionIds: [] },
+          ],
+        },
+      });
+      const done = stepWorkQuestionnaire(questionnaire, first.answers, "3 1");
+      if (done.kind !== "complete") throw new Error("The questionnaire did not complete");
+
+      const seen: LocalControlRequest[] = [];
+      const session: OpenedLocalControlSession = {
+        kind: "opened",
+        windowId: "test",
+        close: async () => undefined,
+        send: async (request) => {
+          if (request.path === "/api/pending-requests")
+            return { status: 200, body: { requests: [questionRow] } };
+          if (request.method === "GET") return { status: 200, body: { requests: [workRequest] } };
+          seen.push(request);
+          return { status: 200, body: { kind: "work-request-resolved" } };
+        },
+      };
+      const read = await readWorkRequests(session, threadId);
+      const question = read.kind === "ready" ? read.requests[0] : undefined;
+      if (question === undefined) throw new Error("Missing Work question");
+
+      expect(await answerWorkQuestionnaire(session, question, done.response)).toBeUndefined();
+      expect(seen).toEqual([
+        {
+          path: "/api/work/requests/commands",
+          method: "POST",
+          body: {
+            kind: "resolve-work-request",
+            requestId,
+            expectedVersion: 4,
+            resolution: {
+              kind: "user-input",
+              answer: {
+                version: 1,
+                answers: [
+                  { questionId: "format", selectedOptionIds: ["md"] },
+                  { questionId: "extras", selectedOptionIds: ["notes", "toc"] },
+                ],
+              },
+            },
+          },
+        },
+      ]);
+    });
   });
 });

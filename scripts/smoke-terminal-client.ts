@@ -979,3 +979,169 @@ try {
 } finally {
   perf.renderer.destroy();
 }
+
+// A Work questionnaire is answered in the terminal one question at a time and
+// submitted whole through the Work request route the app's thread view uses.
+const workThreadId = "6c000000-0000-4000-8000-000000000001";
+const workProjectId = "6c000000-0000-4000-8000-000000000002";
+const workRequestId = "6c000000-0000-4000-8000-000000000003";
+let workQuestionPending = true;
+const workAnswers: unknown[] = [];
+const workQuestionnaire = {
+  questions: [
+    {
+      id: "format",
+      prompt: "Which export format?",
+      selection: "single",
+      options: [
+        { id: "pdf", label: "PDF", recommended: true },
+        { id: "md", label: "Markdown" },
+      ],
+      allowCustom: false,
+    },
+    {
+      id: "extras",
+      prompt: "Which extras?",
+      selection: "multiple",
+      options: [
+        { id: "toc", label: "Contents" },
+        { id: "index", label: "Index" },
+      ],
+    },
+  ],
+};
+const workSession = {
+  kind: "opened" as const,
+  windowId: "test",
+  close: async () => {},
+  send: async (request: { path: string; method?: string; body?: unknown }) => {
+    if (request.path === "/api/projects/bootstrap")
+      return { status: 200, body: { active: [], archived: [], availability: [], memory: [] } };
+    if (request.path === "/api/work/threads/bootstrap")
+      return {
+        status: 200,
+        body: {
+          threads: [
+            {
+              id: workThreadId,
+              projectId: workProjectId,
+              title: "Export report",
+              lifecycle: "active",
+              providerInstanceId: providerId,
+              modelId: "test-model",
+              version: 1,
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+        },
+      };
+    if (request.path === `/api/work/turns/transcript/${workThreadId}`)
+      return { status: 200, body: { threadId: workThreadId, turns: [] } };
+    if (request.path.startsWith("/api/native-harness/sessions/"))
+      return { status: 200, body: { view: null } };
+    if (request.path === "/api/pending-requests")
+      return {
+        status: 200,
+        body: {
+          requests: workQuestionPending
+            ? [
+                {
+                  mode: "work",
+                  projectId: workProjectId,
+                  threadId: workThreadId,
+                  threadTitle: "Export report",
+                  requestedAt: now,
+                  kind: "question",
+                  text: "Choose the export",
+                  options: [],
+                  answer: { requestId: workRequestId, expectedVersion: 2 },
+                },
+              ]
+            : [],
+        },
+      };
+    if (request.path === `/api/work/requests?projectId=${workProjectId}&threadId=${workThreadId}`)
+      return {
+        status: 200,
+        body: {
+          requests: workQuestionPending
+            ? [
+                {
+                  requestId: workRequestId,
+                  projectId: workProjectId,
+                  threadId: workThreadId,
+                  providerInstanceId: providerId,
+                  providerSessionId: "6c000000-0000-4000-8000-000000000004",
+                  providerRequestId: "request-1",
+                  detail: {
+                    kind: "user-input",
+                    prompt: "Choose the export",
+                    options: [],
+                    questionnaire: workQuestionnaire,
+                  },
+                  status: "pending",
+                  requestedAt: now,
+                  version: 2,
+                },
+              ]
+            : [],
+        },
+      };
+    if (request.path === "/api/work/requests/commands") {
+      workAnswers.push(request.body);
+      workQuestionPending = false;
+      return { status: 200, body: { kind: "work-request-resolved" } };
+    }
+    return { status: 404, body: { message: "Unavailable" } };
+  },
+};
+const workRender = await createTestRenderer({ width: 120, height: 30 });
+try {
+  const screen = mountAgentScreen(tui, workRender.renderer, paletteFor(undefined, "dark"), {
+    session: workSession,
+    threadId: workThreadId,
+    mode: "work",
+    quiet: true,
+  });
+  await screen.refresh();
+  const running = screen.run();
+  await workRender.waitForFrame((frame) => frame.includes("Question 1 of 2: Which export format?"));
+  if (!workRender.captureCharFrame().includes("1. PDF (recommended)"))
+    throw new Error("The questionnaire's options were not shown.");
+  await workRender.mockInput.typeText("Word");
+  workRender.mockInput.pressEnter();
+  await workRender.waitForFrame((frame) => frame.includes("Choose one option by number."));
+  await workRender.mockInput.typeText("2");
+  workRender.mockInput.pressEnter();
+  await workRender.waitForFrame((frame) => frame.includes("Question 2 of 2: Which extras?"));
+  if (workAnswers.length !== 0) throw new Error("A partial questionnaire was submitted.");
+  await workRender.mockInput.typeText("1,2");
+  workRender.mockInput.pressEnter();
+  await workRender.waitFor(() => workAnswers.length === 1);
+  await workRender.waitForFrame((frame) => !frame.includes("Which extras?"));
+  if (
+    JSON.stringify(workAnswers[0]) !==
+    JSON.stringify({
+      kind: "resolve-work-request",
+      requestId: workRequestId,
+      expectedVersion: 2,
+      resolution: {
+        kind: "user-input",
+        answer: {
+          version: 1,
+          answers: [
+            { questionId: "format", selectedOptionIds: ["md"] },
+            { questionId: "extras", selectedOptionIds: ["toc", "index"] },
+          ],
+        },
+      },
+    })
+  )
+    throw new Error(`Unexpected questionnaire answer: ${JSON.stringify(workAnswers[0])}`);
+  workRender.mockInput.pressCtrlC();
+  await running;
+  console.log("Answered a Work questionnaire one question at a time");
+} finally {
+  workRender.renderer.destroy();
+}

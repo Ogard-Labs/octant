@@ -2554,6 +2554,20 @@ definition; settlement, cancellation, replacement or recovery invalidates them.
 Closing or reloading the app screen drops these drafts. They are never journaled,
 exported in diagnostics or submitted by restoration.
 
+In the terminal (`octant agent`) a Work questionnaire is answered in place
+(maintainer decision, 2026-11-22). The request panel shows one question at a
+time with its numbered options, labelled recommendations, and descriptions. The
+person types option numbers, `0` where the question allows no choice, or a
+written alternative where the question allows one. A line the question cannot
+accept is refused and the same question is asked again. Earlier answers are
+kept only in memory and only for that request. After the last question the
+terminal submits the complete response once, through the same authenticated
+Work request route the app uses. The host validates it as it would an answer
+from the app. A refused submission starts again from the first question. The
+terminal offers no comment field because the comment is optional. If the
+terminal cannot read the questionnaire's definition, it does not offer the
+question at all.
+
 Submitted questionnaires collapse into an expandable, readable summary of
 the questions, selected labels, written answers, and comment. The journal
 keeps the definition and response so the summary survives reopening. Expired,
