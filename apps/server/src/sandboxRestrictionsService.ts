@@ -361,7 +361,7 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
               : [
                   "Windows Strict requires the packaged octant-windows-confine.exe launcher and private host storage.",
                 ]),
-            "Windows Strict phase 1 works at Full access with a verified native Codex .exe installation inside an AppContainer and Job Object. Other providers, lower access levels, command shims, proxy-only network limits, and Octant-operated tools refuse by name.",
+            "Windows Strict phase 1 works at Full access with a verified native Codex .exe installation, whose commands run in Codex's own elevated Windows sandbox after its one-time setup. Other providers, lower access levels, command shims, proxy-only network limits, and Octant-operated tools refuse by name.",
           ]
         : []),
       ...(this.#dependencies.enrollmentEnabled === false

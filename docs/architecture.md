@@ -22319,14 +22319,78 @@ user-added packages through the published seams and the credential broker.
 ### Windows Strict, phase 1
 
 **Partly built.** Phase 1 makes the one shared Strict control accepted on native
-Windows for Work and Code at Full access on a verified native Codex runtime,
-confined by the packaged AppContainer and kill-on-close Job Object launcher
-(`octant-windows-confine.exe`) with durable pre-ACL lease recovery. Hosted
-Windows CI covers the launcher, ACL/profile recovery, and native Codex smoke;
-Gate 5 real standard-user Windows 11 desktop verification remains pending before
-promoting the status to Built. This reframes the earlier proposal to keep the
-sandbox at Full access on Windows as a separate choice (maintainer decision,
-2026-11-21).
+Windows for Work and Code at Full access on a verified native Codex runtime.
+The commands Codex runs are confined by Codex's own elevated Windows sandbox,
+with the thread's folders as its writable roots and every protected store
+denied (see [Codex's own sandbox](#codexs-own-sandbox-on-windows) below). The
+packaged AppContainer and kill-on-close Job Object launcher
+(`octant-windows-confine.exe`), with durable pre-ACL lease recovery, now
+confines only Codex catalog reads under Strict. Hosted Windows CI covers the
+launcher, ACL/profile recovery, and native Codex smoke; Gate 5 real
+standard-user Windows 11 desktop verification remains pending before promoting
+the status to Built. This reframes the earlier proposal to keep the sandbox at
+Full access on Windows as a separate choice (maintainer decision, 2026-11-21).
+
+#### Codex's own sandbox on Windows
+
+**Rule (maintainer decision, 2026-11-22).** Under Windows Strict, Octant no
+longer confines the Codex process. The process runs with its own home, sign-in
+and history, and is started with Codex's elevated Windows sandbox selected
+(`windows.sandbox = "elevated"`). Every thread hands that sandbox a named
+permissions profile: the thread's bound folder, extra folders and a chosen
+policy's writable folders as its only writable roots, and every store the
+secret guard protects denied to its commands, the account's own `auth.json`
+included (the process reads it outside the sandbox; no command needs it).
+Turns run with no approvals inside it, and a command it refuses fails rather
+than leaving it. Before a thread starts, the server asks Codex
+`windowsSandbox/readiness`; anything but `ready`, an older Codex without that
+request, a Codex before permission profiles, or a protected store Codex's
+globs cannot name refuses the thread by name before it starts. The two version
+checks guard different things. Permission profiles have a measured floor:
+0.169.0 is the first release that took a named profile from a thread's config
+and refused its `deny` paths (the same floor as the guarded levels outside
+Strict, `CODEX_PERMISSION_PROFILES_RELEASE`), and without a profile the deny
+list cannot reach Codex at all. The elevated sandbox's own floor is not pinned,
+so it is never inferred from a version: the readiness request is the check, and
+a Codex that cannot answer it is refused. Nothing
+retries without the sandbox, and Codex still works with Strict off. A writable
+folder that overlaps `CODEX_HOME` and a profile-root `CODEX_HOME` keep
+refusing: Codex leaves its home out of its commands' writable roots
+(`filter_sensitive_write_roots`) only when the home is not itself granted. A read-only
+folder beneath a writable one refuses too: the profile carries writable roots
+and denials only, so it could not stay read-only. So does a writable folder
+whose name holds a character Codex reads as a pattern (`*?[]{}`), which Codex
+cannot take literally, and a `CODEX_HOME` at or inside a location Strict
+denies to everyone (a runtime's own sign-in folder excepted), which cannot be
+carved around without also denying the helpers Codex's commands start from.
+Codex's `/review` runs in the same profile, so the reviewer reads no protected
+file either.
+
+**Limit: Git metadata.** The profile extends Codex's built-in workspace
+profile, which keeps each writable root's `.git` read-only. Commands can edit
+the checkout but cannot stage or commit, and with no approvals that fails
+rather than asking. This is kept on purpose: a writable `.git` would let a
+confined command plant hooks that the person's own unconfined Git later runs.
+Git operations stay with the person, or with Strict off. Gate 5 confirms the
+behavior on a real machine.
+
+**Exception to the no-administrator rule.** The elevated backend runs commands
+as Codex's own local sandbox accounts, created by Codex's one-time setup, which
+asks an administrator to approve it. That approval is Codex's own setup and is
+never requested by Octant. A person who has not done it, or cannot, gets the
+refusal "Windows Strict runs Codex's commands in Codex's own Windows sandbox,
+and its one-time setup has not been done" with the way forward.
+
+**Rationale.** Confining the whole Codex process forced shared `CODEX_HOME`
+writes: Codex writes rollouts into date folders every thread shares, takes
+thread writer locks in one shared folder, and compresses other threads' old
+rollouts. Anything the process could write, its commands could write too, so a
+confined command could change or delete another thread's history (a finding on
+the phase 1 build). Confining only the commands matches how Codex itself
+confines them, and how other apps that run Codex pass its sandbox settings
+through. The unelevated backend is not used: its restricted token cannot make
+deny-read entries take part in read checks, and it refuses a profile with
+deny-read paths, so protected stores would stay readable.
 
 **Two postures, one control.** Outside Strict the provider holds the level with
 no Octant sandbox, on Windows as on macOS and Linux
@@ -22350,13 +22414,13 @@ the Strict control show the server's answer: on a Windows Strict thread they
 offer Full access only for a verified Codex runtime and show every other level,
 and Strict on another provider, unavailable with the refusal.
 
-| Windows Strict case                                                                                     | Phase 1 result                                                                                                                                                                                                           |
-| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Work or Code at Full access on a verified native Codex app-server executable and version                | Accepted. Native shell commands and edits run inside the job and AppContainer. An incompatible build, account layout or policy refuses: "Codex cannot run under Strict with this Windows setup. No runtime was started." |
-| Chat, Plan and every level below Full access, on any provider                                           | Keeps refusing by name ("Strict needs a sandbox Windows doesn't have yet").                                                                                                                                              |
-| Claude Code, OpenCode, Pi, ACP agents, Octant Harness, other runtimes or provider shims, at every level | Keeps refusing by name before probe or spawn. Admission is per runtime and version, not per family of executable files.                                                                                                  |
-| Octant-operated file reads and writes, terminals, checks, Project actions, language and debug processes | Keep today's refusal under Strict, unadvertised and enforced on direct tool and command routes before host-side I/O or spawn: "This operation cannot run inside the Windows sandbox yet."                                |
-| The legacy Full-access-only sandbox choice without Strict                                               | Keeps refusing by name. It never returns as a Windows control.                                                                                                                                                           |
+| Windows Strict case                                                                                     | Phase 1 result                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Work or Code at Full access on a verified native Codex app-server executable and version                | Accepted. Native shell commands and edits run inside Codex's own elevated sandbox ([rule](#codexs-own-sandbox-on-windows)). Missing sandbox setup, an incompatible build, account layout or policy refuses by name before a thread starts. |
+| Chat, Plan and every level below Full access, on any provider                                           | Keeps refusing by name ("Strict needs a sandbox Windows doesn't have yet").                                                                                                                                                                |
+| Claude Code, OpenCode, Pi, ACP agents, Octant Harness, other runtimes or provider shims, at every level | Keeps refusing by name before probe or spawn. Admission is per runtime and version, not per family of executable files.                                                                                                                    |
+| Octant-operated file reads and writes, terminals, checks, Project actions, language and debug processes | Keep today's refusal under Strict, unadvertised and enforced on direct tool and command routes before host-side I/O or spawn: "This operation cannot run inside the Windows sandbox yet."                                                  |
+| The legacy Full-access-only sandbox choice without Strict                                               | Keeps refusing by name. It never returns as a Windows control.                                                                                                                                                                             |
 
 Every other Windows Strict case is admitted one runtime at a time, each only
 after that runtime passes the same gates on Windows, and each admission updates
@@ -22365,7 +22429,10 @@ run the file or command effect under the same or narrower OS-enforced grants; a
 lexical check followed by host-authority I/O, a host tool bridge, or the
 person's separate terminal is not equivalent.
 
-**Boundary.** The server resolves the effective turn, bound checkout or Work
+**Boundary.** For a Codex thread, [Codex's own sandbox](#codexs-own-sandbox-on-windows)
+replaces the launcher described in this paragraph and the next; the launcher
+rules still govern Strict catalog reads and any later runtime admitted through
+it. The server resolves the effective turn, bound checkout or Work
 folder, explicit grants, protected locations, network policy and provider before
 starting a thread runtime or accepting an executable tool operation. A window,
 catalog probe or saved preference cannot grant launch authority. The existing
@@ -22396,7 +22463,11 @@ string comparison or a one-time scan is not proof of that invariant. Refuse a
 root or layout if inherited ACLs, aliases or concurrent changes cannot preserve
 it. Do not solve this by granting a broader parent directory.
 
-**Codex admission.** Admit only an explicitly verified native Codex app-server
+**Codex admission.** For a Codex thread this paragraph is superseded by
+[Codex's own sandbox](#codexs-own-sandbox-on-windows): the app-server starts
+directly, and its commands, not the process, are confined by Codex's sandbox.
+What follows still governs the confined catalog read and any later runtime
+admitted through the launcher. Admit only an explicitly verified native Codex app-server
 executable and version, told the sandbox is external as Strict tells it on other
 platforms, with no routine approvals inside the boundary beyond the asks Strict
 keeps everywhere. The admitted program must start and use shell and edit from
@@ -22457,13 +22528,13 @@ folders and synthetic protected-file fixtures for denials. Capture exact source
 and package identity, Windows version, account privilege, provider version,
 case and outcome; an administrator-hosted runner is not a standard-user smoke.
 
-| Gate                       | Evidence required before accepting Strict on Windows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1. Admission and defaults  | Windows server CI tests Code and Work at Full access with Strict on and off, inherited On, explicit Off and old journal absent, and asserts that Strict below Full access, in Chat and Plan, on every other provider, and the legacy Full-access-only choice without Strict still refuse by name. With Strict off, existing Full access and the levels below it launch and ask as before. Provider tests cover a supported executable fixture and unsupported runtime, executable, policy and missing-launcher cases; refusal reaches the caller and no unrestricted probe, spawn or retry occurs.            |
-| 2. Native boundary         | Windows launcher CI proves in-root and explicit-grant effects succeed, read-only paths stay read-only, ungranted sibling writes and synthetic protected-file reads are denied, and access remains denied for child processes and junction destinations. Check unsafe or changed grant identities, unsupported policy overlaps and network modes, and no partial grants on setup failure.                                                                                                                                                                                                                      |
-| 3. Octant operations       | Windows server tests assert terminal, file and other tool requests stay unavailable in advertised capabilities under Strict and fail before host-side I/O or spawn when sent directly. Compare the corresponding behavior with Strict off.                                                                                                                                                                                                                                                                                                                                                                    |
-| 4. Lifecycle and recovery  | Windows CI switches Strict off, on and off again, changes grant authority, and interrupts both initialization and a live turn. Verify new process identity, whole-job exit on Stop and owner loss, normal cleanup, interrupted recovery on restart, and preservation of unrelated ACLs and another live launch. Include a bounded failure when cleanup cannot be proved.                                                                                                                                                                                                                                      |
-| 5. Windows 11 release gate | On an ordinary Windows 11 account with the candidate package and real supported Codex, run a complete Strict turn at Full access in Code and Work: command and edits in the checkout and an explicit grant without routine prompts; verify synthetic sibling/protected denials, stop and descendant/ACL/profile cleanup, the refusals for other levels and providers, and Full access and Codex's native Auto with Strict off. Record bounded grant/cleanup timings for a large checkout. Track this smoke once in the maintainer acceptance list. No support claim until this and the Windows CI gates pass. |
+| Gate                       | Evidence required before accepting Strict on Windows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Admission and defaults  | Windows server CI tests Code and Work at Full access with Strict on and off, inherited On, explicit Off and old journal absent, and asserts that Strict below Full access, in Chat and Plan, on every other provider, and the legacy Full-access-only choice without Strict still refuse by name. With Strict off, existing Full access and the levels below it launch and ask as before. Provider tests cover a supported executable fixture and unsupported runtime, executable, policy and missing-launcher cases; refusal reaches the caller and no unrestricted probe, spawn or retry occurs.                                                                                                                                    |
+| 2. Native boundary         | Windows launcher CI proves in-root and explicit-grant effects succeed, read-only paths stay read-only, ungranted sibling writes and synthetic protected-file reads are denied, and access remains denied for child processes and junction destinations. Check unsafe or changed grant identities, unsupported policy overlaps and network modes, and no partial grants on setup failure.                                                                                                                                                                                                                                                                                                                                              |
+| 3. Octant operations       | Windows server tests assert terminal, file and other tool requests stay unavailable in advertised capabilities under Strict and fail before host-side I/O or spawn when sent directly. Compare the corresponding behavior with Strict off.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 4. Lifecycle and recovery  | Windows CI switches Strict off, on and off again, changes grant authority, and interrupts both initialization and a live turn. Verify new process identity, whole-job exit on Stop and owner loss, normal cleanup, interrupted recovery on restart, and preservation of unrelated ACLs and another live launch. Include a bounded failure when cleanup cannot be proved.                                                                                                                                                                                                                                                                                                                                                              |
+| 5. Windows 11 release gate | On an ordinary Windows 11 account with the candidate package and real supported Codex, after Codex's one-time elevated sandbox setup, run a complete Strict turn at Full access in Code and Work, and check the named refusal on an account where that setup was not done: command and edits in the checkout and an explicit grant without routine prompts; verify synthetic sibling/protected denials, stop and descendant/ACL/profile cleanup, the refusals for other levels and providers, and Full access and Codex's native Auto with Strict off. Record bounded grant/cleanup timings for a large checkout. Track this smoke once in the maintainer acceptance list. No support claim until this and the Windows CI gates pass. |
 
 Stop and ask the maintainer if this would require administrator rights, a
 driver or privileged helper; change behavior with Strict off; weaken the

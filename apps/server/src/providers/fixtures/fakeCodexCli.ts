@@ -290,23 +290,6 @@ if (process.argv.slice(2).join(" ") === "--version") {
                                         rolloutPath,
                                         `${JSON.stringify({ threadId, model, cwd, turns: 1 })}\n`,
                                       );
-                                      // Confirm shared startup config and archived sessions stay unwritable.
-                                      for (const protectedPath of [
-                                        join(codexHome, "config.toml"),
-                                        join(codexHome, "archived_sessions", "archived.jsonl"),
-                                      ]) {
-                                        try {
-                                          appendFileSync(protectedPath, "\n# poisoned\n");
-                                          return {
-                                            __rpcError: {
-                                              code: -32000,
-                                              message: `unexpected write succeeded: ${protectedPath}`,
-                                            },
-                                          };
-                                        } catch {
-                                          // Expected: read-only under Windows Strict.
-                                        }
-                                      }
                                     }
                                     return {
                                       thread: { id: threadId },

@@ -1,0 +1,97 @@
+name: One pull request per issue
+
+# AGENTS.md: one issue gets one branch and one pull request. In November 2026
+# one issue had about 35 open slice pull requests, and every one ran the full
+# CI. This check fails a pull request that delivers an issue another open pull
+# request already delivers, unless the two are layers of the same stack.
+#
+# A pull request declares what it delivers on one description line that
+# starts with "Delivers:" (the PR template carries it), for example
+# "Delivers: Fixes OCT-123" or "Delivers: Part of OCT-123, OCT-124". Every
+# issue on that line counts. Nothing else in the title or description does:
+# prose also cites the maintainer-actions issue, quotes examples, and says
+# what a pull request no longer does, and reading it flagged unrelated pull
+# requests.
+#
+# Not a required check: a maintainer can still merge a deliberate exception.
+# Closing the other pull request does not rerun this one; push, edit the
+# description, or rerun the job to clear a stale failure.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-per-issue-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: One pull request per issue
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Refuse a second open pull request for the same issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_OWNER: ${{ github.event.pull_request.head.repo.owner.login }}
+          HEAD: ${{ github.event.pull_request.head.ref }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          repo_owner="${REPO%%/*}"
+          delivered() {
+            { grep -iE '^[[:space:]]*(\*\*)?delivers(\*\*)?[[:space:]]*:' || true; } \
+              | grep -oE 'OCT-[0-9]+' | sort -u || true
+          }
+          mine=$(printf '%s\n' "$BODY" | delivered)
+          if [ -z "$mine" ]; then
+            echo "::warning::Add a description line 'Delivers: Fixes OCT-123' (or 'Part of OCT-123' for one layer of a stack) naming the issue this pull request delivers."
+            exit 0
+          fi
+          echo "Delivers: $(echo $mine)"
+
+          gh pr list --repo "$REPO" --state open --limit 500 \
+            --json number,body,headRefName,baseRefName,headRepositoryOwner > "$RUNNER_TEMP/open.json"
+
+          # Layers of one linear stack legitimately share an issue. Walk each
+          # pull request's base chain through open pull requests; two pull
+          # requests are one stack when one sits in the other's chain.
+          # Siblings branched from the same parent are not, and still fail.
+          # A branch is "owner:name", so a fork's branch named like one here
+          # (main included) never counts as that branch.
+          declare -A base_of
+          while IFS=$'\t' read -r h b; do base_of["$h"]="$b"; done < <(jq -r --arg o "$repo_owner" \
+            '.[] | [((.headRepositoryOwner.login // "") + ":" + .headRefName), ($o + ":" + .baseRefName)] | @tsv' \
+            "$RUNNER_TEMP/open.json")
+          me="${HEAD_OWNER}:${HEAD}"
+          base_of["$me"]="${repo_owner}:${BASE}"
+          chain() {
+            local ref="$1" depth=0
+            while [ -n "$ref" ] && [ "$depth" -lt 50 ]; do
+              echo "$ref"; ref="${base_of[$ref]:-}"; depth=$((depth + 1))
+            done
+          }
+          my_chain=$(chain "$me")
+
+          failed=0
+          while read -r other; do
+            n=$(jq -r .number <<<"$other")
+            [ "$n" = "$NUMBER" ] && continue
+            other_head=$(jq -r '(.headRepositoryOwner.login // "") + ":" + .headRefName' <<<"$other")
+            if grep -qxF "$other_head" <<<"$my_chain" || chain "$other_head" | grep -qxF "$me"; then continue; fi
+            theirs=$(jq -r '.body // ""' <<<"$other" | delivered)
+            shared=$(comm -12 <(echo "$mine") <(echo "$theirs") | paste -sd, -)
+            if [ -n "$shared" ]; then
+              echo "::error::#$n is already open for ${shared}. Push this work to #$n's branch, or stack on it, instead of opening another pull request."
+              failed=1
+            fi
+          done < <(jq -c '.[]' "$RUNNER_TEMP/open.json")
+          exit "$failed"

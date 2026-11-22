@@ -132,7 +132,7 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
     }, 60_000);
 
     it.runIf(windowsConfineLauncher !== undefined)(
-      "starts native Codex at Full access under Windows Strict inside the AppContainer and Job Object, cleans up durable leases, and refuses .cmd shims",
+      "starts native Codex at Full access under Windows Strict as its own process with Codex's sandbox named, keeps the catalog read in the AppContainer, and refuses .cmd shims",
       async () => {
         const root = realpathSync.native(mkdtempSync(join(tmpdir(), "octant-codex-strict-win-")));
         const leaseDir = realpathSync.native(mkdtempSync(join(tmpdir(), "octant-codex-leases-")));
@@ -178,9 +178,9 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
           },
         });
         // Seed shared startup config, archived history, and the rollout-persistence
-        // marker inside CODEX_HOME so the confined turn proves config and archived
-        // sessions stay unwritable while active rollout state persists across fresh
-        // Windows Strict AppContainer processes.
+        // marker inside CODEX_HOME. The thread's process keeps its own home, so
+        // its rollout persists across fresh Windows Strict processes; Codex's own
+        // sandbox, not this process, is what keeps commands out of that home.
         writeFileSync(join(codexHome, ".persist-rollout"), "1\n");
         writeFileSync(join(codexHome, "config.toml"), 'model = "gpt-5.4"\n');
         mkdirSync(join(codexHome, "archived_sessions"), { recursive: true });
@@ -242,8 +242,8 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
           '{"archived":true}\n',
         );
 
-        // Fresh follow-up process in a brand-new AppContainer SID resumes the
-        // saved rollout written by Turn 1 and appends its own follow-up record.
+        // A fresh follow-up process resumes the saved rollout written by Turn 1
+        // and appends its own follow-up record.
         const resumed = await Effect.runPromise(
           Effect.either(
             Effect.scoped(
