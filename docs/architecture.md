@@ -21461,6 +21461,10 @@ documents its authority, privacy, and release boundaries):
   pull request, which needs no approval (maintainer request, 2026-11-12).
   The rest of the allowed
   actions are not built yet.
+- Short video clips from a video model the person set up, through a card that
+  always asks and shows the price, on the person's own provider key with no
+  Octant-operated service ([Video generation](design/video-generation.md);
+  designed, not built, awaiting maintainer approval).
 - Linked external secret stores, built for the 1Password CLI
   ([linked secret stores](#linked-secret-stores)): a pointer in the credential
   broker, the value fetched at use and never kept.

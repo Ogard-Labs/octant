@@ -43,7 +43,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 5         | 3       | 2            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
-| [Providers](#providers)                                                               | 10        | 8       | 2            | 0                   |
+| [Providers](#providers)                                                               | 11        | 8       | 2            | 1                   |
 | [Context and usage](#context-and-usage)                                               | 10        | 8       | 2            | 0                   |
 | [Native harness](#native-harness)                                                     | 7         | 5       | 2            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **295**   | **178** | **113**      | **4**               |
+| **All areas**                                                                         | **296**   | **178** | **113**      | **5**               |
 
 ## Principles and hard lines
 
@@ -1664,6 +1664,18 @@ Image generation is a journaled job with exactly one profile, and voice is an ap
 - In attended Work and Code outside Plan, an agent may turn text (up to 4,096 characters, as MP3, WAV or Opus) into a new confined audio file in the turn's folder (the Work folder or the Code thread's checkout, including a linked worktree) using the configured Voice synthesis endpoint and voice after a shared offer that also covers the file write. Remembering applies only to the same thread, endpoint, model and voice in host memory and skips the card only at Accept edits and Full access (Ask first and Work Auto still ask). Agent narration leaves a slot for local read-aloud. [Architecture: Providers](../architecture.md#providers)
 
 Status: Partly built. Since: —; agent images in every mode 2026-11-07. Detail: [Architecture: Providers](../architecture.md#providers).
+
+### Video generation
+
+Short video clips run as a journaled job on the person's own Gemini API key, after a card in the thread that always asks and shows the price (design, 2026-11-22; awaiting maintainer approval).
+
+- Gemini Omni Flash (`gemini-omni-1.2-flash`) is the only provider at first: OpenAI shut its Videos API down on 2026-09-24, and Google shut down the Veo 3.1 previews in the Gemini API on 2026-10-22.
+- The card shows duration × the published per-second rate before Generate; video never offers "Don't ask again", and Full access still asks. Plan, Side Chats and unattended turns are never offered the tool.
+- Clips are 3–10 seconds, at most 1080p and 200 MB, with one job per host and a 10-minute job time. A host-wide Video spend per day ceiling (default $5.00) applies on top of thread and Project ceilings, settled from the provider's token count.
+- Clips are stored beside generated images, exported and deleted with their thread, and the provider's stored interaction is deleted as soon as the clip is kept. Paired devices watch and download clips but cannot answer a video card.
+- After a restart, a running job with a recorded provider id resumes; one without settles at its estimate as interrupted.
+
+Status: Designed, not built. Since: 2026-11-22. Detail: [Video generation](video-generation.md).
 
 ### Provider reach Octant no longer narrows
 
