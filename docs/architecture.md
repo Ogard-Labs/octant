@@ -18555,10 +18555,16 @@ approval-gated` command that undoes it. The terminal shows no one-time
     begins only at the host's terminal, so it is the local person's. A device
     is named by its own id in every record, a restricted device's included;
     a second test refuses a module that writes a device's actor under any
-    other id. Not built yet: a Code operation's own events are journaled as
-    the system, for a local window as for a device (the records it writes for
-    the person name the device); cancelling a connector sign-in that is still
-    waiting names no device.
+    other id. A Code operation's own events name whoever started it, a local
+    window or a paired device: what the request journals names its caller,
+    and what the operation journals after answering (a turn's streamed
+    output, a terminal's) names whoever its first event names. An operation
+    the host starts by itself (a routine, a recovery) and what the host
+    settles by itself after a restart (a turn the restart cut off) are the
+    system's. Cancelling a connector sign-in that is still waiting, by
+    signing out or by removing the server, names whoever cancelled it, never
+    whoever began the attempt. Not built yet: adopting a session started
+    outside Octant journals its records as the system.
 
   A hub acting on its spoke, or a spoke
   delegating to another spoke, is such a remote principal on the receiving

@@ -5953,6 +5953,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         operationId: owner.operationId,
         expectedCursor: owner.cursor,
         event: { kind: "operation-state", state: "interrupted", failure },
+        // The restart, not the turn's starter, ended it.
+        journaledAs: "host",
       });
     } catch {
       return false;
