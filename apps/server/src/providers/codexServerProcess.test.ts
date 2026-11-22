@@ -364,6 +364,13 @@ describe.skipIf(process.platform === "win32")("Codex on a server Project's serve
     expect(slashed.status === "found" ? slashed.denied : []).toContain(
       "/home/build/.claude/.credentials.json",
     );
+    // A `CODEX_HOME` that is the login's home exempts no other provider.
+    const sharedHome = await readCodexProtectedSignInsOnServer(
+      placementWith("Linux\n/home/build\n/home/build\n"),
+    );
+    expect(sharedHome.status === "found" ? sharedHome.denied : []).toContain(
+      "/home/build/.claude/.credentials.json",
+    );
     const relative = await readCodexProtectedSignInsOnServer(
       placementWith("Linux\nhome/build\n\n"),
     );

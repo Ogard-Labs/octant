@@ -286,7 +286,9 @@ app-server --listen stdio://` after `codex --version` there; for Claude Code,
     `uname -s`, and `$CODEX_HOME`) on the server and resolves the secret
     guard's Provider sign-ins group for it (Claude's `~/.claude` credentials,
     other providers' auth files, after the person's Protected files choice),
-    leaving out Codex's own home and anything of this host. Those paths go to
+    leaving out Codex's own home (only when it is a folder of its own, not
+    the login's home or a folder holding it) and anything of this host. Full
+    access runs no sandbox there, so no list is read for it. Those paths go to
     Codex as `deny` entries in the thread's permissions profile. A Codex there
     older than the first release that takes a profile (0.169.0) is refused at
     those levels, naming the server and the release, rather than run with the
@@ -298,7 +300,7 @@ app-server --listen stdio://` after `codex --version` there; for Claude Code,
     sign-in. Full access carries no such list, as Full access is no sandbox.
     Plan refuses Codex on a server whenever the list is not empty, saying why
     and pointing to Guarded, and the composer's first notice for Codex on a
-    server says so: Codex's built-in read-only sandbox has no deny
+    server says Plan isn't available while those sign-ins are protected: Codex's built-in read-only sandbox has no deny
     field, and the only profile Octant has measured Codex taking extends
     `:workspace`, which can write the folder, so nothing read-only can carry
     the list.

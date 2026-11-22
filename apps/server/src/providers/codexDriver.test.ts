@@ -3247,6 +3247,34 @@ describe("Codex execution authority and approvals", () => {
     expect(Exit.isFailure(started)).toBe(true);
     expect(f.calls.find(({ method }) => method === "thread/start")).toBeUndefined();
   });
+  it("starts Full access for Codex on a server with no sign-in list, since it runs no sandbox there", async () => {
+    const f = fixture({ version: "0.170.0" });
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      makeCodexDriver(f.options({ platform: "linux" }))
+        .acquire({
+          instanceId,
+          projectRoot,
+          mode: "code",
+          serverPlacement: {
+            serverName: "devbox",
+            start: () => ({ status: "unreachable", message: "Not reached." }),
+            run: async () => ({ status: "unreachable", message: "Not reached." }),
+          },
+        })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    const started = await Effect.runPromiseExit(
+      connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    expect(Exit.isSuccess(started)).toBe(true);
+  });
 
   it("refuses Plan for Codex on a server, whose read-only sandbox cannot deny the login's other sign-ins", async () => {
     const f = fixture({

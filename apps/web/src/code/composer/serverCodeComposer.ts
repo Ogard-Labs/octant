@@ -88,10 +88,11 @@ export function serverPlacementNotice(
   driverKind?: string,
 ): string {
   // Codex's read-only sandbox can't deny other providers' sign-ins on the
-  // server, so the server refuses its Plan there.
+  // server, so the server refuses its Plan there unless the person removed
+  // the Provider sign-ins group; the composer does not read that choice.
   const plan =
     driverKind === "codex"
-      ? `Its sandbox is ${provider}'s own, and Plan isn't available there (use Guarded instead), since ${provider}'s read-only sandbox can't keep other providers' sign-ins on ${server} out of reach`
+      ? `Its sandbox is ${provider}'s own, and Plan isn't available there while other providers' sign-ins are protected (use Guarded instead), since ${provider}'s read-only sandbox can't keep them out of reach`
       : `Its sandbox and plan mode are ${provider}'s own`;
   return `${provider} runs on ${server} as itself. ${plan}; Octant can't sandbox anything on that server. Its requests to its model leave from ${server}, not from this computer, so this computer's network limits don't cover them. Approvals, Stop and the thread's history stay on this computer.`;
 }

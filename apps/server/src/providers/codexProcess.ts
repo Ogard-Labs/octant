@@ -1695,6 +1695,7 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
             placement: server,
             octantVersion: resolved.octantVersion,
             signIns: serverSignIns,
+            sandboxed: requested.executionPolicy !== "full-access",
             args: (version) =>
               codexAppServerArgs(version, {
                 ...(requested.ownSubagents === true ? { ownSubagents: true } : {}),

@@ -2945,6 +2945,9 @@ function makeConnection(
     }) => {
       if (
         serverPlacement === undefined ||
+        // Full access on a server runs with no sandbox (its opt-in sandbox is
+        // refused there), so it carries no list.
+        input.executionPolicy === "full-access" ||
         sessionSandbox(input).kind !== "native" ||
         input.fullAccessSandbox === true
       ) {

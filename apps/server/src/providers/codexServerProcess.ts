@@ -128,8 +128,12 @@ export async function readCodexProtectedSignInsOnServer(
   if (serverHome === "") return unreadable;
   const inside = (path: string, folder: string) => path === folder || path.startsWith(`${folder}/`);
   const codexHome = posix.isAbsolute(codexHomeSetting)
-    ? posix.normalize(codexHomeSetting)
+    ? posix.normalize(codexHomeSetting).replace(/(?<=.)\/+$/, "")
     : posix.join(serverHome, ".codex");
+  // Codex's own sign-in is left to it only when its home is a folder of its
+  // own. A `CODEX_HOME` that is the login's home, or holds it, would exempt
+  // every other provider's sign-in too, so then nothing is exempted.
+  const ownHome = inside(serverHome, codexHome) ? undefined : codexHome;
   const entries = protectedAtLevel(
     secretGuardEntries({
       platform: system === "Darwin" ? "darwin" : "linux",
@@ -140,7 +144,9 @@ export async function readCodexProtectedSignInsOnServer(
   const paths = entries
     .map((entry) => posix.normalize(entry.kind === "path" ? entry.path : entry.directory))
     .filter((path) => inside(path, serverHome));
-  const denied = [...new Set(paths.filter((path) => !inside(path, codexHome)))];
+  const denied = [
+    ...new Set(paths.filter((path) => ownHome === undefined || !inside(path, ownHome))),
+  ];
   // The Provider sign-ins group always names paths in a valid home, so an
   // empty list means the home was misread, unless the person removed the group.
   if (denied.length === 0 && !currentProtectedFilesChoice().removed.includes("provider-sign-ins")) {
@@ -149,7 +155,7 @@ export async function readCodexProtectedSignInsOnServer(
   return {
     status: "found",
     denied,
-    allowed: denied.some((path) => inside(codexHome, path)) ? [codexHome] : [],
+    allowed: ownHome !== undefined && denied.some((path) => inside(ownHome, path)) ? [ownHome] : [],
   };
 }
 
@@ -165,6 +171,11 @@ export function startCodexOnServer(input: {
   readonly octantVersion: string;
   /** Codex's sign-in answers per server, read before the app-server starts. */
   readonly signIns: ServerSignIns;
+  /**
+   * Whether the launch runs Codex's own sandbox, which carries the sign-in
+   * deny list. Full access on a server has no sandbox, so no list is read.
+   */
+  readonly sandboxed: boolean;
 }): Effect.Effect<CodexAppServerConnection, ProviderFailure, Scope.Scope> {
   return Effect.acquireRelease(
     Effect.tryPromise({
@@ -178,8 +189,10 @@ export function startCodexOnServer(input: {
           throw failure("unauthenticated", codexServerSignInRefusal(input.placement.serverName));
         }
         if (signIn.status === "refused") throw failure("unavailable", signIn.message);
-        const protectedSignIns = await readCodexProtectedSignInsOnServer(input.placement);
-        if (protectedSignIns.status === "refused") {
+        const protectedSignIns = input.sandboxed
+          ? await readCodexProtectedSignInsOnServer(input.placement)
+          : undefined;
+        if (protectedSignIns?.status === "refused") {
           throw failure("unavailable", protectedSignIns.message);
         }
         const stream = input.placement.start(["codex", ...input.args(found.version)]);
@@ -219,10 +232,14 @@ export function startCodexOnServer(input: {
           // No egress proxy runs on the server, so its commands reach the
           // network as the server allows; the sandbox should say so.
           networkOpen: true,
-          protectedSignIns: {
-            denied: protectedSignIns.denied,
-            allowed: protectedSignIns.allowed,
-          },
+          ...(protectedSignIns === undefined
+            ? {}
+            : {
+                protectedSignIns: {
+                  denied: protectedSignIns.denied,
+                  allowed: protectedSignIns.allowed,
+                },
+              }),
         };
         return { connection, stop: stream.stop };
       },
