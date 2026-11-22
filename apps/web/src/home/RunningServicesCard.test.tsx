@@ -262,6 +262,105 @@ describe("the Running services card", () => {
       await waitFor(() => expect(screen.queryByText(/stopped or changed/)).toBeNull());
     });
 
+    it("forwards a server's port, even one Octant does not own, and says anything on this computer can reach it", async () => {
+      const { client } = fakeClient(() => listed([service(1, { ownership: "left-over" })]));
+      const forwardPort = vi.fn(async (_service: RunningService) => ({
+        kind: "forwarded" as const,
+        localPort: 5171,
+      }));
+      renderCard(
+        createRunningServicesCard(
+          source(client, {
+            host: "Studio",
+            canOpen: () => false,
+            openLive: vi.fn(async () => ({ kind: "opened" as const })),
+            forwardPort,
+          }),
+        ),
+      );
+      await screen.findByText("vite");
+      await userEvent
+        .setup()
+        .click(screen.getByRole("button", { name: "Forward port 5171 of vite to this computer" }));
+      expect(forwardPort).toHaveBeenCalledTimes(1);
+      expect(
+        await screen.findByText(
+          "Forwarded to localhost:5171 on this computer for an hour. Anything running on this computer can connect to it.",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("offers a forward for a TCP service that does not answer the web, but not for one only on IPv6 loopback", async () => {
+      const { client } = fakeClient(() =>
+        listed([
+          service(1, { health: "unresponsive", openAvailable: false, framework: undefined }),
+          service(2, { url: "http://[::1]:5172/", framework: "next" }),
+        ]),
+      );
+      renderCard(
+        createRunningServicesCard(
+          source(client, {
+            host: "Studio",
+            forwardPort: vi.fn(async () => ({ kind: "refused" as const, message: "" })),
+          }),
+        ),
+      );
+      await screen.findByText("next");
+      expect(
+        screen.getByRole("button", { name: "Forward port 5171 of node to this computer" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Forward port 5172 of next to this computer" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("offers Forward port only for a thread's running server on a computer that admitted this device through the hub", async () => {
+      const { client } = fakeClient(() =>
+        listed([
+          service(1, { thread: { threadId, title: "Fix the header" } }),
+          service(2, { framework: "postgres" }),
+        ]),
+      );
+      const forwardPort = vi.fn(async (_service: RunningService) => ({
+        kind: "forwarded" as const,
+        localPort: 5171,
+      }));
+      renderCard(
+        createRunningServicesCard(
+          source(client, { host: "Studio", forwardPort, forwardsThreadServersOnly: true }),
+        ),
+      );
+      await screen.findByText("postgres");
+      expect(
+        screen.queryByRole("button", { name: "Forward port 5172 of postgres to this computer" }),
+      ).toBeNull();
+      await userEvent
+        .setup()
+        .click(screen.getByRole("button", { name: "Forward port 5171 of vite to this computer" }));
+      expect(forwardPort).toHaveBeenCalledWith(
+        expect.objectContaining({ listenerId: `lsn_${"0".repeat(31)}1` }),
+      );
+    });
+
+    it("shows the host's refusal of a forward on the row", async () => {
+      const { client } = fakeClient(() => listed([service(1)]));
+      const message =
+        "Only a device this computer's own person paired can forward one of its ports.";
+      renderCard(
+        createRunningServicesCard(
+          source(client, {
+            host: "Studio",
+            forwardPort: vi.fn(async () => ({ kind: "refused" as const, message })),
+          }),
+        ),
+      );
+      await screen.findByText("vite");
+      await userEvent
+        .setup()
+        .click(screen.getByRole("button", { name: "Forward port 5171 of vite to this computer" }));
+      expect(await screen.findByText(message)).toBeInTheDocument();
+    });
+
     it("says once that pages opened earlier start with empty storage when the opener moved", async () => {
       const { client } = fakeClient(() => listed([service(1, threaded)]));
       const notice =

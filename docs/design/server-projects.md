@@ -20,7 +20,8 @@ the server, with the Work sidebar, composer, and thread view that open them
 ([Work Projects](#work-projects)); routines that target a server Project,
 chosen in Automation Center's editor or confirmed from a thread there and
 run by this host's scheduler ([Routines](#routines)); person-operated
-loopback dev-server previews ([Previews](#person-operated-dev-server-previews));
+loopback dev-server previews ([Previews](#person-operated-dev-server-previews))
+and raw TCP port forwards ([Port forwards](#person-operated-port-forwards));
 and the seam, host lifecycle, host-key pinning, suspended refusal and
 Settings screen for machines in the person's own cloud account, with no
 target plugin yet
@@ -792,7 +793,9 @@ the person's cloud account.
   upstream in place of a local port, under the relay's grant, budgets and
   WebSocket rules. The preview's limits stay (eight streams, an hour, the
   one-second sweep, `ClearAllForwardings=yes`), and its outcome is journaled
-  as `server-projects.preview-outcome@2`, naming the device as owner.
+  as `server-projects.preview-outcome@2`, naming the device as owner. A
+  device cannot forward a server Project's port
+  ([Port forwards](#person-operated-port-forwards)).
 - **Cloud machines.** Creating, binding, refreshing, suspending, resuming and
   destroying from a device follow the same rules, the destroy confirmation
   included: the host issues it to that device's session, and a confirmation
@@ -825,6 +828,9 @@ the person's cloud account.
   Settings row above, which also offers a saved-action presentation switch; a
   general Developer tools pane remains absent.
 - Extra folders in a server Project.
+- A port forward from a server Project to a paired device's own computer, and
+  more than one forward per Project at a time
+  ([Port forwards](#person-operated-port-forwards)).
 - A Project-level guardrail level or reviewer for a server Project; the
   thread and account levels apply.
 - Real servers are untested: the connection, folder check, file tools,
@@ -974,6 +980,27 @@ The effective local URL and remote port are visible. Where a paired Octant
 host already owns the dev server, use its existing paired-host preview. An SSH
 alias is not evidence of a paired-host identity.
 
+The panel lists what the SSH login serves from the Project's folder: the
+login's own listening TCP sockets, read on the server with `lsof` or `ss` over
+the pinned connection, kept when the process works inside the folder, with only
+the port, the bound address and the process's short name returned (never a
+command line or another login's process; under a privileged login each process
+must also be owned by the login, since `ss` shows every account's). **Preview**
+on a row starts the preview for that port, offered only when the socket answers
+on `127.0.0.1` (IPv4 loopback or a wildcard bind), where the forward connects; a
+socket bound only to `[::1]` or a LAN address is listed without it. Only a local
+window reads the list, under the same rule as starting a preview; a paired
+device is not offered it and sees no local-address guidance, since its preview
+is relayed. A server with neither tool says so.
+
+The forward is raw TCP, so any service works, not only web pages: a database on
+the server is reached at the local address with its own client. The local
+address is `127.0.0.1` on this computer, and the panel says who can reach it
+(maintainer decision, 2026-11-20): agents' guarded tool commands can't, since
+Octant's egress proxy refuses loopback unless the person adds a `localServices`
+grant for that port and thread; a Full access thread, and a provider runtime not
+routed through the proxy, can, as they can reach any local service.
+
 The plain SSH path owns a private loopback TCP listener and at most eight
 concurrent, dedicated `ssh -W` stdio streams. This carries HTTP and WebSocket
 upgrades unchanged. It uses no shared command socket, starts no remote program,
@@ -1014,3 +1041,42 @@ The journal records Project, owner window, selected ports, effective local URL
 and lifecycle outcomes as `server-projects.preview-outcome@1`. It records no
 credentials, stderr, HTTP bodies or page contents. Active listeners are not
 restored on restart. Opening a new preview requires another person action.
+
+## Person-operated port forwards
+
+A local person can open **Forward a port** under a bound Project in Settings ›
+Permissions › Servers, beside the dev-server preview, and type a port on that
+server's literal `127.0.0.1`, such as `5432` for a database. The forward carries
+raw TCP to this computer's `127.0.0.1`, on the same port number when this
+computer has it free and another free port otherwise, so a database client, a
+debugger or any other TCP tool reaches the server's port. Nothing checks that an
+HTTP server answers, and no page opens.
+
+A forward is the preview's raw relay without its link: the same dedicated
+`ssh -W` stdio stream per connection, at most eight at once, the same SSH
+options, and the same checks of the current Project, registered server, binding
+identity and owner window before listening and before each stream. A Project
+holds one forward and one preview at a time, apart from each other. A forward
+ends after one hour, when its window closes, when the Project's binding changes,
+when an SSH stream fails (shown as lost; the person stops it and forwards again),
+when the person stops it, and when the host stops. Stopping a forward leaves the
+server's program running.
+
+Only an authenticated window on this computer may start, read or stop a forward
+(`/api/server-project-forward`, not on the remote route list). The host refuses
+every device, a person-paired one too: a device's preview goes through the
+private listener's relay instead of a loopback listener, and no relay carries a
+server Project's raw TCP to a device yet.
+
+The forward listens on `127.0.0.1` alone, which any process on this computer can
+reach. A guarded tool command reaches it only with a `localServices` grant, but
+a Full access turn and a runtime not routed through Octant's proxy reach it
+without one. The row says so with the sentence a forward from another Octant
+computer shows (maintainer decision, 2026-11-20).
+
+Opening and closing are journaled as `server-projects.port-forward-opened@1` and
+`server-projects.port-forward-closed@1` with the Project, the server's port and
+the local port, never the server's address, an endpoint or what travels. A
+closing names its reason (`stopped`, `expired`, `revoked`, `lost`,
+`host-stopped`), and a starting host records closed (`host-stopped`) every
+forward the journal still shows open, since no forward outlives its run.

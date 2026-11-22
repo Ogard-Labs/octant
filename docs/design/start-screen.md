@@ -471,7 +471,12 @@ computer lists that computer's services instead, names it, and offers an
 Octant-owned, listening server in a thread **Open** and **Open in browser**,
 which show the page live on this computer (see
 [Architecture: security and authority](../architecture.md#security-and-authority),
-Forwarder and signer on the device); any other row there says in one line
+Forwarder and signer on the device). Each row there also offers **Forward
+port**, which forwards the port as raw TCP to this computer's loopback for an
+hour (Port forwards in the same section) whether or not it answers as a web
+server, and says on the row that anything on this computer can connect; a
+server that answered only on IPv6 loopback is not offered it, since the
+forward reaches `127.0.0.1`. A row there without Open says in one line
 why it opens only on that computer, and a refusal shows on the row. While that
 computer is not connected, the card says it cannot check it rather than
 listing this computer's servers under its name. Stop is the

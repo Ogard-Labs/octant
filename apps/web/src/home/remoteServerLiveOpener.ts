@@ -6,7 +6,7 @@ import {
   createRemoteServerProxyClient,
   type RemoteServerProxyClient,
 } from "@octant/client-runtime/remote-server-proxy-client";
-import type { RemoteOpenMode, RemoteOpenOutcome } from "./runningServices";
+import type { RemoteForwardOutcome, RemoteOpenMode, RemoteOpenOutcome } from "./runningServices";
 
 /** The desktop's half: it shows a granted page, and asks this window to sign its requests. */
 export interface RemoteServerLiveBridge {
@@ -19,6 +19,13 @@ export interface RemoteServerLiveBridge {
   readonly subscribeRemoteServerPageSigning: (
     signer: (request: unknown) => Promise<unknown>,
   ) => () => void;
+  /** Listens on this computer's loopback for a forward the host opened. */
+  readonly openRemotePortForward?: (
+    request: unknown,
+  ) => Promise<
+    | { readonly kind: "listening"; readonly port: number }
+    | { readonly kind: "refused"; readonly message: string }
+  >;
 }
 
 /** A paired computer this window reads, with what it takes to prove this device to it. */
@@ -56,6 +63,14 @@ export interface RemoteServerLiveOpener {
     mode: RemoteOpenMode,
   ) => Promise<RemoteOpenOutcome>;
   /**
+   * Forwards one port of another computer to this computer's loopback; absent
+   * from the opener where the desktop offers no forward.
+   */
+  readonly openForward?: (
+    host: RemoteServerLiveHost,
+    target: number | RemoteServerGrantSource,
+  ) => Promise<RemoteForwardOutcome>;
+  /**
    * Opens a relayed server Project preview through the desktop's isolated
    * forwarder, minting a proxy session and signing every request for its grant.
    */
@@ -86,20 +101,43 @@ export function createRemoteServerLiveOpener(
     if (request === undefined || client === undefined) return { status: "refused" };
     return client.signRelayRequest(request);
   });
+  const clientFor = (host: RemoteServerLiveHost): RemoteServerProxyClient => {
+    let client = clients.get(host.hostId);
+    if (client === undefined) {
+      client = createRemoteServerProxyClient({
+        origin: host.origin,
+        hostName: host.hostName,
+        fetch: host.fetch ?? fetch,
+        issueSession: host.issueSession,
+        sign: host.sign,
+      });
+      clients.set(host.hostId, client);
+    }
+    return client;
+  };
+  const openRemotePortForward = bridge.openRemotePortForward;
   return {
+    ...(openRemotePortForward === undefined
+      ? {}
+      : {
+          openForward: async (
+            host: RemoteServerLiveHost,
+            target: number | RemoteServerGrantSource,
+          ) => {
+            const opening = await clientFor(host).openForward(target);
+            if (opening.status === "refused") return { kind: "refused", message: opening.message };
+            const listening = await openRemotePortForward({
+              hostId: host.hostId,
+              listenerOrigin: host.origin,
+              forward: opening.forward,
+            });
+            return listening.kind === "refused"
+              ? listening
+              : { kind: "forwarded", localPort: listening.port };
+          },
+        }),
     openLive: async (host, source, mode) => {
-      let client = clients.get(host.hostId);
-      if (client === undefined) {
-        client = createRemoteServerProxyClient({
-          origin: host.origin,
-          hostName: host.hostName,
-          fetch: host.fetch ?? fetch,
-          issueSession: host.issueSession,
-          sign: host.sign,
-        });
-        clients.set(host.hostId, client);
-      }
-      const opening = await client.openGrant(source);
+      const opening = await clientFor(host).openGrant(source);
       if (opening.status === "refused") return { kind: "refused", message: opening.message };
       const shown = await bridge.openRemoteServerPage({
         hostId: host.hostId,
@@ -185,18 +223,20 @@ export function useRemoteServerLiveOpener(
   const [opener, setOpener] = useState<RemoteServerLiveOpener>();
   const openPage = bridge?.openRemoteServerPage;
   const subscribe = bridge?.subscribeRemoteServerPageSigning;
+  const openForward = bridge?.openRemotePortForward;
   useEffect(() => {
     if (openPage === undefined || subscribe === undefined) return undefined;
     const created = createRemoteServerLiveOpener({
       openRemoteServerPage: openPage,
       subscribeRemoteServerPageSigning: subscribe,
+      ...(openForward === undefined ? {} : { openRemotePortForward: openForward }),
     });
     setOpener(created);
     return () => {
       created.dispose();
       setOpener(undefined);
     };
-  }, [openPage, subscribe]);
+  }, [openPage, subscribe, openForward]);
   return opener;
 }
 

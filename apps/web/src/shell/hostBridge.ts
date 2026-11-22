@@ -455,6 +455,17 @@ export interface OctantHostBridge
     | { readonly kind: "refused"; readonly message: string }
   >;
   /**
+   * Listens on this computer's loopback for a port forward another paired
+   * computer opened for this device; this window signs each connection.
+   * Absent outside the desktop app.
+   */
+  readonly openRemotePortForward?: (
+    request: unknown,
+  ) => Promise<
+    | { readonly kind: "listening"; readonly port: number }
+    | { readonly kind: "refused"; readonly message: string }
+  >;
+  /**
    * Closes the windows of a removed host's pages, clears their storage, and
    * forgets their names. Absent outside the desktop app.
    */
