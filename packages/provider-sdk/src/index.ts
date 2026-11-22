@@ -21,3 +21,4 @@ export * from "./cloudSessions";
 
 export * from "./cloudSessionConformance";
 export * from "./openAiCloudSessionProtocol";
+export * from "./projectFolderDiscovery";

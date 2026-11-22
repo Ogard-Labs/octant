@@ -38,6 +38,7 @@ import {
   decideRemoteServerGrant,
   relayRequestHeaders,
   relayWebSocketRequestHeaders,
+  type RemoteServerGrantPolicyRefusal,
   type RemoteServerGrantThread,
   type RemoteServerRelayHeader,
 } from "@octant/domain";
@@ -61,6 +62,7 @@ import {
   relayToDevServer,
   type RemoteServerRelayLimits,
 } from "./remoteServerProxyRelay";
+import type { ServerPreviewTunnels } from "../serverProjects/serverPreviewTunnel";
 import { REMOTE_SERVER_PROXY_PATH } from "./remoteServerProxySessions";
 
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
@@ -108,6 +110,8 @@ export interface RemoteServerRelayPrincipal {
   readonly sessionIdDigest: string;
   /** The session's origin: the only `Origin` its requests may carry. */
   readonly origin: string;
+  /** Who let this device onto the host, read from the host's own record. */
+  readonly admittedBy?: "host-person" | "hub-roster";
 }
 
 export interface RemoteServerRelayRequestInput {
@@ -185,6 +189,19 @@ export type RemoteServerGrantOpening =
   | { readonly kind: "unavailable" }
   | { readonly kind: "session-ended" };
 
+/**
+ * A thread's listed server as a port forward sees it: the port it holds now,
+ * observed by the host, or why it cannot leave the host. `unavailable` is the
+ * host failing to look, never a verdict on the server.
+ */
+export type RemoteThreadServerObservation =
+  | { readonly kind: "held"; readonly threadId: CodeThreadId; readonly port: number }
+  | {
+      readonly kind: "refused";
+      readonly reason: RemoteServerGrantPolicyRefusal["reason"];
+    }
+  | { readonly kind: "unavailable" };
+
 export interface RemoteServerGrantServiceOptions {
   /** Re-observe the named listing under the request's scope, as Open and Stop do. */
   readonly observeTarget: (
@@ -209,6 +226,8 @@ export interface RemoteServerGrantServiceOptions {
   ) => Promise<LocalListenerHolding>;
   /** Whether Code is on; a grant is a Code thread's, so it closes when Code is off. */
   readonly isCodeEnabled: () => boolean;
+  /** Optional server Project relayed previews owned by person-paired devices. */
+  readonly serverProjectPreviews?: Pick<ServerPreviewTunnels, "hasRelayGrant" | "openRelayStream">;
   readonly relayLimits?: Partial<RemoteServerRelayLimits>;
   readonly socketLimits?: Partial<RemoteServerSocketLimits>;
   readonly journal: Pick<Journal, "append">;
@@ -263,6 +282,14 @@ export class RemoteServerGrantService {
   readonly #sockets = new Map<string, number>();
   /** Every relayed request still in flight, by grant, each with its abort. */
   readonly #relaying = new Map<string, Set<() => void>>();
+  /** In-flight relayed server-project preview streams, tracked by session & device for instant cut. */
+  readonly #previewRelays = new Set<{
+    readonly sessionIdDigest: string;
+    readonly deviceId: string;
+    readonly grantId: string;
+    readonly isSocket: boolean;
+    readonly cut: () => void;
+  }>();
   /** The certificate an HTTPS dev server presented first under each grant. */
   readonly #pins = new Map<string, string>();
   /** The endpoint check running for a grant, and the one queued behind it. */
@@ -400,6 +427,58 @@ export class RemoteServerGrantService {
   }
 
   /**
+   * Observes the server a port forward names exactly as a grant request would
+   * be decided, and mints nothing: the thread readable under the device's
+   * scope, the listener listed for it now, Octant-owned, in that thread's own
+   * worktree, answering, and opening under the thread's Open rule. The port is
+   * the one the host saw the server hold, never one a client sent.
+   */
+  async observeThreadServer(input: {
+    readonly scopeId: WindowId;
+    readonly source: RemoteServerGrantSource;
+    readonly signal?: AbortSignal;
+  }): Promise<RemoteThreadServerObservation> {
+    // Readability before the listing, as for a grant: a device that cannot read
+    // the thread it named learns nothing about which ids are listed in it.
+    const named =
+      input.source.surface === "local-servers"
+        ? await this.#threadFact(input.scopeId, input.source.threadId)
+        : undefined;
+    if (named === "unavailable") return { kind: "unavailable" };
+    if (named?.access === "unreadable") return { kind: "refused", reason: "thread-unreadable" };
+    let target: RemoteServerGrantTarget;
+    try {
+      target = await this.#options.observeTarget(input.scopeId, input.source, input.signal);
+    } catch {
+      return { kind: "unavailable" };
+    }
+    if (target.status === "unavailable") return { kind: "unavailable" };
+    if (target.status === "not-listed") return { kind: "refused", reason: "not-found" };
+    const threadId = target.threadId;
+    const thread =
+      threadId === undefined ? undefined : await this.#threadFact(input.scopeId, threadId);
+    if (thread === "unavailable") return { kind: "unavailable" };
+    const decision = decideRemoteServerGrant({
+      actor: "remote-client",
+      ...(thread === undefined ? {} : { thread }),
+      listener: { status: "listed", ownership: target.ownership, health: target.health },
+    });
+    if (decision.kind === "refuse") return { kind: "refused", reason: decision.refusal.reason };
+    if (threadId === undefined) return { kind: "refused", reason: "not-in-thread" };
+    if (this.#options.readThread(threadId)?.lifecycle !== "active") {
+      return { kind: "refused", reason: "thread-unreadable" };
+    }
+    // A forward's bridge dials 127.0.0.1. A server the scan found answering
+    // only on [::1] is not what that dial reaches, and another service may
+    // hold the same IPv4 port outside the device's grant, so it is refused
+    // as not found where the forward connects.
+    if (new URL(target.endpoint.url).hostname !== "127.0.0.1") {
+      return { kind: "refused", reason: "not-found" };
+    }
+    return { kind: "held", threadId, port: target.endpoint.port };
+  }
+
+  /**
    * Relay one request under a grant to its dev server, after the checks every
    * new upstream connection takes (see `#check`). A lost check refuses the
    * request like any closed grant.
@@ -410,6 +489,12 @@ export class RemoteServerGrantService {
    * closed it returns.
    */
   async relay(input: RemoteServerRelayRequestInput): Promise<RemoteServerRelayOutcome> {
+    if (
+      !this.#grants.has(input.grantId) &&
+      this.#options.serverProjectPreviews?.hasRelayGrant(input.grantId) === true
+    ) {
+      return this.#relayServerProjectPreview(input);
+    }
     const checked = await this.#check(input);
     if (!("grantId" in checked)) return checked;
     // Everything from here to registering the request is synchronous, so a
@@ -469,6 +554,12 @@ export class RemoteServerGrantService {
    * that closed it returns.
    */
   async relayUpgrade(input: RemoteServerUpgradeRequestInput): Promise<RemoteServerUpgradeOutcome> {
+    if (
+      !this.#grants.has(input.grantId) &&
+      this.#options.serverProjectPreviews?.hasRelayGrant(input.grantId) === true
+    ) {
+      return this.#relayServerProjectPreviewUpgrade(input);
+    }
     const checked = await this.#check(input);
     if (!("grantId" in checked)) return checked;
     const grant = checked;
@@ -476,9 +567,7 @@ export class RemoteServerGrantService {
     const last = this.#lastCheck(grant, input);
     if (last !== undefined) return last;
     const key = String(grant.grantId);
-    const onDevice = [...this.#grants.values()]
-      .filter((candidate) => candidate.deviceId === grant.deviceId)
-      .reduce((sum, candidate) => sum + (this.#sockets.get(String(candidate.grantId)) ?? 0), 0);
+    const onDevice = this.#deviceSocketCount(grant.deviceId);
     if (
       (this.#sockets.get(key) ?? 0) >= this.#socketLimits.perGrant ||
       onDevice >= this.#socketLimits.perDevice
@@ -605,11 +694,244 @@ export class RemoteServerGrantService {
     return { kind: "upgraded", response };
   }
 
+  async #relayServerProjectPreview(
+    input: RemoteServerRelayRequestInput,
+  ): Promise<RemoteServerRelayOutcome> {
+    const previews = this.#options.serverProjectPreviews;
+    if (previews === undefined) return closedGrant();
+    if (!input.stillAuthorized()) return { kind: "session-ended" };
+    if (input.principal.admittedBy !== "host-person") return closedGrant();
+    const opened = previews.openRelayStream(input.grantId, {
+      deviceId: input.principal.deviceId,
+      credentialGeneration: input.principal.credentialGeneration,
+      admittedBy: input.principal.admittedBy,
+    });
+    if (opened.kind === "refused") {
+      return opened.reason === "server-unreachable"
+        ? { kind: "refused", reason: "server-unreachable" }
+        : closedGrant();
+    }
+    if (!input.stillAuthorized()) {
+      opened.stream.destroy();
+      return { kind: "session-ended" };
+    }
+    const cut = new AbortController();
+    const tracked = {
+      sessionIdDigest: input.principal.sessionIdDigest,
+      deviceId: input.principal.deviceId,
+      grantId: input.grantId,
+      isSocket: false,
+      cut: () => cut.abort(),
+    };
+    this.#previewRelays.add(tracked);
+    const untrack = () => {
+      this.#previewRelays.delete(tracked);
+    };
+    const attempt = await relayToDevServer({
+      endpointUrl: `http://127.0.0.1:${String(opened.port)}`,
+      connectUpstream: async () => opened.stream,
+      request: {
+        method: input.method,
+        pathQuery: input.pathQuery,
+        headers: relayRequestHeaders({
+          headers: input.headers,
+          listenerOrigin: input.principal.origin,
+          grantPath: `${REMOTE_SERVER_PROXY_PATH}${input.grantId}`,
+          upstream: { scheme: "http", port: opened.port },
+          bodyBytes: input.body?.byteLength,
+        }),
+        body: input.body,
+      },
+      acceptCertificate: () => false,
+      signal: AbortSignal.any([cut.signal, input.signal]),
+      onSettled: untrack,
+      limits: this.#relayLimits,
+    });
+    switch (attempt.kind) {
+      case "responded":
+        return { kind: "relayed", response: attempt.response };
+      case "certificate-changed":
+      case "aborted":
+        return closedGrant();
+      case "unreachable":
+        return cut.signal.aborted
+          ? closedGrant()
+          : { kind: "refused", reason: "server-unreachable" };
+    }
+  }
+
+  #deviceSocketCount(deviceId: string): number {
+    let total = 0;
+    for (const candidate of this.#grants.values()) {
+      if (candidate.deviceId === deviceId) {
+        total += this.#sockets.get(String(candidate.grantId)) ?? 0;
+      }
+    }
+    for (const active of this.#previewRelays) {
+      if (active.isSocket && active.deviceId === deviceId) {
+        total += 1;
+      }
+    }
+    return total;
+  }
+
+  async #relayServerProjectPreviewUpgrade(
+    input: RemoteServerUpgradeRequestInput,
+  ): Promise<RemoteServerUpgradeOutcome> {
+    const previews = this.#options.serverProjectPreviews;
+    if (previews === undefined) return closedGrant();
+    if (!input.stillAuthorized()) return { kind: "session-ended" };
+    if (input.principal.admittedBy !== "host-person") return closedGrant();
+    let perGrant = 0;
+    for (const active of this.#previewRelays) {
+      if (active.isSocket && active.grantId === input.grantId) perGrant += 1;
+    }
+    const onDevice = this.#deviceSocketCount(input.principal.deviceId);
+    if (perGrant >= this.#socketLimits.perGrant || onDevice >= this.#socketLimits.perDevice) {
+      return { kind: "busy" };
+    }
+    const opened = previews.openRelayStream(input.grantId, {
+      deviceId: input.principal.deviceId,
+      credentialGeneration: input.principal.credentialGeneration,
+      admittedBy: input.principal.admittedBy,
+    });
+    if (opened.kind === "refused") {
+      if (opened.reason === "busy") return { kind: "busy" };
+      return opened.reason === "server-unreachable"
+        ? { kind: "refused", reason: "server-unreachable" }
+        : closedGrant();
+    }
+    if (!input.stillAuthorized()) {
+      opened.stream.destroy();
+      return { kind: "session-ended" };
+    }
+    const cut = new AbortController();
+    const tracked = {
+      sessionIdDigest: input.principal.sessionIdDigest,
+      deviceId: input.principal.deviceId,
+      grantId: input.grantId,
+      isSocket: true,
+      cut: () => cut.abort(),
+    };
+    this.#previewRelays.add(tracked);
+    let held = true;
+    const release = () => {
+      if (!held) return;
+      held = false;
+      this.#previewRelays.delete(tracked);
+    };
+    const wsKey = newWebSocketKey();
+    const protocols = offeredProtocols(input.headers);
+    const attempt = await openDevServerWebSocket({
+      endpointUrl: `http://127.0.0.1:${String(opened.port)}`,
+      connectUpstream: async () => opened.stream,
+      pathQuery: input.pathQuery,
+      key: wsKey,
+      protocols,
+      headers: relayWebSocketRequestHeaders({
+        headers: input.headers,
+        listenerOrigin: input.principal.origin,
+        grantPath: `${REMOTE_SERVER_PROXY_PATH}${input.grantId}`,
+        upstream: { scheme: "http", port: opened.port },
+        key: wsKey,
+      }),
+      acceptCertificate: () => false,
+      signal: AbortSignal.any([cut.signal, input.signal]),
+      limits: this.#relayLimits,
+    });
+    if (attempt.kind !== "opened") release();
+    switch (attempt.kind) {
+      case "opened":
+        break;
+      case "declined":
+        return { kind: "refused", reason: "upgrade-refused" };
+      case "certificate-changed":
+      case "aborted":
+        return closedGrant();
+      case "unreachable":
+        return cut.signal.aborted
+          ? closedGrant()
+          : { kind: "refused", reason: "server-unreachable" };
+    }
+    const { socket, head, protocol } = attempt;
+    if (cut.signal.aborted) {
+      socket.destroy();
+      release();
+      return closedGrant();
+    }
+    const devServer = new WebSocketEndpoint(socket, "client", this.#socketLimits.maxMessageBytes);
+    let page: WebSocketPeer | undefined;
+    const end = () => {
+      clearTimeout(switchTimer);
+      cut.signal.removeEventListener("abort", onCut);
+      release();
+    };
+    function onCut() {
+      page?.close(1008, "The grant for this server closed.");
+      devServer.close(1001, "");
+      if (page === undefined) socket.destroy();
+      end();
+    }
+    cut.signal.addEventListener("abort", onCut, { once: true });
+    const switchTimer = setTimeout(() => {
+      if (page !== undefined) return;
+      socket.destroy();
+      end();
+    }, this.#socketLimits.switchTimeoutMs);
+    switchTimer.unref?.();
+    const response = acceptWebSocketUpgrade(
+      {
+        protocol,
+        cancel: () => {
+          if (page !== undefined) return;
+          socket.destroy();
+          end();
+        },
+        open: (client): WebSocketPeerEvents => {
+          page = client;
+          clearTimeout(switchTimer);
+          if (!held) {
+            client.close(1008, "The grant for this server closed.");
+            return { message: () => undefined, closed: () => undefined };
+          }
+          devServer.start(
+            {
+              message: (message) => {
+                opened.onActivity();
+                client.send(message);
+              },
+              closed: (code, reason) => {
+                client.close(sendableCloseCode(code), reason);
+                end();
+              },
+            },
+            head,
+          );
+          return {
+            message: (message) => {
+              opened.onActivity();
+              devServer.send(message);
+            },
+            closed: (code, reason) => {
+              devServer.close(sendableCloseCode(code), reason);
+              end();
+            },
+          };
+        },
+      },
+      { [REMOTE_SERVER_PROXY_RELAYED_HEADER]: REMOTE_SERVER_PROXY_RELAYED },
+    );
+    return { kind: "upgraded", response };
+  }
+
   /** Whether any grant bound to this proxy session has a relayed WebSocket open. */
   holdsOpenSockets(sessionIdDigest: string): boolean {
     for (const grant of this.#grants.values()) {
       if (grant.sessionIdDigest !== sessionIdDigest) continue;
       if ((this.#sockets.get(String(grant.grantId)) ?? 0) > 0) return true;
+    }
+    for (const active of this.#previewRelays) {
+      if (active.isSocket && active.sessionIdDigest === sessionIdDigest) return true;
     }
     return false;
   }
@@ -617,10 +939,16 @@ export class RemoteServerGrantService {
   /** Close every grant bound to one proxy session. */
   closeSession(sessionIdDigest: string, reason: RemoteServerGrantCloseReason): void {
     this.#closeWhere((grant) => grant.sessionIdDigest === sessionIdDigest, reason);
+    for (const active of [...this.#previewRelays]) {
+      if (active.sessionIdDigest === sessionIdDigest) active.cut();
+    }
   }
 
   closeDevice(deviceId: string, reason: RemoteServerGrantCloseReason): void {
     this.#closeWhere((grant) => grant.deviceId === deviceId, reason);
+    for (const active of [...this.#previewRelays]) {
+      if (active.deviceId === deviceId) active.cut();
+    }
   }
 
   closeThread(threadId: string, reason: RemoteServerGrantCloseReason): void {

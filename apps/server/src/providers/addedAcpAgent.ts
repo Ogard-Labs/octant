@@ -12,16 +12,28 @@ import { ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import type { AddedAcpAgentProviderInstance, ProviderToolDefinition } from "@octant/contracts";
 import { addedAcpAgentSteps } from "@octant/domain";
-import { decideAcpAgentLaunch, type AcpAgentSteps } from "@octant/plugin-host/acp-agents";
+import {
+  addedAcpAgentLimitedProfile,
+  addedAcpAgentLimitedProfileRefusal,
+  decideAcpAgentLaunch,
+  type AcpAgentSteps,
+} from "@octant/plugin-host/acp-agents";
 import { HOST_PASSTHROUGH_VARIABLES, type AcpProviderProfile } from "./acpProfiles";
+
+/**
+ * Exact user-facing message shown when Connection Check fails before Trust
+ * because an added npm/uv package's deferred install script has not run yet.
+ */
+export const ACP_PACKAGE_NEEDS_INSTALL_SCRIPT_MESSAGE =
+  "This package needs its install script, which runs when you trust it.";
 
 /**
  * The generic profile for one added agent. Its mode is never selected, since
  * no mapping of Chat, Work, Code and Plan onto the agent's own modes was
  * read; Plan's read-only wall and the level's approvals are Octant's sandbox
- * and approval bridge instead. No exact-release feature (usage, compaction,
- * file review, forms, warm reuse, unadvertised HTTP tools) is pinned, so none
- * is offered at any level.
+ * and approval bridge instead. No exact-release feature (compaction, file
+ * review, forms, warm reuse, unadvertised HTTP tools) is pinned, so none is
+ * offered at any level; its usage is read by ACP's standard schema.
  */
 export function addedAcpAgentProfile(instance: AddedAcpAgentProviderInstance): AcpProviderProfile {
   const { configuration } = instance;
@@ -78,9 +90,25 @@ function withoutOctantTools(
 export function withAddedAcpAgentLaunch(
   driver: ProviderDriver,
   instance: AddedAcpAgentProviderInstance,
+  options?: {
+    readonly hasPendingInstallScripts?: () => Promise<boolean> | boolean;
+  },
 ): ProviderDriver {
   const steps: AcpAgentSteps = addedAcpAgentSteps(instance);
   const name = instance.displayName;
+  const checkPendingInstallScripts = async (): Promise<boolean> => {
+    if (steps.trusted) return false;
+    if (options?.hasPendingInstallScripts !== undefined) {
+      return options.hasPendingInstallScripts();
+    }
+    const { source, install } = instance.configuration;
+    return (
+      source.kind === "registry" &&
+      (source.distribution === "npx" || source.distribution === "uvx") &&
+      install?.hasInstallScripts === true &&
+      install.installScriptsCompleted !== true
+    );
+  };
   return {
     ...driver,
     probe: (input) =>
@@ -93,8 +121,28 @@ export function withAddedAcpAgentLaunch(
                 capabilities: { ...result.capabilities, appManagedTools: "unsupported" as const },
               },
         ),
+        Effect.catchAll((error) => {
+          if (steps.trusted || error.category === "unauthenticated") return Effect.fail(error);
+          return Effect.promise(checkPendingInstallScripts).pipe(
+            Effect.flatMap((pending) =>
+              pending
+                ? Effect.fail({
+                    category: "unavailable" as const,
+                    message: ACP_PACKAGE_NEEDS_INSTALL_SCRIPT_MESSAGE,
+                  })
+                : Effect.fail(error),
+            ),
+          );
+        }),
       ),
     acquire: (input) => {
+      // An agent added before such copies were refused still never starts.
+      const limited = addedAcpAgentLimitedProfile(instance.configuration.source);
+      if (limited !== undefined)
+        return Effect.fail({
+          category: "unavailable" as const,
+          message: addedAcpAgentLimitedProfileRefusal(limited),
+        });
       const refusal = decideAcpAgentLaunch({ steps, executionPolicy: "approval-gated" });
       if (refusal.status === "refused")
         return Effect.fail({

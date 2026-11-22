@@ -2,6 +2,7 @@ import { claudeSandboxToolchainReads } from "./claudeSandboxToolchain";
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import {
   forkSession as forkClaudeSession,
+  getSessionMessages as getClaudeSessionMessages,
   listSessions as listClaudeSessions,
   query as queryClaude,
   type Options as ClaudeSdkOptions,
@@ -44,6 +45,8 @@ import {
 } from "./claudeAgentSdkDecoder";
 import { BoundedAsyncInput, makeClaudeCloseCoordinator } from "./claudeAgentSdkLifecycle";
 import type { ClaudeProcessPort, SpawnClaudeCodeProcess } from "./claudeProcess";
+import { CLAUDE_SERVER_PROGRAM } from "./claudeServerProcess";
+import type { ProviderServerPlacement } from "@octant/provider-sdk/driver";
 import type { ClaudeTaskToolOutput } from "./claudeTaskList";
 import type { ProviderRuntimeProxiedNetwork } from "../network/providerRuntimeNetwork";
 
@@ -189,6 +192,11 @@ export interface ClaudeOpenQueryInput {
    * through its egress proxy: the launch's listener and proxy variables.
    */
   readonly network?: ProviderRuntimeProxiedNetwork;
+  /**
+   * The server a server Project's session runs on: the runtime starts there
+   * as `claude`, through the host's connection, instead of `binaryPath` here.
+   */
+  readonly serverPlacement?: ProviderServerPlacement;
   readonly model: string;
   /** Agent SDK `effort` for the session; absent means the SDK default. */
   readonly effort?: ClaudeEffortLevel;
@@ -747,6 +755,19 @@ export interface ClaudeAgentSdkPort {
     readonly projectRoot: string;
     readonly configDirectory?: string;
   }) => Effect.Effect<ReadonlyArray<ClaudeSessionMetadata>, ProviderFailure>;
+  /**
+   * A session's conversation as the runtime's transcript holds it: its
+   * user and assistant messages on the current chain, oldest first, each the
+   * raw API message. Read-only. Absent on a port that cannot read one.
+   */
+  readonly sessionMessages?: (input: {
+    readonly sessionId: string;
+    readonly projectRoot: string;
+    readonly configDirectory?: string;
+  }) => Effect.Effect<
+    ReadonlyArray<{ readonly type: string; readonly message: unknown }>,
+    ProviderFailure
+  >;
 }
 
 // Mutable because the SDK's `SDKUserMessage` content is; the port builds a
@@ -1053,6 +1074,11 @@ export interface ClaudeAgentSdkBridge {
     readonly dir: string;
     readonly includeWorktrees: false;
   }) => Promise<unknown>;
+  /** The SDK's own transcript read; absent on a bridge that cannot read one. */
+  readonly getSessionMessages?: (
+    sessionId: string,
+    options: { readonly dir: string },
+  ) => Promise<unknown>;
   /** The SDK's own session copy; absent on a bridge that cannot make one. */
   readonly forkSession?: (
     sessionId: string,
@@ -1237,6 +1263,15 @@ function isValidSandboxNetwork(network: unknown, blocked = false): boolean {
 }
 
 function hasValidSandbox(input: ClaudeOpenQueryInput, platform: NodeJS.Platform): boolean {
+  // On a server no Octant sandbox can run, so a placed launch carries none at
+  // any level, and one that asks for Octant's boundary is refused.
+  if (input.serverPlacement !== undefined)
+    return (
+      input.sandbox === undefined &&
+      input.strict !== true &&
+      input.fullAccessSandbox !== true &&
+      input.sandboxPolicy === undefined
+    );
   // Claude Code has no command sandbox on Windows, so a launch there carries
   // none: one asking for it with `failIfUnavailable` would leave every
   // command unable to run. Its permission modes hold the turn instead.
@@ -1457,6 +1492,8 @@ function liveBridge(): ClaudeAgentSdkBridge {
       });
     },
     listSessions: (options) => listClaudeSessions(options),
+    getSessionMessages: (sessionId, options) =>
+      getClaudeSessionMessages(sessionId, { dir: options.dir }),
     forkSession: (sessionId, options) =>
       forkClaudeSession(sessionId, { dir: options.dir, upToMessageId: options.upToMessageId }),
   };
@@ -1527,6 +1564,7 @@ function killAndConfirmExit(
 export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): ClaudeAgentSdkPort {
   const sdk = options.sdk ?? liveBridge();
   const copySession = sdk.forkSession;
+  const readMessages = sdk.getSessionMessages;
   const inputCapacity = options.inputCapacity ?? DEFAULT_INPUT_CAPACITY;
   const platform = options.platform ?? process.platform;
 
@@ -1628,6 +1666,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               : { readOnlyFolders: [input.attachmentsFolder] }),
             runsCommands: input.tools.includes("Bash"),
             ...(input.network === undefined ? {} : { network: input.network }),
+            ...(input.serverPlacement === undefined ? {} : { server: input.serverPlacement }),
           });
           // The runtime process this query's launch produced, kept so a stuck
           // turn can be killed without the graceful close that waits on it.
@@ -1862,7 +1901,10 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               model: input.model,
               ...(Object.keys(flagSettings).length === 0 ? {} : { settings: flagSettings }),
               ...(input.effort === undefined ? {} : { effort: input.effort }),
-              pathToClaudeCodeExecutable: input.binaryPath,
+              // A placed launch names the server's own `claude`; the SDK then
+              // passes it as the command with the CLI's arguments alone.
+              pathToClaudeCodeExecutable:
+                input.serverPlacement === undefined ? input.binaryPath : CLAUDE_SERVER_PROGRAM,
               systemPrompt: {
                 type: "preset",
                 preset: "claude_code",
@@ -2370,6 +2412,31 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
         },
         catch: (error) => sanitizeFailure(error, "session lookup"),
       }),
+    ...(readMessages === undefined
+      ? {}
+      : {
+          sessionMessages: ({ sessionId, projectRoot, configDirectory }) =>
+            Effect.tryPromise({
+              try: async () => {
+                const read: unknown = await withClaudeAccountDirectory(configDirectory, () =>
+                  readMessages(sessionId, { dir: projectRoot }),
+                );
+                if (!Array.isArray(read)) throw new Error("Claude did not list the messages.");
+                return read.flatMap((entry: unknown) =>
+                  typeof entry === "object" &&
+                  entry !== null &&
+                  "type" in entry &&
+                  typeof entry.type === "string" &&
+                  "message" in entry &&
+                  // A subagent's messages belong to the call that started it.
+                  (!("parent_tool_use_id" in entry) || entry.parent_tool_use_id === null)
+                    ? [{ type: entry.type, message: entry.message }]
+                    : [],
+                );
+              },
+              catch: (error) => sanitizeFailure(error, "session lookup"),
+            }),
+        }),
     ...(copySession === undefined
       ? {}
       : {

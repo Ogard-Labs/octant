@@ -20,6 +20,8 @@ import {
   type ThreadMessageQueueRefusalReason,
   type ThreadMessageQueueResult,
   type ThreadMessageQueueScope,
+  type ThreadMessageQueueSnapshot,
+  type ThreadQueueMessageId,
   type WindowId,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -62,6 +64,12 @@ export interface ThreadMessageQueueServiceOptions {
    * is journaled with `actor`.
    */
   readonly deviceActor?: (scopeId: WindowId) => EventActor | undefined;
+  /**
+   * Told that a message started or stopped waiting on a running turn's
+   * runtime. That is host memory, not a journaled change, so without this a
+   * reader would keep offering edit and remove on it until its next read.
+   */
+  readonly onSteeringChanged?: () => void;
 }
 /**
  * Whether a thread owes a turn. `active` is a turn its mode is running or has
@@ -81,6 +89,7 @@ export class ThreadMessageQueueService {
   readonly #clock: () => string;
   readonly #isRestrictedDevice: (scopeId: WindowId) => boolean;
   readonly #deviceActor: (scopeId: WindowId) => EventActor | undefined;
+  readonly #onSteeringChanged: () => void;
   readonly #locks = new Map<string, Promise<void>>();
   readonly #pendingTicks = new Set<string>();
   #allScopesTick: Promise<void> | undefined;
@@ -92,6 +101,22 @@ export class ThreadMessageQueueService {
   >();
   readonly #revoked = new Set<string>();
   readonly #purging = new Set<string>();
+  /** Messages a running turn's runtime refused to take; each waits for a turn of its own. */
+  readonly #unsteerable = new Set<string>();
+  /**
+   * Messages offered to a running turn whose runtime has not answered yet.
+   * Each stays queued but is neither dispatched, edited, removed, nor moved
+   * until the runtime answers, so it can never reach two turns.
+   */
+  readonly #steering = new Set<string>();
+  /**
+   * Of those, the messages a running turn's runtime is actually being asked
+   * to take. Readers see and are told about only these: the queue's
+   * once-a-second pass offers a message the port rules out at once (a Chat
+   * turn, a runtime that cannot steer), and announcing every such offer made
+   * each open queue panel read unchanged data every second.
+   */
+  readonly #asking = new Set<string>();
   #disposed = false;
   constructor(options: ThreadMessageQueueServiceOptions) {
     this.#clock = options.clock ?? (() => new Date().toISOString());
@@ -99,6 +124,18 @@ export class ThreadMessageQueueService {
     this.#port = options.port;
     this.#isRestrictedDevice = options.isRestrictedDevice ?? (() => false);
     this.#deviceActor = options.deviceActor ?? (() => undefined);
+    this.#onSteeringChanged = options.onSteeringChanged ?? (() => undefined);
+  }
+  /** The queue as stored, with each message a running turn's runtime is still considering marked. */
+  #snapshot(scope: ThreadMessageQueueScope): ThreadMessageQueueSnapshot {
+    const stored = this.#store.snapshot(scope);
+    if (!stored.items.some((item) => this.#asking.has(item.messageId))) return stored;
+    return {
+      ...stored,
+      items: stored.items.map((item) =>
+        this.#asking.has(item.messageId) ? { ...item, steering: true as const } : item,
+      ),
+    };
   }
   async read(
     windowId: WindowId,
@@ -107,7 +144,7 @@ export class ThreadMessageQueueService {
     const inspected = await this.#inspect({ scope, windowId, intent: "read" });
     if (inspected.status === "held") return { status: "refused", reason: inspected.reason };
     if (this.#store.purged(scope)) return { status: "refused", reason: "thread-unavailable" };
-    return { status: "ready", snapshot: this.#store.snapshot(scope) };
+    return { status: "ready", snapshot: this.#snapshot(scope) };
   }
   /**
    * Tells a caller that must act only on an idle thread where the thread
@@ -159,7 +196,7 @@ export class ThreadMessageQueueService {
       const result = (status: "applied" | "duplicate" | "conflict"): ThreadMessageQueueResult => ({
         status,
         requestId: command.requestId,
-        snapshot: this.#store.snapshot(command.scope),
+        snapshot: this.#snapshot(command.scope),
       });
       if (this.#disposed) return refused("authority-revoked");
       const deviceActor = this.#deviceActor(windowId);
@@ -266,7 +303,8 @@ export class ThreadMessageQueueService {
           (item) => String(item.messageId) === String(command.messageId),
         );
         if (item === undefined) return refused("not-found");
-        if (item.status !== "queued") return refused("not-editable");
+        if (item.status !== "queued" || this.#steering.has(item.messageId))
+          return refused("not-editable");
         const content = this.#store.content(item.messageId);
         if (command.kind === "edit") {
           if (content === undefined) return refused("content-unavailable");
@@ -317,6 +355,7 @@ export class ThreadMessageQueueService {
         );
         if (outcome === "applied") {
           this.#authorized.delete(item.messageId);
+          this.#unsteerable.delete(item.messageId);
           if (content !== undefined) await this.#release(content, "removed", true);
         }
         return outcome === "unavailable" ? refused("storage-unavailable") : result(outcome);
@@ -332,7 +371,13 @@ export class ThreadMessageQueueService {
         );
         if (items.some((item) => item === undefined)) return refused("invalid-order");
         const defined = items.filter((item) => item !== undefined);
-        if (state.items.some((item, index) => item.status !== "queued" && defined[index] !== item))
+        if (
+          state.items.some(
+            (item, index) =>
+              (item.status !== "queued" || this.#steering.has(item.messageId)) &&
+              defined[index] !== item,
+          )
+        )
           return refused("not-editable");
         const outcome = this.#store.write({ ...state, items: defined }, { command, ...actor });
         return outcome === "unavailable" ? refused("storage-unavailable") : result(outcome);
@@ -519,6 +564,10 @@ export class ThreadMessageQueueService {
           });
         const content = this.#store.content(head.messageId);
         if (content) await this.#release(content, "accepted");
+        // The running turn is the head's own: a message this queue admitted
+        // stays at the head until its turn settles, and the next one may
+        // still be steered into it.
+        await this.#steerBehindAccepted(scope);
         return;
       }
       if (reconciled.status === "not-admitted") {
@@ -566,7 +615,13 @@ export class ThreadMessageQueueService {
       state = lifted;
       head = state.items[0];
     }
-    if (head === undefined || state.paused || state.holdReason !== undefined || this.#disposed)
+    if (
+      head === undefined ||
+      state.paused ||
+      state.holdReason !== undefined ||
+      this.#disposed ||
+      this.#steering.has(head.messageId)
+    )
       return;
     const content = this.#store.content(head.messageId);
     if (content === undefined) {
@@ -626,7 +681,11 @@ export class ThreadMessageQueueService {
       head = state.items[0];
       if (head === undefined) return;
     }
-    if (inspection.status === "busy") return;
+    if (inspection.status === "busy") {
+      this.#steer(scope, head.messageId, content, auth.windowId);
+      return;
+    }
+    this.#unsteerable.delete(head.messageId);
     const codeOperationId = scope.mode === "code" ? decodeCodeOperationId(randomUUID()) : undefined;
     if (
       this.#store.write({
@@ -681,6 +740,129 @@ export class ThreadMessageQueueService {
         ),
       });
     } else this.#hold(state, "delivery-unknown");
+  }
+  /**
+   * Offers the message behind the head to the running turn when that turn is
+   * the head's own, which this queue admitted. Only that one message is
+   * offered, under the same pause, hold, authority and binding checks as the
+   * head, so the queue's order holds. A check that fails leaves it for the
+   * head's ordinary dispatch to judge, and holds nothing.
+   */
+  async #steerBehindAccepted(scope: ThreadMessageQueueScope): Promise<void> {
+    const state = this.#store.state(scope);
+    const next = state.items[1];
+    if (
+      this.#port.steer === undefined ||
+      next === undefined ||
+      next.status !== "queued" ||
+      state.paused ||
+      state.holdReason !== undefined ||
+      this.#disposed ||
+      this.#unsteerable.has(next.messageId) ||
+      this.#steering.has(next.messageId)
+    )
+      return;
+    const content = this.#store.content(next.messageId);
+    const auth = this.#authorized.get(next.messageId);
+    if (content === undefined || auth === undefined) return;
+    const inspection = await this.#inspect({
+      scope,
+      windowId: auth.windowId,
+      intent: "dispatch",
+      payload: content.payload,
+    });
+    if (this.#disposed || !this.#authorized.has(next.messageId)) return;
+    if (inspection.status !== "busy" || inspection.binding !== content.binding) return;
+    this.#steer(scope, next.messageId, content, auth.windowId);
+  }
+  /**
+   * Hands one message to the turn already running, where its runtime steers.
+   * A message that cannot be steered keeps every later one behind it in
+   * order. The message is not marked as dispatching: a restart while the
+   * runtime takes it also ends the turn that took it, and the message still
+   * queued is then sent again under the ordinary restart rules rather than
+   * lost.
+   *
+   * The runtime is asked outside this queue's lock. Octant Harness answers
+   * only once the note is in the conversation, at the end of the step that is
+   * running, and a step can wait on a tool approval for as long as the
+   * person takes; holding the lock that long would stop them queuing,
+   * pausing, or removing anything else meanwhile.
+   */
+  #steer(
+    scope: ThreadMessageQueueScope,
+    messageId: ThreadQueueMessageId,
+    content: QueueContent,
+    windowId: WindowId,
+  ): void {
+    const steer = this.#port.steer;
+    if (steer === undefined || this.#unsteerable.has(messageId) || this.#steering.has(messageId))
+      return;
+    this.#steering.add(messageId);
+    const asking = () => {
+      if (this.#disposed || !this.#steering.has(messageId) || this.#asking.has(messageId)) return;
+      this.#asking.add(messageId);
+      this.#steeringChanged();
+    };
+    void (async () => {
+      let outcome: "steered" | "refused" | "unavailable";
+      try {
+        outcome = await steer({ scope, messageId, payload: content.payload, windowId, asking });
+      } catch {
+        outcome = "refused";
+      }
+      await this.#serial(scope, () => this.#settleSteer(scope, messageId, content, outcome));
+    })().catch(() => {
+      this.#steering.delete(messageId);
+      if (this.#asking.delete(messageId)) this.#steeringChanged();
+    });
+  }
+  #steeringChanged(): void {
+    try {
+      this.#onSteeringChanged();
+    } catch {
+      // A reader that missed the notice catches up at its next read.
+    }
+  }
+  async #settleSteer(
+    scope: ThreadMessageQueueScope,
+    messageId: ThreadQueueMessageId,
+    content: QueueContent,
+    outcome: "steered" | "refused" | "unavailable",
+  ): Promise<void> {
+    this.#steering.delete(messageId);
+    // A steered message's removal is journaled and notifies by itself; one
+    // that waits again changes nothing durable, and one never announced
+    // changes nothing a reader saw.
+    if (this.#asking.delete(messageId) && outcome !== "steered") this.#steeringChanged();
+    if (this.#disposed) return;
+    // Nothing was tried (the turn is still starting, say), so a later pass
+    // asks again; asking now would only repeat the same answer.
+    if (outcome === "unavailable") return;
+    // A runtime that would not take this message is not asked again for it:
+    // the recovery pass runs every second and would otherwise ask each time.
+    if (outcome === "refused") this.#unsteerable.add(messageId);
+    if (outcome === "steered") {
+      const state = this.#store.state(scope);
+      // Edits and removal wait while the runtime is asked, so the message is
+      // still queued unless the thread was purged meanwhile.
+      if (state.items.some((item) => String(item.messageId) === String(messageId))) {
+        const written = this.#store.write(
+          {
+            ...state,
+            items: state.items.filter((item) => String(item.messageId) !== String(messageId)),
+          },
+          { settled: { messageId, status: "steered" } },
+        );
+        if (written === "applied") {
+          this.#authorized.delete(messageId);
+          await this.#release(content, "accepted", true);
+        }
+      }
+    }
+    // The next message may be steered too, or, when the turn ended before
+    // its runtime took this one, sent as a turn of its own.
+    await this.#tick(scope);
   }
   /**
    * Lifts the hold a clean restart left, once, under the authority each
@@ -827,6 +1009,7 @@ export class ThreadMessageQueueService {
       if (identity?.status === "removed") await this.#release(content, "removed", true);
       else if (
         identity?.status === "completed" ||
+        identity?.status === "steered" ||
         identity?.status === "failed" ||
         identity?.status === "cancelled"
       )

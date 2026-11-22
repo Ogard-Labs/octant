@@ -46,4 +46,14 @@ describe("provider cloud submission", () => {
     ])
       expect(decideProviderCloudSubmission(input).status).toBe("refused");
   });
+
+  it("admits a person-paired device and refuses a hub-introduced or restricted device", () => {
+    expect(
+      decideProviderCloudSubmission({ ...request, principalKind: "person-paired-device" }),
+    ).toEqual({ status: "allowed" });
+    expect(decideProviderCloudSubmission({ ...request, principalKind: "remote-device" })).toEqual({
+      status: "refused",
+      reason: "unauthorized",
+    });
+  });
 });

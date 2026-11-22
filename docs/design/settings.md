@@ -39,16 +39,23 @@ feel (Appearance, Sidebar, Keybindings), AI (Providers & Models, Octant Harness,
 Voice & images, then Chat, Work and Code: which provider or model answers each
 job, and how each mode starts), Tools (Skills & Extensions, Web search, Computer use,
 Device tools, GitHub, Linear: what a running agent may reach; Web search's
-rules are in [Web search backends](web-search-backends.md#settings)), Safety (Permissions,
+rules are in [Web search backends](web-search-backends.md#settings), and Computer use holds the plugin switch, guided setup, driver updates, and **Remembered applications** listing each Project and application remembered from a below-Full-access approval with **Forget**), Safety (Permissions,
 Secret stores, Memory: what an agent may touch, reach and remember), and
 Data & devices (Data & storage, Sync, Remote access, Host, Usage: what this
 computer stores and the other machines it talks to). An earlier Privacy & data
 group had grown to seven pages answering three different questions, Modes stood
-apart from the models its pages choose, and Advanced held two pages. General
-opens on Your identity (the profile), followed by Your instructions (a
+apart from the models its pages choose, and Advanced held two pages. General opens on Computer resources (automatic or manual local-work limits,
+Pause new work, and **Keep the computer awake while agents work** — `While on
+power` by default, `Always`, or `Never`, with a quiet counts-only live status
+line on the desktop app that reports held, idle, or unavailable and never shows
+thread titles) and Your identity (the profile), followed by Your instructions (a
 multi-line field with its count, limit, a likely-secret warning, and Save,
 read-only where the window cannot change it) and Orchestration, the same field
 for coordinator threads ([Octant instructions](octant-instructions.md#settings)),
+has a Composer group after Available modes with **Suggest my next message** (on
+by default) and one switch each for Chat, Work, and Code (all on by default;
+greyed while the main switch is off, keeping their choice for when it comes
+back), which control the composer's Tab suggestion ([Thread view](thread-view.md)),
 and ends on Notifications (what Octant sends while a person is away); Permissions holds the files no agent may touch, then the provider tools the person blocked,
 then the network places and servers agents may reach (Network limits, Safe
 networks, Servers), then what a person has already allowed (remembered
@@ -79,8 +86,8 @@ sign in again, and its configuration fixes the base URL and asks for no key. The
 instances, commands, and credentials are the same on every page. A setting lives
 on the page of the thing it changes, and a moved setting keeps answering links
 to its old page. Look & feel holds Appearance (theme, window glass, background,
-text, accessibility, and Reading: transcript text size and width, Reply detail
-and the usage bars) and a separate Sidebar page (layout, destinations, sidebar
+text, accessibility, and Reading: transcript text size and width, Reply detail)
+and a separate Sidebar page (layout, destinations, sidebar
 background, and a thread-row grid of detail by list). A page names its scope once, under its title, and a row names
 its own only when it differs. Settings folds long choices it does not need
 open: the built-in background pictures sit behind the current one and a
@@ -90,21 +97,36 @@ Rows in Settings are `SettingRow`; rows everywhere else are `surface-row`. Both
 draw the same hairline.
 
 **Octant's own limits** sit on Settings › Permissions after Tool steps, as
-host settings in four sections of number steppers (1 to the stated top) and
+host settings in five sections of number steppers (1 to the stated top) and
 switches, each row naming its default in its description
 ([Octant's own limits become settings](../architecture.md#security-and-authority)):
 **Wake-ups and messages** (Wake-ups waiting per thread, 8, up to 64; Message
 wakes per hour, 30; Rounds of replies that wake, 10; Thread messages per turn,
-3, up to 20; and the switch **Run missed wake-ups on return**, off),
+3, up to 20, under Strict only; Sibling thread reads per turn, 8, up to 64,
+under Strict only; Sibling thread waits per turn, 4, up to 32, under Strict
+only; and the switch **Run missed wake-ups on return**, off),
+**Octant Shield** (Denials in a row before you decide, 3, up to 50; Denials
+per thread before you decide, 20, up to 500),
 **Coordinators** (Coordinators per Project, 4, up to 32), **Pull requests**
 (Wakes per pull-request watch, 10, up to 100; Days a pull-request watch lasts,
-3, up to 30; Auto-fix tries per failure, 3, up to 20), **Waiting** (Longest
-Browser wait, in minutes, 10, up to 60, whose description says a Claude Code
+3, up to 30; Auto-fix tries per failure, 3, up to 20), **Waiting** (Latest a
+follow-up still runs, in hours, 24, up to 720; Time to run a shown provider
+command, in minutes, 10, up to 1,440, whose description says a secret held
+for the command is deleted when the time runs out; Longest
+Browser wait, in minutes, 10, up to 60, under Strict only, whose description
+says outside Strict there is no wait limit and a Claude Code
 thread still ends one tool call at eleven minutes; Longest wait for a helper,
 in seconds, 120, up to 3,600), then **Routines** with the switch **Start
 agent-created routines active at Full access**, off. Each change is the
 ordinary journaled settings replacement a local window or a device the host's
 own person paired makes; the server reads each value where it applies.
+
+**Hub settings** sit on Settings › Remote access. On the hub, **Member
+windows** holds the checklist **Projects a member's window may work in**,
+this computer's Projects by name, the same checklist a member's Act item
+shows, with **Save the Projects**; it is the hub's own Act list, read at each
+request, and none ticked leaves a member's window nothing to start here
+([Hub and spokes: the hub coordinates](hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work)).
 
 Selecting a page replaces its controls as well as its heading. Plugin pages
 resolve the currently selected entry point; a missing entry point shows an
@@ -241,6 +263,21 @@ visible while the details are closed; pressing it opens the details and gives
 the same answer without the picker. See
 [Providers and model endpoints](model-endpoints.md).
 
+### Provider channels
+
+Providers & Models carries a **Provider channels** section after Stalled
+turns with two host switches, each read at the next provider launch:
+**Let providers send their own telemetry** (off by default, for every provider
+and for a store saved before the switch existed: Octant sets the provider's
+telemetry guards, as every launch did before the switch; on, each provider's
+own settings decide its usage metrics, error reports and feedback uploads) and **Let providers update
+themselves** (off by default: Octant keeps each provider's self-update guard
+set, since it installs and updates provider CLIs itself; **Update CLI** is
+unaffected). Strict keeps every telemetry and self-update guard set whatever
+the switches say, and so does a thread that keeps or chose a sandbox. Which guards each provider takes is in
+[Provider runtimes](provider-runtimes.md#provider-channel-switches) and the rule
+in [Decisions and requirements](decisions.md#provider-telemetry-and-self-update-are-the-persons-switches).
+
 Provider catalog and the Octant Harness model endpoints (rows, detail
 sub-pages, and Add endpoint) follow
 [Providers and model endpoints](model-endpoints.md): one link per
@@ -333,7 +370,10 @@ Saving a policy does not enable Strict. With Strict off the saved configuration
 is inactive. Project can inherit Settings; an explicit Off overrides an inherited
 On. Existing Full-access-only sandbox choices remain visibly marked as previous
 choices until the person chooses Strict or Off; no silent broadening is described
-as migration. There is no second Keep the sandbox switch.
+as migration. There is no second Keep the sandbox switch, on Windows either: the
+previous Full-access-only choice never returns as a Windows control, and Windows
+gets the same Strict control as it becomes accepted there
+([Windows Strict, phase 1](../architecture.md#windows-strict-phase-1)).
 
 The panel shows effective Strict state and source, full folder paths, supported
 read/write grants and recorded Safe networks settings. Private caches, scratch,
@@ -380,8 +420,8 @@ the branch and its commits stay. A refusal (uncommitted changes, or a turn
 still running in the thread) is said in the
 section's feedback line and the row stays. With none kept it says so in one
 line; a paired device uses the section as a local window does (maintainer
-decision, 2026-11-12; not built yet: today a paired device sees the section
-as managed on the host machine)
+decision, 2026-11-12; server policy admits a person-paired device and refuses
+hub-introduced devices; paired UI follow-up remains)
 ([rules](../architecture.md#modes-chat-work-and-code)).
 **Worktrees on this computer** follows it: a first row says when the host last
 scanned ("Not scanned since Octant started" until then) and how many it found,
@@ -445,7 +485,44 @@ when it signs in with one, with quiet Change and Remove, and **Show key** for
 such a server. Show key opens a line under the row: "Add this line to
 `~/.ssh/authorized_keys` for <user> on <alias>.", the public key in the code
 font, wrapping, and a quiet Copy that reads Copied once it has; a refusal
-shows there in the alert role. The form is Alias, User, Profile, Sign in with
+shows there in the alert role. An account server's row also offers **Make
+this an Octant computer**, which opens one dialog naming the server: it
+states what Octant read over SSH and will do there (server and `uname -sm`,
+version and signature check, install location, user service, the boot
+command with a quiet Copy, a **Listens on** select of the server's private
+addresses, and the hub it joins), with **Install and join** and Cancel; once
+confirmed it lists the six steps (Copy the build, Verify it on the server,
+Install, Start the service, Turn on the listener, Join the hub), each with
+Waiting, Running…, Done, Failed with what to fix, or Not run. A refusal shows
+in the alert role, with **Open the private network guide** for a server with
+no private address
+([Hub and spokes](hub-and-spokes.md#adding-a-computer-over-ssh)). A server
+this computer made an Octant computer reads "Octant computer, version <v>"
+under its open row, and offers **Update** and **Remove Octant** in place of
+that action. Update opens a dialog stating both versions and the ring, the
+signature check, how running turns stop, the `octant server upgrade` swap in
+the install folder and any store migration, and what makes Octant roll back.
+Running turns is a radio group of **Wait up to N minutes for running work**,
+chosen first, and **Stop now**; with Wait chosen a minutes field (1 to 60,
+default 10) follows, and the line under it says the server refuses new turns
+at once, lets running ones finish for up to that long, then stops, and that a
+turn still running continues once it starts again; with Stop now it says the
+server refuses new turns and stops now. It lists the five steps (Copy the
+build, Verify it on the server, Drain running turns, Swap to <v>, Confirm its
+signed hello) before **Update to <v>** and Cancel, then their states, the
+Drain step saying how many turns were still running when a wait ran out, with
+Roll back to <v> added after a failed drain, swap or confirmation and a
+closing line saying why it was rolled back.
+Remove Octant opens a dialog stating that the server leaves the hub, its user
+service is stopped and removed, what is Deleted and what is Kept, with one
+**Also delete the data folder** checkbox, unticked, that moves the data
+folder from Kept to Deleted with "This cannot be undone." (Deleted always
+names the install and its install and update work folders, and Kept then names
+service logs Octant keeps outside the data folder, with example paths, since
+logs inside it go with it, and files it did not make); it lists Leave the
+hub, Stop and remove the service, and Delete the install (or the install and
+the data folder), with **Remove Octant** (or **Remove Octant and its data**)
+and Cancel. The form is Alias, User, Profile, Sign in with
 (Your SSH agent, the default, or A key Octant keeps), Deploy commands (one per
 line, shown for Operate and Admin), and Runbook path. A refusal from the host shows inline in the alert role.
 Below it, **Projects on your servers** lists each server Project as its

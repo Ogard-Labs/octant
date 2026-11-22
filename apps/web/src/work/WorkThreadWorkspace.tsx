@@ -1,3 +1,4 @@
+import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
 import { TurnSubagentRows } from "../agents/threadSubagents";
 import { attachAllowingFiles, attachmentMediaType } from "../composer/attachmentMediaType";
@@ -49,6 +50,7 @@ import {
   PERMISSION_MODE_LABEL,
   PermissionModePicker,
   threadKeepsFullAccessSandbox,
+  threadProviderDriverKind,
 } from "../code/PermissionModePicker";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useProjectTrustNotice } from "../providers/ProjectTrustNotice";
@@ -121,7 +123,10 @@ import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
-import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import type {
+  ImageGenerationClient,
+  ThreadImageResults,
+} from "@octant/client-runtime/image-generation-client";
 import type { ImageArtifactRecord, ImageGenerationProfileView, ImageJob } from "@octant/contracts";
 import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
 import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
@@ -129,7 +134,7 @@ import { ScheduledFollowUpMark } from "../automation/ScheduledFollowUpMark";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageJobs, useGeneratedImageJobs } from "../image/GeneratedImageList";
 import { ImageGenerationAction } from "../image/ImageGenerationAction";
-import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt";
+import { ServiceOfferPrompt } from "../offers/ServiceOfferPrompt";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
@@ -172,6 +177,7 @@ import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
+import { SteeredMessages } from "../messageQueue/SteeredMessages";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import {
   documentIsVisible,
@@ -200,6 +206,11 @@ import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
 import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
 import { SideTaskInline, sideTasksAfterTurn, useThreadSideTasks } from "../followUps/SideTaskCards";
+import {
+  FinishedReceiptInline,
+  finishedReceiptsAfterTurn,
+  useThreadFinishedReceipts,
+} from "../finishedReceipts/FinishedReceiptCard";
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { TurnActions } from "../transcript/TurnActions";
@@ -209,6 +220,7 @@ import {
   turnWorkedFor,
   type TurnHeaderOutcome,
 } from "../transcript/TurnHeader";
+import { TurnLoopStallNotice } from "../transcript/TurnLoopStallNotice";
 import { HarnessRetryStatus, type HarnessRetryStreamEvent } from "../transcript/HarnessRetryStatus";
 import {
   pendingThreadHandoffNotice,
@@ -225,8 +237,8 @@ import {
 } from "../composer/useComposerSlashCommands";
 import {
   ComposerAtTypeahead,
-  composerProviderMentions,
   useComposerAtMenu,
+  useThreadProviderMentions,
 } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
 
@@ -269,10 +281,22 @@ type WorkTranscriptRow =
       readonly steered: NonNullable<WorkTurnState["steeredResults"]>;
     }
   | {
+      readonly kind: "steered-messages";
+      readonly key: string;
+      readonly steered: NonNullable<WorkTurnState["steeredMessages"]>;
+    }
+  | {
       readonly kind: "side-tasks";
       readonly key: string;
       readonly turnId: string;
       readonly running: boolean;
+      readonly last: boolean;
+      readonly loadedTurnIds: ReadonlySet<string>;
+    }
+  | {
+      readonly kind: "finished-receipt";
+      readonly key: string;
+      readonly turnId: string;
       readonly last: boolean;
       readonly loadedTurnIds: ReadonlySet<string>;
     }
@@ -379,6 +403,7 @@ function WorkTurnHeader(props: {
   readonly turn: WorkTurnState;
   /** What Strict kept for the turn before this one, so the notice shows once per change. */
   readonly previousStrictKept?: StrictKeptProtections | undefined;
+  readonly onStopTurn?: () => void;
   readonly providerGroups: ReadonlyArray<PickerGroup>;
   /** Puts the stopped turn's prompt back in the composer to send again. */
   readonly onRestorePrompt?: (prompt: string) => void;
@@ -392,7 +417,11 @@ function WorkTurnHeader(props: {
   const outcome = turnHeaderOutcome(props.turn);
   const usageLimit = props.turn.failure?.usageLimit;
   const workedFor = workTurnWorkedFor(props.turn);
-  const activity = toolStepsActivity(props.turn.toolSteps, props.turn.toolStepsTruncated);
+  const activity = toolStepsActivity(
+    props.turn.toolSteps,
+    props.turn.toolStepsTruncated,
+    props.turn.reasoningMs,
+  );
   return (
     <>
       <TurnHeader
@@ -434,6 +463,12 @@ function WorkTurnHeader(props: {
           )}
         </p>
       )}
+      <TurnLoopStallNotice
+        {...(props.turn.loopNotice === undefined ? {} : { loopNotice: props.turn.loopNotice })}
+        {...(props.turn.stallNotice === undefined ? {} : { stallNotice: props.turn.stallNotice })}
+        running={props.turn.status === "accepted" || props.turn.status === "running"}
+        {...(props.onStopTurn === undefined ? {} : { onStop: props.onStopTurn })}
+      />
       {usageLimit === undefined ? null : (
         <UsageLimitNotice
           limit={usageLimit}
@@ -487,7 +522,11 @@ function WorkToolGroup(props: {
   readonly serverUrl?: string | undefined;
   readonly windowCapability?: string | undefined;
 }) {
-  const activity = toolStepsActivity(props.turn.toolSteps, props.turn.toolStepsTruncated);
+  const activity = toolStepsActivity(
+    props.turn.toolSteps,
+    props.turn.toolStepsTruncated,
+    props.turn.reasoningMs,
+  );
   const toolCallRecords = useToolCallRecordsReader({
     serverUrl: props.serverUrl,
     windowCapability: props.windowCapability,
@@ -575,6 +614,8 @@ export interface WorkThreadWorkspaceProps {
   readonly fileMentionClient?: FileMentionClient;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  readonly imageResults?: ThreadImageResults;
+  readonly serviceOfferClient?: ServiceOfferClient;
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly onOpenSettings?: () => void;
   /** Opens Settings at Image generation, where an image profile is added. */
@@ -732,7 +773,24 @@ function applyWorkTurnStreamFrame(
       ...current,
       ...(toolSteps.length === 0 ? {} : { toolSteps }),
       ...(frame.toolStepsTruncated ? { toolStepsTruncated: true } : {}),
+      ...(frame.reasoningMs === undefined ? {} : { reasoningMs: frame.reasoningMs }),
     };
+    return next;
+  }
+  if (frame.kind === "turn-loop-noticed" || frame.kind === "turn-loop-stopped") {
+    if (index === -1) return turns;
+    const current = turns[index];
+    if (current === undefined) return turns;
+    const next = turns.slice();
+    next[index] = { ...current, loopNotice: frame.notice };
+    return next;
+  }
+  if (frame.kind === "turn-stall-noticed") {
+    if (index === -1) return turns;
+    const current = turns[index];
+    if (current === undefined) return turns;
+    const next = turns.slice();
+    next[index] = { ...current, stallNotice: frame.notice };
     return next;
   }
   if (frame.kind === "provider-retry" || frame.kind === "provider-retry-cleared") return turns;
@@ -886,10 +944,16 @@ function withoutHostTools(props: WorkThreadWorkspaceProps): WorkThreadWorkspaceP
     extensionClient: _extensions,
     fileMentionClient: _files,
     imageGenerationClient: _images,
+    imageResults: _imageResults,
+    imageGenerationProfiles: _imageProfiles,
+    serviceOfferClient: _offers,
     mutationClient: _mutations,
     ...rest
   } = props;
-  return { ...rest, providerGroups: serverCodeThreadProviderGroups(props.providerGroups ?? []) };
+  return {
+    ...rest,
+    providerGroups: serverCodeThreadProviderGroups(props.providerGroups ?? [], "work"),
+  };
 }
 
 export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
@@ -914,11 +978,22 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     props.providerGroups,
     thread?.providerInstanceId,
   );
+  const trustNoticeProject = props.projects?.find(
+    (entry) => entry.type === "work" && String(entry.id) === String(thread?.projectId),
+  );
   const projectTrustNotice = useProjectTrustNotice({
     mode: "work",
     threadId: String(props.threadId),
     projectId: thread?.projectId,
     providerInstanceId: thread?.providerInstanceId,
+    strict:
+      thread?.strict ??
+      (thread?.fullAccessSandbox === true && thread.access === "full-access"
+        ? true
+        : resolveStrict({
+            project: trustNoticeProject?.type === "work" ? trustNoticeProject : undefined,
+            settings: { defaultStrict: props.workDefaultStrict },
+          })),
   });
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
@@ -1308,7 +1383,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     }
   }, [props.threadId, props.turnClient, stoppableTurn, forceStop.requestStop]);
   const answerWorkRequest = useCallback(
-    async (request: WorkRequest, resolution: WorkRequestResolution) => {
+    async (request: WorkRequest, resolution: WorkRequestResolution, secretAnswer?: string) => {
       const requestClient = props.requestClient;
       if (requestClient === undefined) return false;
       const threadKey = String(props.threadId);
@@ -1318,6 +1393,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           requestId: request.requestId,
           expectedVersion: request.version,
           resolution,
+          // A secret question's answer rides beside its resolution, never in it.
+          ...(secretAnswer === undefined ? {} : { secretAnswer }),
         });
         if (currentThreadKeyRef.current !== threadKey) return false;
         setStatus(undefined);
@@ -1489,8 +1566,17 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
   const fileMentionOpen = fileMentions.open && !mention.open;
+  const providerMentions = useThreadProviderMentions(props.providerGroups, {
+    kind: "thread",
+    mode: "work",
+    threadId: String(props.threadId),
+    projectId: thread?.projectId,
+    providerInstanceId: thread?.providerInstanceId,
+    executionPolicy:
+      thread?.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
+  });
   const atMenu = useComposerAtMenu({
-    provider: composerProviderMentions(props.providerGroups, thread?.providerInstanceId),
+    provider: providerMentions,
     textarea: () => textareaRef.current,
     draft: composerDraft.text,
     onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
@@ -1546,6 +1632,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     revealTurnId,
   ]);
   const sideTasks = useThreadSideTasks();
+  const finishedReceipts = useThreadFinishedReceipts();
   const loadedTurnIds = useMemo(() => new Set(turns.map((turn) => String(turn.turnId))), [turns]);
   const transcriptRows = useMemo<ReadonlyArray<WorkTranscriptRow>>(() => {
     const rows: WorkTranscriptRow[] = [];
@@ -1590,6 +1677,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           steered: turn.steeredResults,
         });
       }
+      if (turn.steeredMessages !== undefined && turn.steeredMessages.length > 0) {
+        rows.push({
+          kind: "steered-messages",
+          key: `${String(turn.requestId)}-steered-messages`,
+          steered: turn.steeredMessages,
+        });
+      }
       // The provider's restated task list lands where the turn it belongs to
       // ends, so the transcript reads as what was said and then what it is
       // working through.
@@ -1617,6 +1711,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         last: turn === turns.at(-1),
         loadedTurnIds,
       };
+      if (finishedReceiptsAfterTurn(finishedReceipts, placement).length > 0) {
+        rows.push({
+          kind: "finished-receipt",
+          key: `${String(turn.requestId)}-finished-receipt`,
+          ...placement,
+        });
+      }
       if (sideTasksAfterTurn(sideTasks, placement).length > 0) {
         rows.push({
           kind: "side-tasks",
@@ -1632,7 +1733,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     }
     if (status !== undefined) rows.push({ kind: "status", key: "status", text: status });
     return rows;
-  }, [firstPageSettled, loadedTurnIds, pendingRequests, sideTasks, status, turns]);
+  }, [
+    finishedReceipts,
+    firstPageSettled,
+    loadedTurnIds,
+    pendingRequests,
+    sideTasks,
+    status,
+    turns,
+  ]);
   // The turn's first row, whichever kind opens it (its prompt, or the header
   // a reply opens with), is where the reader lands.
   const revealKey =
@@ -2476,7 +2585,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   // The transcript draws each image after the turn that made it; the trail
   // below the transcript shows the rest.
   const threadImages = useGeneratedImageJobs({
-    client: props.imageGenerationClient,
+    client: props.imageGenerationClient ?? props.imageResults,
     threadKind: "work-thread",
     scopeId: decodeImageGenerationScopeId(String(props.threadId)),
   });
@@ -2500,7 +2609,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     (job) => String(job.createdAt),
     (job) => String(job.id),
   );
-  const imageClient = props.imageGenerationClient;
+  const imageClient = props.imageGenerationClient ?? props.imageResults;
   const imageProfiles = props.imageGenerationProfiles;
   const saveGeneratedImage = (job: ImageJob, artifact: ImageArtifactRecord) => {
     void props.imageGenerationClient
@@ -2723,6 +2832,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                               : {})}
                             turn={row.head}
                             previousStrictKept={previousStrictKeptOf(row.head)}
+                            {...(props.turnClient === undefined ||
+                            stoppableTurn === undefined ||
+                            String(stoppableTurn.requestId) !== String(row.head.requestId)
+                              ? {}
+                              : { onStopTurn: () => void onStop() })}
                             {...(thread?.usageResume === undefined ||
                             String(thread.usageResume.record.turnId) !== String(row.head.turnId)
                               ? {}
@@ -2772,6 +2886,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         : {})}
                       turn={row.turn}
                       previousStrictKept={previousStrictKeptOf(row.turn)}
+                      {...(props.turnClient === undefined ||
+                      stoppableTurn === undefined ||
+                      String(stoppableTurn.requestId) !== String(row.turn.requestId)
+                        ? {}
+                        : { onStopTurn: () => void onStop() })}
                       {...(thread?.usageResume === undefined ||
                       String(thread.usageResume.record.turnId) !== String(row.turn.turnId)
                         ? {}
@@ -2830,6 +2949,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   </section>
                 );
               }
+              if (row.kind === "finished-receipt") {
+                return (
+                  <FinishedReceiptInline
+                    last={row.last}
+                    loadedTurnIds={row.loadedTurnIds}
+                    turnId={row.turnId}
+                  />
+                );
+              }
               if (row.kind === "side-tasks") {
                 return (
                   <SideTaskInline
@@ -2839,6 +2967,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     turnId={row.turnId}
                   />
                 );
+              }
+              if (row.kind === "steered-messages") {
+                return <SteeredMessages steered={row.steered} />;
               }
               if (row.kind === "steered") {
                 return (
@@ -2907,6 +3038,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         ? {}
                         : { questionnaire: row.request.detail.questionnaire })}
                       onAnswer={(answer) => {
+                        if (row.request.detail.kind === "user-input" && row.request.detail.secret)
+                          return answerWorkRequest(
+                            row.request,
+                            { kind: "user-input", secret: true },
+                            answer,
+                          );
                         try {
                           const detail = row.request.detail;
                           const value =
@@ -2924,6 +3061,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       }}
                       options={row.request.detail.options.map((label) => ({ label }))}
                       prompt={row.request.detail.prompt}
+                      secret={row.request.detail.secret === true}
                     />
                   );
                 }
@@ -2947,15 +3085,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             restoreKey={`work:${String(props.threadId)}`}
             role="log"
             trail={
-              (props.imageGenerationClient === undefined ||
-                props.imageGenerationProfiles === undefined) &&
+              (imageClient === undefined || props.imageGenerationProfiles === undefined) &&
               props.browserAutomationClient === undefined ? null : (
                 <div className="work-thread-workspace__transcript-trail">
-                  {props.imageGenerationClient === undefined ||
+                  {imageClient === undefined ||
                   props.imageGenerationProfiles === undefined ? null : (
                     <GeneratedImageJobs
                       canSaveToProject
-                      client={props.imageGenerationClient}
+                      client={imageClient}
                       jobs={threadImages.jobs.filter(
                         (job) => !imagePlacement.placed.has(String(job.id)),
                       )}
@@ -3027,9 +3164,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           threadId={String(props.threadId)}
           turnActive={turnRunning}
         />
-        <ImageGenerationOfferPrompt
+        <ServiceOfferPrompt
           className="thread-column"
-          client={props.imageGenerationClient}
+          client={props.serviceOfferClient}
           keptIn="project"
           profiles={props.imageGenerationProfiles ?? []}
           scopeId={decodeImageGenerationScopeId(String(props.threadId))}
@@ -3413,6 +3550,10 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       props.providerGroups ?? [],
                       thread.providerInstanceId,
                     )}
+                    driverKind={threadProviderDriverKind(
+                      props.providerGroups ?? [],
+                      thread.providerInstanceId,
+                    )}
                     onStrictChange={(strict) => void changeAccess(thread.access, strict)}
                   />
                 )}
@@ -3427,6 +3568,11 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   >
                     <ComposerModelPicker
                       threadId={String(thread.id)}
+                      benchmarkScope={
+                        thread.projectId === undefined
+                          ? undefined
+                          : { kind: "work", projectId: thread.projectId }
+                      }
                       ariaLabel="Provider and model"
                       disabled={providerChanging || creating}
                       locked={completionLocked}

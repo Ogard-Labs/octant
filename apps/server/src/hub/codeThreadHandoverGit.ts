@@ -187,6 +187,7 @@ async function commitWithMessage(
       { cwd: root, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, maxBuffer: GIT_MAX_BUFFER },
       (error, stdout) => (error === null ? resolve(stdout.trim()) : reject(error)),
     );
+    child.stdin?.on("error", () => undefined);
     child.stdin?.end(message);
   });
 }

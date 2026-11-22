@@ -15,6 +15,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type {
   ProviderExecutionPolicy,
@@ -24,11 +25,16 @@ import type {
 import { Effect, type Scope } from "effect";
 import {
   HOST_PASSTHROUGH_VARIABLES,
+  PROTOCOL_STREAM_GUARDS,
+  acpLoadsAllOwnSetup,
+  acpReleaseClaim,
   acpSubagentsRun,
   type AcpProviderProfile,
   type AcpSessionMode,
 } from "./acpProfiles";
-import { providerHostEnvironment } from "./providerHostEnvironment";
+import { awsProfileReadPaths, providerHostEnvironment } from "./providerHostEnvironment";
+import { guardsForOwnChannels, launchOwnChannels } from "./providerOwnChannels";
+import type { ProviderOwnChannels } from "@octant/provider-sdk";
 import { AcpFailure, makeAcpClient, type AcpClient, type AcpInitializeResult } from "./acpProtocol";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
@@ -38,6 +44,7 @@ import {
 } from "../process/windowsProviderProgram";
 import {
   WINDOWS_SANDBOX_MISSING_REASON,
+  providerHoldsLevelWithoutSandbox,
   windowsProviderLaunch,
   type WindowsProviderLaunch,
 } from "@octant/domain/guardrail-policy";
@@ -46,6 +53,7 @@ import {
   ProcessConfinementError,
   seatbeltAllowLiteralReadRule,
   seatbeltDenyRule,
+  seatbeltExecRule,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import {
@@ -70,6 +78,32 @@ export type { AcpSessionMode } from "./acpProfiles";
 
 /** See {@link AcpProviderProfile} `process.readsSystemKeychain`. */
 const SYSTEM_KEYCHAIN_PATH = "/Library/Keychains/System.keychain";
+
+/**
+ * See {@link AcpProviderProfile} `process.readsLoginKeychain`. The same grant
+ * Claude Code's runtime measured as the least that reads a keychain sign-in
+ * (exec of `security`, the two security-server lookups, and the one file);
+ * caller rules follow the secret-file denials, so a path the person protects
+ * in Settings still wins, and nothing grants a write.
+ */
+function loginKeychainSeatbeltRules(): ReadonlyArray<string> {
+  return [
+    seatbeltExecRule("/usr/bin/security"),
+    '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
+    '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
+    seatbeltAllowLiteralReadRule(loginKeychainPath()),
+  ];
+}
+
+function loginKeychainPath(): string {
+  let home = homedir();
+  try {
+    home = realpathSync(home);
+  } catch {
+    // A home that cannot be resolved names no file the profile could open.
+  }
+  return join(home, "Library", "Keychains", "login.keychain-db");
+}
 
 export interface AcpLaunchSpec {
   readonly command: string;
@@ -102,6 +136,12 @@ export interface AcpConfinementInput {
   readonly sandboxPolicy?: SandboxPolicySelection;
   /** Whether the launch is Strict; absent is Strict. */
   readonly strict?: boolean;
+  /**
+   * The provider's own channels this launch opens, already resolved against
+   * Strict; absent opens none. Read for a profile whose telemetry switch is a
+   * command-line argument.
+   */
+  readonly ownChannels?: ProviderOwnChannels;
   /** A non-mutating readiness check may contact the provider without a thread. */
   readonly purpose?: "probe" | "session";
   readonly environment: NodeJS.ProcessEnv;
@@ -163,9 +203,11 @@ export interface AcpProcessStartInput {
   /**
    * Whether the launch is Strict; absent is Strict. Off, the agent gets the
    * host's environment less Octant's variables and other providers' keys, and
-   * its channel guards follow the person's own settings.
+   * its telemetry and self-update guards follow {@link ownChannels}.
    */
   readonly strict?: boolean;
+  /** The person's provider telemetry and self-update switches; read only outside Strict. */
+  readonly ownChannels?: ProviderOwnChannels;
   /** A non-mutating readiness check may contact the provider without a thread. */
   readonly purpose?: "probe" | "session";
   readonly apiKey?: string;
@@ -232,6 +274,7 @@ function acpWindowsLaunch(
     executionPolicy: input.executionPolicy,
     fullAccessSandbox: input.fullAccessSandbox,
     strict: input.sandboxPolicy === undefined ? input.strict : true,
+    driverKind: "acp-agent",
   });
 }
 
@@ -452,11 +495,19 @@ function prepareHostAuthentication(
   });
 }
 
-/** What a session with the person's own setup releases of the profile's guards and denies. */
+/**
+ * What a session with the person's own setup releases of the profile's guards
+ * and denies. Outside Strict such a session holds back none of the profile's
+ * denied entries (`acpLoadsAllOwnSetup`); its guards still follow the profile.
+ */
 function releasedByNativeSetup(
   profile: AcpProviderProfile,
   setup: ProviderNativeSetup | undefined,
-  launch: { readonly executionPolicy: ProviderExecutionPolicy; readonly mode?: AcpSessionMode },
+  launch: {
+    readonly executionPolicy: ProviderExecutionPolicy;
+    readonly mode?: AcpSessionMode;
+    readonly strict?: boolean;
+  },
 ): {
   readonly guards: ReadonlySet<string>;
   readonly rootEntries: ReadonlySet<string>;
@@ -466,8 +517,22 @@ function releasedByNativeSetup(
     setup === undefined || profile.process.nativeSetup === undefined
       ? undefined
       : profile.process.nativeSetup(setup, launch);
+  const guards = new Set(released?.releasedGuards ?? []);
+  if (acpLoadsAllOwnSetup({ strict: launch.strict, setup })) {
+    const hostAuthentication = profile.process.hostAuthentication;
+    return {
+      guards,
+      rootEntries: new Set(profile.process.forbiddenRootEntries ?? []),
+      hostEntries: new Set([
+        ...(profile.process.hostDeniedEntries ?? []),
+        ...(hostAuthentication?.kind === "directory"
+          ? (hostAuthentication.forbiddenEntries ?? [])
+          : []),
+      ]),
+    };
+  }
   return {
-    guards: new Set(released?.releasedGuards ?? []),
+    guards,
     rootEntries: new Set(released?.releasedRootEntries ?? []),
     hostEntries: new Set(released?.releasedHostEntries ?? []),
   };
@@ -477,7 +542,11 @@ function hostExtensionDenyPaths(
   profile: AcpProviderProfile,
   hostDirectory: string | undefined,
   root: string,
-  launch: { readonly executionPolicy: ProviderExecutionPolicy; readonly mode: AcpSessionMode },
+  launch: {
+    readonly executionPolicy: ProviderExecutionPolicy;
+    readonly mode: AcpSessionMode;
+    readonly strict?: boolean;
+  },
   nativeSetup?: ProviderNativeSetup,
 ): ReadonlyArray<string> {
   const released = releasedByNativeSetup(profile, nativeSetup, launch);
@@ -507,6 +576,53 @@ function acpWallPolicy(input: {
   return input.executionPolicy === "full-access" && input.fullAccessSandbox === true
     ? "auto-accept-edits"
     : input.executionPolicy;
+}
+
+/**
+ * Work and Code outside Strict start as Full access does, at every level: the
+ * agent's own mode asks Octant before each side effect
+ * (`providerHoldsLevelWithoutSandbox`). An agent whose shell runs without
+ * asking cannot hold a level that way, so it keeps the sandbox; an added agent
+ * the person has not trusted is started under Strict, so it does too. So does
+ * a session whose person turned the agent's own setup off while the profile
+ * holds entries back: the sandbox's deny rules are the only hold-back, and
+ * without them Kimi Code 0.38.0 started the stdio server a trusted Project's
+ * `.mcp.json` declares at `session/new`, with no approval asked.
+ */
+function acpStartsUnconfinedBelowFullAccess(input: {
+  readonly profile: AcpProviderProfile;
+  readonly mode: AcpSessionMode;
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly strict?: boolean;
+  readonly purpose?: "probe" | "session";
+  readonly fullAccessSandbox?: boolean;
+  readonly sandboxPolicy?: SandboxPolicySelection;
+  readonly nativeSetup?: ProviderNativeSetup;
+}): boolean {
+  return (
+    input.profile.shellWithoutRequest !== true &&
+    (acpLoadsAllOwnSetup({ strict: input.strict, setup: input.nativeSetup }) ||
+      !acpHoldsSetupBack(input.profile)) &&
+    providerHoldsLevelWithoutSandbox({
+      mode: input.mode,
+      executionPolicy: input.executionPolicy,
+      strict: input.strict,
+      fullAccessSandbox: input.fullAccessSandbox,
+      sandboxPolicySelected: input.sandboxPolicy !== undefined,
+      purpose: input.purpose,
+    })
+  );
+}
+
+/** Whether the profile's launch denies any of the agent's own setup. */
+function acpHoldsSetupBack(profile: AcpProviderProfile): boolean {
+  const hostAuthentication = profile.process.hostAuthentication;
+  return (
+    (profile.process.forbiddenRootEntries?.length ?? 0) > 0 ||
+    (profile.process.hostDeniedEntries?.length ?? 0) > 0 ||
+    (hostAuthentication?.kind === "directory" &&
+      (hostAuthentication.forbiddenEntries?.length ?? 0) > 0)
+  );
 }
 
 export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): AcpConfinementPort {
@@ -548,6 +664,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           releasedByNativeSetup(profile, input.nativeSetup, {
             executionPolicy: input.executionPolicy,
             mode: input.mode,
+            ...(input.strict === false ? { strict: false } : {}),
           }).hostEntries,
         );
         const hostReadPaths = yield* canonicalExistingReadPaths(profile);
@@ -564,14 +681,22 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           options.temporaryDirectory ?? input.environment.TMPDIR ?? "/tmp",
           name,
         );
-        const args = profile.process.args({ root, managedHome });
+        const args = profile.process.args({
+          root,
+          managedHome,
+          ...(input.ownChannels === undefined ? {} : { ownChannels: input.ownChannels }),
+        });
         const denyPaths = [
           ...hostAuthentication.forbiddenPaths,
           ...hostExtensionDenyPaths(
             profile,
             hostAuthentication.writePaths[0] ?? hostAuthentication.readPaths[0],
             root,
-            { executionPolicy: input.executionPolicy, mode: input.mode },
+            {
+              executionPolicy: input.executionPolicy,
+              mode: input.mode,
+              ...(input.strict === false ? { strict: false } : {}),
+            },
             input.nativeSetup,
           ),
         ];
@@ -581,11 +706,12 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         // A thread that keeps the sandbox takes the Accept edits wall instead.
         const wall = acpWallPolicy(input);
         if (platform === "win32") {
-          // Windows has no Octant sandbox: Full access, or a level below it
-          // outside Strict, where the agent's own mode asks Octant before each
-          // side effect and Plan keeps the agent's read-only mode, starts
-          // unconfined; anything else is refused by name. The process port
-          // admitted a readiness check already.
+          // Windows has no Octant sandbox: Full access, a level below it
+          // outside Strict (where the agent's own mode asks Octant before each
+          // side effect and Plan keeps the agent's read-only mode), or Chat
+          // outside Strict (on the agent's own permission handling) starts
+          // unconfined; Strict and a kept sandbox are refused by name. The
+          // process port admitted a readiness check already.
           const form =
             input.purpose === "probe"
               ? ({ status: "unconfined", approvals: "none" } as const)
@@ -606,9 +732,9 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           return { command: program.command, args: [...program.args], cwd: root, environment };
         }
         if (
-          wall === "full-access" &&
           input.sandboxPolicy === undefined &&
-          input.fullAccessSandbox !== true
+          input.fullAccessSandbox !== true &&
+          (wall === "full-access" || acpStartsUnconfinedBelowFullAccess(input))
         ) {
           return {
             command: input.binaryPath,
@@ -656,6 +782,8 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         // callers deny paths that must stay hidden even if created later.
         const confinedDenyPaths =
           platform === "linux" ? denyPaths.filter((path) => pathExists(path)) : denyPaths;
+        const readsLoginKeychain =
+          platform === "darwin" && profile.process.readsLoginKeychain === true;
         const extraRules = [
           ...loopbackRules,
           ...(platform === "darwin" ? serverAccessSeatbeltRules(input.servers) : []),
@@ -671,6 +799,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           ...(platform === "darwin" && profile.process.readsSystemKeychain === true
             ? [seatbeltAllowLiteralReadRule(SYSTEM_KEYCHAIN_PATH)]
             : []),
+          ...(readsLoginKeychain ? loginKeychainSeatbeltRules() : []),
         ];
         const launch = yield* Effect.try({
           try: () =>
@@ -711,9 +840,12 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
               // exec literals and binds already permit, and fork without a
               // second exec target cannot reach a shell. Chat and Plan never
               // get here — such profiles are refused above.
+              // Reading the keychain sign-in forks `/usr/bin/security`, the
+              // one program the keychain rules let it exec in Chat and Plan.
               allowProcessFork:
                 !(input.executionPolicy === "plan" || input.mode === "chat") ||
-                profile.process.requiresChildServer === true,
+                profile.process.requiresChildServer === true ||
+                readsLoginKeychain,
               additionalWriteRoots: [managedHome, ...hostAuthentication.writePaths],
               additionalDenyReadPaths: confinedDenyPaths,
               additionalDenyWritePaths: confinedDenyPaths,
@@ -723,6 +855,11 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 managedHome,
                 ...hostAuthentication.readPaths,
                 ...hostReadPaths,
+                ...(input.strict === false &&
+                input.fullAccessSandbox !== true &&
+                input.sandboxPolicy === undefined
+                  ? awsProfileReadPaths(input.environment)
+                  : []),
                 binaryDirectory,
                 binaryRuntimeDirectory,
                 configuredBinaryDirectory,
@@ -735,6 +872,11 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 managedHome,
                 ...hostAuthentication.readPaths,
                 ...hostReadPaths,
+                ...(input.strict === false &&
+                input.fullAccessSandbox !== true &&
+                input.sandboxPolicy === undefined
+                  ? awsProfileReadPaths(input.environment)
+                  : []),
                 binaryRuntimeDirectory,
                 configuredBinaryDirectory,
                 ...(input.servers === undefined ? [] : [input.servers.folder]),
@@ -868,6 +1010,26 @@ function parseVersion(
   };
 }
 
+/**
+ * A launch on a release the profile lists as known to break with Octant is
+ * refused by name; every other release at or above the minimum runs
+ * (maintainer decision, 2026-11-21).
+ */
+function knownBrokenRelease(
+  profile: AcpProviderProfile,
+  version: string,
+): ProviderFailure | undefined {
+  if (profile.process.brokenVersions?.includes(version) !== true) return undefined;
+  return failure(
+    "incompatible",
+    `${profile.displayName} ${version} is known to break with Octant. Install another release.`,
+    {
+      reason: "runtime-incompatible",
+      diagnostic: { stage: "version-check", kind: "version-mismatch", detectedVersion: version },
+    },
+  );
+}
+
 /** Whether a major, minor, patch version is at least the minimum. */
 export function versionAtLeast(
   current: readonly [number, number, number],
@@ -888,7 +1050,8 @@ export function acpNegotiationAccepted(
   const identityMatches = profile.process.verifyAgentInfo
     ? profile.process.verifyAgentInfo(initialized)
     : initialized.agentInfo?.name === profile.process.agentName;
-  return initialized.protocolVersion === 1 && identityMatches;
+  const protocolVersions = profile.process.protocolVersions ?? [1];
+  return protocolVersions.includes(initialized.protocolVersion) && identityMatches;
 }
 
 function resolveNpmPackageVersion(
@@ -959,6 +1122,8 @@ function probeNpmPackageVersion(
       }),
     );
   }
+  const broken = knownBrokenRelease(profile, parsed.version);
+  if (broken !== undefined) return Effect.fail(broken);
   return Effect.succeed({ binaryPath, version: parsed.version });
 }
 
@@ -1128,7 +1293,12 @@ export function probeAcpBinary(
           );
           return;
         }
-        finish(Effect.succeed({ binaryPath, version: parsed.version }));
+        const broken = knownBrokenRelease(profile, parsed.version);
+        finish(
+          broken === undefined
+            ? Effect.succeed({ binaryPath, version: parsed.version })
+            : Effect.fail(broken),
+        );
       };
       const timeout = setTimeout(
         () =>
@@ -1168,18 +1338,37 @@ export function sanitizeAcpEnvironment(
     readonly nativeSetup?: ProviderNativeSetup;
     /** Absent is Strict: the profile's fixed passthrough list and every guard. */
     readonly strict?: boolean;
+    /**
+     * For a person's interactive provider terminal, never an ACP launch: the
+     * protocol-stream guards are left out, so the host's own value of such a
+     * variable, where the environment passes one, stays.
+     */
+    readonly interactive?: boolean;
+    /** The person's provider telemetry and self-update switches; read only outside Strict. */
+    readonly ownChannels?: ProviderOwnChannels;
   },
 ): NodeJS.ProcessEnv {
   const strict = input.strict !== false;
+  const streamGuards = new Set(input.interactive === true ? PROTOCOL_STREAM_GUARDS : []);
   const released = releasedByNativeSetup(profile, input.nativeSetup, {
     executionPolicy: input.executionPolicy ?? "approval-gated",
     ...(input.mode === undefined ? {} : { mode: input.mode }),
   }).guards;
-  const channels = new Set(strict ? [] : (profile.process.channelGuards ?? []));
   const guards = Object.fromEntries(
-    Object.entries(profile.process.guards).filter(
-      ([name]) => !released.has(name) && !channels.has(name),
-    ),
+    Object.entries(
+      guardsForOwnChannels(
+        profile.process.guards,
+        {
+          ...(profile.process.channelGuards === undefined
+            ? {}
+            : { telemetry: profile.process.channelGuards }),
+          ...(profile.process.selfUpdateGuards === undefined
+            ? {}
+            : { selfUpdate: profile.process.selfUpdateGuards }),
+        },
+        launchOwnChannels(strict, input.ownChannels),
+      ),
+    ).filter(([name]) => !released.has(name) && !streamGuards.has(name)),
   );
   const passthrough = new Set(profile.process.passthroughVariables);
   // Outside Strict the agent gets the host's environment as in the person's
@@ -1215,6 +1404,7 @@ function acquireConnection(
   profile: AcpProviderProfile,
   launch: AcpLaunchSpec,
   version: string,
+  executionPolicy: ProviderExecutionPolicy,
   options: Required<Pick<AcpProcessOptions, "shutdownTimeoutMs" | "startupTimeoutMs">> &
     Pick<AcpProcessOptions, "onDiagnostic" | "stderrBytes">,
   clientCapabilities: AcpClientCapabilities | undefined,
@@ -1266,13 +1456,14 @@ function acquireConnection(
     const cleanup = () => {
       cleanupPromise ??= (async () => {
         const suppressStdinError = () => undefined;
+        const removeStdinErrorSuppression = () => child.stdin.off("error", suppressStdinError);
         child.stdin.on("error", suppressStdinError);
+        child.stdin.once("close", removeStdinErrorSuppression);
         try {
           await acp.close().catch(() => undefined);
           await Promise.race([childExited, wait(25)]);
           await terminateGroup();
         } finally {
-          child.stdin.off("error", suppressStdinError);
           child.stdin.destroy();
         }
       })();
@@ -1320,8 +1511,7 @@ function acquireConnection(
         {
           ...(clientCapabilities ?? { readTextFile: false, writeTextFile: false, terminal: false }),
           ...(profile.kind === "mistral-vibe" &&
-          version === "3.0.3" &&
-          profile.elicitationVersions?.includes(version) === true
+          acpReleaseClaim(profile.elicitationVersions, version) !== "absent"
             ? { elicitationForm: true }
             : {}),
         },
@@ -1448,21 +1638,25 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
                 }),
               }),
         });
+        const environmentStrict = !(
+          input.strict === false &&
+          input.fullAccessSandbox !== true &&
+          input.sandboxPolicy === undefined
+        );
+        const ownChannels = launchOwnChannels(environmentStrict, input.ownChannels);
         const environment = sanitizeAcpEnvironment(profile, inheritedEnvironment, {
           managedHome: input.managedHome,
           executionPolicy: input.executionPolicy,
           mode: input.mode,
           ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
           ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
-          ...(input.strict === false &&
-          input.fullAccessSandbox !== true &&
-          input.sandboxPolicy === undefined
-            ? { strict: false }
-            : {}),
+          ...(environmentStrict ? {} : { strict: false, ownChannels }),
         });
         const wall = acpWallPolicy(input);
         const network =
-          wall === "full-access" || windows !== undefined
+          wall === "full-access" ||
+          windows !== undefined ||
+          acpStartsUnconfinedBelowFullAccess({ ...input, profile })
             ? undefined
             : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
                 ...(input.sandboxPolicy === undefined
@@ -1501,6 +1695,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
           ...(input.sandboxPolicy === undefined ? {} : { sandboxPolicy: input.sandboxPolicy }),
           ...(input.strict === false ? { strict: false } : {}),
+          ownChannels,
           ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
           environment,
           ...(input.loopbackPorts === undefined ? {} : { loopbackPorts: input.loopbackPorts }),
@@ -1514,6 +1709,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
             profile,
             launch,
             probe.version,
+            input.executionPolicy,
             {
               shutdownTimeoutMs,
               startupTimeoutMs,

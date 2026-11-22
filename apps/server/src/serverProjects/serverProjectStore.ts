@@ -10,16 +10,29 @@ import {
 } from "@octant/contracts";
 import { ProjectId } from "@octant/contracts/projects";
 import {
-  decodeServerProjectBoundPayload,
-  decodeServerProjectRemovedPayload,
-  decodeServerProjectRenamedPayload,
   decodeServerProjectActionsReplacedPayload,
+  decodeServerProjectActionsReplacedPayloadV2,
+  decodeServerProjectBoundPayload,
+  decodeServerProjectBoundPayloadV2,
+  decodeServerProjectRemovedPayload,
+  decodeServerProjectRemovedPayloadV2,
+  decodeServerProjectRenamedPayload,
+  decodeServerProjectRenamedPayloadV2,
   decodeServerWorkDeveloperToolsChangedPayload,
+  decodeServerWorkDeveloperToolsChangedPayloadV2,
   MAX_SERVER_PROJECTS,
   SERVER_PROJECTS_AGGREGATE,
   SERVER_PROJECTS_AGGREGATE_ID,
   SERVER_PROJECTS_EVENT_NAMES,
+  SERVER_PROJECTS_EVENT_NAMES_V2,
+  SERVER_PROJECTS_PORT_FORWARD_CLOSED,
+  SERVER_PROJECTS_PORT_FORWARD_OPENED,
+  SERVER_PROJECTS_PREVIEW_OUTCOME_V1,
+  decodeServerPortForwardClosedPayload,
+  decodeServerPortForwardOpenedPayload,
   ServerFolderPath,
+  type ServerPortForwardCloseReason,
+  type ServerPortForwardOpenedPayload,
   type ServerProject,
   type ServerProjectsRefusalReason,
 } from "@octant/contracts/server-projects";
@@ -27,7 +40,12 @@ import type { ProjectAction } from "@octant/contracts/projects";
 import type { ShieldServer } from "@octant/contracts/shield-servers";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
-import type { ServerAddress, ServerConnection } from "./serverConnection";
+import {
+  SSH_KEY_CONFIRMATION_MESSAGE,
+  sshNeedsHostKeyConfirmation,
+  type ServerAddress,
+  type ServerConnection,
+} from "./serverConnection";
 
 /**
  * The Code and Work Projects bound to a folder on a registered server, journaled and
@@ -53,7 +71,31 @@ const decodeFolder = Schema.decodeUnknownOption(ServerFolderPath);
 const REPLAY_BATCH = 500;
 const FOLDER_CHECK_TIMEOUT_MS = 20_000;
 
-export type ServerProjectPrincipal = "local-window" | "remote-device";
+export type ServerProjectPrincipal =
+  | "local-window"
+  | "remote-device"
+  | "agent"
+  | "routine"
+  | {
+      readonly kind: "person-paired-device";
+      readonly credentialGeneration: number;
+      readonly actor: EventActorValue;
+    };
+
+type AdmittedServerProjectPrincipal =
+  | {
+      readonly version: 1;
+      readonly payloadPrincipal: { readonly kind: "local-window" };
+      readonly actor: EventActorValue;
+    }
+  | {
+      readonly version: 2;
+      readonly payloadPrincipal: {
+        readonly kind: "person-paired-device";
+        readonly credentialGeneration: number;
+      };
+      readonly actor: EventActorValue;
+    };
 
 export type ServerProjectsChange =
   | { readonly kind: "changed"; readonly project?: ServerProject }
@@ -69,7 +111,8 @@ export type ServerProjectAddress =
   | { readonly kind: "refused"; readonly reason: "project-not-found" | "server-not-registered" };
 
 export interface ServerProjectStoreOptions {
-  readonly journal: Pick<Journal, "append" | "replayAggregateType" | "aggregateVersions">;
+  readonly journal: Pick<Journal, "append" | "replayAggregateType" | "aggregateVersions"> &
+    Partial<Pick<Journal, "transaction">>;
   readonly personActor: EventActorValue;
   readonly uuid: () => string;
   readonly clock: () => string;
@@ -85,6 +128,8 @@ export class ServerProjectStore {
   // Ids the person removed, so a routine still naming one can say why it
   // stopped instead of reading as a Project nobody knows.
   readonly #removed = new Set<string>();
+  // Port forwards the journal shows opened and not yet closed, by Project.
+  readonly #openForwards = new Map<string, ServerPortForwardOpenedPayload>();
   #version = 0;
 
   constructor(options: ServerProjectStoreOptions) {
@@ -96,6 +141,7 @@ export class ServerProjectStore {
   load(): void {
     this.#projects.clear();
     this.#removed.clear();
+    this.#openForwards.clear();
     let after = 0;
     for (;;) {
       const batch = this.#options.journal.replayAggregateType({
@@ -182,8 +228,10 @@ export class ServerProjectStore {
     /** `work` for a Work Project; absent binds a Code Project. */
     readonly mode?: "work" | undefined;
     readonly principal: ServerProjectPrincipal;
+    readonly signal?: AbortSignal;
   }): Promise<ServerProjectsChange> {
-    if (input.principal !== "local-window") return refused("needs-local-window");
+    const admitted = this.#admit(input.principal);
+    if (admitted === undefined) return refused("needs-person");
     if (this.#projects.size >= MAX_SERVER_PROJECTS) return refused("too-many-projects");
     const server = this.#options
       .servers()
@@ -196,9 +244,13 @@ export class ServerProjectStore {
         args: [input.folder],
         timeoutMs: FOLDER_CHECK_TIMEOUT_MS,
         maxOutputBytes: 4_096,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
       },
     );
     if (call.status === "unreachable") {
+      if (admitted.version === 2 && sshNeedsHostKeyConfirmation(call.errorOutput ?? call.message)) {
+        return refused("server-unreachable", SSH_KEY_CONFIRMATION_MESSAGE);
+      }
       return refused("server-unreachable", `${server.alias} could not be reached: ${call.message}`);
     }
     if (call.status !== "ran") return refused("server-unreachable");
@@ -234,9 +286,13 @@ export class ServerProjectStore {
       boundAt: decodeTimestamp(this.#options.clock()),
       ...(input.mode === "work" ? { mode: "work" as const } : {}),
     };
-    const payload = { project, principal: { kind: "local-window" as const } };
-    if (!this.#append(SERVER_PROJECTS_EVENT_NAMES.bound, payload)) return refused("unavailable");
-    this.#apply(SERVER_PROJECTS_EVENT_NAMES.bound, payload);
+    const eventName =
+      admitted.version === 2
+        ? SERVER_PROJECTS_EVENT_NAMES_V2.bound
+        : SERVER_PROJECTS_EVENT_NAMES.bound;
+    const payload = { project, principal: admitted.payloadPrincipal };
+    if (!this.#append(eventName, payload, admitted.actor)) return refused("unavailable");
+    this.#apply(eventName, payload);
     return { kind: "changed", project };
   }
 
@@ -245,27 +301,61 @@ export class ServerProjectStore {
     readonly name: string;
     readonly principal: ServerProjectPrincipal;
   }): ServerProjectsChange {
-    if (input.principal !== "local-window") return refused("needs-local-window");
+    const admitted = this.#admit(input.principal);
+    if (admitted === undefined) return refused("needs-person");
     const existing = this.#projects.get(input.projectId);
     if (existing === undefined) return refused("project-not-found");
     const name = input.name.trim();
     if (name === existing.name) return { kind: "changed", project: existing };
-    const payload = { projectId: existing.id, name, principal: { kind: "local-window" as const } };
-    if (!this.#append(SERVER_PROJECTS_EVENT_NAMES.renamed, payload)) return refused("unavailable");
-    this.#apply(SERVER_PROJECTS_EVENT_NAMES.renamed, payload);
+    const eventName =
+      admitted.version === 2
+        ? SERVER_PROJECTS_EVENT_NAMES_V2.renamed
+        : SERVER_PROJECTS_EVENT_NAMES.renamed;
+    const payload = { projectId: existing.id, name, principal: admitted.payloadPrincipal };
+    if (!this.#append(eventName, payload, admitted.actor)) return refused("unavailable");
+    this.#apply(eventName, payload);
     return { kind: "changed", project: this.#projects.get(input.projectId) ?? existing };
   }
 
   remove(input: {
     readonly projectId: string;
     readonly principal: ServerProjectPrincipal;
+    /**
+     * Appends companion events inside the same journal transaction as
+     * `server-projects.removed@1`, returning a callback to publish their
+     * in-memory state only after the transaction commits. Any failure rolls
+     * back both companion appends and catalog removal together.
+     */
+    readonly withinTransaction?: (project: ServerProject) => () => void;
   }): ServerProjectsChange {
-    if (input.principal !== "local-window") return refused("needs-local-window");
+    const admitted = this.#admit(input.principal);
+    if (admitted === undefined) return refused("needs-person");
     const existing = this.#projects.get(input.projectId);
     if (existing === undefined) return refused("project-not-found");
-    const payload = { projectId: existing.id, principal: { kind: "local-window" as const } };
-    if (!this.#append(SERVER_PROJECTS_EVENT_NAMES.removed, payload)) return refused("unavailable");
-    this.#apply(SERVER_PROJECTS_EVENT_NAMES.removed, payload);
+    const eventName =
+      admitted.version === 2
+        ? SERVER_PROJECTS_EVENT_NAMES_V2.removed
+        : SERVER_PROJECTS_EVENT_NAMES.removed;
+    const payload = { projectId: existing.id, principal: admitted.payloadPrincipal };
+    let publishCompanion: (() => void) | undefined;
+    const run = (): void => {
+      if (input.withinTransaction !== undefined) {
+        publishCompanion = input.withinTransaction(existing);
+      }
+      this.#appendRaw(eventName, payload, admitted.actor);
+    };
+    try {
+      if (this.#options.journal.transaction !== undefined) {
+        this.#options.journal.transaction(run);
+      } else {
+        run();
+      }
+    } catch {
+      return refused("unavailable");
+    }
+    this.#version += 1;
+    this.#apply(eventName, payload);
+    publishCompanion?.();
     return { kind: "changed" };
   }
 
@@ -275,7 +365,8 @@ export class ServerProjectStore {
     readonly expectedVersion: number;
     readonly principal: ServerProjectPrincipal;
   }): ServerProjectsChange {
-    if (input.principal !== "local-window") return refused("needs-local-window");
+    const admitted = this.#admit(input.principal);
+    if (admitted === undefined) return refused("needs-person");
     const project = this.#projects.get(input.projectId);
     if (project === undefined) return refused("project-not-found");
     if (input.expectedVersion !== (project.actionsVersion ?? 0)) return refused("actions-changed");
@@ -286,15 +377,18 @@ export class ServerProjectStore {
       );
     if (JSON.stringify(input.actions) === JSON.stringify(project.actions ?? []))
       return { kind: "changed", project };
+    const eventName =
+      admitted.version === 2
+        ? SERVER_PROJECTS_EVENT_NAMES_V2.actionsReplaced
+        : SERVER_PROJECTS_EVENT_NAMES.actionsReplaced;
     const payload = {
       projectId: project.id,
       actions: input.actions,
       actionsVersion: decodeAggregateVersion((project.actionsVersion ?? 0) + 1),
-      principal: { kind: "local-window" as const },
+      principal: admitted.payloadPrincipal,
     };
-    if (!this.#append(SERVER_PROJECTS_EVENT_NAMES.actionsReplaced, payload))
-      return refused("unavailable");
-    this.#apply(SERVER_PROJECTS_EVENT_NAMES.actionsReplaced, payload);
+    if (!this.#append(eventName, payload, admitted.actor)) return refused("unavailable");
+    this.#apply(eventName, payload);
     return {
       kind: "changed",
       project: { ...project, actions: payload.actions, actionsVersion: payload.actionsVersion },
@@ -303,8 +397,63 @@ export class ServerProjectStore {
 
   recordPreview(
     payload: import("./serverPreviewTunnel").ServerPreviewView & { readonly owner: string },
+    principal?: {
+      readonly kind: "person-paired-device";
+      readonly credentialGeneration: number;
+      readonly actor: EventActorValue;
+    },
   ): boolean {
-    return this.#append("server-projects.preview-outcome@1", payload);
+    if (principal !== undefined) {
+      return this.#append(
+        SERVER_PROJECTS_EVENT_NAMES_V2.previewOutcome,
+        {
+          ...payload,
+          principal: {
+            kind: "person-paired-device",
+            credentialGeneration: principal.credentialGeneration,
+          },
+        },
+        principal.actor,
+      );
+    }
+    return this.#append(SERVER_PROJECTS_PREVIEW_OUTCOME_V1, payload, this.#personActor);
+  }
+
+  /**
+   * A port forward's opening or closing, journaled as the person at a local
+   * window with the Project and the ports alone.
+   */
+  recordForward(
+    record:
+      | ({ readonly event: "opened" } & ServerPortForwardOpenedPayload)
+      | ({
+          readonly event: "closed";
+          readonly reason: ServerPortForwardCloseReason;
+        } & ServerPortForwardOpenedPayload),
+  ): boolean {
+    const opened = {
+      projectId: record.projectId,
+      remotePort: record.remotePort,
+      localPort: record.localPort,
+    };
+    const [eventName, payload] =
+      record.event === "opened"
+        ? [SERVER_PROJECTS_PORT_FORWARD_OPENED, opened]
+        : [SERVER_PROJECTS_PORT_FORWARD_CLOSED, { ...opened, reason: record.reason }];
+    if (!this.#append(eventName, payload, this.#personActor)) return false;
+    this.#apply(eventName, payload);
+    return true;
+  }
+
+  /**
+   * Forwards live only in the host's memory, so one the journal still shows
+   * open was left by a run that stopped without closing it. A starting host
+   * records each closed, so the journal never shows a forward nothing serves.
+   */
+  closeForwardsLeftOpen(): void {
+    for (const opened of this.#openForwards.values()) {
+      this.recordForward({ event: "closed", ...opened, reason: "host-stopped" });
+    }
   }
 
   setDeveloperTools(input: {
@@ -312,29 +461,69 @@ export class ServerProjectStore {
     readonly enabled: boolean;
     readonly principal: ServerProjectPrincipal;
   }): ServerProjectsChange {
-    if (input.principal !== "local-window") return refused("needs-local-window");
+    const admitted = this.#admit(input.principal);
+    if (admitted === undefined) return refused("needs-person");
     const project = this.#projects.get(input.projectId);
     if (project?.mode !== "work") return refused("project-not-found");
     if ((project.developerTools?.enabled ?? false) === input.enabled)
       return { kind: "changed", project };
+    const eventName =
+      admitted.version === 2
+        ? SERVER_PROJECTS_EVENT_NAMES_V2.developerToolsChanged
+        : SERVER_PROJECTS_EVENT_NAMES.developerToolsChanged;
     const payload = {
       projectId: project.id,
       developerTools: {
         enabled: input.enabled,
-        changedBy: this.#personActor,
+        changedBy: admitted.actor,
         changedAt: decodeTimestamp(this.#options.clock()),
       },
-      principal: { kind: "local-window" as const },
+      principal: admitted.payloadPrincipal,
     };
-    if (!this.#append(SERVER_PROJECTS_EVENT_NAMES.developerToolsChanged, payload))
-      return refused("unavailable");
-    this.#apply(SERVER_PROJECTS_EVENT_NAMES.developerToolsChanged, payload);
+    if (!this.#append(eventName, payload, admitted.actor)) return refused("unavailable");
+    this.#apply(eventName, payload);
     return { kind: "changed", project: { ...project, developerTools: payload.developerTools } };
   }
 
+  #admit(principal: ServerProjectPrincipal): AdmittedServerProjectPrincipal | undefined {
+    if (principal === "local-window") {
+      return {
+        version: 1,
+        payloadPrincipal: { kind: "local-window" },
+        actor: this.#personActor,
+      };
+    }
+    if (typeof principal === "object" && principal.kind === "person-paired-device") {
+      return {
+        version: 2,
+        payloadPrincipal: {
+          kind: "person-paired-device",
+          credentialGeneration: principal.credentialGeneration,
+        },
+        actor: decodeActor(principal.actor),
+      };
+    }
+    return undefined;
+  }
+
   #apply(eventName: string, payload: unknown): void {
-    if (eventName === SERVER_PROJECTS_EVENT_NAMES.developerToolsChanged) {
-      const change = decodeServerWorkDeveloperToolsChangedPayload(payload);
+    if (eventName === SERVER_PROJECTS_PORT_FORWARD_OPENED) {
+      const opened = decodeServerPortForwardOpenedPayload(payload);
+      this.#openForwards.set(opened.projectId, opened);
+      return;
+    }
+    if (eventName === SERVER_PROJECTS_PORT_FORWARD_CLOSED) {
+      this.#openForwards.delete(decodeServerPortForwardClosedPayload(payload).projectId);
+      return;
+    }
+    if (
+      eventName === SERVER_PROJECTS_EVENT_NAMES.developerToolsChanged ||
+      eventName === SERVER_PROJECTS_EVENT_NAMES_V2.developerToolsChanged
+    ) {
+      const change =
+        eventName === SERVER_PROJECTS_EVENT_NAMES_V2.developerToolsChanged
+          ? decodeServerWorkDeveloperToolsChangedPayloadV2(payload)
+          : decodeServerWorkDeveloperToolsChangedPayload(payload);
       const project = this.#projects.get(String(change.projectId));
       if (project?.mode === "work")
         this.#projects.set(String(project.id), {
@@ -343,8 +532,14 @@ export class ServerProjectStore {
         });
       return;
     }
-    if (eventName === SERVER_PROJECTS_EVENT_NAMES.actionsReplaced) {
-      const replacement = decodeServerProjectActionsReplacedPayload(payload);
+    if (
+      eventName === SERVER_PROJECTS_EVENT_NAMES.actionsReplaced ||
+      eventName === SERVER_PROJECTS_EVENT_NAMES_V2.actionsReplaced
+    ) {
+      const replacement =
+        eventName === SERVER_PROJECTS_EVENT_NAMES_V2.actionsReplaced
+          ? decodeServerProjectActionsReplacedPayloadV2(payload)
+          : decodeServerProjectActionsReplacedPayload(payload);
       const project = this.#projects.get(String(replacement.projectId));
       if (project !== undefined)
         this.#projects.set(String(project.id), {
@@ -354,49 +549,73 @@ export class ServerProjectStore {
         });
       return;
     }
-    if (eventName === SERVER_PROJECTS_EVENT_NAMES.bound) {
-      const { project } = decodeServerProjectBoundPayload(payload);
+    if (
+      eventName === SERVER_PROJECTS_EVENT_NAMES.bound ||
+      eventName === SERVER_PROJECTS_EVENT_NAMES_V2.bound
+    ) {
+      const { project } =
+        eventName === SERVER_PROJECTS_EVENT_NAMES_V2.bound
+          ? decodeServerProjectBoundPayloadV2(payload)
+          : decodeServerProjectBoundPayload(payload);
       this.#projects.set(String(project.id), project);
       return;
     }
-    if (eventName === SERVER_PROJECTS_EVENT_NAMES.renamed) {
-      const { projectId, name } = decodeServerProjectRenamedPayload(payload);
+    if (
+      eventName === SERVER_PROJECTS_EVENT_NAMES.renamed ||
+      eventName === SERVER_PROJECTS_EVENT_NAMES_V2.renamed
+    ) {
+      const { projectId, name } =
+        eventName === SERVER_PROJECTS_EVENT_NAMES_V2.renamed
+          ? decodeServerProjectRenamedPayloadV2(payload)
+          : decodeServerProjectRenamedPayload(payload);
       const existing = this.#projects.get(String(projectId));
       if (existing !== undefined) this.#projects.set(String(projectId), { ...existing, name });
       return;
     }
-    if (eventName === SERVER_PROJECTS_EVENT_NAMES.removed) {
-      const projectId = String(decodeServerProjectRemovedPayload(payload).projectId);
+    if (
+      eventName === SERVER_PROJECTS_EVENT_NAMES.removed ||
+      eventName === SERVER_PROJECTS_EVENT_NAMES_V2.removed
+    ) {
+      const projectId = String(
+        (eventName === SERVER_PROJECTS_EVENT_NAMES_V2.removed
+          ? decodeServerProjectRemovedPayloadV2(payload)
+          : decodeServerProjectRemovedPayload(payload)
+        ).projectId,
+      );
       this.#projects.delete(projectId);
       this.#removed.add(projectId);
     }
   }
 
-  #append(eventName: string, payload: unknown): boolean {
+  #append(eventName: string, payload: unknown, actor: EventActorValue): boolean {
     try {
-      this.#options.journal.append({
-        aggregate: {
-          aggregateType: SERVER_PROJECTS_AGGREGATE,
-          aggregateId: decodeAggregateId(SERVER_PROJECTS_AGGREGATE_ID),
-        },
-        expectedVersion: decodeAggregateVersion(this.#version),
-        events: [
-          {
-            eventId: decodeEventId(this.#options.uuid()),
-            eventName: decodeEventName(eventName),
-            eventVersion: 1,
-            correlationId: decodeCorrelationId(this.#options.uuid()),
-            actor: this.#personActor,
-            occurredAt: decodeTimestamp(this.#options.clock()),
-            payload,
-          },
-        ],
-      });
+      this.#appendRaw(eventName, payload, actor);
     } catch {
       return false;
     }
     this.#version += 1;
     return true;
+  }
+
+  #appendRaw(eventName: string, payload: unknown, actor: EventActorValue): void {
+    this.#options.journal.append({
+      aggregate: {
+        aggregateType: SERVER_PROJECTS_AGGREGATE,
+        aggregateId: decodeAggregateId(SERVER_PROJECTS_AGGREGATE_ID),
+      },
+      expectedVersion: decodeAggregateVersion(this.#version),
+      events: [
+        {
+          eventId: decodeEventId(this.#options.uuid()),
+          eventName: decodeEventName(eventName),
+          eventVersion: 1,
+          correlationId: decodeCorrelationId(this.#options.uuid()),
+          actor,
+          occurredAt: decodeTimestamp(this.#options.clock()),
+          payload,
+        },
+      ],
+    });
   }
 }
 

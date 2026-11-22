@@ -1,5 +1,7 @@
 import { configureSandboxNetworkSnapshot } from "../process/sandboxRuntimePolicy";
+import { listServerProjectListeners } from "../serverProjects/serverProjectListeners";
 import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
+import type { HubActScopeSlot } from "../hub/hubActScope";
 import { activeSandboxPolicy, configureSandboxToolNetwork } from "../process/sandboxRuntimePolicy";
 import { RemoteSetupChecks } from "../serverProjects/remoteSetupChecks";
 import { createRemoteSetupCheckRoutes } from "../serverProjects/remoteSetupCheckRoutes";
@@ -73,16 +75,22 @@ import {
   type FollowUpSuggestionActionDependencies,
 } from "../followUps/followUpSuggestionRoutes";
 import { createSideTaskRouteHandler } from "../sideTasks/sideTaskRoutes";
+import { createFinishedReceiptRouteHandler } from "../finishedReceipts/finishedReceiptRoutes";
 import type { SideTaskStartDependencies } from "../sideTasks/sideTaskStart";
 import {
   createNativeHarnessSessionRouteHandler,
   type NativeHarnessSessionRouteDependencies,
 } from "../harness/nativeHarnessSessionRoutes";
 import { createNativeHarnessEgressRouteHandler } from "../harness/nativeHarnessEgressRoutes";
-import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
+import {
+  NativeHarnessTurnObserver,
+  type NativeHarnessTurnAdmission,
+} from "../harness/nativeHarnessTurnObserver";
+import { HostDrain } from "../hostDrain";
 import { openPromptDigester } from "../metrics/promptDigest";
 import { toTurnMetricsRecord, type TurnEndSummary } from "../metrics/turnEnd";
-import { FOLLOW_UP_SUGGESTION_INSTRUCTIONS } from "../followUps/followUpSuggestionInstructions";
+import { followUpSuggestionInstructionsFor } from "../followUps/followUpSuggestionInstructions";
+import { defaultShellSettings, nextMessageSuggestionsOn } from "@octant/domain/shell-policy";
 import { octantOrientation } from "../orientation/octantOrientation";
 import { turnDecisionInstructions } from "../turnDecisions/turnDecisionInstructions";
 import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing";
@@ -138,6 +146,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "processAuthorityTime"
     | "toolEffectLedger"
     | "windowAuthorityStore"
+    | "isPersonPairedDeviceCurrent"
   > &
   Pick<
     AgentRunsWiring,
@@ -147,6 +156,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "contributeChildTools"
     | "externalContentIngestionStore"
     | "sideTasks"
+    | "finishedReceipts"
     | "threadFollowUpSuggestions"
     | "turnMetrics"
   > &
@@ -167,6 +177,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     HarnessStateWiring,
     | "agentRunInteractions"
     | "cloudMachineServers"
+    | "serverAttachmentCleanup"
     | "serverConnection"
     | "serverProjectStore"
     | "serverRegistry"
@@ -187,14 +198,19 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "workTurnProjection"
   > &
   Pick<AgentRunsWiring, "spendCeiling"> &
-  Pick<WorkspaceWiring, "projectService">;
+  Pick<WorkspaceWiring, "projectService"> & {
+    /** The member's Act item for its hub, bound by the hub side after this is built. */
+    readonly hubActScopeSlot: HubActScopeSlot;
+  };
 
 export function wireHarness(deps: HarnessDependencies) {
   const {
+    hubActScopeSlot,
     resolveThreadStrict,
     safeNetworkStore,
     agentRunInteractions,
     cloudMachineServers,
+    serverAttachmentCleanup,
     serverConnection,
     serverProjectStore,
     serverRegistry,
@@ -226,14 +242,23 @@ export function wireHarness(deps: HarnessDependencies) {
     runningWorkTurnAccess,
     runningWorkTurnSandbox,
     sideTasks,
+    finishedReceipts,
     threadFollowUpSuggestions,
     toolEgressRules,
     turnMetrics,
     windowAuthorityStore,
+    isPersonPairedDeviceCurrent,
     workThreadProjection,
     workTurnProjection,
     personMemory,
   } = deps;
+  // Read on every turn, so a change in Settings applies to the next turn
+  // without a restart.
+  const predictsNextMessage = (mode: OctantMode): boolean =>
+    nextMessageSuggestionsOn(
+      persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+      mode,
+    );
   // The keys Octant keeps for servers that sign in with one, in the broker.
   const serverSshKeys =
     options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
@@ -301,11 +326,28 @@ export function wireHarness(deps: HarnessDependencies) {
     agentSocket: sshAgentSocket,
     pinnedKnownHosts: (server) => serverConnection.pinnedKnownHostsFile(server),
     refuses: (server) => serverConnection.refusal(server),
-    record: (record) => serverProjectStore.recordPreview(record),
+    record: (record, principal) => serverProjectStore.recordPreview(record, principal),
+    recordForward: (record) => serverProjectStore.recordForward(record),
   });
   const previewRoutes = createServerPreviewTunnelRoutes({
     windows: windowAuthorityStore,
     tunnels: serverPreviewTunnels,
+    listeners: async (projectId) => {
+      const project = serverProjectStore.project(projectId);
+      const address = serverProjectStore.addressOf(projectId);
+      if (project === undefined || address.kind !== "address") {
+        return {
+          status: "unavailable",
+          message: "This Project's server is no longer registered.",
+        };
+      }
+      return listServerProjectListeners({
+        connection: serverConnection,
+        server: address.server,
+        folder: project.folder,
+      });
+    },
+    isPersonPairedDeviceCurrent,
   });
   // Machines in the person's own cloud account, each bound as a server
   // Project. Targets arrive only from cloud machine target plugins the person
@@ -334,6 +376,8 @@ export function wireHarness(deps: HarnessDependencies) {
     windowAuthorityStore,
     store: serverProjectStore,
     cloudMachineOf: (projectId) => cloudMachines.machineForProject(projectId),
+    stageProjectRemoval: (input) => serverAttachmentCleanup.stageProjectRemoval(input),
+    removeProjectAttachments: (input) => serverAttachmentCleanup.removeForProject(input),
   });
   const serverResourceReaders = new Map<string, () => Promise<ServerResourceRead>>();
   const resourceRoutes = createServerResourceRoutes({
@@ -359,6 +403,7 @@ export function wireHarness(deps: HarnessDependencies) {
   });
   const setupCheckRoutes = createRemoteSetupCheckRoutes({
     windows: windowAuthorityStore,
+    isPersonPairedDeviceCurrent,
     checks: new RemoteSetupChecks({
       servers: () => shieldServerStore.servers(),
       agentAvailable: () => sshAgentSocket() !== undefined,
@@ -659,6 +704,11 @@ export function wireHarness(deps: HarnessDependencies) {
       Promise.resolve({ kind: "refused", message: "This thread cannot take a message now." }),
     clock: () => new Date().toISOString(),
   });
+  const finishedReceiptRoutes = createFinishedReceiptRouteHandler({
+    store: finishedReceipts,
+    windowAuthorityStore,
+    authorizeThread: authorizeFollowUpThread,
+  });
   const nativeHarnessEgressRoutes = createNativeHarnessEgressRouteHandler({
     windowAuthorityStore,
     rules: toolEgressRules,
@@ -739,6 +789,8 @@ export function wireHarness(deps: HarnessDependencies) {
   };
   const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
     mayAnswerChildFromDevice: agentRunInteractions.mayAnswerFromDevice,
+    hubActScope: hubActScopeSlot.current,
+    threadProjectId,
     windowAuthorityStore,
     store: {
       read: (threadId) => {
@@ -771,8 +823,8 @@ export function wireHarness(deps: HarnessDependencies) {
       }),
     recoveryBlockers: ({ threadId }) => recoveryBlockers(threadId),
     followUps: followUpActions,
-    answerQuestion: ({ threadId, questionId, answer, actor }) =>
-      nativeHarnessQuestions.answer(threadId, questionId, answer, actor),
+    answerQuestion: ({ threadId, questionId, answer, secret, actor }) =>
+      nativeHarnessQuestions.answer(threadId, questionId, answer, actor, secret),
     decideApproval: ({ threadId, approvalId, decision, answer }) =>
       nativeHarnessApprovals.decide(threadId, approvalId, decision, answer),
     steer: ({ threadId, command, actor }) => {
@@ -847,6 +899,11 @@ export function wireHarness(deps: HarnessDependencies) {
     join(providerDataDirectory, "metrics", "prompt-digest.key"),
   );
   const { toolEffectLedger } = deps;
+  // Draining before an update is decided here, where a Chat send, a Work turn
+  // and a Code turn each ask to start and every mode reports a turn starting
+  // and ending, so the refusal and the count of running turns sit at the one
+  // admission all three modes share.
+  const hostDrain = new HostDrain({ now: Date.now });
   const nativeHarnessHooks = {
     toolEffects: (turn: Parameters<ToolEffectLedger["forTurn"]>[0]) =>
       toolEffectLedger.forTurn(turn),
@@ -867,11 +924,20 @@ export function wireHarness(deps: HarnessDependencies) {
       ...nativeHarnessObserver.contextFor(scope),
       ...nativeHarnessObserver.runtimeServerNotes(scope),
       ...turnDecisionInstructions(scope.mode),
-      FOLLOW_UP_SUGGESTION_INSTRUCTIONS,
+      followUpSuggestionInstructionsFor(predictsNextMessage(scope.mode)),
     ],
-    admitTurn: (scope: Parameters<NativeHarnessTurnObserver["admitTurn"]>[0]) =>
-      nativeHarnessObserver.admitTurn(scope),
+    admitTurn: (
+      scope: Parameters<NativeHarnessTurnObserver["admitTurn"]>[0],
+    ): NativeHarnessTurnAdmission => {
+      const refusal = hostDrain.refusal();
+      return refusal === undefined
+        ? nativeHarnessObserver.admitTurn(scope)
+        : { kind: "draining", detail: refusal };
+    },
+    acceptTurn: (scope: Parameters<NativeHarnessTurnObserver["turnStarted"]>[0]) =>
+      hostDrain.accept(scope),
     turnStarted: (scope: Parameters<NativeHarnessTurnObserver["turnStarted"]>[0]) => {
+      hostDrain.turnStarted(scope);
       nativeHarnessObserver.turnStarted(scope);
       nativeHarnessLeadFallback.turnStarted(scope);
       try {
@@ -895,6 +961,7 @@ export function wireHarness(deps: HarnessDependencies) {
       scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0],
       turn?: TurnEndSummary,
     ) => {
+      hostDrain.turnEnded(scope);
       nativeHarnessObserver.turnEnded(scope, turn);
       nativeHarnessLeadFallback.turnEnded(scope);
       if (turn === undefined) return;
@@ -924,7 +991,9 @@ export function wireHarness(deps: HarnessDependencies) {
           projectId: input.projectId,
           suggestedBy: { providerInstanceId: input.providerInstanceId, modelId: input.modelId },
           followUps: offered.followUps,
-          nextMessage: offered.nextMessage,
+          // A prediction from a turn that began before the setting changed is
+          // not kept, so switching a mode off empties its composer at once.
+          nextMessage: predictsNextMessage(input.mode) ? offered.nextMessage : undefined,
         });
       } catch {
         // A set the journal refused leaves the reply itself untouched.
@@ -954,6 +1023,13 @@ export function wireHarness(deps: HarnessDependencies) {
     codeOperationRuntime: { threadWithActiveTurnPosture: codeParentActiveTurn },
   });
   const hostShield = createHostShield({
+    brakeLimits: () => {
+      const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+      return {
+        denialsInARow: settings.shieldDenialsInARow,
+        denialsPerThread: settings.shieldDenialsPerThread,
+      };
+    },
     readCodeThread: (threadId) => persistence.readCodeThread(threadId),
     chosenReviewer: (thread) => {
       const project = persistence.readProject(thread.projectId);
@@ -1147,6 +1223,7 @@ export function wireHarness(deps: HarnessDependencies) {
       runningWorkTurnAccess,
       readThreadTaint: (threadId) =>
         readThreadExternalContentTaint(persistence.connection, threadId),
+      readStrict: (threadId) => resolveThreadStrict(threadId),
       holdsServerCodeThread: (thread) => serverProjectOf(serverProjectStore, thread) !== undefined,
       holdsServerWorkThread: (thread) =>
         serverWorkProjectOf(serverProjectStore, thread) !== undefined,
@@ -1326,6 +1403,7 @@ export function wireHarness(deps: HarnessDependencies) {
     serverProjectRoutes,
     serverPreviewTunnels,
     nativeHarnessHooks,
+    hostDrain,
     observeTurnEnded,
     nativeHarnessSessionRoutes,
     onHarnessPausedByPerson,
@@ -1334,6 +1412,7 @@ export function wireHarness(deps: HarnessDependencies) {
     webSearchSettings,
     sideTaskHost,
     sideTaskRoutes,
+    finishedReceiptRoutes,
     hostShield,
     threadWork,
   };

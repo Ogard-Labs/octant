@@ -1,6 +1,5 @@
 import type {
   DiscoveryCandidate,
-  DiscoveryCommand,
   DiscoverySnapshot,
   FirstRunOnboardingStatus,
   ProviderDriverKind,
@@ -11,25 +10,6 @@ import { isImageProfileDriverKind } from "./providerPolicy";
 export type DiscoveryPolicyDecision =
   | { readonly kind: "allowed" }
   | { readonly kind: "denied"; readonly reason: string };
-
-/**
- * Connect is allowed only when the candidate appears in the latest snapshot
- * with the same driver/binary path. Configured-instance filtering is owned by
- * the UI/server inventory layer, not this pure policy helper.
- */
-export function canConnectCandidate(
-  candidate: DiscoveryCandidate,
-  snapshot: DiscoverySnapshot,
-): DiscoveryPolicyDecision {
-  const found = snapshot.candidates.find(
-    (entry) =>
-      entry.driverKind === candidate.driverKind && entry.binaryPath === candidate.binaryPath,
-  );
-  if (found === undefined) {
-    return { kind: "denied", reason: "Candidate not found in discovery snapshot." };
-  }
-  return { kind: "allowed" };
-}
 
 export function isDuplicateInstallation(
   candidate: DiscoveryCandidate,
@@ -90,12 +70,6 @@ export function isUnclassifiedDriverKind(driverKind: ProviderDriverKind): boolea
     !requiresManualEndpoint(driverKind) &&
     !isImageProfileDriverKind(driverKind)
   );
-}
-
-export function isConnectCommand(
-  command: DiscoveryCommand,
-): command is Extract<DiscoveryCommand, { kind: "connect" }> {
-  return command.kind === "connect";
 }
 
 function openCodeBinaryName(binaryPath: string): string {

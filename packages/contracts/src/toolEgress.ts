@@ -46,7 +46,6 @@ export const TOOL_EGRESS_EVENT_NAMES = {
   learnModeSet: "thread.egress-learn-mode-set@1",
 } as const;
 
-export const DEFAULT_TOOL_EGRESS_PORT = 443;
 /** Live rules one thread, or one Project, may hold at a time. */
 export const MAX_LIVE_TOOL_EGRESS_RULES = 64;
 export const MAX_TOOL_EGRESS_PROPOSALS_PER_LAUNCH = 16;
@@ -334,10 +333,8 @@ export type ThreadEgressLearnModeSetPayload = typeof ThreadEgressLearnModeSetPay
 /** How long a thread rule lives. A `call` rule ends with its launch instead. */
 export const ToolEgressThreadRuleLifetime = Schema.Literal("1h", "8h", "7d");
 export type ToolEgressThreadRuleLifetime = typeof ToolEgressThreadRuleLifetime.Type;
-export const DEFAULT_TOOL_EGRESS_THREAD_RULE_LIFETIME: ToolEgressThreadRuleLifetime = "8h";
 export const ToolEgressProjectRuleLifetime = Schema.Literal("7d", "30d");
 export type ToolEgressProjectRuleLifetime = typeof ToolEgressProjectRuleLifetime.Type;
-export const DEFAULT_TOOL_EGRESS_PROJECT_RULE_LIFETIME: ToolEgressProjectRuleLifetime = "7d";
 
 /** A live rule as the thread's and the Project's rules lists show it. */
 export const ToolEgressRuleView = Schema.Struct({

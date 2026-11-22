@@ -4,7 +4,6 @@ import {
   canImportGravatar,
   gravatarImageUrl,
   isNamed,
-  isProfileConfigured,
   normalizeGravatarEmail,
 } from "./userProfilePolicy";
 
@@ -43,32 +42,6 @@ describe("gravatar lookup", () => {
   it("offers the lookup only once an address has actually been entered", () => {
     expect(canImportGravatar({})).toBe(false);
     expect(canImportGravatar({ email: "ada@example.com" })).toBe(true);
-  });
-});
-
-describe("profile completeness", () => {
-  it("reports what the user gave, and treats the untouched profile as unanswered", () => {
-    expect(isProfileConfigured({ accent: "indigo", avatar: { kind: "initials" } })).toBe(false);
-    expect(
-      isProfileConfigured({
-        displayName: "Ada Lovelace",
-        accent: "indigo",
-        avatar: { kind: "initials" },
-      }),
-    ).toBe(true);
-    expect(
-      isProfileConfigured({
-        accent: "indigo",
-        avatar: { kind: "image", source: "upload", dataUrl: "data:image/png;base64,AA==" },
-      }),
-    ).toBe(true);
-  });
-
-  it("counts a colour the user chose, since the accent always holds a value", () => {
-    // Name, address, and picture are absent until given, so their presence is
-    // the answer. An accent is never absent, so only a change from the shipped
-    // one separates a choice from a default nobody looked at.
-    expect(isProfileConfigured({ accent: "teal", avatar: { kind: "initials" } })).toBe(true);
   });
 });
 

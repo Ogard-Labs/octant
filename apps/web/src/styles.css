@@ -5006,6 +5006,14 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   white-space: nowrap;
 }
 
+.composer-model-picker__benchmark-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2) var(--oct-menu-inset);
+}
+
 .composer-model-picker__menu {
   box-sizing: border-box;
   display: grid;
@@ -5026,6 +5034,10 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   /* Size and place only. The popover recipe paints the fill, the edge, and the
      corner; this rule used to repaint all three, and its fill was the
      workspace's, so it was the one darker popup beside the menus. */
+}
+
+.composer-model-picker__menu:has(> .composer-model-picker__benchmark-hint) {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
 }
 
 /* The reasoning row and the service-tier row sit under the list in every

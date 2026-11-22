@@ -1,7 +1,6 @@
 import { decodeCodeWorktreeSourcePreview } from "@octant/contracts/code";
 import { describe, expect, it } from "vitest";
 import {
-  canUseCachedSnapshot,
   defaultDeliveryBranchIntent,
   defaultStartFromOrigin,
   describeWorktreeSource,
@@ -221,43 +220,6 @@ describe("describeWorktreeSource", () => {
 
   it("returns nothing for the idle state", () => {
     expect(describeWorktreeSource({ kind: "idle" }, now)).toBeUndefined();
-  });
-});
-
-describe("canUseCachedSnapshot", () => {
-  it("is eligible only when the snapshot carries remote, branch, SHA, and fetch time", () => {
-    const eligible = canUseCachedSnapshot(
-      {
-        remoteName: "origin",
-        branch: "development",
-        resolvedHead: FULL_SHA,
-        fetchedAt: FETCHED_AT,
-      },
-      now,
-    );
-    expect(eligible.eligible).toBe(true);
-    if (eligible.eligible) {
-      expect(eligible.disclosure.label).toBe("origin/development · a1b2c3d");
-      expect(eligible.disclosure.detail).toBe("fetched 5m ago");
-    }
-  });
-
-  it("is not eligible when the SHA is missing", () => {
-    expect(
-      canUseCachedSnapshot(
-        { remoteName: "origin", branch: "development", fetchedAt: FETCHED_AT },
-        now,
-      ).eligible,
-    ).toBe(false);
-  });
-
-  it("is not eligible when the fetch time is missing so age cannot be shown", () => {
-    expect(
-      canUseCachedSnapshot(
-        { remoteName: "origin", branch: "development", resolvedHead: FULL_SHA },
-        now,
-      ).eligible,
-    ).toBe(false);
   });
 });
 

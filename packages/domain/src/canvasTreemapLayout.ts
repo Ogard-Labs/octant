@@ -369,18 +369,3 @@ export function treemapLeafReading(
   const index = indexTreemap(block);
   return leafReading(index.nodeOf.get(nodeId), measureId);
 }
-
-export function treemapMaxDepth(block: CanvasTreemapBlock): number {
-  const index = indexTreemap(block);
-  let deepest = 0;
-  const depthOf = (nodeId: string, seen: ReadonlySet<string>): number => {
-    if (seen.has(nodeId)) return 0;
-    const next = new Set(seen);
-    next.add(nodeId);
-    const kids = index.childrenOf.get(nodeId) ?? [];
-    if (kids.length === 0) return 1;
-    return 1 + Math.max(...kids.map((child) => depthOf(child, next)));
-  };
-  for (const nodeId of index.nodeOf.keys()) deepest = Math.max(deepest, depthOf(nodeId, new Set()));
-  return deepest;
-}

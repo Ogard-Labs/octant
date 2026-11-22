@@ -1,3 +1,4 @@
+import type { HubActScopeSlot } from "../hub/hubActScope";
 import { createXcodeDerivedData } from "../apple/xcodeDerivedData";
 import { scanHostWorktrees } from "../code/hostWorktreeDiscovery";
 import { removeHostWorktree } from "../code/hostWorktreeRemoval";
@@ -13,6 +14,8 @@ import {
   type RepositoryIdentityObservation,
 } from "../code/repositoryIdentity";
 import { createHash, randomUUID } from "node:crypto";
+import { CODE_HOME_DELIVERY_OBSERVED } from "@octant/contracts/code-home-activity";
+import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { lstat } from "node:fs/promises";
 import { lstatSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
@@ -70,6 +73,11 @@ import {
 } from "../code/codeProjectPullRequestActionService";
 import { GhPullRequestActionPort } from "../code/ghPullRequestActionPort";
 import { createGhCommandPort, GhPullRequestPort } from "../code/ghPullRequestPort";
+import {
+  PullRequestLinkService,
+  collectLegacyPullRequestLinks,
+  type PullRequestLinkSwitchReconciler,
+} from "../code/pullRequestLinkService";
 import { createFileHelperProcessTransport } from "../code/fileHelperProcessTransport";
 import { FileOperationPort } from "../code/fileOperationPort";
 import { createManagedWorktreeNodePorts } from "../code/managedWorktreeNodePorts";
@@ -85,6 +93,7 @@ import { createFolderBrowseRouteHandler } from "../folderBrowseRoutes";
 import { FolderBrowseService } from "../folderBrowseService";
 import { createProjectIconReader } from "../projectIcon";
 import { ProjectCustomIconStore } from "../projectIconStore";
+import { ProviderFolderScanService } from "../providerFolderScanService";
 import { ProjectService } from "../projectService";
 import { CodeProjectAccess } from "../codeProjectAccess";
 import type { CodeOperationRuntime } from "../code/codeOperationRuntime";
@@ -528,7 +537,7 @@ const unavailableActionForge = {
   readContext: async () => ({ status: "unavailable", reason: "unavailable" }) as const,
 };
 
-function createProjectPullRequestPorts(ghExecutable: string | undefined): {
+export function createProjectPullRequestPorts(ghExecutable: string | undefined): {
   readonly list: CodeProjectPullRequestListPort;
   readonly detail: CodeProjectPullRequestDetailPort;
   readonly merge: CodeProjectPullRequestMergePort;
@@ -558,9 +567,12 @@ function createProjectPullRequestPorts(ghExecutable: string | undefined): {
     return {
       list: {
         listActive: (request, signal) => port.listActive(request, signal),
+        observeBaseRepository: (request, signal) => port.observeBaseRepository(request, signal),
       },
       detail: {
         observeReviewByIdentity: (request, signal) => port.observeReviewByIdentity(request, signal),
+        observeIssueClosure: (request, signal) => port.observeIssueClosure(request, signal),
+        observeViewerLogin: (signal) => port.observeViewerLogin(signal),
       },
       merge: {
         mergeByIdentity: (request, signal) => port.mergeByIdentity(request, signal),
@@ -603,7 +615,10 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
   > &
   Pick<
     AgentRunsWiring,
-    "externalContentIngestionStore" | "managedWorktreeReceipts" | "threadAwaitsHarnessApproval"
+    | "externalContentIngestionStore"
+    | "finishedReceipts"
+    | "managedWorktreeReceipts"
+    | "threadAwaitsHarnessApproval"
   > &
   Pick<
     IntegrationsWiring,
@@ -626,6 +641,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "codeBoardEventStore"
     | "codeEvidence"
     | "isProjectPolicyTargetAllowed"
+    | "resolveHostStrict"
     | "selectCodeConversation"
   > &
   Pick<
@@ -635,10 +651,13 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "managedWorktreeRefsList"
     | "managedWorktreeSourcePreview"
     | "probeProviderForThreads"
+    | "providerFolderDiscoveryPorts"
     | "refreshStandaloneSkills"
   > & {
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
+    /** The member's Act item, which bounds the Code Projects a hub-introduced device reads. */
+    readonly hubActScopeSlot: HubActScopeSlot;
   };
 
 export function wireCode(deps: CodeDependencies) {
@@ -650,6 +669,7 @@ export function wireCode(deps: CodeDependencies) {
     codeEvidence,
     codeSessionAuthority,
     externalContentIngestionStore,
+    finishedReceipts,
     gitEnvironmentPort,
     githubIssueContextService,
     gitObservationPort,
@@ -671,7 +691,9 @@ export function wireCode(deps: CodeDependencies) {
     probeProviderForThreads,
     projectRootPort,
     projectService,
+    providerFolderDiscoveryPorts,
     refreshStandaloneSkills,
+    resolveHostStrict,
     selectCodeConversation,
     serverConnection,
     serverProjectStore,
@@ -851,6 +873,21 @@ export function wireCode(deps: CodeDependencies) {
     const projectCustomIcons = new ProjectCustomIconStore({
       dataDirectory: persistence.dataDirectory,
     });
+    const providerFolderScan = new ProviderFolderScanService({
+      homeDirectory: homedir(),
+      env: process.env,
+      discoveryPorts: providerFolderDiscoveryPorts,
+      readProviderInstances: () => persistence.readProviderInstances(),
+      readActiveCodeProjects: () => persistence.readProjects({ type: "code", lifecycle: "active" }),
+      isHostStrict: resolveHostStrict,
+      requireGitRepository: () =>
+        persistence.readCodeSettings()?.settings.requireGitRepository ?? true,
+      bindingReceiptStore,
+      projectRootPort,
+      projectService,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
     const projectRoutes = createProjectRouteHandler({
       service: projectService,
       environmentService,
@@ -858,7 +895,9 @@ export function wireCode(deps: CodeDependencies) {
       icons: createProjectIconReader({ projects: projectService, custom: projectCustomIcons }),
       customIcons: projectCustomIcons,
       memoryProposals: deps.projectMemoryAccess.proposals,
+      providerFolderScan,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+      hubActScope: deps.hubActScopeSlot.current,
     });
     const agentProfileService = new AgentProfileService({
       persistence,
@@ -919,6 +958,7 @@ export function wireCode(deps: CodeDependencies) {
           moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
           liveTurns,
           awaitsHarnessApproval: threadAwaitsHarnessApproval,
+          readLatestFinishedReceipt: (threadId) => finishedReceipts.latest(threadId),
           gitHistory: new GitHistoryPort(),
           serverGitHistory: (thread) => {
             const project = serverProjectOf(serverProjectStore, thread);
@@ -1160,6 +1200,43 @@ export function wireCode(deps: CodeDependencies) {
     ): void => {
       pullRequestSnapshotListeners.push(listener);
     };
+    // The switch service is composed in `wireCodeRuntime` after this area; it
+    // binds here before any tick or refresh can reconcile duplicate links.
+    let pullRequestSwitchReconciler: PullRequestLinkSwitchReconciler | undefined;
+    const bindPullRequestSwitchReconciler = (reconciler: PullRequestLinkSwitchReconciler): void => {
+      pullRequestSwitchReconciler = reconciler;
+    };
+    const pullRequestLinkService = new PullRequestLinkService({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      switchReconciler: {
+        reconcileDuplicateLinks: (input) => {
+          if (pullRequestSwitchReconciler === undefined) {
+            input.commitMerge?.([]);
+            return Promise.resolve({ status: "reconciled" as const, disabledSwitches: [] });
+          }
+          return pullRequestSwitchReconciler.reconcileDuplicateLinks(input);
+        },
+      },
+      legacyLinks: (projectId) =>
+        collectLegacyPullRequestLinks({
+          journal: persistence.journal,
+          threads: persistence
+            .readCodeThreads()
+            .filter((thread) => String(thread.projectId) === String(projectId))
+            .map((thread) => {
+              // Use full history rather than summary so superseded PR results
+              // keep the earliest linkedAt timestamp for survivor selection.
+              const history = codeBoardEventStore.historyForThread(thread.id);
+              return {
+                threadId: thread.id,
+                projectId: thread.projectId,
+                frames: history.status === "ok" ? history.frames : [],
+              };
+            }),
+        }),
+    });
     const projectPullRequestService = new CodeProjectPullRequestService({
       projects: projectService,
       // Only the remotes: the full observation also diffs the working tree
@@ -1177,10 +1254,45 @@ export function wireCode(deps: CodeDependencies) {
           clock: () => new Date().toISOString(),
           ...(actor === undefined ? {} : { actor }),
         }),
+      recordDelivery: (record) => {
+        const aggregate = {
+          aggregateType: "code-home-activity",
+          aggregateId: createHash("sha256")
+            .update(
+              JSON.stringify([
+                record.kind,
+                record.projectId,
+                record.threadId,
+                record.repositoryOwner.toLowerCase(),
+                record.repositoryName.toLowerCase(),
+                record.number,
+                new Date(record.occurredAt).toISOString(),
+              ]),
+            )
+            .digest("hex"),
+        };
+        if (persistence.journal.latestAggregateEvent(aggregate) !== undefined) return;
+        persistence.journal.append({
+          aggregate,
+          expectedVersion: 0,
+          events: [
+            {
+              eventId: randomUUID(),
+              eventName: CODE_HOME_DELIVERY_OBSERVED,
+              eventVersion: 1,
+              correlationId: randomUUID(),
+              actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+              occurredAt: record.occurredAt,
+              payload: record,
+            },
+          ],
+        });
+      },
       cacheStats,
       snapshotStore: new CodeProjectPullRequestSnapshotStore(
         join(persistence.dataDirectory, "code", "pull-request-snapshot.json"),
       ),
+      pullRequestLinks: pullRequestLinkService,
       onSnapshotRefreshed: (rows) => {
         for (const listener of pullRequestSnapshotListeners) listener(rows);
       },
@@ -1251,7 +1363,15 @@ export function wireCode(deps: CodeDependencies) {
       folderBrowseRoutes,
       folderBrowseService,
       isCodeProviderModelAllowed,
+      // The host-owned repository scope a Code Home activity read may draw
+      // from: connected repositories of Projects the window admits now.
+      listActivityRepositories: async (windowId: WindowId) =>
+        (await projectPullRequestService.listConnectedRepositories(windowId)).filter((repository) =>
+          canAccessCodeProject(windowId, repository.projectId),
+        ),
       onPullRequestSnapshotRefreshed,
+      bindPullRequestSwitchReconciler,
+      pullRequestLinkService,
       projectPullRequestActionService,
       projectPullRequestCadence,
       projectPullRequestService,

@@ -6,6 +6,7 @@ import { mobileSpacing, mobileTypography } from "../theme/tokens";
 export interface ApprovalDecisionButtonsProps {
   readonly busy: boolean;
   readonly onAllow: () => void;
+  readonly allowDisabled?: boolean;
   readonly onDeny: () => void;
   /** Absent when the host would ignore a session-wide choice. */
   readonly onAllowSession?: (() => void) | undefined;
@@ -30,8 +31,8 @@ export function ApprovalDecisionButtons(props: ApprovalDecisionButtonsProps) {
       <Pressable
         accessibilityLabel={props.allowLabel ?? MOBILE_COPY.approvalAllow}
         accessibilityRole="button"
-        accessibilityState={state}
-        disabled={props.busy}
+        accessibilityState={{ ...state, disabled: props.busy || props.allowDisabled === true }}
+        disabled={props.busy || props.allowDisabled === true}
         onPress={props.onAllow}
         style={[styles.button, { backgroundColor: colors.send }, props.busy ? styles.busy : null]}
       >

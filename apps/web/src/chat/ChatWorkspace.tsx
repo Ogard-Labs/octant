@@ -1,3 +1,4 @@
+import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import {
   ProjectMemoryProposalPrompt,
@@ -26,7 +27,8 @@ import type {
   MentionableThreadId,
   SideChatSidecar,
 } from "@octant/contracts";
-import type { ThreadMentionClient } from "@octant/client-runtime";
+import type { AutomationClient, ThreadMentionClient } from "@octant/client-runtime";
+import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
 import {
   buildImageAttachmentCapability,
   chatFileRefusal,
@@ -86,10 +88,13 @@ import { LinkedThreadParallelReviewFlow } from "../linkedThread/LinkedThreadPara
 import { useLinkedThreadParallelReview } from "../linkedThread/useLinkedThreadParallelReview";
 import { isReviewInParallelReference } from "../linkedThread/parseReviewInParallelDraft";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
-import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import type {
+  ImageGenerationClient,
+  ThreadImageResults,
+} from "@octant/client-runtime/image-generation-client";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageJobs, useGeneratedImageJobs } from "../image/GeneratedImageList";
-import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt";
+import { ServiceOfferPrompt } from "../offers/ServiceOfferPrompt";
 import {
   decodeBrowserThreadId,
   decodeImageGenerationScopeId,
@@ -130,6 +135,8 @@ export interface ChatWorkspaceProps {
   readonly sideChatReturnPending?: boolean;
   readonly extensionClient?: ExtensionClient;
   readonly memoryProposalClient?: ProjectMemoryProposalClient;
+  /** Answers a follow-up this thread's agent proposed; nothing exists until the person confirms. */
+  readonly automationClient?: AutomationClient;
   readonly browserAutomationClient?: BrowserAutomationClient;
   readonly narrow?: boolean;
   readonly onAttachCanvasContext?: (selection: CanvasContextSelection) => void;
@@ -148,6 +155,8 @@ export interface ChatWorkspaceProps {
   readonly messageQueueClient?: ThreadMessageQueueClient;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  readonly imageResults?: ThreadImageResults;
+  readonly serviceOfferClient?: ServiceOfferClient;
   /** Every image profile, custom image sources included, computed once by the shell. */
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly hostId?: HostId;
@@ -512,7 +521,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   // Read before the early return too: the transcript draws each image after
   // the turn that made it, and the list below the transcript shows the rest.
   const threadImages = useGeneratedImageJobs({
-    client: props.imageGenerationClient,
+    client: props.imageGenerationClient ?? props.imageResults,
     threadKind: "chat-thread",
     scopeId: view === undefined ? undefined : decodeImageGenerationScopeId(String(view.thread.id)),
   });
@@ -584,7 +593,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const thread = view.thread;
   const connectionLost = props.controller.status === "disconnected";
   const canvasClient = props.canvasClient;
-  const imageClient = props.imageGenerationClient;
+  const imageClient = props.imageGenerationClient ?? props.imageResults;
   // A Canvas sits inline after the turn that wrote it, in whichever run the
   // transcript shows: the newest turns, or a run the reader jumped to.
   const shownRun = transcriptWindow?.detached;
@@ -1271,9 +1280,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 />
               </section>
             )}
-            {props.imageGenerationClient === undefined ? null : (
+            {imageClient === undefined ? null : (
               <GeneratedImageJobs
-                client={props.imageGenerationClient}
+                client={imageClient}
                 jobs={threadImages.jobs.filter((job) => !imagePlacement.placed.has(String(job.id)))}
                 onAttach={attachGeneratedImage}
                 onEnqueued={threadImages.refresh}
@@ -1331,6 +1340,29 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     ),
                   })}
               busy={isSending || branchPending}
+              {...(activeAttempt === undefined
+                ? {}
+                : {
+                    stoppingTurn: stoppingAttemptId !== undefined,
+                    onStopTurn: () => {
+                      const stopping = String(activeAttempt.id);
+                      setStopRequestedFor(stopping);
+                      void props.controller
+                        .execute({
+                          kind: "interrupt-chat-turn",
+                          threadId: view.thread.id,
+                          expectedVersion: view.thread.version,
+                          turnId: activeAttempt.turnId,
+                          attemptId: activeAttempt.id,
+                        })
+                        .then((result) => {
+                          if (result === undefined)
+                            setStopRequestedFor((current) =>
+                              current === stopping ? undefined : current,
+                            );
+                        });
+                    },
+                  })}
               {...(props.revealTurnId === undefined ? {} : { revealTurnId: props.revealTurnId })}
               {...(props.onTurnRevealed === undefined
                 ? {}
@@ -1457,7 +1489,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                   return { value: undefined, base: baseFromResult(result) };
                 }).catch(() => undefined);
               }}
-              onAnswerQuestion={({ turnId, attemptId, requestId, answer }) => {
+              onAnswerQuestion={({ turnId, attemptId, requestId, answer, secret }) => {
                 return enqueueThreadCommand(async (previous) => {
                   const result = await props.controller.execute({
                     kind: "answer-chat-turn-question",
@@ -1466,7 +1498,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     turnId,
                     attemptId,
                     requestId,
-                    answer,
+                    // A secret question's answer rides in the command only.
+                    ...(secret === true ? { secretAnswer: answer } : { answer }),
                   });
                   return {
                     value: result?.kind === "attempt-updated",
@@ -1514,9 +1547,15 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             threadId={activeThreadId === undefined ? undefined : String(activeThreadId)}
             turnActive={turnActive}
           />
-          <ImageGenerationOfferPrompt
+          <RoutineProposalPrompt
             className="chat-workspace__tool-approval thread-column"
-            client={props.imageGenerationClient}
+            client={props.automationClient}
+            threadId={activeThreadId === undefined ? undefined : String(activeThreadId)}
+            turnActive={turnActive}
+          />
+          <ServiceOfferPrompt
+            className="chat-workspace__tool-approval thread-column"
+            client={props.serviceOfferClient}
             keptIn={view?.thread.projectId === undefined ? "thread" : "project"}
             profiles={props.imageGenerationProfiles ?? []}
             scopeId={
@@ -1576,6 +1615,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             ) : null}
           </OctantDialogPresence>
           <ChatComposer
+            benchmarkProjectId={view.thread.projectId}
             notices={sideChatNotice === undefined ? [] : [sideChatNotice]}
             key={String(thread.id)}
             info={

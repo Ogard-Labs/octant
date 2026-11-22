@@ -1,6 +1,12 @@
 import type { EventActor } from "@octant/contracts";
 import { requiresLiveCodeReviewAuthority } from "./code/codeReviewAuthority";
 import {
+  decodeActivityQuery,
+  encodeActivityView,
+  type ActivityQuery,
+  type ActivityView,
+} from "@octant/contracts/code-home-activity";
+import {
   decodeCodeProviderFileReviewRequest,
   decodeCodeProviderFileReviewRead,
   type CodeProviderFileReviewRequest,
@@ -25,6 +31,7 @@ import {
   CodeCheckoutId,
   CodeDigest,
   CodeEvidenceContentId,
+  CodeFileId,
   GlobalSequence,
   MAX_CODE_OPERATION_EVIDENCE_BYTES,
   MAX_CODE_OPERATION_TEXT_BYTES,
@@ -195,6 +202,7 @@ import type { FileIdentity } from "./code/fileOperationPort";
 import type { ProjectTerminalService } from "./code/projectTerminalService";
 import { MAX_EDITABLE_CODE_FILE_BYTES } from "./code/codeFileService";
 import type { PairedMergeUnlockPort } from "./hub/pairedMergeUnlock";
+import { hubActRefusal, type HubActScopePort } from "./hub/hubActScope";
 import {
   isAgentGrantSession,
   principalActsAsHostPerson,
@@ -494,6 +502,19 @@ export interface CodeRouteService {
     input: CodeFileOpenInput,
   ) => Promise<CodeFileOpenResultEnvelope> | CodeFileOpenResultEnvelope;
   /**
+   * Resolves a Code file identity (journaled or opened via `openFile`) to its
+   * authorized local root and path for desktop external-editor / default-app
+   * handoff.
+   */
+  readonly resolveDesktopFileTarget?: (
+    authenticatedWindowId: WindowId,
+    input: {
+      readonly threadId: typeof CodeThreadId.Type;
+      readonly checkoutId: typeof CodeCheckoutId.Type;
+      readonly fileId: typeof CodeFileId.Type;
+    },
+  ) => Promise<{ readonly rootPath: string; readonly relativePath: CodeRelativePath } | undefined>;
+  /**
    * Confined listing of the checkout bound to a thread (#code-file-explorer).
    * Optional so a host without a listing capability answers `unavailable`
    * rather than 404, which is the honest distinction between "this host cannot
@@ -602,6 +623,8 @@ export interface CodeRouteDependencies {
    * switch off, a paired client's merge keeps its confirmation and checks gate.
    */
   readonly pairedMergeUnlock?: () => PairedMergeUnlockPort | undefined;
+  /** The member's Act item for its hub, which bounds where a device only the hub introduced may start a thread. */
+  readonly hubActScope?: () => HubActScopePort | undefined;
   /** Terminals a Code Project owns without a thread; absent on a host without them. */
   readonly projectTerminals?: Pick<ProjectTerminalService, "execute">;
   /**
@@ -614,6 +637,18 @@ export interface CodeRouteDependencies {
    * `unavailable` rather than 404.
    */
   readonly debug?: Pick<CodeDebugService, "configurations" | "approve" | "start" | "session">;
+  /**
+   * Authorized Code Home activity reads; absent on a host without the
+   * journal-backed history, which then answers `unavailable` rather than 404.
+   */
+  readonly homeActivity?: {
+    readonly read: (
+      windowId: WindowId,
+      query: ActivityQuery,
+      admission: () => boolean,
+      signal?: AbortSignal,
+    ) => Promise<ActivityView>;
+  };
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxJsonBodySize?: number;
   readonly maxFileBodySize?: number;
@@ -664,9 +699,19 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
     // judged as a local window is; it stays the principal and the actor.
     let callerAuthority: "local-window" | "remote-device";
     let agentGrantSession: boolean;
+    // A device only the hub introduced: it starts threads, answers approvals
+    // and questions, and stops turns within the member's Act item.
+    let hubIntroduced = false;
     // Who the journal names for what this request changes: the device, when a
     // device asked.
     let callerActor: EventActor;
+    let projectTerminalDeviceBinding:
+      | {
+          readonly deviceId: string;
+          readonly sessionId: string;
+          readonly credentialGeneration: number;
+        }
+      | undefined;
     let liveAdmissionCurrent: () => boolean;
     let principalAbortSignal: AbortSignal | undefined;
     const originalWindowCapability = request.headers.get(WINDOW_CAPABILITY_HEADER);
@@ -687,7 +732,20 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
         ? "local-window"
         : "remote-device";
       agentGrantSession = isAgentGrantSession(principalContext.principal);
+      hubIntroduced =
+        principalContext.principal.kind === "remote-device" &&
+        callerAuthority === "remote-device" &&
+        !agentGrantSession;
       callerActor = eventActorForPrincipal(principalContext.principal);
+      projectTerminalDeviceBinding =
+        principalContext.principal.kind === "remote-device" &&
+        principalActsAsHostPerson(principalContext.principal)
+          ? {
+              deviceId: String(principalContext.principal.deviceId),
+              sessionId: String(principalContext.principal.sessionId),
+              credentialGeneration: principalContext.principal.credentialGeneration,
+            }
+          : undefined;
       operationInitiator = callerAuthority === "local-window" ? "user" : "agent";
       const capability = request.headers.get(WINDOW_CAPABILITY_HEADER) ?? "";
       // Review and selected-hunk requests recheck that this same window still
@@ -740,6 +798,57 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
         proof: request.headers.get(OWNER_UNLOCK_HEADER),
       });
       return checked.status === "unlocked" ? undefined : checked;
+    };
+
+    // Where a hub-introduced device may start a thread: a Project the member's
+    // Act item names, read at this start. Preparing the Project's checkout and
+    // reading its remotes are the start's first steps, so they are held to the
+    // same item; otherwise such a device could observe any Project's checkout.
+    // A fork's Project is its source's, which this route does not read, so a
+    // fork from such a device is refused while this host is in a hub.
+    const hubActStartRefusal = (command: CodeCommand | undefined): string | undefined => {
+      const projectId =
+        command?.kind === "create-code-thread"
+          ? String(command.thread.projectId)
+          : command?.kind === "create-managed-code-thread" ||
+              command?.kind === "prepare-code-project-checkout" ||
+              command?.kind === "get-worktree-remote-facts"
+            ? String(command.projectId)
+            : command?.kind === "fork-code-thread"
+              ? ""
+              : undefined;
+      if (projectId === undefined) return undefined;
+      return hubActRefusal(dependencies.hubActScope?.(), projectId, "start");
+    };
+
+    // Answering a thread's approval or question, sending a turn (a started
+    // thread's first message included), and Stop, likewise: only in a
+    // Project the member's Act item names, read at this request. The Project
+    // is the thread's own, read under this caller's scope; a thread it cannot
+    // read names no Project, so the request is refused while this host is in a
+    // hub and keeps its own rules otherwise.
+    const hubActOperationRefusal = async (
+      operation: CodeOperationCommand,
+    ): Promise<string | undefined> => {
+      const action =
+        operation.kind === "answer-provider-approval" || operation.kind === "answer-provider-input"
+          ? "answer"
+          : operation.kind === "cancel-provider-turn" ||
+              operation.kind === "force-stop-provider-turn"
+            ? "stop"
+            : operation.kind === "start-provider-turn"
+              ? "turn"
+              : undefined;
+      const scope = dependencies.hubActScope?.();
+      if (action === undefined || scope === undefined) return undefined;
+      let projectId: string | undefined;
+      try {
+        const view = await dependencies.service.read(authenticatedWindowId, operation.threadId);
+        projectId = String(view.thread.projectId);
+      } catch {
+        projectId = undefined;
+      }
+      return hubActRefusal(scope, projectId, action);
     };
 
     try {
@@ -802,6 +911,10 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           } catch {
             // The authenticated command endpoint also carries strict Code operations.
           }
+          const actRefusal = hubIntroduced ? hubActStartRefusal(command) : undefined;
+          if (actRefusal !== undefined) {
+            return failureResponse({ category: "unauthorized", message: actRefusal }, 403, origin);
+          }
           if (
             command?.kind === "change-code-thread-document-delivery" &&
             refusesThreadDocumentDelivery(request, command.documentDelivery)
@@ -842,9 +955,10 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           // agent-gated caller may watch, never set.
           if (
             command !== undefined &&
-            callerAuthority !== "local-window" &&
+            (callerAuthority !== "local-window" || agentGrantSession) &&
             (command.kind === "set-code-thread-coordinator" ||
               command.kind === "set-code-thread-coordinator-bounds" ||
+              command.kind === "set-code-thread-coordinator-done-when" ||
               command.kind === "set-code-thread-message-wake" ||
               command.kind === "set-code-thread-coordinator-wake" ||
               (command.kind === "update-code-settings" &&
@@ -989,12 +1103,25 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
+          const operationActRefusal = hubIntroduced
+            ? await hubActOperationRefusal(operation)
+            : undefined;
+          if (operationActRefusal !== undefined) {
+            return failureResponse(
+              { category: "unauthorized", message: operationActRefusal },
+              403,
+              origin,
+            );
+          }
           const operationResult = decodeCodeOperationResult(
             await dependencies.service.executeOperation(authenticatedWindowId, operation, {
               initiator: operationInitiator,
               actor: callerActor,
               ...(operation.kind === "start-provider-turn" ||
               requiresLiveCodeReviewAuthority(operation) ||
+              // A switch may wait behind another Git mutation in the queue;
+              // its admission is asked again when its turn to run arrives.
+              operation.kind === "switch-git-branch" ||
               [
                 "prepare-git-hunks",
                 "stage-git-hunks",
@@ -1033,12 +1160,20 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           }
           return jsonResponse(
             decodeProjectTerminalResult(
-              await dependencies.projectTerminals.execute(
-                authenticatedWindowId,
-                callerAuthority,
-                command,
-                callerActor,
-              ),
+              projectTerminalDeviceBinding === undefined
+                ? await dependencies.projectTerminals.execute(
+                    authenticatedWindowId,
+                    callerAuthority,
+                    command,
+                    callerActor,
+                  )
+                : await dependencies.projectTerminals.execute(
+                    authenticatedWindowId,
+                    callerAuthority,
+                    command,
+                    callerActor,
+                    projectTerminalDeviceBinding,
+                  ),
             ),
             200,
             origin,
@@ -1379,13 +1514,17 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             throw new CodeRouteRejected("HTTP method is not supported for this route.", 400);
           }
           const threadId = decodePathThreadId(route.threadId);
-          const afterSequence = decodeReplayCursor(url);
+          const { afterSequence, waits } = decodeThreadEventsQuery(url);
           const frames: CodeEventFrame[] = [];
+          // Without a signal the service stops once it has caught up instead of
+          // parking on the next change. A paired computer's window reads through
+          // a bounded request channel that cannot hold a request open, so it
+          // asks with `wait=0` and reads again on a timer.
           for await (const frame of dependencies.service.subscribe(
             authenticatedWindowId,
             threadId,
             afterSequence,
-            request.signal,
+            waits ? request.signal : undefined,
           )) {
             frames.push(decodeCodeEventFrame(frame));
             if (frames.length === MAX_CODE_REPLAY_FRAMES) break;
@@ -2131,6 +2270,52 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             origin,
           );
         }
+        case "home-activity": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          // The history is the person's own: no renderer-authored identity
+          // and nothing reachable through an agent grant or a remote scope
+          // that is not the paired host person.
+          if (agentGrantSession || callerAuthority !== "local-window") {
+            return failureResponse(
+              {
+                category: "unauthorized",
+                message: "Code Home activity belongs to the person's own scope.",
+              },
+              403,
+              origin,
+            );
+          }
+          if (dependencies.homeActivity === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Code Home activity is unavailable." },
+              503,
+              origin,
+            );
+          }
+          const value = parseJson(await readBoundedBytes(request, jsonLimit));
+          refuseRendererAuthoredIdentity(value);
+          let activityQuery: ActivityQuery;
+          try {
+            activityQuery = decodeActivityQuery(value);
+          } catch {
+            throw new CodeRouteRejected("The Code Home activity request is invalid.", 400);
+          }
+          const view = await dependencies.homeActivity.read(
+            authenticatedWindowId,
+            activityQuery,
+            admissionCurrent,
+            AbortSignal.any(
+              principalAbortSignal === undefined
+                ? [request.signal]
+                : [request.signal, principalAbortSignal],
+            ),
+          );
+          if (!admissionCurrent()) {
+            throw new CodeRouteRejected("Code Home activity admission ended during the read.", 409);
+          }
+          return jsonResponse(encodeActivityView(view), 200, origin);
+        }
         case "composer-activity": {
           requireMethodAndEmptyQuery(request, url, "POST");
           requireJsonContentType(request);
@@ -2545,6 +2730,7 @@ type MatchedRoute =
         | "project-pull-requests-merge-when-ready"
         | "project-pull-requests-auto-fix"
         | "composer-activity"
+        | "home-activity"
         | "provider-file-review";
     }>
   | Readonly<{ kind: "planner"; projectId: string }>
@@ -2699,6 +2885,7 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
     return { kind: "project-pull-requests-auto-fix" };
   }
   if (pathname === "/api/code/composer-activity") return { kind: "composer-activity" };
+  if (pathname === "/api/code/home-activity") return { kind: "home-activity" };
   if (pathname === "/api/code/provider-file-review") return { kind: "provider-file-review" };
   if (pathname === "/api/code/language/documents") return { kind: "language-documents" };
   if (pathname === "/api/code/language/read") return { kind: "language-read" };
@@ -2804,9 +2991,30 @@ function decodePathContentId(value: string): string {
   }
 }
 
+function decodeThreadEventsQuery(url: URL): {
+  readonly afterSequence: number;
+  readonly waits: boolean;
+} {
+  const wait = url.searchParams.get("wait");
+  if (wait === null) return { afterSequence: decodeReplayCursor(url), waits: true };
+  if (wait !== "0" || url.searchParams.size !== 2) {
+    throw new CodeRouteRejected("Code replay cursor is invalid.", 400);
+  }
+  return {
+    afterSequence: decodeReplayCursorValue(url.searchParams.get("afterSequence")),
+    waits: false,
+  };
+}
+
 function decodeReplayCursor(url: URL): number {
-  const value = url.searchParams.get("afterSequence");
-  if (value === null || url.searchParams.size !== 1 || !/^(?:0|[1-9]\d*)$/.test(value)) {
+  if (url.searchParams.size !== 1) {
+    throw new CodeRouteRejected("Code replay cursor is invalid.", 400);
+  }
+  return decodeReplayCursorValue(url.searchParams.get("afterSequence"));
+}
+
+function decodeReplayCursorValue(value: string | null): number {
+  if (value === null || !/^(?:0|[1-9]\d*)$/.test(value)) {
     throw new CodeRouteRejected("Code replay cursor is invalid.", 400);
   }
   try {

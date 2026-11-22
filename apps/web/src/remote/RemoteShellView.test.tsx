@@ -869,7 +869,7 @@ describe("RemoteShellView", () => {
     }
   });
 
-  it("offers a restricted session no way to start a Work or Code thread", async () => {
+  it("offers a restricted session no way to start a Work thread, and a Code thread only in the Projects its host lists", async () => {
     const user = userEvent.setup();
     const { bridge } = await readyBridge([], false, false, false, true);
     render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
@@ -881,8 +881,10 @@ describe("RemoteShellView", () => {
 
     await user.click(screen.getByRole("button", { name: "Code" }));
     const code = await screen.findByRole("navigation", { name: "Code thread list" });
-    expect(await within(code).findByText(/Start one from the host/)).toBeInTheDocument();
-    expect(within(code).queryByRole("button", { name: "Start thread" })).toBeNull();
+    // The host lists such a session only the Code Projects it may start in
+    // (a hub-introduced device's Act Projects) and refuses a start elsewhere.
+    expect(await within(code).findByRole("button", { name: "Start thread" })).toBeInTheDocument();
+    expect(within(code).queryByRole("button", { name: /New Project from a folder/ })).toBeNull();
   });
 
   it("opens the host's Extensions and Providers settings for a browser the host's own person paired", async () => {

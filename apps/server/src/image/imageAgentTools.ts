@@ -1,14 +1,9 @@
 import {
-  decodeImageArtifactId,
-  decodeProviderInstanceId,
-  decodeProviderModelId,
-  MAX_IMAGE_PROMPT_CHARACTERS,
-  MAX_IMAGE_VARIANTS,
   type ImageGenerationCustomSource,
   type ImageGenerationGenerateOffer,
+  type ImageGenerationProfileView,
   type ImageGenerationSaveOffer,
   type ImageGenerationSaveResult,
-  type ImageGenerationProfileView,
   type ImageGenerationScopeId,
   type ImageJob,
   type ProviderInstance,
@@ -20,9 +15,22 @@ import {
 import {
   hasEligibleImageProfile,
   imageGenerationWithoutAsking,
+  imageProfileSupportsReferences,
   listEligibleImageProfiles,
 } from "@octant/domain";
+import type {
+  MediaImageGenerateOutcome,
+  MediaImageGenerateRequest,
+  MediaImageSaveOutcome,
+  MediaImageSaveRequest,
+  MediaToolHostPort,
+} from "@octant/plugin-api/media-tools";
+import {
+  CREATE_IMAGE_MEDIA_TOOL_PLUGIN,
+  CREATE_IMAGE_TOOL_NAME,
+} from "@octant/plugin-host/media-tools";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { adaptMediaToolSet } from "../providers/mediaToolAdapter";
 import type {
   ImageGenerationChoice,
   ImageGenerationOfferOutcome,
@@ -30,43 +38,22 @@ import type {
 } from "./imageGenerationOfferService";
 import type { EnqueueImageJobInput, ImageJobService } from "./imageJobService";
 import type { KeptImageGenerationChoices } from "./keptImageGenerationChoices";
+import {
+  describeImageSources,
+  parseImageSourceRequests,
+  readImageSources,
+  type ImageSourceRequest,
+  type ThreadImageSources,
+} from "./threadImageSources";
 
-export const IMAGE_TOOL_NAME = "octant_create_image";
-
-const imageToolInputSchema = {
-  type: "object",
-  properties: {
-    operation: { type: "string", enum: ["generate", "save"] },
-    prompt: { type: "string" },
-    profileInstanceId: { type: "string" },
-    modelId: { type: "string" },
-    variantCount: { type: "number" },
-    parentAttachmentId: { type: "string" },
-    attachmentId: { type: "string" },
-    relativePath: { type: "string" },
-  },
-} as const;
-
-const MAX_SAVE_PATH_CHARACTERS = 512;
-
-const FORBIDDEN_INPUT_KEYS = [
-  "apiKey",
-  "credential",
-  "credentials",
-  "endpoint",
-  "baseUrl",
-  "header",
-  "headers",
-  "path",
-  "filePath",
-  "canonicalRoot",
-] as const;
+export const IMAGE_TOOL_NAME = CREATE_IMAGE_TOOL_NAME;
 
 export interface ImageAgentToolPort {
   readonly listInstances: () => ReadonlyArray<ProviderInstance>;
   readonly readImageGenerationCustomSources: () => ReadonlyArray<ImageGenerationCustomSource>;
   readonly enqueue: (input: EnqueueImageJobInput) => Promise<ImageJob>;
   readonly listJobs: ImageJobService["listByScope"];
+  readonly imageSources?: ThreadImageSources;
   /**
    * Asks the person in the thread whether to generate, and with which profile
    * and model. A call asks unless a kept choice or Full access already
@@ -129,174 +116,221 @@ export const IMAGE_TOOL_WAIT_MS = 120_000;
 /** The provider image channel's own bound on one image's base64 text. */
 const MAX_TOOL_IMAGE_BASE64_LENGTH = 2_097_152;
 
-interface ImageToolInput {
-  readonly operation: "generate";
-  readonly prompt: string;
-  readonly profileInstanceId?: ProviderInstanceId;
-  readonly modelId?: ProviderModelId;
-  readonly variantCount?: number;
-  readonly parentAttachmentId?: string;
-}
-
-interface ImageSaveInput {
-  readonly operation: "save";
-  readonly attachmentId: string;
-  readonly relativePath: string;
-}
-
-const DESCRIPTION =
-  "Generate or revise a picture (a photo, illustration, or rendered scene) with an image model the person set up in Octant. Call it when the person asks for an image instead of drawing one yourself as SVG, HTML, or CSS: a real image model gives a far better result. Keep SVG for logos, icons, and diagrams, or when the person asks for it. Octant shows the person a card in this thread where they pick the model and confirm, because each generation is billed to their image provider; nothing runs until they answer, unless they already said not to ask again or the thread runs at Full access, where it uses the profile the person named in Settings (else the first one set up) on its default model. Describe the image in prompt; profileInstanceId and modelId only suggest what the card preselects. To revise, pass parentAttachmentId from a completed image on this thread. Never pass credentials, endpoints, headers, or filesystem paths. The result says what happened: completed with each image's attachmentId (the images are shown in this thread, and to you when you can read images; use an attachmentId to revise one, to place it in a Canvas design as a generated-image asset, or to save it), failed with the reason, generating with a jobId when it takes longer than the call waits (it appears in this thread when done; do not start another), agent-draws (the person wants you to make the visual yourself), or cancelled (do not ask again unless they do). In a Work or Code thread, operation save with an attachmentId from this thread and a relativePath stores that image as a new file in the folder you work in: it never overwrites a file, Plan refuses it, and at Ask first the person confirms the path. Never invent an image URL.";
-
 /**
- * App-managed image generation for a Chat, Work, or Code thread.
+ * App-managed image generation for a Chat, Work, or Code thread, composed
+ * through the public `CREATE_IMAGE_MEDIA_TOOL_PLUGIN` over a host-owned
+ * `MediaToolHostPort`.
  *
  * Present only while Settings has an enabled image profile. A call asks the
  * person, in the thread, before a job is queued, unless they said not to ask
  * again or the thread is at Full access, which uses the profile Settings names
  * or the first ready one (`imageGenerationWithoutAsking`); the job runs on the
  * profile and model that settles.
- * The tool still refuses credentials, endpoints, and filesystem paths.
  */
 export function createImageAgentTools(options: {
   readonly threadKind: "chat-thread" | "work-thread" | "code-thread";
   readonly scopeId: ImageGenerationScopeId;
   readonly port: ImageAgentToolPort;
 }): AppManagedToolSet | undefined {
-  const instances = options.port.listInstances();
-  const customSources = options.port.readImageGenerationCustomSources();
-  if (!hasEligibleImageProfile(instances, customSources)) return undefined;
-  return {
-    definitions: [
-      { name: IMAGE_TOOL_NAME, description: DESCRIPTION, inputSchema: imageToolInputSchema },
-    ],
-    execute: async ({ name, inputJson, signal }) => {
-      if (name !== IMAGE_TOOL_NAME) {
-        return { result: { error: "tool-unavailable" }, isError: true };
-      }
-      const refusal = options.port.refusal?.();
-      if (refusal !== undefined) return { result: { error: refusal }, isError: true };
-      const parsed = parseInput(inputJson);
-      if ("error" in parsed) return { result: { error: parsed.error }, isError: true };
-      if (parsed.operation === "save") return saveImage(options, parsed, signal);
-
-      const profiles = eligibleProfiles(options.port);
-      if (profiles.length === 0) {
-        return { result: { error: "No enabled image profile is configured." }, isError: true };
-      }
-      const suggested = suggestedChoice(profiles, parsed);
-      if ("error" in suggested) return { result: { error: suggested.error }, isError: true };
-
-      let parentArtifactRef: EnqueueImageJobInput["parentArtifactRef"];
-      if (parsed.parentAttachmentId !== undefined) {
-        const parent = findCompletedArtifact(
-          options.port.listJobs(options.scopeId),
-          parsed.parentAttachmentId,
-        );
-        if (parent === undefined) {
-          return {
-            result: { error: "The parent image is unavailable on this thread." },
-            isError: true,
-          };
-        }
-        parentArtifactRef = parent;
-      }
-
-      const unasked = imageGenerationWithoutAsking({
-        profiles,
-        kept: options.port.remembered(),
-        fullAccess: options.port.fullAccess?.() === true,
-        askAgain: options.port.asksAgain?.() === true,
-        defaultProfileInstanceId: options.port.defaultProfileInstanceId?.(),
-      });
-      let choice: ImageGenerationChoice | undefined;
-      if (unasked.kind === "generate") {
-        choice = unasked.choice;
-      } else {
-        // A kept choice the host can no longer generate with (its profile was
-        // turned off or the model removed) is dropped and the person asked
-        // again, never swapped silently for another model.
-        if (unasked.keptUnavailable) await options.port.forget();
-        if (options.port.unattended === true) {
-          return {
-            result: {
-              error:
-                "Nobody is at this thread to choose an image model, and its Project keeps no choice that can run. Do not try again in this turn.",
-            },
-            isError: true,
-          };
-        }
-        const outcome = await options.port.ask({
-          offer: {
-            kind: "generate",
-            prompt: parsed.prompt,
-            variantCount: parsed.variantCount ?? 1,
-            revision: parentArtifactRef !== undefined,
-            suggested,
-          },
-          ...(signal === undefined ? {} : { signal }),
-        });
-        switch (outcome.status) {
-          case "generate":
-            choice = outcome;
-            break;
-          case "agent-draws":
-            return {
-              result: {
-                status: "agent-draws",
-                message:
-                  "The person chose not to use an image model for this. Make the visual yourself if the request still calls for one.",
-              },
-            };
-          case "save":
-          case "cancelled":
-            return {
-              result: {
-                status: "cancelled",
-                message:
-                  "The person did not start the image generation. Do not ask again unless they do.",
-              },
-            };
-          case "too-many-waiting":
-            return {
-              result: { error: "Too many image generations are waiting for an answer." },
-              isError: true,
-            };
-        }
-      }
-      // The answer can arrive minutes later, so the turn's standing is read
-      // again: a thread moved to Plan while the card was open must not spend.
-      const refusalNow = options.port.refusal?.();
-      if (refusalNow !== undefined) return { result: { error: refusalNow }, isError: true };
-      // The person's choice is checked again as it runs: a profile turned off
-      // while the card was open must not run.
-      if (choice === undefined || !isEligibleChoice(eligibleProfiles(options.port), choice)) {
-        return {
-          result: { error: "The chosen image model is no longer available." },
-          isError: true,
-        };
-      }
-
-      try {
-        const job = await options.port.enqueue({
-          threadKind: options.threadKind,
-          scopeId: options.scopeId,
-          profileInstanceId: choice.profileInstanceId,
-          modelId: choice.modelId,
-          prompt: parsed.prompt,
-          ...(parsed.variantCount === undefined ? {} : { variantCount: parsed.variantCount }),
-          ...(parentArtifactRef === undefined ? {} : { parentArtifactRef }),
-        });
-        return await settledResult(options.port, job, signal);
-      } catch (error) {
-        return {
-          result: {
-            error: error instanceof Error ? error.message : "The image job could not be started.",
-          },
-          isError: true,
-        };
-      }
+  const mode =
+    options.threadKind === "chat-thread"
+      ? "chat"
+      : options.threadKind === "work-thread"
+        ? "work"
+        : "code";
+  const mediaPort: MediaToolHostPort = {
+    turn: {
+      mode,
+      hasFolder: options.port.save !== undefined,
+      unattended: options.port.unattended === true,
+      inPlan: () => false,
+      allowed: () => true,
+    },
+    imageGeneration: {
+      isAvailable: () =>
+        hasEligibleImageProfile(
+          options.port.listInstances(),
+          options.port.readImageGenerationCustomSources(),
+        ),
+      ...(options.port.refusal === undefined ? {} : { refusal: options.port.refusal }),
+      generate: (request) => executeHostImageGeneration(options, request),
+      ...(options.port.save === undefined || options.port.readArtifact === undefined
+        ? {}
+        : { save: (request) => executeHostImageSave(options, request) }),
     },
   };
+  const tools = CREATE_IMAGE_MEDIA_TOOL_PLUGIN.createTools(mediaPort);
+  if (tools === undefined) return undefined;
+  return adaptMediaToolSet({ tools });
+}
+
+async function executeHostImageGeneration(
+  options: {
+    readonly threadKind: "chat-thread" | "work-thread" | "code-thread";
+    readonly scopeId: ImageGenerationScopeId;
+    readonly port: ImageAgentToolPort;
+  },
+  request: MediaImageGenerateRequest,
+): Promise<MediaImageGenerateOutcome> {
+  const { signal } = request;
+  const needsReferences = request.references.length > 0;
+  const profiles = eligibleProfiles(options.port, needsReferences);
+  if (profiles.length === 0) {
+    return {
+      status: "refused",
+      error: needsReferences
+        ? "No enabled image model can use reference images."
+        : "No enabled image profile is configured.",
+    };
+  }
+  const suggested = suggestedChoice(
+    profiles,
+    needsReferences &&
+      request.profileInstanceId !== undefined &&
+      !profiles.some((profile) => String(profile.instanceId) === String(request.profileInstanceId))
+      ? {}
+      : request,
+  );
+  if ("error" in suggested) return { status: "refused", error: suggested.error };
+
+  let parentArtifactRef: EnqueueImageJobInput["parentArtifactRef"];
+  if (request.parentAttachmentId !== undefined && !needsReferences) {
+    const parent = findCompletedArtifact(
+      options.port.listJobs(options.scopeId),
+      String(request.parentAttachmentId),
+    );
+    if (parent === undefined) {
+      return { status: "refused", error: "The parent image is unavailable on this thread." };
+    }
+    parentArtifactRef = parent;
+  }
+
+  const validatedReferences =
+    request.references.length === 0 ? [] : parseImageSourceRequests(request.references);
+  if ("error" in validatedReferences) {
+    return { status: "refused", error: validatedReferences.error };
+  }
+  const sourceRequests: ReadonlyArray<ImageSourceRequest> =
+    request.parentAttachmentId === undefined
+      ? validatedReferences
+      : [
+          { kind: "generated-image", attachmentId: request.parentAttachmentId },
+          ...validatedReferences,
+        ];
+  const references = needsReferences
+    ? await describeImageSources(sourceRequests, options.port.imageSources, (id) => {
+        const found = findCompletedJobArtifact(
+          options.port
+            .listJobs(options.scopeId)
+            .filter((job) => job.threadKind === options.threadKind),
+          id,
+        );
+        if (found === undefined) return undefined;
+        return {
+          label: "generated image",
+          size: found.artifact.size,
+          read: async () =>
+            (await options.port.readArtifact?.(found.job.id, found.artifact.attachmentId))?.bytes,
+        };
+      })
+    : [];
+  if ("error" in references) return { status: "refused", error: references.error };
+  if (signal?.aborted) return { status: "cancelled", reason: "aborted" };
+
+  // A remembered model is not permission to share these particular images.
+  const unasked = imageGenerationWithoutAsking({
+    profiles,
+    kept: needsReferences ? undefined : options.port.remembered(),
+    fullAccess: !needsReferences && options.port.fullAccess?.() === true,
+    askAgain: options.port.asksAgain?.() === true,
+    defaultProfileInstanceId: options.port.defaultProfileInstanceId?.(),
+  });
+  let choice: ImageGenerationChoice | undefined;
+  if (unasked.kind === "generate") {
+    choice = unasked.choice;
+  } else {
+    // A kept choice the host can no longer generate with (its profile was
+    // turned off or the model removed) is dropped and the person asked
+    // again, never swapped silently for another model.
+    if (unasked.keptUnavailable) await options.port.forget();
+    if (options.port.unattended === true) {
+      return {
+        status: "refused",
+        error:
+          "Nobody is at this thread to choose an image model, and its Project keeps no choice that can run. Do not try again in this turn.",
+      };
+    }
+    const outcome = await options.port.ask({
+      offer: {
+        kind: "generate",
+        prompt: request.prompt,
+        variantCount: request.variantCount ?? 1,
+        revision: request.parentAttachmentId !== undefined,
+        suggested,
+        ...(needsReferences ? { references: references.map(({ reference }) => reference) } : {}),
+      },
+      ...(signal === undefined ? {} : { signal }),
+    });
+    switch (outcome.status) {
+      case "generate":
+        choice = outcome;
+        break;
+      case "agent-draws":
+        return { status: "agent-draws" };
+      case "save":
+      case "cancelled":
+        return { status: "cancelled", reason: "declined" };
+      case "too-many-waiting":
+        return {
+          status: "refused",
+          error: "Too many image generations are waiting for an answer.",
+        };
+    }
+  }
+  // The answer can arrive minutes later, so the turn's standing is read
+  // again: a thread moved to Plan while the card was open must not spend.
+  const refusalNow = options.port.refusal?.();
+  if (refusalNow !== undefined) return { status: "refused", error: refusalNow };
+  // The person's choice is checked again as it runs: a profile turned off
+  // while the card was open must not run.
+  if (
+    choice === undefined ||
+    !isEligibleChoice(eligibleProfiles(options.port, needsReferences), choice)
+  ) {
+    return { status: "refused", error: "The chosen image model is no longer available." };
+  }
+
+  try {
+    const images = await readImageSources(references, signal);
+    if ("error" in images) return { status: "refused", error: images.error };
+    if (signal?.aborted) return { status: "cancelled", reason: "aborted" };
+    if (needsReferences) {
+      const refusalAfterRead = options.port.refusal?.();
+      if (refusalAfterRead !== undefined) return { status: "refused", error: refusalAfterRead };
+      if (!isEligibleChoice(eligibleProfiles(options.port, true), choice)) {
+        return {
+          status: "refused",
+          error: "The chosen image model can no longer use reference images.",
+        };
+      }
+    }
+    const job = await options.port.enqueue({
+      threadKind: options.threadKind,
+      scopeId: options.scopeId,
+      profileInstanceId: choice.profileInstanceId,
+      modelId: choice.modelId,
+      prompt: request.prompt,
+      ...(request.variantCount === undefined ? {} : { variantCount: request.variantCount }),
+      ...(parentArtifactRef === undefined ? {} : { parentArtifactRef }),
+      ...(images.length === 0 ? {} : { references: images }),
+    });
+    return await settledOutcome(options.port, job, signal);
+  } catch (error) {
+    return {
+      status: "refused",
+      error: error instanceof Error ? error.message : "The image job could not be started.",
+    };
+  }
 }
 
 /**
@@ -306,40 +340,36 @@ export function createImageAgentTools(options: {
  * one that lets edits through writes at once. The write is confined to that
  * folder and never overwrites a file.
  */
-async function saveImage(
+async function executeHostImageSave(
   options: {
     readonly scopeId: ImageGenerationScopeId;
     readonly port: ImageAgentToolPort;
   },
-  input: ImageSaveInput,
-  signal: AbortSignal | undefined,
-): Promise<{ readonly result: unknown; readonly isError?: boolean }> {
+  request: MediaImageSaveRequest,
+): Promise<MediaImageSaveOutcome> {
   const save = options.port.save;
   if (save === undefined || options.port.readArtifact === undefined) {
     return {
-      result: { error: "This thread has no folder to save into. Chat images stay in the thread." },
-      isError: true,
+      status: "refused",
+      error: "This thread has no folder to save into. Chat images stay in the thread.",
     };
   }
   const found = findCompletedJobArtifact(
     options.port.listJobs(options.scopeId),
-    input.attachmentId,
+    String(request.attachmentId),
   );
   if (found === undefined) {
-    return {
-      result: { error: "That image is not a finished image of this thread." },
-      isError: true,
-    };
+    return { status: "refused", error: "That image is not a finished image of this thread." };
   }
   // Plan refuses before anything is read or asked.
   if (save.posture() === "refuse") {
-    return { result: { error: "Plan mode cannot save files." }, isError: true };
+    return { status: "refused", error: "Plan mode cannot save files." };
   }
   const read = await options.port
     .readArtifact(found.job.id, found.artifact.attachmentId)
     .catch(() => undefined);
   if (read === undefined) {
-    return { result: { error: "The generated image is unavailable." }, isError: true };
+    return { status: "refused", error: "The generated image is unavailable." };
   }
   // The level is read again after every wait, and once more right before the
   // write starts with nothing awaited in between: a thread lowered to Plan or
@@ -349,7 +379,7 @@ async function saveImage(
   for (;;) {
     const posture = save.posture();
     if (posture === "refuse") {
-      return { result: { error: "Plan mode cannot save files." }, isError: true };
+      return { status: "refused", error: "Plan mode cannot save files." };
     }
     if (posture === "allow" || confirmed) break;
     const outcome = await options.port.ask({
@@ -357,24 +387,17 @@ async function saveImage(
         kind: "save",
         jobId: found.job.id,
         attachmentId: found.artifact.attachmentId,
-        relativePath: input.relativePath,
+        relativePath: request.relativePath,
       },
-      ...(signal === undefined ? {} : { signal }),
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
     });
-    if (outcome.status !== "save") {
-      return {
-        result: {
-          status: "not-saved",
-          message: "The person did not save the image. Do not ask again unless they do.",
-        },
-      };
-    }
+    if (outcome.status !== "save") return { status: "not-saved" };
     confirmed = true;
   }
-  const saved = await save.write(input.relativePath, read.bytes);
+  const saved = await save.write(request.relativePath, read.bytes);
   return saved.status === "saved"
-    ? { result: { status: "saved", relativePath: saved.relativePath } }
-    : { result: { status: saved.status, error: saved.reason }, isError: true };
+    ? { status: "saved", relativePath: saved.relativePath }
+    : { status: "refused", saveStatus: saved.status, error: saved.reason };
 }
 
 function findCompletedJobArtifact(jobs: ReadonlyArray<ImageJob>, attachmentId: string) {
@@ -394,24 +417,16 @@ function findCompletedJobArtifact(jobs: ReadonlyArray<ImageJob>, attachmentId: s
  * image is handed to the model only when it reads images and the image fits
  * the provider's image channel; the result says when one was left out.
  */
-async function settledResult(
+async function settledOutcome(
   port: ImageAgentToolPort,
   queued: ImageJob,
   signal: AbortSignal | undefined,
-): Promise<{
-  readonly result: unknown;
-  readonly isError?: boolean;
-  readonly images?: ReadonlyArray<ProviderToolImage>;
-}> {
-  const generating = {
-    result: {
-      status: "generating",
-      jobId: queued.id,
-      modelId: queued.modelId,
-      profileInstanceId: queued.profileInstanceId,
-      message:
-        "The image is still being generated. It appears in this thread when it finishes; do not start another for the same request.",
-    },
+): Promise<MediaImageGenerateOutcome> {
+  const generating: MediaImageGenerateOutcome = {
+    status: "generating",
+    jobId: queued.id,
+    modelId: queued.modelId,
+    profileInstanceId: queued.profileInstanceId,
   };
   if (port.whenTerminal === undefined) return generating;
   const job = await waitForTerminal(
@@ -421,56 +436,44 @@ async function settledResult(
   );
   if (job === undefined) return generating;
   if (job.status === "cancelled") {
-    return {
-      result: { status: "cancelled", jobId: job.id, message: "The generation was cancelled." },
-    };
+    return { status: "cancelled", jobId: job.id, reason: "job-cancelled" };
   }
   if (job.status !== "completed") {
     return {
-      result: {
-        status: "failed",
-        jobId: job.id,
-        message: job.safetyRefusal ?? job.failure?.message ?? "The image could not be generated.",
-      },
-      isError: true,
+      status: "failed",
+      jobId: job.id,
+      message: job.safetyRefusal ?? job.failure?.message ?? "The image could not be generated.",
     };
   }
   const images: Array<ProviderToolImage> = [];
-  let withheld = 0;
+  let withheldCount = 0;
   if (port.readsImages?.() === true && port.readArtifact !== undefined) {
     for (const artifact of job.artifacts) {
       if (artifact.mime !== "image/png" && artifact.mime !== "image/jpeg") {
-        withheld += 1;
+        withheldCount += 1;
         continue;
       }
       const read = await port.readArtifact(job.id, artifact.attachmentId).catch(() => undefined);
       const data = read === undefined ? undefined : Buffer.from(read.bytes).toString("base64");
       if (data === undefined || data.length > MAX_TOOL_IMAGE_BASE64_LENGTH) {
-        withheld += 1;
+        withheldCount += 1;
         continue;
       }
       images.push({ mimeType: artifact.mime, data });
     }
   }
   return {
-    result: {
-      status: "completed",
-      jobId: job.id,
-      modelId: job.modelId,
-      profileInstanceId: job.profileInstanceId,
-      images: job.artifacts.map((artifact) => ({
-        attachmentId: artifact.attachmentId,
-        mime: artifact.mime,
-        size: artifact.size,
-      })),
-      message:
-        images.length > 0
-          ? withheld === 0
-            ? "The images are shown in this thread and attached to this result."
-            : `The images are shown in this thread; ${String(withheld)} could not be attached to this result because of its size or format.`
-          : "The images are shown in this thread. You were not shown them, so do not describe what they look like.",
-    },
+    status: "completed",
+    jobId: job.id,
+    modelId: job.modelId,
+    profileInstanceId: job.profileInstanceId,
+    artifacts: job.artifacts.map((artifact) => ({
+      attachmentId: artifact.attachmentId,
+      mime: artifact.mime,
+      size: artifact.size,
+    })),
     ...(images.length === 0 ? {} : { images }),
+    withheldCount,
   };
 }
 
@@ -519,6 +522,7 @@ export function createThreadImageAgentTools(input: {
   readonly refusal?: () => string | undefined;
   /** Whether the model driving this turn accepts images in a tool result. */
   readonly readsImages: () => boolean;
+  readonly imageSources?: ThreadImageSources;
   /** Saving under the turn's folder; Work and Code only. */
   readonly save?: ImageAgentToolPort["save"];
 }): AppManagedToolSet | undefined {
@@ -560,14 +564,22 @@ export function createThreadImageAgentTools(input: {
       whenTerminal: (jobId) => input.jobs.whenTerminal(jobId),
       readArtifact: (jobId, attachmentId) => input.jobs.readArtifact(jobId, attachmentId),
       readsImages: input.readsImages,
+      ...(input.imageSources === undefined ? {} : { imageSources: input.imageSources }),
       ...(input.refusal === undefined ? {} : { refusal: input.refusal }),
       ...(input.save === undefined || threadKind === "chat-thread" ? {} : { save: input.save }),
     },
   });
 }
 
-function eligibleProfiles(port: ImageAgentToolPort): ReadonlyArray<ImageGenerationProfileView> {
-  return listEligibleImageProfiles(port.listInstances(), port.readImageGenerationCustomSources());
+function eligibleProfiles(
+  port: ImageAgentToolPort,
+  references: boolean,
+): ReadonlyArray<ImageGenerationProfileView> {
+  const profiles = listEligibleImageProfiles(
+    port.listInstances(),
+    port.readImageGenerationCustomSources(),
+  );
+  return references ? profiles.filter(imageProfileSupportsReferences) : profiles;
 }
 
 function isEligibleChoice(
@@ -584,7 +596,10 @@ function isEligibleChoice(
 /** What the card preselects: the agent's suggestion when the host can run it, else the first profile. */
 function suggestedChoice(
   profiles: ReadonlyArray<ImageGenerationProfileView>,
-  input: ImageToolInput,
+  input: {
+    readonly profileInstanceId?: ProviderInstanceId;
+    readonly modelId?: ProviderModelId;
+  },
 ): ImageGenerationChoice | { readonly error: string } {
   const profile =
     input.profileInstanceId === undefined
@@ -616,82 +631,4 @@ function findCompletedArtifact(jobs: ReadonlyArray<ImageJob>, attachmentId: stri
     }
   }
   return undefined;
-}
-
-function parseInput(
-  inputJson: string,
-): ImageToolInput | ImageSaveInput | { readonly error: string } {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(inputJson);
-  } catch {
-    return { error: "Image tool input is not valid JSON." };
-  }
-  if (typeof raw !== "object" || raw === null) {
-    return { error: "Image tool input is invalid." };
-  }
-  const record = raw as Record<string, unknown>;
-  for (const key of FORBIDDEN_INPUT_KEYS) {
-    if (key in record) {
-      return { error: "Image generation cannot take credentials, endpoints, or filesystem paths." };
-    }
-  }
-  const operation = record["operation"] ?? "generate";
-  if (operation === "save") {
-    const attachmentId = record["attachmentId"];
-    const relativePath = record["relativePath"];
-    if (typeof relativePath !== "string" || relativePath.trim().length === 0) {
-      return { error: "A save needs relativePath, a path inside this thread's folder." };
-    }
-    if (relativePath.length > MAX_SAVE_PATH_CHARACTERS) {
-      return { error: "The save path is too long." };
-    }
-    try {
-      return {
-        operation: "save",
-        attachmentId: String(decodeImageArtifactId(attachmentId)),
-        relativePath: relativePath.trim(),
-      };
-    } catch {
-      return { error: "A save needs the attachmentId of a finished image on this thread." };
-    }
-  }
-  if (operation !== "generate") return { error: "The operation is generate or save." };
-  const prompt = record["prompt"];
-  if (typeof prompt !== "string" || prompt.trim().length === 0) {
-    return { error: "The image prompt must not be empty." };
-  }
-  if (prompt.length > MAX_IMAGE_PROMPT_CHARACTERS) {
-    return { error: "The image prompt exceeded the length limit." };
-  }
-  const variantCount = record["variantCount"];
-  if (variantCount !== undefined) {
-    if (
-      typeof variantCount !== "number" ||
-      !Number.isSafeInteger(variantCount) ||
-      variantCount < 1 ||
-      variantCount > MAX_IMAGE_VARIANTS
-    ) {
-      return { error: "The requested variant count is not supported." };
-    }
-  }
-  const profileInstanceId = record["profileInstanceId"];
-  const modelId = record["modelId"];
-  const parentAttachmentId = record["parentAttachmentId"];
-  try {
-    return {
-      operation: "generate",
-      prompt: prompt.trim(),
-      ...(profileInstanceId === undefined
-        ? {}
-        : { profileInstanceId: decodeProviderInstanceId(profileInstanceId) }),
-      ...(modelId === undefined ? {} : { modelId: decodeProviderModelId(modelId) }),
-      ...(variantCount === undefined ? {} : { variantCount }),
-      ...(typeof parentAttachmentId === "string"
-        ? { parentAttachmentId: String(decodeImageArtifactId(parentAttachmentId)) }
-        : {}),
-    };
-  } catch {
-    return { error: "Image tool input is invalid." };
-  }
 }

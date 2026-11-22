@@ -1,4 +1,4 @@
-import { decodeProjectMemoryProposal, RoutineAgentRequest } from "@octant/contracts";
+import { decodeProjectMemoryProposal, RoutineAgentRequest, ServiceOffer } from "@octant/contracts";
 import { decodeBrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
 import { decodeExtensionToolApproval } from "@octant/contracts/extension-rpc";
 import { Schema } from "effect";
@@ -37,10 +37,35 @@ const none = {
   browserApprovals: [],
   memoryProposals: [],
   routineProposals: [],
-  imageOffers: [],
+  serviceOffers: [],
 };
 
 describe("waiting asks", () => {
+  it("finds an image offer by its own id without exposing the prompt or an answer", () => {
+    const offer = Schema.decodeUnknownSync(ServiceOffer)({
+      kind: "generate",
+      offerId: "00000000-0000-4000-8000-000000000b01",
+      threadKind: "chat-thread",
+      scopeId: chatThread,
+      requestedAt: "2026-11-13T08:02:00.000Z",
+      prompt: "Private image prompt",
+      variantCount: 1,
+      revision: false,
+      suggested: { profileInstanceId: projectId, modelId: "test-model" },
+    });
+    expect(waitingAsksFrom({ ...none, serviceOffers: [offer] }, readThread)).toEqual([
+      {
+        kind: "service-offer",
+        askId: offer.offerId,
+        mode: "chat",
+        threadId: chatThread,
+        threadTitle: "Trip plan",
+        requestedAt: offer.requestedAt,
+        text: "Generate an image?",
+      },
+    ]);
+  });
+
   it("lists a tool approval with its whole input, for its thread to answer", () => {
     expect(waitingAsksFrom({ ...none, toolApprovals: [toolApproval()] }, readThread)).toEqual([
       {

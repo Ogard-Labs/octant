@@ -1,4 +1,4 @@
-import { Network, X } from "../ui/icons";
+import { ListChecks, Network, X } from "../ui/icons";
 import { useState } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
 import { WorkerMark } from "../projects/coordinatorMarks";
@@ -16,6 +16,33 @@ import "./coordinator-workers.css";
 export interface CoordinatorWorkersSource {
   readonly rows: ReadonlyArray<CoordinatorWorkerRow>;
   readonly onOpenWorker: (threadId: string) => void;
+}
+
+/**
+ * The Done when button in a coordinator's pane header beside Workers. Shows
+ * how many host-checked conditions are configured and opens the coordinator's
+ * limits and done-when dialog to view, edit, or clear them.
+ */
+export function CoordinatorDoneWhenButton(props: {
+  readonly count: number;
+  readonly onClick: () => void;
+}) {
+  return (
+    <OctantButton
+      className="coordinator-workers-toggle window-no-drag"
+      onClick={props.onClick}
+      onPointerDown={(event) => event.stopPropagation()}
+      size="sm"
+      type="button"
+      variant="ghost"
+    >
+      <ListChecks aria-hidden="true" size={14} />
+      Done when
+      {props.count === 0 ? null : (
+        <span className="coordinator-workers-toggle__count">{props.count}</span>
+      )}
+    </OctantButton>
+  );
 }
 
 /**

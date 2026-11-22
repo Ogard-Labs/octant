@@ -51,6 +51,11 @@ export interface LiveTurnTracker {
   observe(event: ProviderRuntimeEvent): void;
   /** Records the connection the turn acquired; it is forgotten at `end`. */
   connect(connection: LiveTurnConnection): void;
+  /**
+   * The runtime accepted the turn's prompt: the connection's `send` returned.
+   * A runtime takes a person's note from here on, even before it says anything.
+   */
+  promptSent(): void;
   end(): void;
 }
 
@@ -69,9 +74,12 @@ const DEFAULT_COALESCE_MS = 250;
 
 interface LiveTurn {
   readonly owner: symbol;
+  readonly topic: MachineChangeTopic;
   readonly startedAt: UtcTimestamp;
   state: LiveTurnState;
   connection?: LiveTurnConnection;
+  /** Whether the runtime has the turn's prompt: it was sent, or it answered. */
+  answering?: true;
 }
 
 /**
@@ -111,6 +119,11 @@ export class LiveTurnRegistry {
     this.#pending.set(topic, timer);
   }
 
+  /** How many turns run on this host now, for the load level other members read. */
+  count(): number {
+    return this.#turns.size;
+  }
+
   tracker(threadId: string, topic: MachineChangeTopic): LiveTurnTracker {
     const owner = Symbol(threadId);
     const own = (): LiveTurn | undefined => {
@@ -123,7 +136,12 @@ export class LiveTurnRegistry {
         // the turn simply goes unreported rather than failing to run.
         try {
           const decoded = decodeUtcTimestamp(startedAt);
-          this.#turns.set(threadId, { owner, startedAt: decoded, state: startLiveTurn(decoded) });
+          this.#turns.set(threadId, {
+            owner,
+            topic,
+            startedAt: decoded,
+            state: startLiveTurn(decoded),
+          });
         } catch {
           this.#turns.delete(threadId);
         }
@@ -132,6 +150,7 @@ export class LiveTurnRegistry {
       observe: (event) => {
         const turn = own();
         if (turn === undefined) return;
+        if (turn.connection !== undefined) turn.answering = true;
         // Text deltas arrive many times a second and never move the step; the
         // fold hands back the same state for them, so they cost one comparison.
         const next = observeLiveTurn(turn.state, event);
@@ -144,6 +163,10 @@ export class LiveTurnRegistry {
       connect: (connection) => {
         const turn = own();
         if (turn !== undefined) turn.connection = connection;
+      },
+      promptSent: () => {
+        const turn = own();
+        if (turn?.connection !== undefined) turn.answering = true;
       },
       end: () => {
         if (own() === undefined) return;
@@ -158,6 +181,21 @@ export class LiveTurnRegistry {
     return this.#turns.get(threadId)?.connection;
   }
 
+  /**
+   * The connection of the thread's running turn once its runtime has its
+   * prompt: `send` returned, or the runtime answered with an event (every
+   * event a runner observes follows the send). A runner records the
+   * connection before it opens the session and sends the prompt, and a
+   * runtime refuses a person's note until the prompt is open, so a note
+   * offered sooner is not refused for good, just offered again later. A
+   * runtime that stays silent through its first request (the Octant Harness
+   * waiting on the model) still takes a note once the prompt is sent.
+   */
+  answeringConnection(threadId: string): LiveTurnConnection | undefined {
+    const turn = this.#turns.get(threadId);
+    return turn?.answering === true ? turn.connection : undefined;
+  }
+
   /** The thread's live-turn facts, or nothing when no turn is running. */
   read(threadId: string): LiveTurnFacts | undefined {
     const turn = this.#turns.get(threadId);
@@ -167,5 +205,17 @@ export class LiveTurnRegistry {
       turnStartedAt: turn.startedAt,
       ...(step === undefined ? {} : { liveStep: step }),
     };
+  }
+
+  /** Every turn currently running, by thread id and mode topic. */
+  activeEntries(): ReadonlyArray<{
+    readonly threadId: string;
+    readonly topic: MachineChangeTopic;
+  }> {
+    const entries: Array<{ readonly threadId: string; readonly topic: MachineChangeTopic }> = [];
+    for (const [threadId, turn] of this.#turns) {
+      entries.push({ threadId, topic: turn.topic });
+    }
+    return entries;
   }
 }

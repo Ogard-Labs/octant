@@ -17,8 +17,16 @@ import {
   type ExtensionClient,
 } from "@octant/client-runtime/extension-client";
 import { createChatClient, type ChatClient } from "@octant/client-runtime/chat-client";
+import {
+  createThreadImageResults,
+  type ThreadImageResults,
+} from "@octant/client-runtime/image-generation-client";
 import { createCanvasClient, type CanvasClient } from "@octant/client-runtime/canvas-client";
 import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
+import {
+  createFolderBrowseClient,
+  type FolderBrowseClient,
+} from "@octant/client-runtime/folder-browse-client";
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
 import {
   createProjectBrowserClient,
@@ -50,14 +58,26 @@ import {
   type WorkThreadClient,
 } from "@octant/client-runtime/work-thread-client";
 import {
+  createServerProjectsClient,
+  type ServerProjectsClient,
+} from "@octant/client-runtime/server-projects-client";
+import {
   createReplicaSyncStatusClient,
   type ReplicaSyncStatusClient,
 } from "@octant/client-runtime/replica-sync-status-client";
 import { createWorkTurnClient, type WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import {
+  createServiceOfferClient,
+  type ServiceOfferClient,
+} from "@octant/client-runtime/service-offer-client";
+import {
   createReplyDetailClient,
   type ReplyDetailClient,
 } from "@octant/client-runtime/reply-detail-client";
+import {
+  createNewDeviceAlertsClient,
+  type NewDeviceAlertsClient,
+} from "@octant/client-runtime/new-device-alerts-client";
 import { createBrowserHostRegistryStorage } from "../host/browserHostRegistryStorage";
 import { browserOwnerMergeUnlock, createBrowserGuestStore } from "../host/browserHubGuest";
 import { platformPasskeys } from "../host/ownerPasskey";
@@ -66,10 +86,14 @@ import type { ProviderOAuthCommand } from "../providers/ProviderOAuthSignIn";
 
 export interface RemoteProductClients {
   readonly conversationInputs?: ConversationInputClient;
+  readonly serviceOffers?: ServiceOfferClient;
+  readonly imageResults?: ThreadImageResults;
   readonly chat: ChatClient;
   readonly canvas: CanvasClient;
   readonly code: CodeClient;
   readonly project: ProjectClient;
+  /** The host's folders, for a new Project there; the host admits only its own person. */
+  readonly folderBrowse: FolderBrowseClient;
   readonly provider: ProviderClient;
   readonly workThread: WorkThreadClient;
   readonly workTurn: WorkTurnClient;
@@ -84,10 +108,12 @@ export interface RemoteProductClients {
    * a device its own person paired; the shell offers it to no other session.
    */
   readonly canvasImportHtml: NonNullable<CanvasClient["importHtml"]>;
-  /** The device's own shell in a local Project; the host refuses any other session. */
+  /** The device's own shell in a local or server Project; the host refuses any other session. */
   readonly projectTerminal: ProjectTerminalClient;
   /** The device's own Private page for a Project; a profile page stays at a window. */
   readonly projectBrowser: ProjectBrowserClient;
+  /** Server Projects catalog, setup checks, relayed previews, and cloud machines. */
+  readonly serverProjects?: ServerProjectsClient;
 }
 
 // The Work and Code clients refuse a non-loopback base URL because the window
@@ -114,6 +140,16 @@ export function createRemoteExtensionClient(
     fetch: createRemoteProductFetch({ bridge }),
     windowCapability: NO_WINDOW_CAPABILITY,
     session,
+  });
+}
+
+/** The host's new-device alerts over the session, which every connected device reads. */
+export function createRemoteNewDeviceAlertsClient(
+  bridge: RemoteSessionBridge,
+): NewDeviceAlertsClient {
+  return createNewDeviceAlertsClient({
+    baseUrl: REMOTE_CLIENT_BASE_URL,
+    fetch: createRemoteProductFetch({ bridge }),
   });
 }
 
@@ -164,6 +200,11 @@ export function createRemoteProviderOAuth(bridge: RemoteSessionBridge) {
     }).catch(() => undefined);
 }
 
+function withoutServerListeners(client: ServerProjectsClient): ServerProjectsClient {
+  const { listeners: _listeners, ...rest } = client;
+  return rest;
+}
+
 /**
  * The ordinary product clients, carried over the paired device's
  * authenticated session. Nothing here knows about the desktop window.
@@ -175,8 +216,18 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
     windowCapability: NO_WINDOW_CAPABILITY,
   };
   const canvas = createCanvasClient(port);
+  // A server Project's port forward listens on the loopback of the computer
+  // that runs the host, not this browser's, so only a window there is offered
+  // one; the host refuses every device too.
+  const {
+    forwardRead: _forwardRead,
+    forwardCommand: _forwardCommand,
+    ...serverProjects
+  } = createServerProjectsClient(port);
   return {
     conversationInputs: createConversationInputClient(port),
+    serviceOffers: createServiceOfferClient(port),
+    imageResults: createThreadImageResults(port),
     chat: createChatClient(port),
     // Reading a Canvas never grants a paired browser the host's export,
     // credential, editing or share-management authority.
@@ -203,6 +254,7 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
       }),
     }),
     project: createProjectClient(port),
+    folderBrowse: createFolderBrowseClient(port),
     provider: createProviderClient(port),
     workThread: createWorkThreadClient(port),
     workTurn: createWorkTurnClient(port),
@@ -214,5 +266,8 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
       canvas.importHtml?.(request) ?? Promise.reject(new Error("Import is unavailable.")),
     projectTerminal: createProjectTerminalClient(port),
     projectBrowser: createProjectBrowserClient(port),
+    // Listing what a server serves is a window-on-this-computer read the remote
+    // gateway refuses, so a paired browser is not offered it.
+    serverProjects: withoutServerListeners(serverProjects),
   };
 }

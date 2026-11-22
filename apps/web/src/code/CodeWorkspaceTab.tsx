@@ -1,3 +1,4 @@
+import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
 import type { ProjectMemoryProposalClient } from "../projects/ProjectMemoryProposalPrompt";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import type { CodeClient } from "@octant/client-runtime/code-client";
@@ -13,7 +14,6 @@ import type { CodeEditorFileProjection } from "./MonacoEditorPane";
 import type { CodeController } from "./useCodeController";
 import type { CodeThreadControllers } from "./codeThreadControllers";
 import type { OctantHostBridge } from "../shell/hostBridge";
-import type { CodeOverviewSurfaceKind } from "./CodeOverview";
 import { nativeCodeWorkspaceApprovals } from "./codeWorkspaceApprovals";
 import { noticeTouches, useCodeFileChangeWatch } from "./useCodeFileChangeWatch";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
@@ -22,9 +22,13 @@ import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { AutomationClient } from "@octant/client-runtime";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
-import type { ImageGenerationProfileView } from "@octant/contracts";
+import type { ImageGenerationProfileView, ProjectSummary } from "@octant/contracts";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { HostId } from "@octant/contracts/host";
+import type { ProjectClient } from "@octant/client-runtime/project-client";
+import { useCodeCheckoutObservation } from "../environment/CodeCheckoutContext";
+import { useCodeEnvironmentController } from "../environment/useCodeEnvironmentController";
+import { checkoutUnreadableReason } from "./checkoutUnreadableReason";
 
 type CodeWorkspaceTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
 
@@ -44,10 +48,7 @@ export default function CodeWorkspaceTab(props: {
   /** Opens one changed repository file as a Code file tab, from the diff. */
   readonly onOpenFile?: (relativePath: string) => void;
   readonly onOpenReview?: (request?: CodeReviewFileRequest) => void;
-  readonly onOpenSurface?: (
-    kind: CodeOverviewSurfaceKind,
-    options?: { readonly terminalId?: import("@octant/contracts/code").CodeTerminalId },
-  ) => void;
+  readonly onOpenSurface?: CodeWorkspaceProps["onOpenSurface"];
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly harnessAutoReviewSupported?: boolean;
   readonly strictDefault?: CodeWorkspaceProps["strictDefault"];
@@ -56,6 +57,7 @@ export default function CodeWorkspaceTab(props: {
   readonly autoReview?: AutoReview;
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
+  readonly serviceOfferClient?: ServiceOfferClient;
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly browserAutomationClient?: BrowserAutomationClient;
   readonly onOpenSettings?: () => void;
@@ -79,12 +81,41 @@ export default function CodeWorkspaceTab(props: {
   /** Reaches the host's `#thread` mention surface from the Code composer. */
   readonly serverUrl?: string;
   readonly windowCapability?: string;
+  /** The thread's Project, when the window has resolved it. */
+  readonly project?: ProjectSummary;
+  readonly projectClient?: ProjectClient;
 }) {
   const deferredAdapter = deferredCodeAdapterFor(props.tab.kind);
   const preloadDeferredAdapter = () => {
     if (deferredAdapter !== undefined) void deferredAdapter.load().catch(() => undefined);
   };
   const view = props.controller.activeView;
+  // Why the checkout cannot be read, when an observation already knows: the
+  // Environment's reading reaches a pane under it through the context, and a
+  // pane without it (a standalone terminal tile) asks the same endpoint — but
+  // only once the checkout is actually broken, so no read runs just for text
+  // while the checkout is healthy.
+  const contextCheckout = useCodeCheckoutObservation();
+  const checkoutEnvironment = useCodeEnvironmentController({
+    ...(props.projectClient === undefined ? {} : { client: props.projectClient }),
+    enabled:
+      contextCheckout === undefined &&
+      view !== undefined &&
+      view.checkout.availability === "unavailable" &&
+      props.project?.type === "code",
+    project: props.project,
+    threadId: view?.thread.id,
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+  });
+  const checkoutUnavailableReason = useMemo(() => {
+    const observation = contextCheckout?.observation ?? checkoutEnvironment.observation;
+    const raw =
+      observation !== undefined && observation.status !== "ready"
+        ? observation.reason
+        : (contextCheckout?.errorMessage ?? checkoutEnvironment.errorMessage);
+    return raw === undefined ? undefined : checkoutUnreadableReason(raw);
+  }, [contextCheckout, checkoutEnvironment.observation, checkoutEnvironment.errorMessage]);
   const approvals = useMemo(
     () => nativeCodeWorkspaceApprovals(props.hostBridge, view),
     [props.hostBridge, view?.thread.id, view?.thread.projectId],
@@ -130,6 +161,7 @@ export default function CodeWorkspaceTab(props: {
   });
   const projections = {
     ...(editorFile.file === undefined ? {} : { file: editorFile.file }),
+    ...(editorFile.openError === undefined ? {} : { fileOpenError: editorFile.openError }),
     ...(definitions === undefined
       ? {}
       : {
@@ -177,6 +209,7 @@ export default function CodeWorkspaceTab(props: {
           : { coordinatorWorkers: props.coordinatorWorkers })}
         client={props.controller.client}
         controller={props.controller}
+        {...(checkoutUnavailableReason === undefined ? {} : { checkoutUnavailableReason })}
         {...(props.holdAccessNotice === undefined
           ? {}
           : { holdAccessNotice: props.holdAccessNotice })}
@@ -198,6 +231,9 @@ export default function CodeWorkspaceTab(props: {
         {...(props.imageGenerationClient === undefined
           ? {}
           : { imageGenerationClient: props.imageGenerationClient })}
+        {...(props.serviceOfferClient === undefined
+          ? {}
+          : { serviceOfferClient: props.serviceOfferClient })}
         {...(props.imageGenerationProfiles === undefined
           ? {}
           : { imageGenerationProfiles: props.imageGenerationProfiles })}

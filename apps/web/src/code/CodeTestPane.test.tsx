@@ -132,6 +132,24 @@ describe("CodeTestPane", () => {
     expect(screen.queryByRole("button", { name: "Run Web tests" })).not.toBeInTheDocument();
     expect(screen.getByText("Plan mode is read-only.")).toBeVisible();
 
+    const onOpenModeMenu = vi.fn();
+    rerender(
+      <CodeTestPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        createTestRunId={() => ids.testRun as never}
+        definitions={[testDefinition]}
+        executionPolicy="plan"
+        onOpenModeMenu={onOpenModeMenu}
+        scope={scope}
+      />,
+    );
+    const changeMode = screen.getByRole("button", { name: "Change mode" });
+    expect(changeMode).toBeVisible();
+    fireEvent.click(changeMode);
+    expect(onOpenModeMenu).toHaveBeenCalledOnce();
+    expect(client.executeOperation).not.toHaveBeenCalled();
+
     rerender(
       <CodeTestPane
         client={client}

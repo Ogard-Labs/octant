@@ -1,3 +1,4 @@
+import type { NewDeviceAlertsClient } from "@octant/client-runtime/new-device-alerts-client";
 import { SandboxRestrictionsSettings } from "../settings/SandboxRestrictionsSettings";
 import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-restrictions-client";
 import type { SandboxSettingsScope } from "../settings/SandboxRestrictionsSettings";
@@ -56,6 +57,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { SliderField } from "../settings/SliderField";
 import { DefaultFolderSettings } from "../settings/DefaultFolderSettings";
+import { NextMessageSuggestionsSettings } from "../settings/NextMessageSuggestionsSettings";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
@@ -145,6 +147,7 @@ import type { SecretStoresClient } from "@octant/client-runtime/secret-stores-cl
 import type { ProviderToolingClient } from "@octant/client-runtime/provider-tooling-client";
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
+import type { ServerProjectRelayedPreviewOpener } from "../settings/ServerProjectPreviewTunnel";
 import { ServerAccessSettings } from "../settings/ServerProjectsSettings";
 import { RemoteSetupGuide } from "../settings/RemoteSetupGuide";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
@@ -297,6 +300,8 @@ export interface SettingsViewProps {
   >;
   /** Settings › Permissions › Protected files; absent where the host publishes no list. */
   readonly protectedFilesClient?: ProtectedFilesClient;
+  /** The host's new-device alerts, read and cleared from this window. */
+  readonly newDeviceAlertsClient?: NewDeviceAlertsClient;
   readonly blockedToolsClient?: BlockedToolsClient;
   readonly sandboxRestrictionsClient?: SandboxRestrictionsClient;
   readonly sandboxInitialScope?:
@@ -331,6 +336,7 @@ export interface SettingsViewProps {
   readonly codeProjectId?: ProjectId | undefined;
   readonly workProjectId?: ProjectId | undefined;
   readonly onOpenServerProject?: (project: ServerProject) => void;
+  readonly onOpenRelayedServerProjectPreview?: ServerProjectRelayedPreviewOpener;
   /** Creating, joining, and revoking on this host; absent off it. */
   readonly replicaMembershipClient?: ReplicaMembershipClient;
   /** Read-only sync status, used when this client is not on the host. */
@@ -344,6 +350,8 @@ export interface SettingsViewProps {
   readonly extensionClient?: ExtensionClient;
   /** Project names by Project id, to head the remembered tool approvals. */
   readonly projectNames?: ReadonlyMap<string, string>;
+  /** The Code and Work Projects by id, which the hub grant's Act item can name. */
+  readonly actProjectNames?: ReadonlyMap<string, string>;
   readonly pickLocalPluginFolder?: () => Promise<
     Readonly<{ receiptId: string; displayName: string }> | undefined
   >;
@@ -1185,6 +1193,8 @@ function ActiveSectionContent({
         <>
           <ComputerUseSettingsView
             settings={props.settings.computerUse}
+            rememberedApps={props.settings.rememberedComputerUseApps}
+            projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             onSettingsChange={props.onSettingsChange}
             {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
           />
@@ -1241,7 +1251,7 @@ function ActiveSectionContent({
             <SettingsSection title="Stalled turns">
               <div className="setgroup">
                 <SettingRow
-                  description="Ends a turn when its provider sends nothing for this long, from the next turn; a tool call the provider reports as running is not silence, up to the tool-call pause limit."
+                  description="Notices a turn when its provider sends nothing for this long, from the next turn, and ends it under Strict; a tool call the provider reports as running is not silence, up to the tool-call pause limit."
                   focused={focusedSetting === settingId("stalled-turn-limit")}
                   label="Stalled-turn limit"
                   scope="host"
@@ -1297,6 +1307,42 @@ function ActiveSectionContent({
                     minutes={props.settings.backgroundSessionIdleLimitMinutes}
                     onChange={(minutes) =>
                       props.onSettingsChange({ backgroundSessionIdleLimitMinutes: minutes })
+                    }
+                  />
+                </SettingRow>
+              </div>
+            </SettingsSection>
+          </div>
+          <div hidden={harnessEndpointOpen} id="settings-provider-channels">
+            <SettingsSection title="Provider channels">
+              <div className="setgroup">
+                <SettingRow
+                  description="Leaves each provider's own usage metrics, error reports and feedback uploads to its own settings. Off by default: Octant turns them off at launch. Strict turns them off whatever this says. Applies from the next turn."
+                  focused={focusedSetting === settingId("provider-own-telemetry")}
+                  label="Let providers send their own telemetry"
+                  scope="host"
+                  settingId="provider-own-telemetry"
+                >
+                  <OctantSwitch
+                    label="Let providers send their own telemetry"
+                    checked={props.settings.providerTelemetry}
+                    onCheckedChange={(checked) =>
+                      props.onSettingsChange({ providerTelemetry: checked })
+                    }
+                  />
+                </SettingRow>
+                <SettingRow
+                  description="Lets each provider check for and install a newer version of itself. Off by default, since Octant installs and updates provider CLIs; Update CLI is unaffected. Strict keeps it off whatever this says. Applies from the next turn."
+                  focused={focusedSetting === settingId("provider-self-update")}
+                  label="Let providers update themselves"
+                  scope="host"
+                  settingId="provider-self-update"
+                >
+                  <OctantSwitch
+                    label="Let providers update themselves"
+                    checked={props.settings.providerSelfUpdate}
+                    onCheckedChange={(checked) =>
+                      props.onSettingsChange({ providerSelfUpdate: checked })
                     }
                   />
                 </SettingRow>
@@ -1494,7 +1540,9 @@ function ActiveSectionContent({
             }
             ownerUnlock={ownerUnlockOf(props.hostBridge)}
             pairedComputers={pairedComputersOf(props.hostBridge)}
+            projectNames={props.actProjectNames ?? NO_PROJECT_NAMES}
             pairedDeviceLifetime={props.settings.pairedDeviceLifetime}
+            newDeviceAlerts={props.newDeviceAlertsClient}
           />
           {agentAccess}
         </div>
@@ -1587,6 +1635,9 @@ function ActiveSectionContent({
             {...(props.onOpenServerProject === undefined
               ? {}
               : { onOpenServerProject: props.onOpenServerProject })}
+            {...(props.onOpenRelayedServerProjectPreview === undefined
+              ? {}
+              : { onOpenRelayedPreview: props.onOpenRelayedServerProjectPreview })}
             {...(props.projectTerminalClient === undefined
               ? {}
               : { terminalClient: props.projectTerminalClient })}
@@ -1594,6 +1645,12 @@ function ActiveSectionContent({
               ? {}
               : { actionStoragePrefix: props.projectActionStoragePrefix })}
             focusedSetting={focusedSetting}
+            onOpenPrivateNetworkGuide={() =>
+              onApplyDeepLink({
+                section: "remote-access",
+                setting: settingId("remote-setup-checks"),
+              })
+            }
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             projects={props.serverProjectsClient}
             servers={props.shieldServersClient}
@@ -2534,6 +2591,7 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
         <HostResourceSettings
           client={props.agentRunSettingsClient}
           focusedSetting={String(focusedSetting ?? "")}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         />
       )}
       <SettingsSection
@@ -2590,6 +2648,15 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           <BackgroundHostSettings
             bridge={props.hostBridge}
             focused={focusedSetting === settingId("background-host")}
+          />
+        </div>
+      </SettingsSection>
+      <SettingsSection title="Composer">
+        <div className="setgroup">
+          <NextMessageSuggestionsSettings
+            focusedSetting={focusedSetting}
+            onChange={(next) => props.onSettingsChange({ nextMessageSuggestions: next })}
+            value={props.settings.nextMessageSuggestions}
           />
         </div>
       </SettingsSection>
@@ -3083,27 +3150,6 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
                   {REPLY_DETAIL_LABELS[level]}
                 </OctantToggleGroupItem>
               ))}
-            </OctantToggleGroup>
-          </SettingRow>
-        ) : null}
-        {isAvailable("usage-bars") ? (
-          <SettingRow
-            description="How the plan-usage meters above the composer look."
-            focused={focusedSetting === settingId("usage-bars")}
-            label="Usage bars"
-            scope="app"
-            settingId="usage-bars"
-          >
-            <OctantToggleGroup<ShellSettings["usageBars"]>
-              aria-label="Usage bars"
-              onValueChange={(value) => {
-                const selected = value[0];
-                if (selected !== undefined) props.onSettingsChange({ usageBars: selected });
-              }}
-              value={[props.settings.usageBars]}
-            >
-              <OctantToggleGroupItem value="smooth">Smooth</OctantToggleGroupItem>
-              <OctantToggleGroupItem value="pixelated">Pixelated</OctantToggleGroupItem>
             </OctantToggleGroup>
           </SettingRow>
         ) : null}

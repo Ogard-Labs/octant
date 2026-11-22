@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   decodeUtcTimestamp,
   type CodeThreadId,
+  type EventActor,
   type ProjectId,
   type ProviderExecutionPolicy,
   type ProviderInstance,
@@ -18,7 +19,30 @@ import {
 } from "@octant/contracts/provider-cloud-sessions";
 import { decideProviderCloudSubmission } from "@octant/domain";
 import type { CloudSessionAdapter, CloudSessionIntent } from "@octant/provider-sdk/cloud-sessions";
-import type { ProviderCloudSessionStore } from "./providerCloudSessionStore";
+import type {
+  ProviderCloudEventRecordPrincipal,
+  ProviderCloudSessionStore,
+} from "./providerCloudSessionStore";
+
+export type ProviderCloudPrincipal =
+  | { readonly kind: "local-window"; readonly scopeId: WindowId }
+  | {
+      readonly kind: "person-paired-device";
+      readonly scopeId: WindowId;
+      readonly deviceId: string;
+      readonly sessionId: string;
+      readonly credentialGeneration: number;
+      readonly actor: EventActor;
+    }
+  | { readonly kind: "remote-device"; readonly scopeId: WindowId };
+
+/** A `WindowId` alone denotes a local window; routes pass the full authenticated principal. */
+export type ProviderCloudCaller = WindowId | ProviderCloudPrincipal;
+
+export interface ProviderCloudAdapterCallOptions {
+  readonly principalKind?: "local-window" | "person-paired-device";
+  readonly onCredentialUnlockRequired?: () => void;
+}
 
 export interface ProviderCloudThreadContext {
   readonly threadId: CodeThreadId;
@@ -42,14 +66,34 @@ export interface ProviderCloudSessionServiceInput {
     intent: CloudSessionIntent,
     admission?: () => boolean,
     onCreated?: (remoteId: ProviderCloudRemoteId) => void,
+    options?: ProviderCloudAdapterCallOptions,
   ) => CloudSessionAdapter;
   readonly context: (
     windowId: WindowId,
     threadId: CodeThreadId,
     signal?: AbortSignal,
+    principal?: ProviderCloudPrincipal,
   ) => ProviderCloudThreadContext | undefined;
-  readonly canManageProvider: (windowId: WindowId) => boolean;
+  readonly canManageProvider: (windowId: WindowId, principal?: ProviderCloudPrincipal) => boolean;
   readonly now: () => string;
+}
+
+function normalizeCaller(caller: ProviderCloudCaller): ProviderCloudPrincipal {
+  return typeof caller === "string" ? { kind: "local-window", scopeId: caller } : caller;
+}
+
+function recordPrincipalOf(
+  principal: ProviderCloudPrincipal,
+): ProviderCloudEventRecordPrincipal | undefined {
+  if (principal.kind === "person-paired-device") {
+    return {
+      kind: "person-paired-device",
+      credentialGeneration: principal.credentialGeneration,
+      actor: principal.actor,
+    };
+  }
+  if (principal.kind === "local-window") return { kind: "local-window" };
+  return undefined;
 }
 
 const terminal = (state: ProviderCloudJob["state"]) =>
@@ -100,13 +144,13 @@ export class ProviderCloudSessionService {
   }
 
   async execute(
-    windowId: WindowId,
+    caller: ProviderCloudCaller,
     command: ProviderCloudRequest,
     signal?: AbortSignal,
     callerIsCurrent: () => boolean = () => true,
   ): Promise<ProviderCloudResponse> {
     if (this.#closed) return { status: "refused", reason: "unavailable" };
-    const request = this.#execute(windowId, command, signal, callerIsCurrent);
+    const request = this.#execute(normalizeCaller(caller), command, signal, callerIsCurrent);
     this.#requests.add(request);
     try {
       return await request;
@@ -118,25 +162,32 @@ export class ProviderCloudSessionService {
   }
 
   async #execute(
-    windowId: WindowId,
+    principal: ProviderCloudPrincipal,
     command: ProviderCloudRequest,
     signal: AbortSignal | undefined,
     callerIsCurrent: () => boolean,
   ): Promise<ProviderCloudResponse> {
     const input = this.#input;
-    if (!callerIsCurrent()) return { status: "refused", reason: "unauthorized" };
+    // A hub-introduced device, an agent grant or any unproved device session
+    // never reads, opts in, spends or cancels cloud jobs.
+    if (principal.kind === "remote-device" || !callerIsCurrent()) {
+      return { status: "refused", reason: "unauthorized" };
+    }
+    const windowId = principal.scopeId;
+    const recordPrincipal = recordPrincipalOf(principal);
     if (command.kind === "profiles")
-      return input.canManageProvider(windowId)
+      return input.canManageProvider(windowId, principal)
         ? this.#view()
         : { status: "refused", reason: "unauthorized" };
     if (command.kind === "opt-in") {
-      if (!input.canManageProvider(windowId)) return { status: "refused", reason: "unauthorized" };
+      if (!input.canManageProvider(windowId, principal))
+        return { status: "refused", reason: "unauthorized" };
       const instance = input
         .instances()
         .find((item) => String(item.id) === String(command.instanceId));
       if (instance === undefined || (command.enabled && !input.supports(instance)))
         return { status: "refused", reason: "unavailable" };
-      input.store.setEnabled(instance.id, command.enabled);
+      input.store.setEnabled(instance.id, command.enabled, recordPrincipal);
       if (!command.enabled) {
         for (const job of input.store.active()) {
           if (
@@ -157,7 +208,7 @@ export class ProviderCloudSessionService {
     const threadId =
       command.kind === "start" || command.kind === "list" ? command.threadId : existing?.threadId;
     if (threadId === undefined) return { status: "refused", reason: "unknown-job" };
-    const owned = input.context(windowId, threadId, signal);
+    const owned = input.context(windowId, threadId, signal, principal);
     if (owned === undefined || !callerIsCurrent() || !owned.current())
       return { status: "refused", reason: "unauthorized" };
     const context = { ...owned, current: () => callerIsCurrent() && owned.current() };
@@ -174,7 +225,7 @@ export class ProviderCloudSessionService {
         createHash("sha256").update(command.input).digest("hex"),
       );
       const decision = decideProviderCloudSubmission({
-        principalKind: "local-window",
+        principalKind: principal.kind,
         personOwned: true,
         mode: "code",
         executionPolicy: context.executionPolicy,
@@ -214,11 +265,14 @@ export class ProviderCloudSessionService {
       for (const acknowledgement of command.acknowledgedUnknownJobs ?? []) {
         const unknown = input.store.get(acknowledgement.jobId);
         if (unknown !== undefined)
-          input.store.put({
-            ...unknown,
-            uncertaintyAcknowledgedAt: decodeUtcTimestamp(input.now()),
-            updatedAt: decodeUtcTimestamp(input.now()),
-          });
+          input.store.put(
+            {
+              ...unknown,
+              uncertaintyAcknowledgedAt: decodeUtcTimestamp(input.now()),
+              updatedAt: decodeUtcTimestamp(input.now()),
+            },
+            recordPrincipal,
+          );
       }
       const active = input.store.active();
       if (active.length >= 16 || active.some((job) => String(job.threadId) === String(threadId)))
@@ -240,6 +294,7 @@ export class ProviderCloudSessionService {
           createdAt: now,
           updatedAt: now,
         }),
+        recordPrincipal,
       );
       if (!context.current() || !context.canSubmit() || !input.store.enabled(instance.id)) {
         input.store.put({
@@ -250,6 +305,7 @@ export class ProviderCloudSessionService {
         return { status: "refused", reason: "unauthorized" };
       }
       let observedRemoteId: ProviderCloudRemoteId | undefined;
+      let credentialUnlockRequired = false;
       const result = await input
         .adapter(
           instance,
@@ -277,6 +333,12 @@ export class ProviderCloudSessionService {
                 state: "running",
                 updatedAt: decodeUtcTimestamp(input.now()),
               });
+          },
+          {
+            principalKind: principal.kind,
+            onCredentialUnlockRequired: () => {
+              credentialUnlockRequired = true;
+            },
           },
         )
         .create({ jobId: job.id, modelId: job.modelId, text: job.input });
@@ -318,6 +380,13 @@ export class ProviderCloudSessionService {
             .cancel(observedRemoteId, job.id);
         return { status: "refused", reason: "journal-unavailable" };
       }
+      if (
+        credentialUnlockRequired &&
+        observedRemoteId === undefined &&
+        !input.store.hasCreateDispatch(job.id)
+      ) {
+        return { status: "refused", reason: "credential-unlock-needs-this-computer" };
+      }
       const observed = input.store.get(job.id);
       if (observed !== undefined) {
         if (
@@ -339,11 +408,29 @@ export class ProviderCloudSessionService {
     if (this.#busy.has(existing.id)) return { status: "refused", reason: "busy" };
     this.#busy.add(existing.id);
     try {
-      if (command.kind === "cancel") await this.#cancel(existing, instance);
-      else if (!terminal(existing.state) && existing.remoteId !== undefined) {
+      let credentialUnlockRequired = false;
+      const adapterOptions: ProviderCloudAdapterCallOptions = {
+        principalKind: principal.kind,
+        onCredentialUnlockRequired: () => {
+          credentialUnlockRequired = true;
+        },
+      };
+      if (command.kind === "cancel") {
+        await this.#cancel(existing, instance, recordPrincipal, adapterOptions);
+        if (credentialUnlockRequired)
+          return { status: "refused", reason: "credential-unlock-needs-this-computer" };
+      } else if (!terminal(existing.state) && existing.remoteId !== undefined) {
         const result = await input
-          .adapter(instance, { kind: "read", remoteId: existing.remoteId }, context.current)
+          .adapter(
+            instance,
+            { kind: "read", remoteId: existing.remoteId },
+            context.current,
+            undefined,
+            adapterOptions,
+          )
           .read(existing.remoteId);
+        if (credentialUnlockRequired)
+          return { status: "refused", reason: "credential-unlock-needs-this-computer" };
         const latest = input.store.get(existing.id);
         if (latest === undefined) return { status: "refused", reason: "unauthorized" };
         if (result.status === "observed") {
@@ -374,23 +461,43 @@ export class ProviderCloudSessionService {
     return this.#view(threadId);
   }
 
-  async #cancel(job: ProviderCloudJob, instance: ProviderInstance): Promise<void> {
+  async #cancel(
+    job: ProviderCloudJob,
+    instance: ProviderInstance,
+    person?: ProviderCloudEventRecordPrincipal,
+    adapterOptions?: ProviderCloudAdapterCallOptions,
+  ): Promise<void> {
     const latest = this.#input.store.get(job.id);
     if (latest === undefined) {
       if (job.remoteId !== undefined)
         await this.#input
-          .adapter(instance, { kind: "cancel", remoteId: job.remoteId, jobId: job.id })
+          .adapter(
+            instance,
+            { kind: "cancel", remoteId: job.remoteId, jobId: job.id },
+            undefined,
+            undefined,
+            adapterOptions,
+          )
           .cancel(job.remoteId, job.id);
       return;
     }
     if (terminal(latest.state) || latest.remoteId === undefined) return;
-    this.#input.store.put({
-      ...latest,
-      state: "cancel-requested",
-      updatedAt: decodeUtcTimestamp(this.#input.now()),
-    });
+    this.#input.store.put(
+      {
+        ...latest,
+        state: "cancel-requested",
+        updatedAt: decodeUtcTimestamp(this.#input.now()),
+      },
+      person,
+    );
     await this.#input
-      .adapter(instance, { kind: "cancel", remoteId: latest.remoteId, jobId: latest.id })
+      .adapter(
+        instance,
+        { kind: "cancel", remoteId: latest.remoteId, jobId: latest.id },
+        undefined,
+        undefined,
+        adapterOptions,
+      )
       .cancel(latest.remoteId, latest.id);
   }
 

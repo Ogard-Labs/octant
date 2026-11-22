@@ -2,7 +2,13 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/
 import { setImmediate as nextMacrotask } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { HostOAuthDescriptor, HostOAuthSignInState } from "@octant/contracts/host-oauth";
+import type { EventActor } from "@octant/contracts";
+import type {
+  HostOAuthDescriptor,
+  HostOAuthJournalRecord,
+  HostOAuthSignInState,
+} from "@octant/contracts/host-oauth";
+import { createHostOAuthRuntime, type CredentialStore } from "@octant/host-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHostOAuthService, type HostOAuthService } from "../providers/oauth/hostOAuthService";
 import { makeHostOAuthBrokerClient } from "../providers/oauth/hostOAuthBrokerClient";
@@ -2155,5 +2161,419 @@ describe("application setup without account consent", () => {
       },
     });
     expect(begun).toHaveLength(0);
+  });
+});
+
+describe("connector sign-in finished from a paired device", () => {
+  const device = {
+    deviceId: "71000000-0000-4000-8000-0000000000a1",
+    sessionId: "71000000-0000-4000-8000-0000000000b1",
+    credentialGeneration: 2,
+  } as const;
+  const deviceActor: EventActor = {
+    kind: "remote-device",
+    actorId: device.deviceId as Extract<EventActor, { kind: "remote-device" }>["actorId"],
+    deviceId: device.deviceId as Extract<EventActor, { kind: "remote-device" }>["deviceId"],
+  };
+
+  function makeMemoryStore(): CredentialStore {
+    const entries = new Map<string, string>();
+    return {
+      has: async (key) => entries.has(key),
+      set: async (key, value) => {
+        entries.set(key, value);
+      },
+      resolve: async (key) => {
+        const value = entries.get(key);
+        if (value === undefined) throw new Error("missing");
+        return value;
+      },
+      delete: async (key) => {
+        entries.delete(key);
+      },
+    };
+  }
+
+  function makeRealStack(fetchImpl: typeof fetch) {
+    const store = makeMemoryStore();
+    const runtime = createHostOAuthRuntime({
+      store,
+      fetch: fetchImpl,
+      sleep: async () => undefined,
+    });
+    const journal: Array<{
+      readonly record: HostOAuthJournalRecord;
+      readonly actor: EventActor | undefined;
+    }> = [];
+    const oauth = createHostOAuthService({
+      journal: {
+        append: (record, actor) => {
+          journal.push({ record, actor });
+        },
+      },
+      broker: {
+        begin: (input) => runtime.begin(input),
+        cancel: (input) => runtime.cancel(input),
+        relay: (input) => runtime.relay(input),
+        status: async (attemptId) => runtime.status(attemptId),
+        refresh: (ref) => runtime.refresh(ref),
+        access: (ref, binding) => runtime.access(ref, binding),
+        revoke: (ref) => runtime.revoke(ref),
+        forget: (ref) => store.delete(ref),
+      },
+    });
+    return { runtime, oauth, journal };
+  }
+
+  it("uses RFC 8628 device authorization first when advertised and journals device actor and flow", async () => {
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === SERVER) return new Response("", { status: 401 });
+      if (url === "https://mcp.example/.well-known/oauth-protected-resource/mcp") {
+        return json({ resource: SERVER, authorization_servers: [ISSUER] });
+      }
+      if (url === `${ISSUER}/.well-known/oauth-authorization-server`) {
+        return json({
+          issuer: ISSUER,
+          authorization_endpoint: `${ISSUER}/authorize`,
+          token_endpoint: `${ISSUER}/token`,
+          device_authorization_endpoint: `${ISSUER}/device`,
+          registration_endpoint: `${ISSUER}/register`,
+          grant_types_supported: [
+            "authorization_code",
+            "urn:ietf:params:oauth:grant-type:device_code",
+            "refresh_token",
+          ],
+          code_challenge_methods_supported: ["S256"],
+        });
+      }
+      if (url === `${ISSUER}/register`) return json({ client_id: "device-client" }, 201);
+      if (url === `${ISSUER}/device`) {
+        return json({
+          device_code: "secret-device-code-42",
+          user_code: "ABCD-5678",
+          verification_uri: `${ISSUER}/verify`,
+          verification_uri_complete: `${ISSUER}/verify?user_code=ABCD-5678`,
+          expires_in: 600,
+          interval: 1,
+        });
+      }
+      if (url === `${ISSUER}/token`) {
+        const form = new URLSearchParams(String(init?.body ?? ""));
+        expect(form.get("grant_type")).toBe("urn:ietf:params:oauth:grant-type:device_code");
+        return json({
+          access_token: "device-access-token-never-journaled",
+          refresh_token: "device-refresh-token-never-journaled",
+          token_type: "Bearer",
+          expires_in: 600,
+        });
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+
+    const { runtime, oauth, journal } = makeRealStack(fetchImpl);
+    try {
+      const { service } = await signIn({
+        fetchImpl,
+        oauth,
+        access: (ref) => runtime.access(ref),
+      });
+      const begun = await service.begin(
+        EXTENSION,
+        COMPONENT,
+        "person-paired-device",
+        deviceActor,
+        device,
+      );
+      expect(begun).toMatchObject({
+        kind: "awaiting-device-code",
+        issuerHost: "auth.example",
+        verificationUri: `${ISSUER}/verify`,
+        verificationUriComplete: `${ISSUER}/verify?user_code=ABCD-5678`,
+        userCode: "ABCD-5678",
+      });
+      expect(JSON.stringify(begun)).not.toContain("secret-device-code-42");
+      if (begun.kind !== "awaiting-device-code") throw new Error();
+
+      await nextMacrotask();
+      const finished = await service.poll(
+        EXTENSION,
+        COMPONENT,
+        begun.attemptId,
+        "person-paired-device",
+        device,
+      );
+      expect(finished).toEqual({ kind: "signed-in", issuer: "auth.example" });
+      expect(
+        journal.map((entry) => ({
+          name: entry.record.name,
+          flow: "flow" in entry.record ? entry.record.flow : undefined,
+          actor: entry.actor,
+        })),
+      ).toEqual([
+        { name: "host-oauth.terms-acknowledged", flow: undefined, actor: deviceActor },
+        { name: "host-oauth.sign-in-started", flow: "device-code", actor: deviceActor },
+        { name: "host-oauth.sign-in-completed", flow: "device-code", actor: deviceActor },
+      ]);
+      const journalText = JSON.stringify(journal);
+      expect(journalText).not.toContain("secret-device-code-42");
+      expect(journalText).not.toContain("device-access-token-never-journaled");
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("falls back to the one-time relay when the device verification address is untrusted, binds relay to the starting device, and journals cancellation", async () => {
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === SERVER) return new Response("", { status: 401 });
+      if (url === "https://mcp.example/.well-known/oauth-protected-resource/mcp") {
+        return json({ resource: SERVER, authorization_servers: [ISSUER] });
+      }
+      if (url === `${ISSUER}/.well-known/oauth-authorization-server`) {
+        return json({
+          issuer: ISSUER,
+          authorization_endpoint: `${ISSUER}/authorize`,
+          token_endpoint: `${ISSUER}/token`,
+          device_authorization_endpoint: `${ISSUER}/device`,
+          registration_endpoint: `${ISSUER}/register`,
+          grant_types_supported: [
+            "authorization_code",
+            "urn:ietf:params:oauth:grant-type:device_code",
+            "refresh_token",
+          ],
+          code_challenge_methods_supported: ["S256"],
+        });
+      }
+      if (url === `${ISSUER}/register`) return json({ client_id: "relay-client" }, 201);
+      if (url === `${ISSUER}/device`) {
+        // Off-issuer host must fall back to relay.
+        return json({
+          device_code: "dc-untrusted",
+          user_code: "BAD-1234",
+          verification_uri: "https://phish.example/verify",
+          expires_in: 300,
+          interval: 5,
+        });
+      }
+      if (url === `${ISSUER}/token`) {
+        const form = new URLSearchParams(String(init?.body ?? ""));
+        expect(form.get("code")).toBe("relayed-secret-code-99");
+        return json({
+          access_token: "relay-access-token-99",
+          refresh_token: "relay-refresh-token-99",
+          token_type: "Bearer",
+          expires_in: 600,
+        });
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+
+    const { runtime, oauth, journal } = makeRealStack(fetchImpl);
+    try {
+      const { service } = await signIn({
+        fetchImpl,
+        oauth,
+        access: (ref) => runtime.access(ref),
+      });
+      const begun = await service.begin(
+        EXTENSION,
+        COMPONENT,
+        "person-paired-device",
+        deviceActor,
+        device,
+      );
+      expect(begun).toMatchObject({
+        kind: "awaiting-consent",
+        flow: "relay",
+        relayable: true,
+      });
+      if (begun.kind !== "awaiting-consent") throw new Error();
+      const authUrl = new URL(begun.authorizationUrl);
+      const redirectUri = authUrl.searchParams.get("redirect_uri") ?? "";
+      const state = authUrl.searchParams.get("state") ?? "";
+
+      // Different device, different session, or rotated credential generation is refused without settling.
+      for (const wrong of [
+        { ...device, deviceId: "71000000-0000-4000-8000-0000000000a2" },
+        { ...device, sessionId: "71000000-0000-4000-8000-0000000000b2" },
+        { ...device, credentialGeneration: 3 },
+      ]) {
+        expect(
+          await service.relay({
+            attemptId: begun.attemptId,
+            callbackUrl: `${redirectUri}?code=relayed-secret-code-99&state=${state}`,
+            principalKind: "person-paired-device",
+            device: wrong,
+            actor: {
+              kind: "remote-device",
+              actorId: wrong.deviceId as Extract<EventActor, { kind: "remote-device" }>["actorId"],
+              deviceId: wrong.deviceId as Extract<
+                EventActor,
+                { kind: "remote-device" }
+              >["deviceId"],
+            },
+          }),
+        ).toMatchObject({ kind: "refused", reason: "local-host-required" });
+      }
+
+      // Same device finishes via relay; second relay is refused sign-in-settled.
+      const relayed = await service.relay({
+        attemptId: begun.attemptId,
+        callbackUrl: `${redirectUri}?code=relayed-secret-code-99&state=${state}`,
+        principalKind: "person-paired-device",
+        device,
+        actor: deviceActor,
+      });
+      expect(relayed).toEqual({ kind: "signed-in", issuer: "auth.example" });
+      expect(
+        await service.relay({
+          attemptId: begun.attemptId,
+          callbackUrl: `${redirectUri}?code=relayed-secret-code-99&state=${state}`,
+          principalKind: "person-paired-device",
+          device,
+          actor: deviceActor,
+        }),
+      ).toMatchObject({ kind: "refused", reason: "sign-in-settled" });
+
+      // Journal names the device and relay flow, never callback URL, code, state, or tokens.
+      const journalText = JSON.stringify(journal);
+      expect(journalText).not.toContain("relayed-secret-code-99");
+      expect(journalText).not.toContain(state);
+      expect(journalText).not.toContain(redirectUri);
+      expect(journalText).not.toContain("relay-access-token-99");
+      expect(
+        journal.some(
+          (entry) =>
+            entry.record.name === "host-oauth.sign-in-started" &&
+            entry.record.flow === "relay" &&
+            entry.actor?.actorId === device.deviceId,
+        ),
+      ).toBe(true);
+      expect(
+        journal.some(
+          (entry) =>
+            entry.record.name === "host-oauth.sign-in-completed" &&
+            entry.record.flow === "relay" &&
+            entry.actor?.actorId === device.deviceId,
+        ),
+      ).toBe(true);
+
+      // Sign out, begin again, and cancel from the paired device — cancellation names the device and flow.
+      expect(
+        await service.signOut(EXTENSION, COMPONENT, "person-paired-device", deviceActor),
+      ).toEqual({ kind: "signed-out" });
+      const second = await service.begin(
+        EXTENSION,
+        COMPONENT,
+        "person-paired-device",
+        deviceActor,
+        device,
+      );
+      expect(second.kind).toBe("awaiting-consent");
+      expect(
+        await service.signOut(EXTENSION, COMPONENT, "person-paired-device", deviceActor),
+      ).toEqual({ kind: "signed-out" });
+      expect(
+        journal.some(
+          (entry) =>
+            entry.record.name === "host-oauth.sign-in-cancelled" &&
+            entry.record.flow === "relay" &&
+            entry.actor?.actorId === device.deviceId,
+        ),
+      ).toBe(true);
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("accepts a relay queued behind a concurrent poll that refreshes the same pending attempt", async () => {
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === SERVER) return new Response("", { status: 401 });
+      if (url === "https://mcp.example/.well-known/oauth-protected-resource/mcp") {
+        return json({ resource: SERVER, authorization_servers: [ISSUER] });
+      }
+      if (url === `${ISSUER}/.well-known/oauth-authorization-server`) {
+        return json({
+          issuer: ISSUER,
+          authorization_endpoint: `${ISSUER}/authorize`,
+          token_endpoint: `${ISSUER}/token`,
+          registration_endpoint: `${ISSUER}/register`,
+          code_challenge_methods_supported: ["S256"],
+        });
+      }
+      if (url === `${ISSUER}/register`) return json({ client_id: "relay-concurrent-client" }, 201);
+      if (url === `${ISSUER}/token`) {
+        return json({
+          access_token: "relay-concurrent-token",
+          refresh_token: "relay-concurrent-refresh",
+          token_type: "Bearer",
+          expires_in: 600,
+        });
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+
+    const { runtime, oauth } = makeRealStack(fetchImpl);
+    const pollEntered = Promise.withResolvers<void>();
+    const releasePoll = Promise.withResolvers<void>();
+    const gatedOauth: HostOAuthService = {
+      ...oauth,
+      status: async (input) => {
+        pollEntered.resolve();
+        await releasePoll.promise;
+        return oauth.status(input);
+      },
+    };
+    try {
+      const { service } = await signIn({
+        fetchImpl,
+        oauth: gatedOauth,
+        access: (ref) => runtime.access(ref),
+      });
+      const begun = await service.begin(
+        EXTENSION,
+        COMPONENT,
+        "person-paired-device",
+        deviceActor,
+        device,
+      );
+      if (begun.kind !== "awaiting-consent") throw new Error("expected awaiting-consent");
+      const authUrl = new URL(begun.authorizationUrl);
+      const redirectUri = authUrl.searchParams.get("redirect_uri") ?? "";
+      const state = authUrl.searchParams.get("state") ?? "";
+
+      // Start an automatic poll that holds the serialized resource queue.
+      const pendingPoll = service.poll(
+        EXTENSION,
+        COMPONENT,
+        begun.attemptId,
+        "person-paired-device",
+        device,
+      );
+      await pollEntered.promise;
+
+      // Queue the relay while the poll is still running.
+      const pendingRelay = service.relay({
+        attemptId: begun.attemptId,
+        callbackUrl: `${redirectUri}?code=concurrent-code-1&state=${state}`,
+        principalKind: "person-paired-device",
+        device,
+        actor: deviceActor,
+      });
+
+      // Release the poll: it refreshes #attempts with { ...pending, view }, then the queued relay runs.
+      releasePoll.resolve();
+      expect(await pendingPoll).toMatchObject({
+        kind: "awaiting-consent",
+        attemptId: begun.attemptId,
+        relayable: true,
+      });
+      expect(await pendingRelay).toEqual({ kind: "signed-in", issuer: "auth.example" });
+    } finally {
+      releasePoll.resolve();
+      await runtime.close();
+    }
   });
 });

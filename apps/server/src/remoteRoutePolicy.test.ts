@@ -43,6 +43,20 @@ function handler(overrides: Partial<Parameters<typeof createRemoteRouteHandler>[
 }
 
 describe("remote route policy", () => {
+  it("admits paired image-result reads without admitting image job changes or the library controls", () => {
+    const remote = createRemoteRoutePolicy({ origin });
+    for (const path of [
+      "/api/image/jobs?threadKind=chat-thread",
+      "/api/image/thread-artifact?offset=0",
+    ]) {
+      expect(remote.inspect(request(path))).toMatchObject({
+        kind: "allow",
+        surface: "authenticated-product",
+      });
+      expect(remote.inspect(request(path, { method: "POST" }))).toMatchObject({ kind: "reject" });
+    }
+    expect(remote.inspect(request("/api/image/profiles"))).toMatchObject({ kind: "reject" });
+  });
   it("accepts canonical HTTPS default port 443 while rejecting wrong authority", () => {
     const defaultOrigin = "https://octant.example";
     const requestFor = (url: string, host: string, requestOrigin: string) =>
@@ -280,11 +294,8 @@ describe("remote route policy", () => {
       // The host's whole export is bulk data with no bound for a remote
       // caller, so it alone of host control stays on the host.
       "/api/host-control/export",
-      "/api/replica-store/settings",
-      "/api/replica-store/commands",
-      // Leaving a replica, like every membership command, is the host's own.
-      "/api/replica-membership/commands",
-      "/api/replica-membership/state",
+      "/api/secret-stores/settings",
+      "/api/secret-stores/commands",
       "/api/missing",
     ]) {
       expect((await fixture.route(request(path, { method: "POST" }))).status).toBe(404);
@@ -293,6 +304,46 @@ describe("remote route policy", () => {
     expect(fixture.webAssets).not.toHaveBeenCalled();
     expect(fixture.preAuth).not.toHaveBeenCalled();
     expect(fixture.authenticatedProduct).not.toHaveBeenCalled();
+  });
+
+  it("forwards person-paired routes for servers, notifications, artifacts, tool records, tooling, sessions, and replica sync with no remote action for other devices", async () => {
+    const cases: ReadonlyArray<{ readonly path: string; readonly method: string }> = [
+      { path: "/api/shield/servers?projectId=p1", method: "GET" },
+      { path: "/api/shield/servers", method: "POST" },
+      { path: "/api/automation-notifications", method: "PUT" },
+      { path: "/api/push-notifications/gateway", method: "PUT" },
+      { path: "/api/artifacts/tag", method: "POST" },
+      { path: "/api/artifacts/claude-snapshot", method: "POST" },
+      { path: "/api/artifacts/claude-copy", method: "POST" },
+      { path: "/api/artifacts/mirror", method: "POST" },
+      { path: "/api/artifacts/synced", method: "POST" },
+      { path: "/api/threads/tool-call-records", method: "POST" },
+      { path: "/api/provider-tooling/list", method: "POST" },
+      { path: "/api/code-live-tasks?threadId=t1", method: "GET" },
+      { path: "/api/work-live-tasks?threadId=t1", method: "GET" },
+      { path: "/api/replica-store/settings", method: "GET" },
+      { path: "/api/replica-store/commands", method: "POST" },
+      { path: "/api/replica-membership/state", method: "GET" },
+      { path: "/api/replica-membership/commands", method: "POST" },
+    ];
+    for (const entry of cases) {
+      const fixture = handler();
+      const req = request(entry.path, {
+        method: entry.method,
+        ...(entry.method === "GET"
+          ? {}
+          : {
+              headers: {
+                origin,
+                "sec-fetch-site": "same-origin",
+                "content-type": "application/json",
+              },
+              body: "{}",
+            }),
+      });
+      expect((await fixture.route(req)).status).toBe(200);
+      expect(classifyProductAction(req)).toBeUndefined();
+    }
   });
 
   it("forwards provider bootstrap read-only, forwards provider administration and sign-in for the product dispatch to judge, and keeps discovery and probes local-only", async () => {
@@ -929,6 +980,7 @@ describe("remote route policy", () => {
       "/api/extensions/skills",
       "/api/extensions/user-servers",
       "/api/extensions/sign-in",
+      "/api/extensions/mcp-sign-in/relay",
     ]) {
       expect(inspect(path, "POST")).toMatchObject({
         kind: "allow",
@@ -936,8 +988,8 @@ describe("remote route policy", () => {
       });
       expect(inspect(path, "GET")).toMatchObject({ kind: "reject" });
     }
-    // A skill folder is chosen in the host's own folder picker, whose receipt
-    // route no device is forwarded.
+    // A skill folder is chosen in the host's own native folder picker, which
+    // no device is forwarded.
     for (const method of ["GET", "POST"] as const) {
       const decision = inspect("/api/extensions/skill-folder-selection", method);
       expect(decision).toMatchObject({ kind: "reject" });
@@ -948,14 +1000,41 @@ describe("remote route policy", () => {
         origin,
         authenticatedRoutes: [
           {
-            id: "folder-select",
-            match: { kind: "exact", path: "/api/folders/select" },
+            id: "secret-store-link",
+            match: { kind: "exact", path: "/api/secret-stores" },
             surface: "authenticated-product",
             methods: ["GET", "POST"],
           },
         ],
       }),
     ).toThrow("local-only");
+  });
+
+  it("forwards folder browse and choice for the product dispatch, which admits only the host's own person", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string, method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    for (const path of ["/api/folders/browse", "/api/folders/select"]) {
+      expect(inspect(path, "POST")).toMatchObject({
+        kind: "allow",
+        surface: "authenticated-product",
+      });
+      expect(inspect(path, "GET")).toMatchObject({ kind: "reject" });
+      // No catalogued action: every session but the host's own person is refused.
+      expect(classifyProductAction(new Request(`${origin}${path}`, { method: "POST" }))).toBe(
+        undefined,
+      );
+    }
   });
 
   it("forwards a provider key on its way to the credential broker, and keeps the desktop bridge's own key routes on the host", () => {
@@ -1144,6 +1223,31 @@ describe("remote route policy", () => {
     expect(inspect("/api/pending-requests/defer", "POST")).toMatchObject({ maxBodyBytes: 1_024 });
   });
 
+  it("forwards the new-device alert read for every device, a hub guest included, as a read", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request("/api/new-device-alerts", {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    expect(inspect("GET")).toMatchObject({ kind: "allow", surface: "authenticated-product" });
+    expect(inspect("POST")).toMatchObject({ kind: "reject" });
+    // A catalogued read, so the product dispatch admits a hub guest too.
+    expect(
+      classifyProductAction(new Request(`${origin}/api/new-device-alerts`, { method: "GET" })),
+    ).toBe("project.overview.read");
+    expect(
+      classifyProductAction(new Request(`${origin}/api/new-device-alerts`, { method: "POST" })),
+    ).toBeUndefined();
+  });
+
   it("lets a paired device send the query an exact route declares, and refuses a query on an exact route that declares none", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
     const inspect = (path: string) =>
@@ -1164,6 +1268,29 @@ describe("remote route policy", () => {
       surface: "authenticated-product",
     });
     expect(status(inspect("/api/replica-sync/status?x=1"))).not.toBe("allow");
+  });
+
+  it("forwards scoped offer reads and answers without opening the legacy image API to devices", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const listPath = "/api/offers?threadKind=chat-thread&scopeId=thread";
+    const listRequest = request(listPath, { headers: { origin, "sec-fetch-site": "same-origin" } });
+    expect(routePolicy.inspect(listRequest)).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+    });
+    const answer = request("/api/offers/decide", {
+      method: "POST",
+      headers: { origin, "sec-fetch-site": "same-origin", "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(routePolicy.inspect(answer)).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+      maxBodyBytes: 8_192,
+    });
+    expect(classifyProductAction(listRequest)).toBeUndefined();
+    expect(classifyProductAction(answer)).toBeUndefined();
+    expect(routePolicy.inspect(request("/api/image/offers"))).toMatchObject({ kind: "reject" });
   });
 
   it("applies an exact product route's response budget and keeps the listener default when none is declared", async () => {

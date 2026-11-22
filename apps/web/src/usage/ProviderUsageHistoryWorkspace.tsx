@@ -204,6 +204,17 @@ export function ProviderUsageHistoryWorkspace(props: {
           )}
           {props.embedded === true ? null : <h2>Usage</h2>}
           {props.sourceControl}
+          {/* Refresh rides with the source it reads: at the end of the toggles
+              it wrapped onto a row of its own in a 760px window. */}
+          <OctantButton
+            aria-label="Refresh provider history"
+            disabled={busy}
+            variant="ghost"
+            size="icon"
+            onClick={() => setRevision((value) => value + 1)}
+          >
+            <RefreshCw size={16} />
+          </OctantButton>
         </div>
         <div className="provider-history__controls">
           <OctantToggleGroup<HistoryMetric>
@@ -231,15 +242,6 @@ export function ProviderUsageHistoryWorkspace(props: {
               </OctantToggleGroupItem>
             ))}
           </OctantToggleGroup>
-          <OctantButton
-            aria-label="Refresh provider history"
-            disabled={busy}
-            variant="ghost"
-            size="icon"
-            onClick={() => setRevision((value) => value + 1)}
-          >
-            <RefreshCw size={16} />
-          </OctantButton>
         </div>
       </header>
       <div className="provider-history__content">

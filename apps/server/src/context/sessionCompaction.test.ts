@@ -214,6 +214,42 @@ describe("compacting a session on request", () => {
     world.close();
   });
 
+  it("enriches host compaction materials through conversationForCompaction while keeping the sources fixed at request time", async () => {
+    const world = createWorld();
+    planSession(world);
+    world.state.conversationForCompaction = async () => [
+      ...world.state.conversation.map((message, index) =>
+        index === 0
+          ? {
+              ...message,
+              content: [
+                'The person attached a file, "rotate.yaml" (application/yaml). Its text follows.',
+                "```",
+                "keyRotationDays: 30",
+                "```",
+                message.content,
+              ].join("\n"),
+            }
+          : message,
+      ),
+      {
+        source: { kind: "message", referenceId: "later-turn-user" },
+        role: "user",
+        exchangeKey: "turn-99",
+        content: "Added after compaction was requested",
+      },
+    ];
+    expect(world.service.start(command(), "local-window")).toMatchObject({
+      kind: "compaction-started",
+    });
+    await world.service.settled();
+
+    expect(world.provider.prompt).toContain("rotate.yaml");
+    expect(world.provider.prompt).toContain("keyRotationDays: 30");
+    expect(world.provider.prompt).not.toContain("Added after compaction");
+    world.close();
+  });
+
   it("reads a fresh plan, not the last compaction's figure, once a turn replanned after it", async () => {
     const world = createWorld();
     planSession(world);
@@ -1866,6 +1902,7 @@ interface WorldState {
   driverThrows: boolean;
   ownership: "host" | "provider";
   conversation: ReadonlyArray<SessionConversationMessage>;
+  conversationForCompaction?: () => Promise<ReadonlyArray<SessionConversationMessage>>;
   /** The provider's stored facts, as the Project's provider policy reads them. */
   provider: ProviderInstance;
   /** Makes the thread read throw, as the host's storage can. */
@@ -1940,6 +1977,10 @@ function createWorld(providerOptions: FakeProviderOptions = {}) {
       reads.conversations += 1;
       return state.conversation;
     },
+    conversationForCompaction: async () =>
+      state.conversationForCompaction === undefined
+        ? state.conversation
+        : await state.conversationForCompaction(),
     scratchRoot: async () => "/tmp/octant-session-compaction/thread",
     settled: (threadId: string, compaction: unknown) => {
       announced.push({ threadId, compaction });
@@ -2147,6 +2188,7 @@ interface FakeProviderOptions {
 function fakeProvider(options: FakeProviderOptions) {
   const recorded = {
     sends: 0,
+    prompt: "",
     materials: [] as ReadonlyArray<string>,
     started: undefined as object | undefined,
     sentTools: undefined as ReadonlyArray<unknown> | undefined,
@@ -2165,6 +2207,7 @@ function fakeProvider(options: FakeProviderOptions) {
     }) =>
       Effect.suspend(() => {
         recorded.sends += 1;
+        recorded.prompt = input.prompt;
         recorded.sentTools = input.tools;
         recorded.materials = input.prompt
           .split("\n")
@@ -2202,6 +2245,9 @@ function fakeProvider(options: FakeProviderOptions) {
     driver,
     get sends() {
       return recorded.sends;
+    },
+    get prompt() {
+      return recorded.prompt;
     },
     get materials() {
       return recorded.materials;

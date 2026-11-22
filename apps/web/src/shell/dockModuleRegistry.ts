@@ -105,6 +105,7 @@ export const dockModuleInputs = {
     "codeThreadView",
     "hostBridge",
     "onOpenFile",
+    "pullRequestReviewClient",
     "serverUrl",
     "subject",
     "windowCapability",

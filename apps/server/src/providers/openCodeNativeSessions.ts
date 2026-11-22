@@ -22,6 +22,7 @@ import type { ProviderFailure, ProviderInstanceId, ProviderResumeCursor } from "
 import type {
   ProviderDriver,
   ProviderNativeSession,
+  ProviderNativeSessionMessage,
   ProviderSessionForkRequest,
 } from "@octant/provider-sdk/driver";
 import { Effect } from "effect";
@@ -48,6 +49,46 @@ function normalizedRoot(root: string): boolean {
 
 function inFolder(directory: string, projectRoot: string): boolean {
   return isAbsolute(directory) && resolve(directory) === projectRoot;
+}
+
+/**
+ * OpenCode's messages as imported messages: the text parts of each user and
+ * assistant message, with an assistant's `tool` parts named. Synthetic and
+ * ignored text, reasoning, files and step markers are left out.
+ */
+export function openCodeSessionMessages(
+  messages: ReadonlyArray<{ readonly role: string; readonly parts: ReadonlyArray<unknown> }>,
+): ReadonlyArray<ProviderNativeSessionMessage> {
+  return messages.flatMap((message) => {
+    if (message.role !== "user" && message.role !== "assistant") return [];
+    const texts: string[] = [];
+    const tools: string[] = [];
+    for (const candidate of message.parts) {
+      if (typeof candidate !== "object" || candidate === null) continue;
+      const part = candidate as Readonly<Record<string, unknown>>;
+      if (
+        part.type === "text" &&
+        typeof part.text === "string" &&
+        part.synthetic !== true &&
+        part.ignored !== true
+      )
+        texts.push(part.text);
+      else if (
+        message.role === "assistant" &&
+        part.type === "tool" &&
+        typeof part.tool === "string"
+      )
+        tools.push(part.tool);
+    }
+    if (texts.length === 0 && tools.length === 0) return [];
+    return [
+      {
+        role: message.role === "user" ? ("person" as const) : ("agent" as const),
+        text: texts.join("\n"),
+        ...(tools.length === 0 ? {} : { tools }),
+      },
+    ];
+  });
 }
 
 /** Adoptions of one OpenCode session waiting their turn, so a check and its claim are one step. */
@@ -175,6 +216,27 @@ export function makeOpenCodeNativeSessions(options: {
         catch: (error) =>
           refusalOr(error, failure("unavailable", "The OpenCode session could not be taken up.")),
       }),
+    history: (input) =>
+      wrongInstance(input.instanceId)
+        ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
+        : Effect.tryPromise({
+            try: () =>
+              options.withClient(input.projectRoot, async (client) => {
+                const sessionMessages = client.sessionMessages;
+                if (
+                  sessionMessages === undefined ||
+                  !SESSION_ID.test(input.nativeSessionId) ||
+                  !normalizedRoot(input.projectRoot)
+                )
+                  return { status: "unsupported" as const };
+                return {
+                  status: "read" as const,
+                  messages: openCodeSessionMessages(await sessionMessages(input.nativeSessionId)),
+                };
+              }),
+            catch: () =>
+              failure("unavailable", "The OpenCode session's messages could not be read."),
+          }),
     // Taken in turn with adoptions of the same session, so a release never
     // gives back a claim a later adoption made.
     release: (input) =>

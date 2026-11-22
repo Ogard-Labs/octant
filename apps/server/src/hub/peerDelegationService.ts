@@ -27,12 +27,14 @@ import {
 import {
   clampDelegation,
   type AuthorizedPeer,
+  type MemberLoadLevel,
   type DelegationProjectAuthority,
 } from "@octant/domain";
 import { Schema } from "effect";
 import {
   MAX_OPEN_DELEGATIONS,
   MAX_REMEMBERED_SETTLED,
+  delegationAcceptingSwitch,
   type DelegationStatePort,
   type ReceivedDelegation,
 } from "./delegationStateStore";
@@ -119,6 +121,7 @@ export type DelegationRefusalKind =
   | "above-granted-authority"
   | "request-id-in-use"
   | "too-many-open-delegations"
+  | "not-accepting"
   | "unknown-request"
   | "thread-unavailable"
   | "start-failed"
@@ -132,6 +135,16 @@ export type DelegationRefusal = {
 };
 
 export type DelegationReceipt = DelegationAccepted | DelegationRefusal;
+export interface DelegationProjectList {
+  readonly status: "listed";
+  readonly accepting: boolean;
+  readonly load?: MemberLoadLevel;
+  readonly projects: ReadonlyArray<{
+    readonly projectId: ProjectId;
+    readonly name: string;
+    readonly modes: ReadonlyArray<"work" | "code">;
+  }>;
+}
 export type DelegationStatusReceipt =
   | ({ readonly status: "read" } & { readonly delegation: DelegationStatus })
   | DelegationRefusal;
@@ -148,7 +161,11 @@ export interface PeerDelegationServiceOptions {
   /** The peer as this host holds it right now; undefined once it is out of the roster or has no grant. */
   readonly currentPeer: (memberId: HubMemberId) => AuthorizedPeer | undefined;
   readonly host: PeerDelegationHost;
+  /** This host's active Projects by id and name, for the read-only list a peer asks for. */
+  readonly projects?: () => ReadonlyArray<{ readonly projectId: ProjectId; readonly name: string }>;
   readonly state: DelegationStatePort;
+  /** This member's load level, reported with its list of Projects for placing work. */
+  readonly load?: () => MemberLoadLevel;
   readonly record: (change: HubDelegationRecordedPayload) => void;
   readonly now: () => number;
 }
@@ -233,6 +250,11 @@ export class PeerDelegationService {
         : refusal("request-id-in-use");
     }
 
+    // This member's person stopped accepting delegated work: nothing new
+    // starts. Checked only for a new request id, after the replays above, so a
+    // retry of a start whose acceptance was lost still gets its answer and the
+    // sender keeps tracking the child that is already running.
+    if (!this.accepting()) return refusal("not-accepting");
     const project = this.#options.host.projectAuthority(request.projectId);
     if (project === undefined) return refusal("project-unavailable");
     const clamp = clampDelegation({ peer, request, project });
@@ -264,7 +286,9 @@ export class PeerDelegationService {
     if (!(await this.#makeRoom())) return refusal("too-many-open-delegations");
     // The grant and the Project are read again each time: the person here may
     // remove or narrow the sender while this start is preparing.
+    // Turning delegated work off while this start prepares stops it too.
     const admissionCurrent = (): boolean => {
+      if (!this.accepting()) return false;
       const peer = this.#options.currentPeer(principal.memberId);
       const project = this.#options.host.projectAuthority(request.projectId);
       if (peer === undefined || project === undefined) return false;
@@ -275,6 +299,7 @@ export class PeerDelegationService {
         clamp.authority.mode === authority.mode
       );
     };
+    if (!this.accepting()) return refusal("not-accepting");
     if (!admissionCurrent()) return refusal("delegation-not-granted");
     const started = await this.#options.host.startThread({
       requestId: request.requestId,
@@ -284,7 +309,15 @@ export class PeerDelegationService {
       authority,
       admissionCurrent,
     });
-    if (started.status === "refused") return refusal(started.kind);
+    if (started.status === "refused") {
+      // A host reads one admission check, so a pause while it prepared reads
+      // as a lost grant there; the sender's grant is unchanged, so say why.
+      return refusal(
+        started.kind === "delegation-not-granted" && !this.accepting()
+          ? "not-accepting"
+          : started.kind,
+      );
+    }
     const received: ReceivedDelegation = {
       requestId: request.requestId,
       senderMemberId: principal.memberId,
@@ -307,6 +340,49 @@ export class PeerDelegationService {
       threadId: started.threadId,
     });
     return { status: "accepted", requestId: request.requestId, authority };
+  }
+
+  /**
+   * The Projects here the sender may delegate to and the modes each takes:
+   * open for delegated work on this host and inside the grant this host gave
+   * the sender. Names only, never a path, so a member learns where it may ask
+   * and nothing about the folders behind it.
+   */
+  listProjects(signed: SignedRequest): DelegationProjectList | DelegationRefusal {
+    const authenticated = this.#options.authenticate(signed);
+    if (authenticated.status === "refused") return refusal(authenticated.kind);
+    const { peer } = authenticated;
+    if (peer.member.role === "guest") return refusal("guest-cannot-delegate");
+    const delegation = peer.grant.delegation;
+    if (delegation === undefined) return refusal("delegation-not-granted");
+    const load = this.#options.load?.();
+    const placement = load === undefined ? {} : { load };
+    if (!this.accepting())
+      return { status: "listed", projects: [], accepting: false, ...placement };
+    const projects = (this.#options.projects?.() ?? []).flatMap((project) => {
+      if (
+        delegation.projects !== "all" &&
+        !delegation.projects.some((id) => String(id) === String(project.projectId))
+      ) {
+        return [];
+      }
+      const authority = this.#options.host.projectAuthority(project.projectId);
+      const modes = (authority?.modes ?? []).filter((mode) => delegation.modes.includes(mode));
+      return modes.length === 0
+        ? []
+        : [{ projectId: project.projectId, name: listedName(project.name), modes }];
+    });
+    return {
+      status: "listed",
+      projects: withinListingBudget(projects),
+      accepting: true,
+      ...placement,
+    };
+  }
+
+  /** Whether this member takes delegated work now; on unless its person turned it off. */
+  accepting(): boolean {
+    return delegationAcceptingSwitch(this.#options.state).read();
   }
 
   async status(signed: SignedRequest): Promise<DelegationStatusReceipt> {
@@ -489,4 +565,31 @@ export class PeerDelegationService {
 
 function refusal(kind: DelegationRefusalKind): DelegationRefusal {
   return { status: "refused", kind };
+}
+
+// The asker decodes a listing whole and drops the member when any part breaks
+// the contract (a name over 200 characters, more than 500 entries) or the
+// reply is cut at the route's 131,072-byte budget, so one long local name
+// would hide every Project here. The listing is bounded where it is made.
+const LISTED_NAME_MAX = 200;
+const LISTED_PROJECTS_MAX = 500;
+const LISTING_BYTES_MAX = 120_000;
+
+// The wire limit counts UTF-16 code units, as `String.length` does, so an
+// emoji counts twice; a cut never leaves half of a surrogate pair behind.
+function listedName(name: string): string {
+  if (name.length <= LISTED_NAME_MAX) return name;
+  const prefix = name.slice(0, LISTED_NAME_MAX - 1).replace(/[\uD800-\uDBFF]$/, "");
+  return `${prefix}…`;
+}
+
+function withinListingBudget<T>(projects: ReadonlyArray<T>): ReadonlyArray<T> {
+  const kept: T[] = [];
+  let bytes = 64;
+  for (const project of projects.slice(0, LISTED_PROJECTS_MAX)) {
+    bytes += Buffer.byteLength(JSON.stringify(project)) + 1;
+    if (bytes > LISTING_BYTES_MAX) break;
+    kept.push(project);
+  }
+  return kept;
 }

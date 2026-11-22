@@ -13,6 +13,7 @@ import type {
   ProviderProbeInput,
   ProviderSessionHandle,
   ProviderSessionResume,
+  ProviderServerPlacement,
   ProviderSessionStart,
   ProviderTurnInput,
   ProviderUserInputAnswer,
@@ -42,6 +43,16 @@ export interface ProviderConformanceFixture {
     readonly unknownUserInput: ProviderFailureCategory;
   };
   readonly isReleased: () => boolean;
+  /**
+   * Required when the driver reports `serverPlacement: "supported"`: a
+   * placement that records whether the runtime was started through it. The
+   * kit acquires with it and starts a session, and the runtime must have
+   * started there rather than on this host.
+   */
+  readonly serverPlacement?: {
+    readonly placement: ProviderServerPlacement;
+    readonly used: () => boolean;
+  };
   readonly successfulTurn?: {
     readonly sessionStart: ProviderSessionStart;
     readonly turn: ProviderTurnInput;
@@ -277,6 +288,30 @@ export async function runProviderConformance(
             connection.compact !== undefined,
           "session compaction is claimed as supported but the connection cannot compact",
         );
+        if (probe.capabilities.serverPlacement === "supported") {
+          const placed = fixture.serverPlacement;
+          assertConformance(
+            placed !== undefined,
+            "server placement is claimed as supported but the fixture gives no placement to check it",
+          );
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const onServer = yield* fixture.driver.acquire({
+                ...fixture.acquireInput,
+                serverPlacement: placed.placement,
+              });
+              // The host hands a placement out only with Strict off, since
+              // Octant's sandbox cannot run on a server; a runtime may refuse
+              // a Strict start there before it starts anything.
+              yield* onServer.start({ ...fixture.sessionStart, strict: false }).pipe(Effect.either);
+              yield* onServer.stop(fixture.sessionStart.sessionId).pipe(Effect.either);
+            }),
+          );
+          assertConformance(
+            placed.used(),
+            "server placement is claimed as supported but the runtime did not start through the placement",
+          );
+        }
         let successfulEvents: ReadonlyArray<ProviderRuntimeEvent> = [];
         if (fixture.successfulTurn !== undefined) {
           const successful = fixture.successfulTurn;

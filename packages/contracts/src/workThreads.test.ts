@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  WORK_THREAD_EVENT_NAMES,
   decodeWorkThread,
   decodeWorkThreadBootstrap,
   decodeWorkThreadNavigation,
@@ -35,6 +34,16 @@ describe("work thread contracts", () => {
   it("brands WorkThreadId and rejects non-uuid values", () => {
     expect(decodeWorkThreadId(ids.thread)).toBe(ids.thread);
     expect(() => decodeWorkThreadId("not-a-uuid")).toThrow();
+  });
+
+  it("accepts Plan as the level Settings › Work starts new threads at", () => {
+    expect(
+      decodeWorkThreadCommand({
+        kind: "update-work-settings",
+        expectedVersion: 1,
+        defaultAccess: "plan",
+      }),
+    ).toMatchObject({ defaultAccess: "plan" });
   });
 
   it("decodes WorkThread with required projectId and rejects excess fields", () => {
@@ -322,8 +331,6 @@ describe("work thread contracts", () => {
       throw new Error(`expected thread-created, got failure ${result.category}`);
     }
     expect(result.kind).toBe("thread-created");
-    expect(WORK_THREAD_EVENT_NAMES).toContain("work.thread-created@1");
-    expect(WORK_THREAD_EVENT_NAMES).toContain("work.thread-updated@1");
   });
 
   it("decodes work-thread workspace tab and rejects wrong mode", () => {

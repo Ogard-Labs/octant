@@ -99,6 +99,7 @@ function services(overrides: Partial<WorkDelegationServices> = {}) {
       },
     },
     scope: SCOPE,
+    helperRunRefusal: () => undefined,
     uuid: () => ids.shift() ?? "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
     ...overrides,
   };
@@ -229,6 +230,22 @@ describe("the Work thread a delegation becomes on the receiving spoke", () => {
     expect(noDefault.executed).toEqual([]);
   });
 
+  it("starts no thread when this host's Work default is a provider that refuses helper runs", async () => {
+    const { host, executed, firstTurns } = services({
+      helperRunRefusal: (providerInstanceId) =>
+        providerInstanceId === "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+          ? "Google doesn't support Google Antigravity as a helper agent."
+          : undefined,
+    });
+
+    expect(await host.startThread(input)).toEqual({
+      status: "refused",
+      kind: "provider-unavailable",
+    });
+    expect(executed).toEqual([]);
+    expect(firstTurns).toEqual([]);
+  });
+
   it("refuses a delegation and starts nothing while Work is turned off on this host", async () => {
     let workOn = false;
     const { host, executed, firstTurns } = services({ isWorkEnabled: () => workOn });
@@ -344,6 +361,30 @@ describe("the Work thread a delegation becomes on the receiving spoke", () => {
 
     expect(await host.readThread(THREAD, DELEGATED_TURN)).toBeUndefined();
     expect(await host.interrupt(THREAD, DELEGATED_TURN)).toBe("unavailable");
+  });
+
+  it("marks a peer-delegated Work thread before starting its first turn so person memory is withheld", async () => {
+    const withheld = new Set<string>();
+    const order: string[] = [];
+    const { host } = services({
+      onDelegatedThreadCreated: (threadId) => {
+        withheld.add(threadId);
+        order.push(`marked:${threadId}`);
+      },
+      turns: {
+        ...baseTurns(),
+        startFirstTurn: async (_scope, command) => {
+          const { threadId } = command as { readonly threadId: string };
+          order.push(`started:${threadId}:withheld=${String(withheld.has(threadId))}`);
+          return { kind: "accepted" };
+        },
+      },
+    });
+
+    const started = await host.startThread(input);
+
+    expect(started).toMatchObject({ status: "started", threadId: THREAD });
+    expect(order).toEqual([`marked:${THREAD}`, `started:${THREAD}:withheld=true`]);
   });
 });
 

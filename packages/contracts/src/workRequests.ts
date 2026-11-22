@@ -175,6 +175,12 @@ export const WorkRequestDetail = Schema.Union(
     prompt: WorkRequestSanitizedText,
     options: Schema.Array(WorkRequestSanitizedText).pipe(Schema.maxItems(MAX_WORK_REQUEST_OPTIONS)),
     questionnaire: Schema.optional(WorkQuestionnaire),
+    /**
+     * The provider asks for a secret: the person answers in a masked field,
+     * through `resolve-work-request`'s `secretAnswer`, and the request records
+     * only that a secret answer was given.
+     */
+    secret: Schema.optional(Schema.Literal(true)),
   }).annotations(strict),
 );
 export type WorkRequestDetail = typeof WorkRequestDetail.Type;
@@ -189,6 +195,15 @@ export const WorkRequestResolution = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("user-input"),
     answer: Schema.Union(WorkRequestSanitizedText, WorkQuestionnaireResponse),
+  }).annotations(strict),
+  /**
+   * A secret question's answer, given and handed to the provider in memory.
+   * The value travels beside the resolution as the command's `secretAnswer`,
+   * so neither the delivery intent nor the settled request ever holds it.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("user-input"),
+    secret: Schema.Literal(true),
   }).annotations(strict),
 );
 export type WorkRequestResolution = typeof WorkRequestResolution.Type;
@@ -235,6 +250,14 @@ export const WorkRequest = Schema.Struct({
   detail: WorkRequestDetail,
   status: WorkRequestStatus,
   resolution: Schema.optional(WorkRequestResolution),
+  /**
+   * On a resolved level change the person approved: whether the new level
+   * applied inside the running turn (`in-place`, entering Plan on a provider
+   * that can hold its session to it) or from the next turn, the asking turn
+   * ending (`next-turn`). Set by the host, never by an answer; absent on
+   * every other request and in older journals.
+   */
+  levelChangeApplied: Schema.optional(Schema.Literal("in-place", "next-turn")),
   delivery: Schema.optional(WorkRequestDelivery),
   requestedAt: UtcTimestamp,
   settledAt: Schema.optional(UtcTimestamp),
@@ -245,15 +268,28 @@ export const WorkRequest = Schema.Struct({
     Schema.filter(
       (request) => {
         if (request.status === "pending") {
-          return request.resolution === undefined && request.settledAt === undefined;
+          return (
+            request.resolution === undefined &&
+            request.settledAt === undefined &&
+            request.levelChangeApplied === undefined
+          );
         }
         if (request.settledAt === undefined || request.delivery !== undefined) return false;
         if (request.status === "resolved") {
           return (
-            request.resolution !== undefined && request.resolution.kind === request.detail.kind
+            request.resolution !== undefined &&
+            request.resolution.kind === request.detail.kind &&
+            // A secret question settles only as a secret answer, and only it does.
+            (request.detail.kind !== "user-input" ||
+              "secret" in request.resolution === (request.detail.secret === true)) &&
+            (request.levelChangeApplied === undefined ||
+              (request.detail.kind === "approval" &&
+                request.detail.levelChange !== undefined &&
+                request.resolution.kind === "approval" &&
+                request.resolution.approved))
           );
         }
-        return request.resolution === undefined;
+        return request.resolution === undefined && request.levelChangeApplied === undefined;
       },
       { jsonSchema: {} },
     ),
@@ -277,6 +313,13 @@ export const WorkRequestCommand = Schema.Union(
     kind: Schema.Literal("resolve-work-request"),
     ...RequestTransitionFields,
     resolution: WorkRequestResolution,
+    /**
+     * The value of a secret resolution, given exactly when the resolution is
+     * `{ kind: "user-input", secret: true }`. It reaches the provider and is
+     * never written to the request's journal; the host checks the pairing,
+     * the bound and the question, so a decode failure never prints it.
+     */
+    secretAnswer: Schema.optional(Schema.String),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("cancel-work-request"),

@@ -157,7 +157,8 @@ describe("mapOpenCodeEvent", () => {
         kind: "usage",
         // 12 uncached plus 2 read from the cache and 1 written to it.
         inputTokens: 15,
-        outputTokens: 7,
+        // 7 of answer plus the 3 of reasoning OpenCode reports apart from it.
+        outputTokens: 10,
         reasoningTokens: 3,
         cacheReadInputTokens: 2,
         cacheWriteInputTokens: 1,
@@ -212,6 +213,29 @@ describe("mapOpenCodeEvent", () => {
         requestId: "permission-1",
         action: "write",
         description: "Approval is required for this action.",
+      },
+    },
+    {
+      name: "permission question carries its tool call's identity",
+      event: official({
+        id: "event-permission-tool",
+        type: "permission.asked",
+        properties: {
+          id: "permission-3",
+          sessionID: "provider-session",
+          permission: "bash",
+          patterns: [],
+          metadata: {},
+          always: [],
+          tool: { messageID: "message-1", callID: "call-42" },
+        },
+      }),
+      expected: {
+        kind: "approval-request",
+        requestId: "permission-3",
+        action: "bash",
+        description: "Approval is required for this action.",
+        toolCallId: "call-42",
       },
     },
     {
@@ -661,6 +685,21 @@ describe("mapOpenCodeEvent", () => {
     ).toEqual([]);
   });
 
+  it("marks text unfolded from stored parts synthesized and live deltas live", () => {
+    const messageParts = new OpenCodeMessageParts();
+    const ctx = { ...context(), messageParts };
+    expect(mapOpenCodeEvent(ctx, answers("message-1"))).toEqual([]);
+    const buffered = mapOpenCodeEvent(
+      ctx,
+      part("message-1", "part-1", "reasoning", "whole thought"),
+    );
+    // An accumulated snapshot emits as one batch, never at a written instant.
+    expect(buffered).toMatchObject([{ kind: "reasoning-delta", synthesized: true }]);
+    const live = mapOpenCodeEvent(ctx, partDelta("message-1", "part-1", " more"));
+    expect(live).toMatchObject([{ kind: "reasoning-delta" }]);
+    expect(live[0]).not.toHaveProperty("synthesized");
+  });
+
   it("clears the task panel when OpenCode empties its todo list", () => {
     expect(
       mapped(
@@ -1045,7 +1084,7 @@ describe("OpenCode 2.0.22 events", () => {
       {
         kind: "usage",
         inputTokens: 7,
-        outputTokens: 7,
+        outputTokens: 8,
         reasoningTokens: 1,
         cacheReadInputTokens: 2,
         costUsd: 0.5,

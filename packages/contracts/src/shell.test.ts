@@ -105,6 +105,8 @@ const settings = {
   fullAccessStalledTurnLimitMinutes: null,
   providerToolCallPauseLimitMinutes: 120,
   backgroundSessionIdleLimitMinutes: 120,
+  providerTelemetry: false,
+  providerSelfUpdate: false,
   threadWakeupsWaitingLimit: 8,
   threadWakeupsRunMissedOnReturn: false,
   messageWakesPerHour: 30,
@@ -114,8 +116,14 @@ const settings = {
   pullRequestWatchDays: 3,
   autoFixAttemptsPerFailure: 3,
   threadMessagesPerTurn: 3,
+  siblingThreadReadsPerTurn: 8,
+  siblingThreadWaitsPerTurn: 4,
   browserWaitLimitMinutes: 10,
   childRunWaitLimitSeconds: 120,
+  shieldDenialsInARow: 3,
+  shieldDenialsPerThread: 20,
+  followUpLatenessLimitHours: 24,
+  toolingCommandConfirmMinutes: 10,
   agentRoutinesStartActiveAtFullAccess: false,
   navigatorAssistant: {},
   voice: {},
@@ -135,6 +143,7 @@ const settings = {
   browserHeldDownloadLimit: 5,
   browserUploadFileCountLimit: 5,
   rememberedBrowserTransfers: [],
+  rememberedComputerUseApps: [],
   persistentBrowserOwner: false,
   pairedDeviceLifetime: "30-days" as const,
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
@@ -378,6 +387,14 @@ describe("shell bootstrap contracts", () => {
     expect(() => decodeShellSettings({ ...settings, showThreadStats: "off" })).toThrow();
   });
 
+  it("keeps every provider's own telemetry off for a store saved before the switch, until a person turns it on", () => {
+    const { providerTelemetry: _omitted, ...withoutSwitch } = settings;
+    expect(decodeShellSettings(withoutSwitch).providerTelemetry).toBe(false);
+    expect(decodeShellSettings({ ...settings, providerTelemetry: true }).providerTelemetry).toBe(
+      true,
+    );
+  });
+
   it("reads a store from before the stalled-turn limit at thirty minutes, and keeps Off and a bounded choice", () => {
     const { stalledTurnLimitMinutes: _omitted, ...withoutLimit } = settings;
     expect(decodeShellSettings(withoutLimit).stalledTurnLimitMinutes).toBe(30);
@@ -389,6 +406,26 @@ describe("shell bootstrap contracts", () => {
     ).toBe(120);
     expect(() => decodeShellSettings({ ...settings, stalledTurnLimitMinutes: 4 })).toThrow();
     expect(() => decodeShellSettings({ ...settings, stalledTurnLimitMinutes: 481 })).toThrow();
+  });
+
+  it("reads a store from before the Shield brake, follow-up and shown-command settings at their former fixed values", () => {
+    const {
+      shieldDenialsInARow: _row,
+      shieldDenialsPerThread: _thread,
+      followUpLatenessLimitHours: _lateness,
+      toolingCommandConfirmMinutes: _confirm,
+      ...before
+    } = settings;
+    const decoded = decodeShellSettings(before);
+    expect(decoded.shieldDenialsInARow).toBe(3);
+    expect(decoded.shieldDenialsPerThread).toBe(20);
+    expect(decoded.followUpLatenessLimitHours).toBe(24);
+    expect(decoded.toolingCommandConfirmMinutes).toBe(10);
+    expect(decodeShellSettings({ ...settings, shieldDenialsInARow: 6 }).shieldDenialsInARow).toBe(
+      6,
+    );
+    expect(() => decodeShellSettings({ ...settings, shieldDenialsInARow: 0 })).toThrow();
+    expect(() => decodeShellSettings({ ...settings, followUpLatenessLimitHours: 721 })).toThrow();
   });
 
   it("reads a store from before the longest tool-call pause at two hours, and keeps Off and a bounded choice", () => {
@@ -406,6 +443,56 @@ describe("shell bootstrap contracts", () => {
   it("decodes a store from before the start-screen cards to the registry defaults", () => {
     const { homeCards: _predatesTheCards, ...predatesTheCards } = settings;
     expect(decodeShellSettings(predatesTheCards).homeCards).toEqual({ order: [], visibility: [] });
+  });
+
+  it("round-trips the activity cards' shared range, source and pinned ranges", () => {
+    const activity = {
+      sharedRange: { kind: "last-month" },
+      source: "octant",
+      pins: [
+        { card: "runs", range: { kind: "last-24-hours" } },
+        {
+          card: "prs-merged",
+          range: { kind: "custom", startDate: "2026-08-01", endDate: "2026-08-14" },
+        },
+      ],
+    };
+    const customized = {
+      ...settings,
+      homeCards: {
+        order: ["activity-runs", "activity-prs-merged"],
+        visibility: [{ id: "activity-prs-merged", visible: false }],
+        activity,
+      },
+    };
+    const decoded = decodeShellSettings(customized);
+    expect(decoded.homeCards.order).toEqual(["activity-runs", "activity-prs-merged"]);
+    expect(decoded.homeCards.visibility).toEqual([{ id: "activity-prs-merged", visible: false }]);
+    expect(decoded.homeCards.activity).toEqual(activity);
+  });
+
+  it("decodes a legacy store that never recorded activity choices without inventing them", () => {
+    expect(decodeShellSettings(settings).homeCards.activity).toBeUndefined();
+  });
+
+  it("refuses a second pin on the same activity card", () => {
+    expect(() =>
+      decodeShellSettings({
+        ...settings,
+        homeCards: {
+          order: [],
+          visibility: [],
+          activity: {
+            sharedRange: { kind: "this-week" },
+            source: "github",
+            pins: [
+              { card: "runs", range: { kind: "today" } },
+              { card: "runs", range: { kind: "total" } },
+            ],
+          },
+        },
+      }),
+    ).toThrow();
   });
 
   it("decodes a store that never recorded the update-check preference to checks off", () => {
@@ -1516,5 +1603,40 @@ describe("sidebar More row preference", () => {
     expect(decodeShellSettings({ ...settings, sidebarMoreEnabled: false }).sidebarMoreEnabled).toBe(
       false,
     );
+  });
+});
+
+describe("Strict-only messaging and Browser wait limits", () => {
+  it("decodes a store that predates the messaging and Browser wait limits to their defaults", () => {
+    const {
+      threadMessagesPerTurn: _asks,
+      siblingThreadReadsPerTurn: _reads,
+      siblingThreadWaitsPerTurn: _waits,
+      browserWaitLimitMinutes: _waitMinutes,
+      ...predatesLimits
+    } = settings;
+    const decoded = decodeShellSettings(predatesLimits);
+    expect(decoded.threadMessagesPerTurn).toBe(3);
+    expect(decoded.siblingThreadReadsPerTurn).toBe(8);
+    expect(decoded.siblingThreadWaitsPerTurn).toBe(4);
+    expect(decoded.browserWaitLimitMinutes).toBe(10);
+  });
+
+  it("keeps custom Strict limit values within bounds and rejects out-of-range values", () => {
+    const decoded = decodeShellSettings({
+      ...settings,
+      threadMessagesPerTurn: 5,
+      siblingThreadReadsPerTurn: 16,
+      siblingThreadWaitsPerTurn: 12,
+      browserWaitLimitMinutes: 25,
+    });
+    expect(decoded.threadMessagesPerTurn).toBe(5);
+    expect(decoded.siblingThreadReadsPerTurn).toBe(16);
+    expect(decoded.siblingThreadWaitsPerTurn).toBe(12);
+    expect(decoded.browserWaitLimitMinutes).toBe(25);
+    expect(() => decodeShellSettings({ ...settings, siblingThreadReadsPerTurn: 0 })).toThrow();
+    expect(() => decodeShellSettings({ ...settings, siblingThreadReadsPerTurn: 65 })).toThrow();
+    expect(() => decodeShellSettings({ ...settings, siblingThreadWaitsPerTurn: 0 })).toThrow();
+    expect(() => decodeShellSettings({ ...settings, siblingThreadWaitsPerTurn: 33 })).toThrow();
   });
 });

@@ -77,7 +77,9 @@ export function ProviderCloudSessions(props: {
           ? "An earlier cloud task may still be active. Check its status or acknowledge an uncertain submission before reviewing a new task."
           : result.reason === "unsupported-budget"
             ? "This provider cannot enforce the required cloud spend bound. Keep this task local."
-            : "The request could not be confirmed. Refresh saved sessions; remote work may still be running.",
+            : result.reason === "credential-unlock-needs-this-computer"
+              ? "Unlock this provider's key at this computer before starting a cloud task from a paired device."
+              : "The request could not be confirmed. Refresh saved sessions; remote work may still be running.",
       );
     }
     setBusy(false);

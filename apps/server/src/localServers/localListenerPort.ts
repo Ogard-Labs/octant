@@ -418,7 +418,7 @@ export function createLiveLocalListenerHoldingProbe(
  * `lsof -F n` names no address family, so a wildcard counts for both loopback
  * families: a process that might be answering is treated as answering.
  */
-function answersOn(bindAddress: string, host: "127.0.0.1" | "::1"): boolean {
+export function answersOn(bindAddress: string, host: "127.0.0.1" | "::1"): boolean {
   const address = bindAddress.replace(/^\[|\]$/g, "").toLowerCase();
   if (address === host || address === "*" || address === "::") return true;
   // An IPv6 socket bound to an IPv4-mapped address answers that IPv4 address.

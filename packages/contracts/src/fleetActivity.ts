@@ -1,5 +1,8 @@
 import { Schema } from "effect";
 import { UtcTimestamp } from "./events";
+import { WindowId } from "./shell";
+
+export const FLEET_OFFER_WINDOWS_MEDIA_TYPE = "application/vnd.octant.fleet-offer-windows+json";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -26,6 +29,8 @@ export const FleetActivityThread = Schema.Struct({
   mode: Schema.Literal("chat", "work", "code"),
   threadId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
   title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_FLEET_ACTIVITY_TITLE_LENGTH)),
+  /** Navigation hint for the local menu bar; never a capability. */
+  offerWindowId: Schema.optional(WindowId),
   /** Absent for a Chat thread filed under no Project. */
   projectName: Schema.optional(
     Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_FLEET_ACTIVITY_TITLE_LENGTH)),

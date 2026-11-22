@@ -1047,6 +1047,45 @@ describe("CodeComposerAdapter interactions", () => {
     );
   });
 
+  it("opens the Start from picker on a draft asked for another branch even when the default is this checkout", async () => {
+    const projectId = "00000000-0000-0000-0000-000000000009";
+    const execute = vi.fn(async (command: { kind: string; projectId?: string }) => {
+      if (command.kind !== "list-code-worktree-refs") return undefined;
+      return {
+        kind: "worktree-refs-listed",
+        projectId: command.projectId,
+        refs: [
+          { name: "development", kind: "local", isCurrent: true },
+          { name: "fix/parser", kind: "local" },
+        ],
+      };
+    });
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        execute={execute as never}
+        projectId={projectId as never}
+        startFromOpen
+      />,
+    );
+
+    // The intent lands the person in the picker itself — the Where menu and
+    // the Start from list are open, the refs it lists were just read, and the
+    // worktree choice it implies is already made.
+    await waitFor(() =>
+      expect(execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "list-code-worktree-refs" }),
+      ),
+    );
+    expect(await screen.findByRole("listbox", { name: "Refs" })).toBeVisible();
+    expect(await screen.findByRole("option", { name: /fix\/parser/ })).toBeVisible();
+    expect(screen.getByRole("radio", { name: /New worktree/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: /^Start from/ })).toBeVisible();
+  });
+
   it("clears stale worktree refs when the selected project changes", async () => {
     const firstProject = "00000000-0000-0000-0000-000000000001";
     const secondProject = "00000000-0000-0000-0000-000000000002";
@@ -1370,12 +1409,34 @@ describe("CodeComposerAdapter interactions", () => {
       await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the build");
       expect(screen.getByRole("button", { name: "Create thread" })).toBeDisabled();
       expect(screen.getByRole("alert")).toHaveTextContent(
-        "Runs on this computer's files; a Project on a server runs on the Octant Harness only.",
+        "Runs on this computer's files; a Project on a server runs on the Octant Harness, or on a runtime that runs on the server itself.",
       );
       await user.click(screen.getByRole("button", { name: "Provider and model" }));
       await user.click(screen.getByRole("option", { name: "Local Codex" }));
       expect(screen.getByRole("option", { name: "Cli Model" })).toBeDisabled();
       expect(onCreateThread).not.toHaveBeenCalled();
+    });
+
+    it("offers a provider that runs on the server itself, such as Codex, and starts a thread on it", async () => {
+      const user = userEvent.setup();
+      render(
+        <CodeComposerAdapter
+          {...serverProps}
+          providerGroups={[harness, { ...cli, serverPlacement: "supported" }]}
+          selectedProviderInstanceId={cli.instance.id}
+          selectedModelId={decodeProviderModelId("cli-model")}
+        />,
+      );
+      await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the build");
+      expect(screen.queryByText(/Runs on this computer's files/)).toBeNull();
+      expect(screen.getByRole("button", { name: "Create thread" })).toBeEnabled();
+      // Said once per server and provider: its sandbox is its own, and its
+      // model requests leave from the server.
+      expect(screen.getByText(/Octant can't sandbox anything on that server/)).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Got it" }));
+      expect(screen.queryByText(/Octant can't sandbox anything on that server/)).toBeNull();
+      await user.click(screen.getByRole("button", { name: "Details" }));
+      expect(screen.getByText(/leave from devbox, not from this computer/)).toBeInTheDocument();
     });
   });
 });

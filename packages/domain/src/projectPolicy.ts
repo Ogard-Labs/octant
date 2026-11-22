@@ -15,6 +15,7 @@ import {
   type CodeProject,
   type CodeProjectAgentDefaultBranchPush,
   type CodeProjectAgentMerge,
+  type CodeProjectDelegatedCode,
   type CodeProjectOwnToolchain,
   type ProjectAgentMemoryWrites,
   type ProjectImageGenerationChoice,
@@ -554,6 +555,31 @@ export function changeCodeProjectAgentMerge(
 }
 
 /**
+ * Mark a Code Project as taking delegated Code work from other hub members,
+ * with the delivery target its person confirmed, or take the mark off.
+ * Rejects a non-Code Project and a change that leaves the mark as it was.
+ */
+export function changeCodeProjectDelegatedCode(
+  project: Project,
+  delegatedCode: CodeProjectDelegatedCode | undefined,
+  updatedAt: UtcTimestamp,
+): CodeProject {
+  if (project.type !== "code") {
+    reject("binding-not-allowed", "Only Code Projects take delegated Code work");
+  }
+  if (delegatedCode === undefined && project.delegatedCode === undefined) {
+    reject("invalid-lifecycle", "This Code Project already takes no delegated Code work");
+  }
+  const { delegatedCode: _previous, ...rest } = project;
+  return {
+    ...rest,
+    ...(delegatedCode === undefined ? {} : { delegatedCode }),
+    version: nextVersion(project),
+    updatedAt,
+  };
+}
+
+/**
  * Run a Code Project's language services from the Project's own copy of a
  * toolchain, or return to the copy Octant bundles. Absence reads as disabled.
  * Rejects a non-Code Project and a no-op change so the journal never carries
@@ -910,21 +936,6 @@ function foldersOverlap(left: string, right: string): boolean {
   return folderContainsPath(left, right) || folderContainsPath(right, left);
 }
 
-/**
- * The folders a bound Project grants, main folder first. Every question of
- * the form "is this path inside the Project?" asks it of this list: an extra
- * folder gets exactly the access the main folder gets at a thread's level.
- */
-export function projectFolderRoots(project: {
-  readonly binding: CanonicalProjectBinding;
-  readonly extraFolders?: ReadonlyArray<Pick<ProjectExtraFolder, "canonicalRoot">> | undefined;
-}): ReadonlyArray<string> {
-  return [
-    project.binding.canonicalRoot,
-    ...(project.extraFolders ?? []).map((folder) => folder.canonicalRoot),
-  ];
-}
-
 /** The extra folders alone, as the paths a launch or a driver is handed. */
 export function projectExtraFolderRoots(project: {
   readonly extraFolders?: ReadonlyArray<Pick<ProjectExtraFolder, "canonicalRoot">> | undefined;
@@ -946,14 +957,6 @@ export function projectExtraFoldersInstructions(
     ...extraFolders.map((folder) => `- ${folder}`),
     "You may read and change files in them exactly as in the main folder, naming them by absolute path. Commands, Git and checkouts start in the main folder; the extra folders are plain folders.",
   ].join("\n");
-}
-
-/** Whether a canonical absolute path lies in one of a Project's folders. */
-export function isPathInProjectFolders(
-  folders: ReadonlyArray<string>,
-  canonicalPath: string,
-): boolean {
-  return folders.some((folder) => folderContainsPath(folder, canonicalPath));
 }
 
 /**

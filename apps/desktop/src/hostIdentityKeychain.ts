@@ -410,7 +410,7 @@ export const executeHostSigningHelper: KeychainHelperExecutor = async (spec, lim
         stderr: consumeBuffers(stderr),
       });
     });
-    child.stdin.once("error", requestTermination);
+    child.stdin.on("error", requestTermination);
     child.stdin.end(input, () => input.fill(0));
   });
 

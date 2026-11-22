@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import type {
+  EventActor,
   ProviderInstance,
   ProviderInstanceId,
   ProviderToolingAppliedRecord,
@@ -27,7 +28,8 @@ import {
 } from "./providerToolingAccount";
 import type { ProviderToolingRunner } from "./providerToolingRunner";
 
-const PLAN_LIFETIME_MS = 10 * 60_000;
+/** Settings' default, used when the host gives no reading of its own. */
+const DEFAULT_PLAN_LIFETIME_MINUTES = 10;
 const MAXIMUM_PLANS = 32;
 const LIST_TIMEOUT_MS = 45_000;
 const COMMAND_TIMEOUT_MS = 120_000;
@@ -45,9 +47,14 @@ export interface ProviderToolingServiceOptions {
   /** Holds a plan's secret until the person confirms it. Absent on a host with no broker. */
   readonly secrets?: ProviderCredentialStore;
   /** Writes the journal record of a change. Receives no secret. */
-  readonly record: (change: ProviderToolingAppliedRecord) => void;
+  readonly record: (change: ProviderToolingAppliedRecord, actor?: EventActor) => void;
   readonly now?: () => number;
   readonly uuid?: () => string;
+  /**
+   * Settings' `toolingCommandConfirmMinutes`: how long a shown command may
+   * still run, read when it is shown. Absent is ten minutes.
+   */
+  readonly confirmMinutes?: () => number;
 }
 
 interface StoredPlan {
@@ -68,6 +75,7 @@ interface StoredPlan {
 export interface ProviderToolingCaller {
   readonly kind: "local-window" | "remote-device";
   readonly windowId: string;
+  readonly actor?: EventActor;
 }
 
 /**
@@ -186,11 +194,13 @@ export class ProviderToolingService {
     }
     const digest = randomBytes(32).toString("hex");
     const binding = bindingOf(id, account, command);
+    const lifetimeMs = (this.#options.confirmMinutes?.() ?? DEFAULT_PLAN_LIFETIME_MINUTES) * 60_000;
+    const expiresAt = this.#now() + lifetimeMs;
     this.#plans.set(planId, {
       planId,
       digest,
       binding,
-      expiresAt: this.#now() + PLAN_LIFETIME_MS,
+      expiresAt,
       windowId: caller.windowId,
       instanceId: id,
       // The stored command never keeps the secret: it stays in the broker.
@@ -204,14 +214,14 @@ export class ProviderToolingService {
       const expiry = setTimeout(() => {
         const waiting = this.#plans.get(planId);
         if (waiting !== undefined && !waiting.used) void this.#discard(waiting);
-      }, PLAN_LIFETIME_MS + 1000);
+      }, lifetimeMs + 1000);
       expiry.unref();
     }
     return {
       status: "planned",
       planId,
       digest,
-      expiresAt: new Date(this.#now() + PLAN_LIFETIME_MS).toISOString(),
+      expiresAt: new Date(expiresAt).toISOString(),
       provider: account.provider,
       commandKind: command.commandKind,
       commandLine: shownCommandLine(account, command),
@@ -287,13 +297,14 @@ export class ProviderToolingService {
           "The account changed since the command was shown. Review it again.",
         );
       }
-      return this.#run(plan, current);
+      return this.#run(plan, current, caller.actor);
     });
   }
 
   async #run(
     plan: StoredPlan,
     account: ProviderToolingAccount,
+    actor?: EventActor,
   ): Promise<ProviderToolingApplyResult> {
     let secretValue: string | undefined;
     try {
@@ -321,14 +332,17 @@ export class ProviderToolingService {
       });
       const output = scrub(run.output, secretValue);
       const succeeded = run.exitCode === 0 && !run.timedOut && !run.startFailed;
-      this.#options.record({
-        provider: account.provider,
-        providerInstanceId: plan.instanceId,
-        commandKind: plan.command.commandKind,
-        ...(plan.command.name === undefined ? {} : { name: plan.command.name }),
-        outcome: succeeded ? "succeeded" : "failed",
-        usedSecret: plan.hasSecret,
-      });
+      this.#options.record(
+        {
+          provider: account.provider,
+          providerInstanceId: plan.instanceId,
+          commandKind: plan.command.commandKind,
+          ...(plan.command.name === undefined ? {} : { name: plan.command.name }),
+          outcome: succeeded ? "succeeded" : "failed",
+          usedSecret: plan.hasSecret,
+        },
+        actor,
+      );
       if (succeeded) return { status: "applied", output };
       return {
         status: "failed",

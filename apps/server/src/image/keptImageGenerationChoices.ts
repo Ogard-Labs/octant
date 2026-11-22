@@ -1,5 +1,6 @@
 import type {
   AggregateVersion,
+  EventActor,
   ImageGenerationOffer,
   Project,
   ProjectId,
@@ -18,7 +19,11 @@ type ThreadScope = Pick<ImageGenerationOffer, "threadKind" | "scopeId">;
  * every thread did before the choice was journaled.
  */
 export interface KeptImageGenerationChoices {
-  remember(scope: ThreadScope, choice: ProjectImageGenerationChoice): Promise<void>;
+  remember(
+    scope: ThreadScope,
+    choice: ProjectImageGenerationChoice,
+    actor?: EventActor,
+  ): Promise<void>;
   remembered(scope: ThreadScope): ProjectImageGenerationChoice | undefined;
   forget(scope: ThreadScope): Promise<void>;
   /** The person chose Ask again for this thread's Project. */
@@ -34,12 +39,15 @@ export function createKeptImageGenerationChoices(options: {
     projectId: ProjectId,
   ) => Pick<Project, "version" | "imageGenerationChoice" | "imageGenerationAskAgain"> | undefined;
   /** Journals the Project's choice through the Project command path. */
-  readonly changeProject: (command: {
-    readonly kind: "change-project-image-generation-choice";
-    readonly projectId: ProjectId;
-    readonly expectedVersion: AggregateVersion;
-    readonly imageGenerationChoice?: ProjectImageGenerationChoice;
-  }) => Promise<void>;
+  readonly changeProject: (
+    command: {
+      readonly kind: "change-project-image-generation-choice";
+      readonly projectId: ProjectId;
+      readonly expectedVersion: AggregateVersion;
+      readonly imageGenerationChoice?: ProjectImageGenerationChoice;
+    },
+    actor?: EventActor,
+  ) => Promise<void>;
 }): KeptImageGenerationChoices {
   const sameChoice = (
     left: ProjectImageGenerationChoice | undefined,
@@ -55,22 +63,26 @@ export function createKeptImageGenerationChoices(options: {
   const change = async (
     projectId: ProjectId,
     choice: ProjectImageGenerationChoice | undefined,
+    actor?: EventActor,
   ): Promise<void> => {
     const project = options.readProject(projectId);
     if (project === undefined || sameChoice(project.imageGenerationChoice, choice)) return;
-    await options.changeProject({
-      kind: "change-project-image-generation-choice",
-      projectId,
-      expectedVersion: project.version,
-      ...(choice === undefined ? {} : { imageGenerationChoice: choice }),
-    });
+    await options.changeProject(
+      {
+        kind: "change-project-image-generation-choice",
+        projectId,
+        expectedVersion: project.version,
+        ...(choice === undefined ? {} : { imageGenerationChoice: choice }),
+      },
+      actor,
+    );
   };
 
   return {
-    async remember(scope, choice) {
+    async remember(scope, choice, actor) {
       const projectId = options.projectOf(scope);
       if (projectId === undefined) options.threadChoices.remember(scope, choice);
-      else await change(projectId, choice);
+      else await change(projectId, choice, actor);
     },
     remembered(scope) {
       const projectId = options.projectOf(scope);

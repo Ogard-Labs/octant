@@ -218,6 +218,129 @@ describe("HubSettingsSection", () => {
     );
   });
 
+  it("names the Projects a device the hub introduced may start threads in, only while Act is ticked", async () => {
+    const user = userEvent.setup();
+    const service = "40000000-0000-4000-8000-000000000001";
+    const fixture = harness({
+      status: { status: 200, body: linkedStatus({ items: ["roster", "act"] }) },
+      grant: {
+        status: 200,
+        body: { status: "changed", grant: { items: ["roster", "act"], actProjects: [service] } },
+      },
+    });
+    render(
+      <HubSettingsSection
+        hub={fixture.hub}
+        now={() => NOW}
+        pairing={fixture.pairing}
+        projectNames={new Map([[service, "Service"]])}
+      />,
+    );
+    const projects = await screen.findByRole("group", {
+      name: "Projects a device the hub introduced may start threads in",
+    });
+    await user.click(within(projects).getByRole("checkbox", { name: "Service" }));
+    await user.click(screen.getByRole("button", { name: "Save the grant" }));
+    await waitFor(() =>
+      expect(fixture.calls.find((call) => call.operation === "grant")?.body).toEqual({
+        items: ["roster", "act"],
+        actProjects: [service],
+      }),
+    );
+
+    await user.click(screen.getByRole("checkbox", { name: /^Act/ }));
+    expect(
+      screen.queryByRole("group", {
+        name: "Projects a device the hub introduced may start threads in",
+      }),
+    ).toBeNull();
+  });
+
+  it("on the hub, names this computer's Projects a member's window may work in and saves the ticked ones", async () => {
+    const user = userEvent.setup();
+    const service = "40000000-0000-4000-8000-000000000001";
+    const site = "40000000-0000-4000-8000-000000000002";
+    const fixture = harness({
+      status: { status: 200, body: statusBody({ enabled: true, members: [] }) },
+      "act-projects": { status: 200, body: { status: "changed", actProjects: [site] } },
+    });
+    render(
+      <HubSettingsSection
+        hub={fixture.hub}
+        now={() => NOW}
+        pairing={fixture.pairing}
+        projectNames={
+          new Map([
+            [service, "Service"],
+            [site, "Site"],
+          ])
+        }
+      />,
+    );
+    const projects = await screen.findByRole("group", {
+      name: "Projects a member's window may work in",
+    });
+    expect(within(projects).getByRole("checkbox", { name: "Service" })).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Save the Projects" })).toBeDisabled();
+
+    await user.click(within(projects).getByRole("checkbox", { name: "Site" }));
+    await user.click(screen.getByRole("button", { name: "Save the Projects" }));
+
+    await waitFor(() =>
+      expect(fixture.calls.find((call) => call.operation === "act-projects")?.body).toEqual({
+        actProjects: [site],
+      }),
+    );
+    // A saved list reads as a success, not an alert.
+    expect(
+      await screen.findByText("Saved. A member's window may work only in the Projects you ticked."),
+    ).toHaveAttribute("role", "status");
+  });
+
+  it("tells a computer in no hub where the delegated work switch comes from, so a search for it lands on a row", async () => {
+    renderHub({ status: { status: 200, body: statusBody({}) } });
+    await screen.findByRole("switch", { name: "Act as hub" });
+    const row = screen.getByRole("group", {
+      name: "Take delegated work from other members setting",
+    });
+    expect(row).toHaveTextContent("Join a hub");
+    expect(
+      screen.getByRole("switch", { name: "Take delegated work from other members" }),
+    ).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("still shows the delegated work row to a joined computer that did not report the switch", async () => {
+    renderHub({ status: { status: 200, body: linkedStatus({ items: ["roster"] }) } });
+    const row = await screen.findByRole("group", {
+      name: "Take delegated work from other members setting",
+    });
+    expect(row).toHaveTextContent("has not reported");
+    expect(
+      screen.getByRole("switch", { name: "Take delegated work from other members" }),
+    ).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("stops and resumes taking delegated work with one switch", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderHub({
+      status: {
+        status: 200,
+        body: { ...linkedStatus({ items: ["roster"] }), delegation: { accepting: true } },
+      },
+      "delegation-accepting": { status: 200, body: { status: "changed" } },
+    });
+    const toggle = await screen.findByRole("switch", {
+      name: "Take delegated work from other members",
+    });
+    expect(toggle).toBeChecked();
+    await user.click(toggle);
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "delegation-accepting")?.body).toEqual({
+        accepting: false,
+      }),
+    );
+  });
+
   it("makes the Mac's unlock key when joining and presents only its public half", async () => {
     const user = userEvent.setup();
     const fixture = harness({

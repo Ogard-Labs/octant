@@ -511,7 +511,11 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             />
           </SettingRow>
           <SettingRow
-            description="Strict keeps provider sign-ins, SSH keys and cloud credentials protected. It applies at every access level and preserves required approvals. Changes apply to the next turn."
+            description={
+              hostPlatform === "win32"
+                ? "Strict keeps provider sign-ins, SSH keys and cloud credentials protected. On Windows, phase 1 works at Full access with native Codex (AppContainer and Job Object); other providers and lower levels refuse by name. Changes apply to the next turn."
+                : "Strict keeps provider sign-ins, SSH keys and cloud credentials protected. It applies at every access level and preserves required approvals. Changes apply to the next turn."
+            }
             focused={
               props.focusedSetting === "code-strict" ||
               props.focusedSetting === "code-full-access-sandbox"

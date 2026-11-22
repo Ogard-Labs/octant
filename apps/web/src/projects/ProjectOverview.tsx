@@ -5,6 +5,8 @@ import { createDesktopPaneClient } from "@octant/client-runtime/desktop-pane-cli
 import { createProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
+import type { PullRequestReviewClient } from "@octant/client-runtime/pull-request-review-client";
+import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type { OctantInstructionsClient } from "@octant/client-runtime/octant-instructions-client";
 import type {
   ProjectAction,
@@ -24,6 +26,7 @@ import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { DelegatedCodeSetting } from "./DelegatedCodeSetting";
 import { ProjectIcon, useProjectIconDetails, useProjectIconSource } from "./ProjectIcon";
 import { FolderPicker } from "./FolderPicker";
 import { ProjectMemorySection } from "./ProjectMemorySection";
@@ -35,6 +38,7 @@ import { ProjectFoldersSection } from "./ProjectFoldersSection";
 import type { ExtraFolderChange, ProjectChange } from "./useProjectController";
 import { ProjectDesktopRecipeSection } from "./ProjectDesktopRecipeSection";
 import { ProjectAutoReviewerSection } from "./ProjectAutoReviewerSection";
+import { ProjectPullRequestReviewerSection } from "../code/PullRequestReviewerSettings";
 import {
   ProjectModelRolesSection,
   type ProjectModelRolesSectionProps,
@@ -143,6 +147,11 @@ export interface ProjectOverviewProps {
    * host accepts it only from a window on its own machine.
    */
   readonly onOwnToolchainChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  /** Marks the Project as taking delegated Code work from hub members; the host accepts it only from its own person. */
+  readonly onDelegatedCodeChange?: (
+    projectId: ProjectId,
+    delegatedCode: import("@octant/contracts/projects").CodeProjectDelegatedCode | undefined,
+  ) => Promise<boolean>;
   /** Absent when the host cannot accept the change; the switch is then not shown. */
   readonly onWorkDeveloperToolsChange?: (
     projectId: ProjectId,
@@ -156,6 +165,8 @@ export interface ProjectOverviewProps {
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
   /** Off hides the Project's spend ceiling row, unless a ceiling is set. */
   readonly spendCeilingShown?: boolean;
+  readonly pullRequestReviewClient?: PullRequestReviewClient;
+  readonly providerSnapshot?: ProviderRegistrySnapshot;
   /** Absent when the window cannot reach the host's model roles; the Models section is then not shown. */
   readonly modelRoles?: Omit<ProjectModelRolesSectionProps, "projectId" | "disabled">;
 }
@@ -791,11 +802,36 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 />
               </ProjectOverviewInspector>
             ) : null}
+            {props.project.type === "code" && props.pullRequestReviewClient !== undefined ? (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-pr-reviewer`}
+                label="Pull request reviewer"
+                summary="Optional second-model review on pushed pull request heads"
+              >
+                <ProjectPullRequestReviewerSection
+                  client={props.pullRequestReviewClient}
+                  disabled={archived || connectionStale}
+                  projectId={props.project.id}
+                  providerSnapshot={props.providerSnapshot}
+                />
+              </ProjectOverviewInspector>
+            ) : null}
             {props.project.type === "code" && props.onOwnToolchainChange !== undefined ? (
               <OwnToolchainSetting
                 disabled={archived || connectionStale}
                 enabled={props.project.ownToolchain === "enabled"}
                 onChange={(enabled) => props.onOwnToolchainChange?.(props.project.id, enabled)}
+              />
+            ) : null}
+            {props.project.type === "code" && props.onDelegatedCodeChange !== undefined ? (
+              <DelegatedCodeSetting
+                key={`${String(props.project.id)}-delegated-code`}
+                delegatedCode={props.project.delegatedCode}
+                disabled={archived || connectionStale}
+                onChange={(delegatedCode) =>
+                  props.onDelegatedCodeChange?.(props.project.id, delegatedCode) ??
+                  Promise.resolve(false)
+                }
               />
             ) : null}
             {props.project.type === "code" && props.onDesktopRecipeChange !== undefined ? (

@@ -23,6 +23,7 @@ import { UsageResumeThreadState } from "./usageResume";
 import { ThreadUsageLimitHandoff } from "./usageLimitHandoff";
 import { BrowserProfileChoice } from "./projectBrowser";
 import { ThreadDocumentDelivery } from "./threadToolSteps";
+import { FinishedReceiptId } from "./finishedReceipt";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -56,13 +57,15 @@ export type WorkThreadCompletionEvidence = typeof WorkThreadCompletionEvidence.T
 
 /**
  * The levels Work's defaults (Settings › Work, and a Work Project's start
- * mode) offer: every Work level except Plan, which a thread enters on its own.
+ * mode) offer: every Work level, Plan included (maintainer decision,
+ * 2026-11-21), so a new thread may start read-only.
  */
 export const WorkDefaultAccess = Schema.Literal(
   "ask-first",
   "auto-accept-edits",
   "auto",
   "full-access",
+  "plan",
 );
 export type WorkDefaultAccess = typeof WorkDefaultAccess.Type;
 
@@ -75,7 +78,7 @@ export type WorkDefaultAccess = typeof WorkDefaultAccess.Type;
  * `auto` lets the provider's own reviewer answer (a provider without one asks
  * first), `full-access` runs with no sandbox and no prompts, and `plan` is
  * Code's read-only Plan: the agent looks and proposes and changes nothing.
- * Plan is a thread's level only, never a default. The first two are what Work
+ * Plan may also be where a new thread starts. The first two are what Work
  * threads recorded before the levels were shared, so older journals replay
  * unchanged.
  */
@@ -123,6 +126,8 @@ export const WorkThread = Schema.Struct({
   lifecycle: Schema.Literal("active", "archived", "deleting", "deleted"),
   completionConfirmed: Schema.optional(Schema.Boolean),
   completionEvidence: Schema.optional(WorkThreadCompletionEvidence),
+  /** Fresh finished receipt recorded as completion evidence when a person marked the thread Done. */
+  completionReceiptId: Schema.optional(FinishedReceiptId),
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   modelOptionValues: Schema.optional(ProviderModelOptionValues),
@@ -664,13 +669,6 @@ export const WorkThreadNavigation = Schema.Struct({
 }).annotations(strict);
 export type WorkThreadNavigation = typeof WorkThreadNavigation.Type;
 
-export const WORK_THREAD_EVENT_NAMES = [
-  "work.thread-created@1",
-  "work.thread-updated@1",
-  "work.thread-completion-confirmed@1",
-] as const;
-
-export const WORK_SETTINGS_EVENT_NAME = "work.settings-updated@1";
 export const decodeWorkSettingsUpdated = Schema.decodeUnknownSync(WorkSettingsUpdated);
 
 export const decodeWorkThreadId = Schema.decodeUnknownSync(WorkThreadId);

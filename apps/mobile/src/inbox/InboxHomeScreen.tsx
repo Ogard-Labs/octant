@@ -654,7 +654,9 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
                   ? MOBILE_COPY.noProject
                   : (projectName(row) ?? "Project"),
               )} · `
-      }${hostLabels.get(row.hostId) ?? row.hostId.slice(0, 8)}`}
+      }${hostLabels.get(row.hostId) ?? row.hostId.slice(0, 8)}${
+        row.waitingOfferText === undefined ? "" : ` · ${row.waitingOfferText}`
+      }`}
       icon={modeIcon(row.mode)}
       key={`${row.hostId}:${row.mode}:${row.threadId}`}
       label={formatScreenshotSafeLabel(row.title)}

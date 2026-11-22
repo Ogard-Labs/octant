@@ -11,6 +11,7 @@ export interface DelegationParentFacts {
     AgentRunControlParentFacts["liveAuthority"],
     "subagents" | "executionPolicy"
   >;
+  readonly helperRunRefusal?: AgentRunControlParentFacts["helperRunRefusal"];
 }
 
 export interface DelegationParentRules {
@@ -65,7 +66,13 @@ export function checkDelegationParent(
   const parent = rules.authorizeCreation({ threadId: input.threadId, windowId: input.windowId });
   if (parent === undefined) return { status: "refused", kind: "parent-unavailable" };
   if (parent.parentMode !== input.mode) return { status: "refused", kind: "parent-mode-mismatch" };
-  if (!parent.parentAuthority.subagents || !parent.liveAuthority.subagents) {
+  // A child on another host is still a helper this thread started, which its
+  // provider's personal sign-in does not cover.
+  if (
+    !parent.parentAuthority.subagents ||
+    !parent.liveAuthority.subagents ||
+    parent.helperRunRefusal !== undefined
+  ) {
     return { status: "refused", kind: "subagents-not-allowed" };
   }
   const policy = parent.liveAuthority.executionPolicy;

@@ -1,15 +1,19 @@
+import { ThreadTranscription } from "../speech/transcriptionTool";
+import { createSpeechGates } from "../speech/speechGates";
 import { workThreadAccessOf, threadAccessOf } from "@octant/domain/guardrail-policy";
 import { decodeWorkThreadId } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts";
 import { notifyWindowRevocations } from "../windowRevocations";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { defaultShellSettings } from "@octant/domain";
 import {
   type AgentRun,
   decodeChatThreadId,
   decodeProjectId,
   decodeWindowId,
+  MAX_PENDING_IMAGE_GENERATION_OFFERS,
+  type ServiceOffer,
   type WindowId,
 } from "@octant/contracts";
 import {
@@ -31,6 +35,7 @@ import { ProcessAuthorityClock } from "../processAuthorityClock";
 import {
   readDeviceApprovedByPerson,
   readDeviceRegistration,
+  readRemoteSessionInvalidation,
 } from "../persistence/remoteAccessProjection";
 import { AgentRunEventStore } from "../agentRun/agentRunEventStore";
 import { AgentRunPersistenceService } from "../agentRun/agentRunPersistenceService";
@@ -47,6 +52,7 @@ import {
 } from "../process/secretGuard";
 import { createPersonMemoryAccess } from "../personMemory/personMemoryAccess";
 import { createPersonMemoryRouteHandler } from "../personMemory/personMemoryRoutes";
+import { readReceivedDelegationThreadIds } from "../hub/delegationJournal";
 import { createTodoRouteHandler } from "../todos/todoRoutes";
 import { privateListenerHostId } from "../remote/privateListenerHostIdentity";
 import { TodoStore } from "../todos/todoStore";
@@ -62,6 +68,8 @@ import { ExtensionToolApprovalService } from "../extensions/extensionToolApprova
 import { AutomationEventStore } from "../automation/automationEventStore";
 import { RoutineProposalService } from "../automation/routineProposalService";
 import { ImageGenerationOfferService } from "../image/imageGenerationOfferService";
+import type { ServiceOfferAnswer } from "../offers/serviceOfferDecision";
+import { ServiceOfferService } from "../offers/serviceOfferService";
 import {
   chatThreadStandsInProject,
   isDeviceRegistrationCurrent,
@@ -236,10 +244,42 @@ export function wireAuthority(deps: AuthorityDependencies) {
   const isRestrictedDeviceScope = (scopeId: WindowId): boolean =>
     isPairedDeviceScope(scopeId) &&
     !readDeviceApprovedByPerson(persistence.connection, String(scopeId));
+  const isPersonPairedDeviceCurrent = (
+    deviceId: string,
+    credentialGeneration: number,
+    sessionId?: string,
+  ): boolean => {
+    const registration = readDeviceRegistration(persistence.connection, deviceId);
+    if (
+      registration === undefined ||
+      !isDeviceRegistrationCurrent(registration, Date.now()) ||
+      registration.credentialGeneration !== credentialGeneration ||
+      !readDeviceApprovedByPerson(persistence.connection, deviceId)
+    ) {
+      return false;
+    }
+    if (sessionId !== undefined) {
+      const digest = createHash("sha256").update(sessionId).digest("hex");
+      if (readRemoteSessionInvalidation(persistence.connection, digest) !== undefined) {
+        return false;
+      }
+    }
+    return true;
+  };
+  // Peer-delegated Work threads run under the host scope for a peer granted
+  // one Project, so host-wide person memory is withheld from those threads and
+  // any subagent they spawn — live before the first turn starts and rebuilt
+  // from the delegation journal after a restart.
+  const peerDelegatedThreads = new Set<string>(
+    readReceivedDelegationThreadIds(persistence.journal),
+  );
+  const withholdThreadFromPersonMemory = (threadId: string): void => {
+    peerDelegatedThreads.add(threadId);
+  };
   const personMemoryAccess = createPersonMemoryAccess({
     store: personMemory,
-    isPairedDeviceScope: isRestrictedDeviceScope,
-    isHostScope: isRoutineHostScope,
+    isRestrictedDeviceScope,
+    isThreadWithheld: (threadId) => peerDelegatedThreads.has(threadId),
     projectLabel: (projectId) => persistence.readProject(decodeProjectId(projectId))?.name,
   });
   // The asks these services hold are not journaled when raised, so each says
@@ -306,22 +346,26 @@ export function wireAuthority(deps: AuthorityDependencies) {
     now: processAuthorityTime,
     onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
   });
-  // Image generations an agent asked the person to start, answered from a
-  // card in the thread. A prompt like the routine proposals above, so it
-  // rides the same change topic.
-  const imageGenerationOffers = new ImageGenerationOfferService({
-    onAsked: onWaitingAsk,
-    uuid: randomUUID,
-    now: processAuthorityTime,
-    onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
-  });
+  const speechGates = createSpeechGates();
+  const threadTranscription = new ThreadTranscription();
+  const serviceOffers = new ServiceOfferService<ServiceOffer, ServiceOfferAnswer>(
+    MAX_PENDING_IMAGE_GENERATION_OFFERS,
+    {
+      onAsked: onWaitingAsk,
+      uuid: randomUUID,
+      now: processAuthorityTime,
+      onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
+    },
+  );
+  const imageGenerationOffers = new ImageGenerationOfferService(serviceOffers);
   // An ask waits with no expiry, so a thread archived while its turn is
   // still parked on one must give it up here. Later areas register the asks
   // they hold, as they register window revocations below.
   const threadArchivals: Array<(threadId: string) => void> = [
     (id) => extensionToolApprovalService.withdrawThread(id),
     (id) => routineProposalService.withdrawThread(id),
-    (id) => imageGenerationOffers.withdrawThread(id),
+    (id) => serviceOffers.withdrawThread(id),
+    (id) => threadTranscription.forget(id),
   ];
   const onThreadArchived = (withdraw: (threadId: string) => void): void => {
     threadArchivals.push(withdraw);
@@ -416,7 +460,8 @@ export function wireAuthority(deps: AuthorityDependencies) {
         (id) => androidInputGrants.revokeWindow(String(id)),
         (id) => extensionToolApprovalService.revokeWindow(id),
         (id) => routineProposalService.revokeWindow(id),
-        (id) => imageGenerationOffers.revokeWindow(id),
+        (id) => serviceOffers.revokeWindow(id),
+        (id) => threadTranscription.revokeWindow(id),
         (id) => codeSessionAuthority.revokeWindow(id),
         (id) => {
           for (const [requestId, binding] of agentRunExecutionWindows) {
@@ -490,8 +535,12 @@ export function wireAuthority(deps: AuthorityDependencies) {
     extensionToolApprovalService,
     routineProposalService,
     imageGenerationOffers,
+    serviceOffers,
+    speechGates,
+    threadTranscription,
     isPairedDeviceScope,
     isRestrictedDeviceScope,
+    isPersonPairedDeviceCurrent,
     liveTurns,
     machineChangeFeed,
     onAgentRunExecutionAccepted,
@@ -510,6 +559,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     personMemory,
     personMemoryAccess,
     personMemoryRoutes,
+    withholdThreadFromPersonMemory,
     octantInstructions,
     octantInstructionsRoutes,
     protectedFilesRoutes,

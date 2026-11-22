@@ -7,6 +7,8 @@ import {
 } from "@octant/contracts/shield-servers";
 import { AggregateId } from "@octant/contracts";
 import { Schema } from "effect";
+import { principalActsAsHostPerson } from "../clientPrincipal";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -98,7 +100,15 @@ export function createShieldServerRouteHandler(dependencies: ShieldServerRouteDe
         now: now(),
         ...(body === undefined ? {} : { body }),
       });
-      principal = context.principal.kind === "remote-device" ? "remote-device" : "local-window";
+      principal =
+        context.principal.kind === "local-window"
+          ? "local-window"
+          : principalActsAsHostPerson(context.principal)
+            ? {
+                kind: "person-paired-device",
+                actor: eventActorForPrincipal(context.principal),
+              }
+            : "remote-device";
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failure("Server request is unauthorized.", 401, origin);
@@ -199,7 +209,7 @@ async function showServerKey(
   serverId: string,
   principal: ShieldServerPrincipal,
 ): Promise<ShieldServersCommandResult> {
-  if (principal !== "local-window") return refused("needs-local-window");
+  if (principal === "remote-device") return refused("needs-local-window");
   const server = dependencies.store.serverById(serverId);
   if (server === undefined) return refused("server-not-found");
   if (server.signIn !== "octant-key") return refused("signs-in-with-agent");

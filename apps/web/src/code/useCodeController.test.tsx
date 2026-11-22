@@ -616,6 +616,26 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("a poll-mode controller reads thread events again on its own timer, not the reconnect delay", async () => {
+    // A poll-mode read ends as soon as the host has caught up, so the next read
+    // comes from the controller's pace; with a minute-long reconnect delay a
+    // second read within a few seconds can only come from that pace.
+    const subscribe = vi.fn(async function* () {});
+    const client = fakeClient({
+      threadEvents: "poll",
+      subscribe,
+      thread: vi.fn().mockResolvedValue(view(1)),
+    });
+    const { unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() => expect(subscribe.mock.calls.length).toBeGreaterThanOrEqual(2), {
+      timeout: 3_000,
+    });
+    unmount();
+  });
+
   it("keeps catching up after a failed snapshot instead of freezing the thread", async () => {
     const gap = deferred<void>();
     const thread = vi
@@ -3984,6 +4004,62 @@ describe("useCodeController", () => {
     });
   });
 
+  it("sends pull request line notes to a linked thread that is not open with pullRequestLineNotesSource", async () => {
+    const executeOperation = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: "provider-turn-state", state: "running" })
+      .mockResolvedValueOnce({
+        kind: "operation-failed",
+        failure: { category: "waiting", message: "A turn is already running on this thread." },
+      });
+    const putEvidence = vi.fn(async () => ({
+      contentId: "80000000-0000-4000-8000-000000000001",
+      digest: "a".repeat(64),
+      byteLength: 24,
+    }));
+    const client = fakeClient({
+      executeOperation: executeOperation as never,
+      putEvidence: putEvidence as never,
+    });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    const source = {
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 12,
+    } as const;
+    let outcome: Awaited<ReturnType<typeof result.current.sendPullRequestLineNotes>> | undefined;
+    await act(async () => {
+      outcome = await result.current.sendPullRequestLineNotes(
+        ids.thread,
+        "Notes on the changed lines:\n\n1. src/refresh.ts, new line 12\n   Why 42?",
+        source,
+      );
+    });
+    expect(outcome).toEqual({ status: "sent" });
+    expect(putEvidence).toHaveBeenCalledWith(
+      ids.thread,
+      "Notes on the changed lines:\n\n1. src/refresh.ts, new line 12\n   Why 42?",
+    );
+    expect(executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "start-provider-turn",
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        pullRequestLineNotesSource: source,
+      }),
+    );
+
+    await act(async () => {
+      outcome = await result.current.sendPullRequestLineNotes(ids.thread, "Second try", source);
+    });
+    expect(outcome).toEqual({
+      status: "refused",
+      message: "A turn is already running on this thread.",
+    });
+  });
+
   it("marks a manual follow-up with a strictly newer trigger sequence", async () => {
     const executeFollowUp = vi.fn(async () => ({ kind: "follow-up-updated" }) as never);
     const client = fakeClient({
@@ -4504,3 +4580,273 @@ function memoryDraftStorage(): Storage {
     },
   };
 }
+
+describe("useCodeController moveThread choices", () => {
+  const busyRuntime = (turnStartedAt = "2026-07-21T12:00:00.000Z") =>
+    [{ threadId: ids.thread, executing: true, turnStartedAt }] as never;
+  const idleRuntime = () => [{ threadId: ids.thread, executing: false }] as never;
+  const sentCommands = (client: CodeClient) =>
+    vi.mocked(client.execute).mock.calls.map(([command]) => (command as { kind: string }).kind);
+  const sentOperations = (client: CodeClient) =>
+    vi
+      .mocked(client.executeOperation)
+      .mock.calls.map(([operation]) => (operation as { kind: string }).kind);
+
+  it("queues the move for after the running turn and dispatches it once the turn settles", async () => {
+    const nav = { value: { ...bootstrap(), runtime: busyRuntime() } };
+    const client = fakeClient({ bootstrap: vi.fn(async () => nav.value) });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.bootstrap).toBeDefined());
+
+    const outcome = await result.current.moveThread(ids.thread, ids.project, {
+      when: "after-turn",
+    });
+    expect(outcome.status).toBe("deferred");
+    expect(sentCommands(client)).not.toContain("move-code-thread");
+
+    let settled: unknown;
+    void (outcome as { settled: Promise<unknown> }).settled.then((answer) => {
+      settled = answer;
+    });
+    nav.value = { ...bootstrap(), runtime: idleRuntime() };
+    await act(async () => {
+      await result.current.refreshNavigation();
+    });
+
+    await waitFor(() => expect(settled).toEqual({ status: "ok" }));
+    expect(sentCommands(client).filter((kind) => kind === "move-code-thread")).toHaveLength(1);
+  });
+
+  it("drops the queued move on Cancel and refuses it when a different turn took over", async () => {
+    const nav = { value: { ...bootstrap(), runtime: busyRuntime() } };
+    const client = fakeClient({ bootstrap: vi.fn(async () => nav.value) });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.bootstrap).toBeDefined());
+
+    const cancelledMove = await result.current.moveThread(ids.thread, ids.project, {
+      when: "after-turn",
+    });
+    expect(cancelledMove.status).toBe("deferred");
+    (cancelledMove as { cancel: () => void }).cancel();
+    await expect((cancelledMove as { settled: Promise<unknown> }).settled).resolves.toEqual({
+      status: "cancelled",
+    });
+
+    nav.value = { ...bootstrap(), runtime: idleRuntime() };
+    await act(async () => {
+      await result.current.refreshNavigation();
+    });
+    expect(sentCommands(client)).not.toContain("move-code-thread");
+
+    nav.value = { ...bootstrap(), runtime: busyRuntime() };
+    await act(async () => {
+      await result.current.refreshNavigation();
+    });
+    const moved = await result.current.moveThread(ids.thread, ids.project, {
+      when: "after-turn",
+    });
+    expect(moved.status).toBe("deferred");
+    nav.value = {
+      ...bootstrap(),
+      runtime: busyRuntime("2026-07-21T13:00:00.000Z"),
+    };
+    await act(async () => {
+      await result.current.refreshNavigation();
+    });
+    await expect((moved as { settled: Promise<unknown> }).settled).resolves.toEqual({
+      status: "refused",
+      message: "The thread started another turn; move it when it is idle.",
+    });
+    expect(sentCommands(client)).not.toContain("move-code-thread");
+  });
+
+  it("refuses to stop a turn this window did not start, and sends nothing", async () => {
+    const client = fakeClient({
+      bootstrap: vi.fn(async () => ({ ...bootstrap(), runtime: busyRuntime() })),
+      executeOperation: vi.fn(async () => undefined as never),
+    });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.bootstrap).toBeDefined());
+
+    const outcome = await result.current.moveThread(ids.thread, ids.project, {
+      when: "stop-now",
+    });
+    expect(outcome).toEqual({
+      status: "refused",
+      message:
+        "The running turn cannot be identified from this window; move the thread after it finishes instead.",
+    });
+    expect(sentOperations(client)).not.toContain("cancel-provider-turn");
+    expect(sentCommands(client)).not.toContain("move-code-thread");
+  });
+
+  it("stops only the turn it started, then moves once that turn settles", async () => {
+    const nav = { value: { ...bootstrap(), runtime: busyRuntime() } };
+    const interrupted = deferred<void>();
+    async function* frames() {
+      yield {
+        threadId: ids.thread,
+        operationId: "70000000-0000-4000-8000-000000000043",
+        cursor: 1,
+        occurredAt: now,
+        event: {
+          kind: "operation-result",
+          result: {
+            kind: "provider-turn-state",
+            operationId: "70000000-0000-4000-8000-000000000043",
+            state: "running",
+          },
+        },
+      };
+      await interrupted.promise;
+      yield {
+        threadId: ids.thread,
+        operationId: "70000000-0000-4000-8000-000000000043",
+        cursor: 2,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "interrupted" },
+      };
+    }
+    const executeOperation = vi.fn(async (command: CodeOperationCommand) => ({
+      kind: "provider-turn-state" as const,
+      operationId: command.operationId,
+      state:
+        command.kind === "cancel-provider-turn" ? ("interrupted" as const) : ("running" as const),
+    }));
+    const client = fakeClient({
+      bootstrap: vi.fn(async () => nav.value),
+      executeOperation: executeOperation as never,
+      subscribeOperation: vi.fn(() => frames()) as never,
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+
+    let running: Promise<boolean> | undefined;
+    await act(async () => {
+      running = result.current.sendFollowUp("stop this turn");
+    });
+    await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+    const startedTurn = () =>
+      executeOperation.mock.calls.find(([command]) => command.kind === "start-provider-turn")?.[0]
+        .operationId;
+
+    const outcome = await result.current.moveThread(ids.thread, ids.project, {
+      when: "stop-now",
+    });
+    // The stop names the exact turn this window started, and the move waits
+    // for that turn to settle instead of racing its drain.
+    expect(outcome.status).toBe("deferred");
+    expect(executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "cancel-provider-turn",
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        turnOperationId: startedTurn(),
+      }),
+    );
+    expect(sentCommands(client)).not.toContain("move-code-thread");
+
+    interrupted.resolve();
+    await act(async () => {
+      await running;
+    });
+    nav.value = { ...bootstrap(), runtime: idleRuntime() };
+    await act(async () => {
+      await result.current.refreshNavigation();
+    });
+    await expect((outcome as { settled: Promise<unknown> }).settled).resolves.toEqual({
+      status: "ok",
+    });
+    expect(sentCommands(client).filter((kind) => kind === "move-code-thread")).toHaveLength(1);
+  });
+
+  it("answers a queued move as cancelled when a newer queued move replaces it", async () => {
+    const nav = { value: { ...bootstrap(), runtime: busyRuntime() } };
+    const client = fakeClient({ bootstrap: vi.fn(async () => nav.value) });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.bootstrap).toBeDefined());
+
+    const first = await result.current.moveThread(ids.thread, ids.project, {
+      when: "after-turn",
+    });
+    const second = await result.current.moveThread(ids.thread, ids.project, {
+      when: "after-turn",
+    });
+    expect(first.status).toBe("deferred");
+    expect(second.status).toBe("deferred");
+    await expect((first as { settled: Promise<unknown> }).settled).resolves.toEqual({
+      status: "cancelled",
+    });
+
+    nav.value = { ...bootstrap(), runtime: idleRuntime() };
+    await act(async () => {
+      await result.current.refreshNavigation();
+    });
+    await expect((second as { settled: Promise<unknown> }).settled).resolves.toEqual({
+      status: "ok",
+    });
+    expect(sentCommands(client).filter((kind) => kind === "move-code-thread")).toHaveLength(1);
+  });
+
+  it("moves an idle thread immediately", async () => {
+    const client = fakeClient();
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.bootstrap).toBeDefined());
+
+    const outcome = await result.current.moveThread(ids.thread, ids.project);
+    expect(outcome.status).toBe("ok");
+    expect(sentCommands(client)).toContain("move-code-thread");
+  });
+
+  it("carries the updated thread version into a sequential done-when save right after saving coordinator bounds", async () => {
+    const initial = { ...thread(1), coordinator: true as const };
+    let currentVersion = 1;
+    const seen: Array<{ readonly kind: string; readonly expectedVersion?: number }> = [];
+    const client = fakeClient({
+      bootstrap: vi.fn(async () => ({ ...bootstrap(), threads: [initial] })),
+      execute: vi.fn(async (command: CodeCommand) => {
+        if (
+          command.kind === "set-code-thread-coordinator-bounds" ||
+          command.kind === "set-code-thread-coordinator-done-when"
+        ) {
+          seen.push({ kind: command.kind, expectedVersion: command.expectedVersion });
+          expect(command.expectedVersion).toBe(currentVersion);
+          currentVersion += 1;
+          return {
+            kind: "thread-updated",
+            thread: { ...initial, version: currentVersion },
+          } as CodeCommandResult;
+        }
+        throw new Error(`Unexpected command ${command.kind}`);
+      }),
+    });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    // Invoke both saves sequentially in one async block without awaiting a React render in between.
+    await act(async () => {
+      const boundsOutcome = await result.current.setThreadCoordinatorBounds(ids.thread, {
+        rounds: 4,
+      });
+      expect(boundsOutcome).toEqual({ status: "ok" });
+      const doneWhenOutcome = await result.current.setThreadCoordinatorDoneWhen(ids.thread, {
+        items: [
+          {
+            kind: "pull-request-merged",
+            repositoryOwner: "Ogard-Labs",
+            repositoryName: "octant",
+            number: 42,
+          },
+        ],
+      });
+      expect(doneWhenOutcome).toEqual({ status: "ok" });
+    });
+
+    expect(seen).toEqual([
+      { kind: "set-code-thread-coordinator-bounds", expectedVersion: 1 },
+      { kind: "set-code-thread-coordinator-done-when", expectedVersion: 2 },
+    ]);
+  });
+});

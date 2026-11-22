@@ -20,6 +20,7 @@ import {
 import type { KeyboardEvent, ReactNode } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
+import { PaneBar } from "../shell/PaneBar";
 import { useDockBarControls, type DockBarItem } from "../shell/dockBarControls";
 import type { DeviceChoice } from "./deviceModel";
 
@@ -97,6 +98,9 @@ export function DeviceToolbar(props: {
       id: "state",
       text: props.os === undefined ? props.state : `${props.os} · ${props.state}`,
       live: true,
+      // The device's live state is the tool's must-read cue: it folds last,
+      // and into the More menu's first row with its badge.
+      cue: true,
       ...(switchable ? { dot: props.dot } : {}),
     },
   ];
@@ -164,18 +168,22 @@ export function DeviceToolbar(props: {
   const hosted = useDockBarControls(items);
   if (hosted !== undefined) return null;
   return (
-    <div
-      aria-label={`${props.label} controls`}
+    <PaneBar
       className="device-toolbar"
+      lead={
+        <>
+          <DeviceSwitcher {...props} />
+          <span className="device-toolbar__meta" aria-live="polite">
+            {props.os === undefined ? null : (
+              <span className="device-toolbar__os">{props.os} · </span>
+            )}
+            <span>{props.state}</span>
+          </span>
+        </>
+      }
       onKeyDown={moveAlongToolbar}
-      role="toolbar"
+      toolbarLabel={`${props.label} controls`}
     >
-      <DeviceSwitcher {...props} />
-      <span className="device-toolbar__meta" aria-live="polite">
-        {props.os === undefined ? null : <span className="device-toolbar__os">{props.os} · </span>}
-        <span>{props.state}</span>
-      </span>
-      <span className="device-toolbar__spacer" />
       {props.viewOnly === undefined ? null : (
         <OctantButton
           className="device-chip"
@@ -231,7 +239,7 @@ export function DeviceToolbar(props: {
           value=""
         />
       )}
-    </div>
+    </PaneBar>
   );
 }
 
@@ -373,7 +381,7 @@ export function deviceStateWord(state: DeviceChoice["state"]): string {
  * Arrow keys move between the toolbar's controls, as a toolbar should; Tab
  * still leaves it. Disabled controls are skipped.
  */
-function moveAlongToolbar(event: KeyboardEvent<HTMLDivElement>) {
+function moveAlongToolbar(event: KeyboardEvent<HTMLElement>) {
   const forward = event.key === "ArrowRight";
   if (!forward && event.key !== "ArrowLeft" && event.key !== "Home" && event.key !== "End") return;
   const controls = [...event.currentTarget.querySelectorAll("button")].filter(

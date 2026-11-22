@@ -297,7 +297,12 @@ export interface DesktopLeaseReconciliation {
 
 export interface DesktopLeaseService {
   /** Host-only preview admission. It conveys no caller-controlled socket or process access. */
-  readonly previewTarget: (caller: DesktopLeaseCaller & { readonly leaseId: DesktopLeaseId }) =>
+  readonly previewTarget: (
+    caller: DesktopLeaseCaller & {
+      readonly leaseId: DesktopLeaseId;
+      readonly personPairedDevice?: boolean;
+    },
+  ) =>
     | {
         readonly lease: DesktopLease;
         readonly handle: DesktopHandle;
@@ -336,6 +341,7 @@ export interface DesktopLeaseService {
    */
   readonly recipeMachines: (input: {
     readonly actor: EventActor;
+    readonly personPairedDevice?: boolean;
     readonly providerId: DesktopProviderId;
     readonly placementId: DesktopPlacementId;
   }) => Promise<
@@ -426,19 +432,23 @@ export interface DesktopLeaseService {
   /** Ends leases whose clock, thread, recipe, provider, or setting ended them; retries failed releases. */
   readonly sweep: () => Promise<void>;
   /**
-   * This month's billed desktop spend and the cap. Only a person at a local
-   * window reads it, as only they set the cap.
+   * This month's billed desktop spend and the cap. Only the host's own person
+   * reads it, at a local window or on a device they paired, as only they set
+   * the cap.
    */
   readonly spend: (input: {
     readonly actor: EventActor;
+    readonly personPairedDevice?: boolean;
   }) => { readonly status: "spend"; readonly summary: DesktopSpendSummary } | DesktopLeaseRefusal;
   /**
-   * A person at a local window setting the monthly cap, or clearing it, which
-   * turns billed desktops off. Every other actor is refused before anything
-   * is journaled, an agent in any posture included.
+   * The host's own person setting the monthly cap, or clearing it, which turns
+   * billed desktops off, at a local window or on a device they paired,
+   * journaled as that device. Every other actor is refused before anything is
+   * journaled, an agent in any posture and a hub-introduced device included.
    */
   readonly setSpendCap: (input: {
     readonly actor: EventActor;
+    readonly personPairedDevice?: boolean;
     readonly monthlyCapUsdCents: number | undefined;
   }) => { readonly status: "spend"; readonly summary: DesktopSpendSummary } | DesktopLeaseRefusal;
   /**
@@ -1998,7 +2008,8 @@ export function createDesktopLeaseService(
   }
 
   const recipeMachines: DesktopLeaseService["recipeMachines"] = async (input) => {
-    if (input.actor.kind !== "local-user") return refused("not-permitted");
+    if (!desktopLeaseSettingsChangeAllowed(input.actor.kind, input.personPairedDevice === true))
+      return refused("not-permitted");
     // Only a provider offered for leasing now, on a placement that chooses a
     // machine, is asked: the same list a recipe may name.
     const loaded = registered(String(input.providerId));
@@ -2293,15 +2304,20 @@ export function createDesktopLeaseService(
         String(credentialRef),
     );
 
-  const spend: DesktopLeaseService["spend"] = ({ actor }) =>
-    desktopSpendCapChangeAllowed(actor.kind)
+  const spend: DesktopLeaseService["spend"] = ({ actor, personPairedDevice }) =>
+    desktopSpendCapChangeAllowed(actor.kind, personPairedDevice === true)
       ? { status: "spend", summary: spendSummary() }
       : refused("spend-cap-local-only");
 
-  const setSpendCap: DesktopLeaseService["setSpendCap"] = ({ actor, monthlyCapUsdCents }) => {
-    // Checked before anything is journaled: no agent, device, or system
-    // actor moves the cap, whichever way.
-    if (!desktopSpendCapChangeAllowed(actor.kind)) return refused("spend-cap-local-only");
+  const setSpendCap: DesktopLeaseService["setSpendCap"] = ({
+    actor,
+    personPairedDevice,
+    monthlyCapUsdCents,
+  }) => {
+    // Checked before anything is journaled: no agent, hub-introduced device,
+    // or system actor moves the cap, whichever way.
+    if (!desktopSpendCapChangeAllowed(actor.kind, personPairedDevice === true))
+      return refused("spend-cap-local-only");
     const previous = projection.spend().monthlyCapUsdCents;
     if (previous !== monthlyCapUsdCents) {
       const changed: DesktopSpendCapChanged = {
@@ -2347,7 +2363,11 @@ export function createDesktopLeaseService(
   return {
     start,
     previewTarget: (caller) => {
-      if (caller.actor.kind !== "local-user" || caller.owner.mode !== "code") return undefined;
+      if (
+        (caller.actor.kind !== "local-user" && caller.personPairedDevice !== true) ||
+        caller.owner.mode !== "code"
+      )
+        return undefined;
       const current = admitOperating(caller);
       if (
         current.status === "refused" ||

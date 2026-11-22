@@ -46,6 +46,12 @@ export function appToolThreadLevel(
   };
 }
 
+/** The capabilities that decide what a thread gets of Octant's tools. */
+export type AppToolCapabilities = Pick<
+  ProviderObservedState["capabilities"],
+  "appManagedTools" | "appManagedToolsAtFullAccess"
+>;
+
 /**
  * What one thread gets of Octant's tools from what its runtime reports.
  * `mixed` exists only at Full access: the runtime could not prove Octant's
@@ -55,10 +61,7 @@ export function appToolThreadLevel(
  * guarded levels are, so a runtime that proves exclusivity there keeps it.
  */
 export function threadAppToolSupport(
-  capabilities: Pick<
-    ProviderObservedState["capabilities"],
-    "appManagedTools" | "appManagedToolsAtFullAccess"
-  >,
+  capabilities: AppToolCapabilities,
   level: AppToolThreadLevel,
 ): ProviderCapabilitySupport | "mixed" {
   if (
@@ -79,10 +82,7 @@ export function threadAppToolSupport(
 export function browserToolTransport(
   observed:
     | (Pick<ProviderObservedState, "verifiedToolModelIds"> & {
-        readonly capabilities: Pick<
-          ProviderObservedState["capabilities"],
-          "appManagedTools" | "appManagedToolsAtFullAccess"
-        >;
+        readonly capabilities: AppToolCapabilities;
       })
     | undefined,
   modelId: string,
@@ -92,6 +92,11 @@ export function browserToolTransport(
   return (
     observed.capabilities.appManagedTools === "supported" ||
     observed.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) === true ||
-    (level !== undefined && threadAppToolSupport(observed.capabilities, level) === "mixed")
+    (level !== undefined && carriesThreadTools(threadAppToolSupport(observed.capabilities, level)))
   );
+}
+
+/** Whether a thread's tool support lets Octant's tools reach it, labelled or not. */
+export function carriesThreadTools(support: ProviderCapabilitySupport | "mixed"): boolean {
+  return support === "supported" || support === "mixed";
 }

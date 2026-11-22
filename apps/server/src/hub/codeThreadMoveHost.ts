@@ -84,6 +84,11 @@ export interface CodeThreadMoveHostOptions {
   readonly readThread: (threadId: CodeThreadId) => CodeThread | undefined;
   /** Whether a turn runs or the thread waits on the person. */
   readonly isBusy: (threadId: CodeThreadId) => boolean;
+  /**
+   * Whether a peer delegated the thread to this host. A delegated thread stays
+   * where the delegating member's saved reference finds it.
+   */
+  readonly isDelegated: (threadId: CodeThreadId) => boolean;
   /** The folder the thread's checkout is, resolved under the host's own scope. */
   readonly checkoutRoot: (threadId: CodeThreadId) => Promise<string | undefined>;
   /** Whether the checkout is a managed worktree this host made for the thread. */
@@ -150,8 +155,7 @@ export function createCodeThreadMoveHost(options: CodeThreadMoveHostOptions): {
         status: "found",
         title: code.title,
         busy: options.isBusy(code.id),
-        // Delegation between computers carries Work threads only.
-        delegated: false,
+        delegated: options.isDelegated(code.id),
         repositoryRemotes: root === undefined ? [] : await repositoryRemotes(root),
       };
     },

@@ -1,4 +1,8 @@
-import { ServerProjectPreviewTunnel } from "./ServerProjectPreviewTunnel";
+import {
+  ServerProjectPreviewTunnel,
+  type ServerProjectRelayedPreviewOpener,
+} from "./ServerProjectPreviewTunnel";
+import { ServerProjectPortForward } from "./ServerProjectPortForward";
 import {
   CLOUD_MACHINE_SUSPENDED_NOTICE,
   CloudMachinesSettings,
@@ -40,6 +44,8 @@ export interface ServerProjectsSettingsProps {
         | "command"
         | "previewRead"
         | "previewCommand"
+        | "forwardRead"
+        | "forwardCommand"
         | "cloudMachinesRead"
         | "cloudMachinesCommand"
       >
@@ -53,6 +59,8 @@ export interface ServerProjectsSettingsProps {
   readonly codeProjectId?: ProjectId | undefined;
   readonly workProjectId?: ProjectId | undefined;
   readonly onOpenServerProject?: (project: ServerProject) => void;
+  /** Opens a host-relayed server Project preview through the desktop forwarder. */
+  readonly onOpenRelayedPreview?: ServerProjectRelayedPreviewOpener;
 }
 
 export const SERVER_PROJECTS_INTRO =
@@ -72,6 +80,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | undefined>(undefined);
+  const [notice, setNotice] = useState<string | undefined>(undefined);
   const [actionProblem, setActionProblem] = useState<string | undefined>(undefined);
   const [actionsChanged, setActionsChanged] = useState(false);
   const [name, setName] = useState("");
@@ -141,12 +150,14 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
     const actionSave = command.kind === "set-server-project-actions";
     const reportProblem = actionSave ? setActionProblem : setProblem;
     reportProblem(undefined);
+    if (!actionSave) setNotice(undefined);
     if (actionSave) setActionsChanged(false);
     setBusy(true);
     try {
       const result = await client.command(command);
       if (result.kind === "server-projects-updated") {
         setView(result.view);
+        if (!actionSave) setNotice(result.notice);
         setEditingActions((current) =>
           result.view.projects.some((project) => String(project.id) === current)
             ? current
@@ -221,7 +232,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
     <div className="shield-servers" data-setting-id="server-projects" ref={root} tabIndex={-1}>
       <SettingsPanel
         collapse={{
-          open: view.projects.length > 0,
+          open: view.projects.length > 0 || notice !== undefined,
           summary:
             view.projects.length === 0
               ? "No folders on a server are bound"
@@ -232,6 +243,9 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
         description={SERVER_PROJECTS_INTRO}
         title="Projects on your servers"
       >
+        <div aria-live="polite">
+          {notice === undefined ? null : <OctantAlert tone="warning">{notice}</OctantAlert>}
+        </div>
         {view.projects.length === 0 ? (
           <p className="shield-servers__empty">No folders on a server are bound.</p>
         ) : (
@@ -413,7 +427,14 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
                     ) : null}
                   </div>
                 )}
-                <ServerProjectPreviewTunnel client={client} project={project} />
+                <ServerProjectPreviewTunnel
+                  client={client}
+                  project={project}
+                  {...(props.onOpenRelayedPreview === undefined
+                    ? {}
+                    : { onOpenRelayedPreview: props.onOpenRelayedPreview })}
+                />
+                <ServerProjectPortForward client={client} project={project} />
               </li>
             ))}
           </ul>
@@ -536,11 +557,14 @@ export function ServerAccessSettings(props: {
   readonly codeProjectId?: ProjectId | undefined;
   readonly workProjectId?: ProjectId | undefined;
   readonly onOpenServerProject?: (project: ServerProject) => void;
+  readonly onOpenRelayedPreview?: ServerProjectRelayedPreviewOpener;
   readonly servers: ShieldServersClient | undefined;
   readonly projects: ServerProjectsSettingsProps["client"];
   readonly focusedSetting?: string | undefined;
   /** Project names by id, for the registry's Project picker. */
   readonly projectNames: ReadonlyMap<string, string>;
+  /** Opens the guide to putting a computer on Tailscale or a private network. */
+  readonly onOpenPrivateNetworkGuide?: (() => void) | undefined;
 }) {
   const { servers } = props;
   const [registryRevision, setRegistryRevision] = useState(0);
@@ -555,6 +579,7 @@ export function ServerAccessSettings(props: {
               if (result.kind === "shield-servers-updated") setRegistryRevision((n) => n + 1);
               return result;
             },
+            memberInstall: (command, signal) => servers.memberInstall(command, signal),
           },
     [servers],
   );
@@ -563,6 +588,7 @@ export function ServerAccessSettings(props: {
       <ShieldServersSettings
         client={watched}
         focusedSetting={props.focusedSetting}
+        onOpenPrivateNetworkGuide={props.onOpenPrivateNetworkGuide}
         projectNames={props.projectNames}
       />
       <ServerProjectsSettings
@@ -571,6 +597,9 @@ export function ServerAccessSettings(props: {
         {...(props.onOpenServerProject === undefined
           ? {}
           : { onOpenServerProject: props.onOpenServerProject })}
+        {...(props.onOpenRelayedPreview === undefined
+          ? {}
+          : { onOpenRelayedPreview: props.onOpenRelayedPreview })}
         {...(props.terminalClient === undefined ? {} : { terminalClient: props.terminalClient })}
         {...(props.actionStoragePrefix === undefined
           ? {}

@@ -1,3 +1,8 @@
+import type {
+  DiscoveredProviderFolderId,
+  ImportProviderFoldersResult,
+  ProviderFolderScanResult,
+} from "@octant/contracts/provider-folder-scan";
 import type { KeyProviderDriverKinds, PermissionMode } from "@octant/contracts/providers";
 import type { DesignSystemChoice } from "@octant/contracts/design-systems";
 import type { AutoReviewer } from "@octant/contracts/shield";
@@ -17,6 +22,7 @@ import {
   type CodeNewThreadWorkspace,
   type CodeProjectAgentDefaultBranchPush,
   type CodeProjectAgentMerge,
+  type CodeProjectDelegatedCode,
   type CodeProjectOwnToolchain,
   type CodeProjectAgentPullRequestComments,
   type CodeProjectPullRequestBackgroundRefresh,
@@ -314,7 +320,6 @@ export function useProjectController(options: ProjectControllerOptions) {
         : { fullAccessSandbox: project.defaultFullAccessSandbox }),
     };
     if (project.type === "work") {
-      if (permissionMode === "plan") return false;
       return execute(
         {
           kind: "change-work-project-permission-mode",
@@ -423,6 +428,31 @@ export function useProjectController(options: ProjectControllerOptions) {
       agentMerge === "enabled"
         ? "Agents may now merge this Project's pull requests."
         : "Agents no longer merge this Project's pull requests without asking.",
+    );
+  }
+
+  /**
+   * Mark a Code Project as taking delegated Code work from other hub members,
+   * with the delivery target the person confirmed, or take the mark off. The
+   * server accepts it only from this host's person.
+   */
+  async function setCodeDelegatedCode(
+    projectId: ProjectId,
+    delegatedCode: CodeProjectDelegatedCode | undefined,
+  ): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project?.type !== "code") return false;
+    if (delegatedCode === undefined && project.delegatedCode === undefined) return true;
+    return execute(
+      {
+        kind: "change-code-project-delegated-code",
+        projectId,
+        expectedVersion: project.version,
+        ...(delegatedCode === undefined ? {} : { delegatedCode }),
+      },
+      delegatedCode === undefined
+        ? "This Project no longer takes delegated Code work."
+        : "This Project now takes delegated Code work.",
     );
   }
 
@@ -1085,6 +1115,29 @@ export function useProjectController(options: ProjectControllerOptions) {
     [state.availability],
   );
 
+  const scanProviderFolders = useCallback(
+    (signal?: AbortSignal): Promise<ProviderFolderScanResult> | undefined =>
+      fallbackClient.scanProviderFolders?.(signal),
+    [fallbackClient],
+  );
+
+  const importProviderFolders = useCallback(
+    async (
+      folderIds: readonly [DiscoveredProviderFolderId, ...DiscoveredProviderFolderId[]],
+    ): Promise<ImportProviderFoldersResult | undefined> => {
+      if (fallbackClient.importProviderFolders === undefined) return undefined;
+      const result = await fallbackClient.importProviderFolders({ folderIds });
+      if (
+        result.status === "completed" &&
+        result.results.some((item) => item.status === "created")
+      ) {
+        await load("retry");
+      }
+      return result;
+    },
+    [fallbackClient, load],
+  );
+
   return {
     activeProject,
     allProjects,
@@ -1095,6 +1148,8 @@ export function useProjectController(options: ProjectControllerOptions) {
     client: fallbackClient,
     create,
     ensureDefault,
+    importProviderFolders,
+    scanProviderFolders,
     createMemory,
     clearMemory,
     errorMessage,
@@ -1124,6 +1179,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     setCodeAutoReviewer,
     setCodePullRequestBackgroundRefresh,
     setCodeAgentMerge,
+    setCodeDelegatedCode,
     setCodeOwnToolchain,
     setCodeAgentPullRequestComments,
     setCodeAgentDefaultBranchPush,

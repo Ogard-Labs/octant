@@ -397,7 +397,12 @@ export function mapOpenCodeEvent(
       // is all input, cached or not, so context math and the cache hit rate
       // never depend on whether a model caches.
       const allInputTokens = inputTokens + cacheReadInputTokens + cacheWriteInputTokens;
-      if (!Number.isSafeInteger(allInputTokens)) {
+      // OpenCode also reports output apart from reasoning (it prices the two
+      // separately), while `outputTokens` counts thinking and `reasoningTokens`
+      // is its part, as every other runtime reports them; a spend ceiling sums
+      // input and output only.
+      const allOutputTokens = outputTokens + reasoningTokens;
+      if (!Number.isSafeInteger(allInputTokens) || !Number.isSafeInteger(allOutputTokens)) {
         return [
           mappedEvent(context, {
             kind: "failed",
@@ -409,7 +414,7 @@ export function mapOpenCodeEvent(
         mappedEvent(context, {
           kind: "usage",
           inputTokens: allInputTokens,
-          outputTokens,
+          outputTokens: allOutputTokens,
           reasoningTokens,
           cacheReadInputTokens,
           cacheWriteInputTokens,
@@ -481,6 +486,10 @@ export function mapOpenCodeEvent(
     case "permission.asked": {
       const requestId = normalizeText(event.properties.id);
       const action = normalizeText(event.properties.permission);
+      const toolCallId =
+        event.properties.tool === undefined
+          ? undefined
+          : normalizeText(event.properties.tool.callID);
       return requestId === undefined || action === undefined
         ? []
         : [
@@ -489,6 +498,7 @@ export function mapOpenCodeEvent(
               requestId,
               action,
               description: "Approval is required for this action.",
+              ...(toolCallId === undefined ? {} : { toolCallId }),
             }),
           ];
     }

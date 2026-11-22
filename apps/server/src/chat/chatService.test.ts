@@ -1,4 +1,25 @@
 import { decodeChatThreadId, decodeEventActor } from "@octant/contracts";
+import {
+  decodeImageGenerationScopeId,
+  decodeProviderInstance,
+  decodeServiceOffersResponse,
+  type DeviceId,
+  type StableHostId,
+  type RemoteSessionId,
+  type ServiceOffer,
+} from "@octant/contracts";
+import { listEligibleImageProfiles } from "@octant/domain";
+import { createThreadImageAgentTools, IMAGE_TOOL_NAME } from "../image/imageAgentTools";
+import { ImageGenerationOfferService } from "../image/imageGenerationOfferService";
+import { imageOfferDecisionRules } from "../image/imageOfferDecisionRules";
+import type { ServiceOfferAnswer } from "../offers/serviceOfferDecision";
+import { createServiceOfferRouteHandler } from "../offers/serviceOfferRoutes";
+import { ServiceOfferService } from "../offers/serviceOfferService";
+import { transcriptionDecision } from "../speech/transcriptionTool";
+import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { createRemoteDevicePrincipal } from "../clientPrincipal";
+import { createChatRouteHandler } from "../chatRoutes";
 import { createNativeHarnessComposition } from "../harness/nativeHarnessComposition";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { ToolActionAuthority } from "@octant/contracts";
@@ -36,6 +57,8 @@ import {
   symlinkSync,
   writeFileSync,
   readFileSync,
+  readdirSync,
+  statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -158,10 +181,48 @@ import type { RecordExternalContentIngestion } from "../context/inheritedExterna
 import { createFollowUp } from "../followUps/followUpSuggestionCreation";
 import { rebuildProjection } from "../persistence/projection";
 import { erasePurgedThread } from "../persistence/threadPurge";
+import { buildDocxFixture } from "../preview/previewTestFixtures";
+import { MAX_CHAT_ATTACHED_TEXT_CHARACTERS } from "./chatAttachedFiles";
 import { ChatAttachmentStore } from "./chatAttachmentStore";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 
 const directories: Array<string> = [];
 const now = "2026-07-19T22:10:00.000Z";
+const ANTIGRAVITY_UNATTENDED_REFUSAL =
+  "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Choose a provider that uses a Gemini API key, such as Gemini CLI with an API key.";
+/**
+ * Answers each question a parked turn still asks, as its person would, and
+ * waits until the turn has completed, so a test leaves no turn running.
+ */
+async function finishParkedTurn(
+  service: { execute: ChatService["execute"]; read: ChatService["read"] },
+  threadId: ChatThreadId,
+): Promise<void> {
+  const window = decodeWindowId("84000000-0000-4000-8000-0000000000ff");
+  await until(() => {
+    const view = service.read(threadId);
+    const turn = view.turns.at(-1);
+    const attempt = turn?.attempts.at(-1);
+    const question = attempt?.pendingQuestion;
+    if (turn !== undefined && attempt !== undefined && question !== undefined)
+      void service
+        .execute(
+          {
+            kind: "answer-chat-turn-question",
+            threadId,
+            expectedVersion: view.thread.version,
+            turnId: turn.id,
+            attemptId: attempt.id,
+            requestId: question.requestId,
+            answer: question.options[0]?.label ?? "Yes",
+          },
+          { windowId: window },
+        )
+        .catch(() => undefined);
+    return attempt?.outcome === "completed";
+  });
+}
+
 const ids = {
   actor: "84000000-0000-4000-8000-000000000001",
   correlation: "84000000-0000-4000-8000-000000000002",
@@ -255,6 +316,7 @@ function searxngResearchProbe(): ProviderProbeResult {
 }
 
 function openFixture(options?: {
+  readonly toolRequest?: { readonly name: string; readonly inputJson: string };
   readonly responseFragments?: ReadonlyArray<string>;
   readonly verifyModelToolsOnFirstUse?: ChatServiceOptions["verifyModelToolsOnFirstUse"];
   readonly inputTransfer?: (directory: string) => Pick<ConversationInputTransfer, "prepare">;
@@ -278,6 +340,8 @@ function openFixture(options?: {
   readonly contextFacts?: ProviderDriver["contextFacts"];
   readonly seedSettings?: boolean;
   readonly providerEnabled?: boolean;
+  /** The driver kind each provider instance reports; absent reads as an OpenAI-compatible endpoint. */
+  readonly driverKindFor?: (providerInstanceId: string) => string;
   /** Per-instance enablement; overrides `providerEnabled` when provided. */
   readonly providerEnabledFor?: (providerInstanceId: string) => boolean;
   readonly missingProviderInstanceIds?: ReadonlyArray<string>;
@@ -319,6 +383,9 @@ function openFixture(options?: {
   ) => Promise<import("./research/researchRouter").ProviderNativeResearchResultSet>;
   readonly resolveAppManagedTools?: (input: {
     readonly windowId: WindowId;
+    readonly thread: ChatThread;
+  }) => import("../providers/appManagedToolSet").AppManagedToolSet | undefined;
+  readonly resolveHostRunTools?: (input: {
     readonly thread: ChatThread;
   }) => import("../providers/appManagedToolSet").AppManagedToolSet | undefined;
   readonly resolveComputerUseTools?: (input: {
@@ -480,7 +547,7 @@ function openFixture(options?: {
       return {
         id: decodeProviderInstanceId(id),
         displayName: "Fixture provider",
-        driverKind: "openai-compatible",
+        driverKind: options?.driverKindFor?.(id) ?? "openai-compatible",
         enabled: options?.providerEnabledFor?.(id) ?? options?.providerEnabled ?? true,
         configuration: {},
         version: 1,
@@ -614,6 +681,15 @@ function openFixture(options?: {
     }) =>
       Effect.gen(function* () {
         sentTurns.push(input);
+        if (options?.toolRequest !== undefined) {
+          yield* Queue.offer(queue, {
+            kind: "tool-request",
+            sessionId: input.sessionId,
+            requestId: "fixture-tool",
+            toolName: options.toolRequest.name,
+            inputJson: options.toolRequest.inputJson,
+          } as never);
+        }
         const planned = options?.turnOutcome ?? "completed";
         const outcome = typeof planned === "function" ? planned(sentTurns.length - 1) : planned;
         if (outcome === "waiting") {
@@ -797,6 +873,9 @@ function openFixture(options?: {
     ...(options?.resolveComputerUseTools === undefined
       ? {}
       : { resolveComputerUseTools: options.resolveComputerUseTools }),
+    ...(options?.resolveHostRunTools === undefined
+      ? {}
+      : { resolveHostRunTools: options.resolveHostRunTools }),
     ...(options?.resolveExtensionSelectionContext === undefined
       ? {}
       : { resolveExtensionSelectionContext: options.resolveExtensionSelectionContext }),
@@ -1113,6 +1192,57 @@ function questionDriver(
   } as unknown as ProviderDriver;
 }
 
+/** Asks a plain question, then one that wants a secret, and finishes once both are answered. */
+function secretQuestionDriver(
+  answered: Array<{ requestId: string; answer: string }>,
+): ProviderDriver {
+  return {
+    acquire: () =>
+      Effect.sync(() => {
+        const queue = Effect.runSync(Queue.unbounded<never>());
+        let sessionId = "";
+        const emit = (event: Record<string, unknown>) =>
+          Queue.offer(queue, { sessionId, ...event } as never);
+        return {
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
+          start: (input: { readonly sessionId: string }) =>
+            Effect.sync(() => {
+              sessionId = input.sessionId;
+              return { sessionId: input.sessionId };
+            }),
+          send: () =>
+            Effect.gen(function* () {
+              yield* emit({ kind: "text-delta", text: "Connecting." });
+              yield* emit({
+                kind: "user-input-request",
+                requestId: "q-host",
+                prompt: "Which host?",
+                options: [],
+              });
+              yield* emit({
+                kind: "user-input-request",
+                requestId: "q-secret",
+                prompt: "Database credential?",
+                options: [],
+                secret: true,
+              });
+            }),
+          answerUserInput: (input: { readonly requestId: string; readonly answer: string }) =>
+            Effect.gen(function* () {
+              answered.push({ requestId: input.requestId, answer: input.answer });
+              if (answered.length < 2) return;
+              yield* emit({ kind: "text-delta", text: " Connected." });
+              yield* emit({ kind: "completed" });
+            }),
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerTool: () => Effect.void,
+        };
+      }),
+  } as unknown as ProviderDriver;
+}
+
 /**
  * The conversation a snapshot's plan says its turn sends, keyed by the opening
  * of the material — which is exactly how the manifest labels an entry.
@@ -1338,6 +1468,133 @@ function providerSearchComposition(tainted: ReadonlySet<string>) {
 }
 
 describe("ChatService", () => {
+  it("sends no turn nobody sent that would fall back onto Google Antigravity, and takes the person's own", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000012");
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    let fallbackProbes = 0;
+    const { service } = openFixture({
+      probe: probeFixture({ models: [] }),
+      probeFor: (providerInstanceId) => {
+        if (providerInstanceId !== fallbackProvider) return undefined;
+        fallbackProbes += 1;
+        return probeFixture({ instanceId: decodeProviderInstanceId(fallbackProvider) });
+      },
+      driverKindFor: (providerInstanceId) =>
+        providerInstanceId === fallbackProvider ? "antigravity" : "openai-compatible",
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Fallback onto Antigravity",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const send = (context: Parameters<typeof service.execute>[1]) =>
+      service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Keep going.",
+        },
+        context,
+      );
+
+    // The thread's own provider is not Antigravity; the turn would run there
+    // only through the fallback, which is what the check reads.
+    await expect(send(undefined)).rejects.toMatchObject({
+      failure: { category: "unauthorized", message: ANTIGRAVITY_UNATTENDED_REFUSAL },
+    });
+    expect(service.read(created.thread.id).turns).toHaveLength(0);
+    // Refused from the fallback's declaration, before it is probed, so no
+    // Antigravity session opens for a turn that will not run.
+    expect(fallbackProbes).toBe(0);
+    // An outside agent's send carries its grant's scope as a window, yet is
+    // never the person: its grant checked only the thread's own provider.
+    await expect(send({ windowId: window, fromOutsideAgent: true })).rejects.toMatchObject({
+      failure: {
+        category: "unauthorized",
+        message:
+          "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or use a provider that uses a Gemini API key.",
+      },
+    });
+    expect(service.read(created.thread.id).turns).toHaveLength(0);
+
+    // The person's own send their fallback routes there runs (maintainer
+    // decision, 2026-11-21).
+    await expect(send({ windowId: window })).resolves.toMatchObject({ kind: "turn-created" });
+    expect(service.read(created.thread.id).turns[0]?.attempts[0]?.providerInstanceId).toBe(
+      fallbackProvider,
+    );
+  });
+
+  it("still refuses a turn nobody sent on a thread whose own Google Antigravity provider is turned off", async () => {
+    let on = true;
+    const { service, fakeDriver } = openFixture({
+      driverKindFor: () => "antigravity",
+      providerEnabledFor: () => on,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Antigravity, turned off",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    on = false;
+
+    // Only a pool candidate or the fallback is skipped while off; the
+    // thread's own provider is judged by what it declares, on or off.
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Hello",
+      }),
+    ).rejects.toMatchObject({
+      failure: { category: "unauthorized", message: ANTIGRAVITY_UNATTENDED_REFUSAL },
+    });
+    expect(fakeDriver.sentTurns).toHaveLength(0);
+  });
+
+  it("sends no turn nobody sent on a thread running on Google Antigravity, and takes the person's own", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000011");
+    const { service, fakeDriver } = openFixture({ driverKindFor: () => "antigravity" });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Antigravity",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const send = (context: Parameters<typeof service.execute>[1]) =>
+      service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Hello",
+        },
+        context,
+      );
+
+    // The host's own send (a restart continuation, a benchmark run), the
+    // routine scope, and another thread's message are each refused.
+    for (const context of [
+      undefined,
+      { windowId: ROUTINE_HOST_SCOPE_ID },
+      { windowId: window, coordinationDepth: 1 },
+    ])
+      await expect(send(context)).rejects.toMatchObject({
+        failure: { category: "unauthorized", message: ANTIGRAVITY_UNATTENDED_REFUSAL },
+      });
+    expect(fakeDriver.sentTurns).toHaveLength(0);
+
+    await expect(send({ windowId: window })).resolves.toMatchObject({ kind: "turn-created" });
+  });
+
   it("checks the thread's model for tools by itself before each sent turn, and sends the turn when the check fails", async () => {
     const order: Array<string> = [];
     const verifyModelToolsOnFirstUse = vi.fn(async () => {
@@ -1394,6 +1651,138 @@ describe("ChatService", () => {
     );
     expect(JSON.stringify(fakeDriver.sentTurns[0]?.context)).not.toContain("octant_browser");
   });
+  it("lets the paired browser that started a Chat turn see and cancel the image its model asks for", async () => {
+    const profile = decodeProviderInstance({
+      id: ids.provider,
+      displayName: "Image fixture",
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      driverKind: "openai-image",
+      configuration: {
+        kind: "openai-image-http",
+        modelAllowlist: ["fixture"],
+        defaultModel: "fixture",
+      },
+    });
+    const imageProfiles = {
+      listInstances: () => [profile],
+      readImageGenerationSettings: () => ({ customSources: [] }),
+    };
+    const waiting = new ServiceOfferService<ServiceOffer, ServiceOfferAnswer>(5, {
+      uuid: () => crypto.randomUUID(),
+      now: Date.now,
+    });
+    const offers = new ImageGenerationOfferService(waiting);
+    const unexpected = vi.fn(async (): Promise<never> => {
+      throw new Error("A cancelled offer cannot run an image job.");
+    });
+    const { service } = openFixture({
+      toolRequest: { name: IMAGE_TOOL_NAME, inputJson: JSON.stringify({ prompt: "A lighthouse" }) },
+      resolveAppManagedTools: ({ thread, windowId }) =>
+        createThreadImageAgentTools({
+          windowId,
+          threadKind: "chat-thread",
+          scopeId: decodeImageGenerationScopeId(thread.id),
+          offers,
+          kept: {
+            remembered: () => undefined,
+            forget: async () => undefined,
+            asksAgain: () => false,
+          },
+          jobs: {
+            enqueue: unexpected,
+            listByScope: () => [],
+            whenTerminal: unexpected,
+            readArtifact: unexpected,
+          },
+          listInstances: imageProfiles.listInstances,
+          readImageGenerationCustomSources: () => [],
+          readsImages: () => false,
+        }),
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Paired turn",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread");
+    const windowAuthorityStore = new WindowAuthorityStore();
+    const chat = createChatRouteHandler({ service, windowAuthorityStore });
+    const offerRoute = createServiceOfferRouteHandler({
+      offers: waiting,
+      rules: { ...imageOfferDecisionRules(imageProfiles), transcribe: transcriptionDecision },
+      authorizeScope: async (_scope, kind, id) =>
+        kind === "chat-thread" &&
+        service.read(decodeChatThreadId(id)).thread.lifecycle === "active",
+      listImageProfiles: () => listEligibleImageProfiles([profile]),
+      windowAuthorityStore,
+      now: Date.now,
+    });
+    const dispatch = createAuthenticatedProductDispatch({
+      dispatch: async (request) => (await chat(request)) ?? offerRoute(request),
+    });
+    const origin = "https://octant.example";
+    const first = crypto.randomUUID() as DeviceId;
+    const other = crypto.randomUUID() as DeviceId;
+    const send = (deviceId: DeviceId, path: string, body?: object) =>
+      dispatch({
+        principal: createRemoteDevicePrincipal({
+          deviceId,
+          hostId: ids.project as StableHostId,
+          sessionId: ids.memory as RemoteSessionId,
+          capabilityDigest: "b".repeat(64),
+          credentialGeneration: 1,
+          origin,
+          protocolVersion: 1,
+          admittedBy: "host-person",
+        }),
+        abortSignal: new AbortController().signal,
+        request: new Request(
+          origin + path,
+          body === undefined
+            ? {}
+            : {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(body),
+              },
+        ),
+      });
+    try {
+      const turn = send(first, "/api/chat/commands", {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Draw a lighthouse",
+      });
+      const list = async (device: DeviceId) =>
+        decodeServiceOffersResponse(
+          await (
+            await send(device, `/api/offers?threadKind=chat-thread&scopeId=${created.thread.id}`)
+          )?.json(),
+        ).offers;
+      await vi.waitFor(async () => expect(await list(first)).toHaveLength(1));
+      const [card] = await list(first);
+      expect(card).toMatchObject({ kind: "generate", prompt: "A lighthouse" });
+      expect(await list(other)).toEqual([]);
+      const decision = { offerId: card?.offerId, decision: "cancel" };
+      expect(await (await send(other, "/api/offers/decide", decision))?.json()).toEqual({
+        kind: "offer-gone",
+      });
+      expect(await (await send(first, "/api/offers/decide", decision))?.json()).toEqual({
+        kind: "offer-answered",
+      });
+      expect(await list(first)).toEqual([]);
+      expect((await turn)?.status).toBe(200);
+      expect(unexpected).not.toHaveBeenCalled();
+    } finally {
+      waiting.close();
+    }
+  });
+
   it("tells the model to deliver kept work as a Canvas only when Chat offers the Canvas tool", async () => {
     const window = decodeWindowId("84000000-0000-4000-8000-000000000013");
     const { service, fakeDriver } = openFixture({
@@ -1426,6 +1815,49 @@ describe("ChatService", () => {
     });
     expect(fakeDriver.sentTurns[1]?.tools.map(({ name }) => name)).not.toContain("octant_canvas");
     expect(JSON.stringify(fakeDriver.sentTurns[1]?.context)).not.toContain("octant_canvas");
+  });
+
+  it("gives a turn the host sends with no window the host-run Canvas, and none of the window's tools", async () => {
+    const windowTools = vi.fn(() => ({
+      definitions: [{ name: "octant_computer", inputSchema: { type: "object" } }],
+      execute: async () => ({ result: {} }),
+    }));
+    const hostRunTools = vi.fn(() => ({
+      definitions: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
+      execute: async () => ({ result: {} }),
+    }));
+    const { service, fakeDriver } = openFixture({
+      resolveAppManagedTools: windowTools,
+      resolveComputerUseTools: windowTools,
+      resolveHostRunTools: hostRunTools,
+    });
+    for (const hostRun of [true, false]) {
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: hostRun ? "Routine run" : "No window",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Write the weekly memo",
+        },
+        hostRun ? { hostRun: true } : {},
+      );
+    }
+    const toolNames = fakeDriver.sentTurns.map((turn) => turn.tools.map(({ name }) => name));
+    expect(toolNames[0]).toContain("octant_canvas");
+    expect(toolNames[0]).not.toContain("octant_computer");
+    expect(hostRunTools).toHaveBeenCalledTimes(1);
+    expect(hostRunTools).toHaveBeenCalledWith(
+      expect.objectContaining({ thread: expect.objectContaining({ title: "Routine run" }) }),
+    );
+    // A window-less send that is not the host's own takes nothing.
+    expect(toolNames[1]).not.toContain("octant_canvas");
+    expect(windowTools).not.toHaveBeenCalled();
   });
 
   it("offers Octant's tools only to a model the host verified, not one the driver's probe claims", async () => {
@@ -3260,6 +3692,417 @@ describe("ChatService", () => {
     expect(fileText?.text).toContain("```\nreplicas: 3\n\n```");
     // The file stays on the turn for the record.
     expect(service.read(created.thread.id).turns[0]?.attachmentIds).toEqual([upload.id]);
+  });
+
+  it("carries an earlier turn's attached text and document files when the host rebuilds conversation history", async () => {
+    const textOnly = probeFixture({
+      models: [
+        {
+          id: decodeProviderModelId("model-a"),
+          displayName: "Model A",
+          contextLimit: 200_000,
+          reasoning: "supported",
+          inputModalities: ["text"],
+          options: [],
+          source: "discovered",
+          verification: "verified",
+        },
+      ],
+    });
+    const { service, fakeDriver, contextHarness } = openFixture({ probe: textOnly });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Rebuilt history files",
+      projectId: ids.project,
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const yamlUpload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "deploy.yaml",
+      mediaType: "application/yaml",
+      bytes: new TextEncoder().encode("replicas: 3\n"),
+    });
+    const docxUpload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId("84000000-0000-4000-8000-000000000015"),
+      displayName: "notes.docx",
+      mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      bytes: new Uint8Array(buildDocxFixture(["Rollout checklist"])),
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Is this right?",
+      attachmentIds: [yamlUpload.id, docxUpload.id],
+    });
+
+    // Turn 2 rebuilds history on the host without a live provider session.
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Now bump replicas to 5.",
+    });
+    const rebuiltTurn = fakeDriver.sentTurns[1];
+    const priorUserBlock = (rebuiltTurn?.context ?? []).find(
+      (block) => block.kind === "user-message" && block.text.includes("Is this right?"),
+    );
+    expect(priorUserBlock?.text).toContain(
+      'The person attached a file, "deploy.yaml" (application/yaml). Its text follows',
+    );
+    expect(priorUserBlock?.text).toContain("replicas: 3");
+    expect(priorUserBlock?.text).toContain("Rollout checklist");
+    // The journaled context manifest label keeps only the person's words, not file contents.
+    const snapshot = contextHarness.inspect(
+      decodeContextSubjectRef({ aggregateType: "chat-thread", aggregateId: created.thread.id }),
+    );
+    const turnOneEntry = snapshot.next.manifest.entries.find(
+      (entry) =>
+        entry.category === "conversation" &&
+        entry.source.kind === "message" &&
+        entry.source.referenceId ===
+          String(service.read(created.thread.id).turns[0]?.userMessageRef.contentId),
+    );
+    expect(turnOneEntry?.label).toBe("Is this right?");
+  });
+
+  it("caps rebuilt history attached text at the character limit while prioritizing newer turns", async () => {
+    const textOnly = probeFixture({
+      models: [
+        {
+          id: decodeProviderModelId("model-a"),
+          displayName: "Model A",
+          contextLimit: 250_000,
+          reasoning: "supported",
+          inputModalities: ["text"],
+          options: [],
+          source: "discovered",
+          verification: "verified",
+        },
+      ],
+    });
+    const { service, fakeDriver } = openFixture({ probe: textOnly });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Bounded rebuilt files",
+      projectId: ids.project,
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const olderText = `OLDER-START-${"a".repeat(249_978)}-OLDER-END`;
+    const newerText = `NEWER-START-${"b".repeat(249_978)}-NEWER-END`;
+    expect(olderText.length).toBe(250_000);
+    expect(newerText.length).toBe(250_000);
+    const olderUpload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "older.log",
+      mediaType: "application/x-log",
+      bytes: new TextEncoder().encode(olderText),
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "First log",
+      attachmentIds: [olderUpload.id],
+    });
+    const newerUpload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId("84000000-0000-4000-8000-000000000016"),
+      displayName: "newer.log",
+      mediaType: "application/x-log",
+      bytes: new TextEncoder().encode(newerText),
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Second log",
+      attachmentIds: [newerUpload.id],
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Compare both",
+    });
+
+    const rebuiltContext = fakeDriver.sentTurns[2]?.context ?? [];
+    const firstHistory = rebuiltContext.find(
+      (block) => block.kind === "user-message" && block.text.includes("First log"),
+    );
+    const secondHistory = rebuiltContext.find(
+      (block) => block.kind === "user-message" && block.text.includes("Second log"),
+    );
+    expect(secondHistory?.text).toContain("NEWER-START-");
+    expect(secondHistory?.text).toContain("-NEWER-END");
+    expect(secondHistory?.text).not.toContain("stopped at a limit");
+    expect(firstHistory?.text).toContain("OLDER-START-");
+    expect(firstHistory?.text).toContain("stopped at a limit");
+    expect(firstHistory?.text).not.toContain("-OLDER-END");
+    // Combined file payload stays within the 400,000-character cap plus framing.
+    expect((firstHistory?.text.length ?? 0) + (secondHistory?.text.length ?? 0)).toBeLessThan(
+      MAX_CHAT_ATTACHED_TEXT_CHARACTERS + 2_000,
+    );
+  });
+
+  it("degrades cleanly when an earlier turn's attachment file is missing from storage during history rebuild", async () => {
+    const textOnly = probeFixture({
+      models: [
+        {
+          id: decodeProviderModelId("model-a"),
+          displayName: "Model A",
+          contextLimit: 200_000,
+          reasoning: "supported",
+          inputModalities: ["text"],
+          options: [],
+          source: "discovered",
+          verification: "verified",
+        },
+      ],
+    });
+    const { service, fakeDriver, attachmentStore } = openFixture({ probe: textOnly });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Missing file rebuild",
+      projectId: ids.project,
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const upload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "deploy.yaml",
+      mediaType: "application/yaml",
+      bytes: new TextEncoder().encode("replicas: 3\n"),
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Check this config",
+      attachmentIds: [upload.id],
+    });
+
+    // Remove the file from disk before Turn 2 rebuilds history.
+    await attachmentStore.remove(created.thread.id, upload.id);
+
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Follow up anyway",
+    });
+    const priorUserBlock = (fakeDriver.sentTurns[1]?.context ?? []).find(
+      (block) => block.kind === "user-message" && block.text.includes("Check this config"),
+    );
+    expect(priorUserBlock?.text).toBe("Check this config");
+  });
+
+  it("carries earlier attached text without duplicating the retried turn's own attachment on a host-rebuilt retry", async () => {
+    const textOnly = probeFixture({
+      models: [
+        {
+          id: decodeProviderModelId("model-a"),
+          displayName: "Model A",
+          contextLimit: 200_000,
+          reasoning: "supported",
+          inputModalities: ["text"],
+          options: [],
+          source: "discovered",
+          verification: "verified",
+        },
+      ],
+    });
+    const { service, fakeDriver } = openFixture({
+      probe: textOnly,
+      resumableHostConversation: true,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Retry attached files",
+      projectId: ids.project,
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const firstUpload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "first.yaml",
+      mediaType: "application/yaml",
+      bytes: new TextEncoder().encode("stage: first\n"),
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "First step",
+      attachmentIds: [firstUpload.id],
+    });
+    const secondUpload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId("84000000-0000-4000-8000-000000000017"),
+      displayName: "second.yaml",
+      mediaType: "application/yaml",
+      bytes: new TextEncoder().encode("stage: second\n"),
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Second step",
+      attachmentIds: [secondUpload.id],
+    });
+    const view = service.read(created.thread.id);
+    const secondTurn = view.turns[1];
+    const secondAttempt = secondTurn?.attempts[0];
+    if (secondTurn === undefined || secondAttempt === undefined) {
+      throw new Error("Expected second turn attempt.");
+    }
+    await service.execute({
+      kind: "retry-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: view.thread.version,
+      turnId: secondTurn.id,
+      attemptId: secondAttempt.id,
+    });
+
+    const retriedContext = fakeDriver.sentTurns[2]?.context ?? [];
+    const firstHistory = retriedContext.find(
+      (block) => block.kind === "user-message" && block.text.includes("First step"),
+    );
+    expect(firstHistory?.text).toContain("stage: first");
+    const secondFileBlocks = retriedContext.filter((block) => block.text.includes("stage: second"));
+    expect(secondFileBlocks).toHaveLength(1);
+  });
+
+  it("includes attached file text in requested compaction materials and carries the summary plus uncompacted attachments into later rebuilt turns", async () => {
+    const textOnly = probeFixture({
+      models: [
+        {
+          id: decodeProviderModelId("model-a"),
+          displayName: "Model A",
+          contextLimit: 8_000,
+          reasoning: "supported",
+          inputModalities: ["text"],
+          options: [],
+          source: "discovered",
+          verification: "verified",
+        },
+      ],
+    });
+    const { service, fakeDriver, contextHarness } = openFixture({ probe: textOnly });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Requested compaction attachments",
+      projectId: ids.project,
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const firstUpload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "deploy.yaml",
+      mediaType: "application/yaml",
+      bytes: new TextEncoder().encode(`replicas: 3\n${"# note ".repeat(600)}`),
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Review this deployment",
+      attachmentIds: [firstUpload.id],
+    });
+    const secondUpload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId("84000000-0000-4000-8000-000000000018"),
+      displayName: "scaling.yaml",
+      mediaType: "application/yaml",
+      bytes: new TextEncoder().encode(`maxReplicas: 10\n${"# scale ".repeat(600)}`),
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Add autoscaling",
+      attachmentIds: [secondUpload.id],
+    });
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Check readiness",
+    });
+
+    const subject = decodeContextSubjectRef({
+      aggregateType: "chat-thread",
+      aggregateId: created.thread.id,
+    });
+    const compactionConversation = await service.sessionCompactionConversationWithAttachments(
+      created.thread.id,
+    );
+    expect(compactionConversation[0]?.content).toContain(
+      'The person attached a file, "deploy.yaml" (application/yaml). Its text follows',
+    );
+    expect(compactionConversation[0]?.content).toContain("replicas: 3");
+
+    const compactionId = decodeContextCompactionId("84000000-0000-4000-8000-000000000098");
+    const requested = contextHarness.requestCompaction({
+      subject,
+      compactionId,
+      executor: {
+        kind: "host",
+        providerInstanceId: decodeProviderInstanceId(ids.provider),
+        modelId: decodeProviderModelId("model-a"),
+      },
+      requestedBy: "local-window",
+    });
+    if (requested.kind !== "requested") throw new Error("Expected requested compaction.");
+    const seenMaterials: Array<string> = [];
+    await contextHarness.compactSession({
+      subject,
+      compactionId,
+      conversation: compactionConversation,
+      plannedVersion: requested.version,
+      generateSummary: async (request) => {
+        seenMaterials.push(...request.materials.map((material) => material.content));
+        return {
+          kind: "generated",
+          summary: {
+            content: "Summary: deploy.yaml configures replicas: 3.",
+            summaryTokens: { kind: "known", tokens: 12, accuracy: "conservative-heuristic" },
+          },
+        };
+      },
+      reportedUsage: () => undefined,
+      subjectAvailability: () => "available",
+    });
+    expect(seenMaterials.join("\n")).toContain("replicas: 3");
+
+    // Turn 4 rebuilds history using the summary for compacted Turn 1 and raw attachment text for uncompacted Turn 2.
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Proceed with rollout",
+    });
+    const rebuiltContext = fakeDriver.sentTurns[3]?.context ?? [];
+    expect(rebuiltContext.find((block) => block.kind === "conversation-summary")?.text).toContain(
+      "Summary: deploy.yaml configures replicas: 3.",
+    );
+    expect(
+      rebuiltContext.some(
+        (block) => block.kind === "user-message" && block.text.includes("Review this deployment"),
+      ),
+    ).toBe(false);
+    const secondHistory = rebuiltContext.find(
+      (block) => block.kind === "user-message" && block.text.includes("Add autoscaling"),
+    );
+    expect(secondHistory?.text).toContain("maxReplicas: 10");
   });
 
   it("refuses a binary file the model cannot read before any turn is journaled", async () => {
@@ -6921,6 +7764,117 @@ describe("ChatService", () => {
     ]);
   });
 
+  it("keeps the routed provider of a turn waiting on a question as the live turn's, for the helper check to read", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000014");
+    const fallbackProvider = "84000000-0000-4000-8000-000000000007";
+    const liveTurns = new LiveTurnRegistry();
+    const { service } = openFixture({
+      driver: questionDriver([], []),
+      liveTurns,
+      probe: probeFixture({ models: [] }),
+      probeFor: (providerInstanceId) =>
+        providerInstanceId === fallbackProvider
+          ? probeFixture({ instanceId: decodeProviderInstanceId(fallbackProvider) })
+          : undefined,
+      settings: {
+        ...settings(),
+        providerFallback: { providerInstanceId: fallbackProvider, modelId: "model-a" },
+      } as ChatSettings,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Routed and waiting",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sending = service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Ask me anything",
+      },
+      { windowId: window },
+    );
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.pendingQuestion !== undefined,
+    );
+    // The lookup the host hands `authorizeAgentRunCreation` reads the turn's
+    // fallback provider, not the thread's own, while the turn waits.
+    expect(String(liveTurns.connection(String(created.thread.id))?.providerInstanceId)).toBe(
+      fallbackProvider,
+    );
+    expect(String(created.thread.providerInstanceId)).not.toBe(fallbackProvider);
+    await finishParkedTurn(service, created.thread.id);
+    // The send settles with its turn.
+    await sending.catch(() => undefined);
+    await until(() => liveTurns.read(String(created.thread.id)) === undefined);
+  });
+
+  it("takes no outside agent's answer to a question from an attempt running on Google Antigravity", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000013");
+    const sent: Array<SentTurn> = [];
+    const answered: Array<{ requestId: string; answer: string }> = [];
+    const { service } = openFixture({
+      driver: questionDriver(sent, answered),
+      driverKindFor: () => "antigravity",
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Antigravity question",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sending = service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Ask me anything",
+      },
+      { windowId: window },
+    );
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.pendingQuestion !== undefined,
+    );
+    const waiting = service.read(created.thread.id);
+    const attempt = waiting.turns[0]!.attempts[0]!;
+    const answer = (context: Parameters<typeof service.execute>[1]) =>
+      service.execute(
+        {
+          kind: "answer-chat-turn-question",
+          threadId: created.thread.id,
+          expectedVersion: waiting.thread.version,
+          turnId: waiting.turns[0]!.id,
+          attemptId: attempt.id,
+          requestId: "q-first",
+          answer: "Yes",
+        },
+        context,
+      );
+
+    // The attempt's own provider is read, which a pool or fallback chose.
+    await expect(answer({ windowId: window, fromOutsideAgent: true })).rejects.toMatchObject({
+      failure: {
+        category: "unauthorized",
+        message:
+          "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or use a provider that uses a Gemini API key.",
+      },
+    });
+    expect(answered).toEqual([]);
+    await expect(answer({ windowId: window })).resolves.toMatchObject({
+      kind: "attempt-updated",
+    });
+    // The set's next question parks the turn again; stop it so nothing runs on.
+    await until(
+      () =>
+        service.read(created.thread.id).turns[0]?.attempts[0]?.pendingQuestion?.questionIndex === 2,
+    );
+    await finishParkedTurn(service, created.thread.id);
+    // The send settles with its turn.
+    await sending.catch(() => undefined);
+  });
+
   it("shows and answers a provider's question set, one question at a time", async () => {
     const sent: Array<SentTurn> = [];
     const answered: Array<{ requestId: string; answer: string }> = [];
@@ -7048,6 +8002,94 @@ describe("ChatService", () => {
         answer: "Resolve",
       }),
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
+  });
+
+  it("hands a secret question's answer to the provider from the person alone and never records it", async () => {
+    const answered: Array<{ requestId: string; answer: string }> = [];
+    const { service, dataDirectory } = openFixture({ driver: secretQuestionDriver(answered) });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Secret question",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sendPromise = service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Connect to the database",
+    });
+    const pendingQuestion = () =>
+      service.read(created.thread.id).turns[0]?.attempts[0]?.pendingQuestion;
+    const sentinel = "hunter2-secret-sentinel";
+    const answer = (
+      requestId: string,
+      answered: Record<string, unknown>,
+      initiator?: "user" | "agent",
+    ) => {
+      const view = service.read(created.thread.id);
+      return service.execute(
+        {
+          kind: "answer-chat-turn-question",
+          threadId: created.thread.id,
+          expectedVersion: view.thread.version,
+          turnId: view.turns[0]!.id,
+          attemptId: view.turns[0]!.attempts[0]!.id,
+          requestId,
+          ...answered,
+        } as never,
+        initiator === undefined ? undefined : { initiator },
+      );
+    };
+
+    // A secret goes to no plain question.
+    await until(() => pendingQuestion()?.requestId === "q-host");
+    expect(pendingQuestion()).not.toHaveProperty("secret");
+    await expect(answer("q-host", { secretAnswer: sentinel }, "user")).rejects.toMatchObject({
+      failure: { category: "invalid" },
+    });
+    await answer("q-host", { answer: "db.internal" }, "user");
+
+    await until(() => pendingQuestion()?.requestId === "q-secret");
+    expect(pendingQuestion()).toMatchObject({ prompt: "Database credential?", secret: true });
+    expect(service.listPendingQuestions()).toMatchObject([
+      { mode: "chat", kind: "question", text: "Database credential?", secret: true },
+    ]);
+    // An agent acting for the person cannot answer it, nor can a caller
+    // that never said it was the person, and a secret question takes no
+    // answer the attempt would record.
+    await expect(answer("q-secret", { secretAnswer: sentinel }, "agent")).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+    await expect(answer("q-secret", { secretAnswer: sentinel })).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+    await expect(answer("q-secret", { answer: sentinel }, "user")).rejects.toMatchObject({
+      failure: { category: "invalid" },
+    });
+    expect(answered).toEqual([{ requestId: "q-host", answer: "db.internal" }]);
+
+    const accepted = await answer("q-secret", { secretAnswer: sentinel }, "user");
+    expect(accepted).toMatchObject({ kind: "attempt-updated" });
+    await sendPromise;
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "completed",
+    );
+    expect(answered).toEqual([
+      { requestId: "q-host", answer: "db.internal" },
+      { requestId: "q-secret", answer: sentinel },
+    ]);
+    const settled = service.read(created.thread.id).turns[0]!.attempts.at(-1)!;
+    expect(settled.answeredQuestions).toEqual([
+      expect.objectContaining({ requestId: "q-host", answer: "db.internal" }),
+      expect.objectContaining({ requestId: "q-secret", secret: true }),
+    ]);
+    expect(settled.answeredQuestions?.[1]).not.toHaveProperty("answer");
+    expect(JSON.stringify(service.read(created.thread.id))).not.toContain(sentinel);
+    for (const file of readdirSync(dataDirectory, { recursive: true, encoding: "utf8" })) {
+      const path = join(dataDirectory, file);
+      if (statSync(path).isFile()) expect(readFileSync(path).includes(sentinel)).toBe(false);
+    }
   });
 
   it("keeps saying an idle thread awaits its agent's approval, as after a restart took the turn", async () => {
@@ -8988,6 +10030,45 @@ describe("ChatService", () => {
       if (updated.kind !== "thread-updated") throw new Error("Expected thread-updated result.");
       return { ...fixture, thread: updated.thread };
     }
+
+    it("takes an unattended turn on a pool whose Google Antigravity entry is turned off, and refuses it once it is on", async () => {
+      const antigravity = "84000000-0000-4000-8000-000000000031";
+      let antigravityOn = false;
+      const antigravityCandidate = {
+        hostId: "local" as HostId,
+        providerInstanceId: antigravity,
+        modelId: "model-a",
+      } as MultiModelPoolCandidate;
+      const { service, thread } = await threadWithPool(
+        async ({ pool: p }) =>
+          p.candidates.map((candidate) =>
+            String(candidate.providerInstanceId) === antigravity
+              ? poolFacts(candidate, { readiness: "unavailable", authorityAllowed: false })
+              : poolFacts(candidate),
+          ),
+        { candidates: [poolCandidate("model-a"), antigravityCandidate] },
+        {
+          driverKindFor: (id) => (id === antigravity ? "antigravity" : "openai-compatible"),
+          providerEnabledFor: (id) => id !== antigravity || antigravityOn,
+        },
+      );
+      const send = (prompt: string) =>
+        service.execute({
+          kind: "send-chat-turn",
+          threadId: thread.id,
+          expectedVersion: service.read(thread.id).thread.version,
+          prompt,
+        });
+      // Routing never sends a turn to a provider that is off, so a pool that
+      // still lists one does not block the routine's send.
+      await expect(send("While it is off")).resolves.toMatchObject({ kind: "turn-created" });
+      await until(() => service.read(thread.id).turns[0]?.attempts[0]?.outcome === "completed");
+
+      antigravityOn = true;
+      await expect(send("Once it is on")).rejects.toMatchObject({
+        failure: { category: "unauthorized", message: ANTIGRAVITY_UNATTENDED_REFUSAL },
+      });
+    });
 
     it("persists exactly one selected route decision for the requested candidate before provider execution starts", async () => {
       const { service, thread } = await threadWithPool(async ({ pool: p }) =>
@@ -11932,6 +13013,52 @@ describe("handing a Chat conversation to a new provider session", () => {
 
   const lastAttempt = (fixture: ReturnType<typeof openFixture>, threadId: ChatThreadId) =>
     fixture.service.read(threadId).turns.at(-1)?.attempts.at(-1);
+
+  it("sends a follow-up without the host-run Canvas when the saved session's tools lack it, rather than failing for a handoff no one can choose", async () => {
+    const canvas = vi.fn(() => ({
+      definitions: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
+      execute: async () => ({ result: {} }),
+      close: vi.fn(async () => undefined),
+    }));
+    const fixture = openMoving({
+      nativeConversation: true,
+      // A fixed catalog recorded before the Canvas existed: only adding it
+      // needs a handoff.
+      toolCatalogContinuation: ({ tools }) =>
+        tools.some((tool) => tool.name === "octant_canvas") ? "handoff-required" : "unchanged",
+      resolveHostRunTools: canvas,
+    });
+    const threadId = await answeredThread(fixture);
+    await fixture.service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId,
+        expectedVersion: fixture.service.read(threadId).thread.version,
+        prompt: "Scheduled follow-up",
+      },
+      { hostRun: true },
+    );
+    expect(fixture.service.read(threadId).turns).toHaveLength(2);
+    expect(fixture.fakeDriver.sentTurns.at(-1)?.tools.map(({ name }) => name)).not.toContain(
+      "octant_canvas",
+    );
+    // The saved session is resumed, not replaced by a handed-over one.
+    expect(fixture.fakeDriver.startedSessionIds).toHaveLength(1);
+    expect(lastAttempt(fixture, threadId)?.handoff).toBeUndefined();
+    expect(canvas.mock.results[0]?.value.close).toHaveBeenCalled();
+
+    // A person's own send keeps the explicit choice: no window-less hostRun,
+    // so nothing is dropped for them and the changed-tools refusal stands.
+    const refusing = openMoving({
+      nativeConversation: true,
+      toolCatalogContinuation: () => "handoff-required",
+      resolveHostRunTools: canvas,
+    });
+    const other = await answeredThread(refusing);
+    await expect(sendFollowUp(refusing, other, "Use the new tools")).rejects.toThrow(
+      "different tools",
+    );
+  });
 
   it("keeps the draft unaccepted until the person chooses a text handoff for changed tools", async () => {
     const fixture = openMoving({

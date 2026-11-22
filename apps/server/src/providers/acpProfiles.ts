@@ -23,7 +23,9 @@ import type {
   ProviderExecutionPolicy,
   ProviderNativeSetup,
 } from "@octant/contracts";
+import type { ProviderOwnChannels } from "@octant/provider-sdk";
 import type { AcpInitializeResult } from "./acpProtocol";
+import type { AcpTurnUsageWithoutTotal } from "./acpUsage";
 
 /**
  * Every ACP agent, plus OpenCode, whose 2.x turns run on this stack, and any
@@ -60,7 +62,12 @@ export type AcpHostAuthentication =
     };
 
 export type AcpConfinementStrategy =
-  /** Shared deny-default Seatbelt profile; explicit Full access runs unconfined. */
+  /**
+   * Shared deny-default Seatbelt profile where Octant's sandbox applies: Chat,
+   * Plan, Strict, a chosen sandbox, a kept sandbox and readiness checks. Full
+   * access and Work and Code outside Strict run unconfined
+   * (`providerHoldsLevelWithoutSandbox`).
+   */
   { readonly kind: "deny-default-seatbelt" };
 
 export interface AcpProcessProfile {
@@ -76,18 +83,37 @@ export interface AcpProcessProfile {
    * it. A reviewed profile fails closed on a version it cannot read.
    */
   readonly versionProbe?: "best-effort";
+  /**
+   * The earliest release this profile was probed on; an older one is refused,
+   * since nothing shows it speaks the wire the profile reads (Mistral Vibe's
+   * is also a protocol requirement: its mode ids moved in 2.23.3 and 2.24.1).
+   * Every later release runs unless `brokenVersions` lists it.
+   */
   readonly minimumVersion: readonly [number, number, number];
+  /**
+   * Releases known to break with Octant, each `major.minor.patch`. A launch
+   * on one is refused with a sentence that names it; every other release at
+   * or above `minimumVersion` runs. Empty for every profile until a release
+   * is found broken.
+   */
+  readonly brokenVersions?: ReadonlyArray<string>;
   /** When set, version is read from the matching npm `package.json` instead of `--version`. */
   readonly npmPackageName?: string;
   readonly passthroughVariables: ReadonlyArray<string>;
   readonly guards: Readonly<Record<string, string>>;
   /**
-   * The guards that close one of the agent's own channels to its vendor
-   * (telemetry, trace uploads, feedback). Under Strict they are set as today;
-   * outside Strict they follow the person's own settings. Self-update guards
-   * are not channels and stay set.
+   * The guards that close one of the agent's own telemetry channels to its
+   * vendor (usage metrics, trace uploads, feedback). Under Strict they are
+   * set; outside Strict they are left out while the person lets providers
+   * send their own telemetry, the default, and set otherwise.
    */
   readonly channelGuards?: ReadonlyArray<string>;
+  /**
+   * The guards that keep the agent from checking for or installing a newer
+   * version of itself. Under Strict they are set; outside Strict they are set
+   * unless the person lets providers update themselves.
+   */
+  readonly selfUpdateGuards?: ReadonlyArray<string>;
   /** User-owned configuration files the provider needs to read, never write. */
   readonly hostReadPaths?: ReadonlyArray<string>;
   /** The CLI starts a same-binary stdio server before serving ACP messages. */
@@ -99,6 +125,20 @@ export interface AcpProcessProfile {
    * keychain path.
    */
   readonly readsSystemKeychain?: boolean;
+  /**
+   * The CLI keeps the person's own sign-in in the macOS login keychain and
+   * reads it by running `/usr/bin/security`. On macOS a sandboxed launch
+   * below Full access may then fork, run that one program, reach the two
+   * security-server services and read `login.keychain-db`; nothing grants a
+   * Keychain write or any other file in that folder. Octant never reads the
+   * item itself.
+   */
+  readonly readsLoginKeychain?: boolean;
+  /**
+   * ACP protocol versions the `initialize` reply may report. Absent means
+   * exactly 1, the version every other profile speaks.
+   */
+  readonly protocolVersions?: ReadonlyArray<number>;
   readonly environment: (input: {
     readonly managedHome: string;
     readonly executionPolicy: ProviderExecutionPolicy;
@@ -107,6 +147,8 @@ export interface AcpProcessProfile {
   readonly args: (input: {
     readonly root: string;
     readonly managedHome: string;
+    /** The provider's own channels this launch opens; absent opens none. */
+    readonly ownChannels?: ProviderOwnChannels;
   }) => ReadonlyArray<string>;
   readonly managedFiles: (input: {
     readonly managedHome: string;
@@ -163,15 +205,25 @@ export interface AcpSessionMetaReasoning {
 }
 
 export interface AcpProviderProfile {
-  /** Exact releases whose cumulative usage/context update semantics were verified. */
+  /**
+   * Releases whose cumulative usage/context update semantics were reviewed.
+   * A profile that names them is read only by that rule, from the earliest of
+   * them on (`acpReleaseClaim`); every other agent's usage is read by ACP's
+   * standard schema (`acpTurnUsage`, `finishAcpReportedTurn`).
+   */
   readonly usageVersions?: ReadonlyArray<string>;
-  /** Exact releases whose signed-in supplementary read and cold-resume semantics passed. */
+  /** Releases whose signed-in supplementary read and cold-resume semantics passed. */
   readonly fileReviewVersions?: ReadonlyArray<string>;
-  /** Exact releases whose signed-in nonempty compaction and resume semantics passed. */
+  /** Releases whose signed-in nonempty compaction and resume semantics passed. */
   readonly compactionVersions?: ReadonlyArray<string>;
-  /** Exact releases whose native session lifecycle has passed warm-reuse evidence. */
+  /** Releases whose native session lifecycle has passed warm-reuse evidence. */
   readonly retainedSessionVersions?: ReadonlyArray<string>;
-  /** Verified HTTP MCP implementations that omit, rather than deny, negotiation. */
+  /**
+   * The process stays open between turns on every release, as other ACP
+   * clients of the agent keep it, without a pinned one.
+   */
+  readonly retainsSessions?: true;
+  /** Reviewed HTTP MCP implementations that omit, rather than deny, negotiation. */
   readonly unadvertisedHttpMcpVersions?: ReadonlyArray<string>;
   readonly kind: AcpProviderKind;
   readonly displayName: string;
@@ -197,9 +249,10 @@ export interface AcpProviderProfile {
     autoReview?: boolean,
   ) => string;
   /**
-   * No mode is selected: an added agent's own modes were never mapped onto
-   * Chat, Work, Code and Plan, so its session keeps the mode it opens with
-   * and Octant's sandbox and approvals hold the thread's level.
+   * No mode is selected: the session keeps the mode it opens with and
+   * Octant's sandbox and approvals hold the thread's level. An added agent's
+   * own modes were never mapped onto Chat, Work, Code and Plan; Google
+   * Antigravity refuses every mode but its asking `default` from a client.
    */
   readonly selectsNoMode?: true;
   /**
@@ -228,6 +281,50 @@ export interface AcpProviderProfile {
    */
   readonly unseenChildCalls?: { readonly readOnlyAgents: ReadonlyArray<string> };
   /**
+   * The agent sends updates the strict mapper would fail a turn on, as other
+   * ACP clients of it accept: updates after the prompt answered (usage,
+   * background replies), a subagent's updates under its own session id, a
+   * tool update for a call never started or already finished. They are
+   * ignored or read as the start they imply, a call left running is done
+   * when its turn is, an update reaching a process parked between turns
+   * leaves it warm, and a permission request with neither allow nor reject
+   * options is asked as a question. An allow option is never a question's
+   * answer: `allow_always` beside a reject, with no `allow_once`, is an
+   * approval that chooses allow-always only where approvals hold for the
+   * session and otherwise rejects.
+   */
+  readonly toleratesStrayUpdates?: true;
+  /**
+   * The agent takes a second `session/prompt` while one is open and folds it
+   * into the running turn instead of starting another, so the connection
+   * offers `steer`. Without it a prompt sent mid-turn is refused.
+   */
+  readonly steersMidTurn?: true;
+  /** What a turn the agent ends with `refusal` says. */
+  readonly refusalMessage?: string;
+  /**
+   * A prompt that opens with `/` is the agent's own command, which it runs
+   * only from the start of the prompt: the command goes first and Octant's
+   * context in the following text block.
+   */
+  readonly commandLeadsPrompt?: true;
+  /**
+   * Octant does not offer the agent its `fs/write_text_file`: offered it, the
+   * agent rewrites whole files through it instead of making its own edits,
+   * which its own edit approvals already ask for.
+   */
+  readonly withholdsClientWrites?: true;
+  /**
+   * How to read a `session/prompt` reply whose usage leaves out ACP's
+   * required `totalTokens`, as reviewed on the agent (`acpTurnUsage`).
+   */
+  readonly turnUsageWithoutTotal?: AcpTurnUsageWithoutTotal;
+  /**
+   * A thread may start from one of the agent's own sessions, which it lists
+   * through `session/list` when its `initialize` advertises it.
+   */
+  readonly importsSessions?: true;
+  /**
    * The agent answers a mode it does not offer with success and keeps its
    * previous mode, so a renamed or dropped mode would leave a turn running
    * under whatever mode the session already had. Octant then refuses a mode
@@ -255,8 +352,9 @@ export interface AcpProviderProfile {
    * (MCP servers, hooks, extensions). Used where the entry cannot be denied
    * because the agent fails to start without being able to read it. A session
    * whose setup carries the Project's code (`projectCode`, a Project trusted
-   * for the agent, outside Plan) is not refused: the files then load as the
-   * agent loads them on its own.
+   * for the agent, outside Plan) is not refused, nor is any session outside
+   * Strict that carries the person's setup (`acpLoadsAllOwnSetup`): the files
+   * then load as the agent loads them on its own.
    */
   readonly refusesProject?: (root: string) => string | undefined;
   /**
@@ -278,7 +376,7 @@ export interface AcpProviderProfile {
   /** Chat sessions run in the managed home unless the agent needs a real Project root. */
   readonly chatSessionRoot: "managed-home" | "project-root";
   readonly userQuestions: "supported" | "unsupported";
-  /** Exact native versions accepted by signed-in session-form verification. */
+  /** Native releases accepted by signed-in session-form verification. */
   readonly elicitationVersions?: ReadonlyArray<string>;
   /** ACP method used to reattach to a prior session. */
   readonly resumeMethod: "session/load" | "session/resume";
@@ -287,13 +385,13 @@ export interface AcpProviderProfile {
   /** Whether the probe calls `authenticate` before opening a scratch session. */
   readonly authenticateOnProbe: boolean;
   /**
-   * When present, the probe fails closed unless the agent advertises exactly
-   * this embedded command inventory. A prompt starting with `/` runs one of
-   * those commands in Work and Code outside Plan, as in the agent's own app
-   * (maintainer decision, 2026-11-14); Plan and Chat refuse it, since a
-   * command such as `update-config` writes.
+   * A prompt starting with `/` runs only a command the agent listed (its
+   * session's `available_commands_update`, or the readiness check's until the
+   * session lists any), whatever the release lists (maintainer decisions,
+   * 2026-11-14 and 2026-11-21); an unlisted one is refused before it reaches
+   * the agent. The level's tool rules decide what a command does.
    */
-  readonly reviewedCommands?: ReadonlyArray<string>;
+  readonly listedCommandsOnly?: true;
   /** Provider-owned CLI login, with delegated browser auth reserved for legacy profiles. */
   readonly authentication:
     | { readonly kind: "provider-owned" }
@@ -301,6 +399,49 @@ export interface AcpProviderProfile {
   readonly unauthenticatedMessage: string;
   readonly process: AcpProcessProfile;
 }
+
+/**
+ * What a feature reviewed on named releases (`usageVersions`,
+ * `compactionVersions` and the like) may do on the release that runs, at
+ * every level alike (maintainer decision, 2026-11-21). `reviewed`: the
+ * release is one of them. `unverified`: a release at or above the earliest
+ * of them keeps the feature, and the runtime card says so. `absent`: an
+ * older or unreadable release never inherits newer evidence. A release known
+ * to break is refused at launch (`brokenVersions`), not here.
+ */
+export type AcpReleaseClaim = "reviewed" | "unverified" | "absent";
+
+export function acpReleaseClaim(
+  reviewed: ReadonlyArray<string> | undefined,
+  version: string | undefined,
+): AcpReleaseClaim {
+  if (reviewed === undefined || reviewed.length === 0 || version === undefined) return "absent";
+  if (reviewed.includes(version)) return "reviewed";
+  return reviewed.some((release) => releaseAtLeast(version, release)) ? "unverified" : "absent";
+}
+
+/** Whether `candidate` is the same major.minor.patch release as `floor` or a later one. */
+export function releaseAtLeast(candidate: string, floor: string): boolean {
+  const parse = (text: string) => /^(\d+)\.(\d+)\.(\d+)$/.exec(text)?.slice(1, 4).map(Number);
+  const left = parse(candidate);
+  const right = parse(floor);
+  if (left === undefined || right === undefined) return false;
+  for (let index = 0; index < 3; index += 1) {
+    const a = left[index] ?? 0;
+    const b = right[index] ?? 0;
+    if (a !== b) return a > b;
+  }
+  return true;
+}
+
+/**
+ * The guards that exist only to keep the piped ACP JSON-RPC stream clean, left
+ * out of a person's interactive provider terminal, which is a TTY. `NO_COLOR`
+ * is the only one: every other guard a profile sets closes a vendor channel,
+ * a self-update, or a source of configuration and holds there too; no profile
+ * sets `TERM`, `CI` or another TTY guard; and the terminal sets its own `TERM`.
+ */
+export const PROTOCOL_STREAM_GUARDS: ReadonlyArray<string> = ["NO_COLOR"];
 
 export const HOST_PASSTHROUGH_VARIABLES: ReadonlyArray<string> = [
   "COLORTERM",
@@ -360,18 +501,34 @@ export function acpSubagentsRun(
 }
 
 /**
+ * Whether a launch loads all of the agent's own setup, holding back none of
+ * the profile's denied Project and home entries and refusing no Project at
+ * start: outside Strict, wherever the session carries the person's setup, in
+ * every mode, as the agent loads it on its own (maintainer decision,
+ * 2026-11-21). Plan stays read-only through its OS wall, not through these
+ * entries. Strict keeps the hold-backs until the person allows the Project's
+ * code, and a person who turned the setup off for the account or thread
+ * (no setup on the session) keeps them too.
+ */
+export function acpLoadsAllOwnSetup(input: {
+  readonly strict: boolean | undefined;
+  readonly setup: ProviderNativeSetup | undefined;
+}): boolean {
+  return input.strict === false && input.setup !== undefined;
+}
+
+/**
  * The default own setup of an ACP agent: what the launch holds back of a
  * Project, its `forbiddenRootEntries`, becomes readable once the Project is
  * trusted for the agent, which `projectCode` carries only in Work and Code
  * outside Plan (maintainer decision, 2026-11-14). The agent's own folder
- * trust, where it keeps one, still decides on top. `context` names the
- * Project's instruction text, which every runtime may read, so it comes with
- * any of the person's setup.
+ * trust, where it keeps one, still decides on top. A Project's instruction
+ * text is never among the entries held back: every runtime reads it in every
+ * mode (maintainer decision, 2026-11-18).
  */
 function releasesTrustedProject(
   rootEntries: ReadonlyArray<string>,
   options: {
-    readonly context?: ReadonlyArray<string>;
     readonly guards?: (setup: ProviderNativeSetup) => ReadonlyArray<string>;
     readonly hostEntries?: (setup: ProviderNativeSetup) => ReadonlyArray<string>;
     /** The guard that keeps the agent's own subagents off. */
@@ -386,11 +543,7 @@ function releasesTrustedProject(
         ? [options.subagentGuard]
         : []),
     ],
-    releasedRootEntries: setup.projectCode
-      ? rootEntries
-      : providerRunsAsItself(setup)
-        ? (options.context ?? [])
-        : [],
+    releasedRootEntries: setup.projectCode ? rootEntries : [],
     releasedHostEntries: options.hostEntries?.(setup) ?? [],
   });
 }
@@ -452,6 +605,7 @@ const opencodeProfile: AcpProviderProfile = {
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     requiresChildServer: true,
     hostReadPaths: opencodeGlobalConfigPaths,
+    selfUpdateGuards: ["OPENCODE_DISABLE_AUTOUPDATE"],
     guards: {
       NO_COLOR: "1",
       OPENCODE_DISABLE_AUTOUPDATE: "1",
@@ -525,6 +679,8 @@ const kiloProfile: AcpProviderProfile = {
       /^(?:kilo )?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)?\r?\n?$/,
     minimumVersion: [1, 0, 0],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    channelGuards: ["KILO_TELEMETRY_LEVEL"],
+    selfUpdateGuards: ["KILO_DISABLE_AUTOUPDATE"],
     guards: {
       KILO_DISABLE_AUTOUPDATE: "1",
       KILO_DISABLE_AUTOCOMPACT: "1",
@@ -792,12 +948,12 @@ const vibeProfile: AcpProviderProfile = {
     minimumVersion: [2, 24, 1],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     channelGuards: ["VIBE_ENABLE_TELEMETRY"],
+    selfUpdateGuards: ["VIBE_ENABLE_UPDATE_CHECKS"],
     guards: {
       VIBE_ENABLE_TELEMETRY: "false",
       VIBE_ENABLE_UPDATE_CHECKS: "false",
       VIBE_ENABLE_NOTIFICATIONS: "false",
       VIBE_ENABLE_CONNECTORS: "false",
-      VIBE_INCLUDE_PROJECT_CONTEXT: "false",
       VIBE_ENABLE_EXPERIMENTAL_HOOKS: "false",
       VIBE_EXPERIMENTAL_ENABLE_REGISTRY_SKILLS: "false",
       VIBE_VIBE_CODE_ENABLED: "false",
@@ -877,8 +1033,8 @@ const vibeProfile: AcpProviderProfile = {
       ".vibe/tools",
     ],
     // The person's own Vibe setup, for a session that carries it. Project
-    // context is the Project's instruction text, which every runtime may read,
-    // so it comes with any of it. A trusted Project's `.vibe` entries become
+    // context is the Project's instruction text, which every runtime reads in
+    // every mode, so no guard holds it back. A trusted Project's `.vibe` entries become
     // readable again, and Vibe's own folder-trust list still decides whether
     // it loads them. Telemetry, update checks, notifications, the voice and
     // narrator features, and the keyring stay as above. Skills include the
@@ -891,7 +1047,6 @@ const vibeProfile: AcpProviderProfile = {
     // opens and switches only on the modes Octant selects (maintainer
     // decisions, 2026-11-14).
     nativeSetup: (setup, launch) => {
-      const on = providerRunsAsItself(setup);
       const workOrCode = launch.mode === "work" || launch.mode === "code";
       // The person's own agents come with the subagents: a custom agent may
       // approve its own tools, as it does in Vibe itself (maintainer decision,
@@ -899,7 +1054,6 @@ const vibeProfile: AcpProviderProfile = {
       const subagents = setup.subagents && launch.executionPolicy !== "plan" && workOrCode;
       return {
         releasedGuards: [
-          ...(on ? ["VIBE_INCLUDE_PROJECT_CONTEXT"] : []),
           ...(setup.skills
             ? [
                 "VIBE_SKILL_PATHS",
@@ -1018,6 +1172,7 @@ const grokProfile: AcpProviderProfile = {
       "GROK_TELEMETRY_MIXPANEL_ENABLED",
       "GROK_FEEDBACK_ENABLED",
     ],
+    selfUpdateGuards: ["GROK_DISABLE_AUTOUPDATER"],
     guards: {
       GROK_TELEMETRY_ENABLED: "0",
       GROK_TELEMETRY_TRACE_UPLOAD: "0",
@@ -1237,7 +1392,7 @@ const refusesProjectEntries =
     const found = entries.filter((entry) => projectHoldsEntry(root, entry));
     if (found.length === 0) return undefined;
     const names = found.map((entry) => `\`${entry}\``).join(", ");
-    return `${displayName} starts the MCP servers, hooks, and extensions that ${names} in this Project declare, so it starts here only once you trust this Project for ${displayName}. Trust it, remove or rename ${found.length === 1 ? "that file" : "those files"}, or use another provider in this Project.`;
+    return `${displayName} starts the MCP servers, hooks, and extensions that ${names} in this Project declare, so it starts here only once you allow this Project's code for ${displayName}. Allow it, remove or rename ${found.length === 1 ? "that file" : "those files"}, or use another provider in this Project.`;
   };
 
 const geminiProfile: AcpProviderProfile = {
@@ -1502,13 +1657,10 @@ const qwenProfile: AcpProviderProfile = {
   },
 };
 
-const FX_WORKSPACE_DENIED_ENTRIES = [
-  ".fx.json",
-  ".mcp.json",
-  "AGENTS.md",
-  ".agents",
-  ".claude/skills",
-] as const;
+// The workspace `AGENTS.md` is the Project's instruction text, which every
+// runtime reads in every mode (maintainer decision, 2026-11-18), so it is not
+// held back.
+const FX_WORKSPACE_DENIED_ENTRIES = [".fx.json", ".mcp.json", ".agents", ".claude/skills"] as const;
 
 /**
  * fx has no profile-path variable: its settings, sessions, permission rules,
@@ -1556,6 +1708,7 @@ const fxProfile: AcpProviderProfile = {
     // encrypted with the root-only /var/db/SystemKey, which stays denied.
     readsSystemKeychain: true,
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    selfUpdateGuards: ["FX_AUTO_UPGRADE"],
     guards: {
       // fx's default `permission_mode` is `auto`, and its ACP `code` mode maps
       // to that same auto-review. Pin the profile default to `ask` and select
@@ -1578,34 +1731,15 @@ const fxProfile: AcpProviderProfile = {
     args: () => ["acp"],
     managedFiles: () => [],
     // `fx acp` merges the workspace `AGENTS.md`, approved project `.mcp.json`
-    // servers, project `.fx.json`, and workspace skill roots on its own. Octant
-    // admits none of those for fx, and a project `.mcp.json` would start
-    // executables outside the approval flow, so the root denies them.
+    // servers, project `.fx.json`, and workspace skill roots on its own. A
+    // project `.mcp.json` would start executables outside the approval flow,
+    // so the root denies the Project's code until the Project trusts fx.
     forbiddenRootEntries: FX_WORKSPACE_DENIED_ENTRIES,
-    // A trusted Project's own entries; the workspace `AGENTS.md` is the
-    // Project's instruction text and comes with any of the person's setup.
-    nativeSetup: releasesTrustedProject(FX_WORKSPACE_DENIED_ENTRIES, { context: ["AGENTS.md"] }),
+    nativeSetup: releasesTrustedProject(FX_WORKSPACE_DENIED_ENTRIES),
     confinement: { kind: "deny-default-seatbelt" },
   },
 };
 
-const KIMI_REVIEWED_COMMANDS = [
-  "compact",
-  "status",
-  "usage",
-  "mcp",
-  "tasks",
-  "help",
-  "mcp-config",
-  "import-from-cc-codex",
-  "update-config",
-  "custom-theme",
-  "write-goal",
-  "check-kimi-code-docs",
-  "sub-skill",
-  "sub-skill.review",
-  "sub-skill.consolidate",
-] as const;
 const kimiProfile: AcpProviderProfile = {
   kind: "kimi-code",
   displayName: "Kimi Code",
@@ -1620,7 +1754,7 @@ const kimiProfile: AcpProviderProfile = {
   resumeMethod: "session/resume",
   closesSessions: false,
   authenticateOnProbe: true,
-  reviewedCommands: KIMI_REVIEWED_COMMANDS,
+  listedCommandsOnly: true,
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage: "Kimi Code is not authenticated. Run kimi login, then retry.",
   nativeSetupSupport: acpOwnSetupSupport(["skills", "toolServers", "hooks"]),
@@ -1634,6 +1768,7 @@ const kimiProfile: AcpProviderProfile = {
       "FORCE_COLOR",
     ],
     channelGuards: ["KIMI_DISABLE_TELEMETRY"],
+    selfUpdateGuards: ["KIMI_CODE_NO_AUTO_UPDATE"],
     guards: {
       KIMI_DISABLE_TELEMETRY: "1",
       KIMI_CODE_NO_AUTO_UPDATE: "1",
@@ -1679,6 +1814,111 @@ const kimiProfile: AcpProviderProfile = {
   },
 };
 
+/**
+ * Google Antigravity's official CLI, `agy`, run unmodified as `agy acp`, the
+ * way other ACP clients run it (maintainer decision, 2026-11-20).
+ *
+ * In Work and Code outside Strict it starts with no Octant sandbox at every
+ * level, as Windows starts ACP agents below Full access: its `default` mode
+ * asks Octant before every edit and command, so the thread's level holds
+ * through approvals rather than the OS. The person's own environment, network
+ * and setup reach it as in their own terminal. Chat and Plan, Strict, an
+ * explicit sandbox and a Full access thread that keeps the sandbox still
+ * start inside Octant's sandbox.
+ *
+ * It signs in with the person's own Google account and keeps that sign-in in
+ * the macOS login keychain, so the launch keeps the real HOME, and a
+ * sandboxed launch gets the narrow keychain read Claude Code's runtime has
+ * (`readsLoginKeychain`). Octant sends no spoofed client identity, no faked
+ * environment to move the sign-in, and calls none of Google's internal
+ * endpoints: the CLI talks to Google itself.
+ *
+ * Its modes are `default`, `auto_edit`, `yolo` and, for some accounts, `auto`.
+ * The CLI refuses `auto_edit` and `yolo` from an ACP client (observed by other
+ * ACP clients of 1.5.x), so the session stays in `default` and Octant answers
+ * its approvals for the thread's level, Full access included.
+ */
+const antigravityProfile: AcpProviderProfile = {
+  kind: "antigravity",
+  displayName: "Google Antigravity",
+  reasoningOptionId: "thinking",
+  sessionMode: () => "default",
+  selectsNoMode: true,
+  chatSessionRoot: "managed-home",
+  // Its questions arrive as permission requests whose tool call id starts
+  // with `interaction_`; options with neither an allow nor a reject kind are
+  // asked as a question (`toleratesStrayUpdates`), and an allow beside a
+  // reject as an approval.
+  userQuestions: "supported",
+  unnamedPermissionDescription: "Google Antigravity is asking before it continues.",
+  toleratesStrayUpdates: true,
+  // Google's ACP guide: a prompt sent while a turn runs steers that turn
+  // instead of starting a new one.
+  steersMidTurn: true,
+  // Each launch unpacks the CLI again before it answers, so a cold start per
+  // turn costs far more than for any other agent; other clients keep it open.
+  retainsSessions: true,
+  commandLeadsPrompt: true,
+  withholdsClientWrites: true,
+  turnUsageWithoutTotal: "input-excludes-cache-reads",
+  importsSessions: true,
+  // The CLI ends a turn with `refusal` when the account's quota is used up.
+  refusalMessage:
+    "Google Antigravity stopped: your account's usage limit may be reached. Check your plan, then retry.",
+  // `session/load` replays the whole history into the turn; `session/resume`
+  // reattaches without it, and `initialize` advertises `resume`.
+  resumeMethod: "session/resume",
+  // `initialize` advertises `list` and `resume` but no `close`.
+  closesSessions: false,
+  authenticateOnProbe: false,
+  authentication: { kind: "provider-owned" },
+  unauthenticatedMessage:
+    "Google Antigravity is not signed in. Run agy (or agy acp --login) in your terminal and sign in with your Google account, then retry.",
+  // Nothing of its own setup is held back, so no switch reports anything.
+  nativeSetupSupport: acpOwnSetupSupport([]),
+  process: {
+    agentName: "Antigravity ACP Server",
+    // Any agent name is accepted, as other ACP clients of the CLI accept it:
+    // the name changed between releases (`antigravity-acp` on 1.1.x).
+    verifyAgentInfo: () => true,
+    // The first `x.y.z` anywhere in `agy --version`, whatever prefix or later
+    // lines the release prints (`agy_acp_server_1.1.1` on the bundled server).
+    versionPattern: /\b(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)/,
+    // Releases before 1.5.0 offered only some models to unlisted clients and
+    // had no mid-turn steering; other ACP clients require 1.5.0 or later.
+    minimumVersion: [1, 5, 0],
+    // 1.1.1 reported protocol version 2 while sending version 1 shapes
+    // (recorded `initialize` reply); later releases may still.
+    protocolVersions: [1, 2],
+    passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    selfUpdateGuards: ["AGY_CLI_DISABLE_AUTO_UPDATE"],
+    guards: { NO_COLOR: "1", AGY_CLI_DISABLE_AUTO_UPDATE: "1" },
+    environment: () => ({}),
+    // Google's ACP guide: `--process-per-session` serves each session from an
+    // isolated worker and is required for HTTP MCP servers the client
+    // configures, which is how Octant offers its tools; `--disable-telemetry`
+    // is the CLI's own telemetry switch, so it follows the launch's telemetry
+    // channel as other agents' telemetry guards do.
+    args: ({ ownChannels }) => [
+      "acp",
+      "--process-per-session",
+      ...(ownChannels?.telemetry === true ? [] : ["--disable-telemetry"]),
+    ],
+    managedFiles: () => [],
+    readsLoginKeychain: true,
+    // The CLI keeps its settings, conversations, instructions and skills
+    // under ~/.gemini and loads all of them, as it does on its own.
+    hostAuthentication: {
+      kind: "directory",
+      defaultPath: join(homedir(), ".gemini"),
+      loginHint:
+        "Run agy (or agy acp --login) in your terminal and sign in with your Google account, then retry.",
+      environment: (path) => ({ GEMINI_HOME: path }),
+    },
+    confinement: { kind: "deny-default-seatbelt" },
+  },
+};
+
 export const acpProviderProfiles: Readonly<
   Record<Exclude<AcpProviderKind, "acp-agent">, AcpProviderProfile>
 > = {
@@ -1695,7 +1935,23 @@ export const acpProviderProfiles: Readonly<
   cline: clineProfile,
   qwen: qwenProfile,
   fx: fxProfile,
+  antigravity: antigravityProfile,
 };
+
+/**
+ * Whether a runtime's release keeps its pinned usage reading unverified: a
+ * release newer than the one Octant reviewed it on. The spend ceiling reads
+ * it for unreported turns run below Full access while such a release still
+ * read usage at Full access only.
+ */
+export function acpUsageUnverified(
+  driverKind: ProviderDriverKind,
+  version: string | undefined,
+): boolean {
+  const profiles: Readonly<Partial<Record<ProviderDriverKind, AcpProviderProfile>>> =
+    acpProviderProfiles;
+  return acpReleaseClaim(profiles[driverKind]?.usageVersions, version) === "unverified";
+}
 
 export function isAcpProviderKind(kind: ProviderDriverKind): kind is AcpProviderKind {
   return kind === "acp-agent" || kind in acpProviderProfiles;

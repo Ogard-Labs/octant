@@ -67,8 +67,17 @@ import {
   materializeOsNetworkEgress,
   resolveProviderRuntimeEgressPolicy,
 } from "../process/threadEgressPolicy";
+import type { ProviderServerPlacement } from "@octant/provider-sdk/driver";
 import { canonicalClaudeAccountDirectory } from "./claudeAccountIsolation";
 import { REQUIRED_GUARDS, sanitizeClaudeEnvironment } from "./claudeEnvironment";
+import {
+  CLAUDE_SERVER_STRICT_REFUSAL,
+  readClaudeSignInOnServer,
+  readClaudeVersionOnServer,
+  spawnClaudeOnServer,
+} from "./claudeServerProcess";
+import { awsProfileReadPaths } from "./providerHostEnvironment";
+import { ServerSignIns } from "./serverSignIn";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import type { ProviderRuntimeProxiedNetwork } from "../network/providerRuntimeNetwork";
 
@@ -109,6 +118,12 @@ export interface ClaudeRuntimeConfinement {
    * reach that listener and nothing else. Absent keeps open network.
    */
   readonly network?: ProviderRuntimeProxiedNetwork;
+  /**
+   * The server a server Project's thread runs on. The runtime then starts
+   * there through the host's connection, and nothing of this host's launch
+   * (binary, sandbox, egress, account directory, environment) applies.
+   */
+  readonly server?: ProviderServerPlacement;
 }
 
 /**
@@ -125,11 +140,20 @@ export const CONFINED_CLAUDE_EXECUTION_POLICIES: ReadonlySet<ProviderExecutionPo
 ]);
 
 export interface ClaudeProcessPort {
-  readonly probeVersion: (binaryPath: string) => Effect.Effect<string, ProviderFailure>;
+  /**
+   * The runtime's version. With a server, `claude --version` runs there
+   * instead, since that is the runtime a placed session starts.
+   */
+  readonly probeVersion: (
+    binaryPath: string,
+    server?: ProviderServerPlacement,
+  ) => Effect.Effect<string, ProviderFailure>;
   /**
    * Whether the account is signed in. With a confinement, the check runs inside
    * the sandbox that launch will use: a sign-in the sandbox cannot read is no
-   * sign-in for that launch, and an unconfined check cannot tell.
+   * sign-in for that launch, and an unconfined check cannot tell. With a
+   * server, `claude auth status` runs there as the server login, and a
+   * signed-in answer is held briefly for that server.
    */
   readonly probeSubscription: (
     binaryPath: string,
@@ -294,7 +318,8 @@ function captureChunk(
   };
 }
 
-function parseAuthenticationStatus(
+/** What `claude auth status --json` says: its `loggedIn`, or `undefined` when it says neither. */
+export function parseAuthenticationStatus(
   output: string,
 ): "authenticated" | "unauthenticated" | undefined {
   try {
@@ -511,6 +536,8 @@ function runProbe(
       );
 
       child.stdout.on("data", onStdout);
+      child.stdout.on("error", () => undefined);
+      child.stderr.on("error", () => undefined);
       child.stderr.on("data", onStderr);
       child.once("error", onError);
       child.once("close", onClose);
@@ -1381,6 +1408,8 @@ function confineClaudeLaunch(
         );
       }
     }
+    const openProfile = confinement.strict === false && confinement.sandboxPolicy === undefined;
+    const awsReadPaths = openProfile ? awsProfileReadPaths(spawnOptions.env) : [];
     const launch = options.confinement.prepare({
       sandboxProviderChannel: true,
       executable: spawnOptions.command,
@@ -1397,6 +1426,7 @@ function confineClaudeLaunch(
         temporaryDirectory,
         ...stateRoots.readRoots,
         ...readOnlyFolders,
+        ...awsReadPaths,
         ...(shellFolder === undefined ? [] : [shellFolder]),
       ],
       privateHomeAllowPaths: [
@@ -1405,8 +1435,10 @@ function confineClaudeLaunch(
         temporaryDirectory,
         ...stateRoots.readRoots,
         ...readOnlyFolders,
+        ...awsReadPaths,
         ...(shellFolder === undefined ? [] : [shellFolder]),
       ],
+      ...(openProfile ? { protectedFiles: "provider-sign-ins" as const } : {}),
       // The runtime calls its own control plane, so it resolves the runtime
       // egress policy rather than the thread default. This driver
       // carries Code threads, and the policy no longer reads the mode.
@@ -1550,6 +1582,8 @@ function spawnOwnedClaudeProcess(
     resolveExited = resolve;
   });
 
+  child.stdin.on("error", () => requestTermination("SIGTERM"));
+  child.stderr.on("error", () => undefined);
   child.stderr.on("data", onStderr);
   child.stderr.once("close", () => {
     let pending: Buffer | string | null = child.stderr.read();
@@ -1626,26 +1660,68 @@ export function makeClaudeProcessLive(options: ClaudeProcessOptions = {}): Claud
     onProcessStarted: options.onProcessStarted,
     linuxPlanShellCapsule: options.linuxPlanShellCapsule,
   };
+  // On a server Claude Code signs in as that server's login, whichever
+  // instance launches it, so its answer is held per server alone.
+  const serverSignIns = new ServerSignIns(readClaudeSignInOnServer);
 
   return {
-    probeVersion: (binaryPath) =>
-      runProbe(
-        binaryPath,
-        ["--version"],
-        sanitizeClaudeEnvironment("subscription", resolved.inheritedEnvironment),
-        "version",
-        resolved,
-      ),
-    probeSubscription: (binaryPath, environment, confinement) =>
-      runProbe(
-        binaryPath,
-        ["auth", "status", "--json"],
-        environment,
-        "authentication",
-        resolved,
-        confinement,
-      ),
+    probeVersion: (binaryPath, server) =>
+      server === undefined
+        ? runProbe(
+            binaryPath,
+            ["--version"],
+            sanitizeClaudeEnvironment("subscription", resolved.inheritedEnvironment),
+            "version",
+            resolved,
+          )
+        : Effect.tryPromise({
+            try: () => readClaudeVersionOnServer(server),
+            catch: () => failure("unavailable", `Octant could not reach ${server.serverName}.`),
+          }).pipe(
+            Effect.flatMap((found) =>
+              found.status === "found"
+                ? Effect.succeed(found.version)
+                : Effect.fail(failure("unavailable", found.message)),
+            ),
+          ),
+    probeSubscription: (binaryPath, environment, confinement) => {
+      const server = confinement?.server;
+      if (server === undefined) {
+        return runProbe(
+          binaryPath,
+          ["auth", "status", "--json"],
+          environment,
+          "authentication",
+          resolved,
+          confinement,
+        );
+      }
+      return Effect.tryPromise({
+        try: () => serverSignIns.read(server),
+        catch: () => failure("unavailable", `Octant could not reach ${server.serverName}.`),
+      }).pipe(
+        Effect.flatMap((answer) =>
+          answer.status === "refused"
+            ? Effect.fail(failure("unavailable", answer.message))
+            : Effect.succeed(
+                answer.status === "signed-in"
+                  ? ("authenticated" as const)
+                  : ("unauthenticated" as const),
+              ),
+        ),
+      );
+    },
     spawn: (confinement) => (spawnOptions) => {
+      const server = confinement.server;
+      if (server !== undefined) {
+        // Octant's own sandbox cannot run on a server, so a Strict launch
+        // there is refused rather than run without the sandbox it promises.
+        if (confinement.strict !== false) throw new Error(CLAUDE_SERVER_STRICT_REFUSAL);
+        return spawnClaudeOnServer(spawnOptions, server, {
+          stderrBytes: resolved.runtimeStderrBytes,
+          onDiagnostic: resolved.onDiagnostic,
+        });
+      }
       const confined = confineClaudeLaunch(spawnOptions, confinement, resolved);
       try {
         return spawnOwnedClaudeProcess(

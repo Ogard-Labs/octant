@@ -60,3 +60,342 @@ it("keeps header-like removed and added source lines inside their hunk", () => {
     expect(diffSourceLines(file, "modified")).toEqual([{ line: 1, text: "++ new comment" }]);
   }
 });
+
+it("preserves old and new file modes for mode-only, binary-plus-mode, and mixed mode-and-content diffs", () => {
+  const patch = [
+    "diff --git a/scripts/check.sh b/scripts/check.sh",
+    "old mode 100644",
+    "new mode 100755",
+    "diff --git a/assets/logo.png b/assets/logo.png",
+    "old mode 100644",
+    "new mode 100755",
+    "index 1111111..2222222",
+    "Binary files a/assets/logo.png and b/assets/logo.png differ",
+    "diff --git a/scripts/run.sh b/scripts/run.sh",
+    "old mode 100755",
+    "new mode 100644",
+    "index aaaaaaa..bbbbbbb",
+    "--- a/scripts/run.sh",
+    "+++ b/scripts/run.sh",
+    "@@ -1 +1 @@",
+    "-echo old",
+    "+echo new",
+  ].join("\n");
+  const files = parseUnifiedDiff(patch);
+  expect(files[0]?.path).toBe("scripts/check.sh");
+  expect(files[0]?.binary).toBe(true);
+  expect(files[0]?.modeOnly).toBe(true);
+  expect(files[0]?.modeChange).toEqual({ oldMode: "100644", newMode: "100755" });
+  expect(files[1]?.path).toBe("assets/logo.png");
+  expect(files[1]?.binary).toBe(true);
+  expect(files[1]?.modeOnly).toBeUndefined();
+  expect(files[1]?.modeChange).toEqual({ oldMode: "100644", newMode: "100755" });
+  expect(files[2]?.path).toBe("scripts/run.sh");
+  expect(files[2]?.binary).toBe(false);
+  expect(files[2]?.modeOnly).toBeUndefined();
+  expect(files[2]?.modeChange).toEqual({ oldMode: "100755", newMode: "100644" });
+});
+
+it("preserves end-of-file no-newline markers on the lines they follow", () => {
+  const patch = [
+    "diff --git a/added-newline.txt b/added-newline.txt",
+    "--- a/added-newline.txt",
+    "+++ b/added-newline.txt",
+    "@@ -1 +1 @@",
+    "-hello",
+    "\\ No newline at end of file",
+    "+hello",
+    "diff --git a/removed-newline.txt b/removed-newline.txt",
+    "--- a/removed-newline.txt",
+    "+++ b/removed-newline.txt",
+    "@@ -1 +1 @@",
+    "-hello",
+    "+hello",
+    "\\ No newline at end of file",
+    "diff --git a/context-no-newline.txt b/context-no-newline.txt",
+    "--- a/context-no-newline.txt",
+    "+++ b/context-no-newline.txt",
+    "@@ -1,2 +1,2 @@",
+    "-old",
+    "+new",
+    " tail",
+    "\\ No newline at end of file",
+  ].join("\n");
+
+  const files = parseUnifiedDiff(patch);
+  expect(files[0]?.hunks[0]?.lines).toEqual([
+    { kind: "removed", text: "hello", oldNumber: 1, noNewlineAtEndOfFile: true },
+    { kind: "added", text: "hello", newNumber: 1 },
+  ]);
+  expect(files[1]?.hunks[0]?.lines).toEqual([
+    { kind: "removed", text: "hello", oldNumber: 1 },
+    { kind: "added", text: "hello", newNumber: 1, noNewlineAtEndOfFile: true },
+  ]);
+  expect(files[2]?.hunks[0]?.lines).toEqual([
+    { kind: "removed", text: "old", oldNumber: 1 },
+    { kind: "added", text: "new", newNumber: 1 },
+    { kind: "context", text: "tail", oldNumber: 2, newNumber: 2, noNewlineAtEndOfFile: true },
+  ]);
+});
+
+it("preserves creation and deletion modes for empty, executable, and binary files", () => {
+  const patch = [
+    "diff --git a/scripts/empty.sh b/scripts/empty.sh",
+    "new file mode 100755",
+    "index 0000000..e69de29",
+    "diff --git a/obsolete.txt b/obsolete.txt",
+    "deleted file mode 100644",
+    "index e69de29..0000000",
+    "diff --git a/scripts/start.sh b/scripts/start.sh",
+    "new file mode 100755",
+    "index 0000000..abcdef1",
+    "--- /dev/null",
+    "+++ b/scripts/start.sh",
+    "@@ -0,0 +1 @@",
+    "+#!/bin/sh",
+    "diff --git a/assets/new.png b/assets/new.png",
+    "new file mode 100644",
+    "index 0000000..1234567",
+    "Binary files /dev/null and b/assets/new.png differ",
+  ].join("\n");
+
+  const files = parseUnifiedDiff(patch);
+  expect(files[0]).toMatchObject({
+    path: "scripts/empty.sh",
+    change: "created",
+    fileMode: "100755",
+    binary: true,
+    emptyFile: true,
+  });
+  expect(files[1]).toMatchObject({
+    path: "obsolete.txt",
+    change: "deleted",
+    fileMode: "100644",
+    binary: true,
+    emptyFile: true,
+  });
+  expect(files[2]).toMatchObject({
+    path: "scripts/start.sh",
+    change: "created",
+    fileMode: "100755",
+    binary: false,
+  });
+  expect(files[2]?.emptyFile).toBeUndefined();
+  expect(files[3]).toMatchObject({
+    path: "assets/new.png",
+    change: "created",
+    fileMode: "100644",
+    binary: true,
+  });
+  expect(files[3]?.emptyFile).toBeUndefined();
+});
+
+it("decodes Git C-quoted UTF-8 octal and escape sequences in diff paths", () => {
+  const patch = [
+    'diff --git "a/caf\\303\\251.txt" "b/caf\\303\\251.txt"',
+    '--- "a/caf\\303\\251.txt"',
+    '+++ "b/caf\\303\\251.txt"',
+    "@@ -1 +1 @@",
+    "-old",
+    "+new",
+    'diff --git "a/dir/\\"quote\\"\\tname.txt" "b/dir/\\"quote\\"\\tname.txt"',
+    '--- "a/dir/\\"quote\\"\\tname.txt"',
+    '+++ "b/dir/\\"quote\\"\\tname.txt"',
+    "@@ -1 +1 @@",
+    "-a",
+    "+b",
+    "diff --git a/plain\\keep.txt b/plain\\keep.txt",
+    "--- a/plain\\keep.txt",
+    "+++ b/plain\\keep.txt",
+    "@@ -1 +1 @@",
+    "-x",
+    "+y",
+  ].join("\n");
+
+  const files = parseUnifiedDiff(patch);
+  expect(files[0]?.path).toBe("café.txt");
+  expect(files[0]?.previousPath).toBeUndefined();
+  expect(files[0]?.change).toBe("modified");
+  expect(files[1]?.path).toBe('dir/"quote"\tname.txt');
+  expect(files[1]?.previousPath).toBeUndefined();
+  expect(files[2]?.path).toBe("plain\\keep.txt");
+});
+
+it("preserves unquoted paths with spaces for empty deleted and added files", () => {
+  const patch = [
+    "diff --git a/my file.txt b/my file.txt",
+    "deleted file mode 100644",
+    "index e69de29..0000000",
+    "diff --git a/another empty file.sh b/another empty file.sh",
+    "new file mode 100755",
+    "index 0000000..e69de29",
+  ].join("\n");
+
+  const files = parseUnifiedDiff(patch);
+  expect(files[0]).toMatchObject({
+    path: "my file.txt",
+    change: "deleted",
+    fileMode: "100644",
+    binary: true,
+    emptyFile: true,
+  });
+  expect(files[0]?.previousPath).toBeUndefined();
+  expect(files[1]).toMatchObject({
+    path: "another empty file.sh",
+    change: "created",
+    fileMode: "100755",
+    binary: true,
+    emptyFile: true,
+  });
+  expect(files[1]?.previousPath).toBeUndefined();
+});
+
+it("keeps invalid UTF-8 quoted paths distinct from literal replacement characters and flags nonUtf8Path", () => {
+  const patch = [
+    'diff --git "a/file-\\303.txt" "b/file-\\303.txt"',
+    '--- "a/file-\\303.txt"',
+    '+++ "b/file-\\303.txt"',
+    "@@ -1 +1 @@",
+    "-old invalid",
+    "+new invalid",
+    'diff --git "a/file-\\357\\277\\275.txt" "b/file-\\357\\277\\275.txt"',
+    '--- "a/file-\\357\\277\\275.txt"',
+    '+++ "b/file-\\357\\277\\275.txt"',
+    "@@ -1 +1 @@",
+    "-old replacement",
+    "+new replacement",
+  ].join("\n");
+
+  const files = parseUnifiedDiff(patch);
+  expect(files).toHaveLength(2);
+  expect(files[0]?.path).toBe("file-\\303.txt");
+  expect(files[0]?.nonUtf8Path).toBe(true);
+  expect(files[1]?.path).toBe("file-\uFFFD.txt");
+  expect(files[1]?.nonUtf8Path).toBeUndefined();
+  expect(files[0]?.path).not.toBe(files[1]?.path);
+});
+
+it("preserves rename and copy paths containing spaces from rename/copy headers", () => {
+  const patch = [
+    "diff --git a/old name.txt b/new name.txt",
+    "similarity index 100%",
+    "rename from old name.txt",
+    "rename to new name.txt",
+    "diff --git a/source doc.md b/copied doc.md",
+    "similarity index 100%",
+    "copy from source doc.md",
+    "copy to copied doc.md",
+  ].join("\n");
+
+  const files = parseUnifiedDiff(patch);
+  expect(files[0]).toMatchObject({
+    path: "new name.txt",
+    previousPath: "old name.txt",
+    change: "renamed",
+    binary: true,
+  });
+  expect(files[0]?.copied).toBeUndefined();
+  expect(files[1]).toMatchObject({
+    path: "copied doc.md",
+    previousPath: "source doc.md",
+    change: "renamed",
+    copied: true,
+    binary: true,
+  });
+});
+
+it("preserves leading spaces in unquoted extended headers and leading UTF-8 BOMs in quoted paths", () => {
+  const patch = [
+    'diff --git "a/old\\tname.txt" "b/ file.txt"',
+    "similarity index 100%",
+    'rename from "old\\tname.txt"',
+    "rename to  file.txt",
+    'diff --git "a/\\357\\273\\277bom.txt" "b/\\357\\273\\277bom.txt"',
+    "similarity index 100%",
+    'rename from "old-bom.txt"',
+    'rename to "\\357\\273\\277bom.txt"',
+  ].join("\n");
+
+  const files = parseUnifiedDiff(patch);
+  expect(files[0]).toMatchObject({
+    path: " file.txt",
+    previousPath: "old\tname.txt",
+    change: "renamed",
+  });
+  expect(files[1]?.path).toBe("\uFEFFbom.txt");
+  expect(files[1]?.nonUtf8Path).toBeUndefined();
+});
+
+it("sets nonUtf8Path from the destination path on renames", () => {
+  const patch = [
+    'diff --git "a/file-\\303.txt" b/report.txt',
+    "similarity index 100%",
+    'rename from "file-\\303.txt"',
+    "rename to report.txt",
+    'diff --git a/report.txt "b/file-\\303.txt"',
+    "similarity index 100%",
+    "rename from report.txt",
+    'rename to "file-\\303.txt"',
+    'diff --git "a/file-\\303.txt" b/copy.txt',
+    "similarity index 100%",
+    'copy from "file-\\303.txt"',
+    "copy to copy.txt",
+  ].join("\n");
+
+  const files = parseUnifiedDiff(patch);
+  expect(files[0]).toMatchObject({
+    path: "report.txt",
+    previousPath: "file-\\303.txt",
+    change: "renamed",
+    nonUtf8PreviousPath: true,
+  });
+  expect(files[0]?.nonUtf8Path).toBeUndefined();
+  expect(files[0]?.copied).toBeUndefined();
+
+  expect(files[1]).toMatchObject({
+    path: "file-\\303.txt",
+    previousPath: "report.txt",
+    change: "renamed",
+    nonUtf8Path: true,
+  });
+  expect(files[1]?.nonUtf8PreviousPath).toBeUndefined();
+
+  expect(files[2]).toMatchObject({
+    path: "copy.txt",
+    previousPath: "file-\\303.txt",
+    change: "renamed",
+    copied: true,
+    nonUtf8PreviousPath: true,
+  });
+  expect(files[2]?.nonUtf8Path).toBeUndefined();
+});
+
+it("preserves trailing spaces in diff headers delimited by a tab", () => {
+  const patch = [
+    "diff --git a/name  b/name ",
+    "index 1111111..2222222 100644",
+    "--- a/name \t",
+    "+++ b/name \t",
+    "@@ -1 +1 @@",
+    "-old",
+    "+new",
+    "diff --git a/new file  b/new file ",
+    "new file mode 100644",
+    "index 0000000..3333333",
+    "--- /dev/null\t",
+    "+++ b/new file \t2026-01-01 00:00:00 +0000",
+    "@@ -0,0 +1 @@",
+    "+hello",
+  ].join("\n");
+
+  const files = parseUnifiedDiff(patch);
+  expect(files[0]).toMatchObject({
+    path: "name ",
+    change: "modified",
+  });
+  expect(files[0]?.previousPath).toBeUndefined();
+  expect(files[1]).toMatchObject({
+    path: "new file ",
+    change: "created",
+  });
+});

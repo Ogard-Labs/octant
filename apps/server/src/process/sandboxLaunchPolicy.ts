@@ -32,7 +32,11 @@ export interface SandboxLaunchPolicyReceipt {
   readonly policyDigest: string;
   /** Every cached process must match this key before it may serve this selection. */
   readonly reuseKey: string;
-  readonly backend: "seatbelt-v1" | "bubblewrap-v1" | "linux-mediation-v1";
+  readonly backend:
+    | "seatbelt-v1"
+    | "bubblewrap-v1"
+    | "linux-mediation-v1"
+    | "windows-appcontainer-v1";
 }
 
 export interface SandboxLaunchPolicyRefusal {

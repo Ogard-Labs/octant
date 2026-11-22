@@ -13,14 +13,42 @@ import { AgentRunSessionStore } from "./agentRunSessionStore";
 import { AgentRunLiveConversationStore } from "./agentRunLiveConversationStore";
 import { Effect, Queue, Stream } from "effect";
 import {
+  AgentRunRequested,
+  AgentRunResultAcknowledged,
+  AgentRunResultDeliverySettled,
+  AgentRunStatusChanged,
+  EventActor,
   decodeContextSubjectRef,
   decodeProviderServiceLimits,
+  decodeUtcTimestamp,
+  decodeWindowId,
   type AgentRun,
   type AgentRunAuthority,
   type ProviderContextBlock,
   type ProviderExecutionPolicy,
   type ProviderTurnInput,
+  type WindowId,
 } from "@octant/contracts";
+import { Schema } from "effect";
+import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
+import { EventRegistry } from "../persistence/eventRegistry";
+import { Journal } from "../persistence/journal";
+import { ProjectionRegistry } from "../persistence/projection";
+import {
+  AGENT_RUN_REQUESTED,
+  AGENT_RUN_RESULT_ACKNOWLEDGED,
+  AGENT_RUN_RESULT_DELIVERY_SETTLED,
+  AGENT_RUN_STATUS_CHANGED,
+  AgentRunEventStore,
+} from "./agentRunEventStore";
+import {
+  AgentRunOrchestrationService,
+  createInMemoryCapacityPort,
+} from "./agentRunOrchestrationService";
+import { AgentRunPersistenceService } from "./agentRunPersistenceService";
+import { AgentRunProjection } from "./agentRunProjection";
+import { createPersonMemoryAccess } from "../personMemory/personMemoryAccess";
+import { PersonMemoryStore, registerPersonMemoryEvents } from "../personMemory/personMemoryStore";
 import type {
   ProviderAcquireInput,
   ProviderDriver,
@@ -41,6 +69,7 @@ import {
   type AgentRunSessionRuntimeOptions,
 } from "./agentRunSessionRuntime";
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
+import { appToolHostLines } from "../providers/appToolHostLines";
 
 const testDirectories: string[] = [];
 afterEach(() => {
@@ -566,6 +595,17 @@ describe("createAgentRunSessionRuntime", () => {
     await expect(outcome).resolves.toMatchObject({ kind: "completed" });
   });
 
+  it("tells the provider a child's approvals each hold for one call", async () => {
+    const provider = fakeProvider();
+    const runtime = createAgentRunSessionRuntime(runtimeOptions(provider));
+    const outcome = settled(runtime.start(agentRun()));
+    await vi.waitFor(() => expect(provider.turns.length).toBe(1));
+    expect(provider.starts[0]?.answersOncePerCall).toBe(true);
+    await provider.emit({ kind: "text-delta", sessionId, text: "Done." });
+    await provider.emit({ kind: "completed", sessionId });
+    await expect(outcome).resolves.toMatchObject({ kind: "completed" });
+  });
+
   it("does not report running for a child whose workspace cannot be verified", async () => {
     const running: string[] = [];
     const runtime = createAgentRunSessionRuntime(
@@ -1082,6 +1122,34 @@ describe("createAgentRunSessionRuntime", () => {
     await settled(handle);
 
     expect(provider.turns[0]?.context).toEqual(admitted);
+  });
+
+  it("tells a child when to use each Octant tool it is offered, once, after its admitted context", async () => {
+    const provider = fakeProvider({
+      onSend: (emit) => {
+        void emit({ kind: "text-delta", sessionId, text: "Done." }).then(() =>
+          emit({ kind: "completed", sessionId }),
+        );
+      },
+    });
+    const definitions = [
+      { name: "octant_canvas", description: "Canvas", inputSchema: {} },
+      { name: "read_notes", description: "Read notes", inputSchema: {} },
+    ];
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        appManagedTools: () => ({ definitions, execute: async () => ({ result: {} }) }),
+      }),
+    );
+
+    await settled(runtime.start(agentRun()));
+
+    const [line] = appToolHostLines(definitions);
+    expect(line?.tool).toBe("octant_canvas");
+    expect(provider.turns[0]?.context).toEqual([
+      ...context,
+      { kind: "instructions", text: line?.text, tool: "octant_canvas" },
+    ]);
   });
 
   it("delivers admitted original inputs and refuses provider startup after their source is revoked", async () => {
@@ -1618,6 +1686,21 @@ describe("createAgentRunSessionRuntime", () => {
 
     expect(() => runtime.start(queued)).toThrowError(
       expect.objectContaining({ reason: "provider-unavailable" }),
+    );
+    expect(provider.acquired).toHaveLength(0);
+  });
+
+  it("starts no child on a provider that refuses helper runs, even one admitted before it did", () => {
+    const provider = fakeProvider();
+    const refusal = "Google doesn't support Google Antigravity as a helper agent.";
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        helperRunRefusal: (id) => (String(id) === providerInstanceId ? refusal : undefined),
+      }),
+    );
+
+    expect(() => runtime.start(agentRun())).toThrowError(
+      expect.objectContaining({ reason: "provider-unavailable", message: refusal }),
     );
     expect(provider.acquired).toHaveLength(0);
   });
@@ -2520,6 +2603,7 @@ describe("durable child provider identity", () => {
           sessionId,
           resumeCursor: recorded?.resumeCursor,
           modelOptionValues,
+          answersOncePerCall: true,
         }),
       ]);
       expect(provider.turns[1]?.prompt).toBe("Add the regression evidence");
@@ -2745,6 +2829,53 @@ it("answers a child's repeated question only once and records the person's answe
   );
 });
 
+it("lets a child outside Strict be asked a secret, hands it the answer and keeps only that one was given", async () => {
+  const sentinel = "hunter2-secret-sentinel";
+  for (const parentOutsideStrict of [true, false]) {
+    const provider = fakeProvider();
+    const askUser = vi.fn(async () => sentinel);
+    const onUserMessage = vi.fn();
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        interactions: { askUser },
+        onUserMessage,
+        asksSecretQuestions: () => parentOutsideStrict,
+      }),
+    );
+    const result = settled(runtime.start(agentRun()));
+    await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+    // Strict is not loosened for the child: only the secret question is.
+    expect(provider.starts[0]).not.toHaveProperty("strict");
+    if (!parentOutsideStrict) {
+      expect(provider.starts[0]).not.toHaveProperty("asksSecretQuestions");
+      await provider.emit({ kind: "completed", sessionId });
+      await result;
+      continue;
+    }
+    expect(provider.starts[0]).toMatchObject({ asksSecretQuestions: true });
+    await provider.emit({
+      kind: "user-input-request",
+      sessionId,
+      requestId: "question-1",
+      prompt: "Database credential?",
+      options: [],
+      secret: true,
+    });
+    await vi.waitFor(() => expect(provider.answeredQuestions).toHaveLength(1));
+    await provider.emit({ kind: "text-delta", sessionId, text: "Connected", occurredAt: now });
+    await provider.emit({ kind: "completed", sessionId });
+    expect((await result).kind).toBe("completed");
+    expect(provider.answeredQuestions[0]).toMatchObject({ answer: sentinel });
+    expect(onUserMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "answer",
+        text: expect.stringContaining("Database credential?"),
+      }),
+    );
+    expect(JSON.stringify(onUserMessage.mock.calls)).not.toContain(sentinel);
+  }
+});
+
 it("refuses an unanswered question instead of manufacturing an empty provider answer", async () => {
   const provider = fakeProvider();
   const runtime = createAgentRunSessionRuntime(runtimeOptions(provider));
@@ -2966,5 +3097,591 @@ it("preserves an unsent follow-up for genuine resume after provider acquisition 
   await recoveredProvider.emit({ kind: "completed", sessionId });
   await settled(handle);
   expect(restored.sessions.read(run)).not.toHaveProperty("pendingContinuation");
+  connection.close();
+});
+
+it("includes the lead thread's person-memory block once on start and does not send it again on a continuation", async () => {
+  const path = databasePath();
+  const connection = openSqlite(path);
+  applyMigrations(connection, MIGRATIONS, () => now);
+  const run = agentRun();
+  const durable = new AgentRunSessionStore({ connection, getById: () => run });
+  const provider = fakeProvider({ resumable: true });
+  const runtime = createAgentRunSessionRuntime(
+    runtimeOptions(provider, {
+      sessionStore: durable.sessions,
+      supportsResume: () => true,
+      personMemoryBlock: () => "What Octant remembers: prefers CSV.",
+    }),
+  );
+
+  const first = settled(runtime.start(run));
+  await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+  expect(provider.turns[0]?.context?.filter((block) => block.kind === "person-memory")).toEqual([
+    { kind: "person-memory", text: "What Octant remembers: prefers CSV." },
+  ]);
+  await provider.emit({ kind: "text-delta", sessionId, text: "First answer", occurredAt: now });
+  await provider.emit({ kind: "completed", sessionId });
+  expect((await first).kind).toBe("completed");
+
+  const continued = runtime.resume?.(
+    { ...run, lifecycleStatus: "completed", generation: 2 },
+    { message: "Follow up on the export" },
+  );
+  if (continued === undefined) throw new Error("Missing resumed session");
+  await vi.waitFor(() => expect(provider.turns).toHaveLength(2));
+  expect(provider.turns[1]?.context).toEqual([]);
+  await provider.emit({ kind: "text-delta", sessionId, text: "Second answer", occurredAt: now });
+  await provider.emit({ kind: "completed", sessionId });
+  expect((await settled(continued)).kind).toBe("completed");
+  connection.close();
+});
+
+it("omits the person-memory block when the lead thread does not take part and never duplicates one already in admitted context", async () => {
+  const provider = fakeProvider({
+    onSend: (emit) => {
+      void emit({ kind: "completed", sessionId });
+    },
+  });
+  const withoutMemory = createAgentRunSessionRuntime(
+    runtimeOptions(provider, {
+      personMemoryBlock: () => undefined,
+    }),
+  );
+  await settled(withoutMemory.start(agentRun()));
+  expect(provider.turns[0]?.context?.filter((block) => block.kind === "person-memory")).toEqual([]);
+
+  const secondProvider = fakeProvider({
+    onSend: (emit) => {
+      void emit({ kind: "completed", sessionId });
+    },
+  });
+  const alreadyHeld = createAgentRunSessionRuntime(
+    runtimeOptions(secondProvider, {
+      context: {
+        resolve: () => [{ kind: "person-memory", text: "Existing block." }],
+      },
+      personMemoryBlock: () => "Would duplicate.",
+    }),
+  );
+  await settled(alreadyHeld.start(agentRun()));
+  expect(
+    secondProvider.turns[0]?.context?.filter((block) => block.kind === "person-memory"),
+  ).toEqual([{ kind: "person-memory", text: "Existing block." }]);
+});
+
+it("offers octant_past_threads to a child only when its clamped authority allows tools", async () => {
+  const toolFactory = ({ authority: childAuthority }: { readonly authority: AgentRunAuthority }) =>
+    childAuthority.tools
+      ? {
+          definitions: [
+            {
+              name: "octant_past_threads",
+              description: "Search remembered past threads.",
+              inputSchema: { type: "object" },
+            },
+          ],
+          execute: async () => ({ result: { text: "No remembered thread matches." } }),
+        }
+      : undefined;
+
+  const withToolsProvider = fakeProvider({
+    onSend: (emit) => {
+      void emit({ kind: "text-delta", sessionId, text: "Checked." }).then(() =>
+        emit({ kind: "completed", sessionId }),
+      );
+    },
+  });
+  const withToolsRuntime = createAgentRunSessionRuntime(
+    runtimeOptions(withToolsProvider, {
+      appManagedTools: toolFactory,
+      appManagedToolTransport: () => "supported",
+    }),
+  );
+  await settled(withToolsRuntime.start(agentRun()));
+  expect(withToolsProvider.turns[0]?.tools?.map((tool) => tool.name)).toContain(
+    "octant_past_threads",
+  );
+
+  const withoutToolsProvider = fakeProvider({
+    onSend: (emit) => {
+      void emit({ kind: "text-delta", sessionId, text: "Checked." }).then(() =>
+        emit({ kind: "completed", sessionId }),
+      );
+    },
+  });
+  const withoutToolsRuntime = createAgentRunSessionRuntime(
+    runtimeOptions(withoutToolsProvider, {
+      appManagedTools: toolFactory,
+      appManagedToolTransport: () => "supported",
+    }),
+  );
+  await settled(withoutToolsRuntime.start(agentRun({ authority: { ...authority, tools: false } })));
+  expect(withoutToolsProvider.turns[0]?.tools).toEqual([]);
+});
+
+it("restores person memory on retry and resume after restart for a trusted window, and withholds both for a restricted device", async () => {
+  const LOCAL = decodeWindowId("cccccccc-0000-4000-8000-000000000001");
+  const HUB_DEVICE = decodeWindowId("cccccccc-0000-4000-8000-000000000004");
+  const actor = Schema.decodeUnknownSync(EventActor)({
+    kind: "local-user",
+    actorId: "77777777-7777-4777-8777-777777777777",
+  });
+  const path = databasePath();
+  const connection = openSqlite(path);
+  applyMigrations(connection, MIGRATIONS, () => now);
+  const registry = registerPersonMemoryEvents(
+    new EventRegistry()
+      .register(AGENT_RUN_RESULT_DELIVERY_SETTLED, 1, AgentRunResultDeliverySettled)
+      .register(AGENT_RUN_REQUESTED, 1, AgentRunRequested)
+      .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
+      .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged),
+  );
+  const journal = new Journal({
+    connection,
+    registry,
+    projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+    clock: () => now,
+  });
+  const memoryStore = new PersonMemoryStore({
+    connection,
+    journal,
+    uuid: () => crypto.randomUUID(),
+    clock: () => decodeUtcTimestamp("2026-08-01T12:00:00.000Z"),
+    actor,
+  });
+  memoryStore.remember({
+    source: {
+      mode: "chat",
+      threadId: "aaaaaaaa-0000-4000-8000-000000000001" as never,
+      title: "Invoices",
+      providerInstanceId: providerInstanceId as never,
+      endedAt: decodeUtcTimestamp("2026-08-01T12:00:00.000Z"),
+    },
+    summary: "Built an invoice export.",
+    entries: [{ kind: "preference", content: "Prefers CSV over spreadsheets." }],
+  });
+  const personMemoryAccess = createPersonMemoryAccess({
+    store: memoryStore,
+    isRestrictedDeviceScope: (scope) => String(scope) === String(HUB_DEVICE),
+    projectLabel: () => "Shop",
+  });
+
+  const eventStore = new AgentRunEventStore({
+    journal,
+    uuid: () => crypto.randomUUID(),
+    actor,
+  });
+  const persistence = new AgentRunPersistenceService({
+    store: eventStore,
+    projection: new AgentRunProjection(),
+    uuid: () => crypto.randomUUID(),
+    clock: () => now,
+    connection,
+  });
+  const sessionStore = new AgentRunSessionStore({
+    connection,
+    getById: (id) => persistence.getById(id),
+  });
+  // Simulates the in-memory agentRunExecutionWindows map cleared on host restart.
+  const executionOwners = new Map<string, WindowId>();
+  const resolveOwner = (run: AgentRun, ownerWindowId?: string): WindowId | undefined =>
+    ownerWindowId === undefined
+      ? executionOwners.get(String(run.requestId))
+      : decodeWindowId(ownerWindowId);
+  const leadOf = (run: AgentRun, ownerWindowId?: string) => ({
+    mode: run.routingReceipt.mode,
+    threadId: String(run.parentThreadId),
+    createdAt: "2026-08-01T13:00:00.000Z",
+    windowId: resolveOwner(run, ownerWindowId),
+  });
+
+  const provider = fakeProvider({ resumable: true });
+  const capacityScheduler = scheduler();
+  const uuidQueue: string[] = [];
+  const runtime = createAgentRunSessionRuntime(
+    runtimeOptions(provider, {
+      capacityScheduler,
+      serviceLimits: () => soleSlotServiceLimits(),
+      capacityEnforcement: { kind: "observable-api", maxObservableConcurrency: 1 },
+      sessionStore: sessionStore.sessions,
+      supportsResume: () => true,
+      appManagedToolTransport: () => "supported",
+      // `fakeProvider.start` always answers with `sessionId`, so each fresh
+      // start that dispatches queues `[reservationId, sessionId]`.
+      uuid: () => uuidQueue.shift() ?? crypto.randomUUID(),
+      personMemoryBlock: (run, ownerWindowId) =>
+        personMemoryAccess.childBlockFor(leadOf(run, ownerWindowId)),
+      appManagedTools: ({ run, authority: childAuthority, ownerWindowId }) =>
+        personMemoryAccess.childToolsFor(
+          leadOf(run, ownerWindowId),
+          childAuthority,
+          // Live execution checks only the live owner binding, never falling
+          // back to the captured `ownerWindowId`, so revocation takes effect
+          // immediately while the child is still running.
+          () => executionOwners.get(String(run.requestId)),
+        ),
+    }),
+  );
+  let settledByRun:
+    | ((settled: {
+        readonly runId: AgentRun["id"];
+        readonly outcome: AgentRunSessionOutcome;
+      }) => void)
+    | undefined;
+  const supervisor = new AgentRunSessionSupervisor({
+    port: runtime,
+    onSessionSettled: (event) => settledByRun?.(event),
+  });
+  const orchestration = new AgentRunOrchestrationService({
+    persistence,
+    capacity: createInMemoryCapacityPort(),
+    approvals: { isCurrent: () => true },
+    worktree: { isVerifiedIsolation: () => true, isParentCheckout: () => false },
+    processes: supervisor,
+  });
+  settledByRun = (event) => orchestration.onSessionSettled(event);
+
+  const seedRun = agentRun();
+  const admitted = orchestration.admit({
+    command: {
+      kind: "request-agent-run",
+      requestId: seedRun.requestId,
+      parentThreadId: seedRun.parentThreadId,
+      role: "research",
+      task: seedRun.task,
+      creationPosture: "automatic",
+      requestedAuthority: authority,
+      routingReceipt: seedRun.routingReceipt,
+      workspaceReceipt: seedRun.workspaceReceipt,
+    },
+    parentAuthority: authority,
+    liveAuthority: authority,
+    confirmed: true,
+  });
+  if (admitted.kind !== "run-accepted") throw new Error("Expected admitted child run");
+  const interrupted = persistence.applyCommand({
+    kind: "interrupt-agent-run",
+    runId: admitted.run.id,
+    expectedVersion: admitted.run.version,
+    recoveryReason: "Host restarted while child was active.",
+  });
+  if (interrupted.kind !== "run-updated") throw new Error("Expected interrupted run");
+
+  // 1. Simulate restart (empty executionOwners) and retry from a trusted window.
+  executionOwners.clear();
+  uuidQueue.push(crypto.randomUUID(), sessionId);
+  const retried = orchestration.retry(interrupted.run.id, interrupted.run.version, authority, {
+    ownerWindowId: String(LOCAL),
+  });
+  expect(retried).toMatchObject({ kind: "run-updated", run: { lifecycleStatus: "starting" } });
+  // Matches `agentRunRoutes` binding synchronously after `retry` is accepted.
+  if (retried.kind === "run-updated") {
+    executionOwners.set(String(retried.run.requestId), LOCAL);
+  }
+  await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+  expect(provider.turns[0]?.context?.filter((block) => block.kind === "person-memory")).toEqual([
+    expect.objectContaining({
+      kind: "person-memory",
+      text: expect.stringContaining("Prefers CSV over spreadsheets."),
+    }),
+  ]);
+  expect(provider.turns[0]?.tools?.map((tool) => tool.name)).toContain("octant_past_threads");
+  // While the window binding is live, `octant_past_threads` succeeds; once
+  // revoked, the very next call on the same running child is refused.
+  await provider.emit({
+    kind: "tool-request",
+    sessionId,
+    instanceId: providerInstanceId,
+    sequence: 1,
+    requestId: "past-threads-before-revoke",
+    toolName: "octant_past_threads",
+    inputJson: JSON.stringify({ query: "invoice" }),
+    occurredAt: now,
+  });
+  await vi.waitFor(() => expect(provider.answeredTools).toHaveLength(1));
+  expect(provider.answeredTools[0]?.isError).toBeFalsy();
+  executionOwners.delete(String(admitted.run.requestId));
+  await provider.emit({
+    kind: "tool-request",
+    sessionId,
+    instanceId: providerInstanceId,
+    sequence: 2,
+    requestId: "past-threads-after-revoke",
+    toolName: "octant_past_threads",
+    inputJson: JSON.stringify({ query: "invoice" }),
+    occurredAt: now,
+  });
+  await vi.waitFor(() => expect(provider.answeredTools).toHaveLength(2));
+  expect(provider.answeredTools[1]?.isError).toBe(true);
+  await provider.emit({ kind: "text-delta", sessionId, text: "First reply", occurredAt: now });
+  await provider.emit({ kind: "completed", sessionId });
+  await vi.waitFor(() =>
+    expect(persistence.getById(admitted.run.id)?.lifecycleStatus).toBe("completed"),
+  );
+
+  // 2. Simulate restart again (empty executionOwners) and resume from a trusted window.
+  executionOwners.clear();
+  const completed = persistence.getById(admitted.run.id);
+  if (completed === undefined) throw new Error("Expected completed run");
+  const delivered = persistence.applyCommand({
+    kind: "settle-agent-run-result-delivery",
+    runId: completed.id,
+    expectedVersion: completed.version,
+    generation: completed.generation ?? 1,
+    outcome: "delivered",
+  });
+  if (delivered.kind !== "run-updated") throw new Error("Expected delivered run");
+  const resumed = await orchestration.resume(delivered.run.id, delivered.run.version, authority, {
+    message: "Check the invoice format",
+    ownerWindowId: String(LOCAL),
+    onExecutionAccepted: (accepted) => {
+      executionOwners.set(String(accepted.requestId), LOCAL);
+    },
+  });
+  expect(resumed).toMatchObject({ kind: "run-updated", run: { lifecycleStatus: "starting" } });
+  await vi.waitFor(() => expect(provider.turns).toHaveLength(2));
+  expect(provider.turns[1]?.context).toEqual([]);
+  expect(provider.turns[1]?.tools?.map((tool) => tool.name)).toContain("octant_past_threads");
+  await provider.emit({
+    kind: "tool-request",
+    sessionId,
+    instanceId: providerInstanceId,
+    sequence: 3,
+    requestId: "past-threads-resumed-live",
+    toolName: "octant_past_threads",
+    inputJson: JSON.stringify({ query: "invoice" }),
+    occurredAt: now,
+  });
+  await vi.waitFor(() => expect(provider.answeredTools).toHaveLength(3));
+  expect(provider.answeredTools[2]?.isError).toBeFalsy();
+  executionOwners.delete(String(admitted.run.requestId));
+  await provider.emit({
+    kind: "tool-request",
+    sessionId,
+    instanceId: providerInstanceId,
+    sequence: 4,
+    requestId: "past-threads-resumed-revoked",
+    toolName: "octant_past_threads",
+    inputJson: JSON.stringify({ query: "invoice" }),
+    occurredAt: now,
+  });
+  await vi.waitFor(() => expect(provider.answeredTools).toHaveLength(4));
+  expect(provider.answeredTools[3]?.isError).toBe(true);
+  await provider.emit({ kind: "text-delta", sessionId, text: "Second reply", occurredAt: now });
+  await provider.emit({ kind: "completed", sessionId });
+  await vi.waitFor(() =>
+    expect(persistence.getById(admitted.run.id)?.lifecycleStatus).toBe("completed"),
+  );
+
+  // 3. Simulate restart again and resume from a restricted hub-introduced device: gets no tools.
+  executionOwners.clear();
+  const completedAgain = persistence.getById(admitted.run.id);
+  if (completedAgain === undefined) throw new Error("Expected completed run");
+  const deliveredAgain = persistence.applyCommand({
+    kind: "settle-agent-run-result-delivery",
+    runId: completedAgain.id,
+    expectedVersion: completedAgain.version,
+    generation: completedAgain.generation ?? 1,
+    outcome: "delivered",
+  });
+  if (deliveredAgain.kind !== "run-updated") throw new Error("Expected delivered run");
+  const restrictedResume = await orchestration.resume(
+    deliveredAgain.run.id,
+    deliveredAgain.run.version,
+    authority,
+    {
+      message: "Follow up from hub device",
+      ownerWindowId: String(HUB_DEVICE),
+      onExecutionAccepted: (accepted) => {
+        executionOwners.set(String(accepted.requestId), HUB_DEVICE);
+      },
+    },
+  );
+  expect(restrictedResume).toMatchObject({
+    kind: "run-updated",
+    run: { lifecycleStatus: "starting" },
+  });
+  await vi.waitFor(() => expect(provider.turns).toHaveLength(3));
+  expect(provider.turns[2]?.context).toEqual([]);
+  expect(provider.turns[2]?.tools).toEqual([]);
+  await provider.emit({ kind: "text-delta", sessionId, text: "Third reply", occurredAt: now });
+  await provider.emit({ kind: "completed", sessionId });
+  await vi.waitFor(() =>
+    expect(persistence.getById(admitted.run.id)?.lifecycleStatus).toBe("completed"),
+  );
+
+  // 4. Simulate restart and retry an interrupted run from a restricted hub-introduced device: gets neither block nor tool.
+  const secondRun = agentRun();
+  const secondAdmitted = orchestration.admit({
+    command: {
+      kind: "request-agent-run",
+      requestId: "22222222-2222-4222-8222-222222222299" as never,
+      parentThreadId: secondRun.parentThreadId,
+      role: "research",
+      task: secondRun.task,
+      creationPosture: "automatic",
+      requestedAuthority: authority,
+      routingReceipt: secondRun.routingReceipt,
+      workspaceReceipt: secondRun.workspaceReceipt,
+    },
+    parentAuthority: authority,
+    liveAuthority: authority,
+    confirmed: true,
+  });
+  if (secondAdmitted.kind !== "run-accepted") throw new Error("Expected second admitted run");
+  const secondInterrupted = persistence.applyCommand({
+    kind: "interrupt-agent-run",
+    runId: secondAdmitted.run.id,
+    expectedVersion: secondAdmitted.run.version,
+    recoveryReason: "Host restarted while child was active.",
+  });
+  if (secondInterrupted.kind !== "run-updated") throw new Error("Expected second interrupted run");
+  executionOwners.clear();
+  uuidQueue.push(crypto.randomUUID(), sessionId);
+  const restrictedRetry = orchestration.retry(
+    secondInterrupted.run.id,
+    secondInterrupted.run.version,
+    authority,
+    { ownerWindowId: String(HUB_DEVICE) },
+  );
+  expect(restrictedRetry).toMatchObject({
+    kind: "run-updated",
+    run: { lifecycleStatus: "starting" },
+  });
+  await vi.waitFor(() => expect(provider.turns).toHaveLength(4));
+  expect(provider.turns[3]?.context?.filter((block) => block.kind === "person-memory")).toEqual([]);
+  expect(provider.turns[3]?.tools).toEqual([]);
+  await provider.emit({ kind: "text-delta", sessionId, text: "Fourth reply", occurredAt: now });
+  await provider.emit({ kind: "completed", sessionId });
+  await vi.waitFor(() =>
+    expect(persistence.getById(secondAdmitted.run.id)?.lifecycleStatus).toBe("completed"),
+  );
+
+  // 5. Simulate restart where retry hits full provider capacity and returns Waiting,
+  // then an explicit resume once capacity frees starts the child, binds its execution
+  // owner so live octant_past_threads searches succeed, and still refuses after revocation.
+  const thirdRun = agentRun();
+  const thirdAdmitted = orchestration.admit({
+    command: {
+      kind: "request-agent-run",
+      requestId: "33333333-3333-4333-8333-333333333399" as never,
+      parentThreadId: thirdRun.parentThreadId,
+      role: "research",
+      task: thirdRun.task,
+      creationPosture: "automatic",
+      requestedAuthority: authority,
+      routingReceipt: thirdRun.routingReceipt,
+      workspaceReceipt: thirdRun.workspaceReceipt,
+    },
+    parentAuthority: authority,
+    liveAuthority: authority,
+    confirmed: true,
+  });
+  if (thirdAdmitted.kind !== "run-accepted") throw new Error("Expected third admitted run");
+  const thirdInterrupted = persistence.applyCommand({
+    kind: "interrupt-agent-run",
+    runId: thirdAdmitted.run.id,
+    expectedVersion: thirdAdmitted.run.version,
+    recoveryReason: "Host restarted while child was active.",
+  });
+  if (thirdInterrupted.kind !== "run-updated") throw new Error("Expected third interrupted run");
+  executionOwners.clear();
+  const blocker = otherTurnSubmission(capacityScheduler);
+  expect(blocker.status).toBe("dispatched");
+  const waitingRetry = orchestration.retry(
+    thirdInterrupted.run.id,
+    thirdInterrupted.run.version,
+    authority,
+    { ownerWindowId: String(LOCAL) },
+  );
+  expect(waitingRetry).toMatchObject({
+    kind: "run-updated",
+    run: { lifecycleStatus: "waiting" },
+  });
+  if (waitingRetry.kind !== "run-updated") throw new Error("Expected waiting run");
+  // While the provider slot is still full, an explicit resume stays waiting and
+  // does not bind an execution owner.
+  const blockedResumeAccepted = vi.fn();
+  const stillWaiting = await orchestration.resume(
+    waitingRetry.run.id,
+    waitingRetry.run.version,
+    authority,
+    {
+      ownerWindowId: String(LOCAL),
+      onExecutionAccepted: blockedResumeAccepted,
+    },
+  );
+  expect(stillWaiting).toMatchObject({
+    kind: "run-updated",
+    run: { lifecycleStatus: "waiting" },
+  });
+  expect(blockedResumeAccepted).not.toHaveBeenCalled();
+  expect(executionOwners.has(String(thirdAdmitted.run.requestId))).toBe(false);
+
+  // Free the provider slot and explicitly resume the waiting child.
+  if (blocker.status !== "dispatched") throw new Error("Expected dispatched blocker");
+  capacityScheduler.recordTerminal({
+    reservationId: blocker.reservation.id,
+    outcome: "completed",
+  });
+  const waitingLatest = persistence.getById(thirdAdmitted.run.id);
+  if (waitingLatest === undefined) throw new Error("Expected waiting run after capacity block");
+  uuidQueue.push(crypto.randomUUID(), sessionId);
+  const resumedFromWait = await orchestration.resume(
+    waitingLatest.id,
+    waitingLatest.version,
+    authority,
+    {
+      ownerWindowId: String(LOCAL),
+      onExecutionAccepted: (accepted) => {
+        executionOwners.set(String(accepted.requestId), LOCAL);
+      },
+    },
+  );
+  expect(resumedFromWait).toMatchObject({
+    kind: "run-updated",
+    run: { lifecycleStatus: "starting" },
+  });
+  await vi.waitFor(() => expect(provider.turns).toHaveLength(5));
+  expect(provider.turns[4]?.context?.filter((block) => block.kind === "person-memory")).toEqual([
+    expect.objectContaining({
+      kind: "person-memory",
+      text: expect.stringContaining("Prefers CSV over spreadsheets."),
+    }),
+  ]);
+  expect(provider.turns[4]?.tools?.map((tool) => tool.name)).toContain("octant_past_threads");
+  await provider.emit({
+    kind: "tool-request",
+    sessionId,
+    instanceId: providerInstanceId,
+    sequence: 5,
+    requestId: "past-threads-capacity-wait-live",
+    toolName: "octant_past_threads",
+    inputJson: JSON.stringify({ query: "invoice" }),
+    occurredAt: now,
+  });
+  await vi.waitFor(() => expect(provider.answeredTools).toHaveLength(5));
+  expect(provider.answeredTools[4]?.isError).toBeFalsy();
+  executionOwners.delete(String(thirdAdmitted.run.requestId));
+  await provider.emit({
+    kind: "tool-request",
+    sessionId,
+    instanceId: providerInstanceId,
+    sequence: 6,
+    requestId: "past-threads-capacity-wait-revoked",
+    toolName: "octant_past_threads",
+    inputJson: JSON.stringify({ query: "invoice" }),
+    occurredAt: now,
+  });
+  await vi.waitFor(() => expect(provider.answeredTools).toHaveLength(6));
+  expect(provider.answeredTools[5]?.isError).toBe(true);
+  await provider.emit({ kind: "text-delta", sessionId, text: "Fifth reply", occurredAt: now });
+  await provider.emit({ kind: "completed", sessionId });
+  await vi.waitFor(() =>
+    expect(persistence.getById(thirdAdmitted.run.id)?.lifecycleStatus).toBe("completed"),
+  );
+
+  memoryStore.close();
   connection.close();
 });

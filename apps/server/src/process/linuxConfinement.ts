@@ -558,6 +558,39 @@ export function buildBubblewrapLaunch(
     tryBindReadOnly(path);
   }
 
+  // Omit any read-only bind whose target is a symlink already exposed inside a
+  // shallower parent bind when the symlink resolves through the remaining
+  // mounts to the same canonical target. Binding over an existing symlink in a
+  // read-only parent makes Bubblewrap fail the launch before starting.
+  for (const mount of [...mounts.values()].sort(
+    (left, right) => depth(right.target) - depth(left.target),
+  )) {
+    if (mount.kind !== "ro-bind") continue;
+    const parent = [...mounts.values()]
+      .filter(
+        (candidate) =>
+          candidate.target !== mount.target && mount.target.startsWith(`${candidate.target}${sep}`),
+      )
+      .sort((left, right) => right.target.length - left.target.length)[0];
+    if (parent === undefined || (parent.kind !== "ro-bind" && parent.kind !== "bind")) continue;
+    const inParent = join(parent.source, relative(parent.target, mount.target));
+    let isLink = false;
+    try {
+      isLink = lstatSync(inParent).isSymbolicLink();
+    } catch {
+      continue;
+    }
+    if (!isLink || safeRealpathSync(inParent) !== mount.source) continue;
+    const withoutChild = new Map(mounts);
+    withoutChild.delete(mount.target);
+    const resolved = resolveInCapsule(mount.target, withoutChild);
+    const reachedHost =
+      resolved.kind === "present" ? hostPathInCapsule(resolved.path, withoutChild) : undefined;
+    if (reachedHost !== undefined && safeRealpathSync(reachedHost) === mount.source) {
+      mounts.delete(mount.target);
+    }
+  }
+
   const writeTargets = [
     ...(input.writeBoundRoot !== false ? boundRoots : []),
     ...(isSharedHostTemporaryRoot(input.temporaryDirectory) ? [] : [input.temporaryDirectory]),
@@ -664,7 +697,7 @@ export function buildBubblewrapLaunch(
       input.additionalWriteRoots ?? [],
     ),
     withinRoots: [
-      input.boundRoot,
+      ...boundRoots,
       input.temporaryDirectory,
       ...(input.readRoots ?? []),
       ...(input.additionalWriteRoots ?? []),

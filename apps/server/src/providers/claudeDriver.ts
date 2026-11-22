@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
 
 import {
   DEFAULT_RUNTIME_TURNS_PER_TURN,
@@ -42,13 +42,18 @@ import type {
   ProviderConnection,
   ProviderDriver,
   ProviderSessionCompaction,
+  ProviderInPlaceLevelChange,
   ProviderSessionForkRequest,
   ProviderWakeupSchedule,
   ProviderBackgroundWork,
   ProviderNativeSession,
+  ProviderNativeSessionMessage,
   ProviderNativeSessionCarry,
   ProviderNativeSessions,
+  ProviderOwnChannels,
+  ProviderServerPlacement,
 } from "@octant/provider-sdk/driver";
+import { launchOwnChannels } from "./providerOwnChannels";
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
   isOctantInstructionContext,
@@ -99,6 +104,7 @@ import {
   claudeAccountUsesStoredKey,
   mcpServerTool,
   planReadOnlyToolServers,
+  providerHoldsLevelWithoutSandbox,
   providerOwnMemoryLaunches,
   windowsProviderLaunch,
 } from "@octant/domain";
@@ -123,10 +129,17 @@ import { claudeProcessPlanUsageLimits, decodeClaudeProcessPlanUsage } from "./cl
 import { claudeNativeArtifactsSupport } from "./claudeNativeArtifacts";
 import { readClaudePublishedSnapshot } from "./claudePublishedSnapshot";
 import {
+  isProtectedPathOnServer,
   secretGuardRefusal,
   secretGuardSearchRefusal,
   secretGuardNativeReadOverlap,
 } from "../process/secretGuard";
+import {
+  CLAUDE_SERVER_STRICT_REFUSAL,
+  claudeServerSignInRefusal,
+  claudeSessionOnServer,
+  readClaudeInstructionsOnServer,
+} from "./claudeServerProcess";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
 import { isAtLeastRelease } from "./releaseVersion";
@@ -368,10 +381,18 @@ const CLAUDE_ENTER_WORKTREE_TOOL = "EnterWorktree";
 export function claudeWorktreeTarget(
   input: Readonly<Record<string, unknown>>,
   workingDirectory: string,
+  /**
+   * The session runs on a server Project's server, whose repository this
+   * host cannot look for: there only a named path is known before the call.
+   */
+  onServer = false,
 ): string | undefined {
   if (typeof input.path === "string" && input.path !== "") {
-    return resolve(workingDirectory, input.path);
+    return onServer
+      ? posix.resolve(workingDirectory, input.path)
+      : resolve(workingDirectory, input.path);
   }
+  if (onServer) return undefined;
   let directory = resolve(workingDirectory);
   while (!existsSync(join(directory, ".git"))) {
     const parent = dirname(directory);
@@ -400,7 +421,9 @@ export function claudeWorktreeTarget(
  * a level change instead (`approval-request` with `levelChange`), and the
  * call itself is always refused with what the person decided. An approved
  * change applies from the thread's next session, because Plan's read-only
- * rule rests on the tool set and sandbox profile a session launches with. A
+ * rule rests on the tool set and sandbox profile a session launches with,
+ * except entering Plan, which the host can apply in place
+ * (`changeLevelInPlace`): the gate then holds the session to Plan itself. A
  * session whose host does not answer level changes holds neither tool.
  */
 export const CLAUDE_ENTER_PLAN_TOOL = "EnterPlanMode";
@@ -606,6 +629,55 @@ export function claudeBlockedToolNames(
 
 export const CLAUDE_PLAN_MCP_SERVER_REFUSAL =
   'This MCP server is not allowed in Plan. Mark it "Read-only — allowed in Plan" in Settings to use it here.';
+
+/** Plan's sentence for a call a session moved to Plan inside its turn may not make. */
+export const CLAUDE_IN_PLACE_PLAN_REFUSAL =
+  "The thread moved to Plan during this turn, so it is read-only now: no file change, command, subagent or workflow runs. Keep reading and write the plan as your reply.";
+/** Why a mode switch is refused once the thread moved to Plan inside the turn. */
+export const CLAUDE_IN_PLACE_PLAN_LEVEL_REFUSAL =
+  "The thread is already in Plan for the rest of this turn. Write the plan as your reply; leaving Plan is asked from the thread's next turn.";
+
+/**
+ * What a session the thread moved to Plan inside its turn may still call.
+ * It keeps the tools and sandbox of the level it launched at, so its own
+ * sandbox cannot judge a command, and only what a Plan session would hold
+ * stays: reads, the session's own task tools, a question, a skill's text, a
+ * web read (asked as in Plan), the servers the person marked read-only, and
+ * Octant's own tools, which the host judges at the thread's current level.
+ * Everything else is refused, every write, `Bash` call, sandbox escape,
+ * subagent and `Workflow` start among it; a tool this list does not know
+ * fails closed.
+ */
+export function claudeInPlacePlanRefusal(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+  planMcpServers: readonly string[],
+): string | undefined {
+  if (CLAUDE_LEVEL_CHANGE_TOOLS.has(toolName)) return CLAUDE_IN_PLACE_PLAN_LEVEL_REFUSAL;
+  if (
+    CLAUDE_READ_TOOLS.has(toolName) ||
+    toolName === "LS" ||
+    CLAUDE_SESSION_TOOLS.has(toolName) ||
+    toolName === "AskUserQuestion" ||
+    toolName === "Skill" ||
+    CLAUDE_WEB_TOOLS.has(toolName) ||
+    toolName.startsWith("mcp__octant__")
+  ) {
+    return undefined;
+  }
+  if (
+    toolName === CLAUDE_ARTIFACT_TOOL &&
+    typeof input.action === "string" &&
+    CLAUDE_ARTIFACT_READ_ACTIONS.has(input.action)
+  ) {
+    return undefined;
+  }
+  const server = claudeAccountMcpServer(toolName);
+  if (server !== undefined) {
+    return planMcpServers.includes(server) ? undefined : CLAUDE_PLAN_MCP_SERVER_REFUSAL;
+  }
+  return CLAUDE_IN_PLACE_PLAN_REFUSAL;
+}
 
 /**
  * The account MCP server a tool belongs to (`mcp__<server>__<tool>`), or
@@ -829,8 +901,8 @@ function isPlanShellCommand(
  * and their `permissions.allow`, `ask` and `deny` rules live. The source
  * cannot be read for those alone, because it also brings the plugins,
  * agents and commands the person's Octant switches keep out, so a session
- * that reads no home settings keeps Octant's gate and sandbox instead of
- * running with neither protection.
+ * that reads no home settings keeps Octant's gate, which asks before each
+ * command and each edit the level does not waive.
  */
 export function claudeOwnPermissions(input: {
   readonly strict: boolean;
@@ -849,17 +921,36 @@ export function claudeOwnPermissions(input: {
 /**
  * Whether Octant configures Claude's command sandbox for a session. Under
  * Strict it is today's configuration (the Project's folders, Network limits,
- * no unasked sandboxed commands); outside Strict Octant leaves Claude's
- * sandbox to the person's own Claude settings and passes it nothing. A Full
- * access thread that kept its sandbox keeps Octant's at every setting.
+ * no unasked sandboxed commands). Outside Strict a Work or Code launch
+ * below Full access outside Plan runs with no sandbox of Octant's
+ * (`providerHoldsLevelWithoutSandbox`, maintainer decision, 2026-11-21), as on
+ * Windows: Claude's own permission modes, the person's own Claude settings
+ * where the session reads them, and Octant's gate hold the level. Chat and
+ * Plan keep Octant's configuration, as does a legacy chosen sandbox policy in
+ * a session that reads none of the person's settings. A Full access thread
+ * that kept its sandbox keeps Octant's at every setting.
  */
 export function claudeOctantConfiguresSandbox(input: {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly fullAccessSandbox: boolean;
   readonly ownPermissions: boolean;
+  readonly mode: ProviderAcquireInput["mode"] | undefined;
+  readonly strict: boolean;
+  readonly sandboxPolicySelected: boolean;
 }): boolean {
   if (input.executionPolicy === "full-access" && input.fullAccessSandbox) return true;
-  return claudeRunsSandbox(input.executionPolicy) && !input.ownPermissions;
+  return (
+    claudeRunsSandbox(input.executionPolicy) &&
+    !input.ownPermissions &&
+    !providerHoldsLevelWithoutSandbox({
+      mode: input.mode ?? "code",
+      executionPolicy: input.executionPolicy,
+      strict: input.strict,
+      fullAccessSandbox: input.fullAccessSandbox,
+      sandboxPolicySelected: input.sandboxPolicySelected,
+      purpose: "session",
+    })
+  );
 }
 
 function claudePolicyOptions(
@@ -1042,11 +1133,11 @@ export async function claudeSessionInstructions(input: {
     input.onDiagnostic(`Claude instruction file ${skipped.path} was not read: ${skipped.reason}.`);
   }
   if (read.text === undefined) return undefined;
-  return [
-    "Instructions the person keeps for Claude in these files. They are the person's guidance for this work; they grant no permission Octant has not given.",
-    read.text,
-  ].join("\n\n");
+  return [CLAUDE_INSTRUCTIONS_PREAMBLE, read.text].join("\n\n");
 }
+
+const CLAUDE_INSTRUCTIONS_PREAMBLE =
+  "Instructions the person keeps for Claude in these files. They are the person's guidance for this work; they grant no permission Octant has not given.";
 
 /**
  * The account's own sign-in files, which the secret guard leaves to the
@@ -1147,6 +1238,80 @@ export function claudeFileToolSecretRefusal(
     if (refusal !== undefined) return refusal;
   }
   return undefined;
+}
+
+/** Said when a thread keeps a sandbox of Octant's that Claude Code on a server cannot have. */
+export const CLAUDE_SERVER_KEPT_SANDBOX_REFUSAL =
+  "This thread keeps Octant's sandbox, which can't run on a server. Turn off the kept sandbox for this thread to run Claude Code there.";
+
+/** Claude's answer to a file tool naming a protected path on a server Project's server. */
+export const CLAUDE_SERVER_PROTECTED_REFUSAL =
+  "This path is protected by the secret guard's list, matched by its name on the server, so Claude's file tools don't open it there. Use the server's own credential setup instead. The list is in Settings › Permissions › Protected files.";
+
+/** Claude's answer to a search on a server Project's server rooted outside the Project's folders. */
+export const CLAUDE_SERVER_SEARCH_REFUSAL =
+  "On a server, Claude's searches stay in the Project's folders below Full access: Octant can't walk the server's other folders to keep a search off the files the secret guard protects. Search a folder in the Project, or name the file itself.";
+
+/**
+ * {@link claudeFileToolSecretRefusal} for a session on a server Project's
+ * server. The list is matched against the path's name alone
+ * (`isProtectedPathOnServer`): this host can neither resolve a link on the
+ * server nor walk its folders, and whatever sits at the same path here says
+ * nothing about the server. A search reads every file beneath its root, and
+ * a root above a protected file cannot be told by its name, so a search
+ * rooted outside the folders the session holds is refused whole; one inside
+ * them is refused only by name.
+ */
+export function claudeServerFileToolSecretRefusal(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+  workingDirectory: string,
+  /** As for {@link claudeFileToolSecretRefusal} outside Strict: only the provider sign-ins. */
+  fullAccess: boolean,
+  /** Whether a folder on the server is one the session holds. */
+  holds: (path: string) => boolean,
+): string | undefined {
+  const refuses = (path: string) =>
+    isProtectedPathOnServer(posix.resolve(workingDirectory, path), fullAccess)
+      ? CLAUDE_SERVER_PROTECTED_REFUSAL
+      : undefined;
+  if (CLAUDE_SEARCH_TOOLS.has(toolName)) {
+    const pattern = typeof input.pattern === "string" ? input.pattern : "";
+    const searchRoot = posix.resolve(
+      workingDirectory,
+      typeof input.path === "string" ? input.path : ".",
+    );
+    const roots = [
+      searchRoot,
+      ...(toolName === "Glob" ? [posix.resolve(searchRoot, globFixedPrefix(pattern))] : []),
+    ];
+    for (const root of roots) {
+      if (!holds(root)) return CLAUDE_SERVER_SEARCH_REFUSAL;
+      const refusal = refuses(root);
+      if (refusal !== undefined) return refusal;
+    }
+    return undefined;
+  }
+  if (toolName.startsWith("mcp__")) return undefined;
+  for (const key of ["file_path", "notebook_path", "path", "local_path"] as const) {
+    const value = input[key];
+    if (typeof value !== "string") continue;
+    const refusal = refuses(value);
+    if (refusal !== undefined) return refusal;
+  }
+  return undefined;
+}
+
+/**
+ * Whether a path on a server Project's server lies inside a folder there,
+ * read from the names alone: this host cannot resolve a link on the server,
+ * and canonicalizing a server path here would read whatever this host keeps
+ * at that path.
+ */
+function serverPathInside(root: string, absolutePath: string): boolean {
+  if (!posix.isAbsolute(root) || !posix.isAbsolute(absolutePath)) return false;
+  const folder = posix.normalize(root).replace(/\/+$/u, "");
+  return posix.normalize(absolutePath).startsWith(`${folder}/`);
 }
 
 /**
@@ -1354,6 +1519,10 @@ const availableCapabilities: ProviderCapabilities = {
   },
   // Each session owns its runtime process, so one can be killed alone.
   forceStop: "supported",
+  // The SDK's control protocol speaks over the process's standard streams and
+  // carries Octant's tools, approvals and hooks inside it, so the process can
+  // run on a server Project's server over SSH (`claudeServerProcess.ts`).
+  serverPlacement: "supported",
   ...unsupportedChatCapabilities,
   appManagedTools: "supported",
 };
@@ -1382,6 +1551,8 @@ type ClaudeEnvironmentFactory = (
 
 export interface ClaudeDriverOptions {
   readonly sandboxPolicy?: SandboxPolicySelection;
+  /** Whether the host currently enforces Strict; read on probe so Bedrock/custom routing works outside Strict. */
+  readonly hostStrict?: () => boolean;
   readonly instanceId: ProviderInstanceId;
   /** The host's platform; defaults to the running one. */
   readonly platform?: NodeJS.Platform;
@@ -1597,6 +1768,26 @@ interface SessionState {
   readonly settledToolUseIds: Set<string>;
   /** The task list from Claude's task tools, kept across the session's turns. */
   readonly taskList: ClaudeTaskList;
+  /** Whether the host answers this session's level-change asks. */
+  readonly levelChanges: boolean;
+  /**
+   * The account directory overlaps the checkout, so the task tools Plan keeps
+   * would write inside the Project: the session cannot enter Plan in place.
+   */
+  readonly accountDirectoryBroadensPlan: boolean;
+  /** The account MCP servers the person marked read-only, which Plan still starts. */
+  readonly planMcpServers: readonly string[];
+  /**
+   * The thread moved to Plan inside this session's turn
+   * ({@link ProviderConnection.changeLevelInPlace}). The session keeps the
+   * tools and sandbox of the level it launched at, so from then on the gate
+   * judges every call at Plan and refuses whatever a Plan session would not
+   * hold ({@link claudeInPlacePlanRefusal}). It never turns back, even when
+   * the runtime refused to switch and the host ends the turn.
+   */
+  inPlacePlan: boolean;
+  /** The runtime accepted the switch to plan mode, so the turn goes on in Plan. */
+  planModeSwitched: boolean;
   claudeSessionId?: string;
   context?: ClaudeEventContext;
   collector?: Fiber.RuntimeFiber<void, never>;
@@ -1669,12 +1860,23 @@ interface ClaudeRuntimeTurn {
   readonly opened: DeferredValue<boolean>;
 }
 
+/** The level a session's gate judges its calls at now. */
+function claudeGateLevel(
+  state: SessionState,
+  launched: ProviderExecutionPolicy,
+): ProviderExecutionPolicy {
+  return state.inPlacePlan ? "plan" : launched;
+}
+
 /** What the runtime is told after the person answered its ask to change the thread's level. */
-function claudeLevelChangeAnswer(toolName: string, approved: boolean): string {
+function claudeLevelChangeAnswer(toolName: string, approved: boolean, inPlace: boolean): string {
   if (!approved) {
     return toolName === CLAUDE_ENTER_PLAN_TOOL
       ? "The person kept this thread at its level. Continue without planning mode."
       : "The person kept this thread in Plan. Keep planning read-only, or revise the plan.";
+  }
+  if (inPlace && toolName === CLAUDE_ENTER_PLAN_TOOL) {
+    return "The person approved planning first. The thread is in Plan now, read-only, for the rest of this turn: read what you need and write the plan as your reply.";
   }
   return toolName === CLAUDE_ENTER_PLAN_TOOL
     ? "The person approved planning first. Octant ends this turn now; the thread's next turn runs in Plan, read-only. Stop here."
@@ -2366,10 +2568,12 @@ function probeSdk(
       executionPolicy: "plan",
       environment: environment.environment,
     });
+    const strict = environmentOptions.strict !== false;
     const query = yield* options.sdk.openQuery({
       binaryPath: options.binaryPath,
       projectRoot: probeRoot,
       authEnvironment: environment.environment,
+      ...(strict ? {} : { strict: false }),
       ...(network === undefined ? {} : { network }),
       model: PROBE_MODEL,
       executionPolicy: "plan",
@@ -2384,7 +2588,7 @@ function probeSdk(
     if (!account.ready) {
       return yield* Effect.fail(failure("unauthenticated", "Claude authentication is required."));
     }
-    if (account.apiProvider !== undefined && account.apiProvider !== "firstParty") {
+    if (strict && account.apiProvider !== undefined && account.apiProvider !== "firstParty") {
       return yield* Effect.fail(
         failure("protocol", "Claude initialized an unsupported account routing policy."),
       );
@@ -2423,14 +2627,17 @@ function makeProbe(
     }
     return Effect.gen(function* () {
       const version = yield* options.process.probeVersion(options.binaryPath);
+      const strict = options.hostStrict?.() ?? true;
       let apiKey: string | undefined;
       let hostTrafficDisabled = false;
       if (options.authentication === "subscription") {
-        const environment = yield* environmentFactory(
-          "subscription",
-          options.configDirectory === undefined ? {} : { configDirectory: options.configDirectory },
-        );
-        hostTrafficDisabled = disablesNonessentialTraffic(environment.environment);
+        const environment = yield* environmentFactory("subscription", {
+          ...(options.configDirectory === undefined
+            ? {}
+            : { configDirectory: options.configDirectory }),
+          ...(strict ? {} : { strict: false }),
+        });
+        hostTrafficDisabled = disablesNonessentialTraffic(environment.environment, strict);
         const status = yield* options.process.probeSubscription(
           options.binaryPath,
           environment.environment,
@@ -2500,6 +2707,7 @@ function makeProbe(
         ...(options.configDirectory === undefined
           ? {}
           : { configDirectory: options.configDirectory }),
+        ...(strict ? {} : { strict: false }),
       }).pipe(
         Effect.map((probed) => ({ kind: "ready" as const, ...probed })),
         Effect.catchAll((providerFailure) =>
@@ -2755,6 +2963,9 @@ function makeClaudeNativeSessions(
             ? (error as ProviderFailure)
             : failure("unavailable", "The Claude session could not be taken up."),
       }),
+    ...(options.sdk.sessionMessages === undefined
+      ? {}
+      : { history: readHistory(options.sdk.sessionMessages) }),
     // Taken in turn with adoptions of the same session, so a release never
     // removes a record a later adoption wrote.
     release: (input) =>
@@ -2827,6 +3038,27 @@ function makeClaudeNativeSessions(
       ),
     );
   }
+  /**
+   * The adopted session's transcript, which the resume record points at, read
+   * through the SDK from this account's own directory.
+   */
+  function readHistory(
+    sessionMessages: NonNullable<ClaudeAgentSdkPort["sessionMessages"]>,
+  ): NonNullable<ProviderNativeSessions["history"]> {
+    return (input) =>
+      input.instanceId !== options.instanceId
+        ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
+        : sessionMessages({
+            sessionId: input.nativeSessionId,
+            projectRoot: input.projectRoot,
+            ...configDirectory,
+          }).pipe(
+            Effect.map((messages) => ({
+              status: "read" as const,
+              messages: claudeSessionMessages(messages),
+            })),
+          );
+  }
   async function adoptOnce(
     input: Parameters<NonNullable<ProviderDriver["nativeSessions"]>["adopt"]>[0],
   ) {
@@ -2872,6 +3104,48 @@ function makeClaudeNativeSessions(
       }),
     };
   }
+}
+
+/**
+ * A Claude transcript's messages as imported messages. A user message is the
+ * person's text; one that only returns tool results is the runtime's, not the
+ * person's, and is left out. An assistant message keeps its text and names its
+ * `tool_use` calls; thinking is left out.
+ */
+export function claudeSessionMessages(
+  messages: ReadonlyArray<{ readonly type: string; readonly message: unknown }>,
+): ReadonlyArray<ProviderNativeSessionMessage> {
+  const imported: ProviderNativeSessionMessage[] = [];
+  for (const entry of messages) {
+    if (entry.type !== "user" && entry.type !== "assistant") continue;
+    const message =
+      typeof entry.message === "object" && entry.message !== null
+        ? (entry.message as Readonly<Record<string, unknown>>)
+        : undefined;
+    const content = message?.content;
+    const texts: string[] = [];
+    const tools: string[] = [];
+    if (typeof content === "string") texts.push(content);
+    else if (Array.isArray(content))
+      for (const candidate of content as ReadonlyArray<unknown>) {
+        if (typeof candidate !== "object" || candidate === null) continue;
+        const part = candidate as Readonly<Record<string, unknown>>;
+        if (part.type === "text" && typeof part.text === "string") texts.push(part.text);
+        else if (
+          entry.type === "assistant" &&
+          part.type === "tool_use" &&
+          typeof part.name === "string"
+        )
+          tools.push(part.name);
+      }
+    if (texts.length === 0 && tools.length === 0) continue;
+    imported.push({
+      role: entry.type === "user" ? "person" : "agent",
+      text: texts.join("\n"),
+      ...(tools.length === 0 ? {} : { tools }),
+    });
+  }
+  return imported;
 }
 
 /**
@@ -2937,18 +3211,24 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
       attachmentsFolder,
       workRequest,
       sandboxPolicy,
+      serverPlacement,
     }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
         );
       }
+      // A server's folders are POSIX paths there, whatever this host is.
+      const normalized = (root: string) =>
+        serverPlacement === undefined
+          ? isAbsolute(root) && resolve(root) === root
+          : posix.isAbsolute(root) && posix.resolve(root) === root;
       if (
         [
           projectRoot,
           ...extraFolders,
           ...(attachmentsFolder === undefined ? [] : [attachmentsFolder]),
-        ].some((root) => !isAbsolute(root) || resolve(root) !== root)
+        ].some((root) => !normalized(root))
       ) {
         return Effect.fail(
           failure(
@@ -2957,9 +3237,15 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
           ),
         );
       }
+      // Every "inside the Project?" a placed session asks is about the
+      // server's folders, so it is answered from the names there.
+      const confined =
+        serverPlacement === undefined
+          ? options
+          : { ...options, isProjectConfinedPath: serverPathInside };
       return makeConnection(
         {
-          ...withProjectFolders(options, projectRoot, extraFolders),
+          ...withProjectFolders(confined, projectRoot, extraFolders),
           ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }),
         },
         environmentFactory,
@@ -2969,6 +3255,7 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
         factories,
         workRequest === undefined ? undefined : String(workRequest.threadId),
         attachmentsFolder,
+        serverPlacement,
       );
     },
   };
@@ -2985,6 +3272,12 @@ function makeConnection(
   workThreadId?: string,
   /** The thread's attachments folder, which the session reads and never writes. */
   attachmentsFolder?: string,
+  /**
+   * The server a server Project's sessions run on. Each then starts there,
+   * and nothing in this connection reads this host's Claude account, its
+   * instruction files or its folders for a path that names the server.
+   */
+  serverPlacement?: ProviderServerPlacement,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
     const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
@@ -3688,6 +3981,7 @@ function makeConnection(
         readonly executionPolicy: ProviderExecutionPolicy;
         readonly fullAccessSandbox?: boolean;
         readonly strict?: boolean;
+        readonly ownChannels?: ProviderOwnChannels;
         readonly autoApprove?: boolean;
         readonly modelOptionValues?: ProviderModelOptionValues;
         readonly singleUse?: boolean;
@@ -3713,7 +4007,7 @@ function makeConnection(
           executionPolicy: input.executionPolicy,
           fullAccessSandbox: input.fullAccessSandbox,
           strict: input.strict,
-          chatWithoutFolderOrShell: true,
+          driverKind: "claude",
         });
         if (windows.status === "refused") throw failure("incompatible", windows.reason);
       }
@@ -3755,12 +4049,26 @@ function makeConnection(
       if (sessions.has(input.sessionId)) {
         throw failure("protocol", "Claude session is already active.");
       }
+      // On a server Octant's own sandbox cannot run, so Strict, a selected
+      // sandbox policy and a Full access thread that keeps its sandbox are
+      // refused there rather than run without the sandbox each promises.
+      if (serverPlacement !== undefined) {
+        if (input.strict !== false) throw failure("unsupported", CLAUDE_SERVER_STRICT_REFUSAL);
+        if (
+          options.sandboxPolicy !== undefined ||
+          (input.executionPolicy === "full-access" && input.fullAccessSandbox === true)
+        ) {
+          throw failure("unsupported", CLAUDE_SERVER_KEPT_SANDBOX_REFUSAL);
+        }
+      }
 
       let apiKey: string | undefined;
       let scope: Scope.CloseableScope | undefined;
       let state: SessionState | undefined;
       try {
-        if (claudeAccountUsesStoredKey(options.authentication)) {
+        // On a server Claude Code signs in as that server's login; no
+        // credential of this host goes there.
+        if (serverPlacement === undefined && claudeAccountUsesStoredKey(options.authentication)) {
           if (!(await runSetupEffect(brokerHas(options), signal))) {
             throw failure(
               "unauthenticated",
@@ -3771,7 +4079,10 @@ function makeConnection(
           }
           apiKey = await runSetupEffect(brokerResolve(options), signal);
         }
+        // This host's account directory is no folder of the server's, so
+        // neither overlap check below applies to a placed session.
         if (
+          serverPlacement === undefined &&
           options.configDirectory !== undefined &&
           CONFINED_CLAUDE_EXECUTION_POLICIES.has(input.executionPolicy) &&
           claudeAccountDirectoryBroadensPlan(
@@ -3785,6 +4096,17 @@ function makeConnection(
             "Claude Plan confinement cannot use an account directory that overlaps the checkout.",
           );
         }
+        // Plan refuses an account directory that overlaps the checkout, since
+        // the session's own task tools write there. A session launched at
+        // another level over such a folder cannot be held to Plan in place.
+        const accountDirectoryBroadensPlan =
+          serverPlacement === undefined &&
+          options.configDirectory !== undefined &&
+          claudeAccountDirectoryBroadensPlan(
+            projectRoot,
+            options.configDirectory,
+            options.isProjectConfinedPath,
+          );
         scope = await runSetupEffect(Scope.make(), signal);
         const initialized = deferred<string>();
         // Startup no longer waits on this: the runtime initializes with the
@@ -3792,22 +4114,41 @@ function makeConnection(
         void initialized.promise.catch(() => undefined);
         const terminalResult = deferred<void>();
         // Read at each launch, like every other choice here: outside Strict the
-        // runtime gets the host's environment and its own channel settings.
+        // runtime gets the host's environment, and its telemetry and
+        // self-update follow the person's provider switches.
         const strict = input.strict !== false;
-        const environment = await runSetupEffect(
-          environmentFactory(options.authentication, {
-            ...(apiKey !== undefined ? { apiKey } : {}),
-            ...(options.gatewayBaseUrl === undefined
-              ? {}
-              : { gatewayBaseUrl: options.gatewayBaseUrl }),
-            ...(options.configDirectory === undefined
-              ? {}
-              : { configDirectory: options.configDirectory }),
-            ...(strict ? {} : { strict: false }),
-          }).pipe(Effect.provideService(Scope.Scope, scope)),
-          signal,
+        // A thread that keeps or chose a sandbox keeps the provider's own
+        // channels closed as Strict does, as an ACP agent's launch does: the
+        // person's switches open them only where Octant adds nothing of its own.
+        const ownChannels = launchOwnChannels(
+          strict || input.fullAccessSandbox === true || options.sandboxPolicy !== undefined,
+          input.ownChannels,
         );
-        const ownClaudeAccountPaths = claudeOwnAccountPaths(environment.environment);
+        // Whether the launch carries Octant's telemetry guards, which decides
+        // how the host's own opt-outs are read and what Claude artifacts lift.
+        const telemetryGuarded = !ownChannels.telemetry;
+        // A placed launch takes none of this host's environment: the server
+        // login's own applies there, and the SDK's spawn passes on only its
+        // fixed switches (`claudeServerProgram`).
+        const environment: ClaudeEnvironmentScope =
+          serverPlacement !== undefined
+            ? { environment: {} }
+            : await runSetupEffect(
+                environmentFactory(options.authentication, {
+                  ...(apiKey !== undefined ? { apiKey } : {}),
+                  ...(options.gatewayBaseUrl === undefined
+                    ? {}
+                    : { gatewayBaseUrl: options.gatewayBaseUrl }),
+                  ...(options.configDirectory === undefined
+                    ? {}
+                    : { configDirectory: options.configDirectory }),
+                  ...(strict ? {} : { strict: false, ownChannels }),
+                }).pipe(Effect.provideService(Scope.Scope, scope)),
+                signal,
+              );
+        // This host's account folders name nothing on the server.
+        const ownClaudeAccountPaths =
+          serverPlacement === undefined ? claudeOwnAccountPaths(environment.environment) : [];
         if (
           input.strict === true &&
           input.executionPolicy !== "plan" &&
@@ -3834,10 +4175,17 @@ function makeConnection(
           executionPolicy: input.executionPolicy,
           setup: input.nativeSetup,
         });
+        // The gate judges each call with the session's current level, which
+        // can narrow to Plan inside a turn, and Plan never leaves a call to
+        // the person's own rules.
+        const ownLaunchPermissions = ownPermissions;
         const octantSandbox = claudeOctantConfiguresSandbox({
           executionPolicy: input.executionPolicy,
           fullAccessSandbox: sandboxedFullAccess,
           ownPermissions,
+          mode,
+          strict,
+          sandboxPolicySelected: options.sandboxPolicy !== undefined,
         });
         const networkPolicy = sandboxedFullAccess ? "auto-accept-edits" : input.executionPolicy;
         // Claude's own process: its inference and in-process web fetch. It
@@ -3866,23 +4214,49 @@ function makeConnection(
                 }).pipe(Effect.provideService(Scope.Scope, scope)),
                 signal,
               );
-        const servers = await runSetupEffect(
-          acquireProviderServerAccess(
-            options.sandboxPolicy?.policy.hostServices === "blocked"
-              ? undefined
-              : options.serverAccess,
-            {
-              root: projectRoot,
-              executionPolicy: input.executionPolicy,
-            },
-          ).pipe(Effect.provideService(Scope.Scope, scope)),
-          signal,
-        );
+        // The registered servers' wrappers live on this host, so a placed
+        // session gets none; it reaches what the server login reaches.
+        const servers =
+          serverPlacement !== undefined
+            ? undefined
+            : await runSetupEffect(
+                acquireProviderServerAccess(
+                  options.sandboxPolicy?.policy.hostServices === "blocked"
+                    ? undefined
+                    : options.serverAccess,
+                  {
+                    root: projectRoot,
+                    executionPolicy: input.executionPolicy,
+                  },
+                ).pipe(Effect.provideService(Scope.Scope, scope)),
+                signal,
+              );
+        // The version a placed session is held to is the server's `claude`.
         const runtimeVersion = await runSetupEffect(
-          options.process.probeVersion(options.binaryPath),
+          options.process.probeVersion(options.binaryPath, serverPlacement),
           signal,
         );
-        if (options.authentication === "subscription") {
+        // A placed session signs in as the server login, whatever this
+        // host's account is, so Claude Code's own status command answers for
+        // it there, before anything starts.
+        if (serverPlacement !== undefined) {
+          const status = await runSetupEffect(
+            options.process.probeSubscription(
+              options.binaryPath,
+              {},
+              {
+                projectRoot,
+                executionPolicy: input.executionPolicy,
+                strict: false,
+                server: serverPlacement,
+              },
+            ),
+            signal,
+          );
+          if (status === "unauthenticated") {
+            throw failure("unauthenticated", claudeServerSignInRefusal(serverPlacement.serverName));
+          }
+        } else if (options.authentication === "subscription") {
           // A confined launch reads its sign-in from inside the sandbox, so the
           // check runs there too. An unconfined check said "signed in" while
           // the confined runtime could not reach the Keychain, and the turn
@@ -3896,6 +4270,7 @@ function makeConnection(
                 ? {
                     projectRoot,
                     executionPolicy: input.executionPolicy,
+                    ...(strict ? {} : { strict: false }),
                     ...(ownNetwork === undefined ? {} : { network: ownNetwork }),
                   }
                 : undefined,
@@ -3935,7 +4310,17 @@ function makeConnection(
           setup: nativeSetup,
           marked: options.planMcpServers?.() ?? [],
         });
-        const policyExecutionOptions = claudeExecutionOptions(
+        // The servers a Plan session of this setup would start, which a
+        // session moved to Plan inside its turn still calls.
+        const inPlacePlanMcpServers =
+          input.executionPolicy === "plan"
+            ? planMcpServers
+            : planReadOnlyToolServers({
+                executionPolicy: "plan",
+                setup: nativeSetup,
+                marked: options.planMcpServers?.() ?? [],
+              });
+        const levelExecutionOptions = claudeExecutionOptions(
           input.executionPolicy,
           input.autoApprove,
           mode,
@@ -3943,6 +4328,16 @@ function makeConnection(
           strict,
           nativeSetup,
         );
+        // Plan's shell runs unasked only because Octant's sandbox holds it to
+        // read-only programs, and no such sandbox runs on a server: a placed
+        // Plan session has no shell, and Claude's own plan mode holds it there.
+        const policyExecutionOptions: ClaudeExecutionOptions =
+          serverPlacement !== undefined && input.executionPolicy === "plan"
+            ? {
+                ...levelExecutionOptions,
+                tools: levelExecutionOptions.tools.filter((tool) => !CLAUDE_SHELL_TOOLS.has(tool)),
+              }
+            : levelExecutionOptions;
         const baseExecutionOptions: ClaudeExecutionOptions = {
           ...policyExecutionOptions,
           // An explicit list under Strict excludes in-process JavaScript,
@@ -3971,15 +4366,22 @@ function makeConnection(
         // Read at each launch: one launch per turn means the next turn after
         // the person turns the setting or the thread's choice off launches
         // with every guard again.
-        const offersArtifacts = claudeOffersArtifacts({
-          authentication: options.authentication,
-          artifactDelivery: options.artifactDelivery?.() === true,
-          threadChoseArtifacts: input.nativeArtifacts === true,
-          hostTrafficDisabled: disablesNonessentialTraffic(environment.environment, strict),
-          mode,
-          executionPolicy: input.executionPolicy,
-          strict,
-        });
+        // A placed session is offered no Artifact tool: a publish snapshots
+        // the named file on this host, where a server path names nothing.
+        const offersArtifacts =
+          serverPlacement === undefined &&
+          claudeOffersArtifacts({
+            authentication: options.authentication,
+            artifactDelivery: options.artifactDelivery?.() === true,
+            threadChoseArtifacts: input.nativeArtifacts === true,
+            hostTrafficDisabled: disablesNonessentialTraffic(
+              environment.environment,
+              telemetryGuarded,
+            ),
+            mode,
+            executionPolicy: input.executionPolicy,
+            strict,
+          });
         // A session whose host answers level changes puts Claude's own
         // `EnterPlanMode` and, from Plan, `ExitPlanMode` to the person as level
         // changes; asking changes nothing in this session. Plan holds
@@ -4021,8 +4423,12 @@ function makeConnection(
           });
         // Claude Code has no command sandbox on Windows; an admitted turn
         // there runs on Claude's own permission modes alone.
+        // On a server Octant configures no sandbox: its settings name this
+        // host's egress proxy and toolchain, and Octant claims none there.
         const configuresSandbox =
-          octantSandbox && (options.platform ?? process.platform) !== "win32";
+          serverPlacement === undefined &&
+          octantSandbox &&
+          (options.platform ?? process.platform) !== "win32";
         const sandboxNetwork = configuresSandbox
           ? await runSetupEffect(
               acquireProviderRuntimeNetwork(options.runtimeNetwork, {
@@ -4082,7 +4488,11 @@ function makeConnection(
           workingDirectory: string,
         ) => {
           if (toolName !== CLAUDE_ENTER_WORKTREE_TOOL) return;
-          const target = claudeWorktreeTarget(toolInput, workingDirectory);
+          const target = claudeWorktreeTarget(
+            toolInput,
+            workingDirectory,
+            serverPlacement !== undefined,
+          );
           if (target !== undefined && !sessionHolds(state, target)) state.worktrees.add(target);
         };
         const gateToolUse: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
@@ -4103,6 +4513,15 @@ function makeConnection(
           }
           expireClaudePreToolGrants(activeState, factories.authorityNow());
           if (blockedTools.includes(request.toolName)) return deny(CLAUDE_BLOCKED_TOOL_REFUSAL);
+          // The level this call is judged at: Plan once the thread moved
+          // there inside the turn, whatever the session launched at. A call
+          // whose grant the hook gave before that is refused here too.
+          const executionPolicy = claudeGateLevel(activeState, input.executionPolicy);
+          const ownPermissions = ownLaunchPermissions && !activeState.inPlacePlan;
+          const inPlaceRefusal = activeState.inPlacePlan
+            ? claudeInPlacePlanRefusal(request.toolName, request.input, activeState.planMcpServers)
+            : undefined;
+          if (inPlaceRefusal !== undefined) return deny(inPlaceRefusal);
           const digest = claudeAuthorityInputDigest(request.input);
           const grant = activeState?.preToolRequests.get(request.toolUseId);
           if (
@@ -4123,7 +4542,7 @@ function makeConnection(
           // asked about (or one Octant keeps asking), so Octant waives
           // nothing here: the ask reaches the person, or Reviewed's reviewer.
           if (
-            (input.executionPolicy === "full-access" &&
+            (executionPolicy === "full-access" &&
               grant.unsandboxed !== true &&
               request.toolName !== "AskUserQuestion" &&
               !CLAUDE_LEVEL_CHANGE_TOOLS.has(request.toolName)) ||
@@ -4133,15 +4552,11 @@ function makeConnection(
               // every other tool still ask, and so does a read or an edit
               // outside the Project's folders.
               ((grant.outsideProject !== true &&
-                input.executionPolicy === "auto-accept-edits" &&
+                executionPolicy === "auto-accept-edits" &&
                 CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
                 (grant.outsideProject !== true && CLAUDE_READ_TOOLS.has(request.toolName)) ||
                 CLAUDE_SESSION_TOOLS.has(request.toolName) ||
-                isPlanShellCommand(
-                  input.executionPolicy,
-                  request.toolName,
-                  executionOptions.tools,
-                )))
+                isPlanShellCommand(executionPolicy, request.toolName, executionOptions.tools)))
           ) {
             holdWorktree(activeState, request.toolName, request.input, grant.workingDirectory);
             activeState.settledToolUseIds.add(request.toolUseId);
@@ -4276,7 +4691,7 @@ function makeConnection(
               tool: mapped.request.toolName,
               arguments: request.input,
               workingDirectory: grant.workingDirectory,
-              ownerShell: sandbox !== undefined && input.executionPolicy !== "plan",
+              ownerShell: sandbox !== undefined && executionPolicy !== "plan",
             }),
           };
           activeState.pendingApprovals.set(pending.requestId, pending);
@@ -4343,13 +4758,17 @@ function makeConnection(
           }
           expireClaudePreToolGrants(activeState, factories.authorityNow());
           if (blockedTools.includes(request.toolName)) return deny(CLAUDE_BLOCKED_TOOL_REFUSAL);
+          // Plan once the thread moved there inside the turn, whatever the
+          // session launched at.
+          const executionPolicy = claudeGateLevel(activeState, input.executionPolicy);
+          const ownPermissions = ownLaunchPermissions && !activeState.inPlacePlan;
           // In Plan only the account's servers the person marked start. A call
           // to any other is refused with what to do about it.
           const planServer = claudeAccountMcpServer(request.toolName);
           if (
-            input.executionPolicy === "plan" &&
+            executionPolicy === "plan" &&
             planServer !== undefined &&
-            !planMcpServers.includes(planServer)
+            !activeState.planMcpServers.includes(planServer)
           ) {
             return deny(CLAUDE_PLAN_MCP_SERVER_REFUSAL);
           }
@@ -4379,6 +4798,14 @@ function makeConnection(
           if (request.toolName === CLAUDE_ARTIFACT_TOOL) {
             activeState.artifactCalls.set(request.toolUseId, claudeArtifactCall(requestInput));
           }
+          if (activeState.inPlacePlan) {
+            const refusal = claudeInPlacePlanRefusal(
+              request.toolName,
+              requestInput,
+              activeState.planMcpServers,
+            );
+            if (refusal !== undefined) return deny(refusal);
+          }
           // The plan already reached the thread as the reply's text from the
           // call's transcript block. Granting the call would let Claude Code
           // leave plan mode for one that edits, so it is always refused; where
@@ -4386,7 +4813,7 @@ function makeConnection(
           // to leave Plan, and the call is refused with their answer below.
           if (request.toolName === CLAUDE_PLAN_EXIT_TOOL && !levelChanges) {
             return deny(
-              input.executionPolicy === "plan"
+              executionPolicy === "plan"
                 ? CLAUDE_PLAN_CAPTURED_MESSAGE
                 : CLAUDE_LEVEL_CHANGE_REFUSAL,
             );
@@ -4399,7 +4826,7 @@ function makeConnection(
           if (
             CLAUDE_LEVEL_CHANGE_TOOLS.has(request.toolName) &&
             (!levelChanges ||
-              (request.toolName === CLAUDE_EXIT_PLAN_TOOL && input.executionPolicy !== "plan"))
+              (request.toolName === CLAUDE_EXIT_PLAN_TOOL && executionPolicy !== "plan"))
           ) {
             return deny(CLAUDE_LEVEL_CHANGE_REFUSAL);
           }
@@ -4428,20 +4855,33 @@ function makeConnection(
           // The secret guard answers before every posture below Full access,
           // and says which rule refused and which channel to use. The
           // runtime's own account state is its own to read.
-          const secretRefusal =
+          const guarded =
             sandboxedFullAccess ||
             input.strict === true ||
-            claudeSecretGuardApplies(input.executionPolicy)
-              ? claudeFileToolSecretRefusal(
+            claudeSecretGuardApplies(executionPolicy);
+          // On a server the list is matched by name: this host cannot
+          // canonicalize or walk a server path, and must not read what it
+          // keeps at the same path. A placed session is never Strict, so the
+          // list outside Strict applies.
+          const secretRefusal = !guarded
+            ? undefined
+            : serverPlacement !== undefined
+              ? claudeServerFileToolSecretRefusal(
+                  request.toolName,
+                  requestInput,
+                  request.projectRoot,
+                  true,
+                  (path) => sessionHolds(activeState, path),
+                )
+              : claudeFileToolSecretRefusal(
                   request.toolName,
                   requestInput,
                   ownClaudeAccountPaths,
                   request.projectRoot,
-                  claudeSearchesRunUnguarded(input.executionPolicy),
+                  claudeSearchesRunUnguarded(executionPolicy),
                   undefined,
                   sandboxedFullAccess || strict,
-                )
-              : undefined;
+                );
           if (secretRefusal !== undefined) return deny(secretRefusal);
           // Answered before any posture, Full access's unasked allow included.
           const memoryTarget = claudeConfinedTarget(
@@ -4450,11 +4890,16 @@ function makeConnection(
             projectRoot,
             request.projectRoot,
           );
+          // The memory folders are read from this host's account directory,
+          // which names nothing on a server. A placed session never runs in
+          // Chat, and its Plan holds no file tool that writes (Plan's own
+          // list, and `claudeInPlacePlanRefusal` once moved to Plan), so
+          // nothing it could write there is left for this check.
           const memoryRefusal =
-            typeof memoryTarget === "string"
+            serverPlacement === undefined && typeof memoryTarget === "string"
               ? claudeMemoryWriteRefusal({
                   mode,
-                  executionPolicy: input.executionPolicy,
+                  executionPolicy,
                   toolName: request.toolName,
                   target: memoryTarget,
                   workingDirectory: request.projectRoot,
@@ -4475,7 +4920,11 @@ function makeConnection(
           // the sandbox holds every command, so a worktree outside them is
           // refused there rather than held.
           if (sandboxedFullAccess && request.toolName === CLAUDE_ENTER_WORKTREE_TOOL) {
-            const target = claudeWorktreeTarget(requestInput, request.projectRoot);
+            const target = claudeWorktreeTarget(
+              requestInput,
+              request.projectRoot,
+              serverPlacement !== undefined,
+            );
             if (target === undefined || !sessionHolds(activeState, target)) {
               return deny("Claude tool request is outside the Project.");
             }
@@ -4486,11 +4935,11 @@ function makeConnection(
           const escapesSandbox =
             CLAUDE_SHELL_TOOLS.has(request.toolName) &&
             requestInput.dangerouslyDisableSandbox === true;
-          if (escapesSandbox && input.executionPolicy === "plan") {
+          if (escapesSandbox && executionPolicy === "plan") {
             return deny("Plan runs every command inside its sandbox.");
           }
           const asksUnsandboxed =
-            escapesSandbox && (input.strict === true || input.executionPolicy !== "full-access");
+            escapesSandbox && (input.strict === true || executionPolicy !== "full-access");
           // Claude Code takes a hook "allow" as the final word and runs the
           // tool without calling `canUseTool`. Observed 2026-09-06: an
           // approval-gated thread answered "allow" here for a Project-confined
@@ -4547,11 +4996,15 @@ function makeConnection(
             // the runtime would leave every later call there refused.
             const worktreeTarget =
               request.toolName === CLAUDE_ENTER_WORKTREE_TOOL
-                ? claudeWorktreeTarget(requestInput, request.projectRoot)
+                ? claudeWorktreeTarget(
+                    requestInput,
+                    request.projectRoot,
+                    serverPlacement !== undefined,
+                  )
                 : undefined;
             const entersUnheldWorktree =
               worktreeTarget !== undefined && !sessionHolds(activeState, worktreeTarget);
-            return claudeOwnRulesDecide(input.executionPolicy, request.toolName, !ownPermissions) &&
+            return claudeOwnRulesDecide(executionPolicy, request.toolName, !ownPermissions) &&
               !asksUnsandboxed &&
               !outsideProject &&
               !entersUnheldWorktree
@@ -4565,7 +5018,7 @@ function makeConnection(
           if (CLAUDE_LEVEL_CHANGE_TOOLS.has(request.toolName) || asksUnsandboxed)
             return askThroughGrant();
           const decide = (): ClaudePreToolDecision | Promise<ClaudePreToolDecision> => {
-            if (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") {
+            if (executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") {
               return settledUnasked();
             }
             // Outside Strict Claude's own engine and the person's rules decide
@@ -4573,17 +5026,17 @@ function makeConnection(
             // "own-rules"), reads and edits included, so a person's `deny`
             // rule still refuses an in-Project read.
             if (ownPermissions) return askThroughGrant();
-            return (input.executionPolicy === "auto-accept-edits" &&
+            return (executionPolicy === "auto-accept-edits" &&
               CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
               (request.toolName !== "AskUserQuestion" && CLAUDE_READ_TOOLS.has(request.toolName)) ||
               CLAUDE_SESSION_TOOLS.has(request.toolName) ||
-              isPlanShellCommand(input.executionPolicy, request.toolName, executionOptions.tools)
+              isPlanShellCommand(executionPolicy, request.toolName, executionOptions.tools)
               ? settledUnasked()
               : askThroughGrant();
           };
           // A marked server's call in Plan is put to the person, whatever
           // their own rules allow: Plan runs nothing that writes unasked.
-          if (input.executionPolicy === "plan" && planServer !== undefined) {
+          if (executionPolicy === "plan" && planServer !== undefined) {
             return askThroughGrant();
           }
           // The person's own Claude tools name no file to confine: a subagent
@@ -4591,11 +5044,11 @@ function makeConnection(
           // an MCP server call asks below Full access.
           const nativeAnswer = claudeNativeToolAnswer(request.toolName, nativeSetup);
           if (nativeAnswer !== undefined) {
-            if (input.executionPolicy === "full-access") return settledUnasked();
+            if (executionPolicy === "full-access") return settledUnasked();
             if (ownPermissions) return askThroughGrant();
             return nativeAnswer === "unasked" ? settledUnasked() : askThroughGrant();
           }
-          if (input.executionPolicy === "full-access" || ownPermissions) {
+          if (executionPolicy === "full-access" || ownPermissions) {
             // Nothing may ask here (Full access, or Claude's own rules allow
             // the publish), so nothing would read the snapshot at approval:
             // the host keeps what was sent from this hook instead. An approval
@@ -4609,7 +5062,7 @@ function makeConnection(
                 activeState.publishedSnapshots.set(request.toolUseId, snapshot);
               }
             }
-            if (input.executionPolicy === "full-access" && !sandboxedFullAccess) return decide();
+            if (executionPolicy === "full-access" && !sandboxedFullAccess) return decide();
           }
           // A shell call carries no cwd of its own: Claude Code runs it in the
           // session's working directory, which is the Project root, and the
@@ -4628,8 +5081,10 @@ function makeConnection(
           // A confined subscription launch may read the login keychain file so
           // the runtime can sign in. That grant is not the model's: a Project
           // that contains the folder (a home directory opened as a Project)
-          // would otherwise let a file tool name it.
+          // would otherwise let a file tool name it. That folder is this
+          // host's, so a server path is not resolved against it.
           if (
+            serverPlacement === undefined &&
             CLAUDE_READ_TOOLS.has(request.toolName) &&
             claudeToolPathIsInKeychainFolder(candidate)
           ) {
@@ -4663,7 +5118,7 @@ function makeConnection(
             // Outside Strict a publish naming a local file follows the
             // thread's file rules, as a `Write` does, so it asks too.
             if (
-              input.executionPolicy === "plan" ||
+              executionPolicy === "plan" ||
               input.strict === true ||
               sandboxedFullAccess ||
               CLAUDE_SHELL_TOOLS.has(request.toolName) ||
@@ -4760,8 +5215,11 @@ function makeConnection(
           }
           return answerWakeupCall(request.toolUseId, request.toolName, toolInput, wakeups);
         };
+        // A placed session's commits take the server's own Git identity.
         const gitIdentity =
-          sandbox === undefined || options.gitIdentity === undefined
+          serverPlacement !== undefined ||
+          sandbox === undefined ||
+          options.gitIdentity === undefined
             ? {}
             : await options.gitIdentity(projectRoot).catch((): ClaudeGitIdentity => ({}));
         const launchEnvironment = {
@@ -4769,7 +5227,7 @@ function makeConnection(
           ...claudeGitIdentityEnvironment(gitIdentity),
         };
         const artifactEnvironment = offersArtifacts
-          ? claudeArtifactLaunchEnvironment(launchEnvironment, strict)
+          ? claudeArtifactLaunchEnvironment(launchEnvironment, telemetryGuarded)
           : launchEnvironment;
         // Read at each launch, like the artifact switch: the next turn after
         // the person turns the account's memory off launches guarded again.
@@ -4788,29 +5246,57 @@ function makeConnection(
         const assignedSessionId = resumeSessionId === undefined ? randomUUID() : undefined;
         // The task tools keep their list outside the session's transcript, so
         // a resumed session's panel starts from the list Claude stored.
+        // A placed session's list is stored on the server, so its panel starts
+        // empty and follows the task tools' results from there.
         const taskList = new ClaudeTaskList();
-        const storedTaskList = await readClaudeStoredTaskList(
-          claudeConfigurationDirectory(environment.environment),
-          resumeSessionId ?? assignedSessionId ?? "",
-        );
+        const storedTaskList =
+          serverPlacement === undefined
+            ? await readClaudeStoredTaskList(
+                claudeConfigurationDirectory(environment.environment),
+                resumeSessionId ?? assignedSessionId ?? "",
+              )
+            : undefined;
         throwIfSetupCancelled(signal);
-        if (storedTaskList.status === "read") {
+        if (storedTaskList?.status === "read") {
           taskList.seed(storedTaskList.tasks);
-        } else {
+        } else if (storedTaskList !== undefined) {
           console.warn(
             `[provider] Claude's stored task list was refused: ${storedTaskList.reason}`,
           );
         }
-        const instructions = await claudeSessionInstructions({
-          mode,
-          executionPolicy: input.executionPolicy,
-          singleUse: input.singleUse === true,
-          nativeSetup,
-          projectRoot,
-          environment: environment.environment,
-          onDiagnostic:
-            options.onDiagnostic ?? ((message) => Effect.runSync(Effect.logWarning(message))),
-        });
+        // Claude Code on a server reads the instruction files its setting
+        // sources name there itself; this host's files are not the server's.
+        // A source left off (a Project whose code is not trusted, or the
+        // account's) still has its instruction files read there as text.
+        const serverSources =
+          serverPlacement === undefined || input.singleUse === true
+            ? undefined
+            : claudeNativeQueryOptions(nativeSetup).settingSources;
+        const serverInstructionText =
+          serverPlacement === undefined || serverSources === undefined
+            ? undefined
+            : await readClaudeInstructionsOnServer(serverPlacement, {
+                project: mode !== "chat" && !serverSources.includes("project"),
+                account: !serverSources.includes("user"),
+              });
+        const instructions =
+          serverPlacement !== undefined
+            ? serverInstructionText === undefined
+              ? undefined
+              : [CLAUDE_INSTRUCTIONS_PREAMBLE, serverInstructionText].join("\n\n")
+            : serverPlacement === undefined
+              ? await claudeSessionInstructions({
+                  mode,
+                  executionPolicy: input.executionPolicy,
+                  singleUse: input.singleUse === true,
+                  nativeSetup,
+                  projectRoot,
+                  environment: environment.environment,
+                  onDiagnostic:
+                    options.onDiagnostic ??
+                    ((message) => Effect.runSync(Effect.logWarning(message))),
+                })
+              : undefined;
         throwIfSetupCancelled(signal);
         const query = await runSetupEffect(
           options.sdk
@@ -4829,6 +5315,7 @@ function makeConnection(
                 servers,
               ),
               ...(ownNetwork === undefined ? {} : { network: ownNetwork }),
+              ...(serverPlacement === undefined ? {} : { serverPlacement }),
               ...(keepsOwnMemory ? { ownMemory: true as const } : {}),
               ...(planMcpServers.length === 0 ? {} : { planMcpServers }),
               model: input.modelId,
@@ -4872,7 +5359,7 @@ function makeConnection(
         const account = query.initialization.account;
         if (
           account.ready !== true ||
-          (account.apiProvider !== undefined && account.apiProvider !== "firstParty")
+          (strict && account.apiProvider !== undefined && account.apiProvider !== "firstParty")
         ) {
           throw failure("protocol", "Claude initialized an unsupported account routing policy.");
         }
@@ -4902,6 +5389,11 @@ function makeConnection(
           observedToolUseIds: new Set(),
           settledToolUseIds: new Set(),
           taskList,
+          levelChanges,
+          accountDirectoryBroadensPlan,
+          planMcpServers: inPlacePlanMcpServers,
+          inPlacePlan: false,
+          planModeSwitched: false,
           outputAccepted: false,
           pendingTurns: 0,
           promptHookRuns: claudePromptHookRuns(nativeSetup, runtimeVersion),
@@ -5063,27 +5555,44 @@ function makeConnection(
             );
           }
 
-          let metadata;
-          try {
-            metadata = await runSetupEffect(
-              options.sdk.findSession({
-                sessionId: input.resumeCursor.value,
-                projectRoot,
-                ...(options.configDirectory === undefined
-                  ? {}
-                  : { configDirectory: options.configDirectory }),
-              }),
-              signal,
-            );
-          } catch {
-            if (signal.aborted) throw connectionClosingFailure();
-            throw failure("stale-resume", "Claude session history is unavailable for resume.");
+          let historyFound: boolean;
+          if (serverPlacement !== undefined) {
+            // A placed session's transcript is on the server, so it is looked
+            // for there; this host's account directory holds none of it. A
+            // server that does not answer leaves the session as it was.
+            const found = await claudeSessionOnServer(
+              serverPlacement,
+              input.resumeCursor.value,
+            ).catch(() => ({
+              status: "unreachable" as const,
+              message: `Octant could not reach ${serverPlacement.serverName}.`,
+            }));
+            throwIfSetupCancelled(signal);
+            if (found.status === "unreachable") throw failure("unavailable", found.message);
+            historyFound = found.status === "found";
+          } else {
+            let metadata;
+            try {
+              metadata = await runSetupEffect(
+                options.sdk.findSession({
+                  sessionId: input.resumeCursor.value,
+                  projectRoot,
+                  ...(options.configDirectory === undefined
+                    ? {}
+                    : { configDirectory: options.configDirectory }),
+                }),
+                signal,
+              );
+            } catch {
+              if (signal.aborted) throw connectionClosingFailure();
+              throw failure("stale-resume", "Claude session history is unavailable for resume.");
+            }
+            historyFound =
+              metadata !== undefined &&
+              metadata.sessionId === input.resumeCursor.value &&
+              metadata.projectRoot === projectRoot;
           }
-          if (
-            metadata === undefined ||
-            metadata.sessionId !== input.resumeCursor.value ||
-            metadata.projectRoot !== projectRoot
-          ) {
+          if (!historyFound) {
             try {
               await awaitSetupPromise(
                 options.resumeIdentityPort.remove(
@@ -5114,6 +5623,7 @@ function makeConnection(
                 ? {}
                 : { fullAccessSandbox: input.fullAccessSandbox }),
               ...(input.strict === false ? { strict: false } : {}),
+              ...(input.ownChannels === undefined ? {} : { ownChannels: input.ownChannels }),
               ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
               ...(input.modelOptionValues === undefined
                 ? {}
@@ -5375,6 +5885,51 @@ function makeConnection(
           });
         });
       },
+      // Entering Plan inside the running turn: the gate judges every later
+      // call at Plan before the runtime is asked to switch, so a call racing
+      // the switch is never let through at the old level, and a switch the
+      // runtime does not accept still leaves the gate at Plan while the host
+      // ends the turn.
+      changeLevelInPlace: ({ sessionId, change }) =>
+        Effect.suspend((): Effect.Effect<ProviderInPlaceLevelChange> => {
+          const state = sessions.get(sessionId);
+          if (
+            change !== "enter-plan" ||
+            state === undefined ||
+            state.terminal ||
+            state.releasing ||
+            state.released ||
+            state.pendingTurns === 0
+          ) {
+            return Effect.succeed({
+              status: "refused" as const,
+              reason: "Claude session has no running turn.",
+            });
+          }
+          if (
+            !state.levelChanges ||
+            state.executionPolicy === "plan" ||
+            state.accountDirectoryBroadensPlan
+          ) {
+            return Effect.succeed({
+              status: "refused" as const,
+              reason: "Claude session does not take a level change in place.",
+            });
+          }
+          state.inPlacePlan = true;
+          return state.query.setPermissionMode("plan").pipe(
+            Effect.map(() => {
+              state.planModeSwitched = true;
+              return { status: "applied" as const };
+            }),
+            Effect.catchAll(() =>
+              Effect.succeed({
+                status: "failed" as const,
+                reason: "Claude did not switch to plan mode.",
+              }),
+            ),
+          );
+        }),
       backgroundChildAgent: ({ sessionId, childAgentId }) => {
         const state = sessions.get(sessionId);
         const context = state?.context;
@@ -5581,8 +6136,22 @@ function makeConnection(
             if (CLAUDE_LEVEL_CHANGE_TOOLS.has(pending.toolName)) {
               pending.decision.resolve({
                 behavior: "deny",
-                message: claudeLevelChangeAnswer(pending.toolName, answer.approved),
+                message: claudeLevelChangeAnswer(
+                  pending.toolName,
+                  answer.approved,
+                  state.planModeSwitched,
+                ),
               });
+              return;
+            }
+            // A call asked about before the thread moved to Plan inside the
+            // turn is judged at Plan when it is answered: an allow given now
+            // must not run a write the session's level no longer permits.
+            const inPlaceRefusal = state.inPlacePlan
+              ? claudeInPlacePlanRefusal(pending.toolName, {}, state.planMcpServers)
+              : undefined;
+            if (answer.approved && inPlaceRefusal !== undefined) {
+              pending.decision.resolve({ behavior: "deny", message: inPlaceRefusal });
               return;
             }
             if (answer.approved) {

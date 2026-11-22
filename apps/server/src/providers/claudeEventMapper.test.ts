@@ -1674,7 +1674,13 @@ describe("mapClaudeMessage", () => {
         { id: "2", subject: "Write the test", status: "in_progress" },
       ]);
 
-      expect(panel(eventValues(claudeStoredTaskListEvents(ctx)))).toEqual([
+      const stored = claudeStoredTaskListEvents(ctx);
+      expect(stored.length).toBeGreaterThan(0);
+      for (const mapped of stored) {
+        // A restated stored list can never be timed by its emission stamp.
+        expect(mapped.kind === "event" ? mapped.event.synthesized : undefined).toBe(true);
+      }
+      expect(panel(eventValues(stored))).toEqual([
         "task-1 completed Read the spec",
         "task-2 in-progress Write the test",
         "list task-1,task-2",
@@ -3406,6 +3412,39 @@ describe("mapClaudeMessage", () => {
 });
 
 describe("mapClaudeToolRequest", () => {
+  it("bills an ask to the call's own step id, not the provider's toolUseId", () => {
+    const ctx = context();
+    mapped(ctx, {
+      kind: "assistant",
+      sessionId: claudeSessionId,
+      messageId: "message-1",
+      content: [
+        { kind: "tool-use", toolUseId: "sdk-call-9", toolName: "Bash", input: { command: "ls" } },
+      ],
+      usage,
+    });
+    const result = mapClaudeToolRequest(
+      ctx,
+      toolRequest({ toolUseId: "sdk-call-9", toolName: "Bash" }),
+    );
+    expect(result).toMatchObject({
+      kind: "approval",
+      request: { event: { kind: "approval-request", toolCallId: "tool-1" } },
+    });
+  });
+
+  it("omits the call id when no row carries the ask's toolUseId", () => {
+    const result = mapClaudeToolRequest(context(), toolRequest());
+    expect(result).toMatchObject({
+      kind: "approval",
+      request: { event: { kind: "approval-request" } },
+    });
+    if (result.kind !== "approval" || result.request.event.kind !== "approval-request") {
+      throw new Error("expected an approval request");
+    }
+    expect("toolCallId" in result.request.event).toBe(false);
+  });
+
   it("creates a provider-neutral approval event and sanitized pending correlation record", () => {
     const result = mapClaudeToolRequest(context(), toolRequest());
 

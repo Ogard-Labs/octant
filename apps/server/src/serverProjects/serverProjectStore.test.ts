@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { decodeWindowId, decodeProjectActions } from "@octant/contracts";
+import { decodeEventActor, decodeWindowId, decodeProjectActions } from "@octant/contracts";
 import { MAX_SERVER_PROJECTS } from "@octant/contracts/server-projects";
 import type { ShieldServer } from "@octant/contracts/shield-servers";
 import { Journal } from "../persistence/journal";
@@ -111,7 +111,7 @@ describe("server Project catalog", () => {
     expect(store.project(projectId)?.developerTools).toBeUndefined();
     expect(
       store.setDeveloperTools({ projectId, enabled: true, principal: "remote-device" }),
-    ).toMatchObject({ kind: "refused", reason: "needs-local-window" });
+    ).toMatchObject({ kind: "refused", reason: "needs-person" });
     expect(
       store.setDeveloperTools({ projectId, enabled: true, principal: "local-window" }),
     ).toMatchObject({
@@ -161,9 +161,9 @@ describe("server Project catalog", () => {
         kind: "remote-device",
         deviceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
       } as never,
-      scopeId: windowId,
+      scopeId: decodeWindowId("00000000-0000-4000-8000-000000000999"),
     });
-    expect(await (await route(remote))?.json()).toMatchObject({ reason: "needs-local-window" });
+    expect(await (await route(remote))?.json()).toMatchObject({ reason: "needs-person" });
     expect(
       await (
         await route(
@@ -195,7 +195,7 @@ describe("server Project catalog", () => {
     ]);
     expect(
       store.setActions({ projectId, actions, expectedVersion: 0, principal: "remote-device" }),
-    ).toMatchObject({ kind: "refused", reason: "needs-local-window" });
+    ).toMatchObject({ kind: "refused", reason: "needs-person" });
     expect(
       store.setActions({ projectId, actions, expectedVersion: 0, principal: "local-window" }),
     ).toMatchObject({ kind: "changed", project: { actions, actionsVersion: 1 } });
@@ -242,6 +242,40 @@ describe("server Project catalog", () => {
     expect(afterRemoval.projects()).toEqual([]);
     // A routine still naming the Project can say it was removed.
     expect(afterRemoval.wasRemoved(projectId)).toBe(true);
+  });
+
+  it("records closed at the next start a port forward a stopped run left open, with the ports alone", () => {
+    const directory = scratch();
+    const server = answering(() => resolvedTo("/srv/app"));
+    const journal = openJournal(directory);
+    const store = storeOn(journal, server.connection);
+    const ports = { projectId: "project-1", remotePort: 5432, localPort: 5432 };
+    expect(store.recordForward({ event: "opened", ...ports })).toBe(true);
+    expect(store.recordForward({ event: "closed", ...ports, reason: "stopped" })).toBe(true);
+    expect(store.recordForward({ event: "opened", ...ports, localPort: 54321 })).toBe(true);
+
+    const restarted = storeOn(openJournal(directory), server.connection);
+    restarted.closeForwardsLeftOpen();
+    // Already closed, so a second start records nothing more.
+    storeOn(openJournal(directory), server.connection).closeForwardsLeftOpen();
+    const forwards = openJournal(directory)
+      .replayAggregateType({ aggregateType: "server-projects", afterSequence: 0, limit: 10 })
+      .map((envelope) => ({ eventName: envelope.eventName, payload: envelope.payload }));
+    expect(forwards).toEqual([
+      { eventName: "server-projects.port-forward-opened@1", payload: ports },
+      {
+        eventName: "server-projects.port-forward-closed@1",
+        payload: { ...ports, reason: "stopped" },
+      },
+      {
+        eventName: "server-projects.port-forward-opened@1",
+        payload: { ...ports, localPort: 54321 },
+      },
+      {
+        eventName: "server-projects.port-forward-closed@1",
+        payload: { ...ports, localPort: 54321, reason: "host-stopped" },
+      },
+    ]);
   });
 
   it("keeps a Work Project apart from Code ones, and a Code Project's record as it was", async () => {
@@ -340,7 +374,7 @@ describe("server Project catalog", () => {
         folder: "/srv/app",
         principal: "remote-device",
       }),
-    ).toMatchObject({ kind: "refused", reason: "needs-local-window" });
+    ).toMatchObject({ kind: "refused", reason: "needs-person" });
     expect(server.calls).toEqual([]);
   });
 
@@ -453,12 +487,14 @@ describe("server Project catalog", () => {
       principal: {
         kind: "remote-device",
         deviceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        credentialGeneration: 1,
+        admittedBy: "hub-roster",
       } as never,
-      scopeId: windowId,
+      scopeId: decodeWindowId("00000000-0000-4000-8000-000000000999"),
     });
     const refused = await handler(remote);
-    expect(refused?.status).toBe(409);
-    expect(await refused?.json()).toMatchObject({ reason: "needs-local-window" });
+    expect(refused?.status).toBe(403);
+    expect(await refused?.json()).toMatchObject({ reason: "needs-person" });
 
     const local = await handler(
       new Request(url, {
@@ -492,10 +528,10 @@ describe("server Project catalog", () => {
         kind: "remote-device",
         deviceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
       } as never,
-      scopeId: windowId,
+      scopeId: decodeWindowId("00000000-0000-4000-8000-000000000999"),
     });
     expect(await (await handler(actionRemote))?.json()).toMatchObject({
-      reason: "needs-local-window",
+      reason: "needs-person",
     });
     const save = () =>
       handler(
@@ -527,6 +563,145 @@ describe("server Project catalog", () => {
         )
       )?.status,
     ).toBe(400);
+  });
+
+  it("lets a person-paired device bind, rename, update actions, toggle developer tools and remove with v2 records, mixed v1/v2 replay, and SSH key confirmation refusal", async () => {
+    const directory = scratch();
+    const journal = openJournal(directory);
+    let sshResponse: ServerCall = resolvedTo("/srv/paired");
+    const store = storeOn(journal, answering(() => sshResponse).connection);
+    const localBound = await store.bind({
+      name: "LocalBound",
+      serverId: String(web.serverId),
+      folder: "/srv/paired",
+      principal: "local-window",
+    });
+    expect(localBound.kind).toBe("changed");
+
+    const deviceId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const deviceActor = decodeEventActor({
+      kind: "remote-device",
+      actorId: deviceId,
+      deviceId,
+    });
+    const devicePrincipal = {
+      kind: "person-paired-device" as const,
+      deviceId,
+      credentialGeneration: 4,
+      actor: deviceActor,
+    };
+
+    const pairedBound = await store.bind({
+      name: "PairedWork",
+      serverId: String(web.serverId),
+      folder: "/srv/paired",
+      mode: "work",
+      principal: devicePrincipal,
+    });
+    expect(pairedBound.kind).toBe("changed");
+    if (pairedBound.kind !== "changed" || pairedBound.project === undefined)
+      throw Error("Expected bound server Project");
+    const pairedId = String(pairedBound.project.id);
+
+    expect(
+      store.rename({ projectId: pairedId, name: "PairedWorkRenamed", principal: devicePrincipal })
+        .kind,
+    ).toBe("changed");
+    expect(
+      store.setActions({
+        projectId: pairedId,
+        expectedVersion: 0,
+        actions: decodeProjectActions([
+          {
+            id: "11111111-1111-4111-8111-111111111111",
+            name: "Deploy",
+            command: "make deploy",
+            directory: ".",
+          },
+        ]),
+        principal: devicePrincipal,
+      }).kind,
+    ).toBe("changed");
+    expect(
+      store.setDeveloperTools({
+        projectId: pairedId,
+        enabled: true,
+        principal: devicePrincipal,
+      }).kind,
+    ).toBe("changed");
+
+    // Replaying a journal containing both v1 (local-window) and v2 (person-paired-device) events settles cleanly.
+    const replayed = storeOn(
+      openJournal(directory),
+      answering(() => resolvedTo("/srv/paired")).connection,
+    );
+    expect(replayed.projects()).toHaveLength(2);
+    expect(replayed.projects().find((entry) => String(entry.id) === pairedId)).toMatchObject({
+      name: "PairedWorkRenamed",
+      mode: "work",
+      actionsVersion: 1,
+      developerTools: { enabled: true, changedBy: deviceActor },
+    });
+
+    // SSH agent key confirmation refusal writes nothing and names the host computer.
+    sshResponse = {
+      status: "unreachable",
+      message: "Permission denied (publickey).",
+      errorOutput: "sign_and_send_pubkey: signing failed for ED25519-SK: agent refused operation",
+    };
+    const keyRefused = await store.bind({
+      name: "NeedsKey",
+      serverId: String(web.serverId),
+      folder: "/srv/paired",
+      principal: devicePrincipal,
+    });
+    expect(keyRefused).toEqual({
+      kind: "refused",
+      reason: "server-unreachable",
+      message: "This server's key needs a confirmation at this computer.",
+    });
+
+    expect(store.remove({ projectId: pairedId, principal: devicePrincipal }).kind).toBe("changed");
+    const recorded = journal.replay({ afterSequence: 0 as never, limit: 100 });
+    const v2Events = recorded.filter((event) => event.eventName.endsWith("@2"));
+    expect(v2Events.map((event) => event.eventName)).toEqual([
+      "server-projects.bound@2",
+      "server-projects.renamed@2",
+      "server-projects.actions-replaced@2",
+      "server-projects.work-developer-tools-changed@2",
+      "server-projects.removed@2",
+    ]);
+    for (const event of v2Events) {
+      expect(event.actor).toEqual(deviceActor);
+      expect((event.payload as { principal?: unknown }).principal).toEqual({
+        kind: "person-paired-device",
+        credentialGeneration: 4,
+      });
+    }
+
+    // Route admits host-person paired device and refuses hub-introduced device with 403.
+    const windows = new WindowAuthorityStore();
+    const handler = createServerProjectRouteHandler({
+      store,
+      windowAuthorityStore: windows,
+      now: () => 1,
+    });
+    const hubRequest = new Request("http://127.0.0.1/api/server-projects", {
+      method: "POST",
+      body: JSON.stringify({ kind: "rename-server-project", projectId: pairedId, name: "Nope" }),
+    });
+    bindPrincipalRouteContext(hubRequest, {
+      principal: {
+        kind: "remote-device",
+        deviceId,
+        credentialGeneration: 4,
+        admittedBy: "hub-roster",
+      } as never,
+      scopeId: decodeWindowId("00000000-0000-4000-8000-000000000999"),
+    });
+    const hubResponse = await handler(hubRequest);
+    expect(hubResponse?.status).toBe(403);
+    expect(await hubResponse?.json()).toMatchObject({ reason: "needs-person" });
   });
 });
 

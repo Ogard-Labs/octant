@@ -71,7 +71,7 @@ function host(persistence: PersistenceService) {
     now: () => 1,
   });
   const kept = createKeptImageGenerationChoices({
-    threadChoices: new ImageGenerationOfferService({ uuid: () => "unused", now: () => 1 }),
+    threadChoices: new ImageGenerationOfferService({ wait: async () => ({ status: "cancelled" }) }),
     projectOf: (scope) =>
       String(scope.scopeId) === String(outsideProject) ? undefined : projectId,
     readProject: (id) => persistence.readProject(id),

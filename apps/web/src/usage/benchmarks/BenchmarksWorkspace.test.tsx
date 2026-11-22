@@ -52,6 +52,7 @@ function historyRun(runId: string, startedAt: string, passRate: number): History
 
 function makeClient(overrides: Partial<BenchmarksClient> = {}) {
   const base = {
+    advice: vi.fn(async () => ({ suites: [] })),
     listSuites: vi.fn(async () => ({ suites: [suite()] })),
     saveSuite: vi.fn(async (request: Parameters<BenchmarksClient["saveSuite"]>[0]) => ({
       suite: suite({

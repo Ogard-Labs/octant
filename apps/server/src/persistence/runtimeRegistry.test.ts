@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { REMOTE_ACCESS_EVENT_NAMES } from "@octant/contracts/remote-access";
+import { SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES } from "@octant/contracts/server-projects";
 import { EventPayloadInvalid, UnknownEventName } from "./journalErrors";
 import { RETIRED_EVENT_NAMES } from "./retiredEvents";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
@@ -41,6 +42,42 @@ describe("createPhase1RuntimeRegistries", () => {
     ).toMatchObject({ toStatus: "failed", recoveryReason: "interrupted by restart" });
     expect(() =>
       registry.events.decode("image.job-queued@1", 1, { job, b64_json: "secret-bytes" }),
+    ).toThrow(EventPayloadInvalid);
+  });
+
+  it("registers server attachment cleanup events and rejects unsafe thread identifiers", () => {
+    const registry = createPhase1RuntimeRegistries().events;
+    const pending = {
+      serverId: "5e7e1111-0000-4000-8000-000000000001",
+      alias: "web1",
+      user: "deploy",
+      projectId: "5e7e1111-0000-4000-8000-000000000002",
+      threadId: "5e7e1111-0000-4000-8000-000000000003",
+      queuedAt: "2026-11-19T12:00:00.000Z",
+    };
+    const settled = {
+      serverId: pending.serverId,
+      projectId: pending.projectId,
+      threadId: pending.threadId,
+      settledAt: "2026-11-19T12:05:00.000Z",
+    };
+    expect(registry.decode(SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.pending, 1, pending)).toEqual(
+      pending,
+    );
+    expect(registry.decode(SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.settled, 1, settled)).toEqual(
+      settled,
+    );
+    expect(() =>
+      registry.decode(SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.pending, 1, {
+        ...pending,
+        threadId: "../etc",
+      }),
+    ).toThrow(EventPayloadInvalid);
+    expect(() =>
+      registry.decode(SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.settled, 1, {
+        ...settled,
+        extra: true,
+      }),
     ).toThrow(EventPayloadInvalid);
   });
 
@@ -309,6 +346,7 @@ describe("createPhase1RuntimeRegistries", () => {
       "thread-native-setup",
       "remote-access",
       "thread-checkpoint",
+      "activity-history",
       "product-feedback",
       "project-terminal",
       "remote-server-grant",
@@ -354,6 +392,7 @@ describe("createPhase1RuntimeRegistries", () => {
       "thread-native-setup",
       "remote-access",
       "thread-checkpoint",
+      "activity-history",
       "product-feedback",
       "project-terminal",
       "remote-server-grant",
@@ -806,6 +845,8 @@ describe("createPhase1RuntimeRegistries", () => {
           fullAccessStalledTurnLimitMinutes: null,
           providerToolCallPauseLimitMinutes: 120,
           backgroundSessionIdleLimitMinutes: 120,
+          providerTelemetry: true,
+          providerSelfUpdate: false,
           threadWakeupsWaitingLimit: 8,
           threadWakeupsRunMissedOnReturn: false,
           messageWakesPerHour: 30,
@@ -815,8 +856,14 @@ describe("createPhase1RuntimeRegistries", () => {
           pullRequestWatchDays: 3,
           autoFixAttemptsPerFailure: 3,
           threadMessagesPerTurn: 3,
+          siblingThreadReadsPerTurn: 8,
+          siblingThreadWaitsPerTurn: 4,
           browserWaitLimitMinutes: 10,
           childRunWaitLimitSeconds: 120,
+          shieldDenialsInARow: 3,
+          shieldDenialsPerThread: 20,
+          followUpLatenessLimitHours: 24,
+          toolingCommandConfirmMinutes: 10,
           agentRoutinesStartActiveAtFullAccess: false,
           lastContextSurface,
           modeSwitcherPresentation,
@@ -838,6 +885,7 @@ describe("createPhase1RuntimeRegistries", () => {
           browserHeldDownloadLimit: 5,
           browserUploadFileCountLimit: 5,
           rememberedBrowserTransfers: [],
+          rememberedComputerUseApps: [],
           persistentBrowserOwner: false,
           pairedDeviceLifetime: "30-days",
           computerUse: { enabled: false, automaticUpdates: false },
@@ -1080,6 +1128,8 @@ function validSettingsPayload() {
       fullAccessStalledTurnLimitMinutes: null,
       providerToolCallPauseLimitMinutes: 120,
       backgroundSessionIdleLimitMinutes: 120,
+      providerTelemetry: true,
+      providerSelfUpdate: false,
       threadWakeupsWaitingLimit: 8,
       threadWakeupsRunMissedOnReturn: false,
       messageWakesPerHour: 30,
@@ -1089,8 +1139,14 @@ function validSettingsPayload() {
       pullRequestWatchDays: 3,
       autoFixAttemptsPerFailure: 3,
       threadMessagesPerTurn: 3,
+      siblingThreadReadsPerTurn: 8,
+      siblingThreadWaitsPerTurn: 4,
       browserWaitLimitMinutes: 10,
       childRunWaitLimitSeconds: 120,
+      shieldDenialsInARow: 3,
+      shieldDenialsPerThread: 20,
+      followUpLatenessLimitHours: 24,
+      toolingCommandConfirmMinutes: 10,
       agentRoutinesStartActiveAtFullAccess: false,
       lastContextSurface: null,
       sidebarMaterial: "system",
@@ -1114,6 +1170,7 @@ function validSettingsPayload() {
       browserHeldDownloadLimit: 5,
       browserUploadFileCountLimit: 5,
       rememberedBrowserTransfers: [],
+      rememberedComputerUseApps: [],
       persistentBrowserOwner: false,
       pairedDeviceLifetime: "30-days",
       computerUse: { enabled: true, automaticUpdates: true },
@@ -1212,6 +1269,18 @@ function providerEvents(): ReadonlyArray<readonly [string, Record<string, unknow
     [
       "provider.defaults-updated@1",
       { defaults: { permissionPersistence: "project-default", version: 1 } },
+    ],
+    [
+      "provider.acp-agent-install-scripts-ran@1",
+      {
+        instanceId: instance.id,
+        registryId: "factory-droid",
+        version: "1.12.1",
+        distribution: "npx",
+        outcome: "succeeded",
+        sandboxed: true,
+        completedAt: "2026-07-14T10:00:00.000Z",
+      },
     ],
   ];
 }

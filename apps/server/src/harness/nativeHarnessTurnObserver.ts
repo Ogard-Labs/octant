@@ -30,14 +30,19 @@ import { completeOnce } from "./nativeHarnessSingleShot";
 const ADVISOR_TIMEOUT_MS = 60_000;
 const MAX_DIGEST_CHARACTERS = 2_048;
 
-/** Whether a turn may start on the thread; a pause names who paused it and why. */
+/**
+ * Whether a turn may start on the thread; a pause names who paused it and
+ * why. `draining` is the whole host refusing new turns before an update,
+ * whatever the thread's session says.
+ */
 export type NativeHarnessTurnAdmission =
   | { readonly kind: "admitted" }
   | {
       readonly kind: "paused";
       readonly status: "paused-by-advisor" | "paused-by-user" | "recovery-required";
       readonly detail: string;
-    };
+    }
+  | { readonly kind: "draining"; readonly detail: string };
 
 export interface NativeHarnessTurnScope {
   readonly threadId: string;

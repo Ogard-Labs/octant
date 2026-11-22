@@ -24,6 +24,7 @@ import {
   type ThreadAccess,
   type GuardrailResolution,
 } from "@octant/domain/guardrail-policy";
+import type { ShieldBrakeLimits } from "@octant/domain/shield-judge-policy";
 import type { ShieldServerRule } from "@octant/domain/shield-server-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { SpendCeilingService } from "../spendCeilingService";
@@ -108,6 +109,8 @@ export interface HostShieldDependencies {
   readonly safePlaces?: (projectId: string | undefined) => ReadonlyArray<SafeNetworkPlace>;
   /** A folder outside every Project, where Shield's one-shot sessions start. */
   readonly scratchRoot: string;
+  /** Settings › Permissions' Shield brake counts, read at each review. */
+  readonly brakeLimits?: () => ShieldBrakeLimits;
   readonly clock?: () => string;
 }
 
@@ -205,6 +208,7 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
     return deps.resolveDriver(chosen?.providerInstanceId ?? providerInstanceId) !== undefined;
   };
   const shield = new OctantShield({
+    ...(deps.brakeLimits === undefined ? {} : { brakeLimits: deps.brakeLimits }),
     facts: {
       reviewing: (threadId) => {
         const subject = subjectOf(threadId);

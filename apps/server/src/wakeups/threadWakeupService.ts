@@ -102,6 +102,12 @@ export interface ThreadWakeupServiceOptions {
   /** How long a wake-up whose thread is busy waits before it is offered again. */
   readonly busyRetryMs?: number;
   /**
+   * Whether the host refuses new turns now (an update is draining it). A due
+   * wake-up then waits as a busy one does: the turn's admission would refuse
+   * it, and a refusal ends the whole schedule.
+   */
+  readonly refusesNewTurns?: () => boolean;
+  /**
    * The person's limits from Settings, read at each request and each due
    * time so a change applies at once. Absent is the defaults: 8 waiting a
    * thread, and a missed wake-up waits for the person.
@@ -461,6 +467,14 @@ export class ThreadWakeupService {
       return "ended";
     }
     held.firing = true;
+    if (this.#options.refusesNewTurns?.() === true) {
+      // Held back by a drain, as by a busy thread: a pending wake-up keeps its
+      // on-time standing, so a drain longer than the due-time grace does not
+      // make it missed. The standing is in memory only; a restart during the
+      // drain judges it by its due time again.
+      if (held.wakeup.status === "missed") held.firing = false;
+      return "busy";
+    }
     let result: Awaited<ReturnType<ThreadWakeupModePort["startTurn"]>>;
     try {
       result = await port.startTurn(

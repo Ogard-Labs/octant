@@ -68,6 +68,11 @@ export interface CodexEventContext {
    * compaction it carries is `requested` rather than the runtime's own.
    */
   readonly compactionRequested?: boolean;
+  /**
+   * A secret question is shown, masked, rather than refused: set only for a
+   * session outside Strict, whose answer reaches Codex unrecorded.
+   */
+  readonly asksSecretQuestions?: true;
   readonly requestIds: Map<CodexRpcId, string>;
   readonly agentMessages: Map<string, CodexAgentMessageState>;
   readonly taskIds: Map<string, string>;
@@ -811,7 +816,10 @@ type CodexApprovalRequest = Exclude<
 /**
  * Codex's question set as the thread's questionnaire: one request per
  * question, each with its choices. Codex adds a free answer to every question
- * itself (`isOther`), so a typed answer is passed through as written.
+ * itself (`isOther`), so a typed answer is passed through as written. A set
+ * with a secret question (Codex's `isSecret`, or wording that asks for a
+ * password or key) is refused unseen unless the session asks secret
+ * questions, and then that question alone is marked `secret`.
  */
 function userInputRequest(
   context: CodexEventContext,
@@ -830,14 +838,11 @@ function userInputRequest(
   ) {
     return protocolFailure("Provider question set was malformed.");
   }
-  if (
-    questions.some(
-      (question) =>
-        question.isSecret === true ||
-        asksForSecret(question.question) ||
-        asksForSecret(question.header),
-    )
-  ) {
+  const secret = (question: (typeof questions)[number]) =>
+    question.isSecret === true ||
+    asksForSecret(question.question) ||
+    asksForSecret(question.header);
+  if (context.asksSecretQuestions !== true && questions.some(secret)) {
     context.requestIds.set(message.id, context.makeRequestId());
     return [
       {
@@ -860,13 +865,13 @@ function userInputRequest(
       const description = normalized(option.description, SUMMARY_MAX_CHARACTERS);
       return [{ label, ...(description === undefined ? {} : { description }) }];
     });
-    return [{ prompt, options }];
+    return [{ prompt, options, secret: secret(question) }];
   });
   if (prompts.length !== questions.length || prompts.some((prompt) => prompt.options.length > 20)) {
     return protocolFailure("Provider question set was malformed.");
   }
   const count = prompts.length;
-  const asked = prompts.map(({ prompt, options }, index) => {
+  const asked = prompts.map(({ prompt, options, secret }, index) => {
     const requestId = context.makeRequestId();
     return {
       requestId,
@@ -876,6 +881,7 @@ function userInputRequest(
         prompt,
         options,
         ...(count > 1 ? { questionIndex: index + 1, questionCount: count } : {}),
+        ...(secret ? { secret: true } : {}),
       }),
     };
   });
@@ -919,11 +925,18 @@ function approval(
       : message.method === "item/fileChange/requestApproval"
         ? "file change"
         : "permissions";
+  // The row's own normalized id, from the parent call the ask names; an ask
+  // with no known call bills nobody's wait.
+  const approvalCall =
+    typeof message.params.itemId === "string"
+      ? context.toolStates.get(message.params.itemId)?.toolCallId
+      : undefined;
   const approvalEvent = mappedEvent(context, {
     kind: "approval-request",
     requestId,
     action,
     description: "Approval is required for this action.",
+    ...(approvalCall === undefined ? {} : { toolCallId: approvalCall }),
   });
   const base = {
     requestId,
@@ -1205,6 +1218,9 @@ function mapNotification(
       return results;
     }
     case "thread/tokenUsage/updated": {
+      // The turn's terminal event has gone out, and the ledger keeps the last
+      // report the turn sent before it; a later one has no turn to join.
+      if (context.terminal) return [{ kind: "ignored" }];
       if (message.params.threadId !== context.threadId) return correlationFailure();
       // Usage can arrive after a resumed thread has advanced to its next turn.
       // Stale telemetry neither belongs in the new totals nor fails that turn.
@@ -1422,13 +1438,16 @@ export function mapCodexMessage(
   message: CodexServerMessage,
 ): ReadonlyArray<CodexMappedMessage> {
   // Account usage is not turn activity: it may land after the turn ended
-  // and still describes the account truthfully.
+  // and still describes the account truthfully. A token report is telemetry
+  // too, not activity; one that lands late is ignored below rather than
+  // failing a turn that already ended.
   if (
     context.terminal &&
     (message.kind === "request" ||
       (message.kind === "notification" &&
         message.method !== "turn/completed" &&
-        message.method !== "account/rateLimits/updated"))
+        message.method !== "account/rateLimits/updated" &&
+        message.method !== "thread/tokenUsage/updated"))
   ) {
     return protocolFailure("Provider emitted runtime activity after the terminal event.");
   }

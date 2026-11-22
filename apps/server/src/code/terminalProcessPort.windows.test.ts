@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WINDOWS_SANDBOX_MISSING_REASON } from "@octant/domain/guardrail-policy";
+import { WINDOWS_SANDBOX_OPERATION_REFUSAL } from "@octant/domain/guardrail-policy";
 import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it, onTestFailed, vi } from "vitest";
 import { persistProcessReceipt } from "../process/nodeOwnedProcessReceipt";
@@ -94,7 +94,7 @@ describe("a Code terminal on a Windows host", () => {
             executionPolicy,
             ...(strict === undefined ? {} : { strict }),
           }),
-        ).toThrow(new ProcessConfinementError("incompatible", WINDOWS_SANDBOX_MISSING_REASON));
+        ).toThrow(new ProcessConfinementError("incompatible", WINDOWS_SANDBOX_OPERATION_REFUSAL));
       }
     }
     expect(spawn).not.toHaveBeenCalled();

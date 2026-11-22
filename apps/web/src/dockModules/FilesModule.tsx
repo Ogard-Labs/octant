@@ -4,6 +4,7 @@ import { unavailable } from "./moduleState";
 import { WorkFilesPanel } from "../work/WorkFilesPanel";
 import { CodeFileExplorerPanel } from "../code/CodeFileExplorerPanel";
 import { CodeFilesViewer } from "../code/CodeFilesViewer";
+import { filesCloseScope } from "../code/filesCloseGuard";
 import { decodeCodeThreadId, decodeWorkThreadId } from "@octant/contracts";
 import { Suspense } from "react";
 import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
@@ -60,6 +61,7 @@ export default function FilesModule(props: Props) {
         <CodeFilesViewer
           controller={props.codeController}
           explorer={explorer}
+          filesCloseScope={filesCloseScope(props.subject.hostId, props.subject.threadId)}
           hostBridge={props.hostBridge}
           onOpenInMainArea={props.onOpenFile}
           view={props.codeThreadView ?? props.codeController.activeView}

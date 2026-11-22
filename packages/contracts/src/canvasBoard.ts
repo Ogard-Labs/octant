@@ -421,8 +421,6 @@ export const CanvasDiagramLayoutRevised = Schema.Struct({
 }).annotations(strict);
 export type CanvasDiagramLayoutRevised = typeof CanvasDiagramLayoutRevised.Type;
 
-export const CANVAS_DIAGRAM_LAYOUT_REVISED = "canvas.diagram-layout-revised@1";
-
 /**
  * Why a board command was refused. Mirrors the domain policy's rejection codes
  * plus the two the server adds when it cannot reach the policy at all.

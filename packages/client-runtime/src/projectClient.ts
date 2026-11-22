@@ -1,6 +1,8 @@
 import {
   CodeEnvironmentObservation,
   type CodeThreadId,
+  type ImportProviderFoldersRequest,
+  ImportProviderFoldersResult,
   type MemoryCommand,
   MemoryCommandResult,
   ProjectBootstrap,
@@ -12,6 +14,7 @@ import {
   ProjectMemoryProposalList,
   ProjectMemoryView,
   ProjectSummary,
+  ProviderFolderScanResult,
   decodeHostAnswer,
   DesignSystemDocument,
   DesignSystemList,
@@ -59,6 +62,12 @@ export interface ProjectClient {
   ): Promise<DesignSystemDocument>;
   /** Create (no base revision) or replace exactly the revision it was edited from. */
   saveDesignSystem(request: DesignSystemWriteRequest): Promise<DesignSystemWriteResult>;
+  /** Host-side read-only scan of folders used by local providers during first run. */
+  scanProviderFolders?(signal?: AbortSignal): Promise<ProviderFolderScanResult>;
+  /** Import ticked opaque provider folder IDs as Code Projects through host folder receipts. */
+  importProviderFolders?(
+    request: ImportProviderFoldersRequest,
+  ): Promise<ImportProviderFoldersResult>;
 }
 
 export class ProjectClientFailure extends Error {
@@ -202,6 +211,26 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
           body: JSON.stringify(body),
         },
         decodeHostAnswer(DesignSystemWriteResult),
+      );
+    },
+    scanProviderFolders(signal) {
+      return request(
+        options.fetch,
+        new URL("/api/projects/provider-folders/scan", options.baseUrl).toString(),
+        { method: "POST", headers, ...(signal === undefined ? {} : { signal }) },
+        decodeHostAnswer(ProviderFolderScanResult),
+      );
+    },
+    importProviderFolders(body) {
+      return request(
+        options.fetch,
+        new URL("/api/projects/provider-folders/import", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeHostAnswer(ImportProviderFoldersResult),
       );
     },
   };

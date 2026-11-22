@@ -254,6 +254,23 @@ describe("server lifecycle commands", () => {
     expect((await deps.policyStore.read()).enabled).toBe(false);
     expect(deps.serviceManager.disable).toHaveBeenCalledOnce();
     expect(deps.control.request).toHaveBeenCalledWith({ type: "stop", principal: "local" });
+    expect(deps.serviceManager.uninstall).not.toHaveBeenCalled();
+  });
+
+  it("removes the login service after stopping it when disabling with --remove-service", async () => {
+    const deps = await setup();
+    const report = await runServerLifecycleCommand({
+      action: "disable",
+      removeService: true,
+      ...deps,
+    });
+
+    expect(report.state).toBe("disabled");
+    expect(deps.serviceManager.stop).toHaveBeenCalledOnce();
+    expect(deps.serviceManager.uninstall).toHaveBeenCalledOnce();
+    expect(
+      vi.mocked(deps.serviceManager.stop).mock.invocationCallOrder[0] ?? Infinity,
+    ).toBeLessThan(vi.mocked(deps.serviceManager.uninstall).mock.invocationCallOrder[0] ?? 0);
   });
 
   it.each(["install", "enable"] as const)(

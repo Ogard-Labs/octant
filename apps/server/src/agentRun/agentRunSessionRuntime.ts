@@ -58,6 +58,7 @@ import {
   RUNTIME_OUTSIDE_CONTENT_REFUSAL,
   type RuntimeOutsideContentMarking,
 } from "../context/runtimeOutsideContentMark";
+import { appToolHostLines } from "../providers/appToolHostLines";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import type { AgentRunSessionRecord, AgentRunSessionStatePort } from "./agentRunSessionStore";
@@ -261,6 +262,14 @@ export interface AgentRunSessionInteractions {
 }
 
 export interface AgentRunSessionRuntimeOptions {
+  /**
+   * Whether the child's provider may ask it a question that wants a secret:
+   * only when its parent thread is outside Strict, read the way every other
+   * child policy reads its parent's Strict. Its answer reaches the child in
+   * memory and is kept nowhere. The child's session still runs Strict in
+   * every other respect. Absent, or unreadable, such a question is refused.
+   */
+  readonly asksSecretQuestions?: (run: AgentRun) => boolean;
   readonly reviewCapture?: AgentRunReviewCapture;
   readonly canCaptureReview?: (run: AgentRun) => boolean;
   readonly interactions?: AgentRunSessionInteractions;
@@ -287,6 +296,12 @@ export interface AgentRunSessionRuntimeOptions {
     readonly providerInstanceId: ProviderInstanceId;
     readonly modelId: ProviderModelId;
   }) => boolean;
+  /**
+   * Why a provider runs no helper, as its profile declares for its personal
+   * sign-in; read when the child starts or resumes, so a child admitted before
+   * its provider declared it, or on a later retry, still never runs there.
+   */
+  readonly helperRunRefusal?: (providerInstanceId: ProviderInstanceId) => string | undefined;
   /** Resolves the configured driver for a provider instance, or undefined. */
   readonly resolveDriver: (
     providerInstanceId: ProviderInstanceId,
@@ -310,6 +325,14 @@ export interface AgentRunSessionRuntimeOptions {
     readonly usage?: TurnUsage;
   }) => void;
   readonly context: AgentRunContextSnapshotPort;
+  /**
+   * The lead thread's person-memory block, or `undefined` when the lead does
+   * not take part or has nothing to say. Sent once on a fresh start and never
+   * duplicated on a continuation that already holds it. `ownerWindowId` carries
+   * the caller's verified scope during retry/resume before the execution map is
+   * rebound.
+   */
+  readonly personMemoryBlock?: (run: AgentRun, ownerWindowId?: string) => string | undefined;
   readonly inputsCurrent?: (manifest: ConversationInputManifest) => boolean;
   readonly prepareInputs?: (input: {
     readonly run: AgentRun;
@@ -383,6 +406,7 @@ export interface AgentRunSessionRuntimeOptions {
     readonly run: AgentRun;
     readonly authority: AgentRunAuthority;
     readonly projectRoot: string;
+    readonly ownerWindowId?: string;
   }) => AppManagedToolSet | undefined;
   /**
    * The run's record of tool calls about to take effect
@@ -475,7 +499,7 @@ export function createAgentRunSessionRuntime(
     return values;
   };
 
-  const refuseTargetOutsideProjectPolicy = (
+  const refuseDisallowedTarget = (
     run: AgentRun,
     target: ReturnType<typeof effectiveAgentRunExecutionTarget>,
   ) => {
@@ -490,6 +514,8 @@ export function createAgentRunSessionRuntime(
         "provider-unavailable",
         "The Project's provider policy does not allow this child's provider or model. Delegate a new child on an allowed provider.",
       );
+    const refusal = options.helperRunRefusal?.(target.providerInstanceId);
+    if (refusal !== undefined) throw new AgentRunSessionError("provider-unavailable", refusal);
   };
 
   const savedConversation = (run: AgentRun): AgentRunSessionRecord => {
@@ -505,7 +531,7 @@ export function createAgentRunSessionRuntime(
       );
     }
     const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
-    refuseTargetOutsideProjectPolicy(run, target);
+    refuseDisallowedTarget(run, target);
     const driver = options.resolveDriver(target.providerInstanceId, run);
     clampAgentRunSessionAuthority(run);
     const projectRoot = resolveProjectRoot(run, options.scratchRoot);
@@ -547,7 +573,11 @@ export function createAgentRunSessionRuntime(
     return previous;
   };
 
-  const prepareSession = (run: AgentRun, continuation?: { readonly message?: string }) => {
+  const prepareSession = (
+    run: AgentRun,
+    continuation?: { readonly message?: string },
+    ownerWindowId?: string,
+  ) => {
     if (sessions.has(run.id))
       throw new AgentRunSessionError(
         "provider-unavailable",
@@ -558,7 +588,7 @@ export function createAgentRunSessionRuntime(
     // widened since admission, and a child must never gain from that.
     const authority = clampAgentRunSessionAuthority(run);
     const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
-    refuseTargetOutsideProjectPolicy(run, target);
+    refuseDisallowedTarget(run, target);
     const driver = options.resolveDriver(target.providerInstanceId, run);
     if (driver === undefined) {
       throw new AgentRunSessionError(
@@ -578,9 +608,16 @@ export function createAgentRunSessionRuntime(
       );
     }
 
+    const personMemoryText =
+      continuation !== undefined || resolvedContext.some((block) => block.kind === "person-memory")
+        ? undefined
+        : options.personMemoryBlock?.(run, ownerWindowId);
     const source =
       run.workspaceReceipt.kind === "code-worktree" ? run.workspaceReceipt.source : undefined;
     const context: ReadonlyArray<ProviderContextBlock> = [
+      ...(personMemoryText === undefined
+        ? []
+        : [{ kind: "person-memory" as const, text: personMemoryText }]),
       ...resolvedContext,
       ...(source === undefined
         ? []
@@ -592,7 +629,12 @@ export function createAgentRunSessionRuntime(
           ]),
     ];
 
-    const appManagedTools = options.appManagedTools?.({ run, authority, projectRoot });
+    const appManagedTools = options.appManagedTools?.({
+      run,
+      authority,
+      projectRoot,
+      ...(ownerWindowId === undefined ? {} : { ownerWindowId }),
+    });
     if (appManagedTools !== undefined && appManagedTools.definitions.length > 0) {
       const transport = options.appManagedToolTransport?.({
         providerInstanceId: target.providerInstanceId,
@@ -758,6 +800,7 @@ export function createAgentRunSessionRuntime(
       spendReservationId,
       providerSessionId,
       record,
+      ownerWindowId,
       claim: () => {
         if (owned)
           throw new AgentRunSessionError(
@@ -793,6 +836,7 @@ export function createAgentRunSessionRuntime(
       reservationId,
       spendReservationId,
       providerSessionId,
+      ownerWindowId,
     } = prepared;
     let record = prepared.record;
     let reviewCapture: AgentRunReviewCaptureLease | undefined;
@@ -804,7 +848,12 @@ export function createAgentRunSessionRuntime(
           "provider-unavailable",
           "This child already owns a live session.",
         );
-      appManagedTools = options.appManagedTools?.({ run, authority, projectRoot });
+      appManagedTools = options.appManagedTools?.({
+        run,
+        authority,
+        projectRoot,
+        ...(ownerWindowId === undefined ? {} : { ownerWindowId }),
+      });
       toolEffects = options.toolEffects?.(run);
       options.capacityScheduler.markRunning(reservationId);
       prepared.claim();
@@ -1043,7 +1092,19 @@ export function createAgentRunSessionRuntime(
             driver,
             authority,
             projectRoot,
-            context: continuation === undefined ? context : [],
+            // A child is told when to use each Octant tool it is offered, as a
+            // lead is; a follow-up continues a session that already has them.
+            context:
+              continuation === undefined
+                ? [
+                    ...context,
+                    ...appToolHostLines(appManagedTools?.definitions).map((line) => ({
+                      kind: "instructions" as const,
+                      text: line.text,
+                      tool: line.tool,
+                    })),
+                  ]
+                : [],
             ...(continuation !== undefined || run.routingReceipt.admittedInputCount === undefined
               ? {}
               : {
@@ -1132,6 +1193,7 @@ export function createAgentRunSessionRuntime(
             outsideContentMarks: options.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS,
             onUserMessage: options.onUserMessage,
             interactions: options.interactions,
+            asksSecretQuestions: safeAsksSecretQuestions(options, run),
             onSessionEnding: () => {
               live.steer = undefined;
               inputController.abort();
@@ -1268,22 +1330,24 @@ export function createAgentRunSessionRuntime(
         };
       }
     },
-    prepareStart: (run) => {
-      const prepared = prepareSession(run);
+    prepareStart: (run, input) => {
+      const prepared = prepareSession(run, undefined, input?.ownerWindowId);
       return {
         start: (started) => startSession(started, undefined, prepared),
         release: prepared.release,
       };
     },
     prepareResume: (run, input) => {
-      const prepared = prepareSession(run, input ?? {});
+      const prepared = prepareSession(run, input ?? {}, input?.ownerWindowId);
       return {
         start: (started) => startSession(started, input ?? {}, prepared),
         release: prepared.release,
       };
     },
-    start: (run) => startSession(run),
-    resume: (run, input) => startSession(run, input ?? {}),
+    start: (run, input) =>
+      startSession(run, undefined, prepareSession(run, undefined, input?.ownerWindowId)),
+    resume: (run, input) =>
+      startSession(run, input ?? {}, prepareSession(run, input ?? {}, input?.ownerWindowId)),
     steer: async ({ runId, message }) => {
       const live = sessions.get(runId);
       if (
@@ -1326,6 +1390,14 @@ export function createAgentRunSessionRuntime(
 
     ...(options.reconcile === undefined ? {} : { reconcile: options.reconcile }),
   };
+}
+
+function safeAsksSecretQuestions(options: AgentRunSessionRuntimeOptions, run: AgentRun): boolean {
+  try {
+    return options.asksSecretQuestions?.(run) === true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -1492,6 +1564,8 @@ interface ManagedSessionInput {
   readonly outsideContentMarks: RuntimeOutsideContentMarking;
   readonly onUserMessage?: AgentRunSessionRuntimeOptions["onUserMessage"];
   readonly interactions: AgentRunSessionRuntimeOptions["interactions"];
+  /** See {@link AgentRunSessionRuntimeOptions.asksSecretQuestions}. */
+  readonly asksSecretQuestions: boolean;
   readonly onConnectionReady: (
     connection: ProviderConnection,
     sessionId: ProviderSessionId,
@@ -1889,7 +1963,10 @@ function runSessionTurn(
             // The clamped run authority is what reaches the provider. Nothing here
             // may widen it, and no parent-thread policy is consulted.
             executionPolicy: input.authority.executionPolicy,
+            // Every approval a helper gets holds for that one call.
+            answersOncePerCall: true,
             ...(sandboxPolicy === undefined ? {} : { fullAccessSandbox: true }),
+            ...(input.asksSecretQuestions ? { asksSecretQuestions: true } : {}),
             tools: input.appManagedTools?.definitions ?? [],
           })
         : connection.resume({
@@ -1900,7 +1977,9 @@ function runSessionTurn(
               ? {}
               : { modelOptionValues: input.modelOptionValues }),
             executionPolicy: input.authority.executionPolicy,
+            answersOncePerCall: true,
             ...(sandboxPolicy === undefined ? {} : { fullAccessSandbox: true }),
+            ...(input.asksSecretQuestions ? { asksSecretQuestions: true } : {}),
             tools: input.appManagedTools?.definitions ?? [],
           });
     const handle = yield* startup.pipe(
@@ -2265,7 +2344,10 @@ function collectSessionEvents(
                     input.onUserMessage?.({
                       runId: input.run.id,
                       kind: "answer",
-                      text: `Question: ${event.prompt}\nAnswer: ${answer}`,
+                      // A secret answer is never shown or kept, only that it was given.
+                      text: `Question: ${event.prompt}\nAnswer: ${
+                        event.secret === true ? "(a secret, not kept)" : answer
+                      }`,
                       occurredAt: decodeUtcTimestamp(new Date().toISOString()),
                     });
                   } catch {

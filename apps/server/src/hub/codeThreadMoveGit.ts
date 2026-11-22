@@ -418,6 +418,15 @@ export async function branchExists(repositoryRoot: string, branch: string): Prom
 }
 
 /** The remote URLs a clone has. */
+/** The fetch URL of one named remote, or undefined when the checkout has no such remote. */
+export async function remoteFetchUrl(
+  repositoryRoot: string,
+  remoteName: string,
+): Promise<string | undefined> {
+  const url = await git(repositoryRoot, ["remote", "get-url", "--", remoteName]).catch(() => "");
+  return url.length > 0 ? url : undefined;
+}
+
 export async function repositoryRemotes(repositoryRoot: string): Promise<ReadonlyArray<string>> {
   const names = (await git(repositoryRoot, ["remote"]).catch(() => ""))
     .split("\n")

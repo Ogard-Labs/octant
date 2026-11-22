@@ -46,8 +46,6 @@ export function resolveSettingsCliCommand(
     return { action: "sandbox", sandboxed: mode === "on", work };
   }
   if (action !== "access" || !isPermissionMode(mode)) return undefined;
-  // No Work thread starts in Plan, so it is no Work default and is refused up front.
-  if (work && mode === "plan") return undefined;
   return { action: "access", mode, work };
 }
 
@@ -100,10 +98,6 @@ export async function runSettingsCliCommand(input: {
     return 1;
   }
   const access = workAccessOfPermissionMode(command.mode);
-  if (access === undefined) {
-    stderr.write("--access plan is not a Work default; a Work thread moves to Plan on its own.\n");
-    return 1;
-  }
   const executed = await session.send({
     path: "/api/work/threads/commands",
     method: "POST",

@@ -216,6 +216,14 @@ class StdioJsonRpcTransport implements JsonRpcTransport {
     this.#onTransportClosed = onTransportClosed;
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk) => this.#onData(String(chunk)));
+    // Route stdin/stdout errors (such as EPIPE on a dead MCP server) to this
+    // transport's own failure cleanup instead of reaching the process error net.
+    child.stdin.on("error", (error) =>
+      this.#fail(error instanceof Error ? error : new Error("MCP stdio stdin failed.")),
+    );
+    child.stdout.on("error", (error) =>
+      this.#fail(error instanceof Error ? error : new Error("MCP stdio stdout failed.")),
+    );
     this.#ready = Promise.resolve();
     child.once("exit", () => {
       const unexpected = !this.#closed;
@@ -301,7 +309,11 @@ class StdioJsonRpcTransport implements JsonRpcTransport {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
-    this.#child.stdin.end();
+    try {
+      this.#child.stdin.end();
+    } catch {
+      // Child exit and stop below own cleanup if stdin is already broken.
+    }
     await this.#child.stop();
   }
 

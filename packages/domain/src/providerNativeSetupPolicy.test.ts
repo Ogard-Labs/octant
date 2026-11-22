@@ -104,6 +104,49 @@ describe("a key provider running as itself", () => {
     ).toEqual({ ...everything, webTools: false });
   });
 
+  it("loads an added Project's code outside Strict without turning on an account the person turned off", () => {
+    expect(
+      resolveProviderNativeSetup({
+        driverKind: "claude",
+        mode: "code",
+        executionPolicy: "approval-gated",
+        accountAllows: true,
+        projectTrusts: false,
+        projectAddedTrusts: true,
+      }),
+    ).toEqual(everything);
+    expect(
+      resolveProviderNativeSetup({
+        driverKind: "claude",
+        mode: "work",
+        executionPolicy: "approval-gated",
+        accountAllows: false,
+        projectTrusts: false,
+        projectAddedTrusts: true,
+      }),
+    ).toBeUndefined();
+    expect(
+      resolveProviderNativeSetup({
+        driverKind: "codex",
+        mode: "code",
+        executionPolicy: "plan",
+        accountAllows: true,
+        projectTrusts: false,
+        projectAddedTrusts: true,
+      })?.projectCode,
+    ).toBe(false);
+    expect(
+      resolveProviderNativeSetup({
+        driverKind: "codex",
+        mode: "chat",
+        executionPolicy: "approval-gated",
+        accountAllows: true,
+        projectTrusts: false,
+        projectAddedTrusts: true,
+      })?.projectCode,
+    ).toBe(false);
+  });
+
   it("never runs hooks, tool servers, or a Project's code in Plan, which stays read-only", () => {
     expect(
       resolveProviderNativeSetup({
@@ -299,7 +342,34 @@ describe("a provider's own memory", () => {
     ).toBe(false);
   });
 
-  it("keeps a memory the runtime writes in the background off in Plan and Chat, and for a session that names no mode", () => {
+  it("follows the person's setting for a memory the runtime writes in the background in Plan and Chat outside Strict", () => {
+    const memoryWrites = "background";
+    for (const [mode, executionPolicy] of [
+      ["code", "plan"],
+      ["chat", "approval-gated"],
+    ] as const) {
+      expect(
+        providerOwnMemoryLaunches({
+          accountAllows: true,
+          mode,
+          executionPolicy,
+          memoryWrites,
+          strict: false,
+        }),
+      ).toBe(true);
+      expect(
+        providerOwnMemoryLaunches({
+          accountAllows: false,
+          mode,
+          executionPolicy,
+          memoryWrites,
+          strict: false,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("keeps a memory the runtime writes in the background off in Plan and Chat under Strict, and for a session that names no mode", () => {
     const memoryWrites = "background";
     expect(
       providerOwnMemoryLaunches({

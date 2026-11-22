@@ -140,7 +140,6 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".environment-move__bar",
   ".environment-context__meter, .environment-context__mini",
   ".thread-move-frozen__progress",
-  ".plan-usage__bar--smooth",
   ".provider-limits__window meter",
   ".provider-limits__window meter::-webkit-meter-bar",
   ".provider-limits__window meter::-webkit-meter-optimum-value",

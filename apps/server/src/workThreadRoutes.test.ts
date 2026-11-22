@@ -9,6 +9,8 @@ import { describe, expect, it, vi } from "vitest";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { createWorkThreadRouteHandler } from "./workThreadRoutes";
+import type { HubGrant } from "@octant/contracts";
+import { hubActScopeFromSpokeLink, type HubActScopePort } from "./hub/hubActScope";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -105,6 +107,77 @@ describe("Work thread routes", () => {
     expect(execute).not.toHaveBeenCalled();
 
     expect((await route(fromDevice("canvas")))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("lets a hub-introduced device start a Work thread only in a Project the member's Act item names", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-created", thread: thread() }));
+    const grant: { current: HubGrant } = {
+      current: { items: ["act"], actProjects: [projectId as never] },
+    };
+    const route = routeFixture(
+      { execute },
+      hubActScopeFromSpokeLink({
+        status: () => ({ membership: "member", grant: grant.current }) as never,
+      }),
+    );
+    const remoteDeviceId = "73000000-0000-4000-8000-000000000030";
+    const create = {
+      kind: "create-work-thread",
+      threadId,
+      projectId,
+      title: "Draft brief",
+      providerInstanceId: "73000000-0000-4000-8000-000000000004",
+      modelId: "model-a",
+      hostId: "local",
+      bindingRevisionId: "72000000-0000-4000-8000-000000000008",
+    };
+    const fromIntroduced = (command: Record<string, unknown> = create) => {
+      const remote = request("/api/work/threads/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "73000000-0000-4000-8000-000000000031" as never,
+          admittedBy: "hub-roster",
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+
+    expect((await route(fromIntroduced()))?.status).toBe(200);
+    // A fork lands in its source's Project, which the route does not read, so
+    // even with Act naming a Project a fork from such a device is refused.
+    const forked = await route(
+      fromIntroduced({
+        kind: "fork-work-thread",
+        threadId: "73000000-0000-4000-8000-000000000040",
+        sourceThreadId: threadId,
+        throughRequestId: "73000000-0000-4000-8000-000000000041",
+        title: "Draft brief, again",
+      }),
+    );
+    expect(forked?.status).toBe(403);
+    expect(await forked?.json()).toMatchObject({
+      message:
+        "A device the hub introduced cannot fork a thread on this computer while it is in a hub.",
+    });
+    grant.current = { items: ["act"], actProjects: [] };
+    const refused = await route(fromIntroduced());
+    expect(refused?.status).toBe(403);
+    expect(await refused?.json()).toMatchObject({
+      message:
+        "This computer's Act item for its hub does not name this Project, so a device the hub introduced cannot start threads in it here.",
+    });
     expect(execute).toHaveBeenCalledOnce();
   });
 
@@ -697,7 +770,7 @@ function request(path: string, init: RequestInit = {}): Request {
   return new Request(`http://127.0.0.1${path}`, { ...init, headers });
 }
 
-function routeFixture(overrides: Record<string, unknown>) {
+function routeFixture(overrides: Record<string, unknown>, hubActScope?: HubActScopePort) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
   const service = {
@@ -710,6 +783,7 @@ function routeFixture(overrides: Record<string, unknown>) {
     service,
     windowAuthorityStore: store,
     now: () => 1,
+    ...(hubActScope === undefined ? {} : { hubActScope: () => hubActScope }),
   });
 }
 

@@ -49,11 +49,83 @@ const granted = () =>
     grant: { grantId: GRANT_ID, threadId: THREAD_ID, port: 5173 },
   });
 
+describe("forwarding another computer's port from this window", () => {
+  it("asks the host for the forward, then has the desktop listen, and signs each connection's upgrade", async () => {
+    const forwardId = `rpf_${"cd".repeat(32)}`;
+    const forward = { forwardId, port: 5432, expiresAt: 3_600_000 };
+    const desktop = bridge();
+    const openRemotePortForward = vi.fn(async (_request: unknown) => ({
+      kind: "listening" as const,
+      port: 5432,
+    }));
+    const opener = createRemoteServerLiveOpener({ ...desktop, openRemotePortForward }, async () =>
+      Response.json({
+        kind: "remote-port-forward-opened",
+        requestId: "33333333-3333-4333-8333-333333333333",
+        forward,
+      }),
+    );
+    expect(await opener.openForward?.(HOST, 5432)).toEqual({ kind: "forwarded", localPort: 5432 });
+    expect(openRemotePortForward).toHaveBeenCalledWith({
+      hostId: HOST.hostId,
+      listenerOrigin: HOST.origin,
+      forward,
+    });
+    const signing = (await desktop.sign({
+      hostId: HOST.hostId,
+      grantId: forwardId,
+      method: "GET",
+      pathQuery: `/api/server-proxy/${forwardId}`,
+      bodyDigest: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    })) as { status: string };
+    expect(signing.status).toBe("signed");
+  });
+
+  it("names a thread's running server instead of a port, and listens on the port the host forwarded", async () => {
+    const forward = { forwardId: `rpf_${"ef".repeat(32)}`, port: 5173, expiresAt: 3_600_000 };
+    const bodies: unknown[] = [];
+    const openRemotePortForward = vi.fn(async (_request: unknown) => ({
+      kind: "listening" as const,
+      port: 5173,
+    }));
+    const opener = createRemoteServerLiveOpener(
+      { ...bridge(), openRemotePortForward },
+      async (_input, init) => {
+        if (init?.body instanceof Uint8Array) {
+          bodies.push(JSON.parse(new TextDecoder().decode(init.body)));
+        }
+        return Response.json({
+          kind: "remote-port-forward-opened",
+          requestId: "33333333-3333-4333-8333-333333333333",
+          forward,
+        });
+      },
+    );
+    const source = { surface: "running-services", listenerId: SERVICE.listenerId } as const;
+    expect(await opener.openForward?.(HOST, source)).toEqual({
+      kind: "forwarded",
+      localPort: 5173,
+    });
+    expect(bodies).toEqual([expect.objectContaining({ kind: "open-remote-port-forward", source })]);
+    expect(openRemotePortForward).toHaveBeenCalledWith(expect.objectContaining({ forward }));
+  });
+
+  it("offers no forward where the desktop cannot listen for one", () => {
+    expect(createRemoteServerLiveOpener(bridge()).openForward).toBeUndefined();
+  });
+});
+
 describe("opening another computer's server live from this window", () => {
   it("asks the host for the grant, then has the desktop show it, and signs the page's requests", async () => {
     const desktop = bridge();
     const opener = createRemoteServerLiveOpener(desktop, async () => granted());
-    expect(await opener.openLive(HOST, SERVICE, "octant-browser")).toEqual({ kind: "opened" });
+    expect(
+      await opener.openLive(
+        HOST,
+        { surface: "running-services", listenerId: SERVICE.listenerId },
+        "octant-browser",
+      ),
+    ).toEqual({ kind: "opened" });
     expect(desktop.openRemoteServerPage).toHaveBeenCalledWith({
       hostId: HOST.hostId,
       hostName: "Studio Mac",
@@ -77,13 +149,52 @@ describe("opening another computer's server live from this window", () => {
     const hostFetch = vi.fn<typeof globalThis.fetch>(async () => granted());
     const opener = createRemoteServerLiveOpener(desktop, pageFetch);
 
-    expect(await opener.openLive({ ...HOST, fetch: hostFetch }, SERVICE, "octant-browser")).toEqual(
-      { kind: "opened" },
-    );
+    expect(
+      await opener.openLive(
+        { ...HOST, fetch: hostFetch },
+        { surface: "running-services", listenerId: SERVICE.listenerId },
+        "octant-browser",
+      ),
+    ).toEqual({ kind: "opened" });
 
     expect(hostFetch).toHaveBeenCalledOnce();
     expect(String(hostFetch.mock.calls[0]?.[0])).toBe(`${HOST.origin}/api/server-proxy/grants`);
     expect(pageFetch).not.toHaveBeenCalled();
+  });
+
+  it("signs with the replacement credential after the host re-admits this device under a new key", async () => {
+    const desktop = bridge();
+    const opener = createRemoteServerLiveOpener(desktop, async () => granted());
+    const oldKey = vi.fn(async () => "old-signature");
+    const newKey = vi.fn(async () => "new-signature");
+    const source = { surface: "running-services", listenerId: SERVICE.listenerId } as const;
+    await opener.openLive(
+      { ...HOST, credentialKeyId: "key-1", sign: oldKey },
+      source,
+      "octant-browser",
+    );
+    await opener.openLive(
+      { ...HOST, credentialKeyId: "key-2", sign: newKey },
+      source,
+      "octant-browser",
+    );
+    const signing = (await desktop.sign({
+      hostId: HOST.hostId,
+      grantId: GRANT_ID,
+      method: "GET",
+      pathQuery: `/api/server-proxy/${GRANT_ID}/`,
+      bodyDigest: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    })) as { status: string };
+    expect(signing.status).toBe("signed");
+    expect(newKey).toHaveBeenCalled();
+    const oldCalls = oldKey.mock.calls.length;
+    expect(oldCalls).toBeGreaterThan(0);
+    await opener.openLive(
+      { ...HOST, credentialKeyId: "key-2", sign: newKey },
+      source,
+      "octant-browser",
+    );
+    expect(oldKey.mock.calls.length).toBe(oldCalls);
   });
 
   it("shows the host's refusal and asks the desktop for nothing", async () => {
@@ -98,7 +209,13 @@ describe("opening another computer's server live from this window", () => {
         },
       }),
     );
-    expect(await opener.openLive(HOST, SERVICE, "default-browser")).toEqual({
+    expect(
+      await opener.openLive(
+        HOST,
+        { surface: "running-services", listenerId: SERVICE.listenerId },
+        "default-browser",
+      ),
+    ).toEqual({
       kind: "refused",
       message: "This device can't open servers in that thread.",
     });
@@ -108,7 +225,11 @@ describe("opening another computer's server live from this window", () => {
   it("signs nothing for a host it holds no grant from, or after it is disposed", async () => {
     const desktop = bridge();
     const opener = createRemoteServerLiveOpener(desktop, async () => granted());
-    await opener.openLive(HOST, SERVICE, "octant-browser");
+    await opener.openLive(
+      HOST,
+      { surface: "running-services", listenerId: SERVICE.listenerId },
+      "octant-browser",
+    );
     const request = {
       hostId: "99999999-9999-4999-8999-999999999999",
       grantId: GRANT_ID,
@@ -119,5 +240,36 @@ describe("opening another computer's server live from this window", () => {
     expect(await desktop.sign(request)).toEqual({ status: "refused" });
     opener.dispose();
     expect(await desktop.sign({ ...request, hostId: HOST.hostId })).toBeUndefined();
+  });
+
+  it("adopts a relayed server Project preview grant and signs requests under its proxy path", async () => {
+    const desktop = bridge();
+    const opener = createRemoteServerLiveOpener(desktop);
+    const outcome = await opener.openServerProjectPreview(
+      HOST,
+      {
+        projectId: "44444444-4444-4444-8444-444444444444",
+        remotePort: 5173,
+        grantId: GRANT_ID,
+      },
+      "octant-browser",
+    );
+    expect(outcome).toEqual({ kind: "opened" });
+    expect(desktop.openRemoteServerPage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hostId: HOST.hostId,
+        listenerOrigin: HOST.origin,
+        grant: expect.objectContaining({ grantId: GRANT_ID, port: 5173 }),
+      }),
+    );
+    const signed = await desktop.sign({
+      hostId: HOST.hostId,
+      grantId: GRANT_ID,
+      method: "GET",
+      pathQuery: `/api/server-proxy/${GRANT_ID}/`,
+      bodyDigest: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    });
+    expect(signed).toMatchObject({ status: "signed" });
+    opener.dispose();
   });
 });

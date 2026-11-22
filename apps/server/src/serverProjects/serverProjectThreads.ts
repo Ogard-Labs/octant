@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { ProviderServerPlacement } from "@octant/provider-sdk/driver";
 import { posix } from "node:path";
 import {
   decodeCodeCheckoutId,
@@ -19,6 +20,7 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { ServerConnection } from "./serverConnection";
 import { ServerFileSystem } from "./serverFiles";
 import type { ServerProjectStore } from "./serverProjectStore";
+import type { ServerRuntimeRecords } from "./serverRuntimeRecords";
 import { createServerShell, type ServerShellOptions } from "./serverShell";
 
 /**
@@ -209,10 +211,28 @@ export function serverCodeCheckoutRoot(
 
 export type ServerCodeTurnBinding =
   | { readonly status: "bound"; readonly tools: AppManagedToolSet }
+  /** The thread's runtime runs on the server itself, started through this placement. */
+  | { readonly status: "placed"; readonly placement: ProviderServerPlacement }
   | { readonly status: "refused"; readonly message: string };
 
 export const SERVER_RUNTIME_NOT_HARNESS =
-  "A thread in a Project on a server runs on the Octant Harness only, because other runtimes act on this computer's files. Choose a model the Octant Harness runs.";
+  "A thread in a Project on a server runs on the Octant Harness, or on a runtime that runs on the server itself, such as Codex. This one acts on this computer's files. Choose another model.";
+
+/** Said when a Work thread in a server Project picks a runtime other than the Octant Harness. */
+export const SERVER_WORK_RUNTIME_NOT_HARNESS =
+  "A Work thread in a Project on a server runs on the Octant Harness. This model's runtime acts on this computer's files or runs on the server only in Code. Choose another model.";
+
+/** Said when Strict is on for a thread whose runtime would run on its server. */
+export const SERVER_PLACEMENT_STRICT_REFUSAL =
+  "Strict needs Octant's own sandbox, which can't run on a server. Turn Strict off for this thread to run this provider there.";
+
+/**
+ * Every program a placed runtime runs does so in the Project's folder on the
+ * server; a long-running one starts there behind its record
+ * (`ServerRuntimeRecords`).
+ */
+const IN_FOLDER_SCRIPT = 'cd "$1" || exit 1\nshift\nexec "$@"';
+const SERVER_RUN_OUTPUT_BYTES = 64 * 1024;
 const SERVER_NOT_REGISTERED =
   "This Project's server is no longer registered in Settings › Permissions › Servers, so nothing can run there.";
 
@@ -224,8 +244,11 @@ export function bindServerCodeTurn(
   options: {
     readonly store: Pick<ServerProjectStore, "codeProject" | "addressOf" | "serverOf">;
     /** `refusal` names why no call may go to the server now, such as a suspended machine. */
-    readonly connection: Pick<ServerConnection, "run"> & Partial<Pick<ServerConnection, "refusal">>;
+    readonly connection: Pick<ServerConnection, "run"> &
+      Partial<Pick<ServerConnection, "refusal" | "openStream">>;
     readonly composition: Pick<NativeHarnessComposition, "forServerCode">;
+    /** Records every program a placed runtime starts, so one a dropped connection leaves running is stopped. */
+    readonly runtimes: Pick<ServerRuntimeRecords, "begin" | "connected">;
     readonly record: (
       input: Parameters<ServerShellOptions["record"]>[0] & {
         readonly threadId: string;
@@ -236,6 +259,10 @@ export function bindServerCodeTurn(
     readonly thread: CodeThread;
     readonly windowId: WindowId;
     readonly secrets: ReadonlyArray<string>;
+    /** The thread's runtime reports that it runs on a server over the connection. */
+    readonly placesOnServer?: boolean;
+    /** Strict is on for this thread; absent counts as on. */
+    readonly strict?: boolean;
   },
 ): ServerCodeTurnBinding {
   const place = serverThreadOf(options.store, input.thread);
@@ -273,6 +300,67 @@ export function bindServerCodeTurn(
     root: place.folder,
     record: (record) => options.record({ ...record, threadId: String(input.thread.id) }),
   });
+  if (input.placesOnServer === true) {
+    if (input.strict !== false)
+      return { status: "refused", message: SERVER_PLACEMENT_STRICT_REFUSAL };
+    const serverName = options.store.serverOf(projectId)?.alias ?? bound.server.alias;
+    const unreachable = {
+      status: "unreachable" as const,
+      message: SERVER_NOT_REGISTERED,
+    };
+    const placement: ProviderServerPlacement = {
+      serverName,
+      start: (program) => {
+        const server = address();
+        if (server === undefined || options.connection.openStream === undefined) return unreachable;
+        const recorded = options.runtimes.begin(server, place.folder, program);
+        const stream = options.connection.openStream(server, recorded.input);
+        if (stream.status !== "open") {
+          recorded.ended(0);
+          return stream;
+        }
+        void stream.exited.then(
+          ({ exitCode }) => recorded.ended(exitCode),
+          () => recorded.ended(null),
+        );
+        return {
+          status: "open",
+          stdin: stream.stdin,
+          stdout: stream.stdout,
+          stderr: stream.stderr,
+          stop: stream.stop,
+          exited: stream.exited,
+        };
+      },
+      run: async (program, { timeoutMs }) => {
+        const server = address();
+        if (server === undefined) return unreachable;
+        options.runtimes.connected(server);
+        const ran = await options.connection.run(server, {
+          script: IN_FOLDER_SCRIPT,
+          args: [place.folder, ...program],
+          timeoutMs,
+          maxOutputBytes: SERVER_RUN_OUTPUT_BYTES,
+        });
+        if (ran.status === "ran") {
+          return {
+            status: "ran",
+            exitCode: ran.exitCode,
+            output: ran.output.toString("utf8"),
+            errorOutput: ran.errorOutput,
+          };
+        }
+        return {
+          status: "unreachable",
+          message:
+            ran.status === "unreachable"
+              ? ran.message
+              : `${serverName} did not answer in time. Nothing ran there.`,
+        };
+      },
+    };
+    return { status: "placed", placement };
+  }
   const tools = options.composition.forServerCode({
     thread: input.thread,
     filesystem,

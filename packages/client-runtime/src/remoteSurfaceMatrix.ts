@@ -168,7 +168,7 @@ const REMOTE_SHELL_SURFACES: ReadonlyArray<RemoteShellSurfaceDescriptor> = [
     id: "server-projects",
     label: "Server Projects",
     description:
-      "Read the Projects bound to a folder on a server, their files and the server's load.",
+      "Bind, change, preview, and operate Projects on your registered servers and cloud machines.",
     availability: "local-host-only",
     // No catalogued action, as for shell settings above.
     catalogAction: "server.project.read",

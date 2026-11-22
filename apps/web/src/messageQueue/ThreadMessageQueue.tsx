@@ -67,6 +67,8 @@ export function ThreadMessageQueue({
   const message = queue.message ?? (queue.available || quiet ? undefined : QUEUE_UNAVAILABLE);
   const disabled = quiet || !queue.available || queue.busy || queue.uncertain;
   const queued = snapshot?.items.filter((item) => item.status === "queued") ?? [];
+  // A message the running turn's runtime is still considering keeps its place.
+  const movable = queued.filter((item) => item.steering !== true);
   const held = snapshot !== undefined && (snapshot.paused || snapshot.holdReason !== undefined);
   const showHoldChip = held && queued.length > 0;
   const resume = () =>
@@ -142,18 +144,21 @@ export function ThreadMessageQueue({
       )}
       <ol id={detailsId} hidden={!expanded}>
         {snapshot?.items.map((item, index) => {
-          const position = queued.findIndex((candidate) => candidate.messageId === item.messageId);
-          const editable = item.status === "queued" && item.payload !== undefined;
+          const position = movable.findIndex((candidate) => candidate.messageId === item.messageId);
+          const editable =
+            item.status === "queued" && item.steering !== true && item.payload !== undefined;
           const edit = editing?.id === item.messageId ? editing : undefined;
           const move = (offset: number) => {
-            const ids = queued.map((entry) => entry.messageId);
+            const ids = movable.map((entry) => entry.messageId);
             const other = ids[position + offset];
             if (other === undefined) return;
             ids[position + offset] = item.messageId;
             ids[position] = other;
             let queuedIndex = 0;
             const ordered = snapshot.items.map((entry) =>
-              entry.status === "queued" ? (ids[queuedIndex++] ?? entry.messageId) : entry.messageId,
+              entry.status === "queued" && entry.steering !== true
+                ? (ids[queuedIndex++] ?? entry.messageId)
+                : entry.messageId,
             );
             void queue.change({ kind: "reorder", messageIds: ordered });
           };
@@ -216,6 +221,9 @@ export function ThreadMessageQueue({
                   {item.status === "dispatching" ? "Starting" : "Accepted by host"}
                 </span>
               )}
+              {item.status === "queued" && item.steering === true && (
+                <span role="status">Sending into the running turn</span>
+              )}
               <div className="thread-message-queue__actions">
                 <OctantButton
                   type="button"
@@ -248,7 +256,7 @@ export function ThreadMessageQueue({
                   size="sm"
                   variant="ghost"
                   aria-label={`Move queued message ${index + 1} down`}
-                  disabled={disabled || !editable || position >= queued.length - 1}
+                  disabled={disabled || !editable || position >= movable.length - 1}
                   onClick={() => move(1)}
                 >
                   Move down
@@ -258,7 +266,7 @@ export function ThreadMessageQueue({
                   size="sm"
                   variant="ghost"
                   aria-label={`Remove queued message ${index + 1}`}
-                  disabled={disabled || item.status !== "queued"}
+                  disabled={disabled || item.status !== "queued" || item.steering === true}
                   onClick={() => void queue.change({ kind: "remove", messageId: item.messageId })}
                 >
                   Remove

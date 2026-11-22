@@ -16,3 +16,5 @@ export * from "./computerUsePlugin";
 export * from "./browserUsePlugin";
 export * from "./replicaStoreActivation";
 export * from "./cloudMachineTargets";
+export * from "./mediaTools";
+export * from "./pullRequestReviewers";

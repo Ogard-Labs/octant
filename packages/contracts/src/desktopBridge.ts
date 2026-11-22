@@ -62,6 +62,15 @@ export interface BackgroundHostChange {
   readonly openAtLogin?: boolean;
 }
 
+/**
+ * Live status of the desktop app's prevent-app-suspension assertion.
+ * Active summaries are built strictly from work counts — never thread titles.
+ */
+export type KeepAwakeStatus =
+  | { readonly state: "active"; readonly summary: string }
+  | { readonly state: "idle"; readonly reason: "disabled" | "on-battery" | "no-work" }
+  | { readonly state: "unavailable" };
+
 export type BoundProjectType = "work" | "code";
 export type ProviderCredentialStatus = "stored" | "missing" | "unavailable";
 
@@ -112,6 +121,8 @@ export interface CodeExternalEditorRequest {
   readonly fileId: string;
   readonly line: number;
   readonly column: number;
+  /** Opens the resolved file in the desktop's default application instead of a configured external editor. */
+  readonly defaultApplication?: boolean;
 }
 
 export interface OpenInApplicationDescriptor {
@@ -302,6 +313,34 @@ export interface BrowserSurfaceRequest {
   };
 }
 
+/**
+ * One tab's icon as the owning window reads it for its tab strip. The image is
+ * display-only: it crosses the window's own IPC and never joins a shared
+ * observation, a journal entry, or an agent's tool result.
+ */
+export interface BrowserSurfaceTabIcon {
+  readonly tabId: string;
+  readonly revision: number;
+  readonly active: boolean;
+  /** The changed image; absent while the page has declared none or unchanged. */
+  readonly dataUrl?: string;
+  /**
+   * The context answered without waking: its windows are closed and this is
+   * the icon the tab went to sleep with, so the strip shows it dimmed.
+   */
+  readonly sleeping?: boolean;
+}
+
+/** What the owning window asks for its tabs' icons: what it already holds. */
+export interface BrowserSurfaceTabIconsRequest {
+  readonly contextId: string;
+  readonly threadId: string;
+  readonly known: ReadonlyArray<{
+    readonly tabId: string;
+    readonly revision: number;
+  }>;
+}
+
 export type CanvasPrototypeSurfacePreparation =
   | { readonly status: "ready" }
   | { readonly status: "unavailable"; readonly reason: string };
@@ -446,6 +485,34 @@ export type PairedComputerAnswer =
     }
   | { readonly status: "refused"; readonly message: string }
   | { readonly status: "unreachable"; readonly message: string };
+
+/** The window's guest key, the member id it chose, and its label, for its introduction to the hub. */
+export interface HubWindowIntroductionRequest {
+  readonly memberId: string;
+  readonly devicePublicKey: string;
+  readonly deviceLabel: string;
+}
+
+/**
+ * The host's answer to a window's introduction, as main passes it on after
+ * recording the members' pins: no hub, the members the window may reach, or
+ * `unavailable` when the host could not be asked.
+ */
+export type HubWindowIntroductionOutcome =
+  | { readonly membership: "none" }
+  | { readonly membership: "unavailable" }
+  | {
+      readonly membership: "member";
+      readonly introduction: "introduced" | "unchanged" | "refused" | "hub-unreachable";
+      readonly hubMemberId: string;
+      readonly members: ReadonlyArray<{
+        readonly memberId: string;
+        readonly name: string;
+        readonly origin: string;
+        readonly pin: string;
+        readonly identityKeyFingerprint: string;
+      }>;
+    };
 
 /** Closed human presentation, available only through an authenticated native main. */
 export interface EmbeddedBrowserBridge {

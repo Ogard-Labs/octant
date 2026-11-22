@@ -171,6 +171,13 @@ export function installNightlyBrokeredFlows<TWindow extends BrokeredWindow>(
       },
     })(event as BrokeredEvent);
   });
+  const previewExecutor = createNativePreviewHandoffExecutor({
+    shell: options.shell,
+    platform: options.platform,
+    ...(options.pathEnv === undefined ? {} : { pathEnv: options.pathEnv }),
+    exists: options.exists,
+    spawn: options.spawnQuickLook,
+  });
   register(DESKTOP_IPC_CHANNELS.openCodeExternalEditor, async (event, request) => {
     const call = brokered(event, "code-external-editor-target");
     let decoded: ReturnType<typeof decodeCodeExternalEditorRequest>;
@@ -187,6 +194,7 @@ export function installNightlyBrokeredFlows<TWindow extends BrokeredWindow>(
       fetch: options.fetch,
       spawn: (executable, arguments_, spawnOptions) =>
         options.spawn(executable, [...arguments_], spawnOptions),
+      openDefaultApplication: previewExecutor.openExternal,
     });
   });
   register(DESKTOP_IPC_CHANNELS.openCodeCheckoutInApplication, async (event, request) => {
@@ -216,13 +224,6 @@ export function installNightlyBrokeredFlows<TWindow extends BrokeredWindow>(
             options.spawn(executable, [...arguments_], spawnOptions),
         }),
     });
-  });
-  const previewExecutor = createNativePreviewHandoffExecutor({
-    shell: options.shell,
-    platform: options.platform,
-    ...(options.pathEnv === undefined ? {} : { pathEnv: options.pathEnv }),
-    exists: options.exists,
-    spawn: options.spawnQuickLook,
   });
   // As in Octant, a newer handoff for the same target supersedes the last.
   const previewHandoffs = new Map<string, AbortController>();

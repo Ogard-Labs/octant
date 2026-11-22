@@ -41,8 +41,23 @@ describe("Settings' flow for any ACP agent", () => {
     await userEvent.click(within(form).getByRole("button", { name: "Add" }));
     expect(onStep).toHaveBeenCalledWith({
       kind: "add",
-      source: { kind: "registry", registryId: "antigravity-acp" },
+      source: { kind: "registry", registryId: "factory-droid" },
     });
+  });
+
+  it("points Google Antigravity from the registry to its built-in provider, and offers no Add", async () => {
+    const onStep = vi.fn(async () => true);
+    render(<AddedAcpAgentsSection busy={false} instances={[]} onStep={onStep} />);
+    await userEvent.click(screen.getByRole("button", { name: "Add ACP agent" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Registry agent" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Google Antigravity" }));
+    const form = screen.getByRole("form", { name: "Add ACP agent" });
+    expect(form).toHaveTextContent(
+      "Google Antigravity runs only as its built-in provider, which keeps it to the use its vendor supports on a personal sign-in. Add Google Antigravity in Settings › Providers & Models instead.",
+    );
+    expect(form).not.toHaveTextContent(/downloaded from the address the registry lists/);
+    expect(within(form).getByRole("button", { name: "Add" })).toBeDisabled();
+    expect(onStep).not.toHaveBeenCalled();
   });
 
   it("offers Install, then Trust with what trusting grants and an unverified download said plainly, and Turn on only once trusted", async () => {
@@ -108,5 +123,74 @@ describe("Settings' flow for any ACP agent", () => {
         args: ["acp", "--stdio"],
       },
     });
+  });
+
+  it("explains that trusting a package with install scripts runs them with no further prompt and updates once completed", async () => {
+    const onStep = vi.fn(async () => true);
+    const droid = (install: Record<string, unknown>, trusted = false): ProviderInstance =>
+      decodeProviderInstance({
+        id: "80000000-0000-4000-8000-000000000971",
+        displayName: "Factory Droid",
+        driverKind: "acp-agent",
+        configuration: {
+          kind: "acp-agent",
+          source: {
+            kind: "registry",
+            registryId: "factory-droid",
+            version: "1.12.1",
+            distribution: "npx",
+          },
+          args: ["exec", "--output-format", "acp-daemon"],
+          install,
+          trusted,
+        },
+        enabled: false,
+        environmentPolicy: "inherit-host",
+        version: 2,
+        createdAt: now,
+        updatedAt: now,
+      });
+    const { rerender } = render(
+      <AddedAcpAgentsSection
+        busy={false}
+        instances={[
+          droid({
+            executable: "/data/acp-agent-installs/droid/1.12.1-abcd1234/node_modules/.bin/droid",
+            integrity: "package-manager",
+            hasInstallScripts: true,
+          }),
+        ]}
+        onStep={onStep}
+      />,
+    );
+    const row = () => screen.getByRole("listitem", { name: "Factory Droid" });
+    expect(within(row()).getByRole("group", { name: "Trust step" })).toHaveTextContent(
+      /with install scripts off\. Trusting it runs its install script\./,
+    );
+    await userEvent.click(within(row()).getByRole("button", { name: "Trust" }));
+    expect(onStep).toHaveBeenCalledTimes(1);
+    expect(onStep).toHaveBeenLastCalledWith({
+      kind: "trust",
+      instanceId: "80000000-0000-4000-8000-000000000971",
+    });
+
+    rerender(
+      <AddedAcpAgentsSection
+        busy={false}
+        instances={[
+          droid(
+            {
+              executable: "/data/acp-agent-installs/droid/1.12.1-abcd1234/node_modules/.bin/droid",
+              integrity: "package-manager",
+              hasInstallScripts: true,
+              installScriptsCompleted: true,
+            },
+            true,
+          ),
+        ]}
+        onStep={onStep}
+      />,
+    );
+    expect(row()).toHaveTextContent(/its install scripts ran when you trusted it\./);
   });
 });

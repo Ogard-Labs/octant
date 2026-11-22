@@ -21,6 +21,7 @@ import { threadStats, threadStatsInputOf } from "@octant/domain";
 import { radii, space, typography, useTheme, withAlpha } from "../../design-system";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { BottomSheet } from "../ui/BottomSheet";
+import type { MobileIconName } from "../ui/IconButton";
 import { ListNote, ListRow, ListSection, SegmentedControl } from "../ui/NativeChrome";
 import {
   contextMeterPresentation,
@@ -44,17 +45,35 @@ export interface ThreadPanesSheetProps {
   /** Full-screen views besides the conversation the host would fill (Browser today). */
   readonly views: ReadonlyArray<MobileThreadSurfaceOption>;
   readonly onOpenView: (view: RemoteThreadSurfaceKind) => void;
+  /**
+   * The device's own tools this thread offers, which the host takes only
+   * from a device its own person paired: the Project terminal and Private
+   * page in Work and Code, Import HTML in Chat. Empty for any other session.
+   */
+  readonly tools: ReadonlyArray<ThreadTool>;
+  readonly onOpenTool: (tool: ThreadTool) => void;
 }
+
+export type ThreadTool = "terminal" | "page" | "import-html";
 
 const VIEW_ICONS: Readonly<Partial<Record<RemoteThreadSurfaceKind, "globe-outline">>> = {
   browser: "globe-outline",
+};
+
+const TOOL_ROWS: Readonly<
+  Record<ThreadTool, { readonly label: string; readonly icon: MobileIconName }>
+> = {
+  terminal: { label: MOBILE_COPY.projectTerminalTitle, icon: "terminal-outline" },
+  page: { label: MOBILE_COPY.projectPageTitle, icon: "globe-outline" },
+  "import-html": { label: MOBILE_COPY.canvasImportHtml, icon: "code-slash-outline" },
 };
 
 /**
  * The desktop thread's side panes at phone scale, read-only: one sheet, one
  * segmented control to move between them. Every row comes from a read the
  * host forwards to a paired device; acting on what a pane shows stays on the
- * Mac, so nothing here commits, stops, or steers.
+ * Mac, so nothing here commits, stops, or steers. The tool rows above them
+ * open the device's own tools in sheets of their own.
  */
 export function ThreadPanesSheet(props: ThreadPanesSheetProps) {
   const panes = useMemo(() => listMobileThreadPanes(props.mode), [props.mode]);
@@ -74,7 +93,11 @@ export function ThreadPanesSheet(props: ThreadPanesSheetProps) {
       onClose={props.onClose}
       sheetStyle={styles.sheet}
       testID="mobile-thread-panes"
-      title={props.views.length > 0 ? MOBILE_COPY.threadViewsAndPanes : PANE_TITLES[active]}
+      title={
+        props.views.length > 0 || props.tools.length > 0
+          ? MOBILE_COPY.threadViewsAndPanes
+          : PANE_TITLES[active]
+      }
       visible={props.visible}
     >
       {props.views.length === 0 ? null : (
@@ -89,6 +112,25 @@ export function ThreadPanesSheet(props: ThreadPanesSheetProps) {
                 last={index === props.views.length - 1}
                 onPress={() => props.onOpenView(view.id)}
                 testID={`mobile-thread-view-${view.id}`}
+              />
+            ))}
+          </ListSection>
+        </View>
+      )}
+      {props.tools.length === 0 ? null : (
+        <View style={styles.views}>
+          <ListSection
+            title={props.mode === "chat" ? MOBILE_COPY.canvasSection : MOBILE_COPY.projectTools}
+          >
+            {props.tools.map((tool, index) => (
+              <ListRow
+                accessory="chevron"
+                icon={TOOL_ROWS[tool].icon}
+                key={tool}
+                label={TOOL_ROWS[tool].label}
+                last={index === props.tools.length - 1}
+                onPress={() => props.onOpenTool(tool)}
+                testID={`mobile-thread-tool-${tool}`}
               />
             ))}
           </ListSection>

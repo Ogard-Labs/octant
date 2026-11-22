@@ -21,9 +21,7 @@ import {
   ProjectPolicyRejected,
   addProjectExtraFolder,
   extraFolderRefusal,
-  isPathInProjectFolders,
   projectExtraFolderRoots,
-  projectFolderRoots,
   removeProjectExtraFolder,
   changeCodeProjectAccess,
   changeCodeProjectActions,
@@ -32,6 +30,7 @@ import {
   changeCodeProjectDesktopRecipe,
   changeCodeProjectAgentDefaultBranchPush,
   changeCodeProjectAgentMerge,
+  changeCodeProjectDelegatedCode,
   changeCodeProjectOwnToolchain,
   changeCodeProjectAgentPullRequestComments,
   changeCodeProjectPullRequestBackgroundRefresh,
@@ -295,6 +294,31 @@ describe("Project creation and lifecycle", () => {
       changeCodeProjectOwnToolchain(
         makeProject(ids.work, "0/1", { type: "work" }),
         "enabled",
+        updatedAt,
+      ),
+    ).toThrow(ProjectPolicyRejected);
+  });
+
+  it("marks a Code Project as taking delegated Code work with its confirmed target, and takes the mark off", () => {
+    const project = makeProject(ids.code, "0/1", { type: "code" });
+    const target = {
+      remoteName: "origin",
+      baseBranch: "main",
+      outcomeKind: "opened-pr" as const,
+      confirmedAt: updatedAt,
+    };
+    const marked = changeCodeProjectDelegatedCode(project, target, updatedAt);
+    expect(marked).toMatchObject({ delegatedCode: target, version: 2 });
+    const unmarked = changeCodeProjectDelegatedCode(marked, undefined, updatedAt);
+    expect(unmarked.delegatedCode).toBeUndefined();
+    expect(unmarked.version).toBe(3);
+    expect(() => changeCodeProjectDelegatedCode(project, undefined, updatedAt)).toThrow(
+      ProjectPolicyRejected,
+    );
+    expect(() =>
+      changeCodeProjectDelegatedCode(
+        makeProject(ids.work, "0/1", { type: "work" }),
+        target,
         updatedAt,
       ),
     ).toThrow(ProjectPolicyRejected);
@@ -960,13 +984,7 @@ describe("Project extra folders", () => {
       addedAt: updatedAt,
     });
     expect(project).toMatchObject({ version: 2, updatedAt, extraFolders: [folder] });
-    const folders = projectFolderRoots(project);
-    expect(folders).toEqual(["/Users/example/Workspace", "/Users/example/Notes"]);
     expect(projectExtraFolderRoots(project)).toEqual(["/Users/example/Notes"]);
-    expect(isPathInProjectFolders(folders, "/Users/example/Notes/today.md")).toBe(true);
-    expect(isPathInProjectFolders(folders, "/Users/example/Workspace/a.txt")).toBe(true);
-    expect(isPathInProjectFolders(folders, "/Users/example/Notes-old/a.txt")).toBe(false);
-    expect(isPathInProjectFolders(folders, "/Users/example/Desktop")).toBe(false);
   });
 
   it("refuses the main folder, a folder inside or around it, and a duplicate or nested extra", () => {

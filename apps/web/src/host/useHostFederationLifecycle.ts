@@ -11,14 +11,21 @@ import {
   createHostFederationLifecycle,
   type HostFederationLifecycle,
 } from "@octant/client-runtime/host-federation-lifecycle";
-import { createHostReadModelCache } from "@octant/client-runtime/host-federation-merged-reads";
+import {
+  createHostReadModelCache,
+  type HostReadModelCache,
+} from "@octant/client-runtime/host-federation-merged-reads";
 import {
   createDefaultDeviceKeyStore,
   type RemoteDeviceKeyStore,
 } from "@octant/client-runtime/remote-pairing-client";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { createBrowserHostRegistryStorage } from "./browserHostRegistryStorage";
+import { syncHubComputersInWindow, withHubComputerDismissals } from "./hubWindowComputers";
 import { createPairedComputerFetch } from "./pairedComputerFetch";
+
+/** How often a window on a hub member reads the hub's members again, so one the hub drops leaves. */
+const HUB_COMPUTERS_REFRESH_MS = 5 * 60 * 1_000;
 
 /**
  * Boot the shared Post-preview B6 lifecycle stack for Settings / shell chrome.
@@ -32,12 +39,17 @@ export interface HostFederationStack {
   readonly registry: ClientHostRegistry;
   /** The device keys the paired sessions sign with. */
   readonly deviceKeyStore: RemoteDeviceKeyStore;
+  /** Each paired computer's last reading of its threads and asks, kept stale when it stops answering. */
+  readonly cache: HostReadModelCache;
 }
 
 export function useHostFederationLifecycle(
   hostBridge?: Pick<
     OctantHostBridge,
-    "forgetRemoteServerPages" | "forgetPairedComputer" | "requestPairedComputer"
+    | "forgetRemoteServerPages"
+    | "forgetPairedComputer"
+    | "requestPairedComputer"
+    | "introduceWindowToHub"
   >,
 ): HostFederationStack | undefined {
   const [stack, setStack] = useState<HostFederationStack | undefined>();
@@ -49,12 +61,15 @@ export function useHostFederationLifecycle(
   forgetComputer.current = hostBridge?.forgetPairedComputer;
   const requestComputer = useRef(hostBridge?.requestPairedComputer);
   requestComputer.current = hostBridge?.requestPairedComputer;
+  const introduceToHub = useRef(hostBridge?.introduceWindowToHub);
+  introduceToHub.current = hostBridge?.introduceWindowToHub;
 
   const built = useMemo(() => {
     if (typeof window === "undefined") return undefined;
     try {
       const deviceKeyStore = createDefaultDeviceKeyStore();
-      const registry = createClientHostRegistry(createBrowserHostRegistryStorage());
+      const storage = createBrowserHostRegistryStorage();
+      const registry = createClientHostRegistry(storage);
       const transports = createHostFederationTransports({
         registry,
         deviceKeyStore,
@@ -69,31 +84,35 @@ export function useHostFederationLifecycle(
         },
       });
       const cache = createHostReadModelCache();
+      const rosterLifecycle = createHostFederationLifecycle({
+        registry,
+        transports,
+        deviceKeyStore,
+        cache,
+        onHostCleared: async (hostId, origin) => {
+          const outcome = await forgetPages.current?.(hostId);
+          // The desktop's pin goes with the host, so a computer removed from
+          // here cannot be reached again until it is paired again.
+          const pin = origin === undefined ? undefined : await forgetComputer.current?.(origin);
+          if (outcome?.status === "incomplete") {
+            throw new Error(
+              outcome.message ??
+                "Removed, but Octant couldn't clear everything its pages stored on this computer.",
+            );
+          }
+          if (pin?.status === "forgotten" && pin.warning !== undefined) {
+            throw new Error(pin.warning);
+          }
+        },
+      });
       return {
-        lifecycle: createHostFederationLifecycle({
-          registry,
-          transports,
-          deviceKeyStore,
-          cache,
-          onHostCleared: async (hostId, origin) => {
-            const outcome = await forgetPages.current?.(hostId);
-            // The desktop's pin goes with the host, so a computer removed from
-            // here cannot be reached again until it is paired again.
-            const pin = origin === undefined ? undefined : await forgetComputer.current?.(origin);
-            if (outcome?.status === "incomplete") {
-              throw new Error(
-                outcome.message ??
-                  "Removed, but Octant couldn't clear everything its pages stored on this computer.",
-              );
-            }
-            if (pin?.status === "forgotten" && pin.warning !== undefined) {
-              throw new Error(pin.warning);
-            }
-          },
-        }),
+        lifecycle: withHubComputerDismissals(rosterLifecycle, registry, storage),
+        rosterLifecycle,
         transports,
         registry,
         deviceKeyStore,
+        storage,
+        cache,
       };
     } catch {
       return undefined;
@@ -103,11 +122,29 @@ export function useHostFederationLifecycle(
   useEffect(() => {
     if (built === undefined) return;
     let cancelled = false;
+    const { storage, rosterLifecycle, ...stackOnly } = built;
+    // A desktop window on a hub member lists the hub's other members too. Only
+    // the desktop offers the introduction; a browser joins a hub as a guest.
+    const syncHubComputers = async (): Promise<void> => {
+      const introduce = introduceToHub.current;
+      const request = requestComputer.current;
+      if (introduce === undefined || request === undefined) return;
+      await syncHubComputersInWindow({
+        bridge: { introduceWindowToHub: introduce, requestPairedComputer: request },
+        stack: stackOnly,
+        storage,
+        removeHost: (hostId) => rosterLifecycle.removeLocal(hostId),
+      }).catch(() => undefined);
+    };
     void built.lifecycle.sync().then(() => {
-      if (!cancelled) setStack(built);
+      if (cancelled) return;
+      setStack(stackOnly);
+      void syncHubComputers();
     });
+    const refresh = setInterval(() => void syncHubComputers(), HUB_COMPUTERS_REFRESH_MS);
     return () => {
       cancelled = true;
+      clearInterval(refresh);
     };
   }, [built]);
 

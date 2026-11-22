@@ -2,8 +2,10 @@ import {
   ActorId,
   CorrelationId,
   EventId,
+  PROVIDER_ACP_AGENT_INSTALL_SCRIPTS_RAN,
   type EventActor,
   UtcTimestamp,
+  decodeProviderAcpAgentInstallScriptsRan,
   decodeProviderFailure,
   decodeProviderCatalogSnapshot,
   decodeProviderInstanceId,
@@ -128,9 +130,12 @@ import {
   acpAgentCommandRefusal,
   acpAgentEnableRefusal,
   acpRegistryAgent,
+  addedAcpAgentLimitedProfile,
+  addedAcpAgentLimitedProfileRefusal,
 } from "@octant/plugin-host/acp-agents";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
-import type { AcpAgentInstallResult } from "./acpAgentInstall";
+import type { AcpAgentInstallResult, AcpAgentInstallScriptsResult } from "./acpAgentInstall";
+import { ACP_PACKAGE_NEEDS_INSTALL_SCRIPT_MESSAGE } from "./addedAcpAgent";
 import {
   ConcurrencyConflict,
   JournalWriteFailed,
@@ -283,6 +288,12 @@ export interface ProviderServiceOptions {
    */
   readonly acpAgentInstall?: {
     readonly install: (instance: AddedAcpAgentProviderInstance) => Promise<AcpAgentInstallResult>;
+    readonly runInstallScripts?: (
+      instance: AddedAcpAgentProviderInstance,
+    ) => Promise<AcpAgentInstallScriptsResult>;
+    readonly hasPendingInstallScripts?: (
+      instance: AddedAcpAgentProviderInstance,
+    ) => Promise<boolean>;
     readonly remove: (instanceId: ProviderInstanceId) => Promise<void>;
   };
   readonly uuid: () => string;
@@ -389,6 +400,8 @@ export class ProviderService implements ProviderServiceApi {
   #addedAcpAgentSource(
     source: Extract<ProviderRegistryCommand, { readonly kind: "add-acp-agent" }>["source"],
   ): { readonly displayName: string; readonly configuration: AddedAcpAgentConfiguration } {
+    const limited = addedAcpAgentLimitedProfile(source);
+    if (limited !== undefined) throw this.#invalid(addedAcpAgentLimitedProfileRefusal(limited));
     if (source.kind === "registry") {
       const listing = acpRegistryAgent(source.registryId);
       if (listing === undefined) {
@@ -439,6 +452,54 @@ export class ProviderService implements ProviderServiceApi {
       throw this.#unsupported("This host does not install ACP agents.");
     }
     return this.#acpAgentInstall.install(instance);
+  }
+
+  async #hasPendingAcpAgentInstallScripts(
+    instance: AddedAcpAgentProviderInstance,
+  ): Promise<boolean> {
+    if (instance.configuration.trusted) return false;
+    if (this.#acpAgentInstall?.hasPendingInstallScripts !== undefined) {
+      return this.#acpAgentInstall.hasPendingInstallScripts(instance);
+    }
+    const { source, install } = instance.configuration;
+    return (
+      source.kind === "registry" &&
+      (source.distribution === "npx" || source.distribution === "uvx") &&
+      install?.hasInstallScripts === true &&
+      install.installScriptsCompleted !== true
+    );
+  }
+
+  #appendAcpAgentInstallScriptsRun(
+    instance: AddedAcpAgentProviderInstance,
+    result: Exclude<AcpAgentInstallScriptsResult, { readonly status: "not-needed" }>,
+    actor?: EventActor,
+  ): void {
+    const { source } = instance.configuration;
+    if (
+      source.kind !== "registry" ||
+      (source.distribution !== "npx" && source.distribution !== "uvx")
+    ) {
+      return;
+    }
+    const payload = decodeProviderAcpAgentInstallScriptsRan({
+      instanceId: instance.id,
+      registryId: source.registryId,
+      version: source.version,
+      distribution: source.distribution,
+      outcome: result.status === "completed" ? "succeeded" : "failed",
+      sandboxed: result.sandboxed,
+      completedAt: decodeTimestamp(result.completedAt),
+      ...(result.status === "failed" ? { reason: result.reason } : {}),
+    });
+    this.#persistence.journal.append({
+      aggregate: {
+        aggregateType: "provider-acp-install-scripts",
+        aggregateId: this.#uuid(),
+      },
+      expectedVersion: 0 as never,
+      events: [this.#pendingEvent(PROVIDER_ACP_AGENT_INSTALL_SCRIPTS_RAN, payload, actor)],
+    });
   }
 
   async bootstrap(_authenticatedWindowId: WindowId): Promise<ProviderRegistrySnapshot> {
@@ -993,6 +1054,7 @@ export class ProviderService implements ProviderServiceApi {
           command.kind === "create-codex-provider" || command.kind === "change-codex-configuration"
             ? await this.#acquireCodexAccountClaim()
             : undefined;
+        let releaseAcpTrustClaim: (() => void) | undefined;
         try {
           this.#assertReady();
           const current = this.#persistence.readProviderInstance(command.instanceId);
@@ -1629,7 +1691,13 @@ export class ProviderService implements ProviderServiceApi {
             }
             instance = installAddedAcpAgent(
               current,
-              { executable: installed.executable, integrity: installed.integrity },
+              {
+                executable: installed.executable,
+                integrity: installed.integrity,
+                ...(installed.hasInstallScripts === undefined
+                  ? {}
+                  : { hasInstallScripts: installed.hasInstallScripts }),
+              },
               updatedAt,
             );
             await this.#runtime.invalidateRuntime(current.id);
@@ -1638,13 +1706,45 @@ export class ProviderService implements ProviderServiceApi {
             if (!isAddedAcpAgentInstance(current)) {
               throw this.#unsupported("Only an added ACP agent is trusted this way.");
             }
-            instance = setAddedAcpAgentTrust(current, command.trusted, updatedAt);
-            // A running process keeps the wall it started with; the next one
-            // starts under the new trust.
+            // Validate trust preconditions (installed) before claiming runtime or running scripts.
+            let next = setAddedAcpAgentTrust(current, command.trusted, updatedAt);
+            // Reserve runtime quiescence and close idle runtimes BEFORE running
+            // deferred install scripts so active sessions refuse Trust before any
+            // script mutates the installation and no session can start mid-script.
+            const claimKey = `acp-agent-trust:${current.id}`;
+            this.#runtime.claimExecutableUpdate(claimKey, [current.id], {
+              activeSessionMessage: "Stop active sessions before changing trust for this agent.",
+              busyMessage: "Wait for this agent's Trust step to finish before starting a session.",
+            });
+            releaseAcpTrustClaim = () => this.#runtime.releaseExecutableUpdate(claimKey);
             await this.#runtime.invalidateRuntime(current.id);
+            if (command.trusted && this.#acpAgentInstall?.runInstallScripts !== undefined) {
+              const scripts = await this.#acpAgentInstall.runInstallScripts(current);
+              if (scripts.status === "completed") {
+                this.#appendAcpAgentInstallScriptsRun(current, scripts, actor);
+                next = setAddedAcpAgentTrust(current, true, updatedAt, {
+                  installScriptsCompleted: true,
+                });
+              } else if (scripts.status === "failed") {
+                this.#appendAcpAgentInstallScriptsRun(current, scripts, actor);
+                throw new ProviderServiceError({
+                  category:
+                    scripts.reason === "invalid-install-folder"
+                      ? "invalid-configuration"
+                      : "unavailable",
+                  message: scripts.message,
+                });
+              }
+            }
+            instance = next;
             eventName = "provider.instance-configuration-changed@1";
           } else {
             if (command.kind === "set-provider-enabled" && command.enabled) {
+              const limited = isAddedAcpAgentInstance(current)
+                ? addedAcpAgentLimitedProfile(current.configuration.source)
+                : undefined;
+              if (limited !== undefined)
+                throw this.#invalid(addedAcpAgentLimitedProfileRefusal(limited));
               const refusal = isAddedAcpAgentInstance(current)
                 ? acpAgentEnableRefusal(addedAcpAgentSteps(current))
                 : undefined;
@@ -1720,6 +1820,7 @@ export class ProviderService implements ProviderServiceApi {
             instance: authoritative,
           });
         } finally {
+          releaseAcpTrustClaim?.();
           releaseClaudeClaim?.();
           releaseCodexClaim?.();
         }
@@ -1911,9 +2012,27 @@ export class ProviderService implements ProviderServiceApi {
         this.#persistCatalog(withFacts);
         return this.#reportedRuntime(instance.driverKind, withFacts);
       } catch (error) {
-        const failedObservation = this.#failedProbeObservation(instanceId, error);
+        let reportedError: unknown = error;
+        if (!(error instanceof ProviderServiceError)) {
+          const current = this.#persistence.readProviderInstance(instanceId);
+          const failure = providerFailureOfError(error);
+          if (
+            current !== undefined &&
+            isAddedAcpAgentInstance(current) &&
+            !current.configuration.trusted &&
+            failure?.category !== "unauthenticated" &&
+            (failure?.message === ACP_PACKAGE_NEEDS_INSTALL_SCRIPT_MESSAGE ||
+              (await this.#hasPendingAcpAgentInstallScripts(current)))
+          ) {
+            reportedError = {
+              category: "unavailable" as const,
+              message: ACP_PACKAGE_NEEDS_INSTALL_SCRIPT_MESSAGE,
+            };
+          }
+        }
+        const failedObservation = this.#failedProbeObservation(instanceId, reportedError);
         if (failedObservation !== undefined) this.#runtime.setObservedState(failedObservation);
-        throw this.#mapFailure(error);
+        throw this.#mapFailure(reportedError);
       }
     });
   }
@@ -2207,7 +2326,11 @@ export class ProviderService implements ProviderServiceApi {
     const diagnostic = failure?.diagnostic;
     const driverKind = this.#persistence.readProviderInstance(instanceId)?.driverKind;
     const endpointMessage =
-      failure !== undefined && driverKind !== undefined && authorsEndpointFailures(driverKind)
+      failure !== undefined &&
+      driverKind !== undefined &&
+      (authorsEndpointFailures(driverKind) ||
+        (driverKind === "acp-agent" &&
+          failure.message === ACP_PACKAGE_NEEDS_INSTALL_SCRIPT_MESSAGE))
         ? failure.message
         : undefined;
     return decodeProviderObservedState({

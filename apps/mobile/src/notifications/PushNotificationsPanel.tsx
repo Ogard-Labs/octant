@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { MobileInboxFailure, type MobileRemoteTransport } from "@octant/client-runtime";
 import type { MobileNotificationPermissionPort } from "./notificationPermissionPort";
 import {
@@ -26,6 +26,55 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
   const { colors } = useTheme();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | undefined>();
+  // Whether this phone hears about new devices on this computer, once
+  // notifications are on for it; undefined while they are not.
+  const [newDevices, setNewDevices] = useState<boolean | undefined>();
+  const hostId = props.transport?.hostId;
+
+  useEffect(() => {
+    let live = true;
+    void props.book.list().then((records) => {
+      const record = records.find((entry) => entry.hostId === hostId);
+      if (!live) return;
+      setNewDevices(
+        record === undefined || record.forgetPending === true
+          ? undefined
+          : record.newDevices !== false,
+      );
+    });
+    return () => {
+      live = false;
+    };
+  }, [props.book, hostId, message]);
+
+  const setHearNewDevices = async (value: boolean) => {
+    if (props.transport === undefined) return;
+    setBusy(true);
+    setMessage(undefined);
+    try {
+      const result = await enablePhoneNotifications({
+        transport: props.transport,
+        hostKeyFingerprint: props.hostKeyFingerprint,
+        deviceId: await props.resolveDeviceId(),
+        permission: props.permission,
+        book: props.book,
+        newDevices: value,
+      });
+      setMessage(
+        result.status === "registered"
+          ? value
+            ? "This phone will hear when a new device joins or pairs."
+            : "This phone will no longer hear about new devices from this computer."
+          : result.status === "cancelled"
+            ? "Notifications were turned off for this computer."
+            : ENABLE_REFUSAL_COPY[result.reason],
+      );
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Could not change the setting.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const enable = async () => {
     if (!props.permission.available) return;
@@ -130,6 +179,9 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
         secondary: { alignItems: "center", paddingVertical: mobileSpacing.sm },
         secondaryLabel: { color: colors.accent, fontWeight: "500" },
         message: { ...mobileTypography.body, color: colors.textPrimary },
+        row: { flexDirection: "row", alignItems: "center", gap: mobileSpacing.md },
+        rowText: { flex: 1, gap: 2 },
+        rowLabel: { ...mobileTypography.body, color: colors.textPrimary },
       }),
     [colors],
   );
@@ -162,6 +214,23 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
           Push notifications are unavailable in this build. Open Octant to check for updates from
           your paired hosts.
         </Text>
+      )}
+      {newDevices === undefined || !props.permission.available ? null : (
+        <View style={styles.row} testID="mobile-push-new-devices">
+          <View style={styles.rowText}>
+            <Text style={styles.rowLabel}>New devices</Text>
+            <Text style={styles.help}>
+              Hear when a device joins this computer's hub or pairs with it, with its name and
+              address.
+            </Text>
+          </View>
+          <Switch
+            accessibilityLabel="New devices"
+            disabled={busy}
+            onValueChange={(value) => void setHearNewDevices(value)}
+            value={newDevices}
+          />
+        </View>
       )}
       {props.transport !== undefined ? (
         <Pressable

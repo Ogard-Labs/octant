@@ -5,8 +5,10 @@ import { homedir, networkInterfaces } from "node:os";
 import { join } from "node:path";
 import {
   CANVAS_REFRESH_MAX_SKILL_OPTIONS,
+  type CanvasId,
   type CanvasRefreshRequest,
   type CanvasRefreshSkill,
+  type CanvasWorkspaceScope,
   decodeCanvasDefinition,
   decodeAgentRunId,
   decodeBrowserThreadId,
@@ -14,6 +16,7 @@ import {
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeProjectId,
+  type EventActor,
   LOCAL_HOST_ID,
   type OctantMode,
   type ProjectId,
@@ -386,6 +389,25 @@ export function wireCanvas(deps: CanvasDependencies) {
     return receipt.canonicalWorktreePath;
   };
 
+  const threadProjectAssetRoot = async (input: {
+    readonly mode: "work" | "code";
+    readonly projectId: string;
+    readonly threadId: string;
+  }): Promise<string | undefined> => {
+    const { mode, projectId, threadId } = input;
+    const workspace = resolveCanvasWorkspace({ mode, threadId });
+    if (workspace?.kind === "code-worktree" && String(workspace.projectId) === projectId) {
+      return codeThreadCheckoutRoot(threadId, projectId);
+    }
+    if (workspace?.kind === "work-root" && String(workspace.projectId) === projectId) {
+      const project = persistence.readProject(workspace.projectId);
+      if (project?.type === "work" && project.lifecycle === "active") {
+        return project.binding.canonicalRoot;
+      }
+    }
+    return undefined;
+  };
+
   /**
    * Where a Canvas design's declared images are read from. Every call
    * re-derives authority from the Canvas version's provenance and durable
@@ -448,26 +470,7 @@ export function wireCanvas(deps: CanvasDependencies) {
       return { status: "read", bytes: kept.bytes };
     },
     projectFile: async ({ mode, projectId, threadId, path, maximumBytes }) => {
-      let root: string | undefined;
-      if (mode === "code") {
-        // The same binding-revision and checkout-availability checks as any
-        // Canvas scope, so a rebound Project or a waiting checkout refuses.
-        const workspace = resolveCanvasWorkspace({ mode: "code", threadId });
-        root =
-          workspace?.kind === "code-worktree" && String(workspace.projectId) === projectId
-            ? await codeThreadCheckoutRoot(threadId, projectId)
-            : undefined;
-      } else {
-        const workspace = resolveCanvasWorkspace({ mode: "work", threadId });
-        const project = persistence.readProject(projectId as never);
-        root =
-          workspace?.kind === "work-root" &&
-          String(workspace.projectId) === projectId &&
-          project?.type === "work" &&
-          project.lifecycle === "active"
-            ? project.binding.canonicalRoot
-            : undefined;
-      }
+      const root = await threadProjectAssetRoot({ mode, projectId, threadId });
       if (root === undefined) return { status: "unavailable", reason: "refused" };
       return await readCanvasDesignAssetFile({
         filesystem: liveWorkFilesystem,
@@ -544,70 +547,15 @@ export function wireCanvas(deps: CanvasDependencies) {
     // Taking an edited file back in goes through `revise` — the same path a
     // person or an agent takes — so it is authorized, journaled, and counted
     // as a version like any other. Nothing here can replace a version.
-    appendVersionFromBundle: ({ canvasId, definition }) => {
-      const entry = persistence.canvasProjection.getById(canvasId);
-      if (entry === undefined) {
-        return { kind: "denied", message: "That artifact is no longer available." };
-      }
-      let blocks;
-      try {
-        blocks = decodeCanvasDefinition(definition).blocks;
-      } catch {
-        return { kind: "denied", message: "The file is not a readable artifact bundle." };
-      }
-      const current = entry.currentVersion;
-      const provenance = current.definition.provenance;
-      const workspace = resolveCanvasWorkspace(provenance);
-      if (workspace === undefined) {
-        return {
-          kind: "denied",
-          message: "The Project or thread this artifact belongs to is no longer available.",
-        };
-      }
-      const project =
-        provenance.projectId === null ? undefined : persistence.readProject(provenance.projectId);
-      const result = canvasService.revise(
-        {
-          schemaVersion: 1,
-          kind: "canvas-revise",
-          requestId: randomUUID(),
-          canvasId,
-          expectedSequence: current.sequence,
-          hostId: LOCAL_HOST_ID,
-          mode: provenance.mode,
-          workspace,
-          originThreadId: provenance.threadId,
-          prompt: "Re-imported from the mirrored file.",
-          actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
-          providerInstanceId: provenance.providerInstanceId,
-          modelId: provenance.modelId,
-          requestedAuthority: {
-            filesystem: false,
-            shell: false,
-            git: false,
-            network: false,
-            tools: false,
-            subagents: false,
-            executionPolicy: "plan",
-            permissionPersistence: "current-session",
-          },
-        },
-        {
-          mode: provenance.mode,
-          projectId: provenance.projectId === null ? null : String(provenance.projectId),
-          hostId: String(LOCAL_HOST_ID),
-          workspace,
-          originThreadId: String(provenance.threadId),
-        },
-        project === undefined
-          ? undefined
-          : { id: String(project.id), type: project.type, lifecycle: project.lifecycle },
-        blocks,
-      );
-      return result.kind === "accepted"
-        ? { kind: "accepted", versionId: String(result.receipt.versionId) }
-        : { kind: "denied", message: result.message };
-    },
+    appendVersionFromBundle: (input) =>
+      appendArtifactMirrorBundleVersion({
+        ...input,
+        readCanvasEntry: (canvasId) => persistence.canvasProjection.getById(canvasId),
+        readProject: (projectId) => persistence.readProject(projectId),
+        resolveCanvasWorkspace,
+        canvasService,
+        uuid: randomUUID,
+      }),
     // Auto-commit is off unless the person turned it on, and even then it
     // commits only what the mirror wrote. Its Git service is this host's own
     // rather than the Code runtime's: the commit is authorized against the
@@ -936,6 +884,11 @@ export function wireCanvas(deps: CanvasDependencies) {
       uuid: randomUUID,
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       now: () => new Date().toISOString() as UtcTimestamp,
+      // A person's answer or clear on a Canvas the replica carries goes to
+      // their other computers; one taken in from another computer does not.
+      committed: (canvasId, event) => {
+        void replicaArtifactSync.service?.choiceAnswerCommitted({ canvasId, event });
+      },
     },
     { authorize: authorizeCanvas },
   );
@@ -949,6 +902,14 @@ export function wireCanvas(deps: CanvasDependencies) {
     project: async (windowId, projectId) => {
       const bootstrap = await projectService.bootstrap(windowId);
       const project = bootstrap.active.find((candidate) => String(candidate.id) === projectId);
+      return project === undefined
+        ? undefined
+        : { id: String(project.id), type: project.type, lifecycle: project.lifecycle };
+    },
+    // A host-run Chat turn has no window, so its Canvas reads the thread's
+    // own Project as recorded; the tool still requires an active Chat one.
+    threadProject: (projectId) => {
+      const project = persistence.readProject(decodeProjectId(projectId));
       return project === undefined
         ? undefined
         : { id: String(project.id), type: project.type, lifecycle: project.lifecycle };
@@ -1388,6 +1349,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     artifactLibraryService,
     artifactMirrorRoutes,
     canvasAgentToolPort,
+    canvasChoiceAnswerService,
     canvasCommentService,
     canvasNetworkAccess,
     canvasPublicShareService,
@@ -1395,8 +1357,103 @@ export function wireCanvas(deps: CanvasDependencies) {
     canvasService,
     replicaArtifactSync,
     resolveCanvasWorkspace,
+    threadProjectAssetRoot,
     snapshotCanvas,
   };
 }
 
 export type CanvasWiring = ReturnType<typeof wireCanvas>;
+
+/**
+ * Appends a re-imported mirrored artifact bundle as a new Canvas version.
+ *
+ * `CanvasReviseRequest.actor` is restricted to `CanvasActor` (`system`,
+ * `local-user`, `agent`), so a person-paired device's `EventActor` travels
+ * separately to `CanvasService.revise` for journal envelope attribution.
+ */
+export function appendArtifactMirrorBundleVersion(input: {
+  readonly canvasId: CanvasId;
+  readonly definition: unknown;
+  readonly actor?: EventActor;
+  readonly readCanvasEntry: (canvasId: CanvasId) => CanvasProjectionEntry | undefined;
+  readonly readProject: (projectId: ProjectId) =>
+    | {
+        readonly id: ProjectId;
+        readonly type: OctantMode;
+        readonly lifecycle: "active" | "archived";
+      }
+    | undefined;
+  readonly resolveCanvasWorkspace: (provenance: {
+    readonly mode: OctantMode;
+    readonly threadId: string;
+  }) => CanvasWorkspaceScope | undefined;
+  readonly canvasService: Pick<CanvasService, "revise">;
+  readonly uuid: () => string;
+}):
+  | { readonly kind: "accepted"; readonly versionId: string }
+  | { readonly kind: "denied"; readonly message: string } {
+  const entry = input.readCanvasEntry(input.canvasId);
+  if (entry === undefined) {
+    return { kind: "denied", message: "That artifact is no longer available." };
+  }
+  let blocks;
+  try {
+    blocks = decodeCanvasDefinition(input.definition).blocks;
+  } catch {
+    return { kind: "denied", message: "The file is not a readable artifact bundle." };
+  }
+  const current = entry.currentVersion;
+  const provenance = current.definition.provenance;
+  const workspace = input.resolveCanvasWorkspace(provenance);
+  if (workspace === undefined) {
+    return {
+      kind: "denied",
+      message: "The Project or thread this artifact belongs to is no longer available.",
+    };
+  }
+  const project =
+    provenance.projectId === null ? undefined : input.readProject(provenance.projectId);
+  const result = input.canvasService.revise(
+    {
+      schemaVersion: 1,
+      kind: "canvas-revise",
+      requestId: input.uuid(),
+      canvasId: input.canvasId,
+      expectedSequence: current.sequence,
+      hostId: LOCAL_HOST_ID,
+      mode: provenance.mode,
+      workspace,
+      originThreadId: provenance.threadId,
+      prompt: "Re-imported from the mirrored file.",
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      providerInstanceId: provenance.providerInstanceId,
+      modelId: provenance.modelId,
+      requestedAuthority: {
+        filesystem: false,
+        shell: false,
+        git: false,
+        network: false,
+        tools: false,
+        subagents: false,
+        executionPolicy: "plan",
+        permissionPersistence: "current-session",
+      },
+    },
+    {
+      mode: provenance.mode,
+      projectId: provenance.projectId === null ? null : String(provenance.projectId),
+      hostId: String(LOCAL_HOST_ID),
+      workspace,
+      originThreadId: String(provenance.threadId),
+    },
+    project === undefined
+      ? undefined
+      : { id: String(project.id), type: project.type, lifecycle: project.lifecycle },
+    blocks,
+    undefined,
+    input.actor,
+  );
+  return result.kind === "accepted"
+    ? { kind: "accepted", versionId: String(result.receipt.versionId) }
+    : { kind: "denied", message: result.message };
+}

@@ -66,9 +66,13 @@ export const AGENT_MESSAGE_EVENT_NAMES = {
   acknowledged: "agent.message-acknowledged@1",
 } as const;
 
-export const AGENT_MESSAGE_LIFETIME_MS = 24 * 60 * 60_000;
-
 export const AgentMessageSent = Schema.Struct({
+  /**
+   * The deadline an earlier host recorded (24 hours after admission). A new
+   * message has none and waits for a turn until it is carried, refused, or
+   * its thread is purged (maintainer decision, 2026-11-21); a recorded
+   * deadline still expires its message on replay.
+   */
   expiresAt: Schema.optional(UtcTimestamp),
   kind: Schema.Literal("message-sent"),
   messageId: AgentMessageId,

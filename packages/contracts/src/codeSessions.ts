@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { CodeThreadId } from "./code";
 import { CodeNativeSessionId } from "./codeOperations";
+import { ImportedSessionHistory } from "./importedSessionHistory";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -64,14 +65,22 @@ export type CodeNativeSession = typeof CodeNativeSession.Type;
 
 /**
  * What a Code thread offers of its provider's own sessions. `adopted` names
- * the session the thread continues, when it was started from one; `sessions`
+ * the session the thread continues, when it was started from one, with the
+ * earlier conversation its adoption imported; `sessions`
  * lists those it may still start from, and is empty once the thread has a
  * message or a session of its own.
  */
 export const CodeNativeSessions = Schema.Struct({
   threadId: CodeThreadId,
   adopted: Schema.optional(
-    Schema.Struct({ nativeSessionId: CodeNativeSessionId }).annotations(strict),
+    Schema.Struct({
+      nativeSessionId: CodeNativeSessionId,
+      /**
+       * The session's earlier conversation as the adoption imported it.
+       * Absent on a thread adopted before Octant imported any.
+       */
+      history: Schema.optional(ImportedSessionHistory),
+    }).annotations(strict),
   ),
   sessions: Schema.Array(CodeNativeSession).pipe(Schema.maxItems(50)),
   /** Why the thread cannot start from a session, when it cannot. */

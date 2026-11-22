@@ -31,8 +31,23 @@ export type ChatAttachedFiles =
       readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
       /** One block per text file, to place before the person's message. */
       readonly texts: ReadonlyArray<string>;
+      /** Total extracted text characters carried in `texts`, in UTF-16 code units. */
+      readonly characters: number;
     }
   | { readonly status: "refused"; readonly message: string };
+
+export interface ChatHistoryAttachmentInput {
+  readonly attachmentId: string;
+  readonly displayName: string;
+  readonly mediaType: string;
+  /** Reads the attachment's verified bytes from the store, or undefined if unavailable. */
+  readonly readBytes: () => Promise<Uint8Array | undefined>;
+}
+
+export interface ChatHistoryTurnAttachments {
+  readonly turnId: string;
+  readonly attachments: ReadonlyArray<ChatHistoryAttachmentInput>;
+}
 
 export function chatAttachedFiles(
   attachments: ReadonlyArray<ProviderAttachmentInput>,
@@ -72,7 +87,82 @@ export function chatAttachedFiles(
     }
     texts.push(attachedTextBlock(attachment, text, document?.truncated === true));
   }
-  return { status: "ready", attachments: kept, texts };
+  return { status: "ready", attachments: kept, texts, characters };
+}
+
+/**
+ * Text blocks for earlier turns' text and document attachments when the host
+ * rebuilds a Chat conversation's history.
+ *
+ * Allocates the character budget from the newest turn backwards so recent
+ * turns' attachments stay intact before older ones are truncated or omitted.
+ * Missing, unreadable, purged, image, or binary attachments are skipped cleanly
+ * so history rebuild never fails on an unavailable file.
+ */
+export async function chatHistoryAttachedTexts(
+  turns: ReadonlyArray<ChatHistoryTurnAttachments>,
+  options: { readonly maxCharacters?: number } = {},
+): Promise<ReadonlyMap<string, ReadonlyArray<string>>> {
+  let remaining = Math.max(
+    0,
+    Math.floor(options.maxCharacters ?? MAX_CHAT_ATTACHED_TEXT_CHARACTERS),
+  );
+  const textsByTurnId = new Map<string, ReadonlyArray<string>>();
+  if (remaining === 0 || turns.length === 0) return textsByTurnId;
+
+  for (let index = turns.length - 1; index >= 0 && remaining > 0; index -= 1) {
+    const turn = turns[index];
+    if (turn === undefined || turn.attachments.length === 0) continue;
+    const turnTexts: string[] = [];
+    for (const attachment of turn.attachments) {
+      if (remaining <= 0) break;
+      if (attachment.mediaType.startsWith("image/")) continue;
+      let bytes: Uint8Array | undefined;
+      try {
+        bytes = await attachment.readBytes();
+      } catch {
+        continue;
+      }
+      if (bytes === undefined || bytes.byteLength === 0) continue;
+      const extracted = extractChatAttachmentText(bytes);
+      if (extracted === undefined || extracted.text.length === 0) continue;
+      let text = extracted.text;
+      let truncated = extracted.truncated;
+      if (text.length > remaining) {
+        let length = remaining;
+        if (length > 0) {
+          const last = text.charCodeAt(length - 1);
+          if (last >= 0xd800 && last <= 0xdbff) length -= 1;
+        }
+        remaining = 0;
+        if (length === 0) break;
+        text = text.slice(0, length);
+        truncated = true;
+      } else {
+        remaining -= text.length;
+      }
+      turnTexts.push(attachedTextBlock(attachment, text, truncated));
+    }
+    if (turnTexts.length > 0) textsByTurnId.set(turn.turnId, turnTexts);
+  }
+  return textsByTurnId;
+}
+
+function extractChatAttachmentText(
+  bytes: Uint8Array,
+): { readonly text: string; readonly truncated: boolean } | undefined {
+  let document: ReturnType<typeof extractedDocumentText>;
+  try {
+    document = extractedDocumentText(Buffer.from(bytes));
+  } catch {
+    return undefined;
+  }
+  if (document === "unreadable") return undefined;
+  if (document !== undefined) {
+    return { text: document.text, truncated: document.truncated };
+  }
+  const plain = attachedFileText(bytes);
+  return plain === undefined ? undefined : { text: plain, truncated: false };
 }
 
 /**
@@ -81,7 +171,7 @@ export function chatAttachedFiles(
  * file cannot close it early.
  */
 function attachedTextBlock(
-  attachment: ProviderAttachmentInput,
+  attachment: Pick<ProviderAttachmentInput, "displayName" | "mediaType">,
   text: string,
   truncated: boolean,
 ): string {

@@ -32,6 +32,9 @@ export interface SettingsContainerProps {
   readonly projectTerminalClient?: ProjectTerminalClient;
   readonly projectActionStoragePrefix?: string;
   readonly onOpenServerProject?: (project: ServerProject) => void;
+  readonly onOpenRelayedServerProjectPreview?: Parameters<
+    typeof ShellSettingsSurface
+  >[0]["onOpenRelayedServerProjectPreview"];
   readonly actions: Pick<
     ShellActions,
     "openChatThread" | "setUsageOpen" | "selectChatThread" | "selectWorkThread" | "selectCodeThread"
@@ -59,6 +62,8 @@ export interface SettingsContainerProps {
   readonly nativeBoundsAvailable: boolean;
   readonly pendingUsageFilter?: UsageQueryFilter;
   readonly projectNamesById: ReadonlyMap<string, string>;
+  /** The Code and Work Projects, which the hub grant's Act item can name. */
+  readonly actProjectNamesById: ReadonlyMap<string, string>;
   readonly providerController: ProviderController;
   readonly settings: NonNullable<ReturnType<typeof useShellController>["settings"]>;
   /** Which standalone surface covers the workspace. */
@@ -96,6 +101,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     nativeBoundsAvailable,
     pendingUsageFilter,
     projectNamesById,
+    actProjectNamesById,
     providerController,
     settings,
     sidebarVibrancySupported,
@@ -115,6 +121,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     folderBrowseClient,
     hostControlClient,
     protectedFilesClient,
+    newDeviceAlertsClient,
     blockedToolsClient,
     sandboxRestrictionsClient,
     archivedWorktreesClient,
@@ -247,6 +254,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       discoveryController={discoveryController}
       extensionClient={extensionClient}
       projectNames={projectNamesById}
+      actProjectNames={actProjectNamesById}
       {...(pickSkillFolder === undefined ? {} : { pickSkillFolder })}
       {...(selectLocalPluginFolder === undefined
         ? {}
@@ -286,6 +294,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
         ? {}
         : { browserAutomationClient: props.browserAutomationClient })}
       protectedFilesClient={protectedFilesClient}
+      newDeviceAlertsClient={newDeviceAlertsClient}
       blockedToolsClient={blockedToolsClient}
       sandboxRestrictionsClient={sandboxRestrictionsClient}
       sandboxScopes={[
@@ -325,6 +334,9 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       {...(props.onOpenServerProject === undefined
         ? {}
         : { onOpenServerProject: props.onOpenServerProject })}
+      {...(props.onOpenRelayedServerProjectPreview === undefined
+        ? {}
+        : { onOpenRelayedServerProjectPreview: props.onOpenRelayedServerProjectPreview })}
       {...(props.projectTerminalClient === undefined
         ? {}
         : { projectTerminalClient: props.projectTerminalClient })}

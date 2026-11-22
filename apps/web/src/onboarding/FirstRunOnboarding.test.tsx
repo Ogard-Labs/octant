@@ -1,11 +1,17 @@
-import type {
-  DiscoverySnapshot,
-  ProviderInstance,
-  ProviderInstanceId,
-  ProviderModel,
-  ProviderModelId,
-  ProviderObservedState,
-  UtcTimestamp,
+import {
+  MAX_IMPORTED_PROVIDER_FOLDERS,
+  decodeDiscoveredProviderFolderId,
+  decodeProjectId,
+  type DiscoveredProviderFolderGroup,
+  type DiscoveredProviderFolderId,
+  type DiscoverySnapshot,
+  type ImportProviderFoldersResult,
+  type ProviderInstance,
+  type ProviderInstanceId,
+  type ProviderModel,
+  type ProviderModelId,
+  type ProviderObservedState,
+  type UtcTimestamp,
 } from "@octant/contracts";
 import type { ProjectId } from "@octant/contracts/projects";
 import { buildModelPickerGroups, type PickerGroup } from "@octant/domain";
@@ -906,6 +912,110 @@ describe("FirstRunOnboarding", () => {
     expect(screen.getByRole("heading", { name: "Model" })).toBeVisible();
     expect(props.controller.complete).not.toHaveBeenCalled();
     expect(props.onStartThread).not.toHaveBeenCalled();
+  });
+
+  it("holds wizard navigation while a multi-batch provider folder import is in flight so remaining batches stay valid", async () => {
+    const user = userEvent.setup();
+    const total = MAX_IMPORTED_PROVIDER_FOLDERS + 1;
+    const groups: ReadonlyArray<DiscoveredProviderFolderGroup> = Array.from(
+      { length: total },
+      (_, index) => ({
+        repository: `acme/repo-${String(index)}`,
+        label: `acme/repo-${String(index)}`,
+        providers: ["claude"],
+        sessionCount: 1,
+        lastActivityAt: now,
+        folders: [
+          {
+            id: decodeDiscoveredProviderFolderId(
+              `11111111-1111-4111-8111-${index.toString(16).padStart(12, "0")}`,
+            ),
+            folderName: `repo-${String(index)}`,
+            providers: ["claude"],
+            sessionCount: 1,
+            lastActivityAt: now,
+            isGitRepository: true,
+            alreadyImported: false,
+          },
+        ],
+      }),
+    );
+
+    const scan = vi.fn(async () => ({
+      status: "ready" as const,
+      requireGitRepository: true,
+      groups,
+      stoppedEarly: false,
+      scannedAt: now,
+    }));
+
+    const batchSizes: number[] = [];
+    let releaseFirstBatch: (() => void) | undefined;
+    const firstBatchGate = new Promise<void>((resolve) => {
+      releaseFirstBatch = resolve;
+    });
+    const importFolders = vi.fn(
+      async (
+        folderIds: readonly [DiscoveredProviderFolderId, ...DiscoveredProviderFolderId[]],
+      ): Promise<ImportProviderFoldersResult> => {
+        batchSizes.push(folderIds.length);
+        if (batchSizes.length === 1) await firstBatchGate;
+        return {
+          status: "completed",
+          results: folderIds.map((folderId, index) => ({
+            folderId,
+            status: "created",
+            projectId: decodeProjectId(
+              `aaaaaaaa-aaaa-4aaa-8aaa-${(batchSizes.length * 100 + index).toString(16).padStart(12, "0")}`,
+            ),
+            name: `repo-${String(index)}`,
+          })),
+        };
+      },
+    );
+
+    render(
+      <FirstRunOnboarding
+        {...baseProps()}
+        providerFolderScan={{ strict: false, scan, importFolders }}
+      />,
+    );
+
+    await user.click(railStep("Project"));
+    const checkboxes = await screen.findAllByRole("checkbox");
+    expect(checkboxes).toHaveLength(total);
+    for (const checkbox of checkboxes) {
+      await user.click(checkbox);
+    }
+
+    await user.click(
+      screen.getByRole("button", {
+        name: new RegExp(`import ${String(total)} code projects`, "i"),
+      }),
+    );
+
+    await waitFor(() => {
+      expect(batchSizes).toEqual([MAX_IMPORTED_PROVIDER_FOLDERS]);
+    });
+
+    // While batches are in flight, navigation and dismissal are held so the
+    // Project step cannot unmount and trigger a remount scan.
+    expect(railStep("Providers")).toBeDisabled();
+    expect(railStep("Model")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Back" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Skip setup" })).toBeDisabled();
+    expect(scan).toHaveBeenCalledTimes(1);
+
+    releaseFirstBatch?.();
+
+    expect(
+      await screen.findByText(new RegExp(`imported ${String(total)} code projects`, "i")),
+    ).toBeInTheDocument();
+    expect(batchSizes).toEqual([MAX_IMPORTED_PROVIDER_FOLDERS, 1]);
+    expect(scan).toHaveBeenCalledTimes(1);
+    expect(railStep("Model")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
   });
 });
 

@@ -4,6 +4,10 @@ import {
   AGENT_RESULT_STEERED,
   AGENT_RESULT_STEERING_AGGREGATE_TYPE,
 } from "../agentRun/agentResultSteeredRecord";
+import {
+  THREAD_MESSAGE_STEERED,
+  THREAD_MESSAGE_STEERING_AGGREGATE_TYPE,
+} from "../messageQueue/threadMessageSteeredRecord";
 import { WorkTurnProjection, hydrateWorkTurnProjectionFromJournal } from "./workTurnProjection";
 
 const ids = {
@@ -15,6 +19,7 @@ const ids = {
   provider: "ffffffff-ffff-4fff-8fff-ffffffffffff",
   session: "11111111-1111-4111-8111-111111111111",
   run: "22222222-2222-4222-8222-222222222222",
+  message: "33333333-3333-4333-8333-333333333333",
 } as const;
 const now = "2026-08-11T12:00:00.000Z";
 
@@ -29,6 +34,16 @@ const steered = {
     runGenerations: [{ runId: ids.run, generation: 1 }],
   },
   body: "A delegated subagent has finished.",
+  steeredAt: now,
+} as const;
+
+const steeredMessage = {
+  kind: "thread-message-steered",
+  mode: "work",
+  threadId: ids.thread,
+  turnKey: ids.request,
+  messageId: ids.message,
+  body: "Skip the generated files.",
   steeredAt: now,
 } as const;
 
@@ -66,6 +81,13 @@ const rows = [
     eventVersion: 1,
     payload: steered,
   },
+  {
+    globalSequence: 5,
+    aggregateType: THREAD_MESSAGE_STEERING_AGGREGATE_TYPE,
+    eventName: THREAD_MESSAGE_STEERED,
+    eventVersion: 1,
+    payload: steeredMessage,
+  },
   // The turn ends after the result entered it; the card stays.
   {
     globalSequence: 3,
@@ -90,9 +112,16 @@ const rows = [
     eventVersion: 1,
     payload: steered,
   },
+  {
+    globalSequence: 6,
+    aggregateType: THREAD_MESSAGE_STEERING_AGGREGATE_TYPE,
+    eventName: THREAD_MESSAGE_STEERED,
+    eventVersion: 1,
+    payload: steeredMessage,
+  },
 ];
 
-describe("a Work turn's steered child results", () => {
+describe("a Work turn's steered child results and messages", () => {
   it("rebuild onto the turn they entered from the journal, once each", () => {
     const projection = new WorkTurnProjection();
     expect(
@@ -112,5 +141,101 @@ describe("a Work turn's steered child results", () => {
     expect(turn?.steeredResults).toEqual([
       { delivery: steered.delivery, body: steered.body, steeredAt: now },
     ]);
+    expect(turn?.steeredMessages).toEqual([
+      { messageId: ids.message, body: "Skip the generated files.", steeredAt: now },
+    ]);
+  });
+
+  it("replays loop and stall notice events onto a Work turn and keeps them across settlement", () => {
+    const firstRow = rows[0];
+    if (firstRow === undefined) throw new Error("Expected accepted row");
+    const noticeRows = [
+      firstRow,
+      {
+        globalSequence: 2,
+        aggregateType: "work-turn",
+        eventName: "work.turn-loop-noticed@1",
+        eventVersion: 1,
+        payload: {
+          kind: "turn-loop-noticed",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+          toolName: "octant_read",
+          count: 6,
+          occurredAt: "2026-10-30T12:01:00.000Z",
+        },
+      },
+      {
+        globalSequence: 3,
+        aggregateType: "work-turn",
+        eventName: "work.turn-stall-noticed@1",
+        eventVersion: 1,
+        payload: {
+          kind: "turn-stall-noticed",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+          idleMs: 1_800_000,
+          occurredAt: "2026-10-30T12:31:00.000Z",
+        },
+      },
+      {
+        globalSequence: 4,
+        aggregateType: "work-turn",
+        eventName: "work.turn-loop-stopped@1",
+        eventVersion: 1,
+        payload: {
+          kind: "turn-loop-stopped",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+          toolName: "octant_read",
+          count: 6,
+          occurredAt: "2026-10-30T12:32:00.000Z",
+        },
+      },
+      {
+        globalSequence: 5,
+        aggregateType: "work-turn",
+        eventName: "work.turn-updated@1",
+        eventVersion: 1,
+        payload: {
+          kind: "turn-updated",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+          status: "cancelled",
+          updatedAt: "2026-10-30T12:32:01.000Z",
+        },
+      },
+    ];
+    const projection = new WorkTurnProjection();
+    expect(
+      hydrateWorkTurnProjectionFromJournal({
+        replay: (cursor) =>
+          noticeRows.filter(
+            (row) =>
+              row.globalSequence > cursor.afterSequence &&
+              (cursor.aggregateType === undefined || row.aggregateType === cursor.aggregateType),
+          ),
+        projection,
+      }),
+    ).toBe("ok");
+
+    const turn = projection.lookup(decodeWorkTurnRequestId(ids.request));
+    expect(turn?.status).toBe("cancelled");
+    expect(turn?.version).toBe(5);
+    expect(turn?.loopNotice).toEqual({
+      kind: "turn-loop-stopped",
+      toolName: "octant_read",
+      count: 6,
+      occurredAt: "2026-10-30T12:32:00.000Z",
+    });
+    expect(turn?.stallNotice).toEqual({
+      kind: "turn-stall-noticed",
+      idleMs: 1_800_000,
+      occurredAt: "2026-10-30T12:31:00.000Z",
+    });
   });
 });

@@ -5,7 +5,7 @@ import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
 import { decodeChatThreadId, type ChatThreadId } from "@octant/contracts/chat";
 import { decodeCodeThreadId, type CodeThreadId } from "@octant/contracts/code";
-import { decodeProjectId, decodeUtcTimestamp, decodeWorkThreadId } from "@octant/contracts";
+import { decodeUtcTimestamp, decodeWorkThreadId } from "@octant/contracts";
 import { decodePersonMemoryCommand } from "@octant/contracts/person-memory";
 import type { EnvironmentSelection } from "@octant/client-runtime/environment-selection";
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
@@ -21,10 +21,12 @@ import { projectViewEnvironmentOptionsFromHosts } from "../code/codeProjectViewM
 import type { CodeReadCursorStore, CodeThreadRestOutcome } from "../code/useCodeController";
 import { codeThreadCoordinatorActions } from "./codeThreadCoordinatorActions";
 import { mergeThreadRowActions } from "../projects/mergeThreadRowActions";
-import { MoveThreadToProjectDialog } from "../projects/MoveThreadToProjectDialog";
 import { ProjectSidebarSection } from "../projects/ProjectSidebarSection";
 import { useServerCodeProjects } from "../projects/serverProjectEntries";
 import { ServerProjectsSidebarGroup } from "../projects/ServerProjectsSidebarGroup";
+import { PairedComputersSidebarGroup } from "../projects/PairedComputersSidebarGroup";
+import type { FederatedReadItem } from "@octant/client-runtime/host-federation-merged-reads";
+import type { PairedComputerThreadPayload } from "@octant/client-runtime/paired-computer-reads";
 import type { ThreadRowActions } from "../projects/ThreadRowMenu";
 import type { useProjectController } from "../projects/useProjectController";
 import {
@@ -53,9 +55,8 @@ import {
 } from "../thread/threadHandOff";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import type { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
-import type { ShellActions } from "./shellActions";
+import type { ShellActions, ThreadMoveRequest } from "./shellActions";
 import type { ShellNavigationModel } from "./shellNavigationModel";
 
 type ProjectController = ReturnType<typeof useProjectController>;
@@ -76,8 +77,8 @@ export interface SidebarContainerProps {
     | "markCodeFollowUp"
     | "markChatThreadRead"
     | "markCodeThreadRead"
-    | "moveCodeThread"
     | "moveProject"
+    | "requestMoveToProject"
     | "noteHandedOffDocument"
     | "openAgentsCenter"
     | "openArchive"
@@ -133,7 +134,6 @@ export interface SidebarContainerProps {
     | "setThreadExportNotice"
     | "snoozeChatThread"
     | "snoozeCodeThread"
-    | "tryWorkRestCommand"
     | "updateSettings"
     | "wakeChatThread"
     | "wakeCodeThread"
@@ -160,6 +160,9 @@ export interface SidebarContainerProps {
   readonly codeStatus: string;
   readonly contextHealthByProject: ReadonlyMap<ProjectId, ContextHealth>;
   readonly environmentSelection: EnvironmentSelection;
+  /** Code threads on the person's other computers, each opened there. */
+  readonly pairedComputerThreads?: ReadonlyArray<FederatedReadItem<PairedComputerThreadPayload>>;
+  readonly onOpenPairedComputerThread?: (hostId: string, threadId: string) => void;
   readonly federatedHostStates: NonNullable<ShellSidebarProps["environments"]>["hostStates"];
   readonly githubIssuesReadAvailable: boolean;
   readonly hostBridge?: OctantHostBridge;
@@ -231,6 +234,8 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     codeStatus,
     contextHealthByProject,
     environmentSelection,
+    pairedComputerThreads,
+    onOpenPairedComputerThread,
     federatedHostStates,
     githubIssuesReadAvailable,
     hostBridge,
@@ -305,18 +310,12 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
   const { codeSidebarThreads, markedThreadGroups, withProviderMark, workProjectThreads } =
     navigation;
 
-  // The thread whose Move to Project choice is open. Work and Code rows ask for
-  // it from their right-click menu; the dialog lives here, beside the Project
-  // list it reads, so the move never reaches through another surface.
-  const [moveRequest, setMoveRequest] = useState<
-    | {
-        readonly mode: "work" | "code";
-        readonly threadId: string;
-        readonly title: string;
-        readonly projectId: string;
-      }
-    | undefined
-  >(undefined);
+  // The thread whose Move to Project choice is open. Work and Code rows ask
+  // for it from their right-click menu and the Environment asks through the
+  // same action; the app-level host draws the dialog so it stays mounted
+  // wherever the asking surface is.
+  const setMoveRequest = (request: ThreadMoveRequest | undefined) =>
+    actions.requestMoveToProject(request);
 
   // The plugin-contributed destinations act through the same overlay and board
   // openers the first-party rows use; resolved here, where the rows are drawn.
@@ -631,16 +630,6 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     [serverProjectIds],
   );
   const workThreadRowActions = rowActions.work;
-
-  const moveThread = (request: NonNullable<typeof moveRequest>) => async (projectId: string) =>
-    request.mode === "code"
-      ? actions.moveCodeThread(decodeCodeThreadId(request.threadId), decodeProjectId(projectId))
-      : actions.tryWorkRestCommand(request.threadId, (expectedVersion) => ({
-          kind: "move-work-thread",
-          threadId: decodeWorkThreadId(request.threadId),
-          expectedVersion,
-          projectId: decodeProjectId(projectId),
-        }));
 
   return (
     <>
@@ -992,6 +981,15 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
                     threads={codeSidebarThreads.map(withProviderMark)}
                   />
                 ) : null}
+                {activeMode === "code" &&
+                pairedComputerThreads !== undefined &&
+                onOpenPairedComputerThread !== undefined ? (
+                  <PairedComputersSidebarGroup
+                    onOpenThread={onOpenPairedComputerThread}
+                    selection={environmentSelection}
+                    threads={pairedComputerThreads}
+                  />
+                ) : null}
                 {activeMode === "work" && workStatus === "ready" ? (
                   <ServerProjectsSidebarGroup
                     actions={workThreadRowActions}
@@ -1013,18 +1011,6 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
           </>
         }
       />
-      <OctantDialogPresence>
-        {moveRequest === undefined ? null : (
-          <MoveThreadToProjectDialog
-            currentProjectId={moveRequest.projectId}
-            mode={moveRequest.mode}
-            onClose={() => setMoveRequest(undefined)}
-            onMove={moveThread(moveRequest)}
-            projects={allProjects}
-            threadTitle={moveRequest.title}
-          />
-        )}
-      </OctantDialogPresence>
     </>
   );
 });

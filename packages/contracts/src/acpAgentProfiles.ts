@@ -9,6 +9,24 @@ export const AcpAgentAuthentication = Schema.Literal("subscription", "provider-o
 export type AcpAgentAuthentication = typeof AcpAgentAuthentication.Type;
 
 /**
+ * What an agent's own personal sign-in does not cover, as its vendor draws
+ * that line. Each field is the sentence a refused run shows, so the server
+ * refuses by what the profile declares, never by the profile's id.
+ */
+export interface AcpPersonalSignInRefusals {
+  /**
+   * A turn no person sent: a routine run, and every turn the host starts as
+   * itself (a wake, Auto-fix, a goal round, a usage-limit or restart
+   * continuation, a child's result, a benchmark) or another thread sends.
+   */
+  readonly refusesUnattendedRuns: string;
+  /** A helper run on the agent, and a helper run a thread on it starts. */
+  readonly refusesHelperRuns: string;
+  /** A turn an outside agent sends under an agent grant. */
+  readonly refusesOutsideAgents: string;
+}
+
+/**
  * What the rest of Octant knows about one ACP agent before it runs. Its runtime
  * behavior (launch argv, environment, confinement, mode mapping) is the other
  * half of the profile and lives beside the shared ACP stack in the server.
@@ -37,8 +55,20 @@ export interface AcpAgentProfileDescriptor {
   readonly authenticationNote?: string;
   /** How the person signs in with the agent's own login. */
   readonly signInGuidance: string;
+  /**
+   * Runs the agent's own personal sign-in does not cover. Declared only by a
+   * profile whose sole posture is that sign-in, so it binds every instance.
+   */
+  readonly personalSignIn?: AcpPersonalSignInRefusals;
   /** The agent's documented self-update arguments, when it has them. */
   readonly cliUpdateArgs?: ReadonlyArray<string>;
+  /**
+   * The arguments that start the agent's own interactive command-line
+   * interface, which a person-operated provider terminal opens. Set only for
+   * an agent whose program is documented to open one this way; absent, no
+   * provider terminal is offered for it.
+   */
+  readonly interactiveArgs?: ReadonlyArray<string>;
   /**
    * Seeds the bundled provider-driver plugin's extension id and digest. Each
    * profile keeps its serial for good: activation state is stored against the
@@ -140,6 +170,9 @@ export const ACP_AGENT_PROFILES = {
     apiKeyLabel: "Gemini API key",
     signInGuidance:
       "Run Gemini CLI in your terminal and complete its provider-owned login, then check the connection again.",
+    // `gemini` with no arguments is the CLI's own interactive session, the
+    // one its sign-in guidance sends the person to.
+    interactiveArgs: [],
     bundledPluginSerial: 0x10,
   },
   copilot: {
@@ -184,6 +217,34 @@ export const ACP_AGENT_PROFILES = {
     signInGuidance: "Add a Vercel AI Gateway API key for fx, then check the connection again.",
     bundledPluginSerial: 0x14,
   },
+  antigravity: {
+    name: "Google Antigravity",
+    executable: "agy",
+    versionProbeArgs: ["--version"],
+    // The official CLI signs in with the person's own Google account and
+    // keeps that sign-in itself; Octant runs the unmodified binary and never
+    // reads, copies or replaces it.
+    authentication: [],
+    authenticationNote: "Uses your own Google account sign-in from the Antigravity CLI.",
+    signInGuidance:
+      "Run agy (or agy acp --login) in your terminal and sign in with your Google account, then check the connection again.",
+    // `agy` with no arguments is Google's own interactive CLI, where the
+    // person signs in.
+    interactiveArgs: [],
+    // Google supports the CLI on a personal plan for one person at their own
+    // computer driving it themselves; unattended runs, use as a sub-agent of
+    // another agent loop, and other callers belong on a Gemini API key.
+    personalSignIn: {
+      refusesUnattendedRuns:
+        "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Choose a provider that uses a Gemini API key, such as Gemini CLI with an API key.",
+      refusesHelperRuns:
+        "Google doesn't support Google Antigravity as a helper agent, or starting helpers from it, on a personal Google sign-in. Use a provider that uses a Gemini API key, such as Gemini CLI with an API key, for helper work.",
+      refusesOutsideAgents:
+        "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or use a provider that uses a Gemini API key.",
+    },
+    // 0x1b is taken: copilot's 0x11 seed normalizes to the `1b` digest.
+    bundledPluginSerial: 0x1c,
+  },
 } as const satisfies Readonly<Record<string, AcpAgentProfileDescriptor>>;
 
 export type AcpAgentKind = keyof typeof ACP_AGENT_PROFILES;
@@ -199,6 +260,14 @@ export function isAcpAgentKind(kind: string): kind is AcpAgentKind {
 
 export function acpAgentProfile(kind: AcpAgentKind): AcpAgentProfileDescriptor {
   return ACP_AGENT_PROFILES[kind];
+}
+
+/**
+ * The runs a provider's own personal sign-in does not cover, for any driver
+ * kind; undefined when the kind declares none.
+ */
+export function personalSignInRefusals(driverKind: string): AcpPersonalSignInRefusals | undefined {
+  return isAcpAgentKind(driverKind) ? acpAgentProfile(driverKind).personalSignIn : undefined;
 }
 
 /** Every ACP agent configuration names its kind as `<driver kind>-acp`. */

@@ -6,6 +6,22 @@ import { AggregateVersion, UtcTimestamp } from "./events";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 export const PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE = "provider-cloud-usage";
+export const PROVIDER_CLOUD_EVENT_NAMES = {
+  jobChanged: "provider-cloud.job-changed@1",
+  optInChanged: "provider-cloud.opt-in-changed@1",
+} as const;
+export const PROVIDER_CLOUD_EVENT_NAMES_V2 = {
+  jobChanged: "provider-cloud.job-changed@2",
+  optInChanged: "provider-cloud.opt-in-changed@2",
+} as const;
+export const ProviderCloudEventPrincipal = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("local-window") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("person-paired-device"),
+    credentialGeneration: Schema.Int.pipe(Schema.positive()),
+  }).annotations(strict),
+);
+export type ProviderCloudEventPrincipal = typeof ProviderCloudEventPrincipal.Type;
 export const ProviderCloudJobId = Schema.UUID.pipe(Schema.brand("ProviderCloudJobId"));
 export type ProviderCloudJobId = typeof ProviderCloudJobId.Type;
 export const ProviderCloudRemoteId = Schema.String.pipe(
@@ -111,6 +127,7 @@ export const ProviderCloudResponse = Schema.Union(
       "opt-in-required",
       "review-required",
       "unsupported-budget",
+      "credential-unlock-needs-this-computer",
       "busy",
       "unknown-job",
       "journal-unavailable",
@@ -118,6 +135,40 @@ export const ProviderCloudResponse = Schema.Union(
   }).annotations(strict),
 ).annotations(strict);
 export type ProviderCloudResponse = typeof ProviderCloudResponse.Type;
+export const ProviderCloudJobChangedV1Payload = Schema.Struct({
+  threadId: ProviderCloudJob.fields.threadId,
+  job: ProviderCloudJob,
+}).annotations(strict);
+export type ProviderCloudJobChangedV1Payload = typeof ProviderCloudJobChangedV1Payload.Type;
+export const ProviderCloudOptInChangedV1Payload = Schema.Struct({
+  instanceId: ProviderCloudJob.fields.instanceId,
+  enabled: Schema.Boolean,
+}).annotations(strict);
+export type ProviderCloudOptInChangedV1Payload = typeof ProviderCloudOptInChangedV1Payload.Type;
+export const ProviderCloudJobChangedV2Payload = Schema.Struct({
+  threadId: ProviderCloudJob.fields.threadId,
+  job: ProviderCloudJob,
+  principal: ProviderCloudEventPrincipal,
+}).annotations(strict);
+export type ProviderCloudJobChangedV2Payload = typeof ProviderCloudJobChangedV2Payload.Type;
+export const ProviderCloudOptInChangedV2Payload = Schema.Struct({
+  instanceId: ProviderCloudJob.fields.instanceId,
+  enabled: Schema.Boolean,
+  principal: ProviderCloudEventPrincipal,
+}).annotations(strict);
+export type ProviderCloudOptInChangedV2Payload = typeof ProviderCloudOptInChangedV2Payload.Type;
+export const decodeProviderCloudJobChangedV1Payload = Schema.decodeUnknownSync(
+  ProviderCloudJobChangedV1Payload,
+);
+export const decodeProviderCloudOptInChangedV1Payload = Schema.decodeUnknownSync(
+  ProviderCloudOptInChangedV1Payload,
+);
+export const decodeProviderCloudJobChangedV2Payload = Schema.decodeUnknownSync(
+  ProviderCloudJobChangedV2Payload,
+);
+export const decodeProviderCloudOptInChangedV2Payload = Schema.decodeUnknownSync(
+  ProviderCloudOptInChangedV2Payload,
+);
 export const decodeProviderCloudRequest = Schema.decodeUnknownSync(ProviderCloudRequest);
 export const decodeProviderCloudResponse = Schema.decodeUnknownSync(ProviderCloudResponse);
 export const decodeProviderCloudJob = Schema.decodeUnknownSync(ProviderCloudJob);

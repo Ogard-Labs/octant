@@ -15,7 +15,7 @@ import { request as httpRequest, type IncomingMessage } from "node:http";
 import { join } from "node:path";
 import type { Duplex } from "node:stream";
 import { Schema } from "effect";
-import { RemoteServerGrant } from "@octant/contracts";
+import { RemotePortForward, RemoteServerGrant } from "@octant/contracts";
 import {
   createRemoteServerForwarder,
   type RemoteServerForwarder,
@@ -33,6 +33,7 @@ import {
 } from "@octant/client-runtime/remote-listener-trust";
 import { REMOTE_SERVER_PAGE_ACCESS_HEADER, type RemoteServerRelayHeader } from "@octant/domain";
 import { clearRemotePageStorage, type PageStoragePort } from "./pairedComputers";
+import { listenForPortForward } from "./remotePortForwardListener";
 
 export type RemoteServerPageMode = "octant-browser" | "default-browser";
 
@@ -54,6 +55,18 @@ export type RemoteServerPageOpenOutcome =
   | { readonly kind: "refused"; readonly message: string };
 
 const decodeGrant = Schema.decodeUnknownSync(RemoteServerGrant);
+const decodeForward = Schema.decodeUnknownSync(RemotePortForward);
+
+/** What a window asks for after the host opened a port forward for it. */
+export interface RemotePortForwardOpenRequest {
+  readonly hostId: string;
+  readonly listenerOrigin: string;
+  readonly forward: RemotePortForward;
+}
+
+export type RemotePortForwardOpenOutcome =
+  | { readonly kind: "listening"; readonly port: number }
+  | { readonly kind: "refused"; readonly message: string };
 const HOST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
@@ -78,6 +91,22 @@ export function validateRemoteServerPageOpenRequest(value: unknown): RemoteServe
     throw invalidOpen();
   }
   return { hostId, hostName: hostName.trim(), listenerOrigin, grant, mode };
+}
+
+/** Checks a window's forward request before anything listens, as an open request is checked. */
+export function validateRemotePortForwardOpenRequest(value: unknown): RemotePortForwardOpenRequest {
+  if (typeof value !== "object" || value === null) throw invalidOpen();
+  const record = value as Record<string, unknown>;
+  const { hostId, listenerOrigin } = record;
+  if (typeof hostId !== "string" || !HOST_ID_PATTERN.test(hostId)) throw invalidOpen();
+  if (typeof listenerOrigin !== "string" || !isHttpsOrigin(listenerOrigin)) throw invalidOpen();
+  let forward: RemotePortForward;
+  try {
+    forward = decodeForward(record.forward);
+  } catch {
+    throw invalidOpen();
+  }
+  return { hostId, listenerOrigin, forward };
 }
 
 function invalidOpen(): Error {
@@ -193,6 +222,14 @@ export interface RemoteServerPages {
     windowId: number,
     request: RemoteServerPageOpenRequest,
   ) => Promise<RemoteServerPageOpenOutcome>;
+  /**
+   * Listens on this computer's loopback for a forward the host opened for the
+   * window that asks; that window signs each connection's upgrade.
+   */
+  readonly openForward: (
+    windowId: number,
+    request: RemotePortForwardOpenRequest,
+  ) => Promise<RemotePortForwardOpenOutcome>;
   /** A window's answer to a signing request; ignored unless that window was asked. */
   readonly answer: (windowId: number, requestId: unknown, signing: unknown) => void;
   /** The secret Octant's browser adds, for exactly this origin. */
@@ -232,6 +269,30 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
     }
   >();
   let forwarder: RemoteServerForwarder | undefined;
+  // Each forward's listener, with the window that signs for it and where it goes.
+  const forwardListeners = new Map<
+    string,
+    {
+      readonly windowId: number;
+      readonly hostId: string;
+      readonly listenerOrigin: string;
+      readonly close: () => void;
+    }
+  >();
+  const closeForwards = (
+    matches: (listener: {
+      readonly windowId: number;
+      readonly hostId: string;
+      readonly listenerOrigin: string;
+    }) => boolean,
+  ) => {
+    for (const [forwardId, listener] of forwardListeners) {
+      if (!matches(listener)) continue;
+      forwardListeners.delete(forwardId);
+      signerByGrant.delete(forwardId);
+      listener.close();
+    }
+  };
   let starting: Promise<ForwarderReadiness> | undefined;
   let noticeGiven = false;
   let records: Map<string, RemoteServerPageRecord> | undefined;
@@ -408,6 +469,39 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
       if (notice !== undefined) noticeGiven = true;
       return notice === undefined ? { kind: "opened" } : { kind: "opened", notice };
     },
+    openForward: async (windowId, request) => {
+      const trust = ports.pairedTrust(request.listenerOrigin);
+      if (trust === undefined) {
+        return { kind: "refused", message: "Octant isn't paired with that computer." };
+      }
+      const forwardId = String(request.forward.forwardId);
+      signerByGrant.set(forwardId, windowId);
+      const listening = await listenForPortForward(
+        { hostId: request.hostId, forward: request.forward },
+        {
+          sign,
+          upgradeToHost: (upgrade) => {
+            const current = ports.pairedTrust(request.listenerOrigin);
+            if (current === undefined) return Promise.reject(new Error("No trust for this host."));
+            return upgradeToHost(
+              { listenerOrigin: request.listenerOrigin, trust: current },
+              upgrade,
+            );
+          },
+        },
+      );
+      if (listening.status === "refused") {
+        signerByGrant.delete(forwardId);
+        return { kind: "refused", message: listening.message };
+      }
+      forwardListeners.set(forwardId, {
+        windowId,
+        hostId: request.hostId,
+        listenerOrigin: request.listenerOrigin,
+        close: listening.close,
+      });
+      return { kind: "listening", port: listening.port };
+    },
     answer: (windowId, requestId, signing) => {
       if (typeof requestId !== "string") return;
       const waiting = pending.get(requestId);
@@ -429,18 +523,25 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
       for (const [grantId, signer] of signerByGrant) {
         if (signer === windowId) signerByGrant.delete(grantId);
       }
+      // A forward with no window to sign for it cannot carry a connection.
+      closeForwards((listener) => listener.windowId === windowId);
     },
-    forgetHost: (hostId) => forgetPages((record) => record.hostId === hostId, [hostId]),
+    forgetHost: (hostId) => {
+      closeForwards((listener) => listener.hostId === hostId);
+      return forgetPages((record) => record.hostId === hostId, [hostId]);
+    },
     // Every page served from the listener stops with it, even one with no page
     // record (a page opened in the default browser keeps none), so no open page
     // or WebSocket outlives the pin.
     forgetListener: (listenerOrigin) => {
       forwarder?.closeListener(listenerOrigin);
+      closeForwards((listener) => listener.listenerOrigin === listenerOrigin);
       return forgetPages((record) => record.listenerOrigin === listenerOrigin);
     },
     stop: async () => {
       for (const waiting of pending.values()) clearTimeout(waiting.timer);
       pending.clear();
+      closeForwards(() => true);
       await forwarder?.stop();
       forwarder = undefined;
     },

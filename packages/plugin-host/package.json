@@ -21,8 +21,10 @@
     "./browser-use": "./src/browserUsePlugin.ts",
     "./replica-store": "./src/replicaStoreActivation.ts",
     "./cloud-machine-targets": "./src/cloudMachineTargets.ts",
+    "./pull-request-reviewers": "./src/pullRequestReviewers.ts",
     "./first-party-plugins": "./src/firstPartyPlugins.ts",
     "./code-tools": "./src/codeTools.ts",
+    "./media-tools": "./src/mediaTools.ts",
     "./themes": "./src/themeContributions.ts",
     "./grounds": "./src/groundContributions.ts"
   },

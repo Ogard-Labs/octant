@@ -12,7 +12,12 @@ import type { ProviderModel } from "@octant/contracts/providers";
 import type { ProviderCapabilitySupport } from "@octant/contracts/providers";
 import type { ProviderObservedState } from "@octant/contracts/providers";
 import type { ProviderReadiness } from "@octant/contracts/providers";
-import { threadAppToolSupport, type AppToolThreadLevel } from "./browserAgentAvailability";
+import {
+  carriesThreadTools,
+  threadAppToolSupport,
+  type AppToolCapabilities,
+  type AppToolThreadLevel,
+} from "./browserAgentAvailability";
 import {
   hasVerifiedToolAuthority,
   hasWorkToolAuthority,
@@ -243,6 +248,11 @@ export interface PickerGroup {
    */
   readonly appManagedTools?: ProviderCapabilitySupport;
   /**
+   * Whether the runtime runs a server Project's turn on the server itself.
+   * Absent when it was never probed or does not say, which reads as no.
+   */
+  readonly serverPlacement?: ProviderCapabilitySupport;
+  /**
    * Models individually verified for Octant-managed tools on a provider that
    * leaves the flag unset per deployment (Foundry). Same rule the server
    * applies when a turn ships tools.
@@ -445,6 +455,9 @@ export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<P
       executionHost: input.hostId ?? localExecutionHost,
       sections,
       appManagedTools: observed.capabilities.appManagedTools,
+      ...(observed.capabilities.serverPlacement === undefined
+        ? {}
+        : { serverPlacement: observed.capabilities.serverPlacement }),
       ...(observed.commands === undefined ? {} : { providerCommands: observed.commands }),
       ...(observed.mentions === undefined ? {} : { providerMentions: observed.mentions }),
       ...(observed.capabilities.forceStop === undefined
@@ -716,10 +729,7 @@ export function modelCanTakeDelegatedWork(
   driverKind: ProviderDriverKind,
   observed: Pick<ProviderObservedState, "readiness" | "models"> &
     Partial<Pick<ProviderObservedState, "verifiedToolModelIds">> & {
-      readonly capabilities?: Pick<
-        ProviderObservedState["capabilities"],
-        "appManagedTools" | "appManagedToolsAtFullAccess"
-      >;
+      readonly capabilities?: AppToolCapabilities;
     },
   modelId: ProviderModelId,
   level?: AppToolThreadLevel,
@@ -729,7 +739,7 @@ export function modelCanTakeDelegatedWork(
     (observed.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false) ||
     (level !== undefined &&
       observed.capabilities !== undefined &&
-      threadAppToolSupport(observed.capabilities, level) === "mixed");
+      carriesThreadTools(threadAppToolSupport(observed.capabilities, level)));
   if (!carriesTools) return false;
   if (!isNativeHarnessDriverKind(driverKind)) {
     return (

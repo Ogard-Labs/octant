@@ -1,5 +1,6 @@
 import { decodeProjectId, decodeWindowId } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
+import { hubActScopeFromSpokeLink } from "../hub/hubActScope";
 import { createThreadMessageQueueAuthority } from "./threadMessageQueueAuthority";
 
 const windowId = decodeWindowId("93000000-0000-4000-8000-000000000001");
@@ -27,6 +28,29 @@ function setup(overrides: { readonly paired?: () => boolean } = {}) {
 }
 
 describe("who a queued message may wait for", () => {
+  it("holds a hub-introduced device's queued Code turn to the Projects the member's Act item names", () => {
+    const named = decodeProjectId("93000000-0000-4000-8000-000000000013");
+    const authority = createThreadMessageQueueAuthority({
+      isLocalWindowLive: () => false,
+      isPairedDevice: (id) => String(id) === String(deviceId),
+      localWindowCanAccess: () => false,
+      projectType: () => "code",
+      hasActiveCodeProject: () => true,
+      isRestrictedDevice: (id) => String(id) === String(deviceId),
+      hubActScope: () =>
+        hubActScopeFromSpokeLink({
+          status: () =>
+            ({
+              membership: "member",
+              grant: { items: ["roster", "introduce", "act"], actProjects: [named] },
+            }) as never,
+        }),
+    });
+    // Asked at enqueue and again before each dispatch.
+    expect(authority.canAccess(deviceId, "code", named)).toBe(true);
+    expect(authority.canAccess(deviceId, "code", codeProject)).toBe(false);
+  });
+
   it("lets a paired device queue on the threads it may already send to", () => {
     const authority = setup();
     expect(authority.isWindowLive(deviceId)).toBe(true);

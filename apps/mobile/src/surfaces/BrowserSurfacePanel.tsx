@@ -1,14 +1,32 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
+  AppState,
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import {
+  createMobilePairedBrowserControlClient,
+  handBackMobileBrowserSurface,
   loadMobileBrowserSurface,
   MobileInboxFailure,
+  takeOverMobileBrowserSurface,
   tapMobileBrowserSurface,
   type MobileBrowserSurfaceView,
   type MobileInboxMode,
   type MobileRemoteTransport,
   type RemoteThreadSurfaceReach,
 } from "@octant/client-runtime";
+import {
+  MAX_PAIRED_BROWSER_TEXT_LENGTH,
+  type PairedBrowserInput,
+  type PairedBrowserStreamEvent,
+  type PairedBrowserWithheldReason,
+} from "@octant/contracts/paired-browser-control";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { useTheme } from "../../design-system";
 import { browserSurfaceReachNote, browserSurfaceStatusNote } from "./threadSurfacePresentation";
@@ -18,12 +36,25 @@ export interface BrowserSurfacePanelProps {
   readonly threadId: string;
   readonly mode: MobileInboxMode;
   readonly reach: RemoteThreadSurfaceReach;
+  /** Person-paired devices can hold a live Browser page via touch and keyboard input. */
+  readonly actsAsHostPerson?: boolean;
   /**
    * Draw only the page picture, small, over the conversation; a tap expands it
    * rather than clicking in the page, which a thumbnail is too small to aim at.
    */
   readonly compact?: { readonly onExpand: () => void };
 }
+
+interface PairedLiveFrame {
+  readonly frameId: number;
+  readonly src: string;
+}
+
+const WITHHELD_COPY: Readonly<Record<PairedBrowserWithheldReason, string>> = {
+  "private-custody": "Frames are paused while a login fill or private script is active.",
+  "native-prompt": "Frames are paused while a prompt is open on the computer.",
+  "outside-document": "This tab moved outside the held page. Finish this on the computer.",
+};
 
 /**
  * What the Mac's browser is showing for this thread, on the phone.
@@ -39,6 +70,29 @@ export function BrowserSurfacePanel(props: BrowserSurfacePanelProps) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | undefined>();
   const [frame, setFrame] = useState<{ readonly width: number; readonly height: number }>();
+  const [pairedLease, setPairedLease] = useState<MobileBrowserSurfaceView["pairedLease"]>();
+  const [liveFrame, setLiveFrame] = useState<PairedLiveFrame | undefined>();
+  const [withheld, setWithheld] = useState<PairedBrowserWithheldReason | undefined>();
+  const [appHidden, setAppHidden] = useState(() => AppState.currentState !== "active");
+  const [typedText, setTypedText] = useState("");
+  const sequence = useRef(0);
+  const pairedControl = useMemo(
+    () => createMobilePairedBrowserControlClient(props.transport),
+    [props.transport],
+  );
+
+  // Blank any live frame immediately when the app leaves the foreground so the
+  // OS app switcher never caches a screenshot of a signed-in page.
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      const hidden = nextState !== "active";
+      setAppHidden(hidden);
+      if (hidden) setLiveFrame(undefined);
+    });
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -65,10 +119,134 @@ export function BrowserSurfacePanel(props: BrowserSurfacePanelProps) {
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    if (pairedLease === undefined) return;
+    const abort = new AbortController();
+    const onEvent = (event: PairedBrowserStreamEvent) => {
+      if (event.kind === "frame") {
+        if (AppState.currentState !== "active") return;
+        setWithheld(undefined);
+        setLiveFrame({
+          frameId: event.frameId,
+          src: `data:image/jpeg;base64,${event.jpegBase64}`,
+        });
+        return;
+      }
+      if (event.kind === "withheld") {
+        setLiveFrame(undefined);
+        setWithheld(event.reason);
+        return;
+      }
+      if (event.kind === "file-chooser") {
+        setMessage("A file chooser opened on the page. Finish this on the computer.");
+        return;
+      }
+      if (event.kind === "reclaimed-locally") {
+        setLiveFrame(undefined);
+        setPairedLease(undefined);
+        setMessage("Reclaimed on the computer.");
+        return;
+      }
+      setLiveFrame(undefined);
+      setPairedLease(undefined);
+      setMessage(
+        event.reason === "handed-back"
+          ? "Handed back to the agent."
+          : "Remote control ended. Finish this on the computer or take over again.",
+      );
+    };
+    void pairedControl
+      .stream({ leaseId: pairedLease.leaseId, onEvent, signal: abort.signal })
+      .catch(() => undefined);
+    return () => {
+      abort.abort();
+    };
+  }, [pairedControl, pairedLease]);
+
+  const sendPairedEvents = useCallback(
+    async (events: ReadonlyArray<PairedBrowserInput>) => {
+      if (pairedLease === undefined || events.length === 0) return;
+      sequence.current += 1;
+      const result = await pairedControl.sendInput(pairedLease.leaseId, sequence.current, events);
+      if (result.status === "refused") {
+        if (result.reason === "stale-frame") {
+          setMessage("The page changed before that tap landed.");
+        } else if (result.reason === "lease-ended" || result.reason === "authority-ended") {
+          setLiveFrame(undefined);
+          setPairedLease(undefined);
+          setMessage("Remote control ended. Finish this on the computer or take over again.");
+        } else if (result.reason === "rate-limited") {
+          setMessage("Slow down — input rate limit reached.");
+        }
+      }
+    },
+    [pairedControl, pairedLease],
+  );
+
+  const takeOver = useCallback(async () => {
+    if (props.actsAsHostPerson !== true) return;
+    setBusy(true);
+    setMessage(undefined);
+    try {
+      const next = await takeOverMobileBrowserSurface({
+        transport: props.transport,
+        threadId: props.threadId,
+        ...(view?.action?.authority === undefined ? {} : { authority: view.action.authority }),
+      });
+      setView(next);
+      if (next.pairedLease !== undefined) {
+        sequence.current = 0;
+        setWithheld(undefined);
+        setPairedLease(next.pairedLease);
+      }
+    } catch (cause) {
+      setMessage(
+        cause instanceof MobileInboxFailure
+          ? cause.message
+          : "Could not hold the Browser page from this device.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }, [props.actsAsHostPerson, props.threadId, props.transport, view?.action?.authority]);
+
+  const handBack = useCallback(async () => {
+    setBusy(true);
+    setMessage(undefined);
+    try {
+      const next = await handBackMobileBrowserSurface({
+        transport: props.transport,
+        threadId: props.threadId,
+        ...(pairedLease === undefined ? {} : { leaseId: pairedLease.leaseId }),
+        ...(view?.action?.authority === undefined ? {} : { authority: view.action.authority }),
+      });
+      setLiveFrame(undefined);
+      setWithheld(undefined);
+      setPairedLease(undefined);
+      setView(next);
+    } catch (cause) {
+      setMessage(
+        cause instanceof MobileInboxFailure ? cause.message : "Could not hand the page back.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }, [pairedLease, props.threadId, props.transport, view?.action?.authority]);
+
   const tap = useCallback(
-    async (x: number, y: number) => {
+    async (x: number, y: number, kind: "tap" | "long-press" = "tap") => {
+      if (frame === undefined || frame.width <= 0 || frame.height <= 0) return;
+      const point = {
+        x: Math.min(1, Math.max(0, x / frame.width)),
+        y: Math.min(1, Math.max(0, y / frame.height)),
+      };
+      if (pairedLease !== undefined) {
+        if (liveFrame === undefined) return;
+        await sendPairedEvents([{ kind, frameId: liveFrame.frameId, x: point.x, y: point.y }]);
+        return;
+      }
       const handle = view?.action;
-      if (handle === undefined || frame === undefined || props.reach !== "interactive") return;
+      if (handle === undefined || props.reach !== "interactive") return;
       setBusy(true);
       setMessage(undefined);
       try {
@@ -79,10 +257,7 @@ export function BrowserSurfacePanel(props: BrowserSurfacePanelProps) {
             handle,
             // Normalized against the picture actually drawn, so the host places
             // the tap in its own viewport instead of in phone pixels.
-            point: {
-              x: Math.min(1, Math.max(0, x / frame.width)),
-              y: Math.min(1, Math.max(0, y / frame.height)),
-            },
+            point,
           }),
         );
       } catch (cause) {
@@ -93,7 +268,16 @@ export function BrowserSurfacePanel(props: BrowserSurfacePanelProps) {
         setBusy(false);
       }
     },
-    [frame, props.reach, props.threadId, props.transport, view?.action],
+    [
+      frame,
+      liveFrame,
+      pairedLease,
+      props.reach,
+      props.threadId,
+      props.transport,
+      sendPairedEvents,
+      view?.action,
+    ],
   );
 
   const styles = useMemo(
@@ -103,6 +287,24 @@ export function BrowserSurfacePanel(props: BrowserSurfacePanelProps) {
         note: { ...mobileTypography.caption, color: colors.textSecondary },
         status: { ...mobileTypography.caption, color: colors.textTertiary },
         message: { ...mobileTypography.caption, color: colors.danger },
+        actionsRow: { flexDirection: "row", gap: mobileSpacing.sm, alignItems: "center" },
+        actionButton: {
+          ...mobileTypography.caption,
+          color: colors.accent,
+          paddingVertical: mobileSpacing.xs,
+        },
+        textRow: { flexDirection: "row", gap: mobileSpacing.xs, alignItems: "center" },
+        textInput: {
+          ...mobileTypography.caption,
+          flex: 1,
+          borderWidth: 1,
+          borderColor: colors.border,
+          borderRadius: 8,
+          paddingHorizontal: mobileSpacing.sm,
+          paddingVertical: mobileSpacing.xs,
+          color: colors.textPrimary,
+          backgroundColor: colors.surface,
+        },
         stage: {
           borderRadius: 12,
           borderWidth: 1,
@@ -135,6 +337,11 @@ export function BrowserSurfacePanel(props: BrowserSurfacePanelProps) {
 
   const status = view?.status ?? "waiting";
   const unavailable = status === "unavailable";
+  const canHold =
+    props.actsAsHostPerson === true &&
+    props.compact === undefined &&
+    view !== undefined &&
+    (status === "showing" || status === "waiting");
 
   if (props.compact !== undefined) {
     const onExpand = props.compact.onExpand;
@@ -145,7 +352,7 @@ export function BrowserSurfacePanel(props: BrowserSurfacePanelProps) {
         onPress={onExpand}
         testID="mobile-browser-surface-compact"
       >
-        {view?.screenshotDataUrl === undefined ? (
+        {view?.screenshotDataUrl === undefined || appHidden ? (
           <Text numberOfLines={3} style={styles.compactNote}>
             {browserSurfaceStatusNote({
               status,
@@ -165,39 +372,182 @@ export function BrowserSurfacePanel(props: BrowserSurfacePanelProps) {
     );
   }
 
+  const displayedImage =
+    pairedLease !== undefined
+      ? appHidden || withheld !== undefined
+        ? undefined
+        : liveFrame?.src
+      : appHidden
+        ? undefined
+        : view?.screenshotDataUrl;
+
   return (
     <View style={styles.panel} testID="mobile-browser-surface">
-      <Text style={styles.note}>{browserSurfaceReachNote(props.reach)}</Text>
+      <Text style={styles.note}>
+        {pairedLease !== undefined
+          ? "You hold this page from this device. Touch and keyboard input stay on the computer."
+          : browserSurfaceReachNote(props.reach)}
+      </Text>
+      {canHold ? (
+        <View style={styles.actionsRow}>
+          {pairedLease === undefined ? (
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => void takeOver()}
+              testID="mobile-browser-surface-take-over"
+            >
+              <Text style={styles.actionButton}>
+                {view?.waitingForPerson === "sign-in" ? "Sign in here" : "Take over"}
+              </Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              disabled={busy}
+              onPress={() => void handBack()}
+              testID="mobile-browser-surface-hand-back"
+            >
+              <Text style={styles.actionButton}>Hand back</Text>
+            </Pressable>
+          )}
+        </View>
+      ) : null}
       <View
         onLayout={(event) => setFrame(event.nativeEvent.layout)}
         style={styles.stage}
         testID="mobile-browser-surface-stage"
       >
-        {view?.screenshotDataUrl === undefined ? (
+        {pairedLease !== undefined && appHidden ? (
+          <Text style={styles.empty}>Live frame hidden while app is inactive.</Text>
+        ) : pairedLease !== undefined && withheld !== undefined ? (
+          <Text style={styles.empty}>{WITHHELD_COPY[withheld]}</Text>
+        ) : displayedImage === undefined ? (
           <Text style={unavailable ? styles.status : styles.empty}>
-            {browserSurfaceStatusNote({
-              status,
-              stale: view?.stale ?? true,
-              ...(view?.url === undefined ? {} : { url: view.url }),
-            })}
+            {pairedLease !== undefined
+              ? "Waiting for live frame from the computer..."
+              : browserSurfaceStatusNote({
+                  status,
+                  stale: view?.stale ?? true,
+                  ...(view?.url === undefined ? {} : { url: view.url }),
+                })}
           </Text>
         ) : (
           <Pressable
             accessibilityLabel="Tap in the page the Mac is showing"
             accessibilityRole="imagebutton"
-            disabled={props.reach !== "interactive" || busy}
+            disabled={pairedLease === undefined && (props.reach !== "interactive" || busy)}
+            onLongPress={(event) => {
+              if (pairedLease !== undefined) {
+                void tap(event.nativeEvent.locationX, event.nativeEvent.locationY, "long-press");
+              }
+            }}
             onPress={(event) => void tap(event.nativeEvent.locationX, event.nativeEvent.locationY)}
             testID="mobile-browser-surface-page"
           >
             <Image
               accessibilityIgnoresInvertColors
               resizeMode="contain"
-              source={{ uri: view.screenshotDataUrl }}
+              source={{ uri: displayedImage }}
               style={styles.image}
             />
           </Pressable>
         )}
       </View>
+      {pairedLease !== undefined ? (
+        <>
+          <View style={styles.actionsRow}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={liveFrame === undefined}
+              onPress={() => {
+                if (liveFrame !== undefined) {
+                  void sendPairedEvents([
+                    {
+                      kind: "scroll",
+                      frameId: liveFrame.frameId,
+                      x: 0.5,
+                      y: 0.5,
+                      deltaX: 0,
+                      deltaY: -240,
+                    },
+                  ]);
+                }
+              }}
+              testID="mobile-browser-surface-scroll-up"
+            >
+              <Text style={styles.actionButton}>Scroll up</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={liveFrame === undefined}
+              onPress={() => {
+                if (liveFrame !== undefined) {
+                  void sendPairedEvents([
+                    {
+                      kind: "scroll",
+                      frameId: liveFrame.frameId,
+                      x: 0.5,
+                      y: 0.5,
+                      deltaX: 0,
+                      deltaY: 240,
+                    },
+                  ]);
+                }
+              }}
+              testID="mobile-browser-surface-scroll-down"
+            >
+              <Text style={styles.actionButton}>Scroll down</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() =>
+                void sendPairedEvents([
+                  { kind: "key", phase: "down", key: "Enter", code: "Enter" },
+                  { kind: "key", phase: "up", key: "Enter", code: "Enter" },
+                ])
+              }
+              testID="mobile-browser-surface-key-enter"
+            >
+              <Text style={styles.actionButton}>Enter</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() =>
+                void sendPairedEvents([
+                  { kind: "key", phase: "down", key: "Backspace", code: "Backspace" },
+                  { kind: "key", phase: "up", key: "Backspace", code: "Backspace" },
+                ])
+              }
+              testID="mobile-browser-surface-key-backspace"
+            >
+              <Text style={styles.actionButton}>Backspace</Text>
+            </Pressable>
+          </View>
+          <View style={styles.textRow}>
+            <TextInput
+              accessibilityLabel="Type into the held page"
+              onChangeText={setTypedText}
+              placeholder="Type or paste into the page"
+              style={styles.textInput}
+              testID="mobile-browser-surface-text-input"
+              value={typedText}
+            />
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                const payload = typedText.slice(0, MAX_PAIRED_BROWSER_TEXT_LENGTH);
+                if (payload.length === 0) return;
+                setTypedText("");
+                void sendPairedEvents([{ kind: "text", text: payload }]);
+              }}
+              testID="mobile-browser-surface-text-send"
+            >
+              <Text style={styles.actionButton}>Send</Text>
+            </Pressable>
+          </View>
+        </>
+      ) : null}
       {view?.screenshotDataUrl === undefined ? null : (
         <Text style={styles.status}>
           {browserSurfaceStatusNote({

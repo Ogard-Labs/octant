@@ -38,8 +38,22 @@ export interface ProviderNativeSetupInput {
   readonly executionPolicy: ProviderExecutionPolicy;
   /** The account's own switch, on unless the person turned it off (`accountRunsAsItself`). */
   readonly accountAllows: boolean;
-  /** The Work or Code Project lists this provider in `nativeProviders`. Always false in Chat. */
+  /**
+   * The Work or Code Project lists this provider in `nativeProviders`
+   * (Trusted providers). Always false in Chat. It grants the Project's own
+   * code under Strict, and turns the rest of the setup on for an account the
+   * person turned off.
+   */
   readonly projectTrusts: boolean;
+  /**
+   * Outside Strict, the person added this Work or Code Project, which is
+   * their trust decision for every agent on its threads (maintainer
+   * decision, 2026-11-18): the Project's own code loads with the rest of the
+   * setup. It never turns the setup on by itself, so an account turned off
+   * stays off. Absent or false under Strict, where only `projectTrusts`
+   * grants the Project's code.
+   */
+  readonly projectAddedTrusts?: boolean;
   /**
    * The thread's own choice. `off` keeps every feature unloaded at every
    * level, Full access included; `on` counts as the account switch does and
@@ -68,8 +82,9 @@ export interface ProviderNativeSetupInput {
  * plugins carry hooks of their own. Plan also leaves the account's tool
  * servers off, because a server's tools can write. Chat may keep them: they
  * are the person's own tool servers, which Chat's no-filesystem rule does not
- * cover, and the switch says so. A Project's code loads only where the person
- * trusted that Project for that provider, Full access included.
+ * cover, and the switch says so. A Project's code loads where the person
+ * added the Project, outside Strict, and under Strict only where they
+ * confirmed that Project's code, Full access included.
  */
 export function resolveProviderNativeSetup(
   input: ProviderNativeSetupInput,
@@ -78,6 +93,8 @@ export function resolveProviderNativeSetup(
   if (input.threadChoice === "off") return undefined;
   const accountAllows = input.accountAllows || input.threadChoice === "on";
   const projectTrusts = input.mode !== "chat" && input.projectTrusts;
+  const projectCodeTrusted =
+    projectTrusts || (input.mode !== "chat" && input.projectAddedTrusts === true);
   const fullAccess = input.mode !== "chat" && input.executionPolicy === "full-access";
   const plan = input.executionPolicy === "plan";
   if (!accountAllows && !projectTrusts && !fullAccess) return undefined;
@@ -88,7 +105,7 @@ export function resolveProviderNativeSetup(
     skills: true,
     toolServers: !plan,
     hooks: !plan && !chat,
-    projectCode: projectTrusts && !plan,
+    projectCode: projectCodeTrusted && !plan,
   };
 }
 
@@ -137,13 +154,16 @@ export type ProviderMemoryWrites = "session-tools" | "background";
  * Whether a session launches with the provider's own memory on. The account's
  * own setting decides (on unless the person turned it off,
  * `accountKeepsOwnMemory`), and nothing else turns it on: not "Run as itself",
- * not a trusted Project, not Full access. Plan and Chat may write nothing a
- * later session would load, and the runtime's memory folder is exactly that,
- * so there the memory is loaded only when it is read-only: a provider whose
- * memory only its session tools write keeps it in Plan and Chat, where Plan
- * holds no write tool and its sandbox binds that folder read-only, and Chat's
- * gate refuses a write into it; a provider that writes memories in the
- * background keeps it off there (maintainer decision, 2026-11-16).
+ * not a trusted Project, not Full access. Outside Strict that setting decides
+ * in Plan and Chat too, as in the provider's own app, whichever way the
+ * runtime writes its memory (maintainer decision, 2026-11-21). Under Strict,
+ * Plan and Chat may write nothing a later session would load, and the
+ * runtime's memory folder is exactly that, so there the memory is loaded only
+ * when it is read-only: a provider whose memory only its session tools write
+ * keeps it in Plan and Chat, where Plan holds no write tool and its sandbox
+ * binds that folder read-only, and Chat's gate refuses a write into it; a
+ * provider that writes memories in the background keeps it off there
+ * (maintainer decision, 2026-11-16).
  */
 export function providerOwnMemoryLaunches(input: {
   /** The account's own switch (`accountKeepsOwnMemory`). */
@@ -151,8 +171,11 @@ export function providerOwnMemoryLaunches(input: {
   readonly mode: "chat" | "work" | "code" | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly memoryWrites: ProviderMemoryWrites;
+  /** Whether the launch is Strict; absent is Strict. */
+  readonly strict?: boolean | undefined;
 }): boolean {
   if (!input.accountAllows || input.mode === undefined) return false;
+  if (input.strict === false) return true;
   const readOnlyLaunch = input.mode === "chat" || input.executionPolicy === "plan";
   return !readOnlyLaunch || input.memoryWrites === "session-tools";
 }

@@ -33,6 +33,7 @@ const everyDriverKind = [
   "cline",
   "qwen",
   "fx",
+  "antigravity",
   "openai-compatible",
   "anthropic-compatible",
   "azure-foundry",
@@ -99,6 +100,8 @@ describe("bundled provider-driver plugins", () => {
       cline: ["12", "13"],
       qwen: ["13", "14"],
       fx: ["14", "15"],
+      // After Added ACP agents' seed; `1b` is the digest copilot's `11` normalizes to.
+      antigravity: ["1c", "1d"],
       "amazon-bedrock": ["19", "1a"],
       "acp-agent": ["1a", "1b"],
     };
@@ -169,7 +172,7 @@ describe("bundled provider-driver plugins", () => {
     expect(catalog.map((listing) => listing.entry.driverKind)).toEqual(
       BUNDLED_PROVIDER_DRIVER_PLUGINS.map((plugin) => plugin.driverKind),
     );
-    expect(catalog).toHaveLength(23);
+    expect(catalog).toHaveLength(24);
     for (const listing of catalog) {
       expect(listing.installed).toBe(true);
       expect(listing.trusted).toBe(true);

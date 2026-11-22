@@ -37,6 +37,7 @@ import { rememberThemeMode } from "./firstPaintTheme";
 import { upgradeLegacyAccent } from "./accentSwatches";
 import { useMediaQueryMatches } from "./useMediaQueryMatches";
 import { usePluginThemes } from "./pluginThemes";
+import type { TimestampFormatPreference } from "./timestampFormat";
 
 const VARIABLE_ALIASES: Readonly<Record<string, ReadonlyArray<string>>> = {
   sidebar: ["sidebar-opaque"],
@@ -221,10 +222,16 @@ export function ThemeSettingsProvider(props: {
       const thin = thinGlassLevels(resolved.mode, accessible.glassTint);
       if (thin === "") delete root.dataset.octantGlassThin;
       else root.dataset.octantGlassThin = thin;
-      // Density and smoothing are plain attributes the stylesheets read; the
-      // contrast step scales the derived washes only for a Custom preset.
+      // Density, smoothing, and timestamp clock format are plain attributes the
+      // stylesheets and shared time formatter read; the contrast step scales
+      // the derived washes only for a Custom preset.
       root.dataset.octantDensity = accessible.density ?? "comfortable";
       root.dataset.octantFontSmoothing = accessible.fontSmoothing === "off" ? "off" : "on";
+      if (accessible.timestampFormat === undefined) {
+        delete root.dataset.octantTimestampFormat;
+      } else {
+        root.dataset.octantTimestampFormat = accessible.timestampFormat;
+      }
       const customId =
         resolved.mode === "light" ? accessible.lightPresetId : accessible.darkPresetId;
       const customSeeds =
@@ -273,6 +280,7 @@ export function ThemeSettingsProvider(props: {
       delete root.dataset.octantGlassThin;
       delete root.dataset.octantDensity;
       delete root.dataset.octantFontSmoothing;
+      delete root.dataset.octantTimestampFormat;
       root.style.removeProperty("--oct-contrast-scale");
       delete root.dataset.octantReducedMotion;
       delete root.dataset.octantReducedTransparency;
@@ -297,15 +305,35 @@ export function ThemeSettingsProvider(props: {
         : resolveTerminalColorProjection(resolved, { increasedContrast }),
     [resolved, increasedContrast],
   );
+  // When a theme is loaded without `timestampFormat`, provide explicit `null`
+  // (locale default) rather than `undefined`, so mounted children immediately
+  // drop any previous clock format during render before the layout effect
+  // clears `data-octant-timestamp-format` on the document root.
+  const timestampFormat: TimestampFormatPreference | undefined =
+    applied === undefined ? undefined : (applied.accessible.timestampFormat ?? null);
   return (
     <IncreasedContrastContext.Provider value={increasedContrast}>
-      <EditorColorContext.Provider value={editorColors}>
-        <TerminalColorContext.Provider value={terminalColors}>
-          {props.children}
-        </TerminalColorContext.Provider>
-      </EditorColorContext.Provider>
+      <TimestampFormatContext.Provider value={timestampFormat}>
+        <EditorColorContext.Provider value={editorColors}>
+          <TerminalColorContext.Provider value={terminalColors}>
+            {props.children}
+          </TerminalColorContext.Provider>
+        </EditorColorContext.Provider>
+      </TimestampFormatContext.Provider>
     </IncreasedContrastContext.Provider>
   );
+}
+
+const TimestampFormatContext = createContext<TimestampFormatPreference | undefined>(undefined);
+
+/**
+ * The theme's configured timestamp clock format (`"12h"` or `"24h"`), `null`
+ * when the mounted theme explicitly leaves it unset (locale default), or
+ * `undefined` outside a `ThemeSettingsProvider`. Components subscribing to
+ * this hook re-render immediately when the theme setting changes.
+ */
+export function useTimestampFormat(): TimestampFormatPreference | undefined {
+  return useContext(TimestampFormatContext);
 }
 
 const EditorColorContext = createContext<EditorColorProjection | undefined>(undefined);

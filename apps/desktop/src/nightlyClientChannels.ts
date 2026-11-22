@@ -32,6 +32,7 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   browserSurfaceDetach: "replaced",
   // Nightly has no native page view to capture; its card keeps the host's picture.
   browserSurfacePreview: "replaced",
+  browserSurfaceTabIcons: "replaced",
   browserSurfaceOpenExternal: "local",
   browserSurfaceState: "replaced",
   // Nightly presents pages in its own renderer, so app shortcuts reach it directly.
@@ -57,6 +58,9 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   // The background service and login item belong to the app that owns the host.
   backgroundHostState: "octant-only",
   backgroundHostChange: "octant-only",
+  // Sleep prevention belongs to the app that owns the host.
+  keepAwakeStatus: "octant-only",
+  keepAwakeRefresh: "octant-only",
   computerUseTest: "octant-only",
   computerUseStatus: "brokered",
   computerUsePermissions: "brokered",
@@ -95,6 +99,8 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   shutdownMovesOffered: "octant-only",
   shutdownProgress: "octant-only",
   requestQuit: "octant-only",
+  filesCloseRequest: "local",
+  filesCloseReply: "local",
   previewHandoff: "local",
   requestCodeOperationApproval: "local",
   updateCodeOperationApprovalAnchor: "local",
@@ -156,10 +162,12 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   pairedComputerForget: "octant-only",
   pairedComputerSettle: "octant-only",
   pairedComputerRequest: "octant-only",
+  pairedComputerIntroduceToHub: "octant-only",
   remoteServerPageOpen: "octant-only",
   remoteServerPageSign: "octant-only",
   remoteServerPageSigned: "octant-only",
   remoteServerPageForgetHost: "octant-only",
+  remotePortForwardOpen: "octant-only",
 } as const satisfies Readonly<Record<ChannelKey, NightlyChannelClass>>;
 
 const CLASS_BY_CHANNEL: ReadonlyMap<string, NightlyChannelClass> = new Map(
@@ -174,6 +182,7 @@ const CLASS_BY_CHANNEL: ReadonlyMap<string, NightlyChannelClass> = new Map(
  * menu commands, Code links, the resolved sidebar material and a menu-bar task.
  */
 export const NIGHTLY_CLIENT_PUSH_CHANNELS: ReadonlySet<string> = new Set([
+  DESKTOP_IPC_CHANNELS.filesCloseRequest,
   DESKTOP_IPC_CHANNELS.menuBarTask,
   DESKTOP_IPC_CHANNELS.openSettings,
   DESKTOP_IPC_CHANNELS.quitShortcutHint,

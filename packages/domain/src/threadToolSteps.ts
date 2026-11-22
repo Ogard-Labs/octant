@@ -3,6 +3,7 @@ import {
   RUNTIME_EVENTS_PER_TOOL_STEP,
   type ProviderRuntimeEvent,
   type ShieldDecision,
+  type ThreadCallTiming,
   type ThreadRoutineReceipt,
   type ToolOutsideContentMark,
   type ThreadToolStep,
@@ -111,6 +112,7 @@ export function recordThreadToolStep(
   current: ThreadToolSteps | undefined,
   event: ProviderRuntimeEvent,
   limit: number | undefined,
+  timing?: ThreadCallTiming | undefined,
 ): ThreadToolSteps | undefined {
   if (
     event.kind !== "tool-start" &&
@@ -160,6 +162,7 @@ export function recordThreadToolStep(
         state: event.kind === "tool-success" ? "completed" : "failed",
         ...(kept === undefined ? {} : { summary: kept }),
         ...(published === undefined ? {} : { published }),
+        ...(timing === undefined ? {} : { timing }),
         ...(previous?.outsideContent === undefined
           ? {}
           : { outsideContent: previous.outsideContent }),
@@ -276,6 +279,7 @@ export function recordThreadAppToolStep(
     readonly state: "started" | "completed" | "failed";
   },
   limit: number | undefined,
+  timing?: ThreadCallTiming | undefined,
 ): ThreadToolSteps | undefined {
   const steps = current?.steps ?? [];
   const toolCallId = boundedIdentifier(call.toolCallId);
@@ -285,10 +289,20 @@ export function recordThreadAppToolStep(
     return current?.truncated === true ? current : { steps, truncated: true };
   }
   if (previous?.state === call.state) return current;
+  const terminal = call.state === "completed" || call.state === "failed";
   const next: ThreadToolStep =
     previous === undefined
-      ? { toolCallId, toolName: boundedIdentifier(call.toolName), state: call.state }
-      : { ...previous, state: call.state };
+      ? {
+          toolCallId,
+          toolName: boundedIdentifier(call.toolName),
+          state: call.state,
+          ...(terminal && timing !== undefined ? { timing } : {}),
+        }
+      : {
+          ...previous,
+          state: call.state,
+          ...(terminal && timing !== undefined ? { timing } : {}),
+        };
   const nextSteps = steps.slice();
   if (index === -1) nextSteps.push(next);
   else nextSteps[index] = next;

@@ -12,16 +12,18 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { enabledModes } from "@octant/domain";
+import type { ClientPrincipal } from "./clientPrincipal";
 
 /**
  * Who reads the list: a window of this computer or a paired device, by the
  * service scope its authenticated principal resolved to. The services that
- * hold asks decide differently for the two, so the kind travels with the
- * scope instead of being guessed from it.
+ * hold asks decide differently for the two, so the kind and authenticated
+ * principal travel with the scope instead of being guessed from it.
  */
 export interface PendingRequestReader {
   readonly kind: PrincipalKind;
   readonly scopeId: WindowId;
+  readonly principal?: ClientPrincipal;
 }
 
 export interface PendingRequestSources {
@@ -57,12 +59,16 @@ export interface PendingRequestSources {
   readonly children: (reader: PendingRequestReader) => Promise<ReadonlyArray<PendingRequest>>;
   /**
    * Every other ask waiting on the person that this reader could answer: MCP
-   * tool approvals, Project memory and routine proposals, image offers, and
+   * tool approvals, Project memory and routine proposals, service offers, and
    * Browser approvals and sign-in cards, a host-run turn's among them. Each
    * comes from its holding service's own list for the reader, and is answered
    * through that service's own route.
    */
-  readonly asks?: (reader: PendingRequestReader) => ReadonlyArray<WaitingAsk>;
+  readonly asks?: (
+    reader: PendingRequestReader,
+    imageOffersOnly: boolean,
+  ) => ReadonlyArray<WaitingAsk> | Promise<ReadonlyArray<WaitingAsk>>;
+  readonly offerHostRun?: string;
 }
 
 /**
@@ -110,20 +116,28 @@ export class PendingRequestService {
   async list(
     windowId: WindowId,
     readerKind: PendingRequestReader["kind"] = "local-window",
+    principal?: ClientPrincipal,
+    imageOffersOnly = false,
   ): Promise<PendingRequestList> {
     const modes = enabledModes(this.#sources.readSettings());
-    const asks = (this.#sources.asks?.({ kind: readerKind, scopeId: windowId }) ?? [])
+    const reader: PendingRequestReader = {
+      kind: readerKind,
+      scopeId: windowId,
+      ...(principal === undefined ? {} : { principal }),
+    };
+    const [work, code, children, waiting] = await Promise.all([
+      modes.includes("work") ? this.#sources.work(windowId) : [],
+      this.#sources.code(windowId),
+      this.#sources.children(reader),
+      this.#sources.asks?.(reader, imageOffersOnly) ?? [],
+    ]);
+    const asks = waiting
       .filter((ask) => modes.includes(ask.mode))
       .toSorted(
         (left, right) =>
           left.requestedAt.localeCompare(right.requestedAt) ||
           left.askId.localeCompare(right.askId),
       );
-    const [work, code, children] = await Promise.all([
-      modes.includes("work") ? this.#sources.work(windowId) : [],
-      this.#sources.code(windowId),
-      this.#sources.children({ kind: readerKind, scopeId: windowId }),
-    ]);
     const chat = modes.includes("chat") ? this.#sources.chat() : [];
     const oldestFirst = [
       ...work,
@@ -160,6 +174,9 @@ export class PendingRequestService {
       truncated: oldestFirst.length > MAX_PENDING_REQUESTS,
       // Absent when nothing waits, so the list reads as it did before asks.
       ...(asks.length === 0 ? {} : { asks: asks.slice(0, MAX_PENDING_REQUESTS) }),
+      ...(this.#sources.offerHostRun === undefined
+        ? {}
+        : { offerHostRun: this.#sources.offerHostRun }),
     });
   }
 }

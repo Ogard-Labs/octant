@@ -1,12 +1,10 @@
 import { decodeCodeProjectPullRequestRow, type CodeProjectPullRequestRow } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts/code";
-import type { CodeOperationEvent } from "@octant/contracts/code-operations";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
 import { describe, expect, it } from "vitest";
 import {
   CodeFollowUpPolicyRejected,
   completeCodeFollowUp,
-  deriveCodeFollowUpTrigger,
   deriveFailingChecksFollowUpTriggers,
   buildCiFailureFollowUpDraft,
   evaluateCodeFollowUpTrigger,
@@ -155,79 +153,6 @@ describe("code thread follow-up policy", () => {
   });
 });
 
-describe("code follow-up automatic trigger derivation", () => {
-  function event(partial: CodeOperationEvent): CodeOperationEvent {
-    return partial;
-  }
-
-  it("derives triggers only from user-actionable structural edges", () => {
-    expect(
-      deriveCodeFollowUpTrigger(
-        event({
-          kind: "approval-requested",
-          approvalId: "c0000000-0000-4000-8000-000000000001" as never,
-          action: "git-push",
-          summary: "Push to origin",
-        }),
-      ),
-    ).toEqual({ origin: "automatic", reason: "Approval requested: git-push" });
-
-    expect(
-      deriveCodeFollowUpTrigger(
-        event({
-          kind: "input-requested",
-          requestId: "req-1",
-          prompt: "Which branch?",
-          options: [],
-        }),
-      ),
-    ).toEqual({ origin: "automatic", reason: "The agent is waiting for your input." });
-
-    expect(
-      deriveCodeFollowUpTrigger(
-        event({ kind: "task-progress", taskId: "t1", state: "waiting", summary: "Needs review" }),
-      ),
-    ).toEqual({ origin: "automatic", reason: "Task needs attention: Needs review" });
-
-    expect(
-      deriveCodeFollowUpTrigger(
-        event({ kind: "child-activity", childId: "c1", state: "failed", summary: "crashed" }),
-      ),
-    ).toEqual({ origin: "automatic", reason: "Subagent failed: crashed" });
-
-    expect(deriveCodeFollowUpTrigger(event({ kind: "operation-state", state: "waiting" }))).toEqual(
-      { origin: "automatic", reason: "The operation is waiting for you." },
-    );
-  });
-
-  it("never derives a trigger from ordinary prose, telemetry, or plain progress", () => {
-    expect(
-      deriveCodeFollowUpTrigger(
-        event({
-          kind: "provider-content",
-          channel: "message",
-          content: {
-            contentId: "80000000-0000-4000-8000-000000000001" as never,
-            digest: "sha256:" + "a".repeat(64),
-            byteLength: 4,
-          },
-        }),
-      ),
-    ).toBeUndefined();
-    expect(
-      deriveCodeFollowUpTrigger(event({ kind: "usage", inputTokens: 10, outputTokens: 20 })),
-    ).toBeUndefined();
-    expect(
-      deriveCodeFollowUpTrigger(
-        event({ kind: "task-progress", taskId: "t1", state: "running", summary: "working" }),
-      ),
-    ).toBeUndefined();
-    expect(
-      deriveCodeFollowUpTrigger(event({ kind: "operation-state", state: "running" })),
-    ).toBeUndefined();
-  });
-});
-
 describe("failing checks follow-up trigger derivation", () => {
   const otherThreadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000002");
   const emptyState: ReadonlyMap<string, LinkedPullRequestDefinitiveChecks> = new Map();
@@ -350,6 +275,21 @@ describe("failing checks follow-up trigger derivation", () => {
       lastDefinitiveChecks: lostSight.lastDefinitiveChecks,
     });
     expect(failingAgain.triggers).toHaveLength(0);
+  });
+
+  it("keeps the failing-checks edge stable across a repository rename when linkId is present", () => {
+    const linkId = "50000000-0000-4000-8000-000000000042";
+    const first = deriveFailingChecksFollowUpTriggers({
+      rows: [checksRow({ repositoryOwner: "acme", repositoryName: "old-repo", linkId })],
+      lastDefinitiveChecks: emptyState,
+    });
+    expect(first.triggers).toHaveLength(1);
+
+    const renamed = deriveFailingChecksFollowUpTriggers({
+      rows: [checksRow({ repositoryOwner: "acme", repositoryName: "new-repo", linkId })],
+      lastDefinitiveChecks: first.lastDefinitiveChecks,
+    });
+    expect(renamed.triggers).toHaveLength(0);
   });
 });
 

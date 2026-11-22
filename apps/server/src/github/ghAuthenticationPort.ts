@@ -897,6 +897,8 @@ async function runBounded(
           if (Buffer.byteLength(stdout, "utf8") <= MAX_OUTPUT_BYTES)
             stdout += chunk.toString("utf8");
         });
+        child.stdout?.on("error", () => undefined);
+        child.stdin?.on("error", () => undefined);
         child.once("error", reject);
         child.once("close", (code) => resolve({ exitCode: code ?? 1, stdout }));
         if (stdin !== undefined) child.stdin?.end(stdin);

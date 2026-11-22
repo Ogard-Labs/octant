@@ -1,5 +1,10 @@
 import type { AddedAcpAgentProviderInstance, ProviderInstance } from "@octant/contracts";
-import { ACP_REGISTRY_AGENTS, acpRegistryAgent } from "@octant/plugin-host/acp-agents";
+import {
+  ACP_REGISTRY_AGENTS,
+  acpRegistryAgent,
+  addedAcpAgentLimitedProfile,
+  addedAcpAgentLimitedProfileRefusal,
+} from "@octant/plugin-host/acp-agents";
 import { useId, useState } from "react";
 import { SettingsSection } from "../settings/primitives";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -31,7 +36,11 @@ function integritySentence(agent: AddedAcpAgentProviderInstance): string | undef
       return "The download matched the checksum the ACP registry lists for this release.";
     case "package-manager":
       return source.kind === "registry"
-        ? `The package manager installed exactly release ${source.version}, checked against its registry's own integrity data, with install scripts off.`
+        ? install.installScriptsCompleted === true
+          ? `The package manager installed exactly release ${source.version}, checked against its registry's own integrity data; its install scripts ran when you trusted it.`
+          : install.hasInstallScripts === true
+            ? `The package manager installed exactly release ${source.version}, checked against its registry's own integrity data, with install scripts off. Trusting it runs its install script.`
+            : `The package manager installed exactly release ${source.version}, checked against its registry's own integrity data, with install scripts off.`
         : undefined;
     case "local-command":
       return `Your own command at ${install.executable}. Octant did not fetch it.`;
@@ -99,11 +108,23 @@ function AddAcpAgentForm(props: {
 }) {
   const id = useId();
   const [from, setFrom] = useState<"registry" | "local">("registry");
-  const [registryId, setRegistryId] = useState(ACP_REGISTRY_AGENTS[0]?.registryId ?? "");
+  // An entry a shipped profile runs in place of is listed only to point to
+  // that provider, so the form starts on one that can be added.
+  const [registryId, setRegistryId] = useState(
+    ACP_REGISTRY_AGENTS.find((agent) => agent.shippedAs === undefined)?.registryId ??
+      ACP_REGISTRY_AGENTS[0]?.registryId ??
+      "",
+  );
   const [displayName, setDisplayName] = useState("");
   const [command, setCommand] = useState("");
   const [args, setArgs] = useState("");
   const listed = acpRegistryAgent(registryId);
+  // The host refuses this agent added under another name; say so here, not
+  // only after the person asks to add it.
+  const limited =
+    listed === undefined
+      ? undefined
+      : addedAcpAgentLimitedProfile({ kind: "registry", registryId });
   const localReady = displayName.trim().length > 0 && command.trim().startsWith("/");
   return (
     <form
@@ -145,11 +166,13 @@ function AddAcpAgentForm(props: {
             <p className="setrow-hint">
               {listed === undefined
                 ? null
-                : `Release ${listed.version}, ${
-                    listed.distribution.kind === "binary"
-                      ? "downloaded from the address the registry lists"
-                      : `installed with ${listed.distribution.kind === "npx" ? "npm" : "uv"}`
-                  }. Octant has no reviewed profile for it yet. ${listed.unreviewedBecause}`}
+                : limited !== undefined
+                  ? addedAcpAgentLimitedProfileRefusal(limited)
+                  : `Release ${listed.version}, ${
+                      listed.distribution.kind === "binary"
+                        ? "downloaded from the address the registry lists"
+                        : `installed with ${listed.distribution.kind === "npx" ? "npm" : "uv"}`
+                    }. Octant has no reviewed profile for it yet. ${listed.unreviewedBecause}`}
             </p>
             <div className="setrow-control">
               <OctantSelectField
@@ -213,7 +236,10 @@ function AddAcpAgentForm(props: {
       </div>
       <div className="added-acp-agents__actions">
         <OctantButton
-          disabled={props.busy || (from === "local" ? !localReady : listed === undefined)}
+          disabled={
+            props.busy ||
+            (from === "local" ? !localReady : listed === undefined || limited !== undefined)
+          }
           size="sm"
           type="submit"
         >

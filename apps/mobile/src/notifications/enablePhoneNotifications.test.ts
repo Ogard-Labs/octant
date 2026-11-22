@@ -215,6 +215,49 @@ async function registeredBook(token = platformToken) {
   return book;
 }
 
+describe("hearing about new devices", () => {
+  it("is on unless the person turns it off for a computer, and a later token keeps the choice", async () => {
+    const host = recordingHost();
+    const book = memoryBook();
+    const requestCapability = vi.fn(async () => ({ status: "issued" as const, capability }));
+    const enable = (newDevices?: boolean) =>
+      enablePhoneNotifications({
+        transport: host.transport,
+        hostKeyFingerprint: fingerprint,
+        deviceId,
+        permission: permission(),
+        book,
+        requestCapability,
+        ...(newDevices === undefined ? {} : { newDevices }),
+      });
+
+    await enable();
+    await enable(false);
+    const preferences = host.bodies.map(
+      (body) => (body as { preferences: { newDevices?: boolean } }).preferences.newDevices,
+    );
+    // On is sent as no field, which a computer from before the setting accepts.
+    expect(preferences).toEqual([undefined, false]);
+    expect((await book.list())[0]?.newDevices).toBe(false);
+
+    await rotatePhoneNotifications({
+      book,
+      permission: permission({ getDevicePushToken: async () => rotatedToken }),
+      transportForHost: () => host.transport,
+      requestCapability: vi.fn(async () => ({
+        status: "issued" as const,
+        capability: rotatedCapability,
+      })),
+    });
+    expect(host.bodies.at(-1)).toMatchObject({ preferences: { newDevices: false } });
+    expect((await book.list())[0]?.newDevices).toBe(false);
+
+    await enable(true);
+    expect(host.bodies.at(-1)).not.toHaveProperty("preferences.newDevices");
+    expect(await book.list()).toEqual([expect.not.objectContaining({ newDevices: false })]);
+  });
+});
+
 describe("rotating the platform token a computer was registered under", () => {
   it("registers the new token with each connected computer once the system issues one", async () => {
     const host = recordingHost();

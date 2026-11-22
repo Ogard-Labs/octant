@@ -1,5 +1,6 @@
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { codeOrWorkThreadProjectId, type HubActScopeSlot } from "../hub/hubActScope";
 import { appToolThreadLevel, browserAgentAvailability, browserToolTransport } from "@octant/domain";
 import {
   createBrowserAppManagedTools,
@@ -32,6 +33,8 @@ import {
 } from "@octant/contracts";
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
 import { chatImageScopeAllowedForWindow } from "../image/imageScopeAuthority";
+import { principalActsAsHostPerson, type ClientPrincipal } from "../clientPrincipal";
+import { assertReadableChatThread } from "../chat/chatService";
 import { windowAdmitsProject } from "@octant/domain/shell-policy";
 import { SessionCompactionService } from "../context/sessionCompaction";
 import { IdleCompactions } from "../context/idleCompaction";
@@ -89,6 +92,9 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
     | "browserProfileService"
     | "browserToolApprovalService"
     | "liveProjectBrowsers"
+    | "pairedBrowserControlService"
+    | "resolvePairedDeviceName"
+    | "isPairedDeviceSessionCurrent"
   > &
   Pick<CodeRuntimeWiring, "codeOperationRuntime" | "routeCodeService"> &
   Pick<ChatWiring, "chatService"> &
@@ -100,10 +106,14 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
     | "workThreadProjection"
     | "workTurnProjection"
   > &
-  Pick<FoundationsWiring, "browserAuthority">;
+  Pick<FoundationsWiring, "browserAuthority"> & {
+    /** The member's Act item for its hub, bound by the hub side after this is built. */
+    readonly hubActScopeSlot: HubActScopeSlot;
+  };
 
 export function wireContext(deps: ContextDependencies) {
   const {
+    hubActScopeSlot,
     agentMessageProjection,
     onWindowRevoked,
     browserAuthority,
@@ -124,6 +134,9 @@ export function wireContext(deps: ContextDependencies) {
     configuredDriverOptions,
     contextHarness,
     liveProjectBrowsers,
+    pairedBrowserControlService,
+    resolvePairedDeviceName,
+    isPairedDeviceSessionCurrent,
     browserExtensionService,
     browserFlowService,
     browserProfileService,
@@ -151,9 +164,19 @@ export function wireContext(deps: ContextDependencies) {
     windowId: WindowId,
     threadKind: "chat-thread" | "work-thread" | "code-thread",
     threadId: string,
+    principal?: ClientPrincipal,
   ): Promise<boolean> => {
     try {
       if (threadKind === "chat-thread") {
+        // A paired browser has no desktop layout. Read the same thread that its authenticated Chat Open admits.
+        if (principal?.kind === "remote-device") {
+          if (
+            !principalActsAsHostPerson(principal) ||
+            String(principal.deviceId) !== String(windowId)
+          )
+            return false;
+          return assertReadableChatThread(persistence, decodeChatThreadId(threadId)) !== undefined;
+        }
         const view = chatService.read(decodeChatThreadId(threadId));
         const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
         return chatImageScopeAllowedForWindow({
@@ -309,6 +332,8 @@ export function wireContext(deps: ContextDependencies) {
         turnRefusal: (threadId) => chatService.turnStandingRefusal(decodeChatThreadId(threadId)),
         conversation: (threadId) =>
           chatService.sessionCompactionConversation(decodeChatThreadId(threadId)),
+        conversationForCompaction: (threadId) =>
+          chatService.sessionCompactionConversationWithAttachments(decodeChatThreadId(threadId)),
         scratchRoot: (threadId) => chatService.scratchRoot(decodeChatThreadId(threadId)),
         runtimeSessions: {
           exists: (threadId) => chatRuntimeSession(threadId) !== undefined,
@@ -997,11 +1022,19 @@ export function wireContext(deps: ContextDependencies) {
     profiles: browserProfileService,
     flows: browserFlowService,
     flowRuns,
+    pairedBrowserControl: pairedBrowserControlService,
+    resolvePairedDeviceName,
+    isPairedDeviceSessionCurrent,
     extensions: browserExtensionService,
     authority: browserAuthority,
     approvals: browserToolApprovalService,
     windowAuthorityStore,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+    hubActScope: hubActScopeSlot.current,
+    codeOrWorkThreadProjectId: codeOrWorkThreadProjectId({
+      readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+      readWorkThread: (threadId) => workThreadProjection.read(threadId),
+    }),
   });
   const agentMessageRoutes = createAgentMessageRouteHandler({
     windowAuthorityStore,

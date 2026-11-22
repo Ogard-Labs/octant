@@ -730,8 +730,68 @@ function createMockTransport(input: {
           requestedAt: NOW,
           version: 1,
         },
+        // Then a tool call and a questionnaire wait behind it, so every Work
+        // card the phone draws is on one screen.
+        {
+          requestId: "84000000-0000-4000-8000-000000000103",
+          projectId: PROJECT_ID,
+          threadId: WORK_THREAD_ID,
+          providerInstanceId: PROVIDER_ID,
+          providerSessionId: "84000000-0000-4000-8000-000000000102",
+          providerRequestId: "mock-run-command",
+          detail: {
+            kind: "approval",
+            action: "Run command",
+            description: "npm run build in the press kit folder",
+          },
+          status: "pending",
+          requestedAt: "2026-08-10T09:31:00.000Z",
+          version: 1,
+        },
+        {
+          requestId: "84000000-0000-4000-8000-000000000104",
+          projectId: PROJECT_ID,
+          threadId: WORK_THREAD_ID,
+          providerInstanceId: PROVIDER_ID,
+          providerSessionId: "84000000-0000-4000-8000-000000000102",
+          providerRequestId: "mock-ask-user",
+          detail: {
+            kind: "user-input",
+            prompt: "Two choices before I send the visa letters",
+            options: [],
+            questionnaire: {
+              questions: [
+                {
+                  id: "signer",
+                  prompt: "Who signs the letters?",
+                  selection: "single",
+                  options: [
+                    { id: "ceo", label: "The CEO", recommended: true },
+                    { id: "ops", label: "Head of operations" },
+                  ],
+                },
+                {
+                  id: "format",
+                  prompt: "Which formats should I send?",
+                  selection: "multiple",
+                  options: [
+                    { id: "pdf", label: "PDF" },
+                    { id: "docx", label: "Word" },
+                  ],
+                },
+              ],
+            },
+          },
+          status: "pending",
+          requestedAt: "2026-08-10T09:32:00.000Z",
+          version: 1,
+        },
       ]
     : [];
+  // The phone's own Project terminal: one shell at a time, which echoes
+  // what it is sent the way a prompt would.
+  let terminalOutput = "";
+  let terminalId: string | undefined;
   const codeEvidence = new Map<
     string,
     {
@@ -1016,11 +1076,24 @@ function createMockTransport(input: {
       }
       if (request.method === "POST" && request.path === "/api/work/requests/commands") {
         const command = JSON.parse(String(request.body ?? "{}")) as {
+          readonly kind?: string;
           readonly requestId?: string;
-          readonly resolution?: { readonly kind: "approval"; readonly approved: boolean };
+          readonly resolution?: { readonly kind: "approval" | "user-input" };
         };
         const index = workRequests.findIndex((entry) => entry.requestId === command.requestId);
         const pending = workRequests[index];
+        if (pending !== undefined && command.kind === "cancel-work-request") {
+          workRequests.splice(index, 1);
+          return mockJsonResponse({
+            kind: "work-request-cancelled",
+            request: {
+              ...pending,
+              status: "cancelled",
+              settledAt: NOW,
+              version: pending.version + 1,
+            },
+          });
+        }
         if (pending === undefined || command.resolution === undefined) {
           return new Response("Mock route not found", { status: 404 });
         }
@@ -1033,6 +1106,159 @@ function createMockTransport(input: {
         };
         workRequests.splice(index, 1);
         return mockJsonResponse({ kind: "work-request-resolved", request: resolved });
+      }
+      // The phone acts as the host's own person, so it is offered the
+      // device's own tools.
+      if (request.method === "GET" && request.path === "/api/remote/auth/device") {
+        return mockJsonResponse({
+          deviceId: "85000000-0000-4000-8000-000000000001",
+          deviceLabel: "Mock phone",
+          origin: "https://mock.octant.invalid",
+          credentialGeneration: 1,
+          createdAt: NOW,
+          expiresAt: "2027-08-10T09:30:00.000Z",
+          lastSeenAt: NOW,
+          state: "active",
+          actsAsHostPerson: true,
+        });
+      }
+      if (request.method === "POST" && request.path === "/api/code/project-terminals") {
+        const command = JSON.parse(String(request.body ?? "{}")) as {
+          readonly kind: string;
+          readonly projectId: string;
+          readonly terminalId: string;
+          readonly data?: string;
+          readonly afterCharacters?: number;
+        };
+        if (command.kind === "start") {
+          terminalId = command.terminalId;
+          terminalOutput =
+            "\u001b[1;32mmock@octant\u001b[0m:\u001b[34m~/launch\u001b[0m$ ls\r\n" +
+            "checklist.md  press-kit  visa-letters\r\n" +
+            "\u001b[1;32mmock@octant\u001b[0m:\u001b[34m~/launch\u001b[0m$ ";
+        }
+        if (command.kind === "write" && command.data !== undefined) {
+          const line = command.data.replace(/\r$/, "");
+          terminalOutput += `${line}\r\n${line === "" ? "" : `ran ${line}\r\n`}$ `;
+        }
+        const ended = command.kind === "stop" || terminalId !== command.terminalId;
+        const terminal = {
+          projectId: command.projectId,
+          terminalId: command.terminalId,
+          state: ended ? "exited" : "running",
+          posture: "approval-gated",
+        };
+        if (command.kind === "read-output") {
+          const after = Math.min(command.afterCharacters ?? 0, terminalOutput.length);
+          return mockJsonResponse({
+            kind: "project-terminal",
+            terminal,
+            output: {
+              text: terminalOutput.slice(after),
+              replace: false,
+              characters: terminalOutput.length,
+            },
+          });
+        }
+        if (command.kind === "stop") terminalId = undefined;
+        return mockJsonResponse({ kind: "project-terminal", terminal });
+      }
+      if (request.method === "POST" && request.path === "/api/browser/project-contexts") {
+        const command = JSON.parse(String(request.body ?? "{}")) as {
+          readonly kind: string;
+          readonly projectId: string;
+          readonly url?: string;
+        };
+        const view = {
+          projectId: command.projectId,
+          mode: command.projectId === CODE_PROJECT_ID ? "code" : "work",
+          subjectId: "85000000-0000-4000-8000-000000000002",
+        };
+        if (command.kind !== "open" || command.url === undefined) {
+          return mockJsonResponse({ kind: "project-browser", browser: view });
+        }
+        // A small picture of a booking page, as the host would send the page's own.
+        const picture =
+          "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAUAAAADwBAMAAACDA6BYAAAAMFBMVEX08erJ" +
+          "1uPj08nY0sTUz8HOyLvPyLjBvLCkoJaBfndmZWBcWldLSkhBQUA9PDw5OTiCgoyXAAAB9klEQVR42u3Y" +
+          "zyvDcRzH8dd3NoQyByk5jBwc5EIpB+3AcfX9BySJk6PVypIfK1flJBdHxx3MBZk7WbODm+9BUmotUcbX" +
+          "vg4LTZTCvt94Pi+f79ba99Gnb/vu/ZWIiIiI6D9nvBz0ewz2lCmvPq/vIECAAAECBPiTwCnVhyveaHxb" +
+          "R70AvFFn+rNP7roDrHk5aJekvH/IjtrXkxM7ya3kSdS2aifNu5nC+OBRae3wcaevqXlmLFkdmHP10Q7m" +
+          "w82RuGncpyQpEjdlXJ0Oz4+cXah1TwrOmcPzoSrvoL/iVSnY25YwlL6WpIGEIaUbVuz+9QZFNhpl28Fe" +
+          "291r8Kn7vBg7cCxJvmAxdiDJKf+v7ZSUd+MafLeDPisQCEnSbY1ygZAUrsv5j8N120vmriTl/C7/Dl5m" +
+          "sssZSUotFrLLGTk9Hdml/Z4OPY5Ikk4XLW/PJLOr8QVPzyS5RJqpjqkOIECAAAESERERERF9sdenW9O/" +
+          "doqHTaY6gAABAgRIRETk3kzyvYmFezFAgAABAiQiImaSas0f3IsBAgQIECARERERERFVtdfngy3f/y6n" +
+          "UF67fgJWspiLAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAg" +
+          "QIAAAQIESERERER/rGdjU2qnYean+QAAAABJRU5ErkJggg==";
+        return mockJsonResponse({
+          kind: "project-browser",
+          browser: {
+            ...view,
+            context: {
+              contextId: "85000000-0000-4000-8000-000000000003",
+              state: "active",
+              profile: "private",
+            },
+            page: { url: command.url, title: "Venue booking", screenshotDataUrl: picture },
+          },
+        });
+      }
+      if (request.method === "POST" && request.path === "/api/canvas/import-html") {
+        const command = JSON.parse(String(request.body ?? "{}")) as {
+          readonly requestId: string;
+          readonly originThreadId: string;
+          readonly workspace: unknown;
+          readonly title?: string;
+          readonly fileName?: string;
+        };
+        const title = command.title ?? command.fileName ?? "Imported page";
+        const authority = {
+          filesystem: false,
+          shell: false,
+          git: false,
+          network: false,
+          tools: true,
+          subagents: false,
+          executionPolicy: "plan",
+          permissionPersistence: "current-session",
+        };
+        const shared = {
+          schemaVersion: 1,
+          canvasId: "85000000-0000-4000-8000-000000000004",
+          versionId: "85000000-0000-4000-8000-000000000005",
+          originThreadId: command.originThreadId,
+          scope: { hostId: "local", mode: "chat", workspace: command.workspace },
+          title,
+          createdAt: NOW,
+        };
+        return mockJsonResponse({
+          kind: "imported",
+          receipt: {
+            ...shared,
+            kind: "canvas-create-receipt",
+            receiptId: "85000000-0000-4000-8000-000000000006",
+            requestId: command.requestId,
+            intent: "blank",
+            effectiveAuthority: authority,
+            outcome: "ready",
+          },
+          card: {
+            ...shared,
+            kind: "canvas-reference-card",
+            cardId: "85000000-0000-4000-8000-000000000007",
+            status: "ready",
+            authority,
+            actorId: "85000000-0000-4000-8000-000000000008",
+            providerInstanceId: PROVIDER_ID,
+            modelId: "mock-model",
+            actionCount: 0,
+          },
+          frame: "static",
+          dropped: [
+            { kind: "stylesheet", count: 1, examples: ["https://fonts.example/inter.css"] },
+            { kind: "link", count: 3, examples: ["https://example.com/tickets"] },
+          ],
+        });
       }
       if (request.method === "POST" && request.path === "/api/work/turns") {
         const command = JSON.parse(String(request.body ?? "{}")) as {

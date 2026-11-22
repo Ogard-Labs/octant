@@ -77,6 +77,15 @@ describe("createRemoteRequestFacts", () => {
     expect(nodeFacts.listenerTrust).toBe("remote");
   });
 
+  it("keeps a peer's private-network address for a new-device alert, and never a public or loopback one", () => {
+    const facts = (peerAddress: string) =>
+      createRemoteRequestFacts({ peerAddress, listenerTrust: "remote", salt: SALT });
+    expect(facts("::ffff:192.168.1.20").privateAddress).toBe("192.168.1.20");
+    expect(facts("100.101.102.103").privateAddress).toBe("100.101.102.103");
+    expect(facts("203.0.113.9")).not.toHaveProperty("privateAddress");
+    expect(facts("127.0.0.1")).not.toHaveProperty("privateAddress");
+  });
+
   it("rejects unclassifiable peer identity with an empty source key", () => {
     const facts = createRemoteRequestFacts({
       peerAddress: undefined,

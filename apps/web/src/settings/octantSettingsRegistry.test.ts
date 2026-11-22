@@ -7,6 +7,22 @@ import { listAvailableSections, resolveDeepLink, searchSettings } from "./regist
 const capabilities = { nativeBoundsAvailable: true, sidebarVibrancySupported: true };
 
 describe("octantSettingsRegistry", () => {
+  it("finds the switch that stops this computer taking delegated work by its label", () => {
+    expect(
+      searchSettings(
+        listAvailableSections(octantSettingsRegistry, capabilities),
+        capabilities,
+        "Take delegated work from other members",
+      ),
+    ).toContainEqual(
+      expect.objectContaining({
+        kind: "setting",
+        sectionId: "remote-access",
+        settingId: "hub-delegation-accepting",
+      }),
+    );
+  });
+
   it.each(["changed identity", "read-only check"])(
     "finds the read-only remote setup journey for %s",
     (query) => {
@@ -157,12 +173,18 @@ describe("octantSettingsRegistry", () => {
       "message-wakes-per-hour",
       "message-wake-rounds",
       "thread-messages-per-turn",
+      "sibling-thread-reads-per-turn",
+      "sibling-thread-waits-per-turn",
       "coordinators-per-project",
       "pull-request-watch-wakes",
       "pull-request-watch-days",
       "auto-fix-attempts",
       "browser-wait-limit",
       "child-run-wait-limit",
+      "shield-denials-in-a-row",
+      "shield-denials-per-thread",
+      "follow-up-lateness-limit",
+      "tooling-command-confirm",
       "agent-routines-start-active",
       "tool-approvals",
       "network-limits",
@@ -281,6 +303,8 @@ describe("octantSettingsRegistry", () => {
       "full-access-stalled-turn-limit",
       "provider-tool-call-pause-limit",
       "background-session-idle-limit",
+      "provider-own-telemetry",
+      "provider-self-update",
       "opencode-managed-update",
       "provider-display-name",
       "provider-binary-path",

@@ -190,7 +190,6 @@ export async function browserOwnerSpokes(input: {
           name: target.name,
           ...(here ? {} : { openAt: origin }),
           client,
-          browser: client,
         },
       ];
     });

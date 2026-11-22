@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_PRODUCT_FEEDBACK_COMMENT_LENGTH,
-  PRODUCT_FEEDBACK_EVENT_NAMES,
   decodeProductFeedbackCommand,
   decodeProductFeedbackNote,
 } from "./productFeedback";
@@ -113,14 +112,6 @@ describe("a note pointed at the running product", () => {
     ).toThrow();
   });
 
-  it("names every note event it journals", () => {
-    expect([...PRODUCT_FEEDBACK_EVENT_NAMES]).toEqual([
-      "feedback.note-captured@1",
-      "feedback.note-discarded@1",
-      "feedback.note-delivered@1",
-      "feedback.note-updated@1",
-    ]);
-  });
   it("requires host point correlation and rejects caller element, mode, or crop injection", () => {
     const prepare = {
       kind: "prepare-product-feedback",

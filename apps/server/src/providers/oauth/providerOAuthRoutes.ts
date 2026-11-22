@@ -19,7 +19,7 @@ import {
   encodeSubscriptionOAuthCredential,
   readSubscriptionOAuthCredential,
 } from "@octant/provider-sdk/subscription-oauth";
-import type { PrincipalKind } from "@octant/domain/remote-access-policy";
+import { actsAsHostPerson, type PrincipalKind } from "@octant/domain/remote-access-policy";
 import { authenticateProjectRequest } from "../../projectBindingRoutes";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "../../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../../windowAuthorityStore";
@@ -170,7 +170,7 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
     if (command === undefined) return json({ kind: "refused", reason: "invalid" }, 400, origin);
     // A cloud portal sign-in begins only from the host's terminal; Settings
     // reads whether one is held, signs it out, and connects the person's own
-    // AWS profile or key pair at a window on this host.
+    // AWS profile or key pair from a local window or a person-paired device.
     if (command.descriptorId === AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.descriptorId) {
       try {
         return json(
@@ -181,6 +181,7 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
             principal,
             actor,
             ...(command.awsProfile === undefined ? {} : { awsProfile: command.awsProfile }),
+            ...(command.mfaCode === undefined ? {} : { mfaCode: command.mfaCode }),
             ...(command.accessKeys === undefined ? {} : { accessKeys: command.accessKeys }),
             actorId: windowId,
           }),
@@ -204,7 +205,7 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
       for (const [key, attempt] of pending) {
         if (attempt.expiresAt <= now()) pending.delete(key);
       }
-      const prior = principal === "local-window" ? pending.get(key) : undefined;
+      const prior = actsAsHostPerson(principal) ? pending.get(key) : undefined;
       const execute = async (): Promise<ProviderOAuthView> => {
         let resumed = command;
         if (
@@ -240,7 +241,7 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
       };
       const viewPromise = execute();
       const tracking =
-        principal === "local-window" && (command.kind === "begin" || prior !== undefined);
+        actsAsHostPerson(principal) && (command.kind === "begin" || prior !== undefined);
       if (tracking)
         pending.set(key, { view: viewPromise, expiresAt: prior?.expiresAt ?? now() + 15 * 60_000 });
       const view = await viewPromise.catch((error: unknown) => {
@@ -569,6 +570,8 @@ export interface ProviderOAuthCommand {
   readonly attemptId: string;
   /** For `connect-aws-profile`: the person's profile name, read by the broker in place. */
   readonly awsProfile?: string;
+  /** For `connect-aws-profile`: optional one-time 6-digit MFA code for a role declaring `mfa_serial`. */
+  readonly mfaCode?: string;
   /** For `connect-access-keys`: a long-lived key pair, handed to the broker and never stored here. */
   readonly accessKeys?: { readonly accessKeyId: string; readonly secretAccessKey: string };
   /**
@@ -604,12 +607,14 @@ function readCommand(value: unknown): ProviderOAuthCommand | undefined {
   if (kind === "poll" && attemptId.length === 0) return undefined;
   if (kind === "connect-aws-profile") {
     if (typeof value.awsProfile !== "string") return undefined;
+    if (value.mfaCode !== undefined && typeof value.mfaCode !== "string") return undefined;
     return {
       kind,
       instanceId,
       descriptorId: value.descriptorId,
       attemptId,
       awsProfile: value.awsProfile,
+      ...(value.mfaCode === undefined ? {} : { mfaCode: value.mfaCode }),
     };
   }
   if (kind === "connect-access-keys") {

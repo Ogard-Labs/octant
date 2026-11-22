@@ -7,37 +7,40 @@ import type {
   ProviderNativeSetup,
 } from "@octant/contracts";
 import { accountRunsAsItself, resolveProviderNativeSetup } from "@octant/domain";
-import type { ProviderCliProjectTrust } from "./providerCliProjectTrust";
 
 export interface ProviderNativeSetupSources {
   readonly readProviderInstance: (id: ProviderInstanceId) => ProviderInstance | undefined;
   readonly readProject: (id: ProjectId) => Project | undefined;
   /** The thread's own choice, or undefined when it inherits. */
   readonly readThreadNativeSetup?: (threadId: string) => "on" | "off" | undefined;
-  /** Whether the provider's own CLI already trusts the Project's folder; absent reads none. */
-  readonly readProviderCliTrust?: ProviderCliProjectTrust;
   /** Strict for the thread, read as the session starts; absent reads Strict. */
   readonly readStrict?: (threadId: string) => boolean;
 }
 
+/** Whether the person listed this provider under the Project's Trusted providers. */
+export function projectListsProvider(
+  project: Exclude<Project, { readonly type: "chat" }>,
+  driverKind: ProviderInstance["driverKind"],
+): boolean {
+  return (project.nativeProviders ?? []).some((kind) => kind === driverKind);
+}
+
 /**
- * Whether a Work or Code Project trusts a key provider: the person trusted it
- * in Octant, or already in the provider's own CLI, whose record Octant's one
- * card would only ask again (maintainer decision, 2026-11-16).
- *
- * Under Strict only Octant's own trust counts: the CLI's record is a lift of
- * Octant's own limit, and Strict restores that limit.
+ * Whether a Work or Code Project trusts a provider to load the Project's own
+ * code. Adding the Project in Octant is the person's trust decision for every
+ * agent on its threads (maintainer decision, 2026-11-18), so outside Strict
+ * every Project does. Strict restores Octant's limit: the Project's code
+ * that can run (settings, hooks, MCP servers, plugins) loads only once the
+ * person confirmed it for the Project, which lists the provider under
+ * Trusted providers. Instruction files are not Project code and load either
+ * way.
  */
 export function projectTrustsProvider(
   project: Exclude<Project, { readonly type: "chat" }>,
   driverKind: ProviderInstance["driverKind"],
-  readProviderCliTrust: ProviderCliProjectTrust | undefined,
   strict: boolean,
 ): boolean {
-  return (
-    (project.nativeProviders ?? []).some((kind) => kind === driverKind) ||
-    (!strict && readProviderCliTrust?.(driverKind, project.binding.canonicalRoot) === true)
-  );
+  return !strict || projectListsProvider(project, driverKind);
 }
 
 export interface SessionNativeSetupInput {
@@ -59,10 +62,9 @@ export function nativeSetupOption(setup: ProviderNativeSetup | undefined): {
 
 /**
  * What a session of this thread may load of the provider's own setup, read
- * from the journal when the session starts or resumes: the account's switch
- * and the Project's trust, both set only by a person at a window on this
- * host, or, outside Strict, the trust the person gave the folder in the
- * provider's own CLI.
+ * from the journal when the session starts or resumes: the account's switch,
+ * the Project's Trusted providers, both set only by a person at a window on
+ * this host, and, outside Strict, the Project the person added.
  * Nothing a thread, an agent, or a remote client sends reaches any of them.
  */
 export function sessionNativeSetup(
@@ -75,15 +77,8 @@ export function sessionNativeSetup(
     input.mode === "chat" || input.projectId === undefined
       ? undefined
       : sources.readProject(input.projectId);
-  const projectTrusts =
-    project !== undefined &&
-    project.type !== "chat" &&
-    projectTrustsProvider(
-      project,
-      instance.driverKind,
-      sources.readProviderCliTrust,
-      input.threadId === undefined || (sources.readStrict?.(input.threadId) ?? true),
-    );
+  const folderProject = project !== undefined && project.type !== "chat" ? project : undefined;
+  const strict = input.threadId === undefined || (sources.readStrict?.(input.threadId) ?? true);
   const threadChoice =
     input.threadId === undefined ? undefined : sources.readThreadNativeSetup?.(input.threadId);
   return resolveProviderNativeSetup({
@@ -91,7 +86,9 @@ export function sessionNativeSetup(
     mode: input.mode,
     executionPolicy: input.executionPolicy,
     accountAllows: "nativeSetup" in instance ? accountRunsAsItself(instance) : true,
-    projectTrusts,
+    projectTrusts:
+      folderProject !== undefined && projectListsProvider(folderProject, instance.driverKind),
+    projectAddedTrusts: folderProject !== undefined && !strict,
     ...(threadChoice === undefined ? {} : { threadChoice }),
   });
 }

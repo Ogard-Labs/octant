@@ -197,6 +197,42 @@ describe("MonotonicRemoteClock", () => {
     connection.close();
   });
 
+  it("does not ratchet forward across repeated observations during a forward wall-clock jump and recovers cleanly once corrected", () => {
+    const connection = openMigratedDatabase();
+    let wall = 10_000_000;
+    let mono = 0;
+    const clock = new MonotonicRemoteClock({
+      connection,
+      hostId,
+      wallClock: () => wall,
+      monotonicSource: () => mono,
+    });
+    expect(clock.nowMs()).toBe(10_000_000);
+
+    // Jump wall clock 20 minutes forward while steady time stays fixed.
+    wall = 10_000_000 + 20 * 60_000;
+    const firstBounded = clock.nowMs();
+    for (let i = 0; i < 25; i++) {
+      expect(clock.nowMs()).toBe(firstBounded);
+    }
+    expect(clock.posture()).toMatchObject({
+      posture: "recovery-required",
+      reason: "forward-jump",
+      highWaterMarkMs: firstBounded,
+    });
+
+    // Advancing steady time moves the bound 1:1 without re-adding tolerance.
+    mono = 5_000;
+    expect(clock.nowMs()).toBe(firstBounded + 5_000);
+    expect(clock.highWaterMarkMs()).toBe(firstBounded + 5_000);
+
+    // Correcting wall clock back to true elapsed time recovers posture immediately.
+    wall = 10_000_000 + 5_000;
+    expect(clock.posture().posture).toBe("ok");
+    expect(clock.highWaterMarkMs()).toBe(firstBounded + 5_000);
+    connection.close();
+  });
+
   it("persistIfAdvanced writes only when the high-water mark advances", () => {
     const connection = openMigratedDatabase();
     let wall = 3_000_000;

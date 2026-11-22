@@ -221,6 +221,18 @@ export const ZenProjectTerminalElementPayload = Schema.Struct({
   minimized: Schema.Boolean,
   locked: Schema.Boolean,
   title: Schema.optional(Schema.NonEmptyTrimmedString),
+  /**
+   * The terminal runs the Work task's provider program, as its owner said when
+   * the card was pinned, so a restart asks for that program again. It grants
+   * nothing: the host decides that start as it decides any other.
+   */
+  program: Schema.optional(Schema.Literal("provider")),
+  /**
+   * That program's name as the host resolved it at the start ("Gemini CLI"),
+   * so the card names the program it runs rather than whatever the window's
+   * Work task uses later. Shown only; it grants nothing.
+   */
+  programName: Schema.optional(Schema.NonEmptyTrimmedString),
 }).annotations(strict);
 export type ZenProjectTerminalElementPayload = typeof ZenProjectTerminalElementPayload.Type;
 

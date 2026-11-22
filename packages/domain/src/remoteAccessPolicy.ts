@@ -166,6 +166,9 @@ const LOCAL_HOST_ACTIONS = new Set([
   "host-key.rotate",
   "host.service.start",
   "host.service.stop",
+  // Refusing new turns before an update stops the host, and is the person's
+  // to start as stopping is.
+  "host.service.drain",
   "host.service.restart",
   "host.service.enable",
   "host.service.disable",
@@ -254,37 +257,6 @@ export function authorizePrincipalAction(input: {
     return { kind: "deny", reason: "local-host-required" };
   }
   return { kind: "allow" };
-}
-
-export function listRemoteActionCatalog(): {
-  readonly remoteApprovable: ReadonlyArray<string>;
-  readonly localHostRequired: ReadonlyArray<string>;
-} {
-  return {
-    remoteApprovable: [...REMOTE_APPROVABLE_ACTIONS].sort(),
-    localHostRequired: [...LOCAL_HOST_ACTIONS].sort(),
-  };
-}
-
-export interface PairingAttemptState {
-  readonly state: "pending" | "approved" | "denied" | "expired";
-  readonly attempts: number;
-  readonly now: number;
-  readonly expiresAt: number;
-}
-
-export function evaluatePairingAttempt(input: PairingAttemptState):
-  | { readonly kind: "accepted"; readonly attempts: number }
-  | {
-      readonly kind: "rejected";
-      readonly reason: "expired" | "attempt-limit" | "already-consumed";
-    } {
-  if (input.state !== "pending") return { kind: "rejected", reason: "already-consumed" };
-  if (input.now >= input.expiresAt) return { kind: "rejected", reason: "expired" };
-  if (input.attempts >= PAIRING_MAX_FAILED_ATTEMPTS) {
-    return { kind: "rejected", reason: "attempt-limit" };
-  }
-  return { kind: "accepted", attempts: input.attempts + 1 };
 }
 
 export interface PairingClaimState {
@@ -410,13 +382,6 @@ export function evaluateDeviceRegistration(input: {
     return { kind: "expired", reason: "registration-expired" };
   }
   return { kind: "active" };
-}
-
-export function shouldPersistDeviceLastSeen(input: {
-  readonly now: number;
-  readonly lastSeenAt: number;
-}): boolean {
-  return input.now - input.lastSeenAt >= DEVICE_LAST_SEEN_COARSEN_MS;
 }
 
 export function evaluateSession(input: {

@@ -8,6 +8,7 @@ import {
   NATIVE_HARNESS_SESSION_AGGREGATE_TYPE,
   NATIVE_HARNESS_SESSION_EVENT_NAMES,
   THREAD_FOLLOW_UP_SUGGESTIONS_AGGREGATE_TYPE,
+  THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE,
   THREAD_RETENTION_EVENT_NAMES,
   THREAD_SIDE_TASKS_AGGREGATE_TYPE,
 } from "@octant/contracts";
@@ -16,6 +17,8 @@ import {
   type MachineChangeFrame,
   type MachineChangeTopic,
 } from "@octant/contracts/machine-changes";
+import { CANVAS_CHOICE_ANSWER_AGGREGATE_TYPE } from "./canvas/canvasChoiceAnswerService";
+import { THREAD_MESSAGE_STEERING_AGGREGATE_TYPE } from "./messageQueue/threadMessageSteeredRecord";
 
 interface Subscriber {
   readonly queue: MachineChangeFrame[];
@@ -250,6 +253,9 @@ function topicsForEvent(event: {
     aggregateType === BROWSER_STEP_AGGREGATE_TYPE
   )
     return ["browser-captures"];
+  if (aggregateType === THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE) {
+    return ["thread-follow-ups", "work-navigation", "code-navigation"];
+  }
   if (
     aggregateType === THREAD_SIDE_TASKS_AGGREGATE_TYPE ||
     aggregateType === THREAD_FOLLOW_UP_SUGGESTIONS_AGGREGATE_TYPE
@@ -262,8 +268,16 @@ function topicsForEvent(event: {
   )
     return ["thread-follow-ups"];
   if (aggregateType === "thread-message-queue") return ["thread-message-queue"];
+  // A steered message is journaled on its own aggregate, never on the running
+  // turn, so without this the turn showed it only at its next unrelated
+  // refresh, well after the message had left the queue.
+  if (aggregateType === THREAD_MESSAGE_STEERING_AGGREGATE_TYPE)
+    return steeredMessageMode(event.payload) === "code" ? ["code-navigation"] : ["work-navigation"];
   if (aggregateType === TODO_AGGREGATE_TYPE || aggregateType === TODO_LIST_HOST_AGGREGATE_TYPE) {
     return ["todos"];
+  }
+  if (aggregateType === CANVAS_CHOICE_ANSWER_AGGREGATE_TYPE) {
+    return ["canvas-choice-answers"];
   }
   // A thread's wake-ups sit with its other scheduled follow-ups.
   if (aggregateType === "thread-wakeup") return ["thread-follow-ups"];
@@ -289,6 +303,12 @@ function topicsForEvent(event: {
   // renderer made, so the thread learns of them here rather than on a timer.
   if (aggregateType === IMAGE_JOB_AGGREGATE_TYPE) return ["image-jobs"];
   return [];
+}
+
+function steeredMessageMode(payload: unknown): unknown {
+  return typeof payload === "object" && payload !== null && "mode" in payload
+    ? payload.mode
+    : undefined;
 }
 
 const CODE_NAVIGATION_EVENT_KINDS = new Set([

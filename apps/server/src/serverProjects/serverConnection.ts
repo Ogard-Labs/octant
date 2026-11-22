@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { Transform, type Readable, type Writable } from "node:stream";
 import { createHash } from "node:crypto";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { SERVER_CONTROL_SOCKET_PREFIX } from "../process/seatbeltProfile";
@@ -54,7 +55,47 @@ export interface ServerCallInput {
   readonly timeoutMs: number;
   readonly maxOutputBytes: number;
   readonly signal?: AbortSignal;
+  /**
+   * An agent socket offering only the key Octant keeps for this server, used
+   * in place of the person's agent. Such a call opens its own login and never
+   * shares a connection made with the person's keys. It is named on the
+   * command line for the destination alone (see `keptKeyOptions`), so a
+   * `ProxyJump` hop still signs in to its jump host with the person's agent.
+   */
+  readonly identityAgent?: string;
 }
+
+/**
+ * A process kept running on the server with its standard streams carried
+ * here, for a program that speaks over stdio for as long as it runs.
+ */
+export type ServerStream =
+  | {
+      readonly status: "open";
+      readonly stdin: Writable;
+      readonly stdout: Readable;
+      readonly stderr: Readable;
+      /** The local `ssh` process carrying the stream. */
+      readonly pid: number | undefined;
+      /** Ends the stream: closes standard input, then stops the connection if it is still open. */
+      readonly stop: () => void;
+      /** Settles once the connection has closed, with the exit code ssh reported. */
+      readonly exited: Promise<{ readonly exitCode: number | null }>;
+    }
+  | { readonly status: "unreachable"; readonly message: string };
+
+export interface ServerStreamInput {
+  /**
+   * A POSIX `sh` script whose arguments arrive as `$1`, `$2`, …. It should
+   * end by `exec`-ing the program, so the program reads standard input
+   * directly and ends when the stream closes it.
+   */
+  readonly script: string;
+  readonly args?: ReadonlyArray<string>;
+}
+
+/** How long a stopped stream's connection has to close on its own before it is ended. */
+const STREAM_STOP_GRACE_MS = 2_000;
 
 export interface ServerConnectionOptions {
   readonly sshPath?: string;
@@ -77,6 +118,21 @@ export interface ServerConnectionOptions {
   readonly pinnedHostKeys?: (server: ServerAddress) => ReadonlyArray<string> | undefined;
   /** Why no call may go to a server now (its machine is suspended), read each call. */
   readonly refuses?: (server: ServerAddress) => string | undefined;
+}
+
+/** Shown to a paired device when a server's SSH key requires local confirmation or hardware touch. */
+export const SSH_KEY_CONFIRMATION_MESSAGE =
+  "This server's key needs a confirmation at this computer.";
+
+/**
+ * Whether OpenSSH failed because the person's SSH agent or hardware security key
+ * needs an interactive confirmation or touch at this computer, which cannot be
+ * answered from a paired device under `BatchMode=yes`.
+ */
+export function sshNeedsHostKeyConfirmation(errorText: string): boolean {
+  return /agent refused operation|confirm user presence|user presence|requires? confirmation|confirmation required|touch.*key|sk_sign.*refused/i.test(
+    errorText,
+  );
 }
 
 /** The name a pinned server's keys are recorded under, so its alias never has to be a host pattern. */
@@ -189,6 +245,13 @@ export function serverSshArguments(
     readonly controlSocket?: string | undefined;
     /** A known hosts file holding only the server's pinned keys. */
     readonly pinnedKnownHosts?: string | undefined;
+    /**
+     * A stream's program reads this call's standard input, so a `StdinNull`
+     * in the person's own ssh config, which would hand it EOF, is overridden.
+     */
+    readonly readsStandardInput?: boolean | undefined;
+    /** An agent socket offering only the key Octant keeps for this server. */
+    readonly identityAgent?: string | undefined;
   },
 ): ReadonlyArray<string> {
   const control =
@@ -204,7 +267,9 @@ export function serverSshArguments(
     ...[
       ...SERVER_CONNECTION_OPTIONS,
       ...pinnedHostKeyOptions(options.pinnedKnownHosts),
+      ...keptKeyOptions(options.identityAgent),
       ...control,
+      ...(options.readsStandardInput === true ? ["StdinNull=no"] : []),
     ].flatMap((option) => ["-o", option]),
     options.terminal ? "-tt" : "-T",
     "-l",
@@ -213,6 +278,22 @@ export function serverSshArguments(
     server.alias,
     ...(remoteCommand === undefined ? [] : [remoteCommand]),
   ];
+}
+
+/**
+ * Signs in to the destination with the kept key's agent. A command-line
+ * option wins over the person's config, so an `IdentityAgent` of theirs cannot
+ * replace the kept agent, and `IdentitiesOnly=no` keeps a configured
+ * `IdentitiesOnly yes` from filtering the kept key out. `IdentityFile` is the
+ * one setting OpenSSH accumulates across sources (`ssh -G` lists a config's
+ * files after `none`), so a configured file is still tried, but only after the
+ * agent's key, which the server is registered to accept. These options reach
+ * the destination only: a `ProxyJump` hop runs its own `ssh` without them and
+ * keeps the person's agent from the inherited `SSH_AUTH_SOCK`.
+ */
+export function keptKeyOptions(identityAgent: string | undefined): ReadonlyArray<string> {
+  if (identityAgent === undefined) return [];
+  return [`IdentityAgent=${identityAgent}`, "IdentitiesOnly=no", "IdentityFile=none"];
 }
 
 /**
@@ -263,9 +344,22 @@ export class ServerConnection {
   #controlDirectory: string | undefined;
   /** What each pinned file holds now, so an unchanged pin is not rewritten on every call. */
   readonly #pinnedWritten = new Map<string, string>();
+  readonly #connectedListeners = new Set<(server: ServerAddress) => void>();
 
   constructor(options: ServerConnectionOptions) {
     this.#options = options;
+  }
+
+  /**
+   * Notified whenever a regular SSH call reaches the server (`status === "ran"`).
+   * Read-only setup diagnostics (`freshConnection: true`) never trigger this so
+   * diagnostics never mutate server or journal state.
+   */
+  subscribeConnected(listener: (server: ServerAddress) => void): () => void {
+    this.#connectedListeners.add(listener);
+    return () => {
+      this.#connectedListeners.delete(listener);
+    };
   }
 
   /** Why no call may go to this server now, or nothing. */
@@ -347,7 +441,9 @@ export class ServerConnection {
     const pinned = this.#options.pinnedHostKeys?.(server) ?? [];
     let controlSocket: string | undefined;
     try {
-      if (input.freshConnection !== true) controlSocket = this.#controlSocket(server, pinned);
+      if (input.freshConnection !== true && input.identityAgent === undefined) {
+        controlSocket = this.#controlSocket(server, pinned);
+      }
     } catch {
       return Promise.resolve({
         status: "unreachable",
@@ -359,6 +455,7 @@ export class ServerConnection {
       configFile: this.#options.configFile,
       controlSocket,
       pinnedKnownHosts: this.pinnedKnownHostsFile(server, pinned),
+      identityAgent: input.identityAgent,
     });
     return new Promise((resolve) => {
       if (input.signal?.aborted === true) {
@@ -366,7 +463,10 @@ export class ServerConnection {
         return;
       }
       const child = spawn(this.#options.sshPath ?? "ssh", [...args], {
-        env: { ...this.#environment(), ...(input.freshConnection === true ? { LC_ALL: "C" } : {}) },
+        env: {
+          ...this.#environment(),
+          ...(input.freshConnection === true ? { LC_ALL: "C" } : {}),
+        },
         detached: input.freshConnection === true,
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -457,8 +557,117 @@ export class ServerConnection {
           return;
         }
         finish({ status: "ran", exitCode: code ?? 1, output, truncated, errorOutput: errorText });
+        if (input.freshConnection !== true) {
+          for (const listener of this.#connectedListeners) {
+            try {
+              listener(server);
+            } catch {
+              // A listener failure never disrupts the SSH call that succeeded.
+            }
+          }
+        }
       });
     });
+  }
+
+  /**
+   * Starts a process on the server and keeps its standard streams open here.
+   * It rides the server's shared connection, with the same pinned host key,
+   * options and encoded `sh` call as {@link run}, and no terminal, so bytes
+   * pass through unchanged. Nothing is forwarded and no secret is placed in
+   * the command line, which the server's process list shows.
+   */
+  openStream(server: ServerAddress, input: ServerStreamInput): ServerStream {
+    const refusal = this.refusal(server);
+    if (refusal !== undefined) return { status: "unreachable", message: refusal };
+    const words = input.args ?? [];
+    if ([input.script, ...words].some((word) => word.includes("\0"))) {
+      return {
+        status: "unreachable",
+        message: "This call holds a NUL byte, which no server command can carry. Nothing ran.",
+      };
+    }
+    // As in `run`, a mark goes out before the program starts, so whatever a
+    // login shell's startup files print (a greeting, a notice) is dropped
+    // here instead of reaching a caller that expects the program's protocol.
+    const remoteCommand = serverRemoteCommand(`printf '\\036'\n${input.script}`, words);
+    if (remoteCommand.length > MAX_REMOTE_COMMAND_BYTES) {
+      return {
+        status: "unreachable",
+        message: "This call is too long to send to the server. Nothing ran.",
+      };
+    }
+    const pinned = this.#options.pinnedHostKeys?.(server) ?? [];
+    let controlSocket: string;
+    try {
+      controlSocket = this.#controlSocket(server, pinned);
+    } catch {
+      return {
+        status: "unreachable",
+        message: "Octant could not make the folder its server connections share.",
+      };
+    }
+    const child = spawn(
+      this.#options.sshPath ?? "ssh",
+      [
+        ...serverSshArguments(server, remoteCommand, {
+          terminal: false,
+          configFile: this.#options.configFile,
+          controlSocket,
+          pinnedKnownHosts: this.pinnedKnownHostsFile(server, pinned),
+          readsStandardInput: true,
+        }),
+      ],
+      { env: this.#environment(), stdio: ["pipe", "pipe", "pipe"] },
+    );
+    child.stdin.on("error", () => undefined);
+    let reached = false;
+    const stdout = child.stdout.pipe(
+      new Transform({
+        transform(chunk: Buffer, _encoding, done) {
+          if (reached) return done(null, chunk);
+          const at = chunk.indexOf(SENTINEL);
+          if (at === -1) return done();
+          reached = true;
+          done(null, chunk.subarray(at + 1));
+        },
+      }),
+    );
+    const exited = new Promise<{ readonly exitCode: number | null }>((resolve) => {
+      child.once("close", (code) => resolve({ exitCode: code }));
+      child.once("error", () => resolve({ exitCode: null }));
+    });
+    let stopping = false;
+    return {
+      status: "open",
+      stdin: child.stdin,
+      stdout,
+      stderr: child.stderr,
+      pid: child.pid,
+      stop: () => {
+        if (stopping) return;
+        stopping = true;
+        // Closing standard input ends a program that `exec`ed; a connection
+        // still open after the grace is ended here.
+        child.stdin.end();
+        const force = setTimeout(() => child.kill("SIGTERM"), STREAM_STOP_GRACE_MS);
+        force.unref();
+        // `close` waits for the output pipes, and output nobody reads pauses
+        // them: a caller that stops without reading would wait on `exited`
+        // forever, even after SSH has gone. A second grace releases the pipes.
+        const release = setTimeout(() => {
+          child.stdout.destroy();
+          child.stderr.destroy();
+          stdout.destroy();
+        }, 2 * STREAM_STOP_GRACE_MS);
+        release.unref();
+        void exited.then(() => {
+          clearTimeout(force);
+          clearTimeout(release);
+        });
+      },
+      exited,
+    };
   }
 
   /**

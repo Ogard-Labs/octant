@@ -211,6 +211,9 @@ export function createNodeComputerUseProcessPort(options?: {
                   }),
           ),
         );
+        child.stdout.on("error", () => undefined);
+        child.stderr.on("error", () => undefined);
+        child.stdin.on("error", () => undefined);
         child.stdin.end(input.stdin);
       }),
     reconcile: async () => {

@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { CodeLiveTask, CodeNativeSession } from "./codeSessions";
+import { ImportedSessionHistory } from "./importedSessionHistory";
 import { ProviderNativeSessionId } from "./providerNativeSession";
 import { WorkThreadId } from "./workThreads";
 
@@ -43,7 +44,11 @@ export type StopWorkLiveTasksResult = typeof StopWorkLiveTasksResult.Type;
 export const WorkNativeSessions = Schema.Struct({
   threadId: WorkThreadId,
   adopted: Schema.optional(
-    Schema.Struct({ nativeSessionId: ProviderNativeSessionId }).annotations(strict),
+    Schema.Struct({
+      nativeSessionId: ProviderNativeSessionId,
+      /** As on a Code thread: the earlier conversation the adoption imported. */
+      history: Schema.optional(ImportedSessionHistory),
+    }).annotations(strict),
   ),
   sessions: Schema.Array(CodeNativeSession).pipe(Schema.maxItems(50)),
   /** Why the thread cannot start from a session, when it cannot. */

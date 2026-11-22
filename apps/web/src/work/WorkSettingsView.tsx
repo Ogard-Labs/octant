@@ -12,6 +12,7 @@ import type { WorkSettingsController } from "./useWorkSettings";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { FULL_ACCESS_WARNING, useFullAccessWarning } from "../code/FullAccessWarning";
+import { useHostPlatform } from "../platform";
 
 const ACCESS_NOTES: Readonly<Record<WorkDefaultAccess, string>> = {
   auto: "The provider's own reviewer approves each command and file change. Without one, it asks you.",
@@ -19,6 +20,7 @@ const ACCESS_NOTES: Readonly<Record<WorkDefaultAccess, string>> = {
   "auto-accept-edits":
     "Edits files in the Project folder without asking. Asks before commands. Anything outside the folder is refused.",
   "full-access": FULL_ACCESS_WARNING,
+  plan: "Starts each new thread read-only: the agent looks and proposes a plan, and changes nothing until you approve it.",
 };
 
 /**
@@ -30,6 +32,7 @@ export function WorkSettingsView(props: {
   readonly providerSnapshot?: ProviderRegistrySnapshot | undefined;
   readonly focusedSetting?: string | undefined;
 }) {
+  const hostPlatform = useHostPlatform();
   const settings = props.controller.settings;
   const warning = useFullAccessWarning("machine");
   const groups = useMemo(
@@ -126,12 +129,17 @@ export function WorkSettingsView(props: {
             <OctantToggleGroupItem value="auto">Auto</OctantToggleGroupItem>
             <OctantToggleGroupItem value="ask-first">Ask first</OctantToggleGroupItem>
             <OctantToggleGroupItem value="auto-accept-edits">Accept edits</OctantToggleGroupItem>
+            <OctantToggleGroupItem value="plan">Plan</OctantToggleGroupItem>
             <OctantToggleGroupItem value="full-access">Full access</OctantToggleGroupItem>
           </OctantToggleGroup>
           {warning.dialog}
         </SettingRow>
         <SettingRow
-          description="Strict keeps provider sign-ins, SSH keys and cloud credentials protected. It applies at every access level and preserves required approvals. Changes apply to the next turn."
+          description={
+            hostPlatform === "win32"
+              ? "Strict keeps provider sign-ins, SSH keys and cloud credentials protected. On Windows, phase 1 works at Full access with native Codex (AppContainer and Job Object); other providers and lower levels refuse by name. Changes apply to the next turn."
+              : "Strict keeps provider sign-ins, SSH keys and cloud credentials protected. It applies at every access level and preserves required approvals. Changes apply to the next turn."
+          }
           focused={
             props.focusedSetting === "work-strict" ||
             props.focusedSetting === "work-full-access-sandbox"

@@ -8,6 +8,11 @@ import {
   type EventEnvelope,
   type Project,
 } from "@octant/contracts";
+import {
+  COORDINATOR_DONE_WHEN_INITIAL_DELAY_MS,
+  coordinatorDoneWhenPullRequestKey,
+  type CoordinatorDoneWhenPullRequestFact,
+} from "@octant/domain";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -98,6 +103,13 @@ interface Harness {
     readonly level: string;
   }>;
   readonly turnIds: Map<string, string>;
+  readonly pullRequests: Map<string, CoordinatorDoneWhenPullRequestFact>;
+  readonly prChecks: Array<{
+    readonly owner: string;
+    readonly name: string;
+    readonly number: number;
+    readonly requiredChecks: boolean;
+  }>;
   settings: CodeSettings | undefined;
   clock: number;
 }
@@ -114,6 +126,10 @@ function harness(): Harness {
   const proposals: Harness["proposals"] = [];
   const planners = new Set<string>();
   const turnIds = new Map<string, string>();
+  const pullRequests = new Map<string, CoordinatorDoneWhenPullRequestFact>();
+  const prChecks: Harness["prChecks"] = [];
+  const satisfiedDoneWhen = new Map<string, string>();
+  const settledWakes: Array<{ readonly wakeId: string; readonly outcome: string }> = [];
   let turnCount = 0;
   const self: { settings: CodeSettings | undefined; clock: number } = {
     settings: undefined,
@@ -164,6 +180,35 @@ function harness(): Harness {
       return { status: "proposed", proposalId: `proposal-${String(turnCount)}` };
     },
     counts: openCountStore(storePath),
+    wakes: {
+      decided: () => undefined,
+      settled: (_threadId, settled) => settledWakes.push(settled),
+      open: () => [],
+      markDoneWhenSatisfied: (threadId, key) => {
+        satisfiedDoneWhen.set(threadId, key);
+      },
+      resetDoneWhen: (threadId) => {
+        satisfiedDoneWhen.delete(threadId);
+      },
+      satisfiedDoneWhen: () => new Map(satisfiedDoneWhen),
+    },
+    observePullRequest: async (target, options) => {
+      prChecks.push({
+        owner: target.repositoryOwner,
+        name: target.repositoryName,
+        number: target.number,
+        requiredChecks: options.requiredChecks,
+      });
+      return (
+        pullRequests.get(
+          coordinatorDoneWhenPullRequestKey(
+            target.repositoryOwner,
+            target.repositoryName,
+            target.number,
+          ),
+        ) ?? { status: "unavailable" }
+      );
+    },
     uuid: () => NEW_WORKER,
     now: () => self.clock,
   };
@@ -182,6 +227,8 @@ function harness(): Harness {
     proposals,
     planners,
     turnIds,
+    pullRequests,
+    prChecks,
   });
 }
 
@@ -605,5 +652,427 @@ describe("a worker turn that starts and finishes between sweeps", () => {
     await h.service.sweep();
     expect(h.hostTurns.map((turn) => turn.threadId)).toEqual([COORDINATOR]);
     expect(h.service.contextFor(COORDINATOR)).toContain(`${WORKER}@${PROJECT} became idle`);
+  });
+});
+
+describe("coordinator host-checked done-when conditions", () => {
+  const doneWhen = {
+    items: [
+      {
+        kind: "pull-request-merged" as const,
+        repositoryOwner: "Ogard-Labs",
+        repositoryName: "octant",
+        number: 42,
+      },
+      {
+        kind: "pull-request-checks-green" as const,
+        repositoryOwner: "Ogard-Labs",
+        repositoryName: "octant",
+        number: 42,
+      },
+      { kind: "thread-done" as const, threadId: WORKER },
+    ],
+  };
+
+  it("wakes the coordinator with the unmet part of its condition", async () => {
+    const h = harness();
+    h.threads.set(
+      COORDINATOR,
+      codeThread(COORDINATOR, {
+        coordinator: true,
+        messageWake: true,
+        coordinatorBounds: { rounds: 2, wakesPerHour: 2 },
+        coordinatorDoneWhen: doneWhen,
+      }),
+    );
+    h.threads.set(
+      WORKER,
+      codeThread(WORKER, { coordinatorThreadId: COORDINATOR, markedDoneAt: now }),
+    );
+    const prKey = coordinatorDoneWhenPullRequestKey("Ogard-Labs", "octant", 42);
+    h.pullRequests.set(prKey, {
+      status: "observed",
+      state: "open",
+      requiredChecks: "green",
+    });
+
+    await h.service.sweep();
+    // Both conditions for PR #42 coalesce into one forge read.
+    expect(h.prChecks).toHaveLength(1);
+    expect(h.prChecks[0]?.requiredChecks).toBe(true);
+    expect(h.hostTurns).toHaveLength(1);
+    expect(h.hostTurns[0]?.threadId).toBe(COORDINATOR);
+    // Reports ONLY the unmet PR merge item; omits green checks and Done thread.
+    expect(h.hostTurns[0]?.prompt).toContain(
+      "pull request Ogard-Labs/octant#42 is not merged (open)",
+    );
+    expect(h.hostTurns[0]?.prompt).not.toContain("required checks");
+    expect(h.hostTurns[0]?.prompt).not.toContain(WORKER);
+    expect(h.service.contextFor(COORDINATOR)).toContain(
+      "pull request Ogard-Labs/octant#42 is not merged (open)",
+    );
+
+    // Backoff prevents re-checking before the initial delay elapses.
+    h.clock += COORDINATOR_DONE_WHEN_INITIAL_DELAY_MS - 1_000;
+    await h.service.sweep();
+    expect(h.prChecks).toHaveLength(1);
+    expect(h.hostTurns).toHaveLength(1);
+
+    // After the initial delay elapses, checks again and wakes once more.
+    h.clock += 1_000;
+    await h.service.sweep();
+    expect(h.prChecks).toHaveLength(2);
+    expect(h.hostTurns).toHaveLength(2);
+
+    // Backoff doubles to 2x; sweeping after only 1x does not check.
+    h.clock += COORDINATOR_DONE_WHEN_INITIAL_DELAY_MS;
+    await h.service.sweep();
+    expect(h.prChecks).toHaveLength(2);
+
+    // After 2x, checks again, but coordinator's round/wake bound (2) stops another wake.
+    h.clock += COORDINATOR_DONE_WHEN_INITIAL_DELAY_MS;
+    await h.service.sweep();
+    expect(h.prChecks).toHaveLength(3);
+    expect(h.hostTurns).toHaveLength(2);
+
+    // Survives host restart: a new service resumes checking from the journaled thread record.
+    h.threads.set(
+      COORDINATOR,
+      codeThread(COORDINATOR, {
+        coordinator: true,
+        messageWake: true,
+        coordinatorBounds: { rounds: 10, wakesPerHour: 10 },
+        coordinatorDoneWhen: doneWhen,
+      }),
+    );
+    const restarted = h.restart();
+    await restarted.sweep();
+    expect(h.prChecks).toHaveLength(4);
+    expect(h.hostTurns).toHaveLength(3);
+  });
+
+  it("stops checking once the condition holds", async () => {
+    const h = harness();
+    h.threads.set(
+      COORDINATOR,
+      codeThread(COORDINATOR, {
+        coordinator: true,
+        messageWake: true,
+        coordinatorDoneWhen: doneWhen,
+      }),
+    );
+    h.threads.set(WORKER, codeThread(WORKER, { coordinatorThreadId: COORDINATOR }));
+    const prKey = coordinatorDoneWhenPullRequestKey("Ogard-Labs", "octant", 42);
+    h.pullRequests.set(prKey, {
+      status: "observed",
+      state: "open",
+      requiredChecks: "failing",
+    });
+
+    await h.service.sweep();
+    expect(h.prChecks).toHaveLength(1);
+    expect(h.hostTurns).toHaveLength(1);
+
+    // Now every condition holds.
+    h.pullRequests.set(prKey, {
+      status: "observed",
+      state: "merged",
+      requiredChecks: "green",
+    });
+    h.threads.set(
+      WORKER,
+      codeThread(WORKER, { coordinatorThreadId: COORDINATOR, markedDoneAt: now }),
+    );
+    h.clock += COORDINATOR_DONE_WHEN_INITIAL_DELAY_MS;
+    await h.service.sweep();
+    expect(h.prChecks).toHaveLength(2);
+    // Satisfied check does not wake the coordinator again.
+    expect(h.hostTurns).toHaveLength(1);
+    expect(h.service.contextFor(COORDINATOR)).not.toContain("Done-when items still unmet");
+
+    // Subsequent sweeps far in the future perform no further checks.
+    h.clock += 60 * 60_000;
+    await h.service.sweep();
+    h.clock += 60 * 60_000;
+    await h.service.sweep();
+    expect(h.prChecks).toHaveLength(2);
+    expect(h.hostTurns).toHaveLength(1);
+
+    // Clearing the condition or stopping/archiving the coordinator also stops checking.
+    h.threads.set(
+      COORDINATOR,
+      codeThread(COORDINATOR, {
+        coordinator: true,
+        messageWake: true,
+        coordinatorDoneWhen: { items: [{ kind: "thread-done", threadId: OTHER }] },
+      }),
+    );
+    h.threads.set(OTHER, codeThread(OTHER));
+    await h.service.sweep();
+    expect(h.hostTurns).toHaveLength(2);
+    h.threads.set(COORDINATOR, codeThread(COORDINATOR, { coordinator: true, messageWake: true }));
+    h.clock += 60 * 60_000;
+    await h.service.sweep();
+    expect(h.hostTurns).toHaveLength(2);
+  });
+
+  it("never starts a worker", async () => {
+    const h = harness();
+    h.threads.set(
+      COORDINATOR,
+      codeThread(COORDINATOR, {
+        coordinator: true,
+        messageWake: true,
+        coordinatorDoneWhen: doneWhen,
+      }),
+    );
+    h.threads.set(WORKER, codeThread(WORKER, { coordinatorThreadId: COORDINATOR }));
+    const prKey = coordinatorDoneWhenPullRequestKey("Ogard-Labs", "octant", 42);
+    h.pullRequests.set(prKey, {
+      status: "observed",
+      state: "open",
+      requiredChecks: "pending",
+    });
+
+    await h.service.sweep();
+    h.clock += COORDINATOR_DONE_WHEN_INITIAL_DELAY_MS;
+    await h.service.sweep();
+    h.pullRequests.set(prKey, {
+      status: "observed",
+      state: "merged",
+      requiredChecks: "green",
+    });
+    h.threads.set(
+      WORKER,
+      codeThread(WORKER, { coordinatorThreadId: COORDINATOR, markedDoneAt: now }),
+    );
+    h.clock += COORDINATOR_DONE_WHEN_INITIAL_DELAY_MS * 2;
+    await h.service.sweep();
+
+    expect(h.hostTurns.length).toBeGreaterThan(0);
+    expect(h.hostTurns.every((turn) => turn.threadId === COORDINATOR)).toBe(true);
+    expect(h.executed).toEqual([]);
+    expect(h.proposals).toEqual([]);
+  });
+
+  it("does not re-arm a satisfied condition after restart even if a check later regresses, and re-arms after clearing", async () => {
+    const h = harness();
+    const checksOnly = {
+      items: [
+        {
+          kind: "pull-request-checks-green" as const,
+          repositoryOwner: "Ogard-Labs",
+          repositoryName: "octant",
+          number: 42,
+        },
+      ],
+    };
+    const prKey = coordinatorDoneWhenPullRequestKey("Ogard-Labs", "octant", 42);
+    h.threads.set(
+      COORDINATOR,
+      codeThread(COORDINATOR, {
+        coordinator: true,
+        messageWake: true,
+        coordinatorDoneWhen: checksOnly,
+      }),
+    );
+    h.pullRequests.set(prKey, { status: "observed", state: "open", requiredChecks: "green" });
+
+    // Condition holds on first sweep and persists satisfaction.
+    await h.service.sweep();
+    expect(h.prChecks).toHaveLength(1);
+    expect(h.hostTurns).toHaveLength(0);
+
+    // After restart, CI turns red on a new push: the already-satisfied condition stays stopped.
+    h.pullRequests.set(prKey, { status: "observed", state: "open", requiredChecks: "failing" });
+    const restarted = h.restart();
+    await restarted.sweep();
+    expect(h.prChecks).toHaveLength(1);
+    expect(h.hostTurns).toHaveLength(0);
+
+    // Clearing the condition via thread-updated resets satisfaction so re-setting it re-arms checks.
+    const cleared = codeThread(COORDINATOR, { coordinator: true, messageWake: true, version: 2 });
+    h.threads.set(COORDINATOR, cleared);
+    restarted.onCommittedEvents([
+      {
+        eventId: "81000000-0000-4000-8000-000000000301",
+        eventName: "code.thread-updated@1",
+        eventVersion: 1,
+        globalSequence: 1,
+        aggregateType: "code-thread",
+        aggregateId: COORDINATOR,
+        aggregateVersion: 2,
+        correlationId: "81000000-0000-4000-8000-000000000302",
+        actor: { kind: "local-user", actorId: "octant-local" },
+        occurredAt: now,
+        payload: { kind: "thread-updated", thread: cleared },
+      } as unknown as EventEnvelope,
+    ]);
+    h.threads.set(
+      COORDINATOR,
+      codeThread(COORDINATOR, {
+        coordinator: true,
+        messageWake: true,
+        coordinatorDoneWhen: checksOnly,
+        version: 3,
+      }),
+    );
+    const restartedAgain = h.restart();
+    await restartedAgain.sweep();
+    expect(h.prChecks).toHaveLength(2);
+    expect(h.hostTurns).toHaveLength(1);
+  });
+
+  it("re-evaluates done-when live on restart wake recovery and drops stale wakes when the condition now holds", async () => {
+    const h = harness();
+    const prKey = coordinatorDoneWhenPullRequestKey("Ogard-Labs", "octant", 42);
+    h.threads.set(
+      COORDINATOR,
+      codeThread(COORDINATOR, {
+        coordinator: true,
+        messageWake: true,
+        coordinatorDoneWhen: doneWhen,
+      }),
+    );
+    h.threads.set(
+      WORKER,
+      codeThread(WORKER, { coordinatorThreadId: COORDINATOR, markedDoneAt: now }),
+    );
+    // PR merged and checks green while offline: recovered wake must drop without waking.
+    h.pullRequests.set(prKey, { status: "observed", state: "merged", requiredChecks: "green" });
+    const dropped = await h.service.continueWakeAfterRestart({
+      threadId: COORDINATOR,
+      wakeId: "81000000-0000-4000-8000-000000000401",
+      cause: "done-when",
+      senderThreadId: COORDINATOR,
+      hop: 0,
+      unmet: ["pull request Ogard-Labs/octant#42 is not merged (open)"],
+    });
+    expect(dropped).toEqual({ kind: "superseded" });
+    expect(h.hostTurns).toEqual([]);
+
+    // When still unmet, recovery uses fresh unmet items rather than stale saved ones.
+    const h2 = harness();
+    h2.threads.set(
+      COORDINATOR,
+      codeThread(COORDINATOR, {
+        coordinator: true,
+        messageWake: true,
+        coordinatorDoneWhen: doneWhen,
+      }),
+    );
+    h2.threads.set(
+      WORKER,
+      codeThread(WORKER, { coordinatorThreadId: COORDINATOR, markedDoneAt: now }),
+    );
+    h2.pullRequests.set(prKey, { status: "observed", state: "open", requiredChecks: "green" });
+    const dispatched = await h2.service.continueWakeAfterRestart({
+      threadId: COORDINATOR,
+      wakeId: "81000000-0000-4000-8000-000000000402",
+      cause: "done-when",
+      senderThreadId: COORDINATOR,
+      hop: 0,
+      unmet: [
+        "pull request Ogard-Labs/octant#42 is not merged (open)",
+        "pull request Ogard-Labs/octant#42 required checks are failing",
+      ],
+    });
+    expect(dispatched).toEqual({ kind: "dispatched" });
+    expect(h2.hostTurns).toHaveLength(1);
+    expect(h2.hostTurns[0]?.prompt).toContain("is not merged (open)");
+    expect(h2.hostTurns[0]?.prompt).not.toContain("required checks are failing");
+  });
+
+  it("never treats a designated planner thread as Done during done-when evaluation", async () => {
+    const h = harness();
+    h.threads.set(
+      COORDINATOR,
+      codeThread(COORDINATOR, {
+        coordinator: true,
+        messageWake: true,
+        coordinatorDoneWhen: { items: [{ kind: "thread-done", threadId: OTHER }] },
+      }),
+    );
+    h.threads.set(OTHER, codeThread(OTHER, { markedDoneAt: now }));
+    h.planners.add(OTHER);
+
+    await h.service.sweep();
+    expect(h.hostTurns).toHaveLength(1);
+    expect(h.hostTurns[0]?.prompt).toContain(`thread ${OTHER} is not Done`);
+  });
+
+  it("skips dispatching a recovered done-when wake if waking is turned off during live evaluation", async () => {
+    const h = harness();
+    const prKey = coordinatorDoneWhenPullRequestKey("Ogard-Labs", "octant", 42);
+    h.threads.set(
+      COORDINATOR,
+      codeThread(COORDINATOR, {
+        coordinator: true,
+        messageWake: true,
+        coordinatorDoneWhen: doneWhen,
+      }),
+    );
+    h.threads.set(
+      WORKER,
+      codeThread(WORKER, { coordinatorThreadId: COORDINATOR, markedDoneAt: now }),
+    );
+    h.pullRequests.set(prKey, { status: "observed", state: "open", requiredChecks: "green" });
+
+    let markStarted: (() => void) | undefined;
+    const observationStarted = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let releaseObservation: (() => void) | undefined;
+    const wait = new Promise<void>((resolve) => {
+      releaseObservation = resolve;
+    });
+    const pausedService = new CoordinatorService({
+      readThread: (id) => h.threads.get(id),
+      readThreads: () => [...h.threads.values()],
+      readProject: () => ({ type: "code", lifecycle: "active" }) as unknown as Project,
+      readSettings: () => h.settings,
+      isDesignatedPlanner: (id) => h.planners.has(id),
+      isMarked: (id) => h.marked.has(id),
+      threadState: (id) => h.states.get(id) ?? "idle",
+      latestTurnId: (id) => h.turnIds.get(id),
+      providerKnown: () => true,
+      executeCode: async () => {
+        throw new Error("unexpected command");
+      },
+      startHostTurn: async (threadId, prompt) => {
+        h.hostTurns.push({ threadId: String(threadId), prompt });
+        return { status: "started", operationId: "turn-1" };
+      },
+      propose: () => ({ status: "refused", message: "unused" }),
+      counts: openCountStore(countStoreFile()),
+      observePullRequest: async () => {
+        markStarted?.();
+        await wait;
+        return { status: "observed", state: "open", requiredChecks: "green" };
+      },
+      uuid: () => NEW_WORKER,
+      now: () => h.clock,
+    });
+    const recovery = pausedService.continueWakeAfterRestart({
+      threadId: COORDINATOR,
+      wakeId: "81000000-0000-4000-8000-000000000403",
+      cause: "done-when",
+      senderThreadId: COORDINATOR,
+      hop: 0,
+      unmet: ["pull request Ogard-Labs/octant#42 is not merged (open)"],
+    });
+    await observationStarted;
+    // Person turns Wake when a message arrives off while live check is in flight.
+    h.threads.set(
+      COORDINATOR,
+      codeThread(COORDINATOR, {
+        coordinator: true,
+        coordinatorDoneWhen: doneWhen,
+      }),
+    );
+    releaseObservation?.();
+
+    expect(await recovery).toEqual({ kind: "superseded" });
+    expect(h.hostTurns).toEqual([]);
   });
 });

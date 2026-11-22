@@ -19,9 +19,11 @@ import type { AwsAssumeRoleInput, AwsStsOutcome } from "./awsSts";
  * `role_arn` assumes that role first, as the AWS CLI does: from the
  * credentials of its `source_profile` (itself possibly a role, up to
  * `MAX_ROLE_HOPS`), of the broker's environment for `credential_source =
- * Environment`, or with the token in its `web_identity_token_file`. A role that
- * asks for an MFA code is refused, since connecting a profile has no place to
- * type one.
+ * Environment`, of EC2 IMDSv2 for `credential_source = Ec2InstanceMetadata`,
+ * of ECS container metadata for `credential_source = EcsContainer`, or with
+ * the token in its `web_identity_token_file`. A role that names `mfa_serial`
+ * requires a one-time 6-digit MFA code at connect time; its assumed temporary
+ * credentials must be kept in memory only and never persisted.
  */
 
 export interface AwsCredentials {
@@ -31,6 +33,10 @@ export interface AwsCredentials {
   /** Epoch milliseconds; absent for long-lived keys. */
   readonly expiresAt?: number;
 }
+
+/** Exact user-facing refusal when EC2/ECS metadata cannot be reached on this computer. */
+export const AWS_METADATA_UNREACHABLE_MESSAGE =
+  "This profile reads credentials from EC2/ECS metadata, which this computer can't reach.";
 
 export type AwsProfileRefusal =
   /** No section by that name in either file. */
@@ -43,8 +49,14 @@ export type AwsProfileRefusal =
   | "process-failed"
   /** The profile names a source this broker does not resolve. */
   | "unsupported"
-  /** The role names an `mfa_serial`, and there is no place to type its code. */
+  /** The role names an `mfa_serial` and no MFA code was supplied yet. */
   | "mfa-required"
+  /** The supplied MFA code is not a valid 6-digit code. */
+  | "mfa-invalid"
+  /** The token service rejected the supplied MFA code or refused to assume the role. */
+  | "mfa-refused"
+  /** EC2 IMDSv2 or ECS container metadata could not be reached or timed out. */
+  | "metadata-unreachable"
   /** The token service refused to assume the role for these source credentials or token. */
   | "role-refused"
   | "unavailable";
@@ -54,8 +66,23 @@ export type AwsProfileResolution =
       readonly kind: "credentials";
       readonly credentials: AwsCredentials;
       readonly via: "static-keys" | "sso" | "credential-process" | "assume-role" | "web-identity";
+      /**
+       * True when any hop in the profile chain assumed a role using `mfa_serial`.
+       * Callers must keep these temporary session credentials in memory only and
+       * never persist them to a credential store or journal.
+       */
+      readonly mfaSession?: true;
     }
-  | { readonly kind: "refused"; readonly reason: AwsProfileRefusal };
+  | {
+      readonly kind: "refused";
+      readonly reason: AwsProfileRefusal;
+      readonly message?: string;
+    };
+
+export interface ResolveAwsProfileOptions {
+  /** One-time 6-digit MFA code for a role profile declaring `mfa_serial`. */
+  readonly mfaCode?: string;
+}
 
 export type AwsSsoMintOutcome =
   | { readonly kind: "credentials"; readonly credentials: Required<AwsCredentials> }
@@ -85,6 +112,13 @@ export interface AwsProfilePorts {
   readonly assumeRoleWithWebIdentity: (
     input: AwsAssumeRoleInput & { readonly webIdentityToken: string },
   ) => Promise<AwsStsOutcome>;
+  /** Fetch implementation for EC2 IMDSv2 and ECS container metadata requests. */
+  readonly fetchMetadata?: typeof fetch;
+  /** Test overrides for local fake HTTP servers standing in for IMDSv2 / ECS metadata hosts. */
+  readonly metadataEndpoints?: {
+    readonly imdsBaseUrl?: string;
+    readonly ecsRelativeBaseUrl?: string;
+  };
   readonly homeDirectory: string;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly now: () => number;
@@ -134,12 +168,21 @@ export function nodeAwsProfilePorts(): Omit<
 }
 
 export const AWS_PROFILE_NAME_PATTERN = /^[A-Za-z0-9_.+@-]{1,64}$/;
+export const AWS_MFA_TOKEN_CODE_PATTERN = /^[0-9]{6}$/;
 const ACCESS_KEY_ID_PATTERN = /^[A-Z0-9]{16,128}$/;
 const REGION_PATTERN = /^(?!cn-)[a-z]{2}-[a-z]{4,9}-[1-9]$/;
 const ACCOUNT_ID_PATTERN = /^[0-9]{12}$/;
 const ROLE_NAME_PATTERN = /^[A-Za-z0-9+=,.@_-]{1,64}$/;
+const IMDS_ROLE_NAME_PATTERN = /^[A-Za-z0-9+=,.@_-]{1,128}$/;
+const MFA_SERIAL_PATTERN = /^[\w+=/:,.@-]{9,256}$/;
 const MAX_SECRET_CHARS = 8_192;
 const MAX_PROCESS_OUTPUT_CHARS = 64 * 1_024;
+const MAX_METADATA_RESPONSE_CHARS = 64 * 1_024;
+// 1 s bound per metadata request so a computer off EC2/ECS fails fast.
+const METADATA_TIMEOUT_MS = 1_000;
+const IMDS_DEFAULT_BASE_URL = "http://169.254.169.254";
+const IMDS_TOKEN_TTL_SECONDS = "21600";
+const ECS_DEFAULT_RELATIVE_BASE_URL = "http://169.254.170.2";
 // The commercial partition only, as the signing scope is: a role elsewhere
 // would need that partition's token service.
 const ROLE_ARN_PATTERN = /^arn:aws:iam::[0-9]{12}:role\/[\w+=,.@/-]{1,512}$/;
@@ -158,9 +201,15 @@ export function isAwsAccessKeyPair(accessKeyId: string, secretAccessKey: string)
   return ACCESS_KEY_ID_PATTERN.test(accessKeyId) && isBoundedSecret(secretAccessKey);
 }
 
+/** Whether a supplied MFA code has the 6-digit shape STS `AssumeRole` takes. */
+export function isValidAwsMfaCode(code: string): boolean {
+  return AWS_MFA_TOKEN_CODE_PATTERN.test(code);
+}
+
 export async function resolveAwsProfileCredentials(
   profileName: string,
   ports: AwsProfilePorts,
+  options?: ResolveAwsProfileOptions,
 ): Promise<AwsProfileResolution> {
   if (!AWS_PROFILE_NAME_PATTERN.test(profileName)) return refused("profile-missing");
   const configPath = ports.env.AWS_CONFIG_FILE ?? join(ports.homeDirectory, ".aws", "config");
@@ -170,7 +219,13 @@ export async function resolveAwsProfileCredentials(
     config: parseAwsIni((await ports.readFile(configPath)) ?? ""),
     shared: parseAwsIni((await ports.readFile(credentialsPath)) ?? ""),
   };
-  return resolveNamedProfile(profileName, files, ports, []);
+  const mfa: MfaContext = { code: options?.mfaCode, used: false };
+  return resolveNamedProfile(profileName, files, ports, [], mfa);
+}
+
+interface MfaContext {
+  readonly code: string | undefined;
+  used: boolean;
 }
 
 type AwsIni = ReadonlyMap<string, ReadonlyMap<string, string>>;
@@ -190,6 +245,7 @@ async function resolveNamedProfile(
   files: ProfileFiles,
   ports: AwsProfilePorts,
   assuming: ReadonlyArray<string>,
+  mfa: MfaContext,
 ): Promise<AwsProfileResolution> {
   if (!AWS_PROFILE_NAME_PATTERN.test(profileName)) return refused("profile-missing");
   const fromShared = files.shared.get(profileName);
@@ -205,7 +261,7 @@ async function resolveNamedProfile(
   // source has no static keys.
   const sourceWithKeys = assuming.length > 0 && setting("aws_access_key_id") !== undefined;
   if (setting("role_arn") !== undefined && !sourceWithKeys) {
-    return assumeProfileRole(profileName, setting, files, ports, assuming);
+    return assumeProfileRole(profileName, setting, files, ports, assuming, mfa);
   }
   for (const section of [fromShared, fromConfig]) {
     const keys = section === undefined ? undefined : staticKeys(section);
@@ -229,16 +285,20 @@ async function assumeProfileRole(
   files: ProfileFiles,
   ports: AwsProfilePorts,
   assuming: ReadonlyArray<string>,
+  mfa: MfaContext,
 ): Promise<AwsProfileResolution> {
   if (assuming.includes(profileName) || assuming.length >= MAX_ROLE_HOPS) {
     return refused("unsupported");
   }
   const role = readRoleSettings(setting, ports.now());
   if (role === "invalid") return refused("unsupported");
-  // The AWS CLI prompts for the code on its terminal; connecting a profile
-  // here has no prompt, so the refusal names the cause instead of the token
-  // service answering access denied.
-  if (setting("mfa_serial") !== undefined) return refused("mfa-required");
+  const mfaSerial = setting("mfa_serial");
+  if (mfaSerial !== undefined) {
+    if (!MFA_SERIAL_PATTERN.test(mfaSerial)) return refused("unsupported");
+    if (setting("web_identity_token_file") !== undefined) return refused("unsupported");
+    if (mfa.code === undefined) return refused("mfa-required");
+    if (!isValidAwsMfaCode(mfa.code)) return refused("mfa-invalid");
+  }
 
   const sourceProfile = setting("source_profile");
   const credentialSource = setting("credential_source");
@@ -265,15 +325,25 @@ async function assumeProfileRole(
   }
 
   let source: AwsCredentials;
+  let sourceMfaSession = false;
   if (credentialSource !== undefined) {
     // The AWS CLI refuses a profile naming both sources.
     if (sourceProfile !== undefined) return refused("unsupported");
-    // Instance and container metadata answer only on that machine's own
-    // network; the broker does not read them.
-    if (credentialSource !== "Environment") return refused("unsupported");
-    const keys = environmentKeys(ports.env);
-    if (keys === undefined) return refused("unavailable");
-    source = keys;
+    if (credentialSource === "Environment") {
+      const keys = environmentKeys(ports.env);
+      if (keys === undefined) return refused("unavailable");
+      source = keys;
+    } else if (credentialSource === "Ec2InstanceMetadata") {
+      const metadata = await resolveEc2ImdsV2Credentials(ports);
+      if (metadata === undefined) return refused("metadata-unreachable");
+      source = metadata;
+    } else if (credentialSource === "EcsContainer") {
+      const metadata = await resolveEcsContainerCredentials(ports);
+      if (metadata === undefined) return refused("metadata-unreachable");
+      source = metadata;
+    } else {
+      return refused("unsupported");
+    }
   } else if (sourceProfile === undefined) {
     return refused("unsupported");
   } else if (sourceProfile === profileName) {
@@ -289,14 +359,40 @@ async function assumeProfileRole(
     if (keys === undefined || keys === "invalid") return refused("unavailable");
     source = keys;
   } else {
-    const resolved = await resolveNamedProfile(sourceProfile, files, ports, [
-      ...assuming,
-      profileName,
-    ]);
+    const resolved = await resolveNamedProfile(
+      sourceProfile,
+      files,
+      ports,
+      [...assuming, profileName],
+      mfa,
+    );
     if (resolved.kind === "refused") return resolved;
     source = resolved.credentials;
+    sourceMfaSession = resolved.mfaSession === true;
   }
-  return fromSts(await ports.assumeRole({ ...role, source }), "assume-role");
+
+  if (mfaSerial !== undefined) {
+    // One 6-digit TOTP code cannot be replayed across two MFA-gated hops.
+    if (mfa.used || mfa.code === undefined) return refused("mfa-required");
+    mfa.used = true;
+    const outcome = await ports.assumeRole({
+      ...role,
+      serialNumber: mfaSerial,
+      tokenCode: mfa.code,
+      source,
+    });
+    if (outcome.kind === "credentials") {
+      return {
+        kind: "credentials",
+        credentials: outcome.credentials,
+        via: "assume-role",
+        mfaSession: true,
+      };
+    }
+    return refused(outcome.kind === "refused" ? "mfa-refused" : "unavailable");
+  }
+
+  return fromSts(await ports.assumeRole({ ...role, source }), "assume-role", sourceMfaSession);
 }
 
 function readRoleSettings(
@@ -348,11 +444,241 @@ function environmentKeys(
 function fromSts(
   outcome: AwsStsOutcome,
   via: "assume-role" | "web-identity",
+  mfaSession = false,
 ): AwsProfileResolution {
   if (outcome.kind === "credentials") {
-    return { kind: "credentials", credentials: outcome.credentials, via };
+    return {
+      kind: "credentials",
+      credentials: outcome.credentials,
+      via,
+      ...(mfaSession ? { mfaSession: true as const } : {}),
+    };
   }
   return refused(outcome.kind === "refused" ? "role-refused" : "unavailable");
+}
+
+/**
+ * EC2 IMDSv2: request a session token with `PUT /latest/api/token`, list the
+ * instance profile role name, and fetch that role's temporary credentials. Each
+ * metadata HTTP call has a strict 1 s timeout and refuses redirects.
+ */
+async function resolveEc2ImdsV2Credentials(
+  ports: AwsProfilePorts,
+): Promise<AwsCredentials | undefined> {
+  if (ports.env.AWS_EC2_METADATA_DISABLED?.trim().toLowerCase() === "true") return undefined;
+  const baseUrl = resolveImdsBaseUrl(ports);
+  if (baseUrl === undefined) return undefined;
+  const fetchImpl = ports.fetchMetadata ?? globalThis.fetch;
+
+  const tokenText = await fetchMetadataText(fetchImpl, `${baseUrl}/latest/api/token`, {
+    method: "PUT",
+    headers: { "x-aws-ec2-metadata-token-ttl-seconds": IMDS_TOKEN_TTL_SECONDS },
+  });
+  if (tokenText === undefined) return undefined;
+  const token = tokenText.trim();
+  if (token.length === 0 || token.length > 4_096 || !/^[\x21-\x7e]+$/.test(token)) {
+    return undefined;
+  }
+
+  const roleListText = await fetchMetadataText(
+    fetchImpl,
+    `${baseUrl}/latest/meta-data/iam/security-credentials/`,
+    {
+      method: "GET",
+      headers: { "x-aws-ec2-metadata-token": token },
+    },
+  );
+  if (roleListText === undefined) return undefined;
+  const roleName = roleListText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  if (roleName === undefined || !IMDS_ROLE_NAME_PATTERN.test(roleName)) return undefined;
+
+  const credentialsText = await fetchMetadataText(
+    fetchImpl,
+    `${baseUrl}/latest/meta-data/iam/security-credentials/${encodeURIComponent(roleName)}`,
+    {
+      method: "GET",
+      headers: { "x-aws-ec2-metadata-token": token },
+    },
+  );
+  return credentialsText === undefined ? undefined : parseMetadataCredentialsJson(credentialsText);
+}
+
+/**
+ * ECS / EKS container credentials: reads `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`
+ * against `169.254.170.2` or a validated `AWS_CONTAINER_CREDENTIALS_FULL_URI`
+ * (HTTPS, or HTTP only on loopback or AWS link-local container endpoints),
+ * attaching `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE` (preferred) or
+ * `AWS_CONTAINER_AUTHORIZATION_TOKEN`. Bounded by a 1 s timeout.
+ */
+async function resolveEcsContainerCredentials(
+  ports: AwsProfilePorts,
+): Promise<AwsCredentials | undefined> {
+  const targetUrl = resolveEcsCredentialsUrl(ports);
+  if (targetUrl === undefined) return undefined;
+  const authHeader = await resolveEcsAuthorizationHeader(ports);
+  if (authHeader === "invalid") return undefined;
+  const fetchImpl = ports.fetchMetadata ?? globalThis.fetch;
+  const text = await fetchMetadataText(fetchImpl, targetUrl, {
+    method: "GET",
+    headers: authHeader === undefined ? {} : { authorization: authHeader },
+  });
+  return text === undefined ? undefined : parseMetadataCredentialsJson(text);
+}
+
+function resolveImdsBaseUrl(ports: AwsProfilePorts): string | undefined {
+  const override = ports.metadataEndpoints?.imdsBaseUrl;
+  if (override !== undefined) return stripTrailingSlashes(override);
+  const configured = ports.env.AWS_EC2_METADATA_SERVICE_ENDPOINT?.trim();
+  if (configured === undefined || configured.length === 0) return IMDS_DEFAULT_BASE_URL;
+  let url: URL;
+  try {
+    url = new URL(configured);
+  } catch {
+    return undefined;
+  }
+  if (
+    url.protocol !== "http:" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.search !== "" ||
+    url.hash !== ""
+  ) {
+    return undefined;
+  }
+  const host = url.hostname.toLowerCase();
+  if (!isLoopbackHostname(host) && host !== "169.254.169.254" && host !== "[fd00:ec2::254]") {
+    return undefined;
+  }
+  return url.origin;
+}
+
+function resolveEcsCredentialsUrl(ports: AwsProfilePorts): string | undefined {
+  const relative = ports.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI?.trim();
+  if (relative !== undefined && relative.length > 0) {
+    if (!relative.startsWith("/") || !/^\/[\x21-\x7e]{0,2048}$/.test(relative)) return undefined;
+    if (relative.split(/[/?#]/).some((segment) => segment === "..")) return undefined;
+    const base = stripTrailingSlashes(
+      ports.metadataEndpoints?.ecsRelativeBaseUrl ?? ECS_DEFAULT_RELATIVE_BASE_URL,
+    );
+    return `${base}${relative}`;
+  }
+  const full = ports.env.AWS_CONTAINER_CREDENTIALS_FULL_URI?.trim();
+  if (full === undefined || full.length === 0) return undefined;
+  let url: URL;
+  try {
+    url = new URL(full);
+  } catch {
+    return undefined;
+  }
+  if (url.username !== "" || url.password !== "") return undefined;
+  if (url.protocol === "https:") return url.toString();
+  if (url.protocol !== "http:") return undefined;
+  const host = url.hostname.toLowerCase();
+  // AWS SDK container credential safety rules: plain HTTP is allowed only for
+  // loopback or the ECS (169.254.170.2) / EKS Pod Identity (169.254.170.23,
+  // [fd00:ec2::254]) link-local metadata endpoints.
+  if (
+    isLoopbackHostname(host) ||
+    host === "169.254.170.2" ||
+    host === "169.254.170.23" ||
+    host === "[fd00:ec2::254]"
+  ) {
+    return url.toString();
+  }
+  return undefined;
+}
+
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) end -= 1;
+  return end === value.length ? value : value.slice(0, end);
+}
+
+function isLoopbackHostname(host: string): boolean {
+  if (host === "localhost" || host === "[::1]") return true;
+  return /^127\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/.test(
+    host,
+  );
+}
+
+async function resolveEcsAuthorizationHeader(
+  ports: AwsProfilePorts,
+): Promise<string | "invalid" | undefined> {
+  const tokenFile = ports.env.AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE?.trim();
+  if (tokenFile !== undefined && tokenFile.length > 0) {
+    const raw = (await ports.readFile(tokenFile))?.trim();
+    if (raw === undefined || !isSafeHeaderToken(raw)) return "invalid";
+    return raw;
+  }
+  const inline = ports.env.AWS_CONTAINER_AUTHORIZATION_TOKEN;
+  if (inline !== undefined && inline.length > 0) {
+    if (!isSafeHeaderToken(inline)) return "invalid";
+    return inline;
+  }
+  return undefined;
+}
+
+function isSafeHeaderToken(value: string): boolean {
+  return value.length > 0 && value.length <= MAX_SECRET_CHARS && /^[\x20-\x7e]+$/.test(value);
+}
+
+async function fetchMetadataText(
+  fetchImpl: typeof fetch,
+  url: string,
+  init: { readonly method: "GET" | "PUT"; readonly headers: Readonly<Record<string, string>> },
+): Promise<string | undefined> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), METADATA_TIMEOUT_MS);
+  try {
+    const response = await fetchImpl(url, {
+      method: init.method,
+      headers: init.headers,
+      redirect: "error",
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      return undefined;
+    }
+    const text = await response.text();
+    return text.length > MAX_METADATA_RESPONSE_CHARS ? undefined : text;
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function parseMetadataCredentialsJson(text: string): AwsCredentials | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed)) return undefined;
+  if (parsed.Code !== undefined && parsed.Code !== "Success") return undefined;
+  const { AccessKeyId, SecretAccessKey, Token, Expiration } = parsed;
+  if (
+    typeof AccessKeyId !== "string" ||
+    typeof SecretAccessKey !== "string" ||
+    !isAwsAccessKeyPair(AccessKeyId, SecretAccessKey) ||
+    (Token !== undefined && (typeof Token !== "string" || !isBoundedSecret(Token))) ||
+    (Expiration !== undefined && typeof Expiration !== "string")
+  ) {
+    return undefined;
+  }
+  const expiresAt = Expiration === undefined ? undefined : Date.parse(Expiration);
+  if (expiresAt !== undefined && !Number.isFinite(expiresAt)) return undefined;
+  return {
+    accessKeyId: AccessKeyId,
+    secretAccessKey: SecretAccessKey,
+    ...(Token === undefined ? {} : { sessionToken: Token }),
+    ...(expiresAt === undefined ? {} : { expiresAt }),
+  };
 }
 
 async function resolveSso(
@@ -509,7 +835,9 @@ export function parseAwsIni(text: string): ReadonlyMap<string, ReadonlyMap<strin
 }
 
 function refused(reason: AwsProfileRefusal): AwsProfileResolution {
-  return { kind: "refused", reason };
+  return reason === "metadata-unreachable"
+    ? { kind: "refused", reason, message: AWS_METADATA_UNREACHABLE_MESSAGE }
+    : { kind: "refused", reason };
 }
 
 function isBoundedSecret(value: string): boolean {

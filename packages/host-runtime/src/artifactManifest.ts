@@ -31,7 +31,9 @@ export type HeadlessArtifactComponentRole =
   | "native-module"
   | "migrations"
   | "notices"
-  | "service-template";
+  | "service-template"
+  /** The Bun runtime the build carries, so the computer needs none of its own. */
+  | "runtime";
 
 const COMPONENT_ROLES = new Set<HeadlessArtifactComponentRole>([
   "server",
@@ -41,6 +43,7 @@ const COMPONENT_ROLES = new Set<HeadlessArtifactComponentRole>([
   "migrations",
   "notices",
   "service-template",
+  "runtime",
 ]);
 
 /** Roles whose embedded component must be version-matched to the artifact. */

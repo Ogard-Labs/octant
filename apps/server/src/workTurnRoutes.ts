@@ -10,6 +10,7 @@ import {
   decodeWorkThreadTranscriptWindowRequest,
   decodeWorkTurnStreamFrame,
   MAX_WORK_TURN_STREAM_FRAME_BYTES,
+  decodeCancelWorkTurnCommand,
   decodeWorkTurnCancelResult,
   decodeWorkThreadRewindResult,
   decodeWorkTurnLookupResult,
@@ -29,7 +30,12 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { Schema } from "effect";
-import { authenticateRoutePrincipal, retainRouteAdmissionCurrent } from "./principalRouteContext";
+import {
+  authenticateRoutePrincipal,
+  boundPrincipalIsHubIntroduced,
+  retainRouteAdmissionCurrent,
+} from "./principalRouteContext";
+import { hubActRefusal, type HubActScopePort } from "./hub/hubActScope";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 import { WorkTurnServiceError, type WorkTurnStartOptions } from "./work/workTurnService";
@@ -91,6 +97,10 @@ export interface WorkTurnRouteDependencies {
   readonly maxJsonBodySize?: number;
   readonly maxFileBodySize?: number;
   readonly now?: () => number;
+  /** The member's Act item for its hub, which bounds where a device only the hub introduced may Stop a turn. */
+  readonly hubActScope?: () => HubActScopePort | undefined;
+  /** The Project a Work thread belongs to; undefined for a thread this host does not hold. */
+  readonly threadProjectId?: (threadId: WorkThreadId) => string | undefined;
 }
 
 export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependencies) {
@@ -315,6 +325,22 @@ export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependenci
         );
       }
       if (isCancel) {
+        // A device only the hub introduced stops a turn only in a Project the
+        // member's Act item names, read at this Stop. A body that names no
+        // thread names no Project, so it is refused while this host is in a
+        // hub; the service decodes and judges it as before otherwise.
+        if (boundPrincipalIsHubIntroduced(request)) {
+          let projectId: string | undefined;
+          try {
+            projectId = dependencies.threadProjectId?.(decodeCancelWorkTurnCommand(value).threadId);
+          } catch {
+            projectId = undefined;
+          }
+          const refusal = hubActRefusal(dependencies.hubActScope?.(), projectId, "stop");
+          if (refusal !== undefined) {
+            return failureResponse({ category: "unauthorized", message: refusal }, 403, origin);
+          }
+        }
         return jsonResponse(
           decodeWorkTurnCancelResult(
             await dependencies.service.cancelFirstTurn(authenticatedWindowId, value),

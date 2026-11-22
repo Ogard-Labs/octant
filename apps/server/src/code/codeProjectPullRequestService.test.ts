@@ -5,6 +5,7 @@ import {
   type CodeProjectPullRequestRow,
 } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts/code";
+import type { ActivityDeliveryObserved } from "@octant/contracts/code-home-activity";
 import type { CodeProjectLinkedThreadFact } from "@octant/domain/code-project-pull-request-policy";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -106,9 +107,20 @@ function serviceFixture(options: {
     readonly number: number;
     readonly observedAt: string;
   }>;
+  readonly observeIssueClosure?: (
+    request: {
+      readonly owner: string;
+      readonly name: string;
+      readonly issueNumber: number;
+      readonly closerNumber: number;
+    },
+    signal: AbortSignal,
+  ) => Promise<{ readonly closedAt: string; readonly title: string } | undefined>;
+  readonly observeViewerLogin?: (signal: AbortSignal) => Promise<string | undefined>;
   readonly merge?: CodeProjectPullRequestMergePort;
   readonly mergeJournal?: Journal;
   readonly recordMerge?: (record: CodeProjectPullRequestMergeRecorded) => void;
+  readonly recordDelivery?: (observation: ActivityDeliveryObserved) => void;
   readonly requiredChecks?: (
     request: { readonly owner: string; readonly name: string; readonly number: number },
     signal: AbortSignal,
@@ -171,9 +183,18 @@ function serviceFixture(options: {
       },
     },
     list: { listActive },
-    detail: { observeReviewByIdentity },
+    detail: {
+      observeReviewByIdentity,
+      ...(options.observeIssueClosure === undefined
+        ? {}
+        : { observeIssueClosure: options.observeIssueClosure }),
+      ...(options.observeViewerLogin === undefined
+        ? {}
+        : { observeViewerLogin: options.observeViewerLogin }),
+    },
     ...(options.merge === undefined ? {} : { merge: options.merge }),
     ...(options.recordMerge === undefined ? {} : { recordMerge: options.recordMerge }),
+    ...(options.recordDelivery === undefined ? {} : { recordDelivery: options.recordDelivery }),
     ...(options.requiredChecks === undefined ? {} : { requiredChecks: options.requiredChecks }),
     ...(mergeJournal === undefined
       ? {}
@@ -1772,6 +1793,21 @@ describe("CodeProjectPullRequestService", () => {
     expect(listActive.mock.calls.length).toBe(callsAfterRefresh);
   });
 
+  it("carries when each pull request was opened into the snapshot the page reads", async () => {
+    const { service } = serviceFixture({
+      list: async () => ({
+        status: "ok",
+        rows: [ghRow({ createdAt: "2026-08-01T09:30:00Z" }), ghRow({ number: 13 })],
+      }),
+    });
+
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    const view = await service.query(windowId, { version: 1 });
+
+    expect(view.rows.find((row) => row.number === 12)?.createdAt).toBe("2026-08-01T09:30:00Z");
+    expect(view.rows.find((row) => row.number === 13)).not.toHaveProperty("createdAt");
+  });
+
   it("says which pull request comes from a fork and leaves a same-repository row as it was", async () => {
     const { service } = serviceFixture({
       list: async () => ({
@@ -1972,6 +2008,188 @@ describe("CodeProjectPullRequestService", () => {
     expect(view.freshness).toEqual({ status: "fresh", lastSuccessfulRefreshAt: now });
   });
 
+  it("records a merged delivery whose GitHub title exceeds the delivery limit", async () => {
+    const recordDelivery = vi.fn();
+    // 100 CJK characters are 300 UTF-8 bytes, past the contract's 256; the
+    // observation must record the delivery with the title cut on a boundary
+    // rather than dropping the whole record.
+    const longTitle = "\u754C".repeat(100);
+    const { service } = serviceFixture({
+      recordDelivery,
+      detail: async () =>
+        ({
+          ...observedDetail,
+          pullRequest: {
+            ...observedDetail.pullRequest,
+            state: "merged",
+            title: longTitle,
+            // gh's real export drops the milliseconds the contract expects.
+            mergedAt: "2026-08-22T08:00:00Z",
+            mergedBy: "octocat",
+          },
+        }) satisfies GhPullRequestReviewResult,
+    });
+
+    await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+
+    expect(recordDelivery).toHaveBeenCalledTimes(1);
+    expect(recordDelivery.mock.calls[0]?.[0]).toMatchObject({
+      kind: "prs-merged",
+      number: 12,
+      occurredAt: "2026-08-22T08:00:00.000Z",
+      title: "\u754C".repeat(85),
+      mergedBy: "octocat",
+    });
+  });
+
+  it("trims a delivery title cut to the byte limit before recording", async () => {
+    const recordDelivery = vi.fn();
+    const { service } = serviceFixture({
+      recordDelivery,
+      detail: async () =>
+        ({
+          ...observedDetail,
+          pullRequest: {
+            ...observedDetail.pullRequest,
+            state: "merged",
+            title: `${"a".repeat(255)} rest`,
+            mergedAt: "2026-08-22T08:00:00Z",
+            mergedBy: "octocat",
+          },
+        }) satisfies GhPullRequestReviewResult,
+    });
+
+    await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+
+    expect(recordDelivery).toHaveBeenCalledTimes(1);
+    expect(recordDelivery.mock.calls[0]?.[0]).toMatchObject({
+      kind: "prs-merged",
+      title: "a".repeat(255),
+    });
+  });
+
+  it("confirms each closing issue once and journals it for every linked thread", async () => {
+    const recordDelivery = vi.fn();
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const observeIssueClosure = vi.fn(
+      async (request: {
+        readonly owner: string;
+        readonly name: string;
+        readonly issueNumber: number;
+        readonly closerNumber: number;
+      }) => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        inFlight -= 1;
+        return { closedAt: "2026-08-22T09:00:00Z", title: `Issue ${request.issueNumber}` };
+      },
+    );
+    const witnesses = [
+      "20000000-0000-4000-8000-000000000001",
+      "20000000-0000-4000-8000-000000000002",
+      "20000000-0000-4000-8000-000000000003",
+    ].map(
+      (id, index) =>
+        ({
+          threadId: id,
+          projectId: String(projectA),
+          title: `Witness ${index + 1}`,
+          repository: { owner: "octant", name: "octant" },
+          deliveryBranch: "feature/manual-refresh",
+          pullRequestNumbers: [],
+        }) satisfies CodeProjectLinkedThreadFact,
+    );
+    const { service } = serviceFixture({
+      recordDelivery,
+      observeIssueClosure,
+      threads: witnesses,
+      detail: async () =>
+        ({
+          ...observedDetail,
+          pullRequest: {
+            ...observedDetail.pullRequest,
+            state: "merged",
+            mergedAt: "2026-08-22T08:00:00Z",
+            mergedBy: "octocat",
+            // The duplicate must not double the confirmation read.
+            closingIssueNumbers: [101, 102, 101],
+          },
+        }) satisfies GhPullRequestReviewResult,
+    });
+
+    await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+
+    expect(observeIssueClosure).toHaveBeenCalledTimes(2);
+    expect(observeIssueClosure.mock.calls.map(([request]) => request.issueNumber)).toEqual([
+      101, 102,
+    ]);
+    // The confirmation reads stay inside the bounded GitHub fan-out.
+    expect(maxInFlight).toBeLessThanOrEqual(4);
+    const closures = recordDelivery.mock.calls.filter(
+      ([delivery]) => delivery.kind === "issues-closed",
+    );
+    expect(closures).toHaveLength(6);
+    expect(closures.map(([delivery]) => `${delivery.threadId}:${delivery.number}`).sort()).toEqual([
+      "20000000-0000-4000-8000-000000000001:101",
+      "20000000-0000-4000-8000-000000000001:102",
+      "20000000-0000-4000-8000-000000000002:101",
+      "20000000-0000-4000-8000-000000000002:102",
+      "20000000-0000-4000-8000-000000000003:101",
+      "20000000-0000-4000-8000-000000000003:102",
+    ]);
+  });
+
+  it("records a merged delivery performed by a GitHub app actor", async () => {
+    const recordDelivery = vi.fn();
+    const { service } = serviceFixture({
+      recordDelivery,
+      detail: async () =>
+        ({
+          ...observedDetail,
+          pullRequest: {
+            ...observedDetail.pullRequest,
+            state: "merged",
+            mergedAt: "2026-08-22T08:00:00Z",
+            mergedBy: "github-actions[bot]",
+          },
+        }) satisfies GhPullRequestReviewResult,
+    });
+
+    await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+
+    expect(recordDelivery).toHaveBeenCalledTimes(1);
+    expect(recordDelivery.mock.calls[0]?.[0]).toMatchObject({
+      kind: "prs-merged",
+      mergedBy: "github-actions[bot]",
+    });
+  });
+
+  it.each(["not a login", "octocat[bot", "octocat[bot][bot]", "[bot]octocat"])(
+    "skips the delivery when the merger login is not a GitHub actor (%s)",
+    async (mergedBy) => {
+      const recordDelivery = vi.fn();
+      const { service } = serviceFixture({
+        recordDelivery,
+        detail: async () =>
+          ({
+            ...observedDetail,
+            pullRequest: {
+              ...observedDetail.pullRequest,
+              state: "merged",
+              mergedAt: "2026-08-22T08:00:00Z",
+              mergedBy,
+            },
+          }) satisfies GhPullRequestReviewResult,
+      });
+
+      await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+
+      expect(recordDelivery).not.toHaveBeenCalled();
+    },
+  );
+
   it("keeps the last authorized detail when refresh fails", async () => {
     let next: GhPullRequestReviewResult = observedDetail;
     const { service } = serviceFixture({
@@ -2024,5 +2242,42 @@ describe("CodeProjectPullRequestService", () => {
     expect(view.detail).toEqual({ state: "unavailable" });
     expect(JSON.stringify(view)).not.toContain("Verified implementation.");
     expect(view.freshness).toEqual({ status: "stale", staleReason: "disconnected" });
+  });
+
+  it("reports the observed pull request author and returns undefined when unobserved or revoked", async () => {
+    const { service } = serviceFixture({
+      detail: async () => observedDetail,
+    });
+    expect(service.observedAuthor(detailQuery)).toBeUndefined();
+
+    await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+    expect(service.observedAuthor(detailQuery)).toBe("octocat");
+
+    service.revokeGithub();
+    expect(service.observedAuthor(detailQuery)).toBeUndefined();
+  });
+
+  it("reads the signed-in viewer login from the pull request detail port and fails closed when unavailable", async () => {
+    const observeViewerLogin = vi.fn(async () => "  henrik  ");
+    const { service } = serviceFixture({ observeViewerLogin });
+    expect(await service.observeViewerLogin(new AbortController().signal)).toBe("henrik");
+
+    const aborted = new AbortController();
+    aborted.abort();
+    expect(await service.observeViewerLogin(aborted.signal)).toBeUndefined();
+
+    service.revokeGithub();
+    expect(await service.observeViewerLogin(new AbortController().signal)).toBeUndefined();
+    expect(observeViewerLogin).toHaveBeenCalledTimes(1);
+
+    const absent = serviceFixture({});
+    expect(await absent.service.observeViewerLogin(new AbortController().signal)).toBeUndefined();
+
+    const throwing = serviceFixture({
+      observeViewerLogin: async () => {
+        throw new Error("gh failed");
+      },
+    });
+    expect(await throwing.service.observeViewerLogin(new AbortController().signal)).toBeUndefined();
   });
 });

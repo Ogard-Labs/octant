@@ -12,6 +12,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ChevronRight,
+  Globe2,
   LoaderCircle,
   Plus,
   RotateCw,
@@ -28,6 +29,8 @@ import {
   RENDERER_OVERLAY_SELECTOR,
 } from "../browser/BrowserWorkspace";
 import { useNativeBrowserSurface } from "../browser/useNativeBrowserSurface";
+import { useBrowserSurfaceTabIcons } from "../browser/tabIcons";
+import { PageFavicon } from "../shell/PageFavicon";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -130,6 +133,15 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
   // A host that reports no tabs is showing exactly one page; the rail says so
   // rather than pretending the context has none.
   const tabs = state?.tabs ?? [];
+  // Every rail tab shows its own icon, including a background tab the person
+  // has not opened yet; the read re-runs when the host publishes new state.
+  const tabIcons = useBrowserSurfaceTabIcons({
+    contextIds: context === undefined ? [] : [String(context.contextId)],
+    hostBridge: props.hostBridge,
+    refreshKey: state,
+    threadId,
+  });
+  const railIcons = context === undefined ? undefined : tabIcons.get(String(context.contextId));
   const canOpenTab =
     props.hostBridge?.tabBrowserSurface !== undefined && tabs.length < MAX_BROWSER_TABS_PER_CONTEXT;
 
@@ -459,6 +471,11 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
                   type="button"
                   variant="ghost"
                 >
+                  <PageFavicon
+                    fallback={<Globe2 aria-hidden="true" size={12} />}
+                    muted={railIcons?.sleeping === true}
+                    src={railIcons?.icons.get(tab.tabId)}
+                  />
                   {tab.title === "" ? "New tab" : tab.title}
                 </OctantButton>
                 {tabs.length > 1 ? (

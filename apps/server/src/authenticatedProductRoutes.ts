@@ -1,5 +1,6 @@
 import { authorizePrincipalAction } from "@octant/domain";
 import { removeImageMetadata } from "./attachments/imageMetadataRemoval";
+import { NEW_DEVICE_ALERTS_PATH } from "./hub/newDeviceAlertRoutes";
 import {
   principalActsAsHostPerson,
   principalAuthorityKind,
@@ -15,6 +16,7 @@ export interface AuthenticatedProductDispatchHandoff {
   readonly request: Request;
   readonly principal: ClientPrincipal;
   readonly abortSignal?: AbortSignal;
+  readonly sessionNow?: () => number;
   readonly freshness?: "current" | "rotation-due";
   readonly requestFacts?: unknown;
 }
@@ -53,6 +55,7 @@ export function createAuthenticatedProductDispatch(
       request: handoff.request,
       principal: handoff.principal,
       ...(handoff.abortSignal === undefined ? {} : { abortSignal: handoff.abortSignal }),
+      ...(handoff.sessionNow === undefined ? {} : { sessionNow: handoff.sessionNow }),
     });
     bindPrincipalRouteContext(handoff.request, context);
     const cleaned = await withoutImageMetadata(handoff.request, handoff.principal);
@@ -85,6 +88,10 @@ export function classifyProductAction(request: Request): string | undefined {
     if (method === "GET" || method === "HEAD") return "project.overview.read";
     return undefined;
   }
+  // Every connected device is told when a new device joins; a read only.
+  if (path === NEW_DEVICE_ALERTS_PATH) {
+    return method === "GET" ? "project.overview.read" : undefined;
+  }
   if (path === "/api/machine/changes") {
     return method === "GET" || method === "HEAD" ? "project.overview.read" : undefined;
   }
@@ -103,6 +110,14 @@ export function classifyProductAction(request: Request): string | undefined {
     // action starts, controls, or observes a session, whatever the method.
     if (path.startsWith("/api/code/debug/")) return undefined;
     if (method === "POST" && path === "/api/code/board") return "project.overview.read";
+    if (
+      method === "POST" &&
+      (path === "/api/code/pull-request-reviews/project/query" ||
+        path === "/api/code/pull-request-reviews/thread/query" ||
+        path === "/api/code/pull-request-reviews/pr/query")
+    ) {
+      return "project.overview.read";
+    }
     if (method === "POST" && path === "/api/code/evidence/batch") {
       return "project.overview.read";
     }
@@ -307,7 +322,8 @@ export function classifyProductAction(request: Request): string | undefined {
     // with a local window.
     if (method === "POST" && path === "/api/benchmarks/cells/rate") return "benchmark.rate-cell";
     return method === "POST" &&
-      (path === "/api/benchmarks/suites/list" ||
+      (path === "/api/benchmarks/advice" ||
+        path === "/api/benchmarks/suites/list" ||
         path === "/api/benchmarks/runs/list" ||
         path === "/api/benchmarks/runs/read" ||
         path === "/api/benchmarks/suites/history" ||
@@ -364,17 +380,6 @@ export function classifyProductAction(request: Request): string | undefined {
         path === "/api/extensions/snapshot" ||
         path === "/api/extensions/state")
     ) {
-      return "settings.read-non-secret";
-    }
-    return method === "GET" || method === "HEAD" ? "settings.read-non-secret" : undefined;
-  }
-  if (path.startsWith("/api/validation/")) {
-    // Validation evidence is the only route on this prefix and is POST-only by
-    // construction, so admitting only GET/HEAD left every evidence pane blank
-    // on a paired browser. Admission is still only forwarding: the route
-    // authenticates the window and re-checks the requested tool authority
-    // against it before loading any snapshot.
-    if (method === "POST" && path === "/api/validation/evidence") {
       return "settings.read-non-secret";
     }
     return method === "GET" || method === "HEAD" ? "settings.read-non-secret" : undefined;

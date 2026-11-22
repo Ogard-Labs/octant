@@ -207,6 +207,7 @@ async function runScript(
           ...options.environment,
         },
         timeoutMs: input.timeoutMs,
+        ...(input.outputRetention === undefined ? {} : { outputRetention: input.outputRetention }),
         ...(egressProxy === undefined ? {} : { egressProxy }),
         ...(servers === undefined
           ? {}

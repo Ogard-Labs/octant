@@ -5,11 +5,15 @@ import type { WorkThread } from "@octant/contracts/work-threads";
 import type { NativeHarnessComposition } from "../harness/nativeHarnessComposition";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { ServerConnection } from "./serverConnection";
-import { transferServerAttachments, type ServerAttachmentTransfer } from "./serverAttachments";
+import {
+  transferServerAttachments,
+  type ServerAttachmentTransfer,
+  type ServerAttachmentTransferGuard,
+} from "./serverAttachments";
 import { ServerFileSystem } from "./serverFiles";
 import type { ServerProjectStore } from "./serverProjectStore";
 import { createServerShell, type ServerShellOptions } from "./serverShell";
-import { SERVER_RUNTIME_NOT_HARNESS } from "./serverProjectThreads";
+import { SERVER_WORK_RUNTIME_NOT_HARNESS } from "./serverProjectThreads";
 
 /**
  * Work threads in a server Project. Canonical: docs/design/server-projects.md
@@ -86,6 +90,7 @@ export function bindServerWorkTurn(
     readonly record: (
       input: Parameters<ServerShellOptions["record"]>[0] & { readonly threadId: string },
     ) => "recorded" | "unavailable";
+    readonly guardTransfer?: ServerAttachmentTransferGuard;
   },
   input: { readonly thread: WorkThread },
 ): ServerWorkTurnBinding {
@@ -128,7 +133,7 @@ export function bindServerWorkTurn(
     server: () => options.store.serverOf(projectId),
   });
   return tools === undefined
-    ? { status: "refused", message: SERVER_RUNTIME_NOT_HARNESS }
+    ? { status: "refused", message: SERVER_WORK_RUNTIME_NOT_HARNESS }
     : {
         status: "bound",
         folder: project.folder,
@@ -140,6 +145,7 @@ export function bindServerWorkTurn(
             threadId: String(input.thread.id),
             files,
             ...(signal === undefined ? {} : { signal }),
+            ...(options.guardTransfer === undefined ? {} : { guard: options.guardTransfer }),
           }),
       };
 }

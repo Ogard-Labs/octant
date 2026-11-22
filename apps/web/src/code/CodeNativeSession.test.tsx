@@ -54,6 +54,49 @@ describe("Code native session", () => {
     expect(screen.getByLabelText("Thread details")).toBeTruthy();
   });
 
+  it("shows the adopted session's earlier conversation marked as imported, and says when earlier messages were left out", async () => {
+    const user = userEvent.setup();
+    const { value } = client({
+      threadId,
+      sessions: [],
+      adopted: {
+        nativeSessionId: sessionId,
+        history: {
+          status: "imported",
+          omittedMessages: 3,
+          messages: [
+            { role: "person", text: "Why is login flaky?" },
+            { role: "agent", text: "A race in the session cookie.", tools: ["Grep"] },
+          ],
+        },
+      },
+    });
+    render(<CodeNativeSession threadId={threadId} threadHasTurns client={value} />);
+
+    await user.click(await screen.findByRole("button", { name: "Show" }));
+
+    expect(screen.getByText(/Imported from the provider's session · 2 messages/)).toBeVisible();
+    const list = screen.getByRole("list", { name: "Imported earlier conversation" });
+    expect(list).toHaveTextContent("3 earlier messages were not imported.");
+    expect(list).toHaveTextContent("Why is login flaky?");
+    expect(list).toHaveTextContent("Used Grep");
+  });
+
+  it("says why nothing was imported from a session whose provider keeps no readable history", async () => {
+    const { value } = client({
+      threadId,
+      sessions: [],
+      adopted: { nativeSessionId: sessionId, history: { status: "none", reason: "unsupported" } },
+    });
+    render(<CodeNativeSession threadId={threadId} threadHasTurns client={value} />);
+
+    expect(
+      await screen.findByText(
+        "This provider does not let Octant read the session's earlier messages.",
+      ),
+    ).toBeVisible();
+  });
+
   it("offers nothing once the thread has messages of its own", async () => {
     const { value } = client({
       threadId,
