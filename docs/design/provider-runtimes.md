@@ -527,14 +527,17 @@ deadline counts only the call's running time: it stands still while an
 approval the call asks before it is dispatched waits for its person, and runs
 on from where it stood once the person answers. An unanswered approval waits
 in Needs you and never turns into a refusal by timing out; Stop still ends the
-wait. For the same reason, while any call in a scope (a scope includes its
-thread) waits for approval, none of that scope's MCP sessions idle out: the
-turn's tool set was fixed at its start, so a connector that idled out under
-the wait would refuse the turn's next call to it. When the scope's last
-waiting approval ends (answered, refused, cancelled or failed), its sessions
-idle on as usual. Disabling a connector in Settings, an authentication change
-and an authority reconciliation still close a session at once and refuse its
-calls. Work and Code have no per-call deadline; their app-managed calls pause
+wait. For the same reason, while an MCP tool call in a scope (a scope
+includes its thread) waits for its approval, none of that scope's MCP
+sessions idle out: the turn's tool set was fixed at its start, so a connector
+that idled out under the wait would refuse the turn's next call to it. Only
+MCP tool approvals hold the scope; other asks, such as a Browser approval,
+do not. When the scope's last waiting MCP approval ends (answered, refused,
+cancelled or failed), its sessions idle on as usual. Disabling a connector in
+Settings, an authentication change and an authority reconciliation still
+close a session at once and refuse its calls; when the closed session is the
+one that asked, its prompt is withdrawn from Needs you, the call is refused,
+and its share of the hold ends with it. Work and Code have no per-call deadline; their app-managed calls pause
 the stalled-turn limit instead.
 
 ### Loop detection and provider tool inputs

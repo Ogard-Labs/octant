@@ -2425,6 +2425,8 @@ describe("Agent Plugin MCP session manager", () => {
       providerToolName: definition!.name,
       mcpToolName: "mutate",
       inputJson: '{"target":"production"}',
+      // Aborted when the session is retired while the ask waits.
+      signal: expect.any(AbortSignal),
     });
     expect(toolCalls).toBe(0);
     await manager.drainAll();
@@ -2790,6 +2792,7 @@ describe("Agent Plugin MCP session manager", () => {
       const initializations = new Map<string, number>();
       const toolCalls = new Map<string, number>();
       const answers: Array<(approved: boolean) => void> = [];
+      let withdrawn = 0;
       const fetchImpl = (async (input, init) => {
         const server = String(input).endsWith("/second") ? "second" : "first";
         if ((init?.method ?? "GET") === "DELETE") return new Response(null, { status: 204 });
@@ -2830,11 +2833,21 @@ describe("Agent Plugin MCP session manager", () => {
             }),
         },
         fetch: fetchImpl,
-        authorizeToolCall: (call: { readonly serverName: string }) =>
+        authorizeToolCall: (call: { readonly serverName: string; readonly signal?: AbortSignal }) =>
           call.serverName === "second"
             ? Promise.resolve(true)
             : new Promise<boolean>((resolve) => {
                 answers.push(resolve);
+                // As the approval service does: an aborted ask leaves Needs
+                // you and settles as refused.
+                call.signal?.addEventListener(
+                  "abort",
+                  () => {
+                    withdrawn += 1;
+                    resolve(false);
+                  },
+                  { once: true },
+                );
               }),
         recordExternalContentIngestion: () => ({
           kind: "recorded",
@@ -2895,6 +2908,19 @@ describe("Agent Plugin MCP session manager", () => {
               },
             ],
           } as never),
+        disableFirst: () =>
+          manager.reconcileLifecycleSnapshot({
+            packages: [
+              {
+                ...pkg,
+                components: [
+                  { ...first, effectiveState: { kind: "blocked", reason: "disabled" } },
+                  second,
+                ],
+              },
+            ],
+          } as never),
+        withdrawn: () => withdrawn,
         initializations: (server: string) => initializations.get(server) ?? 0,
         toolCalls: (server: string) => toolCalls.get(server) ?? 0,
       };
@@ -2916,8 +2942,41 @@ describe("Agent Plugin MCP session manager", () => {
         expect((await fixture.firstCall).isError).not.toBe(true);
         expect(fixture.toolCalls("first")).toBe(1);
 
+        // The hold is released; inside its idle period the sibling still
+        // answers on the same session.
+        await vi.advanceTimersByTimeAsync(4 * minute);
+        expect((await fixture.invoke("second")).isError).not.toBe(true);
+        expect(fixture.toolCalls("second")).toBe(2);
+        expect(fixture.initializations("second")).toBe(1);
+
         // With no approval waiting in the scope, both idle out as usual.
         await vi.advanceTimersByTimeAsync(6 * minute);
+        expect(fixture.manager.sessions()).toHaveLength(0);
+        await fixture.manager.drainAll();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("withdraws the waiting prompt when Settings disables the connector that asked, and lets the sibling idle out on schedule", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const fixture = await twoConnectors();
+        await vi.advanceTimersByTimeAsync(minute);
+        await fixture.disableFirst();
+
+        expect(fixture.withdrawn()).toBe(1);
+        expect(await fixture.firstCall).toMatchObject({
+          isError: true,
+          result: { error: "extension-tool-authentication-changed" },
+        });
+        expect(fixture.toolCalls("first")).toBe(0);
+        expect(fixture.manager.sessions()).toHaveLength(1);
+
+        // The sibling's idle period began when it connected and ends on time.
+        await vi.advanceTimersByTimeAsync(3 * minute);
+        expect(fixture.manager.sessions()).toHaveLength(1);
+        await vi.advanceTimersByTimeAsync(2 * minute);
         expect(fixture.manager.sessions()).toHaveLength(0);
         await fixture.manager.drainAll();
       } finally {
