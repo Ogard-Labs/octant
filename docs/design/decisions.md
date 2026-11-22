@@ -1667,12 +1667,13 @@ Status: Partly built. Since: —; agent images in every mode 2026-11-07. Detail:
 
 ### Video generation
 
-Short video clips run as a journaled job on the person's own Gemini API key, after a card in the thread that always asks and shows the price (design, 2026-11-22; awaiting maintainer approval).
+Short video clips run as a journaled job on the person's own Gemini API key, following the image rule for asking, with the price on the card (design, 2026-11-22; awaiting maintainer approval).
 
 - Gemini Omni Flash (`gemini-omni-1.2-flash`) is the only provider at first: OpenAI shut its Videos API down on 2026-09-24, and Google shut down the Veo 3.1 previews in the Gemini API on 2026-10-22.
-- The card shows duration × the published per-second rate before Generate; video never offers "Don't ask again", and Full access still asks. Plan, Side Chats and unattended turns are never offered the tool.
-- Clips are 3–10 seconds, at most 1080p and 200 MB, with one job per host and a 10-minute job time. A host-wide Video spend per day ceiling (default $5.00) applies on top of thread and Project ceilings, settled from the provider's token count.
-- Clips are stored beside generated images, exported and deleted with their thread, and the provider's stored interaction is deleted as soon as the clip is kept. Paired devices watch and download clips but cannot answer a video card.
+- A provider runtime's own native media output shows in the thread with no Octant gate, as in T3 Code and Paseo; no runtime they drive makes video natively today.
+- The card shows duration × the published per-second rate before Generate and offers "Don't ask again" as for images; Full access, routines and paired devices behave as they do for images. Plan and Side Chats are never offered the tool.
+- Clips use the provider's own range (3–15 seconds, up to 4K). The host bounds only a clip's stored size (1 GB) and job time (30 minutes) and shares the image queue; the person's thread and Project spend ceilings apply, settled from the provider's token count.
+- Clips are stored beside generated images, exported and deleted with their thread, and the provider's stored interaction is deleted as soon as the clip is kept.
 - After a restart, a running job with a recorded provider id resumes; one without settles at its estimate as interrupted.
 
 Status: Designed, not built. Since: 2026-11-22. Detail: [Video generation](video-generation.md).

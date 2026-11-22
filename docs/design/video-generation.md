@@ -99,66 +99,87 @@ driver on the same seam, under
 OpenAI-compatible custom source for video is not designed: no compatible video
 API exists to be compatible with.
 
+## How other agent workspaces do it
+
+The maintainer asked (2026-11-22) that Octant prefer the native or platform
+solution, stay aligned with T3 Code and Paseo, and not lock or restrict
+features. Their public source was read on 2026-11-22 (T3 Code at `1e78f376`,
+Paseo at `e886aeb`):
+
+- Neither generates video itself, and neither has a video provider, card or
+  setting.
+- Both show what the provider runtime makes natively. Codex's app server
+  reports its own `imageGeneration` thread items, and Paseo turns each one into
+  an image in the chat (`codex-app-server-agent.ts`, `mapCodexThreadImageItem`).
+  Neither adds a gate, cap or price check of its own around the runtime's
+  generation.
+- The Codex app-server schema T3 Code generates has no video item, so no
+  runtime either app drives generates video natively today.
+
+This design follows that. A runtime's own native media output is shown in the
+thread as any provider output is, with no Octant gate. Octant's own video tool
+exists for the providers that cannot make video themselves, and it reuses the
+paid-call rule images already follow rather than inventing a stricter one.
+
 ## Rules
 
-### The card always asks
+### The card
 
-Every generation asks the person on a card in the thread before anything is
-sent. The card shows:
+A generation asks on a card in the thread, exactly as an image generation
+does under
+[Image generation and voice](decisions.md#image-generation-and-voice). The
+card shows:
 
 - the prompt;
 - any reference images, named, as for images;
 - the profile and model;
 - the duration, resolution and aspect ratio, which the person can change
-  within the limits below;
+  within what the provider offers;
 - the price before Generate: duration × the published per-second rate for that
   resolution, for example "About $0.70 for 10 s at 720p, billed by Google". A
   model whose price Octant does not know says "Billed by Google; price not
-  published" and needs the person to tick that they understand.
+  published".
 
-"Don't ask again" is **not** offered for video, and Full access does not skip
-the card. Each clip costs real money, and a loop of agent calls at Full access
-could spend dollars a minute. This is a deliberate exception to the paid-call
-rule in
-[Image generation and voice](decisions.md#image-generation-and-voice), and
-it needs maintainer approval. A turn the host runs as itself (a routine or a
-goal loop) is never offered the video tool, since nobody could answer the card.
-Plan refuses. A Side Chat never gets the tool.
+"Don't ask again" is offered as for images and kept the same way: journaled
+per Project, or for a Chat thread outside a Project in host memory. At Full
+access the card is skipped where the Project holds that choice or Settings
+names a default video profile. A routine or goal loop may generate video where
+its Project keeps a choice, since nobody is there to answer a card. Reference
+images always need the card, as for images. Plan refuses, because Plan changes
+nothing outside the host. A Side Chat never gets the tool.
 
 ### Limits
 
-| Limit                        | Value                       | Why                                                                                       |
-| ---------------------------- | --------------------------- | ----------------------------------------------------------------------------------------- |
-| Clip length                  | 3–10 s, default 8 s         | Omni allows 15 s, but 10 s keeps a clip under about $1 at 720p and keeps extension simple |
-| Resolution                   | 360p, 720p (default), 1080p | 4K costs three times 720p and is upscaled anyway; not offered at first                    |
-| Stored size of one clip      | 200 MB                      | A 10-second 1080p MP4 is well under it; anything larger is refused, not truncated         |
-| Job time                     | 10 minutes                  | The job fails as `timeout` and the remote interaction is cancelled and deleted            |
-| Running jobs per host        | 1                           | Others queue; video is slow and costly enough that parallel runs help nobody              |
-| Waiting video cards per host | 4                           | A fifth call is refused with "Too many video generations are waiting for an answer."      |
-| Agent call wait              | 2 minutes                   | As for images; after that the call answers `generating` and the clip appears when done    |
+Octant offers what the provider offers and adds only the bounds a host needs to
+stay healthy:
+
+| Bound                   | Value                                    | Why                                                                                                                       |
+| ----------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Clip length             | 3–15 s, default 8 s                      | Omni's own range; the default keeps a first clip quick and cheap                                                          |
+| Resolution              | 360p, 720p (default), 1080p, 4K          | Omni's own range                                                                                                          |
+| Aspect ratio            | 16:9 (default) or 9:16                   | Omni's own range                                                                                                          |
+| Stored size of one clip | 1 GB                                     | Far above a 15-second 4K MP4; a larger response is refused, not truncated, so a broken one cannot fill the disk           |
+| Job time                | 30 minutes                               | Long enough for a 4K clip under load; the job then fails as `timeout` and the remote interaction is cancelled and deleted |
+| Running jobs            | the image job service's host concurrency | Video jobs share the bounded queue image jobs already use                                                                 |
+| Agent call wait         | 2 minutes                                | As for images; after that the call answers `generating` and the clip appears when done                                    |
 
 ### Spend ceilings
 
-A video job counts against the thread's and the Project's spend ceilings like
-any turn. Before the card's Generate is honoured, the host reserves the card's
-estimate against every ceiling that applies. If a ceiling cannot cover it, the
-job is refused with that ceiling named, and nothing is sent. When the job
-ends, the reservation settles to the cost computed from the token count Google
-reports. A job that fails before any output is billed nothing and releases its
-reservation. A cancelled job settles at what Google reports, or at the
-estimate when Google reports nothing, because Google may bill a job it had
-already started.
-
-The design adds one host setting: **Video spend per day**, in Settings ›
-Voice & images, default $5.00. It is a host-wide ceiling for video jobs only
-and resets at local midnight. It is there because video is the one Octant
-capability where a few clicks can spend tens of dollars; it needs maintainer
-approval.
+A video job counts against the thread's and the Project's spend ceilings, which
+the person sets, like any turn. Before Generate is honoured, the host reserves
+the card's estimate against every ceiling that applies. If a ceiling cannot
+cover it, the job is refused with that ceiling named, and nothing is sent. When
+the job ends, the reservation settles to the cost computed from the token count
+Google reports. A job that fails before any output is billed nothing and
+releases its reservation. A cancelled job settles at what Google reports, or at
+the estimate when Google reports nothing, because Google may bill a job it had
+already started. No video-only ceiling is added: the person's own ceilings
+already cover it.
 
 ### Storage, export and deletion
 
 - A clip is stored in a sibling of the generated-image store, under the host's
-  data directory. It is written once, named by its hash, bounded to 200 MB and
+  data directory. It is written once, named by its hash, bounded to 1 GB and
   checked as an MP4 from its bytes (`ftyp` box) before it is kept.
 - The journal holds the job's events (`video.job-queued@1`,
   `video.job-status-changed@1`), a prompt hash, the provider's opaque
@@ -182,9 +203,8 @@ approval.
   seeking does not download the whole clip. The route checks the window's or
   device's authority over the thread on every request, as image routes do.
 - A paired browser or phone can watch and download clips from threads it can
-  open. It cannot start a video job, and it cannot answer a video card. That
-  card is answered at a local window on the host, because every clip costs
-  money and the card is the only consent.
+  open, and answer its own video cards in the thread, as it answers image
+  cards. A client that cannot show the card's price cannot approve it.
 - A clip can be placed in a Canvas design as a `generated-video` asset in a
   later change; this design does not add the asset kind.
 
@@ -195,7 +215,7 @@ At startup the host reconciles every video job the journal left unfinished:
 - A job that was **queued**, so nothing was sent, is marked failed as
   `interrupted` and billed nothing.
 - A job that was **running** with a recorded interaction id is resumed. The
-  host polls that interaction until it ends or the 10-minute job time measured
+  host polls that interaction until it ends or the 30-minute job time measured
   from its start runs out, then stores the clip and deletes the interaction.
   Google may already have billed it, so it is not thrown away.
 - A job that was **running** with no recorded interaction id, because the host
@@ -271,7 +291,8 @@ plugin over a new optional `videoGeneration` capability on the public media
 tool port (`@octant/plugin-api/media-tools`). It has `generate` and `save`
 operations and the same host-owned boundaries as `octant_create_image`. It is
 offered in Chat, Work and Code only while a Gemini profile with a video model
-is enabled, never in Plan, a Side Chat or an unattended turn. Its host line
+is enabled, never in Plan or a Side Chat, and in an unattended turn only where
+the Project keeps a choice. Its host line
 tells every provider to call it for a clip instead of writing an animation by
 hand only when the person asks for a video.
 
@@ -286,14 +307,26 @@ nothing in this design is platform-specific.
 
 ## Decisions this design asks for
 
-1. Gemini Omni Flash on the Gemini API is the only provider at first. OpenAI's
-   API is shut down, and Veo GA needs enterprise sign-in.
-2. Video never offers "Don't ask again", and Full access still asks.
-3. Limits: 3–10 s, up to 1080p, 200 MB, 10 minutes, one job per host.
-4. A host-wide **Video spend per day** ceiling, default $5.00, on top of
-   thread and Project ceilings.
-5. Clips are exported with their thread and deleted with it, and the remote
-   interaction is deleted as soon as the clip is stored.
-6. Paired devices watch and download but cannot answer a video card.
-7. A running job resumes after a restart. An unknown one settles at its
-   estimate.
+Each has a recommendation, aligned with T3 Code and Paseo where they have one:
+
+1. **Provider.** Recommended: Gemini Omni Flash on the person's own Gemini
+   key, the one provider whose video API is live. OpenAI's is shut down, and
+   Veo GA needs enterprise sign-in, which can be added later on the same seam.
+2. **Native first.** Recommended: a runtime's own native media output is shown
+   in the thread with no Octant gate, as the peers do; Octant's tool serves the
+   providers without it.
+3. **Asking.** Recommended: the image rule unchanged, including "Don't ask
+   again", Full access with a kept or default profile, and routines with a kept
+   choice. The card shows the price.
+4. **Limits.** Recommended: the provider's own range (3–15 s, up to 4K), with
+   only host-health bounds: 1 GB per clip, a 30-minute job time, and the image
+   queue's concurrency.
+5. **Spend.** Recommended: the person's existing thread and Project ceilings,
+   settled from Google's token count; no new video ceiling.
+6. **Storage and privacy.** Recommended: clips are exported and deleted with
+   their thread, and the provider's stored interaction is deleted as soon as
+   the clip is kept.
+7. **Paired devices.** Recommended: watch, download and answer their own cards,
+   as for images.
+8. **Restarts.** Recommended: a running job with a recorded provider id
+   resumes; one without settles at its estimate as interrupted.
