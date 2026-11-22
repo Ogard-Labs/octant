@@ -3,7 +3,7 @@ import {
   decodeHostAnswer,
   type DeviceAccessLevel,
 } from "@octant/contracts";
-import { authorizePrincipalAction, classifyRemoteAction } from "@octant/domain";
+import { authorizePrincipalAction } from "@octant/domain";
 
 /**
  * What the host says an authenticated session is. A session that acts as the
@@ -264,9 +264,15 @@ export function remoteShellSurfaceAvailability(
   if (session.actsAsHostPerson) {
     return descriptor.keptOnHost === true ? "local-host-only" : "remote";
   }
-  const decision = classifyRemoteAction(descriptor.catalogAction);
-  if (decision.kind === "remote-approvable") return "remote";
-  return "local-host-only";
+  // The host's rule for a restricted session, narrowed to the catalogue's
+  // reads for a device its person paired Read only.
+  return authorizePrincipalAction({
+    principalKind: "remote-device",
+    action: descriptor.catalogAction,
+    ...(session.accessLevel === undefined ? {} : { accessLevel: session.accessLevel }),
+  }).kind === "allow"
+    ? "remote"
+    : "local-host-only";
 }
 
 export function listRemoteShellSurfacesByAvailability(
@@ -367,11 +373,13 @@ export function remoteThreadSurfaceReach(
   session: RemoteSessionStanding = RESTRICTED_REMOTE_SESSION,
 ): RemoteThreadSurfaceReach {
   // The host's own rule for the two kinds of session: a person-paired device
-  // also passes the actions the catalogue keeps for the host's person.
+  // also passes the actions the catalogue keeps for the host's person, and a
+  // device its person paired Read only only watches.
   const allowed = (action: string) =>
     authorizePrincipalAction({
       principalKind: session.actsAsHostPerson ? "person-paired-device" : "remote-device",
       action,
+      ...(session.accessLevel === undefined ? {} : { accessLevel: session.accessLevel }),
     }).kind === "allow";
   if (!allowed(descriptor.observeAction)) return "unavailable";
   if (descriptor.interactAction === undefined) return "read-only";

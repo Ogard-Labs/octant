@@ -66,6 +66,9 @@ import {
   type RemoteGatewayOptions,
 } from "./remoteGateway";
 import { canonicalDeviceKeyFacts } from "./deviceKeyFacts";
+import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { createLocalDeviceAdministrationRouteHandler } from "./localDeviceAdministrationRoutes";
 import { executeFinalizationSequence } from "./remoteGatewayFinalization";
 import { createPushNotificationTokenStore } from "./pushNotificationTokenStore";
 
@@ -1911,11 +1914,16 @@ describe("RemoteGateway — a paired device's access level and the pause", () =>
     return keys.privateKey;
   }
 
-  function signedRequest(privateKey: KeyObject, nonce: string): Request {
-    const body = JSON.stringify({ threadId: "55555555-5555-4555-8555-555555555555" });
+  function signedRequest(
+    privateKey: KeyObject,
+    nonce: string,
+    path = "/api/browser/contexts/current",
+    value: unknown = { threadId: "55555555-5555-4555-8555-555555555555" },
+  ): Request {
+    const body = JSON.stringify(value);
     const proof = {
       method: "POST",
-      canonicalPathQuery: "/api/browser/contexts/current",
+      canonicalPathQuery: path,
       timestamp: nowIso,
       nonce,
       bodyDigest: createHash("sha256").update(body, "utf8").digest("hex"),
@@ -1926,7 +1934,7 @@ describe("RemoteGateway — a paired device's access level and the pause", () =>
       key: privateKey,
       dsaEncoding: "ieee-p1363",
     }).toString("base64url");
-    return new Request(`${ORIGIN}/api/browser/contexts/current`, {
+    return new Request(`${ORIGIN}${path}`, {
       method: "POST",
       headers: {
         host: "192.168.1.20:9443",
@@ -2016,6 +2024,53 @@ describe("RemoteGateway — a paired device's access level and the pause", () =>
         ["remote.access-pause-changed@1", localPerson, expect.objectContaining({ paused: true })],
         ["remote.access-pause-changed@1", localPerson, expect.objectContaining({ paused: false })],
       ]);
+    } finally {
+      await gateway.stop();
+    }
+  });
+
+  it("ends the asking device's other open work when it pauses access, and still answers its pause", async () => {
+    const capturing = createCapturingServe();
+    let administration: ((request: Request) => Promise<Response | undefined>) | undefined;
+    const { gateway, connection } = setup({
+      serve: capturing.serve,
+      productDispatch: createAuthenticatedProductDispatch({
+        dispatch: async (request) => await administration?.(request),
+      }),
+    });
+    await gateway.start();
+    try {
+      const fetch = capturing.getFetch();
+      if (fetch === undefined) throw new Error("Expected captured gateway fetch");
+      const deviceId = "22222222-2222-4222-8222-222222222222";
+      const privateKey = pairDevice(connection, deviceId, true);
+      administration = createLocalDeviceAdministrationRouteHandler({
+        desktopBridgeSecret: undefined,
+        windowAuthorityStore: new WindowAuthorityStore(),
+        control: () => gateway.localDeviceAdministration(),
+      });
+      // Another of the asking device's requests, still streaming.
+      const registry = capturedRegistries.at(-1);
+      if (registry === undefined) throw new Error("The gateway made no request registry.");
+      let otherStreamEnded = false;
+      registry.register({
+        hostId,
+        deviceId,
+        sessionIdDigest: createHash("sha256").update(sessionId, "utf8").digest("hex"),
+        cancel: () => {
+          otherStreamEnded = true;
+        },
+      });
+
+      const response = await fetch(
+        signedRequest(privateKey, "9", "/api/remote/access-pause", { paused: true }),
+        lanFacts,
+      );
+
+      expect(response.status).toBe(201);
+      expect(await response.json()).toEqual({ paused: true });
+      expect(otherStreamEnded).toBe(true);
+      expect(gateway.localDeviceAdministration()?.remoteAccessPaused()).toBe(true);
     } finally {
       await gateway.stop();
     }

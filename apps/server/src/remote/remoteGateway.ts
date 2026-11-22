@@ -86,7 +86,7 @@ import {
   pushRegistrationClearReasonFor,
   type PushNotificationTokenStore,
 } from "./pushNotificationTokenStore";
-import type { EventActor, RemoteServerGrantCloseReason } from "@octant/contracts";
+import type { RemoteServerGrantCloseReason } from "@octant/contracts";
 import {
   proxySessionEndReasonForCredentialChange,
   RemoteServerProxySessions,
@@ -759,15 +759,21 @@ function assembleServices(
     return paused;
   };
   /**
-   * Ends devices' in-flight requests and streams, so each asks again under the
-   * host's new answer. The asking device's own request is left to finish its
-   * response; its next request meets the new answer.
+   * Ends devices' in-flight requests, streams and proxy sessions, so each asks
+   * again under the host's new answer. Only the request that made the change
+   * is left to finish its reply: the asking device's other work ends with the
+   * rest, and its next request meets the new answer.
    */
-  const cancelDeviceWork = (deviceIds: ReadonlyArray<string>, actor?: EventActor): void => {
-    const asking = actor?.kind === "remote-device" ? String(actor.deviceId) : undefined;
+  const cancelDeviceWork = (
+    deviceIds: ReadonlyArray<string>,
+    askingRequest: AbortSignal | undefined,
+  ): void => {
     for (const deviceId of deviceIds) {
-      if (deviceId === asking) continue;
-      registry.cancelByDevice({ hostId: identity.hostId, deviceId });
+      registry.cancelByDevice({
+        hostId: identity.hostId,
+        deviceId,
+        ...(askingRequest === undefined ? {} : { exceptRequest: askingRequest }),
+      });
       proxySessions?.endDevice(deviceId, "proxy-session-ended");
     }
   };
@@ -778,22 +784,26 @@ function assembleServices(
     deviceAccessLevel: (deviceId) =>
       deviceAdmittedBy(deviceId) === "host-person" ? deviceAccessLevel(deviceId) : undefined,
     setDeviceAccessLevel: (input) => {
-      const changed = lifecycle.setAccessLevel(input);
+      const changed = lifecycle.setAccessLevel({
+        deviceId: input.deviceId,
+        accessLevel: input.accessLevel,
+        actor: input.actor,
+      });
       accessLevels.set(input.deviceId, changed.accessLevel);
       if (changed.previousLevel !== changed.accessLevel) {
-        cancelDeviceWork([input.deviceId], input.actor);
+        cancelDeviceWork([input.deviceId], input.askingRequest);
       }
       return changed;
     },
     remoteAccessPaused,
     setRemoteAccessPaused: (input) => {
-      paused = lifecycle.setRemoteAccessPaused(input);
+      paused = lifecycle.setRemoteAccessPaused({ paused: input.paused, actor: input.actor });
       if (paused) {
         cancelDeviceWork(
           readDeviceRegistrations(options.connection)
             .filter((device) => device.state === "active")
             .map((device) => String(device.device_id)),
-          input.actor,
+          input.askingRequest,
         );
       }
       return paused;
