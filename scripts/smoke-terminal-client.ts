@@ -987,6 +987,8 @@ const workProjectId = "6c000000-0000-4000-8000-000000000002";
 const workRequestId = "6c000000-0000-4000-8000-000000000003";
 let workQuestionPending = true;
 let workApprovalPending = false;
+let workSecretPending = false;
+const workSecretId = "6c000000-0000-4000-8000-000000000006";
 const workApprovalId = "6c000000-0000-4000-8000-000000000005";
 // Long wrapped plan lines: the target level and the y/n line must stay in view at 80x24.
 const workPlan = Array.from(
@@ -1052,7 +1054,7 @@ const workSession = {
       return {
         status: 200,
         body: {
-          requests: workApprovalPending
+          requests: workSecretPending
             ? [
                 {
                   mode: "work",
@@ -1060,12 +1062,14 @@ const workSession = {
                   threadId: workThreadId,
                   threadTitle: "Export report",
                   requestedAt: now,
-                  kind: "approval",
-                  text: "Start implementing",
-                  answer: { requestId: workApprovalId, expectedVersion: 1 },
+                  kind: "question",
+                  text: "Paste the export API token",
+                  options: [],
+                  secret: true,
+                  answer: { requestId: workSecretId, expectedVersion: 1 },
                 },
               ]
-            : workQuestionPending
+            : workApprovalPending
               ? [
                   {
                     mode: "work",
@@ -1073,65 +1077,99 @@ const workSession = {
                     threadId: workThreadId,
                     threadTitle: "Export report",
                     requestedAt: now,
-                    kind: "question",
-                    text: "Choose the export",
-                    options: [],
-                    answer: { requestId: workRequestId, expectedVersion: 2 },
+                    kind: "approval",
+                    text: "Start implementing",
+                    answer: { requestId: workApprovalId, expectedVersion: 1 },
                   },
                 ]
-              : [],
+              : workQuestionPending
+                ? [
+                    {
+                      mode: "work",
+                      projectId: workProjectId,
+                      threadId: workThreadId,
+                      threadTitle: "Export report",
+                      requestedAt: now,
+                      kind: "question",
+                      text: "Choose the export",
+                      options: [],
+                      answer: { requestId: workRequestId, expectedVersion: 2 },
+                    },
+                  ]
+                : [],
         },
       };
     if (request.path === `/api/work/requests?projectId=${workProjectId}&threadId=${workThreadId}`)
       return {
         status: 200,
         body: {
-          requests: workApprovalPending
+          requests: workSecretPending
             ? [
                 {
-                  requestId: workApprovalId,
+                  requestId: workSecretId,
                   projectId: workProjectId,
                   threadId: workThreadId,
                   providerInstanceId: providerId,
                   providerSessionId: "6c000000-0000-4000-8000-000000000004",
-                  providerRequestId: "request-2",
+                  providerRequestId: "request-3",
                   detail: {
-                    kind: "approval",
-                    action: "Leave Plan",
-                    description: "Start implementing",
-                    levelChange: { to: "auto-accept-edits", plan: workPlan },
+                    kind: "user-input",
+                    prompt: "Paste the export API token",
+                    options: [],
+                    secret: true,
                   },
                   status: "pending",
                   requestedAt: now,
                   version: 1,
                 },
               ]
-            : workQuestionPending
+            : workApprovalPending
               ? [
                   {
-                    requestId: workRequestId,
+                    requestId: workApprovalId,
                     projectId: workProjectId,
                     threadId: workThreadId,
                     providerInstanceId: providerId,
                     providerSessionId: "6c000000-0000-4000-8000-000000000004",
-                    providerRequestId: "request-1",
+                    providerRequestId: "request-2",
                     detail: {
-                      kind: "user-input",
-                      prompt: "Choose the export",
-                      options: [],
-                      questionnaire: workQuestionnaire,
+                      kind: "approval",
+                      action: "Leave Plan",
+                      description: "Start implementing",
+                      levelChange: { to: "auto-accept-edits", plan: workPlan },
                     },
                     status: "pending",
                     requestedAt: now,
-                    version: 2,
+                    version: 1,
                   },
                 ]
-              : [],
+              : workQuestionPending
+                ? [
+                    {
+                      requestId: workRequestId,
+                      projectId: workProjectId,
+                      threadId: workThreadId,
+                      providerInstanceId: providerId,
+                      providerSessionId: "6c000000-0000-4000-8000-000000000004",
+                      providerRequestId: "request-1",
+                      detail: {
+                        kind: "user-input",
+                        prompt: "Choose the export",
+                        options: [],
+                        questionnaire: workQuestionnaire,
+                      },
+                      status: "pending",
+                      requestedAt: now,
+                      version: 2,
+                    },
+                  ]
+                : [],
         },
       };
     if (request.path === "/api/work/requests/commands") {
       workAnswers.push(request.body);
       workQuestionPending = false;
+      workSecretPending = false;
       return { status: 200, body: { kind: "work-request-resolved" } };
     }
     return { status: 404, body: { message: "Unavailable" } };
@@ -1218,4 +1256,50 @@ try {
 } finally {
   workApprovalPending = false;
   approvalRender.renderer.destroy();
+}
+
+// A secret question is answered in the masked entry: what is typed or pasted
+// never appears on screen, and goes only as the command's secretAnswer.
+const secretRender = await createTestRenderer({ width: 100, height: 24 });
+try {
+  workSecretPending = true;
+  workAnswers.length = 0;
+  const screen = mountAgentScreen(tui, secretRender.renderer, paletteFor(undefined, "dark"), {
+    session: workSession,
+    threadId: workThreadId,
+    mode: "work",
+    quiet: true,
+  });
+  await screen.refresh();
+  const running = screen.run();
+  await secretRender.waitForFrame((frame) => frame.includes("Paste the export API token"));
+  await secretRender.mockInput.typeText("zq7x-");
+  secretRender.mockInput.pasteBracketedText("live-1234");
+  await secretRender.waitForFrame((frame) => frame.includes("14 characters typed."));
+  const typedFrame = secretRender.captureCharFrame();
+  if (typedFrame.includes("zq7x") || typedFrame.includes("live-1234"))
+    throw new Error(`The secret was shown while typed.\n${typedFrame}`);
+  secretRender.mockInput.pressEnter();
+  await secretRender.waitFor(() => workAnswers.length === 1);
+  if (
+    JSON.stringify(workAnswers[0]) !==
+    JSON.stringify({
+      kind: "resolve-work-request",
+      requestId: workSecretId,
+      expectedVersion: 1,
+      resolution: { kind: "user-input", secret: true },
+      secretAnswer: "zq7x-live-1234",
+    })
+  )
+    throw new Error("The secret was not sent only as secretAnswer.");
+  await secretRender.waitForFrame((frame) => !frame.includes("Paste the export API token"));
+  const sentFrame = secretRender.captureCharFrame();
+  if (sentFrame.includes("zq7x") || sentFrame.includes("live-1234"))
+    throw new Error(`The secret appeared after it was sent.\n${sentFrame}`);
+  secretRender.mockInput.pressCtrlC();
+  await running;
+  console.log("Answered a secret Work question without showing it");
+} finally {
+  workSecretPending = false;
+  secretRender.renderer.destroy();
 }

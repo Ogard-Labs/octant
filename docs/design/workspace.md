@@ -2571,8 +2571,12 @@ response once, through the same authenticated Work request route the app uses,
 and the host validates it as it would an answer from the app. A refused
 submission starts again from the first question. If the terminal cannot read
 the request's definition, it does not offer the request at all. A Work question
-that asks for a secret is never answered in the terminal, whose composer echoes
-what is typed; the panel points to the app's masked field and sends nothing.
+that asks for a secret is answered in a masked entry, as the app's field is
+(maintainer decision, 2026-11-22): the composer gives up focus, what is typed
+or pasted is never drawn (the panel shows only how many characters), and Enter
+sends it only as the command's `secretAnswer`, after which the terminal drops
+it. It never reaches the composer, a draft, the transcript or a note. Line mode
+does not take one.
 A Work approval
 that changes the thread's level shows, as the app's card does, the whole plan
 the agent hands over and then the level it moves to, directly above the y/n

@@ -2,6 +2,7 @@ import {
   decodeHostAnswer,
   decodeWorkQuestionnaireResponse,
   decodeWorkRequestList,
+  MAX_SECRET_ANSWER_LENGTH,
   type Questionnaire,
   type QuestionnaireQuestion,
   type QuestionnaireResponse,
@@ -99,12 +100,12 @@ export async function readWorkRequests(
 }
 
 /**
- * Said instead of taking an answer to a question that asks for a secret. The
- * host accepts a secret only through its masked field (`secretAnswer`), and a
- * terminal composer echoes what is typed, so the terminal sends nothing.
+ * Said instead of taking a typed answer to a question that asks for a secret.
+ * The composer echoes what is typed, so a secret goes only through the masked
+ * entry (`answerWorkSecret`); where that cannot run, the app's field answers.
  */
 export const WORK_SECRET_QUESTION_REFUSAL =
-  "This question asks for a secret. Answer it in the app, where the field is masked.";
+  "This question asks for a secret. Answer it in the masked field, or in the app.";
 
 export async function answerWorkRequest(
   session: OpenedLocalControlSession,
@@ -240,6 +241,24 @@ function readQuestionAnswer(
   return answer;
 }
 
+/**
+ * Answers a secret question the way the app's masked field does: the value
+ * travels only as the command's `secretAnswer`, beside a resolution that
+ * records that a secret was given. The caller drops its copy once this
+ * resolves; nothing here keeps, logs or prints it.
+ */
+export async function answerWorkSecret(
+  session: OpenedLocalControlSession,
+  request: AgentWorkRequest,
+  secret: string,
+): Promise<string | undefined> {
+  if (request.kind !== "question" || request.secret !== true)
+    return "That question does not ask for a secret.";
+  if (secret.trim().length === 0 || secret.length > MAX_SECRET_ANSWER_LENGTH)
+    return `A secret answer is between 1 and ${String(MAX_SECRET_ANSWER_LENGTH)} characters.`;
+  return resolveWorkRequest(session, request, { kind: "user-input", secret: true }, secret);
+}
+
 export async function answerWorkQuestionnaire(
   session: OpenedLocalControlSession,
   request: AgentWorkRequest,
@@ -253,7 +272,9 @@ async function resolveWorkRequest(
   request: AgentWorkRequest,
   resolution:
     | { readonly kind: "approval"; readonly approved: boolean }
-    | { readonly kind: "user-input"; readonly answer: string | QuestionnaireResponse },
+    | { readonly kind: "user-input"; readonly answer: string | QuestionnaireResponse }
+    | { readonly kind: "user-input"; readonly secret: true },
+  secretAnswer?: string,
 ): Promise<string | undefined> {
   const response = await session.send({
     path: "/api/work/requests/commands",
@@ -262,6 +283,7 @@ async function resolveWorkRequest(
       kind: "resolve-work-request",
       ...request.answer,
       resolution,
+      ...(secretAnswer === undefined ? {} : { secretAnswer }),
     },
   });
   const body =

@@ -7,10 +7,10 @@ import {
 import {
   answerWorkQuestionnaire,
   answerWorkRequest,
+  answerWorkSecret,
   readWorkRequests,
   stepWorkQuestionnaire,
   workLevelChangeText,
-  WORK_SECRET_QUESTION_REFUSAL,
   workQuestionnaireAwaitsComment,
   workQuestionnaireText,
   workRequestId,
@@ -225,6 +225,13 @@ class AgentScreen {
   #questionnaireAnswers:
     | { readonly requestId: string; readonly answers: ReadonlyArray<AgentQuestionnaireAnswer> }
     | undefined;
+  /**
+   * The masked answer being typed to a Work question that asks for a secret.
+   * It lives only here: the composer is blurred while it is typed, the panel
+   * shows only its length, and it is dropped once sent, cleared or the
+   * request changes, so it never reaches the transcript, a draft or a note.
+   */
+  #secret: { readonly requestId: string; value: string } | undefined;
   #destroyed = false;
   #refreshSequence = 0;
   #lastAskId: string | undefined;
@@ -426,7 +433,38 @@ class AgentScreen {
   run(): Promise<number> {
     return new Promise((resolve) => {
       this.#resolveExit = resolve;
+      this.#renderer.keyInput.on("paste", (event) => {
+        const request = this.#secretQuestion();
+        if (request === undefined) return;
+        event.preventDefault();
+        this.#typeSecret(request, new TextDecoder().decode(event.bytes).replace(/[\r\n]/g, ""));
+      });
       this.#renderer.keyInput.on("keypress", (key) => {
+        const secretRequest = this.#secretQuestion();
+        if (secretRequest !== undefined && !key.ctrl && !key.meta) {
+          const typed = key.sequence;
+          if (key.name === "return") {
+            key.preventDefault();
+            void this.#sendSecret(secretRequest);
+            return;
+          }
+          if (key.name === "escape" || key.name === "backspace") {
+            key.preventDefault();
+            const value = this.#secret?.value ?? "";
+            this.#typeSecret(secretRequest, "", key.name === "escape" ? 0 : value.length - 1);
+            return;
+          }
+          if (
+            typed.length > 0 &&
+            !typed.startsWith("\x1b") &&
+            key.name !== "tab" &&
+            ![...typed].some((character) => (character.codePointAt(0) ?? 0) < 0x20)
+          ) {
+            key.preventDefault();
+            this.#typeSecret(secretRequest, typed);
+            return;
+          }
+        }
         if (key.ctrl && key.name === "c") {
           // With text selected, Ctrl+C copies it, as in any terminal; otherwise
           // it stops the turn first, and a second press right after quits.
@@ -573,6 +611,28 @@ class AgentScreen {
       text.length === 0 ? undefined : (provenance ?? this.#captureComposerDraft());
   }
 
+  /** The waiting Work question that asks for a secret, typed into the masked entry. */
+  #secretQuestion(): AgentWorkRequest | undefined {
+    const request = this.#workRequest;
+    return request?.kind === "question" && request.secret === true ? request : undefined;
+  }
+
+  /** Appends to the masked answer, after keeping its first `keep` characters. */
+  #typeSecret(request: AgentWorkRequest, text: string, keep?: number): void {
+    const id = workRequestId(request);
+    const value = this.#secret?.requestId === id ? this.#secret.value : "";
+    this.#secret = { requestId: id, value: value.slice(0, keep ?? value.length) + text };
+    this.#draw();
+  }
+
+  async #sendSecret(request: AgentWorkRequest): Promise<void> {
+    const value = this.#secret?.requestId === workRequestId(request) ? this.#secret.value : "";
+    // Dropped before the host answers, so a failure cannot leave it behind.
+    this.#secret = undefined;
+    this.#note = (await answerWorkSecret(this.#input.session, request, value)) ?? "";
+    await this.refresh();
+  }
+
   /** A bare "?" is a questionnaire answer or comment here, not the key list (Work accepts it). */
   #answersWorkQuestionnaire(): boolean {
     const request = this.#workRequest;
@@ -672,6 +732,12 @@ class AgentScreen {
           workRequestId(this.#workRequest) !== this.#questionnaireAnswers.requestId)
       )
         this.#questionnaireAnswers = undefined;
+      if (
+        this.#secret !== undefined &&
+        (this.#workRequest === undefined ||
+          workRequestId(this.#workRequest) !== this.#secret.requestId)
+      )
+        this.#secret = undefined;
       if (this.#note.startsWith("Provider requests are unavailable: ")) this.#note = "";
     } else {
       this.#note = `Provider requests are unavailable: ${refusedRequestRead.message}`;
@@ -829,6 +895,7 @@ class AgentScreen {
     this.#codeRequest = undefined;
     this.#workRequest = undefined;
     this.#questionnaireAnswers = undefined;
+    this.#secret = undefined;
     this.#hostTicks = undefined;
     mode = opened.mode;
     this.#threadId = threadId;
@@ -1185,6 +1252,10 @@ class AgentScreen {
       this.#tasks.visible = false;
     }
 
+    // A secret is typed into the masked entry, never the composer that echoes it.
+    const masking = this.#secretQuestion() !== undefined;
+    if (masking && this.#composer.focused) this.#composer.blur();
+    else if (!masking && !this.#composer.focused) this.#composer.focus();
     const approval = session?.approvals?.find((entry) => entry.status === "pending");
     const site = this.#siteApproval;
     if (this.#workRequest !== undefined) {
@@ -1201,7 +1272,10 @@ class AgentScreen {
               ? ""
               : workLevelChangeText(request.levelChange) + "\n") + "y allow · n deny — then Enter"
           : request.secret === true
-            ? WORK_SECRET_QUESTION_REFUSAL
+            ? "Type or paste the secret. It is never shown. Enter sends it; Esc clears it." +
+              (this.#secret === undefined || this.#secret.value.length === 0
+                ? ""
+                : `\n${String(this.#secret.value.length)} characters typed.`)
             : request.questionnaire !== undefined
               ? workQuestionnaireText(request.questionnaire, this.#answersTo(request))
               : request.options

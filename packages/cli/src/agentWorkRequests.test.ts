@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   answerWorkQuestionnaire,
   answerWorkRequest,
+  answerWorkSecret,
   readWorkRequests,
   stepWorkQuestionnaire,
   WORK_SECRET_QUESTION_REFUSAL,
@@ -192,7 +193,7 @@ describe("terminal Work requests", () => {
     });
   });
 
-  it("sends nothing for a question that asks for a secret and points to the app", async () => {
+  it("sends a secret only as the masked secretAnswer, never as a typed answer", async () => {
     const answers: LocalControlRequest[] = [];
     const session: OpenedLocalControlSession = {
       kind: "opened",
@@ -239,6 +240,23 @@ describe("terminal Work requests", () => {
       WORK_SECRET_QUESTION_REFUSAL,
     );
     expect(answers).toEqual([]);
+    expect(await answerWorkSecret(session, secret, "   ")).toContain("between 1 and");
+    expect(answers).toEqual([]);
+
+    expect(await answerWorkSecret(session, secret, "sk-test-123")).toBeUndefined();
+    expect(answers).toEqual([
+      {
+        path: "/api/work/requests/commands",
+        method: "POST",
+        body: {
+          kind: "resolve-work-request",
+          requestId: questionRequestId,
+          expectedVersion: 4,
+          resolution: { kind: "user-input", secret: true },
+          secretAnswer: "sk-test-123",
+        },
+      },
+    ]);
   });
 
   it("reports an empty or refused answer response without throwing", async () => {
