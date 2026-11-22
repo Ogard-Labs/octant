@@ -360,6 +360,28 @@ model read, and new outside content marks it again), and the buttons Cancel
 and Clear mark. The mark stays server-owned: the renderer shows it and sends
 the existing clear.
 
+## Choosing a subagent model in a prompt
+
+Typing `@model` opens a searchable picker at the caret. A model served by
+two configured providers appears twice, with each provider's logo and name.
+Choosing a row opens the reasoning choices advertised for that route,
+including **Provider default**. Enter inserts the selection. Escape dismisses
+the picker and preserves the draft.
+
+The composer renders the selection inline as **provider logo – model – reasoning**.
+Expose the provider's name to assistive technology and on hover or focus.
+Use its name when the logo is unavailable. Activating the chip reopens the
+picker with its current values. Copying it preserves the provider instance,
+model ID and optional reasoning setting as plain text, for example
+`@model(my-provider/model-id, reasoning=high)`. Pasting a valid tag
+restores the chip. Omitting reasoning selects the provider default.
+
+A tag qualifies the subagent requested in the prompt. The parent thread keeps
+its model. At launch, resolve the exact configured provider instance and model
+and validate any explicit reasoning setting. If a choice is unavailable,
+show which choice needs attention and let the person revise it before launch.
+The child thread identifies the selected provider, model and reasoning setting.
+
 ## Subagents in a thread
 
 A thread's subagents sit in a card attached above the composer's message
