@@ -1209,9 +1209,9 @@ was given for the site and folder on any page and keeps covering that until
 the person forgets it (maintainer decision, 2026-11-13). At Full access a download is not
 held for a second call: it is saved into `downloads/` as the action that
 started it answers, with the size cap, the link checks and the journal record
-unchanged (maintainer decision, 2026-11-13). Not built yet: an unanswered ask
-still expires instead of waiting, and the person's own download has not been
-run in a packaged window. A local person may separately review a
+unchanged (maintainer decision, 2026-11-13). An unanswered ask waits for its
+answer and never expires into a refusal. Not yet checked: the person's own
+download has not been run in a packaged window. A local person may separately review a
 fixed-content routine upload manifest from one approved Project folder, binding
 caller/model/authority, profile/site, exact files, quota and expiry. It grants no
 account access or downloads; revocation and expiry close affected contexts, and
@@ -18166,7 +18166,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   opens another browser's profile in place. The Work and Code agent adapters
   accept a stored profile request and the task's journaled default profile;
   neither grants access by itself. An agent reads or acts on an origin in a profile page only after a site approval naming the profile;
-  a paired device uses profile pages and answers their site approvals as a local window does (maintainer decision, 2026-11-12; not built yet: today paired devices are refused on profile pages). A managed child, named routine
+  a paired device uses profile pages and answers their site approvals as a local window does (maintainer decision, 2026-11-12; built for a device the host's own person paired; a hub-introduced or restricted device is still refused on profile pages). A managed child, named routine
   or selected terminal session may use an existing sign-in only through an
   explicit grant from the person, "this routine or child may use this profile on
   these sites", which is persistent and survives a host restart and an app

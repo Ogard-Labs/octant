@@ -407,8 +407,8 @@ and an answer the person may remember for the site, folder and profile; a recurr
 instead use the explicit manifest below. At Full access an upload does not ask
 and the path checks below still hold
 ([the Full access rule](../architecture.md#security-and-authority); maintainer
-request, 2026-11-12). Not built yet: an unanswered ask still expires instead
-of waiting.
+request, 2026-11-12). An unanswered ask waits for its answer and never
+expires into a refusal (maintainer decision, 2026-11-13).
 
 - `upload` puts files into one file field. `files` names them relative to the
   thread's workspace: the Work thread's Project folder, or the Code thread's
