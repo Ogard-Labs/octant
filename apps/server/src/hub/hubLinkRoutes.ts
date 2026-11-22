@@ -522,7 +522,10 @@ export function createHubLinkRouteHandler(
       // The hub admits only a member's own desktop window, which its own Act
       // list then bounds; a spoke admits the guests it accepted.
       if (options.hub.status().enabled) {
-        const admitted = options.hub.admitWindowGuest(signed);
+        const admitted = options.hub.admitWindowGuest({
+          ...signed,
+          ...(facts?.privateAddress === undefined ? {} : { privateAddress: facts.privateAddress }),
+        });
         return admitted.status === "admitted"
           ? Response.json(
               { spokeMemberId: admitted.hubMemberId, deviceId: admitted.deviceId },
