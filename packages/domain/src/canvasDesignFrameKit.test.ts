@@ -112,6 +112,13 @@ describe("drawn design asset references", () => {
     expect(drawn('<svg><title/></svg><img src="octant-asset:after-svg">', "html")).toEqual([
       "after-svg",
     ]);
+    // HTML ignores a self-closing marker on a stylesheet.
+    expect(
+      drawn(
+        "<style/>.a{background:url(octant-asset:style-self-closed)}</style><style data-base=/assets/>.b{background:url(octant-asset:style-slash-value)}</style>",
+        "html",
+      ),
+    ).toEqual(["style-self-closed", "style-slash-value"]);
   });
 
   it("does not draw a reference written as text or in an attribute that loads no image", () => {

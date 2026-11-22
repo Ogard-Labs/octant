@@ -118,8 +118,10 @@ uses:
   version's own authority as a reader's draw resolves it, as sniffed PNG,
   JPEG, GIF, or WebP bytes in the document's `images`, named by the share's
   own `image-<n>` references, never by an image id, capture id, or path.
-  Nothing the document does not display leaves; an image that does not
-  resolve is not carried and its frame draws a placeholder. Each image is at
+  Which images a design displays is found by the best-effort reading of its
+  markup described under the service below, with its known limits; nothing
+  that reading finds undrawn leaves, and an image that does not resolve is
+  not carried and its frame draws a placeholder. Each image is at
   most 3 MiB and all of them at
   most 4 MiB (`CANVAS_SHARE_IMAGES_MAX_BYTES`), counted apart from the
   document's text budget (the export body limit), so the card still shows the

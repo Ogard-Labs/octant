@@ -983,9 +983,11 @@ export function designMarkupInertRanges(markup: string, language: "html" | "css"
     const tagEnd = Math.min(cursor + 1, markup.length);
     RAW_TEXT_OPEN.lastIndex = index;
     const raw = RAW_TEXT_OPEN.exec(markup);
-    // A self-closing `<title/>` is an SVG element with no body; HTML raw text
-    // never closes itself that way.
-    if (raw !== null && !raw[0].endsWith("/>")) {
+    // A self-closing `<title/>` is an SVG element with no body. HTML ignores
+    // the marker on `style`, `script` and its other raw-text elements, and a
+    // `/` ending an unquoted value is part of the value.
+    const svgTitle = raw !== null && raw[1]?.toLowerCase() === "title" && /\s*\/>$/.test(raw[0]);
+    if (raw !== null && !svgTitle) {
       const element = (raw[1] ?? "").toLowerCase();
       const closing = new RegExp(`</${element}\\s*>`, "ig");
       closing.lastIndex = tagEnd;
