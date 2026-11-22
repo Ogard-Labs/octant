@@ -60,8 +60,15 @@ const recordedCall = new AsyncLocalStorage<{
   readonly awaitingApproval: () => boolean;
   readonly approvalAnswered: () => void;
   /**
-   * Receives one person-facing wait's measured span, so a caller timing the
-   * whole execution subtracts it instead of reading it as run time.
+   * Told a person-facing wait has opened, so a caller's deadline for the
+   * call can stand still until `approvalWaited` reports it closed: an
+   * unanswered approval never ends by timing out.
+   */
+  readonly approvalWaitStarted?: () => void;
+  /**
+   * Receives one person-facing wait's measured span as it closes, so a
+   * caller timing the whole execution subtracts it instead of reading it as
+   * run time.
    */
   readonly approvalWaited?: (waitMs: number) => void;
   /** The scope's clock in epoch milliseconds; `Date.now` when unset. */
@@ -90,12 +97,17 @@ export function executingToolCallId(): string | undefined {
  */
 export async function whileAwaitingToolApproval<T>(wait: () => Promise<T>): Promise<T> {
   const call = recordedCall.getStore();
-  if (call === undefined || !call.awaitingApproval()) return wait();
+  if (call === undefined) return wait();
+  // A journal that refuses the awaiting frame leaves the call's record as it
+  // was, but the person is still being asked: the wait stays out of the
+  // call's deadline and run time either way.
+  const recorded = call.awaitingApproval();
+  call.approvalWaitStarted?.();
   const startedAt = call.now?.() ?? Date.now();
   try {
     return await wait();
   } finally {
-    call.approvalAnswered();
+    if (recorded) call.approvalAnswered();
     call.approvalWaited?.((call.now?.() ?? Date.now()) - startedAt);
   }
 }
@@ -112,6 +124,7 @@ export async function whileAwaitingToolApproval<T>(wait: () => Promise<T>): Prom
 export async function whileApprovalWaited<T>(wait: () => Promise<T>): Promise<T> {
   const call = recordedCall.getStore();
   if (call === undefined || call.approvalWaited === undefined) return wait();
+  call.approvalWaitStarted?.();
   const startedAt = call.now?.() ?? Date.now();
   try {
     return await wait();
@@ -238,16 +251,14 @@ export class ToolEffectLedger {
             return { result: { error: "tool-call-unrecorded" }, isError: true };
           }
           let outcome: ToolEffectSettled["outcome"] = "failed";
-          let approvalWaitMs = 0;
           try {
             const result = await recordedCall.run(
               {
                 toolCallId,
                 awaitingApproval: () => this.#awaitApproval(turn, toolCallId),
                 approvalAnswered: () => this.#intend(turn, toolCallId, input.name, "host"),
-                approvalWaited: (waitMs) => {
-                  approvalWaitMs += waitMs;
-                },
+                approvalWaitStarted: () => input.onApprovalWaitStarted?.(),
+                approvalWaited: (waitMs) => input.onApprovalWait?.(waitMs),
                 now: () => Date.parse(this.#clock()),
               },
               () => withSandboxToolPolicy(turn.threadId, () => set.execute(input)),
@@ -255,7 +266,6 @@ export class ToolEffectLedger {
             if (result.isError !== true) outcome = "succeeded";
             return result;
           } finally {
-            if (approvalWaitMs > 0) input.onApprovalWait?.(approvalWaitMs);
             this.#settle(turn, toolCallId, "host", outcome);
           }
         },

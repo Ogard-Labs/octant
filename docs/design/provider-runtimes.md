@@ -522,7 +522,15 @@ run, and Off keeps the unbounded pause for work that runs longer; Stop and
 Force stop still end such a turn.
 
 An app-managed tool call in Chat keeps its own deadline of five minutes,
-apart from the stalled-turn limit; it does not follow the setting.
+apart from the stalled-turn limit; it does not follow the setting. The
+deadline counts only the call's running time: it stands still while an
+approval the call asks before it is dispatched waits for its person, and runs
+on from where it stood once the person answers. An unanswered approval waits
+in Needs you and never turns into a refusal by timing out; Stop still ends the
+wait. For the same reason an MCP session with a call waiting for approval
+does not idle out under it, while an authentication change still retires the
+session and refuses the call. Work and Code have no per-call deadline; their
+app-managed calls pause the stalled-turn limit instead.
 
 ### Loop detection and provider tool inputs
 

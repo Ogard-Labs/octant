@@ -2648,6 +2648,136 @@ describe("Agent Plugin MCP session manager", () => {
     await manager.drainAll();
   });
 
+  describe("an MCP session whose tool call waits for a person's approval", () => {
+    const minute = 60_000;
+
+    async function waitingSession() {
+      let toolCalls = 0;
+      const answers: Array<(approved: boolean) => void> = [];
+      const fetchImpl = (async (_input, init) => {
+        if ((init?.method ?? "GET") === "DELETE") return new Response(null, { status: 204 });
+        const body = JSON.parse(String(init?.body ?? "{}")) as { method?: string; id?: number };
+        if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+        if (body.method === "tools/call") toolCalls += 1;
+        return Response.json(
+          {
+            jsonrpc: "2.0",
+            id: body.id,
+            result:
+              body.method === "tools/list"
+                ? { tools: [{ name: "echo", inputSchema: { type: "object" } }] }
+                : body.method === "tools/call"
+                  ? { content: [{ type: "text", text: "echoed" }] }
+                  : {
+                      protocolVersion: "2025-03-26",
+                      capabilities: {},
+                      serverInfo: { name: "remote", version: "1.0.0" },
+                    },
+          },
+          { headers: { "mcp-session-id": "waiting" } },
+        );
+      }) as typeof fetch;
+      const manager = new AgentPluginMcpSessionManager({
+        store: {
+          contentRoot: () => "/tmp/plugin",
+          pluginDataRoot: () => "/tmp/plugin-data",
+          readVerifiedConfiguration: async () =>
+            JSON.stringify({
+              $schema: AGENT_PLUGINS_MCP_SCHEMA,
+              mcpServers: {
+                remote: { type: "streamable-http", url: "https://example.test/mcp" },
+              },
+            }),
+        },
+        fetch: fetchImpl,
+        authorizeToolCall: () =>
+          new Promise<boolean>((resolve) => {
+            answers.push(resolve);
+          }),
+        recordExternalContentIngestion: () => ({
+          kind: "recorded",
+          taint: { externalContentIngested: true, ingestedSources: ["mcp-tool"] },
+        }),
+      } as never);
+      const effective = effectiveMcpSnapshot("mcp-remote", "remote");
+      await manager.reconcile(effective);
+      const [definition] = manager.toolDefinitions();
+      if (definition === undefined) throw new Error("The server offered no tool.");
+      const call = manager.createToolExecutionPort().execute({
+        windowId: "17000000-0000-4000-8000-000000000097" as never,
+        thread: { id: effective.scope.threadId } as never,
+        name: definition.name,
+        inputJson: "{}",
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      const answer = answers[0];
+      if (answer === undefined) throw new Error("The call never asked for approval.");
+      return { manager, call, answer, toolCalls: () => toolCalls };
+    }
+
+    it("stays connected past its idle period while the approval waits, and dispatches the call once on approval", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const { manager, call, answer, toolCalls } = await waitingSession();
+        await vi.advanceTimersByTimeAsync(7 * minute);
+        expect(manager.sessions()).toHaveLength(1);
+
+        answer(true);
+        const result = await call;
+        expect(result.isError).not.toBe(true);
+        expect(toolCalls()).toBe(1);
+
+        // With the approval settled, the session idles out as before.
+        await vi.advanceTimersByTimeAsync(6 * minute);
+        expect(manager.sessions()).toHaveLength(0);
+        await manager.drainAll();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("still refuses the call when authentication changes while its approval waits", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const { manager, call, answer, toolCalls } = await waitingSession();
+        await manager.invalidateAuthentication(
+          "15000000-0000-4000-8000-000000000001",
+          "mcp-remote",
+        );
+        answer(true);
+        expect(await call).toMatchObject({
+          isError: true,
+          result: { error: "extension-tool-authentication-changed" },
+        });
+        expect(toolCalls()).toBe(0);
+        await manager.drainAll();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("idles out as usual once its waiting approval is refused", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const { manager, call, answer, toolCalls } = await waitingSession();
+        await vi.advanceTimersByTimeAsync(7 * minute);
+        answer(false);
+        expect(await call).toMatchObject({
+          isError: true,
+          result: { error: "extension-tool-approval-required" },
+        });
+        expect(toolCalls()).toBe(0);
+        expect(manager.sessions()).toHaveLength(1);
+
+        await vi.advanceTimersByTimeAsync(6 * minute);
+        expect(manager.sessions()).toHaveLength(0);
+        await manager.drainAll();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it("connects effective servers, exposes tools, and isolates sibling failures", async () => {
     const contentRoot = await mkdtemp(join(tmpdir(), "octant-agent-plugins-content-"));
     const pluginDataRoot = await mkdtemp(join(tmpdir(), "octant-agent-plugins-data-"));

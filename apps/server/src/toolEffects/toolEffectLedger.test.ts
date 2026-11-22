@@ -404,6 +404,33 @@ describe("tool effect ledger", () => {
     ]);
   });
 
+  it("tells the caller each approval wait as it opens and as it closes, so its deadline can stand still", async () => {
+    let clockNow = now;
+    const host = hostOn(openConnection(), () => clockNow);
+    const seen: string[] = [];
+    const tools = host.ledger.forTurn({ threadId, turnId }).tools(
+      toolSet(["shell"], async () => {
+        await whileAwaitingToolApproval(async () => {
+          seen.push("asking");
+          clockNow = "2026-11-12T12:10:00.000Z";
+          return "approved";
+        });
+        seen.push("running");
+        return { result: {} };
+      }),
+    );
+
+    await tools.execute({
+      name: "shell",
+      inputJson: "{}",
+      toolCallId: "call-1",
+      onApprovalWaitStarted: () => seen.push("wait opened"),
+      onApprovalWait: (waitMs) => seen.push(`wait closed after ${String(waitMs)}`),
+    });
+
+    expect(seen).toEqual(["wait opened", "asking", "wait closed after 600000", "running"]);
+  });
+
   it("never holds a turn for a read-only host tool its runtime also reports starting", async () => {
     const connection = openConnection();
     const before = hostOn(connection);

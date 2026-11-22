@@ -209,6 +209,12 @@ export class AgentPluginMcpSessionManager {
     }
   >();
   readonly #idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /**
+   * Sessions with a tool call waiting for a person's approval, and how many.
+   * A waiting approval is use of that exact session: it does not idle out
+   * under the call, or the person's later approval would find it gone.
+   */
+  readonly #awaitingAuthorization = new Map<AgentPluginMcpSessionRecord, number>();
   readonly #toolIndex = new Map<
     string,
     { readonly sessionKey: string; readonly toolName: string }
@@ -418,7 +424,7 @@ export class AgentPluginMcpSessionManager {
         const approved =
           this.#authorizeToolCall === undefined || definitionDigest === undefined
             ? false
-            : await this.#authorizeToolCall({
+            : await this.#whileAuthorizing(indexed.sessionKey, record, this.#authorizeToolCall, {
                 thread,
                 windowId,
                 extensionId: record.extensionId,
@@ -434,7 +440,7 @@ export class AgentPluginMcpSessionManager {
                 mcpToolName: indexed.toolName,
                 inputJson,
                 ...(signal === undefined ? {} : { signal }),
-              }).catch(() => false);
+              });
         if (!approved) {
           return { result: { error: "extension-tool-approval-required" }, isError: true };
         }
@@ -1042,6 +1048,31 @@ export class AgentPluginMcpSessionManager {
     }
   }
 
+  /**
+   * Asks for one call's authorization while holding its session's idle
+   * retirement, and releases the hold however the ask ends: approved,
+   * refused, cancelled or failed. The hold delays only idle retirement;
+   * authentication changes and authority reconciliation still close the
+   * session, and the caller's record check refuses the call afterwards.
+   */
+  async #whileAuthorizing(
+    key: string,
+    record: AgentPluginMcpSessionRecord,
+    authorize: (call: ExtensionToolCall) => Promise<boolean>,
+    call: ExtensionToolCall,
+  ): Promise<boolean> {
+    this.#awaitingAuthorization.set(record, (this.#awaitingAuthorization.get(record) ?? 0) + 1);
+    try {
+      return await authorize(call).catch(() => false);
+    } finally {
+      const remaining = (this.#awaitingAuthorization.get(record) ?? 1) - 1;
+      if (remaining > 0) this.#awaitingAuthorization.set(record, remaining);
+      else this.#awaitingAuthorization.delete(record);
+      // The idle period starts over from the answer, as it does after a call.
+      if (this.#sessions.get(key) === record) this.#touchIdle(key);
+    }
+  }
+
   #touchIdle(key: string): void {
     const existing = this.#idleTimers.get(key);
     if (existing !== undefined) clearTimeout(existing);
@@ -1049,6 +1080,8 @@ export class AgentPluginMcpSessionManager {
       this.#idleTimers.delete(key);
       const record = this.#sessions.get(key);
       if (record === undefined) return;
+      // Held while an approval waits; releasing the hold starts a new period.
+      if (this.#awaitingAuthorization.has(record)) return;
       // Retire the scope entirely so an intentional idle close cannot trigger
       // reconnect. The next turn's authority reconciliation recreates it.
       this.#desired.delete(key);
