@@ -1401,6 +1401,8 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
       readonly answers?: Array<"approved" | "denied" | "remember">;
       /** Each thread's Project, where it is not the default Code authority's. */
       readonly projects?: Readonly<Record<string, ProjectId>>;
+      /** Whether Strict is on; absent reads as Strict, as the service does. */
+      readonly strict?: boolean;
     } = {},
   ) {
     let tainted = false;
@@ -1528,6 +1530,7 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
       toolConstraints: () => [],
       fullAccess: () => false,
       externalContentIngested: () => tainted,
+      ...(options.strict === undefined ? {} : { strict: () => options.strict === true }),
       projectFileTransferRemembered: (projectId) => rememberedProjects.has(String(projectId)),
       rememberProjectFileTransfer: ({ projectId }) => {
         rememberedProjects.add(String(projectId));
@@ -1791,12 +1794,12 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
     }
   });
 
-  it("neither offers nor honors a Project's sent-file answer once the thread has read outside content", async () => {
+  it("under Strict, neither offers nor honors a Project's sent-file answer once the thread has read outside content", async () => {
     const sibling = decodeComputerUseOwner({
       ...onDesktop,
       threadId: "77777777-7777-4777-8777-777777777771",
     });
-    const f = desktop({ answers: ["remember"] });
+    const f = desktop({ answers: ["remember"], strict: true });
     const send = call({ operation: "send-file", path: "dist/notes-app" });
     try {
       await f.tools().execute(send);
@@ -1805,6 +1808,28 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
       expect(f.asked).toHaveLength(2);
       expect(f.offers[1]).toBeUndefined();
       expect(f.sendFile.mock.calls[1]?.[4]).toBe(false);
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("outside Strict, offers and honors a Project's sent-file answer on a thread that has read outside content", async () => {
+    const sibling = decodeComputerUseOwner({
+      ...onDesktop,
+      threadId: "77777777-7777-4777-8777-777777777771",
+    });
+    const f = desktop({ answers: ["remember"], strict: false });
+    const send = call({ operation: "send-file", path: "dist/notes-app" });
+    try {
+      f.taint();
+      await expect(f.tools().execute(send)).resolves.toEqual({ result: sent, isError: false });
+      expect(f.offers).toEqual([{ canRememberForProject: true }]);
+      await expect(f.tools(sibling).execute(send)).resolves.toEqual({
+        result: sent,
+        isError: false,
+      });
+      expect(f.asked).toHaveLength(1);
+      expect(f.sendFile.mock.calls[1]?.[4]).toBe(true);
     } finally {
       await f.service.close();
     }

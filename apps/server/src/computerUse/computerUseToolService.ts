@@ -641,10 +641,11 @@ export function createComputerUseToolService(options: {
    * asks, the question goes to this turn's thread with the path, size, hash,
    * and where the file goes.
    *
-   * A Project's answer covers only a thread that has read no outside content,
-   * and is offered only there, as a thread's own answer from before the mark
-   * does not cover it after: the person allowed agents that had read nothing
-   * from outside.
+   * Under Strict, a Project's answer neither covers nor is offered on a
+   * thread that has read outside content, as the first action withholds
+   * Project remembering there. Outside Strict the mark adds no restriction
+   * of its own ("Octant adds no restrictions of its own unless Strict is
+   * on").
    */
   async function sendFile(
     owner: ComputerUseOwner,
@@ -670,7 +671,7 @@ export function createComputerUseToolService(options: {
     if (decided.kind === "relative") endDesktopAppGrants(owner, decided.name);
     const markedAtStart = options.externalContentIngested(owner);
     const projectAt = (): ProjectId | undefined =>
-      options.externalContentIngested(owner) ? undefined : options.authority(owner)?.projectId;
+      outsideContentGates(owner) ? undefined : options.authority(owner)?.projectId;
     const projectAtStart = projectAt();
     try {
       return await options.leases.sendFile(

@@ -887,9 +887,9 @@ Rules this slice resolved:
   ([lease settings](#built-lease-settings)), and that answer covers one file;
   with it off the transfer follows the thread's level as a host-local one
   does.
-- **Remember for this Project.** An ask in the thread on a thread that has
-  read no outside content offers **Allow once** and **Remember for this
-  Project**, as the first-action approval does for an application. A
+- **Remember for this Project.** An ask in the thread offers **Allow once**
+  and **Remember for this Project**, as the first-action approval does for an
+  application. A
   remembered answer covers later transfers from every thread in that Project,
   below Full access, into a desktop on this machine: they proceed without
   asking and record nothing for the thread, so forgetting it brings the ask
@@ -900,11 +900,12 @@ Rules this slice resolved:
   remembers: a hub-introduced device's answer, or one given after the ask
   stopped standing as offered (another Project, a mark arriving, the owner
   changing), allows that one file or declines. The answering thread also
-  keeps its own answer, as the first action keeps its thread grant. A
-  Project's answer covers a thread only while it has read no outside content
-  and is never offered on one that has: the person allowed agents that had
-  read nothing from outside. Plan, Full access, and the off-machine ask are
-  unchanged.
+  keeps its own answer, as the first action keeps its thread grant. Under
+  Strict, a Project's answer neither covers nor is offered on a thread that
+  has read outside content, as the first action withholds Project remembering
+  there; outside Strict the mark adds no restriction to it
+  ([Octant adds no restrictions of its own unless Strict is on](decisions.md#octant-adds-no-restrictions-of-its-own-unless-strict-is-on)).
+  Plan, Full access, and the off-machine ask are unchanged.
 - **Where it lands.** The file is written whole beside the lease's `home` and
   `inbox`, made read-only (`0444`), and renamed into the inbox under its base
   name, so the desktop never sees a partial file and a later transfer under
@@ -926,7 +927,8 @@ checks and the open, and the platform that cannot name the open file;
 `desktopLeaseService.test.ts` also covers a second transfer while one waits,
 and a root change while the transfer waits in the lease's order. `computerUseToolService.test.ts` covers a remembered Project answer
 covering another thread of that Project, not one in another Project, and
-ending once forgotten, and the offer withheld on a marked thread;
+ending once forgotten, and the offer withheld on a marked thread under
+Strict but kept outside it;
 `codeOperationRuntime.test.ts` covers the card's offer and the answer
 remembering only on an offered ask from a person. Under real Bubblewrap,
 `hostLocalDesktopProcess.test.ts` shows the delivered file is read-only
