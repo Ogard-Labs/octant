@@ -24,6 +24,7 @@ import {
   decodeImageArtifactId,
   decodeImageGenerationScopeId,
   decodeImageJobId,
+  type ImageGenerationScopeId,
   decodeCanvasId,
   decodeCanvasVersionId,
   decodeWindowId,
@@ -369,6 +370,8 @@ export type RemoteDependencies = {
     >;
     /** What this start did with the turns a restart cut off. */
     readonly restartRecovery: () => HostRestartRecovery | undefined;
+    /** Drops any short-lived verified image read cached for a thread scope before purge. */
+    readonly evictGeneratedImageScope?: (scopeId: ImageGenerationScopeId) => void;
   };
 
 const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(AgentRunParentThreadId);
@@ -419,6 +422,7 @@ export function wireRemote(deps: RemoteDependencies) {
     credentialResolver,
     externalContentIngestionStore,
     extensionApiService,
+    evictGeneratedImageScope,
     generatedImageStore,
     debugConfigurationApprovals,
     debugService,
@@ -2673,7 +2677,9 @@ export function wireRemote(deps: RemoteDependencies) {
         },
         purgeGeneratedImages: async (id) => {
           try {
-            await generatedImageStore.purgeScope(decodeImageGenerationScopeId(id));
+            const scopeId = decodeImageGenerationScopeId(id);
+            evictGeneratedImageScope?.(scopeId);
+            await generatedImageStore.purgeScope(scopeId);
           } catch {
             // A thread id that is not a generated-image scope is not an image basin.
           }
