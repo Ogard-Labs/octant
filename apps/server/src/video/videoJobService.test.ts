@@ -5,14 +5,18 @@ import {
   decodeImageGenerationScopeId,
   decodeProviderInstanceId,
   decodeProviderModelId,
-  decodeVideoModelCapabilities,
   type ProviderInstance,
-  type VideoModelCapabilities,
 } from "@octant/contracts";
+import {
+  decodeVideoModelCapabilities,
+  type VideoModelCapabilities,
+} from "@octant/contracts/video-generation";
 import type {
   VideoAdapterPoll,
+  VideoAdapterRequest,
   VideoAdapterStart,
   VideoGenerationDriver,
+  VideoGenerationPorts,
 } from "@octant/provider-sdk/video-generation";
 import { CONFORMANCE_MP4_BYTES } from "@octant/provider-sdk/video-generation-conformance";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -70,10 +74,11 @@ function profile(): ProviderInstance {
 }
 
 interface Script {
-  start?: () => Promise<VideoAdapterStart>;
+  start?: (ports: VideoGenerationPorts, request: VideoAdapterRequest) => Promise<VideoAdapterStart>;
   polls?: Array<VideoAdapterPoll>;
   poll?: (signal: AbortSignal) => Promise<VideoAdapterPoll>;
-  cancel?: () => Promise<VideoAdapterPoll>;
+  cancel?: (signal: AbortSignal | undefined) => Promise<VideoAdapterPoll>;
+  credential?: () => Promise<string>;
   forget?: () => Promise<"removed" | "failed">;
   model?: VideoModelCapabilities;
 }
@@ -86,11 +91,13 @@ function fakeDriver(script: Script) {
   const driver: VideoGenerationDriver = {
     driverKind: "gemini-video",
     providerHosts: ["video.example.test"],
-    create: () => ({
+    create: ({ ports }) => ({
       models: async () => [model],
-      start: async () => {
+      start: async (request) => {
         calls.start += 1;
-        return (await script.start?.()) ?? { status: "started", remoteId: "remote-1" };
+        return (
+          (await script.start?.(ports, request)) ?? { status: "started", remoteId: "remote-1" }
+        );
       },
       poll: async (_remoteId, signal) => {
         calls.poll += 1;
@@ -103,9 +110,9 @@ function fakeDriver(script: Script) {
           }
         );
       },
-      cancel: async () => {
+      cancel: async (_remoteId, signal) => {
         calls.cancel += 1;
-        return (await script.cancel?.()) ?? { status: "cancelled" };
+        return (await script.cancel?.(signal)) ?? { status: "cancelled" };
       },
       forget: async () => {
         calls.forget += 1;
@@ -138,6 +145,7 @@ function harness(script: Script, directory?: string) {
     catchUpProjection({ connection, journal, projection, clock: () => now });
   }
   const fake = fakeDriver(script);
+  const fetched: Array<string> = [];
   let clockMs = Date.parse(now);
   const spend = {
     admit: vi.fn(() => ({ status: "admitted" as const, reservedTokens: 0, reservations: [] })),
@@ -150,7 +158,14 @@ function harness(script: Script, directory?: string) {
     clips: new VideoClipStore(root),
     readProviderInstance: (id) => (String(id) === String(profileId) ? profile() : undefined),
     listProviderInstances: () => [profile()],
-    credentialResolver: { has: async () => true, resolve: async () => "key" },
+    credentialResolver: {
+      has: async () => true,
+      resolve: async () => (await script.credential?.()) ?? "key",
+    },
+    fetch: async (input) => {
+      fetched.push(String(input));
+      return new Response("{}", { status: 200 });
+    },
     uuid: () => crypto.randomUUID(),
     clock: () => new Date(clockMs++).toISOString(),
     actor,
@@ -160,7 +175,20 @@ function harness(script: Script, directory?: string) {
     sleep: () => new Promise((resolve) => setTimeout(resolve, 1)),
     now: () => clockMs,
   });
-  return { service, calls: fake.calls, spend, root, connection, journal, runtime };
+  const advance = (ms: number) => {
+    clockMs += ms;
+  };
+  return {
+    service,
+    calls: fake.calls,
+    spend,
+    root,
+    connection,
+    journal,
+    runtime,
+    fetched,
+    advance,
+  };
 }
 
 const enqueue = (service: VideoJobService, overrides: Partial<typeof options> = {}) =>
@@ -253,6 +281,102 @@ describe("video jobs", () => {
     service.stop(queued.id);
     const done = await service.whenTerminal(queued.id);
     expect(done).toMatchObject({ status: "cancelled", settledCostUsdMicros: 695_040 });
+  });
+
+  it("bills nothing when Stop lands while the start is still reading its key", async () => {
+    let keyRequested: () => void = () => undefined;
+    const reading = new Promise<void>((resolve) => {
+      keyRequested = resolve;
+    });
+    const { service, fetched, spend } = harness({
+      credential: () => {
+        keyRequested();
+        return new Promise(() => undefined);
+      },
+      start: async (ports, request) => {
+        try {
+          await ports.request({
+            url: "https://video.example.test/start",
+            method: "POST",
+            auth: { header: "authorization", scheme: "Bearer" },
+            signal: request.signal,
+          });
+          return { status: "started", remoteId: "remote-1" };
+        } catch {
+          return {
+            status: "failed",
+            providerFailure: { category: "interrupted", message: "Aborted." },
+          };
+        }
+      },
+    });
+    const queued = await enqueue(service);
+    await reading;
+    service.stop(queued.id);
+    const done = await service.whenTerminal(queued.id);
+    expect(done?.status).toBe("cancelled");
+    expect(done?.settledCostUsdMicros).toBeUndefined();
+    expect(fetched).toEqual([]);
+    expect(spend.settle).not.toHaveBeenCalled();
+  });
+
+  it("bills nothing when shutdown lands while the start is still reading its key", async () => {
+    let keyRequested: () => void = () => undefined;
+    const reading = new Promise<void>((resolve) => {
+      keyRequested = resolve;
+    });
+    const { service, fetched } = harness({
+      credential: () => {
+        keyRequested();
+        return new Promise(() => undefined);
+      },
+      start: async (ports, request) => {
+        try {
+          await ports.request({
+            url: "https://video.example.test/start",
+            method: "POST",
+            auth: { header: "authorization", scheme: "Bearer" },
+            signal: request.signal,
+          });
+          return { status: "started", remoteId: "remote-1" };
+        } catch {
+          return {
+            status: "failed",
+            providerFailure: { category: "interrupted", message: "Aborted." },
+          };
+        }
+      },
+    });
+    const queued = await enqueue(service);
+    await reading;
+    service.close();
+    const job = service.getById(queued.id);
+    expect(job).toMatchObject({ status: "failed", failure: { category: "interrupted" } });
+    expect(job?.settledCostUsdMicros).toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetched).toEqual([]);
+  });
+
+  it("settles a job whose time ran out without waiting on the provider's stop", async () => {
+    let cancelSignal: AbortSignal | undefined;
+    const harnessed = harness({
+      polls: Array.from({ length: 1000 }, () => ({ status: "running" as const })),
+      // A stop that finds the clip finished and starts downloading it again.
+      cancel: (signal) => {
+        cancelSignal = signal;
+        return new Promise(() => undefined);
+      },
+    });
+    const { service, calls, advance } = harnessed;
+    const queued = await enqueue(service);
+    await vi.waitFor(() => expect(service.getById(queued.id)?.remoteId).toBe("remote-1"));
+    advance(31 * 60 * 1000);
+    const done = await service.whenTerminal(queued.id);
+    expect(done).toMatchObject({ status: "failed", settledCostUsdMicros: 695_040 });
+    await vi.waitFor(() => expect(calls.cancel).toBe(1));
+    expect(cancelSignal?.aborted).toBe(false);
+    service.close();
+    expect(cancelSignal?.aborted).toBe(true);
   });
 
   it("leaves a job running for the next host when shutdown interrupts its poll", async () => {

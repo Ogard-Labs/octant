@@ -1,14 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  MAX_QUEUED_VIDEO_JOBS,
-  MAX_VIDEO_PROMPT_CHARACTERS,
   VIDEO_GENERATION_REQUEST_SHAPE,
-  VIDEO_JOB_AGGREGATE_TYPE,
-  VIDEO_JOB_HOST_CONCURRENCY,
-  VIDEO_JOB_PROVIDER_COPY_CHANGED,
-  VIDEO_JOB_QUEUED,
-  VIDEO_JOB_STATUS_CHANGED,
-  VIDEO_JOB_TIMEOUT_MS,
   AggregateId,
   CorrelationId,
   EventId,
@@ -16,8 +8,6 @@ import {
   decodeSpendCeilingReservationId,
   decodeUsageReconciliationId,
   decodeUtcTimestamp,
-  decodeVideoClipId,
-  decodeVideoJobId,
   type EventActor,
   type ImageGenerationScopeId,
   type ProviderFailure,
@@ -27,6 +17,18 @@ import {
   type SpendCeilingRefusal,
   type SpendCeilingReservationId,
   type UtcTimestamp,
+} from "@octant/contracts";
+import {
+  MAX_QUEUED_VIDEO_JOBS,
+  MAX_VIDEO_PROMPT_CHARACTERS,
+  VIDEO_JOB_AGGREGATE_TYPE,
+  VIDEO_JOB_HOST_CONCURRENCY,
+  VIDEO_JOB_PROVIDER_COPY_CHANGED,
+  VIDEO_JOB_QUEUED,
+  VIDEO_JOB_STATUS_CHANGED,
+  VIDEO_JOB_TIMEOUT_MS,
+  decodeVideoClipId,
+  decodeVideoJobId,
   type VideoClipOptions,
   type VideoDriverKind,
   type VideoJob,
@@ -35,7 +37,7 @@ import {
   type VideoJobThreadKind,
   type VideoModelCapabilities,
   type VideoProviderCopy,
-} from "@octant/contracts";
+} from "@octant/contracts/video-generation";
 import { isVideoProfileDriverKind } from "@octant/domain";
 import { admittedBundledVideoDriverKinds } from "@octant/plugin-host/provider-drivers";
 import {
@@ -59,7 +61,7 @@ import type { ProviderCredentialResolver } from "../providers/credentialBrokerCl
 import type { SpendCeilingService } from "../spendCeilingService";
 import { geminiVideoDriver } from "./geminiVideoAdapter";
 import type { VideoClipStore } from "./videoClipStore";
-import { makeVideoGenerationPorts } from "./videoHttp";
+import { makeVideoGenerationPorts, type VideoSendRecord } from "./videoHttp";
 import type { VideoJobProjection } from "./videoJobProjection";
 
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
@@ -70,6 +72,8 @@ type JournalPort = Pick<Journal, "append">;
 const BUNDLED_VIDEO_DRIVERS: ReadonlyArray<VideoGenerationDriver> = [geminiVideoDriver];
 const FIRST_POLL_MS = 5_000;
 const MAX_POLL_MS = 30_000;
+/** How long the host waits on a provider's stop once a job's time has run out. */
+const VIDEO_TIMEOUT_CLEANUP_MS = 15_000;
 /** How often a removal the provider refused is tried again while the host runs. */
 export const VIDEO_REMOVAL_RETRY_MS = 15 * 60 * 1000;
 
@@ -184,6 +188,7 @@ export class VideoJobService {
   readonly #sleep: (ms: number, signal: AbortSignal) => Promise<void>;
   readonly #now: () => number;
   readonly #running = new Map<string, Running>();
+  readonly #sends: VideoSendRecord = { reached: new WeakSet(), sent: new WeakSet() };
   readonly #waiting: Array<() => void> = [];
   readonly #terminalWaiters = new Map<string, Array<(job: VideoJob) => void>>();
   readonly #inputs = new Map<string, { readonly prompt: string } & VideoJobInputs>();
@@ -472,9 +477,27 @@ export class VideoJobService {
     await this.#options.clips.purgeScope(scopeId);
   }
 
+  /** Whether this job's start reached the host's port but was never sent. */
+  #knownUnsent(running: Running): boolean {
+    const signal = running.controller.signal;
+    return this.#sends.reached.has(signal) && !this.#sends.sent.has(signal);
+  }
+
   close(): void {
+    // Recorded before anything is aborted, while the journal is still open: a
+    // start still reading its credential never reached the provider, so it is
+    // interrupted and billed nothing rather than left for recovery to bill.
+    const controllers = [...this.#running.values()].map((running) => running.controller);
+    for (const [id, running] of [...this.#running]) {
+      const job = this.getById(decodeVideoJobId(id));
+      if (job?.status === "running" && job.remoteId === undefined && this.#knownUnsent(running)) {
+        this.#finish(job, "failed", {
+          failure: videoFailure("interrupted", "The host shut down before the clip was sent."),
+        });
+      }
+    }
     this.#closing.abort();
-    for (const running of this.#running.values()) running.controller.abort();
+    for (const controller of controllers) controller.abort();
     if (this.#removalTimer !== undefined) clearInterval(this.#removalTimer);
   }
 
@@ -537,6 +560,10 @@ export class VideoJobService {
       // Host shutdown: left running without a provider id, so recovery
       // settles it at the estimate, as for any send it cannot confirm.
       if (this.#closing.signal.aborted) return;
+      if (running.stopRequested && this.#knownUnsent(running)) {
+        this.#finish(sending, "cancelled", {});
+        return;
+      }
       // Stop aborted the start request after it may have reached the
       // provider, which can still make and bill the clip.
       if (running.stopRequested) {
@@ -605,7 +632,7 @@ export class VideoJobService {
       if (running.stopRequested && !cancelAsked) {
         cancelAsked = true;
         if (model?.job.cancel === "running") {
-          const answer = await adapter.cancel(remoteId);
+          const answer = await adapter.cancel(remoteId, this.#closing.signal);
           if (answer.status !== "running") {
             await this.#conclude(job, answer, true);
             return;
@@ -622,12 +649,20 @@ export class VideoJobService {
         }
       }
       if (this.#now() >= deadline) {
-        if (model?.job.cancel === "running") await adapter.cancel(remoteId);
+        // Settled before the provider is asked to stop, and the stop is
+        // bounded: a cancel that finds the clip already finished may download
+        // it again, which must not hold the job or its slot.
         this.#finish(this.#current(job), "failed", {
           failure: videoFailure("unavailable", "The clip took longer than 30 minutes."),
           settledCostUsdMicros: estimateOrZero(job),
           billed: true,
         });
+        if (model?.job.cancel === "running") {
+          await adapter.cancel(
+            remoteId,
+            AbortSignal.any([this.#closing.signal, AbortSignal.timeout(VIDEO_TIMEOUT_CLEANUP_MS)]),
+          );
+        }
         await this.#forget(this.#current(job));
         return;
       }
@@ -926,6 +961,7 @@ export class VideoJobService {
         credentialResolver: this.#options.credentialResolver,
         providerHosts: driver.providerHosts,
         ...(this.#options.fetch === undefined ? {} : { fetch: this.#options.fetch }),
+        sends: this.#sends,
       }),
     });
     return {

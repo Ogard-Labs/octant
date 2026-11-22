@@ -391,11 +391,20 @@ async function downloadFile(
   }
 }
 
-async function cancel(ports: VideoGenerationPorts, remoteId: string): Promise<VideoAdapterPoll> {
+async function cancel(
+  ports: VideoGenerationPorts,
+  remoteId: string,
+  signal?: AbortSignal,
+): Promise<VideoAdapterPoll> {
   const url = interactionUrl(remoteId, "/cancel");
   if (url === undefined) return invalidId();
   try {
-    const response = await ports.request({ url, method: "POST", auth: AUTH });
+    const response = await ports.request({
+      url,
+      method: "POST",
+      auth: AUTH,
+      ...(signal === undefined ? {} : { signal }),
+    });
     if (!response.ok && response.status !== 409) {
       return { status: "failed", providerFailure: classifyVideoHttpFailure(response) };
     }
@@ -404,7 +413,7 @@ async function cancel(ports: VideoGenerationPorts, remoteId: string): Promise<Vi
   }
   // Google notes the state can lag the cancel briefly; the job service keeps
   // polling a `running` answer until it settles.
-  return await readInteraction(ports, remoteId);
+  return await readInteraction(ports, remoteId, signal);
 }
 
 async function forget(ports: VideoGenerationPorts, remoteId: string): Promise<VideoAdapterForget> {
@@ -437,7 +446,7 @@ export const geminiVideoDriver: VideoGenerationDriver = {
     models: async () => declaredFor(profile),
     start: (request) => start(ports, profile, request),
     poll: (remoteId, signal) => readInteraction(ports, remoteId, signal),
-    cancel: (remoteId) => cancel(ports, remoteId),
+    cancel: (remoteId, signal) => cancel(ports, remoteId, signal),
     forget: (remoteId) => forget(ports, remoteId),
   }),
 };

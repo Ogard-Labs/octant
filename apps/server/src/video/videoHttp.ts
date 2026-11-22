@@ -1,4 +1,4 @@
-import { MAX_VIDEO_CLIP_BYTES } from "@octant/contracts";
+import { MAX_VIDEO_CLIP_BYTES } from "@octant/contracts/video-generation";
 import {
   isVideoEndpointAllowed,
   videoFailure,
@@ -26,6 +26,17 @@ export const VIDEO_HTTP_LIMITS: ImageHttpLimits = {
 };
 
 /**
+ * Which requests that carried a given signal reached the host's port, and
+ * which of those were handed to the network. A start aborted while its
+ * credential was still being read reached the port but was never sent, so
+ * the provider cannot have made or billed that clip.
+ */
+export interface VideoSendRecord {
+  readonly reached: WeakSet<AbortSignal>;
+  readonly sent: WeakSet<AbortSignal>;
+}
+
+/**
  * The ports one video profile's adapter receives through the video seam. The
  * credential resolver, key pool, fetch and limits stay here; the adapter only
  * names the header its provider reads.
@@ -35,10 +46,14 @@ export function makeVideoGenerationPorts(options: {
   readonly credentialResolver: ProviderCredentialResolver;
   readonly providerHosts: ReadonlyArray<string>;
   readonly fetch?: ImageHttpFetch;
+  readonly sends?: VideoSendRecord;
 }): VideoGenerationPorts {
   const fetch = options.fetch ?? globalThis.fetch;
   return {
     request: async (request) => {
+      const signal = request.signal;
+      const sends = options.sends;
+      if (signal !== undefined) sends?.reached.add(signal);
       // Checked before any credential is read: a driver chooses the URL, so
       // the host decides where the profile's key may go.
       if (!isVideoEndpointAllowed(request.url, options.providerHosts)) {
@@ -51,7 +66,14 @@ export function makeVideoGenerationPorts(options: {
         ...request,
         instanceId: options.instanceId,
         credentialResolver: options.credentialResolver,
-        fetch,
+        // A fetch given an aborted signal sends nothing, so only a live one counts.
+        fetch:
+          signal === undefined || sends === undefined
+            ? fetch
+            : async (input, init) => {
+                if (init?.signal?.aborted !== true) sends.sent.add(signal);
+                return await fetch(input, init);
+              },
         limits: VIDEO_HTTP_LIMITS,
       });
     },
