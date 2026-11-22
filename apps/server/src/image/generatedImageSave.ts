@@ -231,3 +231,24 @@ export async function writeConfinedNewFileUnder(
 function isMissingFileError(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
+
+/**
+ * The create check an icon set makes for every file before writing any, so
+ * one refused path leaves the folder untouched. It is the same confined check
+ * a single new file gets, with the refusal naming the path, since an icon set
+ * writes many. Each write still makes its own exclusive create, so a file that
+ * appears between check and write is refused there.
+ */
+export async function checkNewFileUnder(
+  input: { readonly root: string; readonly relativePath: string },
+  filesystem: WorkFilesystemPort = liveWorkFilesystem,
+): Promise<{ readonly status: "ok" } | { readonly status: "refused"; readonly reason: string }> {
+  const checked = await checkConfinedNewFileUnder(input, filesystem);
+  if (checked.status === "ok") return { status: "ok" };
+  return {
+    status: "refused",
+    reason: checked.reason.startsWith("That file already exists")
+      ? `${input.relativePath} already exists.`
+      : `${input.relativePath}: ${checked.reason}`,
+  };
+}
