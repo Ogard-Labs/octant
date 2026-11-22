@@ -195,6 +195,7 @@ describe("Journal", () => {
         backgroundSessionIdleLimitMinutes: 120,
         providerTelemetry: true,
         providerSelfUpdate: false,
+        providerCredentialPassThrough: {},
         threadWakeupsWaitingLimit: 8,
         threadWakeupsRunMissedOnReturn: false,
         messageWakesPerHour: 30,

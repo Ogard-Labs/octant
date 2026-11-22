@@ -126,6 +126,7 @@ import type { FoundationsWiring } from "./foundations";
 import type { IntegrationsWiring } from "./integrations";
 import type { ProvidersWiring } from "./providers";
 import { windowCanAccessWorkProject } from "../windowCodeProjectAccess";
+import { providerCredentialPassThrough } from "../providers/providerOwnChannels";
 import { resolveProviderTerminal } from "../providers/providerTerminal";
 import { homedir } from "node:os";
 
@@ -380,6 +381,11 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
                     : persistence.readProviderInstance(thread.providerInstanceId),
                 hostEnvironment: process.env,
                 homeDirectory: homedir(),
+                credentialPassThrough: (driverKind) =>
+                  providerCredentialPassThrough(
+                    persistence.readShellSettings()?.settings,
+                    driverKind,
+                  ),
                 platform: process.platform,
                 shell,
                 strict,

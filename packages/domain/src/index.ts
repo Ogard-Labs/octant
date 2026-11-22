@@ -31,6 +31,7 @@ export * from "./secretGuardPolicy";
 export * from "./strictNoticePolicy";
 export * from "./turnLoopPolicy";
 export * from "./blockedToolsPolicy";
+export * from "./hostCredentialPolicy";
 export * from "./shieldJudgePolicy";
 export * from "./shieldServerPolicy";
 export * from "./threadBoardPolicy";

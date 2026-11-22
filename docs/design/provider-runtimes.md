@@ -1566,7 +1566,10 @@ run every command unasked (below).
   so it runs that one command, and denied or unanswered stays refused.
 - The lease key carries Strict, so a Strict and a non-Strict session never
   share a process, and the launch takes the account's open environment: the
-  host's less Octant's variables and other providers' keys. A Plan or Chat
+  host's less Octant's variables, other providers' keys and the unrelated
+  credentials the person did not let through for Codex (its own keys and
+  the AWS credentials its Bedrock sign-in takes stay). The lease key also
+  carries that pass-through list, so a changed list starts a new process. A Plan or Chat
   lease outside Strict keeps Octant's read-only profile, with only other
   providers' sign-ins refused among the protected files.
 - Octant's protected paths become Codex deny rules. Codex's built-in
@@ -3110,8 +3113,12 @@ that declaration, never by the profile id:
 
 - **No sandbox in Work and Code outside Strict.** There the CLI starts as the
   person's own terminal would start it, at every level: no Octant sandbox, no
-  network allowlist, the person's whole environment, and its own sign-in read
-  as it reads it. Every ACP agent now runs this way
+  network allowlist, the person's environment less unrelated credentials
+  (`GH_TOKEN`, AWS keys, other services' `*_API_KEY`) that the person did
+  not let through for this provider in Settings › Providers & Models ›
+  Credentials let through
+  ([Architecture: Security and authority](../architecture.md#security-and-authority),
+  the Environment rule), and its own sign-in read as it reads it. Every ACP agent now runs this way
   (`providerHoldsLevelWithoutSandbox`, maintainer decision, 2026-11-21), the
   rule Windows already applied to ACP agents below Full access: the CLI's
   `default` mode asks Octant before every edit and command, so the thread's

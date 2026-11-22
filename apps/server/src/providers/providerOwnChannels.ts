@@ -15,11 +15,32 @@ export const DEFAULT_PROVIDER_OWN_CHANNELS: ProviderOwnChannels = {
 
 const CLOSED_PROVIDER_OWN_CHANNELS: ProviderOwnChannels = { telemetry: false, selfUpdate: false };
 
-/** The person's two switches in Settings › Providers & Models. */
+/**
+ * The person's two switches in Settings › Providers & Models, and the host
+ * credentials they let through to this provider (by driver kind).
+ */
 export function providerOwnChannelsFromSettings(
-  settings: Pick<ShellSettings, "providerTelemetry" | "providerSelfUpdate">,
+  settings: Pick<
+    ShellSettings,
+    "providerTelemetry" | "providerSelfUpdate" | "providerCredentialPassThrough"
+  >,
+  driverKind: string,
 ): ProviderOwnChannels {
-  return { telemetry: settings.providerTelemetry, selfUpdate: settings.providerSelfUpdate };
+  const credentialPassThrough = providerCredentialPassThrough(settings, driverKind);
+  return {
+    telemetry: settings.providerTelemetry,
+    selfUpdate: settings.providerSelfUpdate,
+    ...(credentialPassThrough.length === 0 ? {} : { credentialPassThrough }),
+  };
+}
+
+/** The host credentials the person lets through to a provider of this driver kind. */
+export function providerCredentialPassThrough(
+  settings: Pick<ShellSettings, "providerCredentialPassThrough"> | undefined,
+  driverKind: string,
+): ReadonlyArray<string> {
+  const lists = settings?.providerCredentialPassThrough;
+  return lists !== undefined && Object.hasOwn(lists, driverKind) ? (lists[driverKind] ?? []) : [];
 }
 
 /**

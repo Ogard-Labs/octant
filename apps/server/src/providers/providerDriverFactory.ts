@@ -278,13 +278,15 @@ export function makeProviderDriver(
         runtimeRegistry: options.runtimeRegistry,
         permissionPersistence: options.permissionPersistence,
         environment: codexEnvironment,
-        openEnvironment: codexAccountProcessEnvironment({
-          binaryPath: instance.configuration.binaryPath,
-          hostEnvironment,
-          codexHome,
-          ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
-          strict: false,
-        }),
+        openEnvironment: (credentialPassThrough) =>
+          codexAccountProcessEnvironment({
+            binaryPath: instance.configuration.binaryPath,
+            hostEnvironment,
+            codexHome,
+            ...(inheritsHostOverlay ? { inheritHostAuth: true } : {}),
+            strict: false,
+            credentialPassThrough,
+          }),
         ...(options.credentialResolver === undefined
           ? {}
           : { credentialResolver: options.credentialResolver }),

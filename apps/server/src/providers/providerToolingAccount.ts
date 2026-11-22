@@ -4,6 +4,7 @@ import { accountRunsAsItself, effectiveClaudeAccountConfigDirectory } from "@oct
 import { isolatedClaudeAccountEnvironment } from "./claudeAccountIsolation";
 import { codexAccountProcessEnvironment } from "./codexProcess";
 import { effectiveCodexAccountHome } from "./providerDriverFactory";
+import { DEFAULT_PROVIDER_OWN_CHANNELS } from "./providerOwnChannels";
 
 export interface ProviderToolingAccount {
   readonly provider: ProviderToolingProvider;
@@ -29,6 +30,8 @@ export function resolveProviderToolingAccount(
   homeDirectory: string,
   /** Whether the launch it mirrors is Strict; tooling commands always are. */
   strict = true,
+  /** Host credentials the person lets through to this provider; read only outside Strict. */
+  credentialPassThrough: ReadonlyArray<string> = [],
 ): ProviderToolingAccount | undefined {
   if (instance.driverKind === "claude") {
     const directory =
@@ -39,6 +42,10 @@ export function resolveProviderToolingAccount(
       configDirectory: directory ?? "/",
       authentication: instance.configuration.authentication,
       strict,
+      // The provider's channels stay closed here, as before this list existed.
+      ...(credentialPassThrough.length === 0
+        ? {}
+        : { ownChannels: { ...DEFAULT_PROVIDER_OWN_CHANNELS, credentialPassThrough } }),
     });
     if (directory === undefined) {
       // The account uses Claude's own default folder; leave both variables unset
@@ -65,7 +72,7 @@ export function resolveProviderToolingAccount(
         binaryPath: instance.configuration.binaryPath,
         hostEnvironment,
         codexHome: directory,
-        ...(strict ? {} : { strict: false as const }),
+        ...(strict ? {} : { strict: false as const, credentialPassThrough }),
       }),
       shownEnvironment: [{ name: "CODEX_HOME", value: directory }],
       directory,

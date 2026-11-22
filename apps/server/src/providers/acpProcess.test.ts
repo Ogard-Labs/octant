@@ -242,12 +242,14 @@ afterAll(() => {
 });
 
 describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
-  it("outside Strict passes the host's environment less Octant's variables, other providers' keys and the host names the profile withholds, and lifts only channel guards once the person turns provider telemetry on", () => {
+  it("outside Strict passes the host's environment less Octant's variables, other providers' keys, unrelated credentials and the host names the profile withholds, and lifts only channel guards once the person turns provider telemetry on", () => {
     const host = {
       PATH: "/usr/bin",
       HOME: "/Users/test",
       HTTPS_PROXY: "http://proxy.invalid",
-      GH_TOKEN: "gh-token",
+      GH_TOKEN: "must-not-cross",
+      AWS_SECRET_ACCESS_KEY: "must-not-cross",
+      STRIPE_API_KEY: "must-not-cross",
       MISTRAL_API_KEY: "must-not-cross",
       ANTHROPIC_API_KEY: "must-not-cross",
       OCTANT_SECRET: "must-not-cross",
@@ -269,7 +271,6 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
     expect(environment).toMatchObject({
       PATH: "/usr/bin",
       HTTPS_PROXY: "http://proxy.invalid",
-      GH_TOKEN: "gh-token",
       ...Object.fromEntries(
         Object.entries(profile.process.guards).filter(([name]) => !channels.has(name)),
       ),
@@ -281,6 +282,29 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
       expect(environment.HOME).not.toBe("/Users/test");
     }
     expect(JSON.stringify(environment)).not.toContain("must-not-cross");
+  });
+
+  it("a provider launched outside Strict does not receive GH_TOKEN unless its pass-through list names it, and Strict ignores the list", () => {
+    const host = { PATH: "/usr/bin", GH_TOKEN: "gh-token", NPM_TOKEN: "npm-token" };
+    const base = { managedHome: "/private/tmp/octant-acp-home" };
+    const passThrough = {
+      telemetry: false,
+      selfUpdate: false,
+      credentialPassThrough: ["GH_TOKEN"],
+    };
+    expect(
+      sanitizeAcpEnvironment(profile, host, { ...base, strict: false }).GH_TOKEN,
+    ).toBeUndefined();
+    const named = sanitizeAcpEnvironment(profile, host, {
+      ...base,
+      strict: false,
+      ownChannels: passThrough,
+    });
+    expect(named.GH_TOKEN).toBe("gh-token");
+    expect(named.NPM_TOKEN).toBeUndefined();
+    expect(
+      sanitizeAcpEnvironment(profile, host, { ...base, ownChannels: passThrough }).GH_TOKEN,
+    ).toBeUndefined();
   });
 
   it("outside Strict keeps its telemetry guards when the person turned provider telemetry off and drops its self-update guards when the person lets providers update themselves", () => {

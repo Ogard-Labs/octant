@@ -278,6 +278,21 @@ the switches say, and so does a thread that keeps or chose a sandbox. Which guar
 [Provider runtimes](provider-runtimes.md#provider-channel-switches) and the rule
 in [Decisions and requirements](decisions.md#provider-telemetry-and-self-update-are-the-persons-switches).
 
+Below them, **Credentials let through** lists, per provider, the host
+environment variables the person lets through to that provider outside
+Strict. Outside Strict a provider does not inherit well-known credentials that
+are not its own (`GH_TOKEN`, `GITHUB_TOKEN`, `NPM_TOKEN`, AWS keys, another
+service's `*_API_KEY`); naming one here lets it through to that provider's
+turns and its provider terminal from the next turn. The list is empty by
+default, holds names only, never values, and offers Claude Code, Codex, Pi,
+each ACP agent and the added ACP agents together. Each row reads
+"`NAME` · Provider · Let through" with **Remove**; the add row is a provider
+picker, a name field and **Let through**. A name that is not an environment
+variable name, or one of Octant's own (`OCTANT_*`), is refused under the
+field and the draft kept. Strict ignores the list. The rule is in
+[Architecture: Security and authority](../architecture.md#security-and-authority)
+and [Decisions and requirements](decisions.md#octant-adds-no-restrictions-of-its-own-unless-strict-is-on).
+
 Provider catalog and the Octant Harness model endpoints (rows, detail
 sub-pages, and Add endpoint) follow
 [Providers and model endpoints](model-endpoints.md): one link per

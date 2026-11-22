@@ -152,15 +152,23 @@ export interface ProviderCompactionPoint {
 }
 
 /**
- * The provider's own channels to its vendor that the person lets it use.
- * `true` means Octant sets none of that family's guards on the launch, so the
- * provider's own settings decide; `false` means Octant keeps them set.
+ * What the person lets a provider use outside Strict: its own channels to its
+ * vendor, and host credentials named for it. For a channel, `true` means
+ * Octant sets none of that family's guards on the launch, so the provider's
+ * own settings decide; `false` means Octant keeps them set.
  */
 export interface ProviderOwnChannels {
   /** Usage metrics, error reports, trace uploads and feedback uploads. */
   readonly telemetry: boolean;
   /** The provider replacing or checking for a newer version of itself. */
   readonly selfUpdate: boolean;
+  /**
+   * Well-known host credentials unrelated to the provider (`GH_TOKEN`, AWS
+   * keys, another service's `*_API_KEY`) the person lets through to it, by
+   * name. Absent or empty, every such credential that is not the provider's
+   * own stays out of its launch.
+   */
+  readonly credentialPassThrough?: ReadonlyArray<string>;
 }
 
 export interface ProviderSessionStart {

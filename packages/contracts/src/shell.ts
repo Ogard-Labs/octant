@@ -772,6 +772,18 @@ export const NextMessageSuggestionsSetting = Schema.Struct({
 }).annotations({ parseOptions: { onExcessProperty: "error" as const } });
 export type NextMessageSuggestionsSetting = typeof NextMessageSuggestionsSetting.Type;
 
+/** How many host credentials one provider's pass-through list may name. */
+export const MAX_PROVIDER_PASS_THROUGH = 64;
+
+/**
+ * The name of a host environment variable a person lets through to a provider.
+ * Octant's own (`OCTANT_*`) never reach a provider, so the list cannot name one.
+ */
+export const HostCredentialName = Schema.String.pipe(
+  Schema.pattern(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/),
+  Schema.filter((name) => !name.toUpperCase().startsWith("OCTANT_")),
+);
+
 export const ShellSettings = Schema.Struct({
   chatEnabled: Schema.Boolean,
   workEnabled: Schema.Boolean,
@@ -1003,6 +1015,22 @@ export const ShellSettings = Schema.Struct({
    * itself; Strict keeps them set whatever this says.
    */
   providerSelfUpdate: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * Host credentials the person lets through to one provider launched outside
+   * Strict, keyed by the provider's driver kind (`claude`, `codex`, an ACP
+   * agent's kind, `acp-agent` for every added ACP agent). Outside Strict a
+   * provider does not inherit well-known credentials that are not its own
+   * (`GH_TOKEN`, AWS keys, another service's `*_API_KEY`) unless its list here
+   * names them. Strict ignores this. Names only, never values. Empty by
+   * default, including for a store persisted before the setting existed.
+   */
+  providerCredentialPassThrough: Schema.optionalWith(
+    Schema.Record({
+      key: Schema.String.pipe(Schema.pattern(/^[a-z][a-z0-9-]{0,63}$/)),
+      value: Schema.Array(HostCredentialName).pipe(Schema.maxItems(MAX_PROVIDER_PASS_THROUGH)),
+    }),
+    { default: () => ({}) },
+  ),
   /**
    * How many wake-ups one thread may have waiting, missed ones included. A
    * store persisted before the setting existed decodes to the former fixed 8.

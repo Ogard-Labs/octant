@@ -1372,9 +1372,14 @@ export function sanitizeAcpEnvironment(
   );
   const passthrough = new Set(profile.process.passthroughVariables);
   // Outside Strict the agent gets the host's environment as in the person's
-  // own shell, less Octant's variables and other providers' keys; a standard
-  // host variable the profile deliberately leaves out (Kimi's HOME) stays out.
+  // own shell, less Octant's variables, other providers' keys and unrelated
+  // credentials the person did not let through; a standard host variable the
+  // profile deliberately leaves out (Kimi's HOME) stays out. The agent's own
+  // key comes from its account below, never from the host.
   const withheld = new Set(HOST_PASSTHROUGH_VARIABLES.filter((name) => !passthrough.has(name)));
+  const credentialPassThrough = strict
+    ? []
+    : (launchOwnChannels(false, input.ownChannels).credentialPassThrough ?? []);
   const environment = strict
     ? Object.fromEntries(
         Object.entries(inherited).filter(
@@ -1382,7 +1387,9 @@ export function sanitizeAcpEnvironment(
         ),
       )
     : Object.fromEntries(
-        Object.entries(providerHostEnvironment(inherited)).filter(([key]) => !withheld.has(key)),
+        Object.entries(providerHostEnvironment(inherited, new Set(), credentialPassThrough)).filter(
+          ([key]) => !withheld.has(key),
+        ),
       );
   return {
     ...environment,

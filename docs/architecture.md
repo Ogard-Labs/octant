@@ -15519,8 +15519,27 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   restores each of these protections:
   - **Environment.** A provider receives the host's environment (proxies,
     custom certificate authorities, `ANTHROPIC_BASE_URL`, Bedrock and Vertex
-    routing, `GH_TOKEN` and the rest), less Octant's own secrets and other
-    providers' keys. Strict keeps each runtime's fixed list. Built for
+    routing and the rest), less Octant's own secrets, other providers' keys,
+    and well-known credentials unrelated to it (maintainer decision,
+    2026-11-22): `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`,
+    `GITHUB_ENTERPRISE_TOKEN`, `GITLAB_TOKEN`, `NPM_TOKEN`,
+    `NODE_AUTH_TOKEN`, AWS access keys, session tokens and the Bedrock bearer
+    token, and any other `*_API_KEY` (`hostCredentialCrosses`). A provider's
+    own credential is never stripped: Codex keeps its keys and the AWS
+    credentials its Bedrock sign-in takes, Claude Code keeps the AWS
+    credentials while the host routes it through Bedrock
+    (`CLAUDE_CODE_USE_BEDROCK`), Pi keeps the keys of the thread's model
+    provider, and an account's own key is applied by Octant after the
+    filter. Settings › Providers & Models › Credentials let through keeps a
+    per-provider list of names the person lets through anyway (such as
+    `GH_TOKEN` for an agent that runs `gh`); it holds names only, never
+    values, is read at each launch, applies to that provider's turns and its
+    provider terminal, and cannot let another model provider's key or an
+    `OCTANT_*` variable through. A Codex process keeps the list it launched
+    with; a lease is keyed on the list, so a changed list starts a new one.
+    Strict keeps each runtime's fixed list and ignores the pass-through
+    list. OpenCode does not strip these yet: its launch receives the host's
+    environment as before. Built for
     Claude Code, Pi and the ACP agents, read at each launch; OpenCode already
     received the host's environment. Built for Codex: each account has a
     Strict and an open launch environment, and a lease takes the one its
@@ -17083,8 +17102,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Strict. Outside Strict (built, under
   [Octant adds no restrictions of its own unless Strict is on](#security-and-authority))
   a Claude launch gets the host's environment less Octant's own variables
-  (`OCTANT_*`) and every other model provider's credential
-  (`providerHostEnvironment`); the account's own sign-in still decides
+  (`OCTANT_*`), every other model provider's credential and the unrelated
+  credentials the person did not let through (`providerHostEnvironment`,
+  under the Environment rule above); the account's own sign-in still decides
   which account a turn runs as, so no host Anthropic key or token crosses,
   Octant's account directory is applied, an API-key account gets its
   broker key, and a gateway account gets its own address and broker token

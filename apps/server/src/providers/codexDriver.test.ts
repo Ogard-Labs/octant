@@ -150,6 +150,7 @@ interface Fixture {
   readonly options: (overrides?: Partial<CodexDriverOptions>) => CodexDriverOptions;
   readonly startCount: () => number;
   readonly authorities: () => ReadonlyArray<CodexLaunchAuthority>;
+  readonly environments: () => ReadonlyArray<NodeJS.ProcessEnv | undefined>;
 }
 
 function fixture(
@@ -302,12 +303,14 @@ function fixture(
     },
   };
   const authorities: CodexLaunchAuthority[] = [];
+  const environments: Array<NodeJS.ProcessEnv | undefined> = [];
   const processPort: CodexProcessPort = {
-    start: ({ authority }) =>
+    start: ({ authority, environment }) =>
       Effect.acquireRelease(
         Effect.sync(() => {
           starts += 1;
           authorities.push(authority);
+          environments.push(environment);
           const exited = new Promise<void>((resolve) => {
             resolveExit = resolve;
           });
@@ -331,6 +334,7 @@ function fixture(
     listenerCount: () => listeners.size,
     startCount: () => starts,
     authorities: () => authorities,
+    environments: () => environments,
     options: (overrides = {}) => ({
       instanceId,
       binaryPath: "/usr/local/bin/codex",
@@ -1020,6 +1024,48 @@ describe("Codex driver probe and runtime lifecycle", () => {
       ),
     );
     expect(probed.readiness).toBe("ready");
+  });
+
+  it("a Codex session outside Strict launches with only the host credentials its pass-through list names, and a Strict one with its fixed list", async () => {
+    const f = fixture();
+    const driver = makeCodexDriver(
+      f.options({
+        environment: { PATH: "/usr/bin" },
+        openEnvironment: (credentialPassThrough) => ({
+          PATH: "/usr/bin",
+          LET_THROUGH: credentialPassThrough.join(","),
+        }),
+      }),
+    );
+    const open = (
+      id: typeof sessionId,
+      launch: { readonly strict?: false; readonly credentialPassThrough: ReadonlyArray<string> },
+    ) =>
+      Effect.runPromise(
+        Effect.scoped(
+          driver.acquire({ instanceId, projectRoot }).pipe(
+            Effect.flatMap((connection) =>
+              connection.start({
+                sessionId: id,
+                modelId: "gpt-5.4" as never,
+                executionPolicy: "approval-gated",
+                ...(launch.strict === false ? { strict: false } : {}),
+                ownChannels: {
+                  telemetry: false,
+                  selfUpdate: false,
+                  credentialPassThrough: launch.credentialPassThrough,
+                },
+              }),
+            ),
+          ),
+        ),
+      );
+    await open(sessionId, { strict: false, credentialPassThrough: ["NPM_TOKEN", "GH_TOKEN"] });
+    await open(secondSessionId, { credentialPassThrough: ["GH_TOKEN"] });
+    expect(f.environments()).toEqual([
+      { PATH: "/usr/bin", LET_THROUGH: "GH_TOKEN,NPM_TOKEN" },
+      { PATH: "/usr/bin" },
+    ]);
   });
 
   it("shares one process per root and posture, separates postures and instances, and idles for 30 seconds", async () => {
@@ -3555,7 +3601,7 @@ describe("Codex execution authority and approvals", () => {
           f.options({
             platform: "darwin",
             protectedSignIns,
-            openEnvironment: { CODEX_HOME: "/data/providers/codex-account" },
+            openEnvironment: () => ({ CODEX_HOME: "/data/providers/codex-account" }),
           }),
         ),
         "code",

@@ -949,6 +949,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "provider self-update self update auto update autoupdate updater update check upgrade new version cli strict claude code opencode kimi grok kilo antigravity fx pi",
         },
         {
+          id: settingId("provider-credential-pass-through"),
+          label: "Credentials let through",
+          scope: "host",
+          keywords:
+            "credentials let through pass through passthrough environment variables env gh_token github_token npm_token aws keys api key secret token strip strict provider gh",
+        },
+        {
+          id: settingId("provider-credential-pass-through-add"),
+          label: "Let a credential through",
+          scope: "host",
+          keywords:
+            "add credential environment variable let through pass through gh_token github token npm aws api key provider",
+        },
+        {
           id: settingId("opencode-managed-update"),
           label: "OpenCode update",
           scope: "host",

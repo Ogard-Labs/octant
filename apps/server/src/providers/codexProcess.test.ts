@@ -343,10 +343,11 @@ describe("sanitizeCodexEnvironment", () => {
     expect(environment.CODEX_HOME).toBe("/Users/test/.codex-accounts/api");
   });
 
-  it("gives a lease outside Strict the host's environment less Octant's own and other providers' keys", () => {
+  it("gives a lease outside Strict the host's environment less Octant's own, other providers' keys and unrelated credentials, keeping the AWS keys its Bedrock sign-in uses", () => {
     const hostEnvironment = {
       PATH: "/usr/bin",
       GH_TOKEN: "host-gh",
+      NPM_TOKEN: "host-npm",
       AWS_PROFILE: "work",
       AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
       NODE_EXTRA_CA_CERTS: "/etc/ssl/corporate.pem",
@@ -362,7 +363,6 @@ describe("sanitizeCodexEnvironment", () => {
       strict: false,
     });
     expect(open).toMatchObject({
-      GH_TOKEN: "host-gh",
       AWS_PROFILE: "work",
       AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
       NODE_EXTRA_CA_CERTS: "/etc/ssl/corporate.pem",
@@ -371,6 +371,20 @@ describe("sanitizeCodexEnvironment", () => {
     });
     expect(open.ANTHROPIC_API_KEY).toBeUndefined();
     expect(open.OCTANT_DESKTOP_BRIDGE_SECRET).toBeUndefined();
+    expect(open.GH_TOKEN).toBeUndefined();
+    expect(open.NPM_TOKEN).toBeUndefined();
+
+    // The person's pass-through list for Codex lets a named one through.
+    const letThrough = codexAccountProcessEnvironment({
+      binaryPath: "/opt/homebrew/bin/codex",
+      hostEnvironment,
+      codexHome: "/Users/test/.codex",
+      inheritHostAuth: true,
+      strict: false,
+      credentialPassThrough: ["GH_TOKEN"],
+    });
+    expect(letThrough.GH_TOKEN).toBe("host-gh");
+    expect(letThrough.NPM_TOKEN).toBeUndefined();
 
     // Strict keeps the fixed list.
     const strict = codexAccountProcessEnvironment({

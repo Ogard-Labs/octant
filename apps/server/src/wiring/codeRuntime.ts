@@ -154,6 +154,7 @@ import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
 import type { CanvasWiring } from "./canvas";
 import { sessionNativeSetup } from "../providers/providerNativeSetup";
+import { providerCredentialPassThrough } from "../providers/providerOwnChannels";
 import { resolveProviderTerminal } from "../providers/providerTerminal";
 import { homedir } from "node:os";
 import {
@@ -1145,6 +1146,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             instance: persistence.readProviderInstance(thread.providerInstanceId),
             hostEnvironment: process.env,
             homeDirectory: homedir(),
+            credentialPassThrough: (driverKind) =>
+              providerCredentialPassThrough(persistence.readShellSettings()?.settings, driverKind),
             platform: process.platform,
             shell,
             strict,

@@ -132,12 +132,13 @@ describe("Pi process boundary", () => {
     });
   });
 
-  it("outside Strict gives a Pi process the host's environment less Octant's variables and other providers' keys, with telemetry off until the person turns it on", () => {
+  it("outside Strict gives a Pi process the host's environment less Octant's variables, other providers' keys and unrelated credentials it was not let through, with telemetry off until the person turns it on", () => {
     const host = {
       PATH: "/usr/bin",
       HOME: "/Users/test",
       HTTPS_PROXY: "http://proxy.invalid:8080",
       GH_TOKEN: "gh-token",
+      AWS_ACCESS_KEY_ID: "aws-key",
       ANTHROPIC_API_KEY: "anthropic-key",
       OPENAI_API_KEY: "openai-key",
       OCTANT_PI_TOOL_BRIDGE_TOKEN: "octant-secret",
@@ -148,13 +149,21 @@ describe("Pi process boundary", () => {
       HOME: "/managed",
       PI_CODING_AGENT_DIR: "/managed",
       HTTPS_PROXY: "http://proxy.invalid:8080",
-      GH_TOKEN: "gh-token",
       OPENAI_API_KEY: "openai-key",
       PI_SKIP_VERSION_CHECK: "1",
       PI_TELEMETRY: "0",
     });
     expect(open).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(open).not.toHaveProperty("OCTANT_PI_TOOL_BRIDGE_TOKEN");
+    expect(open).not.toHaveProperty("GH_TOKEN");
+    expect(open).not.toHaveProperty("AWS_ACCESS_KEY_ID");
+    const letThrough = sanitizePiEnvironment(host, "/managed", "enabled", "openai", false, {
+      telemetry: false,
+      selfUpdate: false,
+      credentialPassThrough: ["GH_TOKEN"],
+    });
+    expect(letThrough).toMatchObject({ GH_TOKEN: "gh-token", OPENAI_API_KEY: "openai-key" });
+    expect(letThrough).not.toHaveProperty("AWS_ACCESS_KEY_ID");
     const strict = sanitizePiEnvironment(host, "/managed", "enabled", "openai");
     expect(strict).toMatchObject({ PI_TELEMETRY: "0" });
     expect(strict).not.toHaveProperty("GH_TOKEN");
