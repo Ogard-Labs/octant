@@ -111,6 +111,34 @@ describe("eligible image profiles", () => {
     expect(hasEligibleImageProfile([openAiImage()])).toBe(true);
   });
 
+  it("lists an outside image profile only while the host admits its driver", () => {
+    const outside = {
+      ...openAiImage(),
+      id: "a1000000-0000-4000-8000-000000000009" as ProviderInstance["id"],
+      displayName: "Example images",
+      driverKind: "outside-image",
+      configuration: {
+        kind: "outside-image",
+        driver: {} as never,
+        baseUrl: "https://images.example.test",
+        modelAllowlist: ["example-image-1" as never],
+        defaultModel: "example-image-1" as never,
+      },
+    } as ProviderInstance;
+    // With no answer from the host, an outside profile is never offered.
+    expect(listEligibleImageProfiles([outside])).toEqual([]);
+    expect(listEligibleImageProfiles([outside], [], () => false)).toEqual([]);
+    expect(listEligibleImageProfiles([outside], [], () => true)).toEqual([
+      {
+        instanceId: outside.id,
+        displayName: "Example images",
+        driverKind: "outside-image",
+        modelAllowlist: ["example-image-1"],
+        defaultModel: "example-image-1",
+      },
+    ]);
+  });
+
   it("lists a BFL image profile with no quality, size, or aspect ratio fields", () => {
     const profiles = listEligibleImageProfiles([bflImage()]);
     expect(profiles).toEqual([

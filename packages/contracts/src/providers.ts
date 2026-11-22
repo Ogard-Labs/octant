@@ -92,6 +92,10 @@ export const ProviderDriverKind = Schema.Literal(
   // Which driver an instance runs is package data in its configuration, never
   // a new value here, so the exhaustive checks over this set stay closed.
   "outside-harness-endpoint",
+  // The one family for every outside driver package that generates images.
+  // Like the harness family above, which driver an instance runs is package
+  // data in its configuration.
+  "outside-image",
 );
 export type ProviderDriverKind = typeof ProviderDriverKind.Type;
 
@@ -915,6 +919,32 @@ export type OutsideHarnessEndpointProviderConfiguration =
   typeof OutsideHarnessEndpointProviderConfiguration.Type;
 
 /**
+ * An outside image generator as the person added it: the exact driver
+ * package, the address its brokered requests may reach, how the key is sent
+ * (absent: no key), and the image models the person listed, each of which
+ * the package must also declare. The default model is one of them.
+ */
+export const OutsideImageProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("outside-image"),
+  driver: OutsideProviderDriverReference,
+  baseUrl: Schema.NonEmptyTrimmedString,
+  key: Schema.optional(OutsideDriverKeyPlacement),
+  modelAllowlist: Schema.Array(ProviderModelId).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(64),
+    Schema.filter((modelIds) => new Set(modelIds).size === modelIds.length),
+  ),
+  defaultModel: ProviderModelId,
+})
+  .pipe(
+    Schema.filter((configuration) =>
+      configuration.modelAllowlist.some((id) => String(id) === String(configuration.defaultModel)),
+    ),
+  )
+  .annotations(strict);
+export type OutsideImageProviderConfiguration = typeof OutsideImageProviderConfiguration.Type;
+
+/**
  * Suggested GPT Image model IDs for Settings. Image allowlists are
  * manual-entry; these names are not the only values Octant accepts and are
  * never rewritten on save.
@@ -1403,6 +1433,29 @@ export const OutsideHarnessEndpointProviderInstance = Schema.Struct({
 export type OutsideHarnessEndpointProviderInstance =
   typeof OutsideHarnessEndpointProviderInstance.Type;
 
+export const OutsideImageProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("outside-image"),
+  configuration: OutsideImageProviderConfiguration,
+  driverQuarantine: Schema.optional(OutsideDriverQuarantine),
+}).annotations(strict);
+export type OutsideImageProviderInstance = typeof OutsideImageProviderInstance.Type;
+
+/** An instance whose driver is an outside package, of either family. */
+export const OutsideDriverProviderInstance = Schema.Union(
+  OutsideHarnessEndpointProviderInstance,
+  OutsideImageProviderInstance,
+);
+export type OutsideDriverProviderInstance = typeof OutsideDriverProviderInstance.Type;
+
+export function isOutsideDriverProviderInstance(
+  instance: ProviderInstance,
+): instance is OutsideDriverProviderInstance {
+  return (
+    instance.driverKind === "outside-harness-endpoint" || instance.driverKind === "outside-image"
+  );
+}
+
 export const ProviderInstance = Schema.Union(
   OpenCodeProviderInstance,
   CodexProviderInstance,
@@ -1424,6 +1477,7 @@ export const ProviderInstance = Schema.Union(
   RunwayVideoProviderInstance,
   FalVideoProviderInstance,
   OutsideHarnessEndpointProviderInstance,
+  OutsideImageProviderInstance,
 );
 export type ProviderInstance = typeof ProviderInstance.Type;
 
@@ -1523,6 +1577,7 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
     OhMyPiProviderInstance,
     OllamaProviderInstance,
     OutsideHarnessEndpointProviderInstance,
+    OutsideImageProviderInstance,
   ),
 }).annotations(strict);
 export type ProviderInstanceConfigurationChanged = typeof ProviderInstanceConfigurationChanged.Type;
@@ -1533,7 +1588,7 @@ export type ProviderInstanceConfigurationChanged = typeof ProviderInstanceConfig
  * `provider.instance-configuration-changed@1`, which keeps the driver as bound.
  */
 export const ProviderInstanceDriverRebound = Schema.Struct({
-  instance: OutsideHarnessEndpointProviderInstance,
+  instance: OutsideDriverProviderInstance,
 }).annotations(strict);
 export type ProviderInstanceDriverRebound = typeof ProviderInstanceDriverRebound.Type;
 /**
@@ -1542,7 +1597,7 @@ export type ProviderInstanceDriverRebound = typeof ProviderInstanceDriverRebound
  * quarantine.
  */
 export const ProviderInstanceDriverQuarantined = Schema.Struct({
-  instance: OutsideHarnessEndpointProviderInstance.pipe(
+  instance: OutsideDriverProviderInstance.pipe(
     Schema.filter((instance) => instance.driverQuarantine !== undefined),
   ),
 }).annotations(strict);
@@ -2461,6 +2516,21 @@ export const OutsideProviderDriverListing = Schema.Struct({
    * runs without one (Linux). Absent where the host confines it (macOS).
    */
   hostConfinement: Schema.optional(Schema.Literal("unconfined")),
+  /**
+   * Present for a driver that generates images: the models its package
+   * declares, with the published price per image where it states one. Absent
+   * for a harness endpoint.
+   */
+  imageGeneration: Schema.optional(
+    Schema.Struct({
+      models: Schema.Array(
+        Schema.Struct({
+          modelId: ProviderModelId,
+          usdMicrosPerImage: Schema.optional(Schema.Int.pipe(Schema.positive())),
+        }).annotations(strict),
+      ).pipe(Schema.minItems(1), Schema.maxItems(64)),
+    }).annotations(strict),
+  ),
 }).annotations(strict);
 export type OutsideProviderDriverListing = typeof OutsideProviderDriverListing.Type;
 
@@ -2684,6 +2754,22 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("change-outside-harness-endpoint-configuration"),
     ...ProviderInstanceCommandFields,
     configuration: OutsideHarnessEndpointProviderConfiguration,
+  }).annotations(strict),
+  /**
+   * Adds an image provider from an admitted outside image driver. Like the
+   * harness command above it takes no `enabled`: the profile is created off.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("create-outside-image-provider"),
+    ...ProviderInstanceCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: OutsideImageProviderConfiguration,
+  }).annotations(strict),
+  /** Changes an outside image provider's address, key placement, or models; never its driver. */
+  Schema.Struct({
+    kind: Schema.Literal("change-outside-image-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: OutsideImageProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("rename-provider"),

@@ -213,6 +213,14 @@ interface PendingCall {
   /** The brokered calls made for this call, closed when the host settles it early. */
   readonly brokered: Set<AbortController>;
   readonly cloudPorts: CloudSessionPorts | undefined;
+  /** The notification that tells the driver the host settled this call early, if any. */
+  readonly cancelMethod: string | undefined;
+  /**
+   * When set, the text of every response relayed for this call, so the host
+   * can later check an address the driver names against what the provider
+   * actually answered.
+   */
+  readonly relayed: Array<string> | undefined;
 }
 
 type BrokeredRequest = (
@@ -269,12 +277,28 @@ class OutsideDriverLink {
       readonly timeoutMs: number;
       readonly onEvent?: (event: OutsideDriverStreamEvent) => void;
       readonly cloudPorts?: CloudSessionPorts;
+      readonly keepRelayed?: boolean;
     },
-  ): { readonly id: number; readonly settled: Promise<unknown> } {
+  ): {
+    readonly id: number;
+    readonly settled: Promise<unknown>;
+    /** The response text relayed for this call so far, when `keepRelayed` was set. */
+    readonly relayed: ReadonlyArray<string>;
+  } {
     const id = this.#nextId;
     this.#nextId += 1;
-    if (method === OUTSIDE_DRIVER_METHODS.sessionSend || method.startsWith("cloud/"))
-      this.#sends.add(id);
+    const owns =
+      method === OUTSIDE_DRIVER_METHODS.sessionSend ||
+      method === OUTSIDE_DRIVER_METHODS.imageGenerate ||
+      method.startsWith("cloud/");
+    if (owns) this.#sends.add(id);
+    const cancelMethod =
+      method === OUTSIDE_DRIVER_METHODS.sessionSend
+        ? OUTSIDE_DRIVER_METHODS.sessionCancel
+        : method === OUTSIDE_DRIVER_METHODS.imageGenerate
+          ? OUTSIDE_DRIVER_METHODS.imageCancel
+          : undefined;
+    const relayed: Array<string> = [];
     const settled = new Promise<unknown>((resolve, reject) => {
       if (this.#stopped !== undefined) {
         reject(this.#stopped);
@@ -284,9 +308,7 @@ class OutsideDriverLink {
         const pending = this.#pending.get(id);
         if (pending === undefined) return;
         this.#pending.delete(id);
-        if (method === OUTSIDE_DRIVER_METHODS.sessionSend) {
-          this.notify(OUTSIDE_DRIVER_METHODS.sessionCancel, { requestId: id });
-        }
+        if (cancelMethod !== undefined) this.notify(cancelMethod, { requestId: id });
         closeBrokered(pending);
         reject(notAnswered());
       }, options.timeoutMs);
@@ -298,10 +320,12 @@ class OutsideDriverLink {
         timer,
         brokered: new Set(),
         cloudPorts: options.cloudPorts,
+        cancelMethod,
+        relayed: options.keepRelayed === true ? relayed : undefined,
       });
       this.#write({ jsonrpc: "2.0", id, method, params });
     });
-    return { id, settled };
+    return { id, settled, relayed };
   }
 
   notify(method: string, params: unknown): void {
@@ -318,7 +342,7 @@ class OutsideDriverLink {
     this.#pending.delete(id);
     clearTimeout(pending.timer);
     pending.reject(interrupted());
-    this.notify(OUTSIDE_DRIVER_METHODS.sessionCancel, { requestId: id });
+    if (pending.cancelMethod !== undefined) this.notify(pending.cancelMethod, { requestId: id });
     closeBrokered(pending);
   }
 
@@ -409,10 +433,12 @@ class OutsideDriverLink {
     const controller = new AbortController();
     this.#http.set(httpId, controller);
     owner?.brokered.add(controller);
-    void this.#relayHttp(httpId, params, controller, owner?.cloudPorts).finally(() => {
-      if (this.#http.get(httpId) === controller) this.#http.delete(httpId);
-      owner?.brokered.delete(controller);
-    });
+    void this.#relayHttp(httpId, params, controller, owner?.cloudPorts, owner?.relayed).finally(
+      () => {
+        if (this.#http.get(httpId) === controller) this.#http.delete(httpId);
+        owner?.brokered.delete(controller);
+      },
+    );
   }
 
   async #relayHttp(
@@ -420,6 +446,7 @@ class OutsideDriverLink {
     params: OutsideDriverHttpRequestParams,
     controller: AbortController,
     cloudPorts?: CloudSessionPorts,
+    relayed?: Array<string>,
   ): Promise<void> {
     let response: Response;
     try {
@@ -452,7 +479,7 @@ class OutsideDriverLink {
       id: httpId,
       result: { status: response.status, headers: relayedHeaders(response.headers, params) },
     });
-    const outcome = await this.#relayBody(httpId, response, controller.signal);
+    const outcome = await this.#relayBody(httpId, response, controller.signal, relayed);
     this.notify(
       OUTSIDE_DRIVER_METHODS.httpEnd,
       outcome === undefined
@@ -466,6 +493,7 @@ class OutsideDriverLink {
     httpId: OutsideDriverMessageId,
     response: Response,
     signal: AbortSignal,
+    relayed?: Array<string>,
   ): Promise<ProviderFailure | undefined> {
     if (response.body === null) return undefined;
     const reader = response.body.getReader();
@@ -484,6 +512,7 @@ class OutsideDriverLink {
           return failure("protocol", "The provider response exceeded the size limit.");
         }
         const text = decoder.decode(read.value, { stream: true });
+        relayed?.push(text);
         for (let offset = 0; offset < text.length; offset += chunkCharacters) {
           // The end that follows an abort is the last line for this call.
           if (signal.aborted) return interrupted();
@@ -494,6 +523,7 @@ class OutsideDriverLink {
         }
       }
       const rest = decoder.decode();
+      if (rest.length > 0) relayed?.push(rest);
       if (signal.aborted) return interrupted();
       if (rest.length > 0) this.notify(OUTSIDE_DRIVER_METHODS.httpChunk, { httpId, data: rest });
       return undefined;
@@ -1178,3 +1208,20 @@ function allUnavailable() {
     harnessAutoReview: "unavailable",
   } as const;
 }
+
+/**
+ * The pieces an outside driver of another family shares with this one: the
+ * channel conversation, the brokered call, the closed failures, and the
+ * bounds. An image driver's proxy builds on them so both families stop,
+ * broker, and fail in exactly the same way.
+ */
+export {
+  OutsideDriverLink,
+  makeBroker as makeOutsideDriverBroker,
+  configuredOrigin as outsideDriverConfiguredOrigin,
+  DEFAULT_LIMITS as OUTSIDE_DRIVER_DEFAULT_LIMITS,
+  failure as outsideDriverFailure,
+  closed as outsideDriverClosedFailure,
+  driverStopped as outsideDriverStopped,
+  noAgreedProtocol as outsideDriverNoAgreedProtocol,
+};

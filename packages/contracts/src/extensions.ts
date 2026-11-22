@@ -592,6 +592,43 @@ export const ExtensionGroundDeclaration = Schema.Struct({
 }).annotations(strict);
 export type ExtensionGroundDeclaration = typeof ExtensionGroundDeclaration.Type;
 
+/**
+ * The largest per-image price a media driver may declare: 100 US dollars, in
+ * micro-dollars. A larger figure is far above any published rate and reads
+ * as a mistake, so the package is refused rather than reserved against.
+ */
+export const MAX_DECLARED_USD_MICROS_PER_IMAGE = 100_000_000;
+
+/** One image model an outside media driver offers, with its published price. */
+export const ExtensionImageGenerationModel = Schema.Struct({
+  modelId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  /**
+   * The provider's published price for one image, in integer micro-dollars.
+   * Absent when the provider publishes none: the host then treats the model
+   * as unpriced, and an active spend limit refuses it.
+   */
+  usdMicrosPerImage: Schema.optional(
+    Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(MAX_DECLARED_USD_MICROS_PER_IMAGE)),
+  ),
+}).annotations(strict);
+export type ExtensionImageGenerationModel = typeof ExtensionImageGenerationModel.Type;
+
+/**
+ * What a provider-driver component generates, as data: present exactly when
+ * the component is a media driver rather than a harness endpoint. The host
+ * reads prices only from here, so a running driver can never name its own
+ * price, and the digest the person trusted covers them.
+ */
+export const ExtensionMediaGenerationDeclaration = Schema.Struct({
+  media: Schema.Literal("image"),
+  models: Schema.Array(ExtensionImageGenerationModel).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(64),
+    Schema.filter((models) => new Set(models.map((model) => model.modelId)).size === models.length),
+  ),
+}).annotations(strict);
+export type ExtensionMediaGenerationDeclaration = typeof ExtensionMediaGenerationDeclaration.Type;
+
 export const ExtensionComponent = Schema.Struct({
   id: ExtensionComponentId,
   kind: ExtensionComponentKind,
@@ -615,6 +652,8 @@ export const ExtensionComponent = Schema.Struct({
   theme: Schema.optional(ExtensionThemeDeclaration),
   /** Present exactly when `kind` is `ground`: character-field values as data, never code. */
   ground: Schema.optional(ExtensionGroundDeclaration),
+  /** Present only on a `provider-driver` that generates media: its models and prices, as data. */
+  mediaGeneration: Schema.optional(ExtensionMediaGenerationDeclaration),
 }).annotations(strict);
 export type ExtensionComponent = typeof ExtensionComponent.Type;
 
@@ -820,6 +859,9 @@ export const ExtensionPackageManifest = Schema.Struct({
         if ((component.kind === "theme") !== (component.theme !== undefined)) return false;
         if (component.kind === "theme" && component.declaredCapabilities.length > 0) return false;
         if ((component.kind === "ground") !== (component.ground !== undefined)) return false;
+        if (component.kind !== "provider-driver" && component.mediaGeneration !== undefined) {
+          return false;
+        }
         if (component.kind === "ground" && component.declaredCapabilities.length > 0) return false;
         if (
           component.kind === "code-tool" &&

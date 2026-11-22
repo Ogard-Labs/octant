@@ -1,6 +1,7 @@
 import {
   acpAgentProfile,
   isAcpAgentKind,
+  isOutsideDriverProviderInstance,
   type AnthropicCompatibleProtocol,
   type ClaudeAuthentication,
   type DiscoverySnapshot,
@@ -229,6 +230,7 @@ export function driverLabel(driverKind: ProviderInstance["driverKind"]): string 
   if (driverKind === "ideogram-image") return "Ideogram Image";
   // An outside driver package never borrows a bundled provider's name.
   if (driverKind === "outside-harness-endpoint") return "Outside driver";
+  if (driverKind === "outside-image") return "Outside image driver";
   if (driverKind === "acp-agent") return "Added ACP agent";
   return "OpenAI-compatible";
 }
@@ -290,7 +292,7 @@ export function providerRefusalCopy(
           nextStep: `Update ${label}, or choose another sign-in.`,
         };
   }
-  if (reason === "driver-not-admitted" && instance.driverKind !== "outside-harness-endpoint") {
+  if (reason === "driver-not-admitted" && !isOutsideDriverProviderInstance(instance)) {
     // A bundled driver is never missing a package; the host withholds it and
     // sends the reason in the observed message.
     return {
@@ -312,7 +314,7 @@ export function providerRefusalCopy(
         "Octant stopped the driver. Install a version of the package built for this Octant, then check the connection again.",
     };
   }
-  if (reason === "runtime-unavailable" && instance.driverKind === "outside-harness-endpoint") {
+  if (reason === "runtime-unavailable" && isOutsideDriverProviderInstance(instance)) {
     const held = outsideDriverHoldGuidance(instance);
     if (held !== undefined) return held;
     return {
@@ -348,7 +350,7 @@ const OUTSIDE_DRIVER_QUARANTINE_COPY = {
 export function outsideDriverHoldGuidance(
   instance: ProviderInstance,
 ): { readonly reason: string; readonly nextStep: string } | undefined {
-  return instance.driverKind === "outside-harness-endpoint" && isOutsideDriverQuarantined(instance)
+  return isOutsideDriverProviderInstance(instance) && isOutsideDriverQuarantined(instance)
     ? OUTSIDE_DRIVER_QUARANTINE_COPY
     : undefined;
 }
@@ -377,8 +379,7 @@ export function providerWithheldReason(
   instance: ProviderInstance,
   observed: ProviderObservedState | undefined,
 ): string | undefined {
-  return observed?.reason === "driver-not-admitted" &&
-    instance.driverKind !== "outside-harness-endpoint"
+  return observed?.reason === "driver-not-admitted" && !isOutsideDriverProviderInstance(instance)
     ? observed.message
     : undefined;
 }

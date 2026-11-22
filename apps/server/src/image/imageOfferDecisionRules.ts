@@ -5,6 +5,7 @@ import type {
   ImageGenerationSettings,
   ProviderInstance,
   ServiceOfferDecision,
+  OutsideImageProviderInstance,
 } from "@octant/contracts";
 import { imageProfileSupportsReferences, listEligibleImageProfiles } from "@octant/domain";
 import type { ServiceOfferRules } from "../offers/serviceOfferDecision";
@@ -26,6 +27,8 @@ export function unavailableImageModel(
 
 export function imageOfferDecisionRules(input: {
   readonly listInstances: () => ReadonlyArray<ProviderInstance>;
+  /** Whether the host admits an outside image profile's driver now; absent admits none. */
+  readonly admitsOutsideImageDriver?: (instance: OutsideImageProviderInstance) => boolean;
   readonly readImageGenerationSettings: () => ImageGenerationSettings;
   readonly kept?: Pick<KeptImageGenerationChoices, "remember">;
 }): ServiceOfferRules<
@@ -43,6 +46,7 @@ export function imageOfferDecisionRules(input: {
       const profiles = listEligibleImageProfiles(
         input.listInstances(),
         input.readImageGenerationSettings().customSources,
+        input.admitsOutsideImageDriver,
       );
       const reason = unavailableImageModel(profiles, decision);
       if (reason !== undefined) return { reason };

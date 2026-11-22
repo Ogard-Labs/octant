@@ -12,6 +12,7 @@ import {
   type OpenAiImageQuality,
   type OpenAiImageSize,
   type ProjectImageGenerationChoice,
+  type OutsideImageProviderInstance,
   type ProviderInstance,
   type ThreadExportAttachment,
 } from "@octant/contracts";
@@ -45,6 +46,11 @@ export type ImageGenerationHonoredOptions =
     }
   | {
       readonly kind: "ideogram-image-http";
+      readonly maxVariants: number;
+      readonly supportsReferences: boolean;
+    }
+  | {
+      readonly kind: "outside-image";
       readonly maxVariants: number;
       readonly supportsReferences: boolean;
     };
@@ -124,15 +130,30 @@ export function listCustomImageProfiles(
 /**
  * Image generation is bound to enabled Settings profiles. Disabled or
  * non-image instances never appear as something a composer or agent can name.
+ * An outside image profile appears only while the host admits its driver
+ * package (installed, trusted and enabled at the digest it binds); with no
+ * answer from the host it is left out.
  */
 export function listEligibleImageProfiles(
   instances: ReadonlyArray<ProviderInstance>,
   customSources: ReadonlyArray<ImageGenerationCustomSource> = [],
+  admitsOutsideDriver: (instance: OutsideImageProviderInstance) => boolean = () => false,
 ): ReadonlyArray<ImageGenerationProfileView> {
   const profiles: Array<ImageGenerationProfileView> = [];
   for (const instance of instances) {
     if (!instance.enabled) continue;
     if (!isImageProfileDriverKind(instance.driverKind)) continue;
+    if (instance.driverKind === "outside-image") {
+      if (!admitsOutsideDriver(instance)) continue;
+      profiles.push({
+        instanceId: instance.id,
+        displayName: boundedDisplayName(instance.displayName),
+        driverKind: "outside-image",
+        modelAllowlist: instance.configuration.modelAllowlist,
+        defaultModel: instance.configuration.defaultModel,
+      });
+      continue;
+    }
     const configuration = instance.configuration;
     if (configuration.kind === "openai-image-http") {
       profiles.push({
@@ -241,8 +262,9 @@ export function imageGenerationWithoutAsking(input: {
 export function hasEligibleImageProfile(
   instances: ReadonlyArray<ProviderInstance>,
   customSources: ReadonlyArray<ImageGenerationCustomSource> = [],
+  admitsOutsideDriver?: (instance: OutsideImageProviderInstance) => boolean,
 ): boolean {
-  return listEligibleImageProfiles(instances, customSources).length > 0;
+  return listEligibleImageProfiles(instances, customSources, admitsOutsideDriver).length > 0;
 }
 
 /**
@@ -257,7 +279,8 @@ export function honoredImageGenerationOptions(
     | "gemini-native-image-http"
     | "openai-compatible-http"
     | "bfl-image-http"
-    | "ideogram-image-http",
+    | "ideogram-image-http"
+    | "outside-image",
 ): ImageGenerationHonoredOptions {
   switch (kind) {
     case "openai-image-http":
@@ -286,6 +309,11 @@ export function honoredImageGenerationOptions(
       // Unlike BFL, Ideogram genuinely supports up to Octant's own variant
       // ceiling in one request; it has no per-call constraint below it.
       return { kind, maxVariants: MAX_IMAGE_VARIANTS, supportsReferences: false };
+    case "outside-image":
+      // An outside driver receives the references and the variant count; a
+      // model that cannot honour them answers `unsupported`, which the job
+      // records, rather than Octant guessing at a package's limits.
+      return { kind, maxVariants: MAX_IMAGE_VARIANTS, supportsReferences: true };
   }
 }
 
@@ -303,7 +331,8 @@ export function imageGenerationConfigurationKind(
   | "gemini-native-image-http"
   | "openai-compatible-http"
   | "bfl-image-http"
-  | "ideogram-image-http" {
+  | "ideogram-image-http"
+  | "outside-image" {
   switch (driverKind) {
     case "openai-image":
       return "openai-image-http";
@@ -315,6 +344,8 @@ export function imageGenerationConfigurationKind(
       return "bfl-image-http";
     case "ideogram-image":
       return "ideogram-image-http";
+    case "outside-image":
+      return "outside-image";
   }
 }
 

@@ -6,6 +6,7 @@ import {
   type ProjectId,
   type Project,
   type WindowId,
+  type OutsideImageProviderInstance,
 } from "@octant/contracts";
 import { randomUUID } from "node:crypto";
 import { createWorkMutationRouteHandler } from "../workMutationRoutes";
@@ -201,6 +202,8 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
   });
   const imageProfiles = {
     listInstances: () => persistence.readProviderInstances(),
+    admitsOutsideImageDriver: (instance: OutsideImageProviderInstance) =>
+      imageJobService.admitsOutsideDriver(instance),
     readImageGenerationSettings: () =>
       (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration,
   };
@@ -216,6 +219,7 @@ export function wireWorkFiles(deps: WorkFilesDependencies) {
       listEligibleImageProfiles(
         imageProfiles.listInstances(),
         imageProfiles.readImageGenerationSettings().customSources,
+        imageProfiles.admitsOutsideImageDriver,
       ),
     authorizeScope: (windowId, threadKind, scopeId, principal) =>
       windowCanOpenThread(windowId, threadKind, String(scopeId), principal),

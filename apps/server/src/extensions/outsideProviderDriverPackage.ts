@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import type { ExtensionNpmSource, ExtensionSource } from "@octant/contracts/extensions";
-import { HOST_HARNESS_ENDPOINT_PROTOCOL_VERSIONS } from "@octant/contracts/outside-driver-protocol";
+import {
+  HOST_HARNESS_ENDPOINT_PROTOCOL_VERSIONS,
+  HOST_IMAGE_GENERATION_PROTOCOL_VERSIONS,
+} from "@octant/contracts/outside-driver-protocol";
 import {
   OUTSIDE_PROVIDER_DRIVER_DOCUMENT_PATH,
   OUTSIDE_PROVIDER_DRIVER_SIGNATURE_PATH,
@@ -118,8 +121,10 @@ export function readOutsideProviderDriverPackage(
   // A package that declares no version the host speaks could never complete
   // its handshake, so it is refused here rather than installed to fail later.
   if (
-    !reading.entry.protocolVersions.some((version) =>
-      HOST_HARNESS_ENDPOINT_PROTOCOL_VERSIONS.includes(version),
+    !reading.entry.protocolVersions.some(
+      (version) =>
+        HOST_HARNESS_ENDPOINT_PROTOCOL_VERSIONS.includes(version) ||
+        HOST_IMAGE_GENERATION_PROTOCOL_VERSIONS.includes(version),
     )
   ) {
     return refused("protocol-incompatible");
@@ -214,6 +219,8 @@ export function outsideProviderDriverRefusalMessage(
       return "This provider driver is not signed by its publisher; Octant installs a provider driver from this source only when it is.";
     case "signature-invalid":
       return "This provider driver's signature does not match its files, name, or version, or does not verify.";
+    case "media-declaration-mismatch":
+      return "This provider driver's kind, protocol versions, and image models do not agree.";
   }
 }
 

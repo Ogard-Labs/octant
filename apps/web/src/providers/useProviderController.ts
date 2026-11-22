@@ -23,6 +23,7 @@ import {
   type OllamaProviderConfiguration,
   type OhMyPiProviderConfiguration,
   type OutsideHarnessEndpointProviderConfiguration,
+  type OutsideImageProviderConfiguration,
   type PiProviderConfiguration,
   type PermissionPersistence,
   type ProviderDefaults,
@@ -631,14 +632,17 @@ export function useProviderController(options: ProviderControllerOptions) {
     [client, hostBridge, install, recoverRegistryFailure],
   );
   /**
-   * Adds a provider from an admitted outside driver. The host creates it off;
-   * a key the person entered goes to the host's keychain right after, and only
+   * Adds a provider from an admitted outside driver, a harness endpoint or an
+   * image generator by the configuration's kind. The host creates it off; a
+   * key the person entered goes to the host's keychain right after, and only
    * for a provider that sends one.
    */
-  const createOutsideHarnessEndpoint = useCallback(
+  const createOutsideProvider = useCallback(
     (
       displayName: string,
-      configuration: OutsideHarnessEndpointProviderConfiguration,
+      configuration:
+        | OutsideHarnessEndpointProviderConfiguration
+        | OutsideImageProviderConfiguration,
       credential: TransientProviderCredential,
     ) => {
       const instanceId = decodeProviderInstanceId(crypto.randomUUID());
@@ -652,14 +656,17 @@ export function useProviderController(options: ProviderControllerOptions) {
           const current = authoritative.current;
           if (client === undefined || current === undefined) return false;
           try {
+            const common = {
+              instanceId,
+              expectedVersion: 0 as ProviderDefaults["version"],
+              displayName,
+            };
             applyResult(
-              await client.execute({
-                kind: "create-outside-harness-endpoint-provider",
-                instanceId,
-                expectedVersion: 0 as ProviderDefaults["version"],
-                displayName,
-                configuration,
-              }),
+              await client.execute(
+                configuration.kind === "outside-image"
+                  ? { kind: "create-outside-image-provider", ...common, configuration }
+                  : { kind: "create-outside-harness-endpoint-provider", ...common, configuration },
+              ),
               current,
               install,
             );
@@ -2845,7 +2852,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     createClaude,
     createOllama,
     createOpenAiCompatible,
-    createOutsideHarnessEndpoint,
+    createOutsideProvider,
     createAnthropicCompatible,
     createAzureFoundry,
     createAmazonBedrock,

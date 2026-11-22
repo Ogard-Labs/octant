@@ -155,11 +155,12 @@ function runtimeSandbox(driverKind: ProviderDriverKind): ProviderCatalogSandbox 
 }
 
 export function providerCatalogSetupKind(driverKind: ProviderDriverKind): ProviderCatalogSetupKind {
-  // An outside driver is a harness endpoint added with its address, never a
+  // An outside driver, of either family, is added with its address, never a
   // runtime found on the host.
   return requiresManualEndpoint(driverKind) ||
     driverKind === "ollama" ||
-    driverKind === "outside-harness-endpoint"
+    driverKind === "outside-harness-endpoint" ||
+    driverKind === "outside-image"
     ? "endpoint"
     : "runtime";
 }
@@ -213,7 +214,10 @@ function chooseInstance(
 
 function takesNoCredential(instance: ProviderInstance): boolean {
   if (instance.driverKind === "ollama") return true;
-  if (instance.driverKind === "outside-harness-endpoint") {
+  if (
+    instance.driverKind === "outside-harness-endpoint" ||
+    instance.driverKind === "outside-image"
+  ) {
     return instance.configuration.key === undefined;
   }
   return (

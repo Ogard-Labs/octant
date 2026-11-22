@@ -6,6 +6,7 @@ import {
   type ImageGenerationSaveResult,
   type ImageGenerationScopeId,
   type ImageJob,
+  type OutsideImageProviderInstance,
   type ProviderInstance,
   type ProviderInstanceId,
   type ProviderModelId,
@@ -54,6 +55,8 @@ export const IMAGE_TOOL_NAME = CREATE_IMAGE_TOOL_NAME;
 
 export interface ImageAgentToolPort {
   readonly listInstances: () => ReadonlyArray<ProviderInstance>;
+  /** Whether the host admits an outside image profile's driver now; absent admits none. */
+  readonly admitsOutsideImageDriver?: (instance: OutsideImageProviderInstance) => boolean;
   readonly readImageGenerationCustomSources: () => ReadonlyArray<ImageGenerationCustomSource>;
   readonly enqueue: (input: EnqueueImageJobInput) => Promise<ImageJob>;
   readonly listJobs: ImageJobService["listByScope"];
@@ -177,6 +180,7 @@ export function createImageAgentTools(options: {
         hasEligibleImageProfile(
           options.port.listInstances(),
           options.port.readImageGenerationCustomSources(),
+          options.port.admitsOutsideImageDriver,
         ),
       ...(options.port.refusal === undefined ? {} : { refusal: options.port.refusal }),
       generate: (request) => executeHostImageGeneration(options, request),
@@ -687,6 +691,8 @@ export function createThreadImageAgentTools(input: {
   readonly defaultProfileInstanceId?: () => string | undefined;
   readonly jobs: Pick<ImageJobService, "enqueue" | "listByScope" | "whenTerminal" | "readArtifact">;
   readonly listInstances: () => ReadonlyArray<ProviderInstance>;
+  /** Whether the host admits an outside image profile's driver now; absent admits none. */
+  readonly admitsOutsideImageDriver?: (instance: OutsideImageProviderInstance) => boolean;
   readonly readImageGenerationCustomSources: () => ReadonlyArray<ImageGenerationCustomSource>;
   readonly refusal?: () => string | undefined;
   /** Whether the model driving this turn accepts images in a tool result. */
@@ -704,6 +710,9 @@ export function createThreadImageAgentTools(input: {
     ...scope,
     port: {
       listInstances: input.listInstances,
+      ...(input.admitsOutsideImageDriver === undefined
+        ? {}
+        : { admitsOutsideImageDriver: input.admitsOutsideImageDriver }),
       readImageGenerationCustomSources: input.readImageGenerationCustomSources,
       enqueue: (job) => input.jobs.enqueue(job),
       listJobs: (scopeId) => input.jobs.listByScope(scopeId),
@@ -752,6 +761,7 @@ function eligibleProfiles(
   const profiles = listEligibleImageProfiles(
     port.listInstances(),
     port.readImageGenerationCustomSources(),
+    port.admitsOutsideImageDriver,
   );
   return references ? profiles.filter(imageProfileSupportsReferences) : profiles;
 }

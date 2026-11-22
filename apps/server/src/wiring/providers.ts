@@ -2108,6 +2108,8 @@ export function wireProviders(deps: ProvidersDependencies) {
       isOutsideDriverAdmitted: (instance) => outsideDriverAdmission.isAdmitted(instance),
       outsideDriverRebindTarget: (instance) => outsideDriverAdmission.rebindTarget(instance),
       outsideDriverListings: () => outsideDriverAdmission.listings(),
+      outsideImageDriverModelIds: (driver) =>
+        outsideDriverAdmission.imageDriverModels(driver)?.map((model) => model.modelId),
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       clearResumeIdentities: async (instanceId) => {
@@ -2698,6 +2700,14 @@ export function wireProviders(deps: ProvidersDependencies) {
       clock: () => new Date().toISOString(),
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
       spendCeiling: spendCeilingService,
+      outsideImageDrivers: {
+        admits: (instance) => outsideDriverAdmission.isAdmitted(instance),
+        declaredUsdMicrosPerImage: (instance, modelId) =>
+          outsideDriverAdmission
+            .imageDriverModels(instance.configuration.driver)
+            ?.find((model) => model.modelId === String(modelId))?.usdMicrosPerImage,
+        adapter: (instance, ports) => outsideDriverAdmission.imageAdapter(instance, ports),
+      },
       resolveThreadProjectId: ({ threadType, threadId }) => {
         if (threadType === "chat-thread") {
           const projectId = persistence.readChatThread(decodeChatThreadId(threadId))?.projectId;

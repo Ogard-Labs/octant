@@ -7943,7 +7943,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   install, trust and enable, with digest-bound trust, admission and
   confinement unchanged (maintainer request, 2026-11-12); the catalog lists effective outside drivers in their own group from
   the registry snapshot. Third-party provider-driver plugins are in scope for the
-  first preview under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
+  first preview under [Outside provider drivers](design/outside-provider-drivers.md),
+  as harness endpoints or as media generators: an outside image driver lists
+  its declared models and prices in the same group and adds an image profile
+  ([Outside media generation drivers](design/outside-provider-drivers.md#outside-media-generation-drivers)). The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
   It reads the registry, the last observations, and the last scan, with each
@@ -8063,8 +8066,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   keep thread authority and the agent tool generates only into its own thread)
   and an app-managed `octant_create_image` tool invoke that job service
   through `/api/image/` when an enabled image profile exists (a dedicated
-  image provider, or a custom image source named in Settings › Voice &
-  images, which every renderer surface lists alongside them). The
+  image provider, a profile added from an outside image driver the host
+  admits ([Outside media generation drivers](design/outside-provider-drivers.md#outside-media-generation-drivers)),
+  or a custom image source named in Settings › Voice & images, which every
+  renderer surface lists alongside them). The
   composer of an open Chat, Work, or Code thread also carries a **Create
   image…** icon beside attach and dictate. It opens the same generation sheet,
   scoped to that thread, so the result lands there as a thread artifact.
@@ -17845,7 +17850,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   | Oh My Pi                  | `oh-my-pi`                                                                                                                                   | `no`  | `no`              | `no`              | `none`           |
 
   The image profiles (`openai-image`, `gemini-native-image`, `bfl-image`,
-  `ideogram-image`) are not turn drivers and are not in the matrix.
+  `ideogram-image`, and an outside package's `outside-image`) are not turn
+  drivers and are not in the matrix.
 
   Where each provider is weaker than Claude Code and Codex:
 

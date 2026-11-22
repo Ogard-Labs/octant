@@ -1022,6 +1022,7 @@ export function wireWork(deps: WorkDependencies) {
               fullAccess: () =>
                 runningWorkTurns.get(String(input.thread.id))?.access === "full-access",
               jobs: imageJobService,
+              admitsOutsideImageDriver: (instance) => imageJobService.admitsOutsideDriver(instance),
               imageSources: workImageSources,
               listInstances: () => persistence.readProviderInstances(),
               readImageGenerationCustomSources: () =>

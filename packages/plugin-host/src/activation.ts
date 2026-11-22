@@ -2,7 +2,9 @@ import type {
   ExtensionActivationState,
   ExtensionComponent,
   ExtensionEffectiveState,
+  ExtensionImageGenerationModel,
   ExtensionPackageState,
+  ExtensionSource,
 } from "@octant/contracts/extensions";
 import type { OctantMode } from "@octant/contracts/modes";
 
@@ -235,6 +237,101 @@ export function resolveOutsideDriverActivation(input: {
     threadAllowed: true,
     catalogCurrent: true,
   });
+}
+
+/**
+ * The image models and prices an outside image driver declares, read from the
+ * package at exactly the version and digest a profile binds. Anything else
+ * (another digest, a harness endpoint, a missing component) declares none, so
+ * a price never comes from code the person did not add the profile from.
+ */
+export function outsideImageDriverModels(input: {
+  readonly packageState: ExtensionPackageState | undefined;
+  readonly driver: OutsideDriverActivationTarget;
+}): ReadonlyArray<ExtensionImageGenerationModel> | undefined {
+  const { packageState, driver } = input;
+  if (
+    packageState === undefined ||
+    String(packageState.extensionId) !== driver.extensionId ||
+    String(packageState.packageId) !== driver.packageId ||
+    String(packageState.version) !== driver.version ||
+    String(packageState.digest) !== driver.digest
+  ) {
+    return undefined;
+  }
+  const component = packageState.components.find(
+    (candidate) => String(candidate.component.id) === driver.componentId,
+  )?.component;
+  if (component?.kind !== "provider-driver") return undefined;
+  return component.mediaGeneration?.media === "image"
+    ? component.mediaGeneration.models
+    : undefined;
+}
+
+/**
+ * Whether an image profile's outside driver is effective: the same ladder a
+ * harness endpoint climbs, and the bound component must still declare image
+ * generation. A driver that declares none is `incompatible`, so a chat
+ * driver can never be reached through the image tools.
+ */
+export function resolveOutsideImageDriverActivation(
+  input: Parameters<typeof resolveOutsideDriverActivation>[0],
+): ExtensionEffectiveState {
+  const state = resolveOutsideDriverActivation(input);
+  if (state.kind !== "effective") return state;
+  return outsideImageDriverModels(input) === undefined
+    ? { kind: "blocked", reason: "incompatible" }
+    : state;
+}
+
+/** One outside image driver a person can add an image profile from. */
+export interface OutsideImageDriverChoice {
+  readonly driver: OutsideDriverActivationTarget;
+  readonly displayName: string;
+  readonly source: ExtensionSource;
+  readonly models: ReadonlyArray<ExtensionImageGenerationModel>;
+}
+
+/**
+ * The outside image drivers this host admits: installed, trusted, enabled,
+ * compatible, and able to run here. Discovery grants nothing; a profile added
+ * from a choice is checked against the ladder again at every use.
+ */
+export function listOutsideImageDriverChoices(input: {
+  readonly platform: string;
+  readonly packages: ReadonlyArray<ExtensionPackageState>;
+  readonly compatible: (packageState: ExtensionPackageState) => boolean;
+  readonly strict?: boolean;
+}): ReadonlyArray<OutsideImageDriverChoice> {
+  return input.packages.flatMap((packageState) =>
+    packageState.components.flatMap(({ component }) => {
+      if (component.kind !== "provider-driver") return [];
+      const driver: OutsideDriverActivationTarget = {
+        extensionId: String(packageState.extensionId),
+        packageId: String(packageState.packageId),
+        componentId: String(component.id),
+        version: String(packageState.version),
+        digest: String(packageState.digest),
+      };
+      const state = resolveOutsideImageDriverActivation({
+        platform: input.platform,
+        packageState,
+        compatible: input.compatible(packageState),
+        driver,
+        ...(input.strict === undefined ? {} : { strict: input.strict }),
+      });
+      const models = outsideImageDriverModels({ packageState, driver });
+      if (state.kind !== "effective" || models === undefined) return [];
+      return [
+        {
+          driver,
+          displayName: packageState.displayName ?? packageState.slug ?? component.displayName,
+          source: packageState.source,
+          models,
+        },
+      ];
+    }),
+  );
 }
 
 /**

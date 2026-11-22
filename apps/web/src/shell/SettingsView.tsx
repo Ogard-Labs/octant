@@ -2345,7 +2345,7 @@ function ProviderCatalogSection(props: {
           instances={controller.instances}
           {...(controller.message === undefined ? {} : { message: controller.message })}
           observedByInstance={controller.observedByInstance}
-          onAddOutsideProvider={controller.createOutsideHarnessEndpoint}
+          onAddOutsideProvider={controller.createOutsideProvider}
           {...(controller.snapshot?.outsideDrivers === undefined
             ? {}
             : { outsideDrivers: controller.snapshot.outsideDrivers })}

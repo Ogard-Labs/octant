@@ -19,6 +19,7 @@ import {
   type ImageJobThreadKind,
   type ProviderInstance,
   type WindowId,
+  type OutsideImageProviderInstance,
 } from "@octant/contracts";
 import { listEligibleImageProfiles } from "@octant/domain";
 import { authenticateRoutePrincipal, retainRouteAdmissionCurrent } from "../principalRouteContext";
@@ -43,6 +44,8 @@ export interface ImageRouteHandler {
 export interface ImageRouteDependencies {
   readonly jobs: ImageJobService;
   readonly listInstances: () => ReadonlyArray<ProviderInstance>;
+  /** Whether the host admits an outside image profile's driver now; absent admits none. */
+  readonly admitsOutsideImageDriver?: (instance: OutsideImageProviderInstance) => boolean;
   readonly readImageGenerationSettings: () => ImageGenerationSettings;
   readonly authorizeScope: (
     windowId: WindowId,
@@ -124,6 +127,7 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies): I
           profiles: listEligibleImageProfiles(
             instances,
             dependencies.readImageGenerationSettings().customSources,
+            dependencies.admitsOutsideImageDriver,
           ),
         });
         return json(body, 200, origin);
