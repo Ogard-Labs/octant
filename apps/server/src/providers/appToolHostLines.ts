@@ -3,6 +3,7 @@ import { COMPUTER_TOOL_HOST_LINE } from "@octant/plugin-host/computer-use";
 import {
   CREATE_IMAGE_TOOL_HOST_LINE,
   LOOK_TOOL_HOST_LINE,
+  NARRATE_TOOL_HOST_LINE,
   TRANSCRIBE_TOOL_HOST_LINE,
 } from "@octant/plugin-host/media-tools";
 
@@ -52,8 +53,7 @@ const GUIDE_LINES: Readonly<Record<string, string>> = {
   octant_look: LOOK_TOOL_HOST_LINE,
   octant_memory:
     "When the person states a durable fact, decision or convention about this Project that its future threads should retain, use octant_memory; keep transient task details in the current thread.",
-  octant_narrate:
-    "Turn text into a spoken audio file in this thread's folder with octant_narrate instead of installing speech tools.",
+  octant_narrate: NARRATE_TOOL_HOST_LINE,
   octant_offer_side_task:
     "When you notice work outside this request, offer it to the person with octant_offer_side_task instead of doing it.",
   octant_past_threads:
