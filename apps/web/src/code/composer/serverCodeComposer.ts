@@ -82,8 +82,18 @@ export function serverCodeSelectionRefusal(
  * What running a provider on a server means, said the first time a person
  * picks it there (maintainer decision, 2026-11-20).
  */
-export function serverPlacementNotice(provider: string, server: string): string {
-  return `${provider} runs on ${server} as itself. Its sandbox and plan mode are ${provider}'s own; Octant can't sandbox anything on that server. Its requests to its model leave from ${server}, not from this computer, so this computer's network limits don't cover them. Approvals, Stop and the thread's history stay on this computer.`;
+export function serverPlacementNotice(
+  provider: string,
+  server: string,
+  driverKind?: string,
+): string {
+  // Codex's read-only sandbox can't deny other providers' sign-ins on the
+  // server, so the server refuses its Plan there.
+  const plan =
+    driverKind === "codex"
+      ? `Its sandbox is ${provider}'s own, and Plan isn't available there (use Guarded instead), since ${provider}'s read-only sandbox can't keep other providers' sign-ins on ${server} out of reach`
+      : `Its sandbox and plan mode are ${provider}'s own`;
+  return `${provider} runs on ${server} as itself. ${plan}; Octant can't sandbox anything on that server. Its requests to its model leave from ${server}, not from this computer, so this computer's network limits don't cover them. Approvals, Stop and the thread's history stay on this computer.`;
 }
 
 const SEEN_PLACEMENT_NOTICES = "octant.server-placement-notices";

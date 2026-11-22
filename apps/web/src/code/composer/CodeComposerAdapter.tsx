@@ -1016,7 +1016,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                       {
                         key: "server-placement",
                         tone: "neutral" as const,
-                        text: serverPlacementNotice(placedGroup.driverLabel, placementServer),
+                        text: serverPlacementNotice(
+                          placedGroup.driverLabel,
+                          placementServer,
+                          placedGroup.instance.driverKind,
+                        ),
                         action: (
                           <OctantButton
                             onClick={() => {

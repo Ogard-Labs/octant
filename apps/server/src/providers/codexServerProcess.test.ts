@@ -28,7 +28,7 @@ import {
   SERVER_FULL_ACCESS_SANDBOX_REFUSAL,
   SERVER_STRICT_REFUSAL,
 } from "./codexProcess";
-import { codexServerSignInRefusal } from "./codexServerProcess";
+import { codexServerSignInRefusal, readCodexProtectedSignInsOnServer } from "./codexServerProcess";
 
 const scratches: string[] = [];
 /**
@@ -345,6 +345,29 @@ describe.skipIf(process.platform === "win32")("Codex on a server Project's serve
     expect(signIns?.denied).toContain(join(home, ".claude", ".credentials.json"));
     expect(signIns?.denied.every((path) => path.startsWith(`${home}/`))).toBe(true);
     expect(signIns?.denied.some((path) => path.startsWith(join(home, ".codex")))).toBe(false);
+  });
+
+  it("keeps the sign-in deny paths when the server login's home ends in a slash, and refuses a relative home", async () => {
+    const placementWith = (output: string) => ({
+      serverName: "devbox",
+      start: () => ({ status: "unreachable" as const, message: "Not reached." }),
+      run: async () => ({
+        status: "ran" as const,
+        exitCode: 0,
+        output,
+        errorOutput: "",
+      }),
+    });
+    const slashed = await readCodexProtectedSignInsOnServer(
+      placementWith("Linux\n/home/build/\n\n"),
+    );
+    expect(slashed.status === "found" ? slashed.denied : []).toContain(
+      "/home/build/.claude/.credentials.json",
+    );
+    const relative = await readCodexProtectedSignInsOnServer(
+      placementWith("Linux\nhome/build\n\n"),
+    );
+    expect(relative.status).toBe("refused");
   });
 
   it("refuses Codex on a server under Strict, before anything runs there", async () => {

@@ -3123,7 +3123,8 @@ describe("Codex execution authority and approvals", () => {
   it("keeps a Plan session on a server in Codex's own read-only sandbox, since no outside sandbox runs there", async () => {
     // Octant's profile cannot run on a server, so naming the sandbox external
     // with `never` would leave Plan's commands free to write there.
-    const f = fixture();
+    // An empty sign-in list is a person who removed the Provider sign-ins group.
+    const f = fixture({ serverSignIns: { denied: [], allowed: [] } });
     const scope = await Effect.runPromise(Scope.make());
     const connection = await Effect.runPromise(
       makeCodexDriver(f.options({ platform: "linux" }))
@@ -3215,6 +3216,36 @@ describe("Codex execution authority and approvals", () => {
     const older = await guardedOnServer("0.168.0");
     expect(Exit.isFailure(older.started)).toBe(true);
     expect(older.thread).toBeUndefined();
+  });
+
+  it("refuses Codex on a server when no sign-in list was read for the login", async () => {
+    const f = fixture({ version: "0.170.0" });
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      makeCodexDriver(f.options({ platform: "linux" }))
+        .acquire({
+          instanceId,
+          projectRoot,
+          mode: "code",
+          serverPlacement: {
+            serverName: "devbox",
+            start: () => ({ status: "unreachable", message: "Not reached." }),
+            run: async () => ({ status: "unreachable", message: "Not reached." }),
+          },
+        })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    const started = await Effect.runPromiseExit(
+      connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    expect(Exit.isFailure(started)).toBe(true);
+    expect(f.calls.find(({ method }) => method === "thread/start")).toBeUndefined();
   });
 
   it("refuses Plan for Codex on a server, whose read-only sandbox cannot deny the login's other sign-ins", async () => {

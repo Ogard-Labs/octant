@@ -290,12 +290,15 @@ app-server --listen stdio://` after `codex --version` there; for Claude Code,
     Codex as `deny` entries in the thread's permissions profile. A Codex there
     older than the first release that takes a profile (0.169.0) is refused at
     those levels, naming the server and the release, rather than run with the
-    sign-ins readable, and a home that cannot be read refuses the launch.
+    sign-ins readable. A home that cannot be read (empty, relative, or one
+    for which the group yields no path while the person has not removed it)
+    refuses the launch; a trailing slash on `$HOME` is ignored.
     _Rationale:_ Codex's built-in workspace sandbox limits writes but has no
     deny field, so under the same login it could read another provider's
     sign-in. Full access carries no such list, as Full access is no sandbox.
     Plan refuses Codex on a server whenever the list is not empty, saying why
-    and pointing to Guarded: Codex's built-in read-only sandbox has no deny
+    and pointing to Guarded, and the composer's first notice for Codex on a
+    server says so: Codex's built-in read-only sandbox has no deny
     field, and the only profile Octant has measured Codex taking extends
     `:workspace`, which can write the folder, so nothing read-only can carry
     the list.

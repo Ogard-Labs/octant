@@ -15,7 +15,11 @@ import type { ProviderFailure } from "@octant/contracts";
 import type { ProviderServerPlacement } from "@octant/provider-sdk/driver";
 import { Effect, type Scope } from "effect";
 import { posix } from "node:path";
-import { protectedAtLevel, secretGuardEntries } from "../process/secretGuard";
+import {
+  currentProtectedFilesChoice,
+  protectedAtLevel,
+  secretGuardEntries,
+} from "../process/secretGuard";
 import { decodeInitializeResult } from "./codexProtocol";
 import type { CodexAppServerConnection } from "./codexProcess";
 import { makeCodexRpcClient } from "./codexRpcClient";
@@ -114,13 +118,14 @@ export async function readCodexProtectedSignInsOnServer(
     ran.status === "ran" && ran.exitCode === 0
       ? ran.output.split("\n").map((line) => line.trim())
       : [];
-  if (!posix.isAbsolute(home) || posix.normalize(home) === "/") {
-    return {
-      status: "refused",
-      message: `Octant could not read the home folder of the login on ${placement.serverName}, so it cannot keep other providers' sign-ins there out of Codex's reach.`,
-    };
-  }
-  const serverHome = posix.normalize(home);
+  // A login's `$HOME` may carry a trailing slash (`/home/build/`); kept, it
+  // would leave every sign-in path outside the home and drop them all.
+  const serverHome = posix.isAbsolute(home) ? posix.normalize(home).replace(/(?<=.)\/+$/, "") : "";
+  const unreadable = {
+    status: "refused",
+    message: `Octant could not read the home folder of the login on ${placement.serverName}, so it cannot keep other providers' sign-ins there out of Codex's reach.`,
+  } as const;
+  if (serverHome === "") return unreadable;
   const inside = (path: string, folder: string) => path === folder || path.startsWith(`${folder}/`);
   const codexHome = posix.isAbsolute(codexHomeSetting)
     ? posix.normalize(codexHomeSetting)
@@ -136,6 +141,11 @@ export async function readCodexProtectedSignInsOnServer(
     .map((entry) => posix.normalize(entry.kind === "path" ? entry.path : entry.directory))
     .filter((path) => inside(path, serverHome));
   const denied = [...new Set(paths.filter((path) => !inside(path, codexHome)))];
+  // The Provider sign-ins group always names paths in a valid home, so an
+  // empty list means the home was misread, unless the person removed the group.
+  if (denied.length === 0 && !currentProtectedFilesChoice().removed.includes("provider-sign-ins")) {
+    return unreadable;
+  }
   return {
     status: "found",
     denied,

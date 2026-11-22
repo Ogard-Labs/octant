@@ -2946,11 +2946,23 @@ function makeConnection(
       if (
         serverPlacement === undefined ||
         sessionSandbox(input).kind !== "native" ||
-        input.fullAccessSandbox === true ||
-        (leasedServerSignIns?.denied.length ?? 0) === 0
+        input.fullAccessSandbox === true
       ) {
         return Effect.void;
       }
+      // Codex on a server always arrives with the list its launch read there;
+      // without one the sign-ins cannot be kept out, so nothing runs.
+      if (leasedServerSignIns === undefined) {
+        return Effect.fail(
+          failure(
+            "unavailable",
+            `Octant could not read the home folder of the login on ${serverPlacement.serverName}, so it cannot keep other providers' sign-ins there out of Codex's reach.`,
+          ),
+        );
+      }
+      // An empty list is the person's choice: they removed the Provider
+      // sign-ins group from Protected files.
+      if (leasedServerSignIns.denied.length === 0) return Effect.void;
       if (input.executionPolicy === "plan") {
         return Effect.fail(
           failure(
