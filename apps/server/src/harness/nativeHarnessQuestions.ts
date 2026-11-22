@@ -12,6 +12,7 @@ import {
   type NativeHarnessSlotCandidate,
   type NativeHarnessInteractionSource,
 } from "@octant/contracts";
+import { whileAwaitingToolApproval } from "../toolEffects/toolEffectLedger";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 
 /**
@@ -128,6 +129,20 @@ export class NativeHarnessQuestionStore {
     } catch {
       // A surface that cannot show the question does not stop it being asked.
     }
+    // A question is the call's own ask and changes nothing, so while it waits
+    // the call's record says nothing ran and a restart asks it again.
+    return whileAwaitingToolApproval(() => this.#wait(input, questionId));
+  }
+
+  #wait(
+    input: {
+      readonly threadId: string;
+      readonly questionnaire?: Questionnaire;
+      readonly secret?: true;
+      readonly signal?: AbortSignal | undefined;
+    },
+    questionId: NativeHarnessQuestionId,
+  ): Promise<SettledQuestionOutcome & { readonly questionId: NativeHarnessQuestionId }> {
     return new Promise((resolve) => {
       const settle = (outcome: SettledQuestionOutcome, actor?: EventActor) => {
         const waiter = this.#waiters.get(String(questionId));

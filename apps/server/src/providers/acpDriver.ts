@@ -76,6 +76,7 @@ import { Cause, Effect, Exit, Option, PubSub, Scope, Stream } from "effect";
 import {
   mapAcpNotification,
   mapAcpPermissionRequest,
+  acpReportOfHostTool,
   type AcpEventContext,
   type AcpMappedPermission,
 } from "./acpEventMapper";
@@ -1264,6 +1265,7 @@ function makeConnection(
         };
       }
       const requestId = `acp-tool-${crypto.randomUUID()}`;
+      const reportedAs = acpReportOfHostTool(state.context, name);
       return new Promise<ManagedToolAnswer>((resolve) => {
         const controller = new AbortController();
         const finish = (answer: ManagedToolAnswer) => {
@@ -1283,6 +1285,7 @@ function makeConnection(
             requestId,
             toolName: name,
             inputJson,
+            ...(reportedAs === undefined ? {} : { toolCallId: reportedAs }),
           }),
         );
       });

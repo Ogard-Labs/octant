@@ -12,6 +12,7 @@ import {
   type ToolActionAuthority,
   type WindowId,
 } from "@octant/contracts";
+import { whileAwaitingToolApproval } from "../toolEffects/toolEffectLedger";
 
 /**
  * An approval waits until it is answered or withdrawn, never for a fixed
@@ -212,6 +213,26 @@ export class BrowserToolApprovalService {
       ...(input.pageTool === undefined ? {} : { pageTool: input.pageTool }),
       requestedAt: new Date(this.#options.now()).toISOString(),
     });
+    const wait = () => this.#wait(input, approvalId, view);
+    // A site, sign-in, upload, script or page-tool question is asked before
+    // the call acts, so while it waits the call's record says nothing ran and
+    // a restart continues the turn and asks again. A download's question can
+    // follow the click that started the download in the same call, so it
+    // keeps the call's first frame and still holds.
+    return input.download === undefined ? whileAwaitingToolApproval(wait) : wait();
+  }
+
+  #wait(
+    input: {
+      readonly windowId: WindowId;
+      readonly threadId: string;
+      readonly authority: ToolActionAuthority;
+      readonly workspaceRoot?: string;
+      readonly signal?: AbortSignal;
+    },
+    approvalId: ReturnType<typeof decodeToolApprovalId>,
+    view: BrowserToolApproval,
+  ): Promise<BrowserToolApprovalOutcome> {
     return new Promise((resolve) => {
       const settle = (decision: BrowserToolApprovalOutcome) => {
         const current = this.#pending.get(String(approvalId));

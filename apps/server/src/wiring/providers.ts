@@ -194,6 +194,8 @@ import {
   withProviderOwnChannels,
 } from "../providers/providerOwnChannels";
 import { redactProviderRuntimeSecrets } from "../providers/secretRedactingDriver";
+import { withRecordedApprovalAnswers } from "../toolEffects/recordedApprovalAnswers";
+import type { ToolEffectLedger } from "../toolEffects/toolEffectLedger";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
 import { GeneratedImageStore } from "../image/generatedImageStore";
@@ -355,6 +357,11 @@ export interface ConfiguredProviderDriverOptions {
   /** How every harness driver built from these options retries and where its lead falls back. */
   readonly nativeHarness?: NativeHarnessEndpointHooks;
   readonly onRuntimeEvent?: (event: ProviderRuntimeEvent) => void;
+  /**
+   * The record of tool calls, told of each answer to a runtime's approval
+   * request before the runtime hears it (toolEffects/recordedApprovalAnswers.ts).
+   */
+  readonly toolEffects?: Pick<ToolEffectLedger, "approvalAnswered">;
   readonly admittedDriverKinds?: ReadonlySet<ProviderDriverKind>;
   /** Admits outside drivers per instance and digest; absent, every outside instance is blocked. */
   readonly outsideDrivers?: Pick<OutsideDriverAdmission, "isAdmitted" | "endpoint">;
@@ -611,6 +618,9 @@ export function makeConfiguredProviderDriver(
   if (ownChannels !== undefined) {
     driver = withProviderOwnChannels(driver, ownChannels);
   }
+  if (options.toolEffects !== undefined) {
+    driver = withRecordedApprovalAnswers(driver, options.toolEffects);
+  }
   // Redaction comes first, so every consumer of the stream, the usage tap
   // included, reads the redacted events.
   const redacted = redactProviderRuntimeSecrets(driver);
@@ -770,6 +780,7 @@ export type ProvidersDependencies = Pick<
   > & {
     /** The member's Act item for its hub, bound by the hub side after this is built. */
     readonly hubActScopeSlot: HubActScopeSlot;
+    readonly toolEffectLedger: Pick<ToolEffectLedger, "approvalAnswered">;
   };
 
 export function wireProviders(deps: ProvidersDependencies) {
@@ -2140,6 +2151,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             runtimeRegistry: providerRuntimeRegistry,
             permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
             onRuntimeEvent: recordProviderRuntimeUsage,
+            toolEffects: deps.toolEffectLedger,
             outsideDrivers: outsideDriverAdmission,
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
             ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
@@ -2345,6 +2357,7 @@ export function wireProviders(deps: ProvidersDependencies) {
     };
     const configuredDriverOptions: ConfiguredProviderDriverOptions = {
       octantVersion: version,
+      toolEffects: deps.toolEffectLedger,
       runtimeTurnsPerTurn: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).runtimeTurnsPerTurn,
       compactionShare: (keeper) => {
