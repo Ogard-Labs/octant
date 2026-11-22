@@ -17,6 +17,8 @@ export interface MachineChangeRevisions {
   readonly threadMessageQueue: number;
   readonly todos: number;
   readonly canvasChoiceAnswers: number;
+  readonly accessActivity: number;
+  readonly changeNotices: number;
 }
 
 const INITIAL_REVISIONS: MachineChangeRevisions = {
@@ -33,6 +35,8 @@ const INITIAL_REVISIONS: MachineChangeRevisions = {
   threadMessageQueue: 0,
   todos: 0,
   canvasChoiceAnswers: 0,
+  accessActivity: 0,
+  changeNotices: 0,
 };
 
 /**
@@ -108,6 +112,8 @@ async function consumeMachineChanges(
                 "thread-message-queue",
                 "todos",
                 "canvas-choice-answers",
+                "access-activity",
+                "change-notices",
               ]
             : frame.topics,
         );
@@ -149,5 +155,7 @@ function advanceRevisions(
     threadMessageQueue: current.threadMessageQueue + Number(changed.has("thread-message-queue")),
     todos: current.todos + Number(changed.has("todos")),
     canvasChoiceAnswers: current.canvasChoiceAnswers + Number(changed.has("canvas-choice-answers")),
+    accessActivity: current.accessActivity + Number(changed.has("access-activity")),
+    changeNotices: current.changeNotices + Number(changed.has("change-notices")),
   };
 }
