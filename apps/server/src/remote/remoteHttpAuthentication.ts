@@ -380,6 +380,11 @@ function pausedFailure(): RemoteHttpAuthFailure {
   return new RemoteHttpAuthFailure(403, "unavailable", false, REMOTE_ACCESS_PAUSED_REASON);
 }
 
+/** The same refusal, for a route that authenticates itself outside this module (an agent grant's). */
+export function remoteAccessPausedResponse(): Response {
+  return mapFailure(pausedFailure());
+}
+
 class RemoteHttpAuthFailure extends Error {
   readonly status: number;
   readonly category: RemoteAuthFailureCategory;

@@ -144,6 +144,8 @@ interface SetupOptions {
   readonly uuid?: () => string;
   readonly onDevicePaired?: RemoteGatewayOptions["onDevicePaired"];
   readonly onDeviceRemoved?: RemoteGatewayOptions["onDeviceRemoved"];
+  readonly agentAccess?: RemoteGatewayOptions["agentAccess"];
+  readonly hubLink?: RemoteGatewayOptions["hubLink"];
 }
 
 function setup(options: SetupOptions = {}) {
@@ -223,6 +225,8 @@ function setup(options: SetupOptions = {}) {
       : { registrationLifetime: options.registrationLifetime }),
     ...(options.onDevicePaired === undefined ? {} : { onDevicePaired: options.onDevicePaired }),
     ...(options.onDeviceRemoved === undefined ? {} : { onDeviceRemoved: options.onDeviceRemoved }),
+    ...(options.agentAccess === undefined ? {} : { agentAccess: options.agentAccess }),
+    ...(options.hubLink === undefined ? {} : { hubLink: options.hubLink }),
     pushTokenStore: pushRegistrations,
     config: options.config ?? makeConfig(),
   };
@@ -2008,6 +2012,55 @@ describe("RemoteGateway — a paired device's access level and the pause", () =>
         ["remote.access-pause-changed@1", localPerson, expect.objectContaining({ paused: true })],
         ["remote.access-pause-changed@1", localPerson, expect.objectContaining({ paused: false })],
       ]);
+    } finally {
+      await gateway.stop();
+    }
+  });
+
+  it("refuses an outside agent while paused and keeps the person's own computers' hub links", async () => {
+    const agentAccess = vi.fn(async () => Response.json({ jsonrpc: "2.0", id: 1, result: {} }));
+    const hubLink = vi.fn(async () => Response.json({ ok: true }));
+    const capturing = createCapturingServe();
+    const { gateway } = setup({ serve: capturing.serve, agentAccess, hubLink });
+    await gateway.start();
+    try {
+      const fetch = capturing.getFetch();
+      if (fetch === undefined) throw new Error("Expected captured gateway fetch");
+      const admin = gateway.localDeviceAdministration();
+      if (admin === undefined) throw new Error("Expected device administration");
+      const agentCall = () =>
+        fetch(
+          new Request(`${ORIGIN}/api/agent-access/mcp`, {
+            method: "POST",
+            headers: {
+              host: "192.168.1.20:9443",
+              "content-type": "application/json",
+              authorization: "Bearer agent-key",
+            },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+          }),
+          lanFacts,
+        );
+      const hubCall = () =>
+        fetch(
+          new Request(`${ORIGIN}/api/hub/status`, { headers: { host: "192.168.1.20:9443" } }),
+          lanFacts,
+        );
+
+      expect((await agentCall()).status).toBe(200);
+      expect(agentAccess).toHaveBeenCalledTimes(1);
+
+      admin.setRemoteAccessPaused({ paused: true, actor: localPerson });
+      const refused = await agentCall();
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toMatchObject({ reasonCode: "remote-access-paused" });
+      expect(agentAccess).toHaveBeenCalledTimes(1);
+      expect((await hubCall()).status).toBe(200);
+      expect(hubLink).toHaveBeenCalledTimes(1);
+
+      admin.setRemoteAccessPaused({ paused: false, actor: localPerson });
+      expect((await agentCall()).status).toBe(200);
+      expect(agentAccess).toHaveBeenCalledTimes(2);
     } finally {
       await gateway.stop();
     }
