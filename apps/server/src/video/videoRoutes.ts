@@ -20,8 +20,7 @@ import type { VideoJobService } from "./videoJobService";
 const PREFIX = "/api/video/";
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, range, x-octant-window-capability";
-const JOB_ROUTE =
-  /^jobs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/stop$/i;
+const JOB_ROUTE = /^jobs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/stop$/i;
 /** Long enough to watch a clip through and seek in it; renewed by asking again. */
 export const VIDEO_CLIP_TICKET_TTL_MS = 10 * 60 * 1000;
 const MAX_TICKETS = 512;
@@ -326,5 +325,3 @@ function corsHeaders(origin: string | null): Record<string, string> {
     "access-control-expose-headers": "content-range, accept-ranges, content-length",
   };
 }
-
-

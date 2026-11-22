@@ -121,6 +121,15 @@ describe("video routes", () => {
     );
   });
 
+  it("serves the whole clip to a download request that asks for no range", async () => {
+    const { handler } = setup();
+    const url = await ticketUrl(handler);
+    const response = await handler(new Request(`http://127.0.0.1:3100${url}`));
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("content-length")).toBe(String(clip.byteLength));
+    expect(new Uint8Array(await (response?.arrayBuffer() ?? new ArrayBuffer(0)))).toEqual(clip);
+  });
+
   it("refuses the clip at the next request once the window can no longer open the thread", async () => {
     const { handler, loseThread } = setup();
     const url = await ticketUrl(handler);
