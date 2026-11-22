@@ -5,10 +5,13 @@
 export { CANVAS_DESIGN_VIEWPORT } from "@octant/contracts/canvas";
 export {
   CANVAS_SHARE_SCHEMA_VERSION,
+  type CanvasShareImage,
   type CanvasStaticExportBlock,
 } from "@octant/contracts/canvas-share";
 export {
   CANVAS_PUBLIC_SHARE_MAX_DOCUMENT_BYTES,
+  CANVAS_PUBLIC_SHARE_MAX_IMAGES_BODY_BYTES,
+  canvasPublicShareDocumentTextBytes,
   CANVAS_PUBLIC_SHARE_REPORT_DETAIL_MAX_CHARS,
   CANVAS_PUBLIC_SHARE_TOMBSTONE_DAYS,
   CANVAS_PUBLIC_SHARE_WIRE_VERSION,
@@ -26,7 +29,10 @@ export {
   type CanvasPublicShareRefusalCode,
   type CanvasPublicShareReportReason,
 } from "@octant/contracts/canvas-public-share";
-export { DESIGN_FRAME_KIT } from "@octant/domain/canvas-design-frame-kit";
+export {
+  DESIGN_FRAME_KIT,
+  withDrawnDesignAssetAddresses,
+} from "@octant/domain/canvas-design-frame-kit";
 export { layoutCanvasBarList } from "@octant/domain/canvas-bar-list-layout";
 export {
   COMPARISON_MATRIX_GLYPH_LABEL,

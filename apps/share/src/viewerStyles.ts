@@ -83,6 +83,9 @@ blockquote footer { border: 0; padding: 0; margin: 0; font-size: 0.875rem; }
 .depth-7 { padding-left: 8.75rem; }
 .depth-8 { padding-left: 10rem; }
 .image-placeholder { margin: 0; padding: 1rem; border: 1px dashed var(--line); border-radius: 6px; color: var(--muted); }
+.image { margin: 0 0 1rem; }
+.image img { display: block; max-width: 100%; height: auto; border-radius: 6px; }
+.image figcaption { margin-top: 0.4rem; color: var(--muted); }
 .design-frame { display: block; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
 .run-link { display: inline-block; padding: 0.4rem 0.9rem; border: 1px solid var(--accent); border-radius: 6px; text-decoration: none; }
 .error { color: #b3261e; }

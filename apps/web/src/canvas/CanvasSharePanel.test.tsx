@@ -177,6 +177,41 @@ describe("CanvasSharePanel", () => {
     });
   });
 
+  it("shows each image the snapshot copies before sharing, and sends the ones the person saw", async () => {
+    const onShare = vi.fn(
+      async (_request: CanvasShareSnapshotRequest): Promise<CanvasShareResult> =>
+        ({ kind: "accepted", snapshot: activeSnapshot() }) as unknown as CanvasShareResult,
+    );
+    const sha256 = "c".repeat(64);
+    renderPanel({
+      overview: overview({
+        images: [
+          {
+            imageRef: "image-1",
+            mediaType: "image/png",
+            byteLength: 68,
+            sha256,
+            data: "iVBORw0KGgo=",
+          },
+        ],
+      }),
+      onShare,
+    });
+
+    const listed = screen.getByTestId("canvas-share-images");
+    expect(listed).toHaveTextContent("The snapshot copies this image:");
+    expect(within(listed).getByRole("img")).toHaveAttribute(
+      "src",
+      "data:image/png;base64,iVBORw0KGgo=",
+    );
+    fireEvent.click(screen.getByTestId("canvas-share-consent-snapshot"));
+    fireEvent.click(screen.getByTestId("canvas-share-consent-audience"));
+    fireEvent.click(screen.getByTestId("canvas-share-submit"));
+
+    await waitFor(() => expect(onShare).toHaveBeenCalledTimes(1));
+    expect(onShare.mock.calls[0]?.[0].consent.acknowledgedImages).toEqual([sha256]);
+  });
+
   it("asks for no markup acknowledgement when the Canvas holds no design", async () => {
     const onShare = vi.fn(
       async (_request: CanvasShareSnapshotRequest): Promise<CanvasShareResult> =>
@@ -443,6 +478,59 @@ describe("CanvasSharePanel", () => {
 
     fireEvent.click(screen.getByTestId("canvas-share-snapshot-close"));
     expect(screen.queryByTestId("canvas-share-snapshot-view")).toBeNull();
+  });
+
+  it("draws the generated images a snapshot carries, in an image block and in a design frame", async () => {
+    const data = "iVBORw0KGgo=";
+    const shared = {
+      ...exportDocument(),
+      schemaVersion: 18,
+      blocks: [
+        {
+          blockId: "cover",
+          schemaVersion: 30,
+          kind: "image",
+          alt: "A lighthouse at dusk",
+          imageRef: "image-1",
+        },
+        {
+          blockId: "phone",
+          schemaVersion: 30,
+          kind: "design",
+          title: "Phone",
+          size: "document",
+          frames: [
+            { frameId: "home", title: "Home", html: '<img src="octant-asset:hero" alt="Hero">' },
+          ],
+          assets: [{ assetId: "hero", imageRef: "image-1" }],
+        },
+      ],
+      images: [
+        {
+          imageRef: "image-1",
+          mediaType: "image/png",
+          byteLength: 8,
+          sha256: "e".repeat(64),
+          data,
+        },
+      ],
+    };
+    const onOpen = vi.fn(
+      async () => ({ kind: "allowed", document: shared, event: { eventId: "x" } }) as never,
+    );
+    renderPanel({ overview: overview({ snapshots: [activeSnapshot()] }), onOpen });
+
+    fireEvent.click(screen.getByTestId(`canvas-share-open-${snapshotId}`));
+    const view = await screen.findByTestId("canvas-share-snapshot-view");
+    await waitFor(() =>
+      expect(
+        within(view)
+          .getAllByRole("img", { name: "A lighthouse at dusk" })
+          .some((element) => element.getAttribute("src") === `data:image/png;base64,${data}`),
+      ).toBe(true),
+    );
+    const frame = within(view).getByTitle<HTMLIFrameElement>("Phone, document");
+    await waitFor(() => expect(frame.srcdoc).toContain(`src="data:image/png;base64,${data}"`));
   });
 
   it("draws a shared treemap, heatmap, and bar list in the opened snapshot", async () => {

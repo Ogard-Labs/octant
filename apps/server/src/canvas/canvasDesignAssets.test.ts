@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +15,7 @@ import { liveWorkFilesystem } from "../work/workFilesystemPort";
 import {
   readCanvasDesignAssetFile,
   resolveCanvasDesignAssets,
+  resolveCanvasShareImages,
   type CanvasDesignAssetPorts,
 } from "./canvasDesignAssets";
 
@@ -267,5 +269,78 @@ describe("resolveCanvasDesignAssets", () => {
     );
     expect(resolved.map((entry) => entry.status)).toEqual(["resolved", "unavailable", "resolved"]);
     expect(resolved[1]).toEqual({ assetId: "b", status: "unavailable", reason: "design-budget" });
+  });
+});
+
+describe("resolveCanvasShareImages", () => {
+  it("reads every image a version shows, once each, under its provenance, as sniffed rasters with their digest", async () => {
+    const svgId = decodeImageArtifactId("44444444-4444-4444-8444-444444444444");
+    const generated = vi.fn(
+      async (input: Parameters<CanvasDesignAssetPorts["generatedImage"]>[0]) =>
+        String(input.imageId) === String(imageId)
+          ? ({ status: "read", bytes: PNG } as const)
+          : ({ status: "read", bytes: SVG } as const),
+    );
+    const ports = filePorts(generated);
+    const resolved = await resolveCanvasShareImages(
+      {
+        provenance: { mode: "work", projectId, threadId } as never,
+        blocks: [
+          {
+            blockId: "cover",
+            schemaVersion: 30,
+            kind: "image",
+            generatedImageId: imageId,
+            alt: "Cover",
+          },
+          {
+            blockId: "logo",
+            schemaVersion: 30,
+            kind: "image",
+            generatedImageId: svgId,
+            alt: "Logo",
+          },
+          {
+            blockId: "phone",
+            schemaVersion: 30,
+            kind: "design",
+            title: "Phone",
+            size: "phone",
+            frames: [
+              {
+                frameId: "home",
+                title: "Home",
+                html: '<img src="octant-asset:hero" alt=""><img src="octant-asset:shot" alt="">',
+              },
+            ],
+            assets: [
+              { assetId: "hero", source: { kind: "generated-image", imageId } },
+              file("shot", "screens/home.png"),
+              // Declared and named nowhere, so never read.
+              file("unused", "screens/escape.png"),
+            ],
+          },
+        ] as never,
+      },
+      ports,
+    );
+    const png = {
+      mediaType: "image/png",
+      data: Buffer.from(PNG).toString("base64"),
+      byteLength: PNG.byteLength,
+      sha256: createHash("sha256").update(PNG).digest("hex"),
+    };
+    // The SVG is not a raster image and is left out.
+    expect([...resolved.entries()]).toEqual([
+      [`generated-image:${String(imageId)}`, png],
+      ["project-file:screens/home.png", png],
+    ]);
+    // The same image shown twice is read once, and a file through the Work
+    // confinement sequence under the thread's folder.
+    expect(generated).toHaveBeenCalledTimes(2);
+    expect(generated).toHaveBeenCalledWith(
+      expect.objectContaining({ imageId, projectId, threadId }),
+    );
+    expect(ports.projectFile).toHaveBeenCalledTimes(1);
   });
 });

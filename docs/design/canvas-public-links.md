@@ -110,16 +110,39 @@ uses:
   200 characters taken from the first reading text (used for link previews),
   and the shared blocks;
 - no Canvas, version, host, Project, or thread id, no provenance labels, and
-  no source manifest; no source ids on any block; no file contents; no
-  declared images of a design (a frame draws a placeholder where one was
-  named); and an action block refuses the whole publish;
+  no source manifest; no source ids on any block; no file contents; and an
+  action block refuses the whole publish;
+- every image the document displays (maintainer decision, 2026-11-22): each
+  image block's generated image and each image a design declares (a generated
+  image, a Project file, or a Browser capture), resolved under the Canvas
+  version's own authority as a reader's draw resolves it, as sniffed PNG,
+  JPEG, GIF, or WebP bytes in the document's `images`, named by the share's
+  own `image-<n>` references, never by an image id, capture id, or path.
+  Which images a design displays is found by the best-effort reading of its
+  markup described under the service below, with its known limits; nothing
+  that reading finds undrawn leaves, and an image that does not resolve is
+  not carried and its frame draws a placeholder. Each image is at
+  most 3 MiB and all of them at
+  most 4 MiB (`CANVAS_SHARE_IMAGES_MAX_BYTES`), counted apart from the
+  document's text budget (the export body limit), so the card still shows the
+  text whole. The card lists every image that leaves, as a thumbnail with its
+  size, and the approved digest covers each image's SHA-256, so approving the
+  card approves exactly those images. There is no separate acknowledgement:
+  the person sees what is sent, and the card is the safeguard. _Rationale:_
+  peers show a guest the images that appear in shared content, a placeholder
+  made a shared document look broken, and limiting the share to generated
+  images would have restricted a feature the card already makes visible;
 - a design's frames only with the card's acknowledgement.
 
 The document is self-contained: the service draws it from its typed blocks
 without calling back to the host. It is a frozen copy. Nothing syncs; a
 change to the Canvas reaches the link only when the person approves an
-update. The payload is bounded at 262,144 bytes of UTF-8, the export body
-budget, and the service refuses a larger one.
+update. The document's text, everything but its images, is bounded at
+262,144 bytes of UTF-8, the export body budget, and the service refuses a
+larger one; its images are bounded apart, at 3 MiB each and 4 MiB together,
+and the service stores them with the share, counting them toward its total
+storage cap. A view counts in a small file beside the share, so a share's
+images are never rewritten when it is read. The service serves each carried image once, at its own content-addressed address beside the page that shows it: `/s/<id>/images/<sha256>` for the viewer and `/f/<id>/<block>/images/<sha256>?t=<image token>` for a design's frame. Every reference names that address, so a page that shows one image many times stays small and the browser fetches it once. An image address answers only as its page does: a live link, its password grant when it has a password (the viewer's cookie is scoped to the link's path), or, for a frame, an image token the frame page signs for its link, revision and block, lasting as long as a view grant so a prototype left open past its frame token still draws later screens; and only for an image the document carries by that digest (and, for a frame, one its design names). Image requests count against a per-client image limit. The response is the raster with its sniffed type and `nosniff`, with the digest as its ETag and `Cache-Control: private, no-cache`, so the browser checks again before reusing a copy and a revoked or expired link, a lapsed grant, or an expired token stops serving even a kept one; a page that shows an image many times still loads it once. A frame's image responses allow any origin (`Access-Control-Allow-Origin: *`), since a sandboxed frame's origin is opaque and the token in the address is the authority. _Rationale:_ writing each reference as a `data:` image grows the page with every repeat, and capping the repeats would make a large image shown many times fall back to its description; one address per image is how the web shares a picture across a page. Only a reference a browser would draw counts, both for what a share carries and for what a frame draws: one in a `src`, `srcset`, `poster`, or `background` attribute, in CSS, or in a script or inline event handler, outside comments. A reference in a comment, in text, or in another attribute such as `alt` is left as written: it draws nothing and is not carried. The reading follows the browser's: character references in a handler are decoded first, a line comment ends at any line terminator, and strings and regular expression literals hide no comment. It is a best-effort reading for finding references, not an HTML or JavaScript parser, and its known limits are accepted (maintainer decision, 2026-11-22): a regular expression right after a keyword, a `/*` inside a quoted CSS string, a reference a script builds at run time, and other forms a parser would read differently can be misread. A misreading can leave out an image the design shows, which then draws nothing, or carry an image named only where nothing draws it; the approval card and the share panel list every image before it leaves, so the person sees such an image and can decline. Later narrow cases are recorded as known limits and changed only for an over-share in a common form. _Follow-up:_ an exact answer would come from the browser, by rendering the frame and reading which images it actually loads, not from adding a parser.
 
 ## Link terms
 
@@ -240,7 +263,9 @@ contact, the viewer health check, and a test publish with embedded content. It r
 through `apps/share/src/shareKit.ts`, which names exactly the modules the
 service uses — in-repo, so there is no pinned-bundle sync to redo. A host that
 publishes a share format or wire version the running service does not know is
-refused, and nothing is stored. The operator serves two origins from two
+refused, and nothing is stored. A link published under an earlier share
+version keeps opening, and its owner keeps managing it, after the service is
+redeployed with a newer one. The operator serves two origins from two
 listeners — a public origin for the API and viewer pages, and a separate
 user-content origin for design frames — configured with
 `OCTANT_SHARE_PUBLIC_ORIGIN` and `OCTANT_SHARE_USERCONTENT_ORIGIN`; the service
@@ -286,7 +311,10 @@ frame-ancestors 'none'`. The page loads one first-party stylesheet and
   policy. A design that runs script is not loaded until the viewer clicks
   **Run**, a plain link that draws the page again with that one frame as
   `sandbox="allow-scripts"`, served under the running frame policy with its
-  own `sandbox` directive. Frame responses carry `frame-ancestors` naming the
+  own `sandbox` directive. A frame that shows carried images adds its own
+  image route's path (`<user-content origin>/f/<id>/<block>/images/`) to
+  `img-src`, and nothing wider, so even a running frame reaches only those
+  images. Frame responses carry `frame-ancestors` naming the
   public origin only, and a frame address carries a short-lived token the
   service signs for one link and revision, so a protected link's frames are
   not open without its password. The token also names whether it opens the
@@ -300,7 +328,8 @@ frame-ancestors 'none'`. The page loads one first-party stylesheet and
   expiry times, byte length, the password hash, the owner secret hash, and an
   aggregate view count. It writes no IP address, user agent, referrer, or
   access log. Rate limits count per IP in memory for the current window only.
-- Limits (configurable): a payload of 262,144 bytes; 10 creates, 60 owner
+- Limits (configurable): a document text of 262,144 bytes, with images of
+  at most 4 MiB beside it; 10 creates, 60 owner
   calls, 120 views, 5 password attempts per link, and 5 reports per IP per
   minute; and a total storage cap past which create answers `unavailable`.
 - **Abuse.** Every page links to a report form (`POST /api/v1/shares/<id>/reports`,

@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
-import type {
-  CanvasBlock,
-  CanvasDefinition,
-  CanvasDesignBlock,
-  CanvasId,
-  CanvasVersionId,
+import {
+  canvasImageBlockAssets,
+  type CanvasBlock,
+  type CanvasDefinition,
+  type CanvasDesignAssetResolution,
+  type CanvasDesignBlock,
+  type CanvasId,
+  type CanvasProvenance,
+  type CanvasVersionId,
 } from "@octant/contracts/canvas";
 import {
   CANVAS_EXPORT_APPROVAL_TTL_MS,
@@ -45,7 +48,12 @@ import {
   CANVAS_EXPORT_BODY_MAX_BYTES,
 } from "@octant/contracts/canvas-export";
 import type { CanvasPublicShareDocument } from "@octant/contracts/canvas-public-share";
-import { buildCanvasPublicShareDocument, CanvasSharePolicyRejected } from "@octant/domain";
+import {
+  buildCanvasPublicShareDocument,
+  CanvasSharePolicyRejected,
+  type CanvasShareResolvedImages,
+} from "@octant/domain";
+import type { CanvasShareImage } from "@octant/contracts/canvas-share";
 import type { CanvasExportDestination, CanvasExportTarget } from "@octant/plugin-api/canvas-export";
 import {
   offerCanvasExportTargets,
@@ -111,6 +119,22 @@ export interface CanvasExportServiceOptions {
    * that has none, where a picture export is refused as a value.
    */
   readonly renderer?: CanvasExportRenderer;
+  /**
+   * The images a share document carries, resolved under the
+   * version's provenance. Absent, a share document carries none.
+   */
+  readonly resolveShareImages?: (
+    definition: CanvasDefinition,
+  ) => Promise<CanvasShareResolvedImages>;
+  /**
+   * The images a block shows, resolved under the version's provenance, so a
+   * picture of the document draws them as the thread does. Absent, they draw
+   * as placeholders.
+   */
+  readonly resolveDesignAssets?: (
+    block: Pick<CanvasDesignBlock, "blockId" | "assets">,
+    provenance: CanvasProvenance,
+  ) => Promise<ReadonlyArray<CanvasDesignAssetResolution>>;
 }
 
 /**
@@ -152,6 +176,8 @@ export class CanvasExportService {
   readonly #uuid: () => string;
   readonly #clock: () => UtcTimestamp;
   readonly #renderer: CanvasExportRenderer | undefined;
+  readonly #resolveShareImages: CanvasExportServiceOptions["resolveShareImages"];
+  readonly #resolveDesignAssets: CanvasExportServiceOptions["resolveDesignAssets"];
   readonly #pending = new Map<string, PendingExport>();
   /** Exports a restart cut off, per Canvas, oldest first; see `settleUnconfirmed`. */
   readonly #unconfirmed = new Map<string, CanvasExportRecorded[]>();
@@ -163,6 +189,8 @@ export class CanvasExportService {
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#renderer = options.renderer;
+    this.#resolveShareImages = options.resolveShareImages;
+    this.#resolveDesignAssets = options.resolveDesignAssets;
   }
 
   offers(canvasId: CanvasId): CanvasExportOfferList | undefined {
@@ -343,7 +371,17 @@ export class CanvasExportService {
     const binding = this.#soleTargetBinding(offer.targetId, document.canvasId);
     const rendered = isCanvasExportPictureFormat(request.format)
       ? await this.#renderPictures(document, request.format, request.frameTheme)
-      : renderText(document, request.format, request.frameTheme, this.#clock());
+      : renderText(
+          document,
+          request.format,
+          request.frameTheme,
+          this.#clock(),
+          request.format === "share-document" &&
+            document.definition !== undefined &&
+            this.#resolveShareImages !== undefined
+            ? await this.#resolveShareImages(document.definition)
+            : undefined,
+        );
     if (rendered.kind === "refused") return decodeCanvasExportPrepareResult(rendered);
     const approvalId = decodeApprovalId(this.#uuid());
     let output: CanvasExportRenderedOutput;
@@ -353,7 +391,12 @@ export class CanvasExportService {
         kind: "canvas-export-output",
         format: rendered.format,
         title: document.title,
-        ...(rendered.kind === "text" ? { body: rendered.body } : { files: rendered.files }),
+        ...(rendered.kind === "text"
+          ? {
+              body: rendered.body,
+              ...(rendered.images === undefined ? {} : { images: rendered.images }),
+            }
+          : { files: rendered.files }),
         metadata: {
           canvasId: document.canvasId,
           versionId: document.versionId,
@@ -706,6 +749,50 @@ export class CanvasExportService {
    * none is drawn as the thread draws it. A host with no browser, a build with
    * no renderer, and a drawing that failed are each a refusal the person reads.
    */
+  /**
+   * A document picture with the images its image blocks and designs show,
+   * resolved under the version's provenance as the thread resolves them.
+   */
+  async #withDocumentImages(
+    subject: Extract<CanvasExportPictureRequest["subject"], { readonly kind: "document" }>,
+  ): Promise<CanvasExportPictureRequest["subject"]> {
+    const resolve = this.#resolveDesignAssets;
+    if (resolve === undefined) return subject;
+    const designAssets: Array<{
+      readonly blockId: string;
+      readonly assets: ReadonlyArray<CanvasDesignAssetResolution>;
+    }> = [];
+    for (const block of subject.definition.blocks) {
+      const declaring =
+        block.kind === "design"
+          ? block
+          : block.kind === "image"
+            ? { blockId: block.blockId, assets: canvasImageBlockAssets(block) }
+            : undefined;
+      if (declaring === undefined || (declaring.assets ?? []).length === 0) continue;
+      designAssets.push({
+        blockId: String(block.blockId),
+        assets: await resolve(declaring, subject.definition.provenance),
+      });
+    }
+    if (designAssets.length === 0) return subject;
+    // A running design is drawn from its own page, so that page is built
+    // again with the images it shows, as the agent's preview builds it.
+    const designPages = subject.definition.blocks
+      .filter(
+        (block): block is CanvasDesignBlock => block.kind === "design" && block.runsScript === true,
+      )
+      .map((block) => ({
+        blockId: String(block.blockId),
+        html: renderCanvasDesignPage(
+          block,
+          String(block.frames[0]?.frameId ?? ""),
+          designAssets.find((entry) => entry.blockId === String(block.blockId))?.assets ?? [],
+        ),
+      }));
+    return { ...subject, designAssets, designPages };
+  }
+
   async #renderPictures(
     document: CanvasExportDocument,
     format: CanvasExportPictureFormat,
@@ -718,8 +805,9 @@ export class CanvasExportService {
         "This host has no browser to draw pictures with. Export as HTML or Markdown instead.",
       );
     }
-    const subject = pictureSubject(document, frameTheme);
-    if (subject.kind === "refused") return subject;
+    const picked = pictureSubject(document, frameTheme);
+    if (picked.kind === "refused") return picked;
+    const subject = picked.kind === "document" ? await this.#withDocumentImages(picked) : picked;
     const drawn = await renderer.renderPictures({
       format,
       theme: frameTheme?.scheme ?? "light",
@@ -787,7 +875,9 @@ type Rendered =
       readonly body: string;
       readonly byteLength: number;
       readonly payloadDigest: ReturnType<typeof decodeCanvasExportPayloadDigest>;
-      readonly card: Pick<CanvasExportApprovalCard, "payload" | "writesDesignMarkup">;
+      /** A share document's images, sent beside its body and shown on its card. */
+      readonly images?: ReadonlyArray<CanvasShareImage>;
+      readonly card: Pick<CanvasExportApprovalCard, "payload" | "writesDesignMarkup" | "images">;
     }
   | {
       readonly kind: "pictures";
@@ -812,10 +902,15 @@ function renderText(
   format: CanvasExportTextFormat,
   frameTheme: CanvasExportFrameTheme | undefined,
   publishedAt: UtcTimestamp,
+  shareImages: CanvasShareResolvedImages | undefined,
 ): Rendered | CanvasExportRefusal {
-  const rendered =
+  const share =
     format === "share-document"
-      ? renderShareDocument(document, publishedAt)
+      ? renderShareDocument(document, publishedAt, shareImages)
+      : undefined;
+  const rendered =
+    share !== undefined
+      ? share
       : renderArtifactDocument(document, format, {
           frames: "as-written",
           ...(frameTheme === undefined ? {} : { frameTheme }),
@@ -824,15 +919,22 @@ function renderText(
   if (rendered.kind === "too-large") {
     return refused("too-large", "The rendered document is too large to export.");
   }
+  const images = share?.kind === "rendered" ? share.images : undefined;
   return {
     kind: "text",
     format,
     body: rendered.body,
     byteLength: canvasExportBodyByteLength(rendered.body),
-    payloadDigest: decodeCanvasExportPayloadDigest(digestOf(rendered.body)),
+    // The digest the approval answers covers the images as well as the body,
+    // so approving the card approves exactly the images it showed.
+    payloadDigest: decodeCanvasExportPayloadDigest(
+      images === undefined ? digestOf(rendered.body) : digestOfShare(rendered.body, images),
+    ),
+    ...(images === undefined ? {} : { images }),
     card: {
       payload: rendered.body,
       ...(rendered.writesDesignMarkup ? { writesDesignMarkup: true as const } : {}),
+      ...(images === undefined ? {} : { images }),
     },
   };
 }
@@ -976,7 +1078,13 @@ function pictureSubject(
 function renderShareDocument(
   document: CanvasExportDocument,
   publishedAt: UtcTimestamp,
-): ArtifactDocumentRender | { readonly kind: "refused"; readonly message: string } {
+  shareImages: CanvasShareResolvedImages | undefined,
+):
+  | (Extract<ArtifactDocumentRender, { readonly kind: "rendered" }> & {
+      readonly images?: ReadonlyArray<CanvasShareImage>;
+    })
+  | Exclude<ArtifactDocumentRender, { readonly kind: "rendered" }>
+  | { readonly kind: "refused"; readonly message: string } {
   let shared: CanvasPublicShareDocument;
   try {
     shared = buildCanvasPublicShareDocument({
@@ -985,6 +1093,7 @@ function renderShareDocument(
       // The card this body is shown on says the markup leaves as written, and
       // approving it is the acknowledgement; nothing is sent before that.
       markupAcknowledged: true,
+      ...(shareImages === undefined ? {} : { images: shareImages }),
     });
   } catch (error) {
     if (error instanceof CanvasSharePolicyRejected) {
@@ -995,13 +1104,17 @@ function renderShareDocument(
     }
     throw error;
   }
-  const body = JSON.stringify(shared, null, 2);
+  // The body is the text the card shows whole; the images leave beside it
+  // and the card shows each of them.
+  const { images, ...text } = shared;
+  const body = JSON.stringify(text, null, 2);
   if (canvasExportBodyByteLength(body) > CANVAS_EXPORT_BODY_MAX_BYTES) return { kind: "too-large" };
   return {
     kind: "rendered",
     title: shared.title,
     body,
     writesDesignMarkup: shared.blocks.some((block) => block.kind === "design"),
+    ...(images === undefined ? {} : { images }),
   };
 }
 
@@ -1012,6 +1125,15 @@ function withoutChoice(
   if (destination?.link === undefined) return destination;
   const { link: _link, ...described } = destination;
   return described;
+}
+
+/** One digest over a share document: its body, then each image's name and digest. */
+function digestOfShare(body: string, images: ReadonlyArray<CanvasShareImage>): string {
+  const hash = createHash("sha256").update(body).update("\0");
+  for (const image of images) {
+    hash.update(String(image.imageRef)).update("\0").update(image.sha256).update("\0");
+  }
+  return `sha256:${hash.digest("hex")}`;
 }
 
 function digestOf(body: string): string {

@@ -58,10 +58,12 @@ import { createCanvasRefreshSourceResolver } from "../canvas/canvasRefreshSource
 import { readCanvasRefreshFile, resolveCanvasRefreshFile } from "../canvas/canvasRefreshFileRead";
 import type {
   CanvasDesignAssetResolution,
+  CanvasDefinition,
   CanvasDesignBlock,
   CanvasProvenance,
 } from "@octant/contracts/canvas";
 import { CanvasDesignRunTickets } from "../canvas/canvasDesignPage";
+import { CanvasShareImageStore } from "../canvas/canvasShareImageStore";
 import { CanvasNetworkAccessService } from "../canvas/canvasNetworkAccessService";
 import { CanvasNetworkProxy } from "../canvas/canvasNetworkProxy";
 import { DesignSystemFiles, designSystemFolders } from "../designSystems/designSystemFiles";
@@ -73,6 +75,7 @@ import {
   type CanvasDesignAssetPorts,
   readCanvasDesignAssetFile,
   resolveCanvasDesignAssets,
+  resolveCanvasShareImages,
 } from "../canvas/canvasDesignAssets";
 import { createCanvasSkillContributionResolver } from "../canvas/canvasSkillContributionResolver";
 import {
@@ -460,10 +463,12 @@ export function wireCanvas(deps: CanvasDependencies) {
     },
   };
   const resolveDesignAssets = (
-    block: CanvasDesignBlock,
+    block: Pick<CanvasDesignBlock, "blockId" | "assets">,
     provenance: CanvasProvenance,
   ): Promise<ReadonlyArray<CanvasDesignAssetResolution>> =>
     resolveCanvasDesignAssets(block, provenance, canvasDesignAssetPorts);
+  const resolveShareImages = (definition: Pick<CanvasDefinition, "blocks" | "provenance">) =>
+    resolveCanvasShareImages(definition, canvasDesignAssetPorts);
 
   const artifactMirrorEvents = new ArtifactMirrorEventStore({
     journal: persistence.journal,
@@ -1003,6 +1008,8 @@ export function wireCanvas(deps: CanvasDependencies) {
   // Canvas API to a principal this host authenticates, never uploaded or
   // linked. Lifecycle is journaled, so revocation survives restart and the
   // access log is rebuilt by replay.
+  // A shared snapshot's image bytes, kept apart from the journal.
+  const canvasShareImages = new CanvasShareImageStore(persistence.dataDirectory);
   const canvasShareService = new CanvasShareService(
     {
       projection: persistence.canvasProjection,
@@ -1018,6 +1025,17 @@ export function wireCanvas(deps: CanvasDependencies) {
     },
     { authorize: authorizeCanvas },
   );
+  // Bytes kept for a snapshot the host stopped before recording, or whose
+  // record a purge erased, are named by no snapshot and go at start.
+  void canvasShareImages
+    .reconcile((snapshotId, sha256) => canvasShareService.namesImage(snapshotId, sha256))
+    .catch(() => undefined);
+  /** Remove the images the snapshots of purged Canvases kept. */
+  const forgetCanvasShareImages = async (canvasIds: ReadonlyArray<string>): Promise<void> => {
+    for (const snapshotId of canvasShareService.snapshotIdsOf(canvasIds)) {
+      await canvasShareImages.forget(snapshotId).catch(() => undefined);
+    }
+  };
   // Where a Project's exports are written, and whether that folder is still
   // usable. Choosing one is a person's act on this machine: the host resolves
   // the browser's candidate to a path itself, and the choice is judged against
@@ -1128,6 +1146,8 @@ export function wireCanvas(deps: CanvasDependencies) {
     // A picture export is drawn by the same browser, under the same no-route
     // switches and interception, that the agent's preview uses.
     renderer: canvasPreviewRenderer,
+    resolveShareImages,
+    resolveDesignAssets,
   });
   // Settle exports a previous run cut off mid-delivery before any new one is
   // decided: recorded as unconfirmed for the person, never sent again.
@@ -1295,6 +1315,8 @@ export function wireCanvas(deps: CanvasDependencies) {
       );
     },
     resolveDesignAssets,
+    resolveShareImages,
+    shareImages: canvasShareImages,
     designRunTickets: new CanvasDesignRunTickets(),
     ...(deps.findPublishedSnapshot === undefined
       ? {}
@@ -1334,6 +1356,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     canvasPublicShareService,
     canvasRoutes,
     canvasService,
+    forgetCanvasShareImages,
     replicaArtifactSync,
     resolveCanvasWorkspace,
     threadProjectAssetRoot,

@@ -1,6 +1,8 @@
 import { createHash, createHmac } from "node:crypto";
 import {
+  CANVAS_PUBLIC_SHARE_MAX_IMAGES_BODY_BYTES,
   CANVAS_PUBLIC_SHARE_WIRE_VERSION,
+  canvasPublicShareDocumentTextBytes,
   type CanvasPublicShareDocument,
   type CanvasPublicShareRefusalCode,
   decodeCanvasPublicShareCreated,
@@ -82,16 +84,24 @@ async function parseBody<T>(
   request: Request,
   limit: number,
   decode: (value: unknown) => T,
+  /** The document's text budget, checked before the body is decoded. */
+  documentBudget?: number,
 ): Promise<Parsed<T>> {
   const body = await readLimitedBody(request, limit);
-  if (body.status === "too-large") {
-    return {
-      status: "refused",
-      response: refusal("too-large", "The request body is larger than this service accepts."),
-    };
-  }
+  const tooLarge: Parsed<T> = {
+    status: "refused",
+    response: refusal("too-large", "The request body is larger than this service accepts."),
+  };
+  if (body.status === "too-large") return tooLarge;
   try {
-    return { status: "parsed", value: decode(JSON.parse(body.text)) };
+    const value: unknown = JSON.parse(body.text);
+    // The body may carry a share's images beside its document, so the read
+    // allows for them; the document's own text is held to its budget here,
+    // before a text too large to decode is mistaken for a malformed one.
+    if (documentBudget !== undefined && rawDocumentTextBytes(value) > documentBudget) {
+      return tooLarge;
+    }
+    return { status: "parsed", value: decode(value) };
   } catch {
     return {
       status: "refused",
@@ -100,8 +110,19 @@ async function parseBody<T>(
   }
 }
 
-function documentByteLength(document: CanvasPublicShareDocument): number {
-  return Buffer.byteLength(JSON.stringify(document), "utf8");
+/** A request body's document text, before it is decoded, without its images. */
+function rawDocumentTextBytes(value: unknown): number {
+  if (typeof value !== "object" || value === null || !("document" in value)) return 0;
+  const document = value.document;
+  if (typeof document !== "object" || document === null) return 0;
+  const { images: _images, ...text } = document as Record<string, unknown>;
+  return Buffer.byteLength(JSON.stringify(text), "utf8");
+}
+
+// The document budget is the text; a share's images have their own
+// budget, which the contract holds when it decodes the body.
+function documentTextBytes(document: CanvasPublicShareDocument): number {
+  return canvasPublicShareDocumentTextBytes(document);
 }
 
 function expiryOf(
@@ -173,13 +194,14 @@ async function createShare(
   }
   const parsed = await parseBody(
     request,
-    ctx.config.maxDocumentBytes + BODY_ENVELOPE_BYTES,
+    ctx.config.maxDocumentBytes + CANVAS_PUBLIC_SHARE_MAX_IMAGES_BODY_BYTES + BODY_ENVELOPE_BYTES,
     decodeCanvasPublicShareIncomingCreateRequest,
+    ctx.config.maxDocumentBytes,
   );
   if (parsed.status === "refused") return parsed.response;
   const { document, expiry, password } = parsed.value;
-  const byteLength = documentByteLength(document);
-  if (byteLength > ctx.config.maxDocumentBytes) {
+  const textBytes = documentTextBytes(document);
+  if (textBytes > ctx.config.maxDocumentBytes) {
     return refusal("too-large", "The Canvas is larger than this service accepts.");
   }
   const owned = parsed.value.kind === "canvas-public-share-owned-create" ? parsed.value : undefined;
@@ -245,7 +267,8 @@ async function createShare(
     createdAt: ctx.store.iso(now),
     updatedAt: ctx.store.iso(now),
     expiresAt: expiryOf(now, expiry),
-    byteLength,
+    // What the share takes on disk, images included, counts toward the total.
+    byteLength: Buffer.byteLength(JSON.stringify(document), "utf8"),
     passwordHash,
     ownerSecretHash: hashOwnerSecret(ownerSecret),
     ...(requestDigest === undefined
@@ -285,13 +308,14 @@ async function updateShare(request: Request, ctx: ServiceContext, id: string): P
   if (authorized.status === "refused") return authorized.response;
   const parsed = await parseBody(
     request,
-    ctx.config.maxDocumentBytes + BODY_ENVELOPE_BYTES,
+    ctx.config.maxDocumentBytes + CANVAS_PUBLIC_SHARE_MAX_IMAGES_BODY_BYTES + BODY_ENVELOPE_BYTES,
     decodeCanvasPublicShareUpdateRequest,
+    ctx.config.maxDocumentBytes,
   );
   if (parsed.status === "refused") return parsed.response;
   const { document, expiry, password } = parsed.value;
-  const byteLength = documentByteLength(document);
-  if (byteLength > ctx.config.maxDocumentBytes) {
+  const textBytes = documentTextBytes(document);
+  if (textBytes > ctx.config.maxDocumentBytes) {
     return refusal("too-large", "The Canvas is larger than this service accepts.");
   }
   const now = ctx.store.now();
@@ -303,7 +327,7 @@ async function updateShare(request: Request, ctx: ServiceContext, id: string): P
   const outcome = ctx.store.replace(id, (current) => ({
     ...current,
     document,
-    byteLength,
+    byteLength: Buffer.byteLength(JSON.stringify(document), "utf8"),
     expiresAt: expiryOf(now, expiry),
     updatedAt: ctx.store.iso(now),
     passwordHash: passwordHash ?? current.passwordHash,

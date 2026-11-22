@@ -2,8 +2,15 @@ import { principalActsAsHostPerson } from "./clientPrincipal";
 import { eventActorForPrincipal } from "./principalEventActor";
 import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
 import type { DesignSystemList } from "@octant/contracts/design-systems";
-import type { CanvasDesignSystem } from "@octant/contracts/canvas";
-import { canvasMockupsTsx, canvasExportStem, importCanvasHtmlPage } from "@octant/domain";
+import { canvasImageBlockAssets, type CanvasDesignSystem } from "@octant/contracts/canvas";
+import type { CanvasShareImageStore } from "./canvas/canvasShareImageStore";
+import {
+  canvasMockupsTsx,
+  canvasExportStem,
+  importCanvasHtmlPage,
+  canvasShareImagesFor,
+  type CanvasShareResolvedImages,
+} from "@octant/domain";
 import {
   type CanvasId,
   decodeCanvasActionResult,
@@ -49,6 +56,7 @@ import {
   decodeProjectId,
   type CanvasDesignAssetResolution,
   type CanvasDesignAssetsOutcome,
+  type CanvasDefinition,
   type CanvasDesignBlock,
   type CanvasDesignRunOutcome,
   type CanvasDesignRunRequest,
@@ -200,9 +208,25 @@ export interface CanvasRouteDependencies {
    * unavailable rather than guessing.
    */
   readonly resolveDesignAssets?: (
-    block: CanvasDesignBlock,
+    block: Pick<CanvasDesignBlock, "blockId" | "assets">,
     provenance: CanvasProvenance,
   ) => Promise<ReadonlyArray<CanvasDesignAssetResolution>>;
+  /**
+   * Where a shared snapshot's image bytes are kept, apart from the journal.
+   * Absent, a snapshot is served with the images its journaled copy names
+   * but no bytes, and readers see each as missing.
+   */
+  readonly shareImages?: Pick<
+    CanvasShareImageStore,
+    "keepResolved" | "keepOnly" | "withBytes" | "forget"
+  >;
+  /**
+   * The images a share of a Canvas version carries, resolved under
+   * that version's provenance. Absent, a share carries none.
+   */
+  readonly resolveShareImages?: (
+    definition: Pick<CanvasDefinition, "blocks" | "provenance">,
+  ) => Promise<CanvasShareResolvedImages>;
   /**
    * Single-use tickets for running designs' pages. Absent on a host that does
    * not serve them, and a running design then answers that it cannot run here.
@@ -1309,7 +1333,21 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         if (overview === undefined) {
           return failureResponse("Canvas sharing is not authorized for this canvas.", 403, origin);
         }
-        return jsonResponse(decodeCanvasShareOverview(overview), 200, origin);
+        // The panel shows the images a snapshot of this version would copy,
+        // exactly as they would leave, before the person agrees to share.
+        const current = dependencies.canvasProjection.getById(canvasId)?.currentVersion;
+        const images =
+          current === undefined || dependencies.resolveShareImages === undefined
+            ? []
+            : canvasShareImagesFor(
+                current.definition,
+                await dependencies.resolveShareImages(current.definition),
+              );
+        return jsonResponse(
+          decodeCanvasShareOverview(images.length === 0 ? overview : { ...overview, images }),
+          200,
+          origin,
+        );
       }
 
       if ((route === "share" || route === "share-revoke") && request.method === "POST") {
@@ -1378,10 +1416,57 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               ? null
               : String(context.activeContext.projectId),
         };
+        // A share carries the images its version displays, resolved
+        // under that version's provenance once the caller may share it.
+        const shared =
+          route === "share" && dependencies.resolveShareImages !== undefined
+            ? shareService.versionToShare(
+                body.value,
+                authorizationContext,
+                context.project,
+                principal,
+              )
+            : undefined;
+        const images =
+          shared === undefined || dependencies.resolveShareImages === undefined
+            ? undefined
+            : await dependencies.resolveShareImages(shared.version.definition);
+        // The bytes are kept before the snapshot is recorded, so a recorded
+        // snapshot never names an image that was not kept; a host that stops
+        // in between leaves only unnamed bytes, which the next start removes.
+        // A replay of a recorded snapshot keeps nothing new: its bytes are
+        // already kept, or it was revoked and must not get them back.
+        const shareImages = dependencies.shareImages;
+        const keepsNewImages = shared !== undefined && !shared.recorded && images !== undefined;
+        if (keepsNewImages && shareImages !== undefined) {
+          await shareImages.keepResolved(shared.snapshotId, images);
+        }
         const result =
           route === "share"
-            ? shareService.share(body.value, authorizationContext, context.project, principal)
+            ? shareService.share(
+                body.value,
+                authorizationContext,
+                context.project,
+                principal,
+                images,
+              )
             : shareService.revoke(body.value, authorizationContext, context.project, principal);
+        // The journaled snapshot names its images by digest; it keeps only
+        // those, a refused share keeps none, and a revoked one loses them.
+        if (shareImages !== undefined) {
+          if (route === "share" && keepsNewImages) {
+            if (result.kind === "accepted") {
+              await shareImages.keepOnly(
+                shared.snapshotId,
+                shareService.imagesOf(shared.snapshotId),
+              );
+            } else {
+              await shareImages.forget(shared.snapshotId);
+            }
+          } else if (route === "share-revoke" && result.kind === "accepted") {
+            await shareImages.forget(String(result.snapshot.snapshotId));
+          }
+        }
         return jsonResponse(decodeCanvasShareResult(result), 200, origin);
       }
 
@@ -1425,14 +1510,28 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         // A reader allowed to open the snapshot may run a prototype it holds:
         // the page is ticketed from the snapshot's own design, after the same
         // decision and the same access-log entry as the read itself.
+        const allowed =
+          result.kind === "allowed" && dependencies.shareImages !== undefined
+            ? {
+                ...result,
+                document: await dependencies.shareImages.withBytes(
+                  String(result.event.snapshotId),
+                  result.document,
+                ),
+              }
+            : result;
         const run = result.kind === "allowed" ? sharedDesignRunAsked(body.value) : undefined;
         const designPage =
           result.kind === "allowed" && run !== undefined
-            ? issueSharedDesignRun(dependencies.designRunTickets, result.document, run)
+            ? issueSharedDesignRun(
+                dependencies.designRunTickets,
+                allowed.kind === "allowed" ? allowed.document : result.document,
+                run,
+              )
             : undefined;
         return jsonResponse(
           decodeCanvasShareAccessResult(
-            designPage === undefined ? result : { ...result, designPage },
+            designPage === undefined ? allowed : { ...allowed, designPage },
           ),
           200,
           origin,
@@ -2528,10 +2627,17 @@ async function resolveDesignAssetsForReader(
     };
   }
   const definition = read.version.definition;
-  const block = definition.blocks.find(
-    (candidate): candidate is CanvasDesignBlock =>
-      candidate.kind === "design" && String(candidate.blockId) === String(input.blockId),
+  // An image block that draws a generated image is read the same way, as a
+  // design declaring that one image, so it keeps the same authority and caps.
+  const found = definition.blocks.find(
+    (candidate) => String(candidate.blockId) === String(input.blockId),
   );
+  const block =
+    found?.kind === "design"
+      ? found
+      : found?.kind === "image" && found.generatedImageId !== undefined
+        ? { blockId: found.blockId, assets: canvasImageBlockAssets(found) }
+        : undefined;
   if (block === undefined) {
     return {
       kind: "unavailable",
@@ -2618,8 +2724,15 @@ async function renderCanvasHtmlFileForReader(
   const resolve = dependencies.resolveDesignAssets;
   if (resolve !== undefined) {
     for (const block of definition.blocks) {
-      if (block.kind !== "design" || (block.assets ?? []).length === 0) continue;
-      designAssets.set(String(block.blockId), await resolve(block, definition.provenance));
+      // An image block's generated image resolves as a design declaring it.
+      const declaring =
+        block.kind === "design"
+          ? block
+          : block.kind === "image"
+            ? { blockId: block.blockId, assets: canvasImageBlockAssets(block) }
+            : undefined;
+      if (declaring === undefined || (declaring.assets ?? []).length === 0) continue;
+      designAssets.set(String(block.blockId), await resolve(declaring, definition.provenance));
     }
   }
   const rendered = renderCanvasHtmlFile(definition, {
@@ -2782,11 +2895,12 @@ async function serveDesignPage(
   const grant = dependencies.designRunTickets?.redeem(ticket);
   if (grant === undefined) return refuse(403);
   const assets =
-    (grant.block.assets ?? []).length === 0 ||
+    grant.sharedAssets ??
+    ((grant.block.assets ?? []).length === 0 ||
     grant.provenance === undefined ||
     dependencies.resolveDesignAssets === undefined
       ? []
-      : await dependencies.resolveDesignAssets(grant.block, grant.provenance);
+      : await dependencies.resolveDesignAssets(grant.block, grant.provenance));
   // A token is minted for a frame a browser on this machine is loading, and
   // for a page the desktop's main process asks for its prototype host. The
   // switch is read again here, since it may have gone off after the ticket

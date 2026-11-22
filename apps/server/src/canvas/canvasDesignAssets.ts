@@ -4,11 +4,22 @@ import {
   type CanvasDesignAssetResolution,
   type CanvasDesignAssetUnavailableReason,
   type BrowserCaptureId,
+  type CanvasDefinition,
+  type CanvasDesignAsset,
   type CanvasDesignBlock,
   type CanvasProvenance,
   type ImageArtifactId,
 } from "@octant/contracts";
-import { canonicalizeWorkRelativePath, WorkConfinementRejected } from "@octant/domain";
+import { createHash } from "node:crypto";
+import { CANVAS_SHARE_IMAGES_MAX_BYTES } from "@octant/contracts/canvas-share";
+import {
+  canonicalizeWorkRelativePath,
+  canvasShareImageKey,
+  canvasShareImageSources,
+  WorkConfinementRejected,
+  type CanvasShareResolvedImage,
+  type CanvasShareResolvedImages,
+} from "@octant/domain";
 import { sniffGeneratedImageMediaType } from "../image/generatedImageStore";
 import { readConfinedWorkFile } from "../work/workConfinedRead";
 import type { WorkFilesystemPort } from "../work/workFilesystemPort";
@@ -64,6 +75,49 @@ export interface CanvasDesignAssetPorts {
 }
 
 /**
+ * Read one declared image under the authority of the Canvas version that
+ * declares it: a generated image of its Project or its own thread, a capture
+ * its own thread kept (never in Chat), or a file under the bound folder
+ * (never in Chat, whose Project has no folder).
+ */
+async function readCanvasDesignAssetSource(
+  source: CanvasDesignAsset["source"],
+  provenance: Pick<CanvasProvenance, "mode" | "projectId" | "threadId">,
+  ports: CanvasDesignAssetPorts,
+  maximumBytes: number,
+): Promise<CanvasDesignAssetRead> {
+  if (source.kind === "generated-image") {
+    return ports.generatedImage({
+      imageId: source.imageId,
+      projectId: provenance.projectId === null ? null : String(provenance.projectId),
+      threadId: String(provenance.threadId),
+      maximumBytes,
+    });
+  }
+  if (source.kind === "browser-capture") {
+    // Chat keeps no captures for a design: the Browser is a Work and Code tool.
+    return provenance.mode === "chat"
+      ? { status: "unavailable", reason: "refused" }
+      : ports.browserCapture({
+          captureId: source.captureId,
+          threadId: String(provenance.threadId),
+          maximumBytes,
+        });
+  }
+  if (provenance.mode === "chat" || provenance.projectId === null) {
+    // A Chat Project is virtual: it has no folder for a path to name.
+    return { status: "unavailable", reason: "refused" };
+  }
+  return ports.projectFile({
+    mode: provenance.mode,
+    projectId: String(provenance.projectId),
+    threadId: String(provenance.threadId),
+    path: source.path,
+    maximumBytes,
+  });
+}
+
+/**
  * Resolve every asset a design declares, under the authority of the Canvas
  * version that holds it.
  *
@@ -91,36 +145,7 @@ export async function resolveCanvasDesignAssets(
     };
     const remaining = CANVAS_DESIGN_ASSETS_MAX_BYTES - spent;
     const maximumBytes = Math.min(CANVAS_DESIGN_ASSET_MAX_BYTES, remaining);
-    let read: CanvasDesignAssetRead;
-    if (asset.source.kind === "generated-image") {
-      read = await ports.generatedImage({
-        imageId: asset.source.imageId,
-        projectId: provenance.projectId === null ? null : String(provenance.projectId),
-        threadId: String(provenance.threadId),
-        maximumBytes,
-      });
-    } else if (asset.source.kind === "browser-capture") {
-      // Chat keeps no captures for a design: the Browser is a Work and Code tool.
-      read =
-        provenance.mode === "chat"
-          ? { status: "unavailable", reason: "refused" }
-          : await ports.browserCapture({
-              captureId: asset.source.captureId,
-              threadId: String(provenance.threadId),
-              maximumBytes,
-            });
-    } else if (provenance.mode === "chat" || provenance.projectId === null) {
-      // A Chat Project is virtual: it has no folder for a path to name.
-      read = { status: "unavailable", reason: "refused" };
-    } else {
-      read = await ports.projectFile({
-        mode: provenance.mode,
-        projectId: String(provenance.projectId),
-        threadId: String(provenance.threadId),
-        path: asset.source.path,
-        maximumBytes,
-      });
-    }
+    const read = await readCanvasDesignAssetSource(asset.source, provenance, ports, maximumBytes);
     if (read.status === "unavailable") {
       // Past the design's remaining budget but within the image's own is the
       // design's fault, not the image's.
@@ -149,6 +174,43 @@ export async function resolveCanvasDesignAssets(
     });
   }
   return resolutions;
+}
+
+/**
+ * The images a share of this version carries: every image the document
+ * displays, resolved under the version's own provenance exactly as a
+ * reader's draw resolves it, and sniffed as raster images (maintainer
+ * decision, 2026-11-22). An image that does not resolve, is not a raster
+ * image, or would pass the share's budget is left out; its block then reads
+ * as its description, or its frame draws a placeholder, in the share.
+ */
+export async function resolveCanvasShareImages(
+  definition: Pick<CanvasDefinition, "blocks" | "provenance">,
+  ports: CanvasDesignAssetPorts,
+): Promise<CanvasShareResolvedImages> {
+  const resolved = new Map<string, CanvasShareResolvedImage>();
+  let spent = 0;
+  for (const source of canvasShareImageSources(definition)) {
+    const remaining = CANVAS_SHARE_IMAGES_MAX_BYTES - spent;
+    if (remaining <= 0) break;
+    const read = await readCanvasDesignAssetSource(
+      source,
+      definition.provenance,
+      ports,
+      Math.min(CANVAS_DESIGN_ASSET_MAX_BYTES, remaining),
+    );
+    if (read.status !== "read") continue;
+    const mediaType = sniffGeneratedImageMediaType(read.bytes);
+    if (mediaType === undefined || read.bytes.byteLength > remaining) continue;
+    spent += read.bytes.byteLength;
+    resolved.set(canvasShareImageKey(source), {
+      mediaType,
+      data: Buffer.from(read.bytes).toString("base64"),
+      byteLength: read.bytes.byteLength,
+      sha256: createHash("sha256").update(read.bytes).digest("hex"),
+    });
+  }
+  return resolved;
 }
 
 /**

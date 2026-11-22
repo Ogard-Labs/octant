@@ -65,10 +65,14 @@ export function startShareService(
   const usercontentServer = Bun.serve({
     hostname: config.host,
     port: config.usercontentPort,
-    fetch: (request) =>
+    fetch: (request, server) =>
       context === undefined
         ? new Response("Starting", { status: 503 })
-        : handleFrame(request, context),
+        : handleFrame(
+            request,
+            context,
+            clientAddress(request, server.requestIP(request)?.address, config.trustProxy),
+          ),
   });
 
   const publicOrigin = config.publicOrigin ?? `http://${config.host}:${String(publicServer.port)}`;

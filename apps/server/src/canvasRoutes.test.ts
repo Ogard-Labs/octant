@@ -1,5 +1,6 @@
 import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
-import { mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -26,7 +27,7 @@ import {
   decodeWindowId,
   type ShellBootstrap,
 } from "@octant/contracts";
-import { EventActor } from "@octant/contracts/events";
+import { EventActor, ReplayCursor } from "@octant/contracts/events";
 import {
   canvasChoiceQuestionFingerprint,
   defaultShellSettings,
@@ -35,6 +36,7 @@ import {
 import { AggregateHeadsProjection } from "./persistence/aggregateHeadsProjection";
 import { EventRegistry } from "./persistence/eventRegistry";
 import { Journal } from "./persistence/journal";
+import { CanvasShareImageStore } from "./canvas/canvasShareImageStore";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { ProjectionRegistry } from "./persistence/projection";
 import { openSqlite } from "./persistence/sqlitePort";
@@ -146,6 +148,8 @@ function createRevisionRoute(
       readonly advance: (ms: number) => void;
     }) => void;
     readonly canvasExportService?: CanvasRouteDependencies["canvasExportService"];
+    readonly resolveShareImages?: CanvasRouteDependencies["resolveShareImages"];
+    readonly shareImages?: CanvasRouteDependencies["shareImages"];
   } = {},
 ) {
   const canvasProjectId = options.threadOwned === true ? null : projectId;
@@ -419,6 +423,10 @@ function createRevisionRoute(
     ...(options.findPublishedSnapshot === undefined
       ? {}
       : { findPublishedSnapshot: options.findPublishedSnapshot }),
+    ...(options.resolveShareImages === undefined
+      ? {}
+      : { resolveShareImages: options.resolveShareImages }),
+    ...(options.shareImages === undefined ? {} : { shareImages: options.shareImages }),
     ...(options.resolveDesignSystem === undefined
       ? {}
       : { resolveDesignSystem: options.resolveDesignSystem }),
@@ -1101,6 +1109,13 @@ describe("canvas routes", () => {
                 },
               ],
             },
+            {
+              blockId: "cover" as never,
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              kind: "image",
+              generatedImageId: "55555555-5555-4555-8555-555555555555" as never,
+              alt: "A lighthouse at dusk",
+            },
           ],
         },
       },
@@ -1184,6 +1199,25 @@ describe("canvas routes", () => {
     });
     expect(resolveDesignAssets).toHaveBeenCalledWith(
       expect.objectContaining({ blockId: "phone" }),
+      expect.objectContaining({ mode: "chat", projectId, threadId }),
+    );
+
+    // An image block that draws a generated image is read as that one image,
+    // under the same version provenance.
+    resolveDesignAssets.mockClear();
+    expect(
+      (await ask(`canvasId=${String(canvasId)}&versionId=${versionId}&blockId=cover`)).body,
+    ).toMatchObject({ kind: "ready", blockId: "cover" });
+    expect(resolveDesignAssets).toHaveBeenCalledWith(
+      {
+        blockId: "cover",
+        assets: [
+          {
+            assetId: "image",
+            source: { kind: "generated-image", imageId: "55555555-5555-4555-8555-555555555555" },
+          },
+        ],
+      },
       expect.objectContaining({ mode: "chat", projectId, threadId }),
     );
 
@@ -2347,6 +2381,103 @@ describe("canvas routes", () => {
       kind: "heading",
       text: "What happened",
     });
+  });
+
+  it("keeps a snapshot's image bytes out of the journal, serves exactly those bytes to its readers, and drops them when it is revoked", async () => {
+    const imageId = "9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a";
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9, 9, 9]);
+    const pixel = {
+      mediaType: "image/png" as const,
+      data: bytes.toString("base64"),
+      byteLength: bytes.byteLength,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    };
+    const resolveShareImages = vi.fn(async () => new Map([[`generated-image:${imageId}`, pixel]]));
+    const dataDirectory = mkdtempSync(join(tmpdir(), "octant-share-images-"));
+    const shareImages = new CanvasShareImageStore(dataDirectory);
+    let journal: Journal | undefined;
+    const route = createRevisionRoute(new CanvasProjection(), {
+      journal: (opened) => {
+        journal = opened;
+      },
+      shareImages,
+      extraBlocks: [
+        {
+          blockId: "cover",
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          kind: "image",
+          generatedImageId: imageId,
+          alt: "A lighthouse at dusk",
+        },
+      ],
+      resolveShareImages,
+    });
+    const post = (path: string, body: unknown) =>
+      route(
+        new Request(`http://127.0.0.1/api/canvas/${path}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "user-agent": "Mozilla/5.0 (Macintosh) Chrome/1.0",
+            "x-octant-window-capability": windowCapability,
+          },
+          body: JSON.stringify(body),
+        }),
+      );
+    // The share panel lists what the snapshot copies before anyone shares it.
+    const listed = await route(
+      new Request(`http://127.0.0.1/api/canvas/share?canvasId=${String(canvasId)}`, {
+        method: "GET",
+        headers: { "x-octant-window-capability": windowCapability },
+      }),
+    );
+    expect(decodeCanvasShareOverview(JSON.parse(await listed!.text())).images).toEqual([
+      { imageRef: "image-1", ...pixel },
+    ]);
+    // Consent that did not list this image does not copy it.
+    const unreviewed = decodeCanvasShareResult(
+      JSON.parse(await (await post("share", shareBody()))!.text()),
+    );
+    expect(unreviewed).toMatchObject({ kind: "denied", denialCode: "consent-required" });
+    expect(existsSync(join(dataDirectory, "canvas-share-images", shareBody().snapshotId))).toBe(
+      false,
+    );
+    const body = shareBody();
+    const shared = decodeCanvasShareResult(
+      JSON.parse(
+        await (await post("share", {
+          ...body,
+          consent: { ...body.consent, acknowledgedImages: [pixel.sha256] },
+        }))!.text(),
+      ),
+    );
+    expect(shared.kind).toBe("accepted");
+    const allowed = decodeCanvasShareAccessResult(
+      JSON.parse(await (await post("share-access", accessBody()))!.text()),
+    );
+    if (allowed.kind !== "allowed") throw new Error("expected the snapshot");
+    expect(allowed.document.images).toEqual([{ imageRef: "image-1", ...pixel }]);
+    expect(allowed.document.blocks.find((block) => block.kind === "image")).toMatchObject({
+      imageRef: "image-1",
+    });
+    expect(JSON.stringify(allowed.document)).not.toContain(imageId);
+    // The journal names the image by digest and never holds its bytes.
+    const journaled = JSON.stringify(
+      journal?.replay(Schema.decodeUnknownSync(ReplayCursor)({ afterSequence: 0, limit: 500 })),
+    );
+    expect(journaled).toContain(pixel.sha256);
+    expect(journaled).not.toContain(pixel.data);
+
+    await post("share-revoke", revokeBody());
+    const kept = join(dataDirectory, "canvas-share-images");
+    expect(existsSync(kept) ? readdirSync(kept) : []).toEqual([]);
+    // Replaying the original share after revoking it brings no bytes back.
+    await post("share", {
+      ...body,
+      consent: { ...body.consent, acknowledgedImages: [pixel.sha256] },
+    });
+    expect(existsSync(kept) ? readdirSync(kept) : []).toEqual([]);
+    rmSync(dataDirectory, { recursive: true, force: true });
   });
 
   it("shares, serves, revokes, and then refuses a Canvas snapshot over the API", async () => {

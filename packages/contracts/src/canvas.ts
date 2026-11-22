@@ -286,6 +286,9 @@ export const CANVAS_CHOICE_SCHEMA_VERSION = 27;
 export const CANVAS_DESIGN_SYSTEM_SCHEMA_VERSION = 28;
 // A decision form: sections on a choice block and a per-question `allowNote`.
 export const CANVAS_DECISION_FORM_SCHEMA_VERSION = 29;
+// An image block that draws a generated image (`generatedImageId`) instead of
+// naming a manifest source.
+export const CANVAS_GENERATED_IMAGE_BLOCK_SCHEMA_VERSION = 30;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -2880,14 +2883,54 @@ export const CanvasEvidenceReferenceBlock = Schema.Struct({
 }).annotations(strict);
 export type CanvasEvidenceReferenceBlock = typeof CanvasEvidenceReferenceBlock.Type;
 
+/**
+ * A picture with its description. It names either a manifest source, which
+ * draws as its description, or a completed generated image
+ * (`generatedImageId`, its attachment id), which the host resolves under the
+ * Canvas version's own provenance each time a reader draws it, exactly as a
+ * design's `generated-image` asset resolves. A generated image is named on the
+ * block rather than in the source manifest because a manifest entry names a
+ * Project, and a Canvas its Chat thread owns has none. The definition holds
+ * only the reference; the bytes are never journaled.
+ */
 export const CanvasImageBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("image"),
-  sourceId: CanvasSourceId,
+  sourceId: Schema.optional(CanvasSourceId),
+  generatedImageId: Schema.optional(ImageArtifactId),
   alt: CanvasNonEmptyText,
   caption: Schema.optional(CanvasText),
-}).annotations(strict);
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (block) => (block.sourceId === undefined) !== (block.generatedImageId === undefined),
+      { message: () => "An image block names exactly one of sourceId or generatedImageId." },
+    ),
+  );
 export type CanvasImageBlock = typeof CanvasImageBlock.Type;
+
+/**
+ * The asset id an image block's generated image travels under when the host
+ * resolves it through the design asset read, so a reader and an export draw
+ * it with the same authority, budget, and placeholders a design's images use.
+ */
+export const CANVAS_IMAGE_BLOCK_ASSET_ID: CanvasDesignAssetId =
+  Schema.decodeSync(CanvasDesignAssetId)("image");
+
+/** The one asset an image block declares: its generated image, or none. */
+export function canvasImageBlockAssets(
+  block: Pick<CanvasImageBlock, "generatedImageId">,
+): ReadonlyArray<CanvasDesignAsset> {
+  return block.generatedImageId === undefined
+    ? []
+    : [
+        {
+          assetId: CANVAS_IMAGE_BLOCK_ASSET_ID,
+          source: { kind: "generated-image", imageId: block.generatedImageId },
+        },
+      ];
+}
 
 /**
  * The block kinds a dashboard may place. A dashboard is never among them, so
@@ -3250,6 +3293,14 @@ const CANVAS_VERSION_GATES: readonly CanvasVersionGate[] = [
     carries: (definition) => definition.designSystem !== undefined,
     requirement: `A Canvas design system requires Canvas schema version ${String(CANVAS_DESIGN_SYSTEM_SCHEMA_VERSION)}.`,
   },
+  {
+    since: CANVAS_GENERATED_IMAGE_BLOCK_SCHEMA_VERSION,
+    carries: (definition) =>
+      definition.blocks.some(
+        (block) => block.kind === "image" && block.generatedImageId !== undefined,
+      ),
+    requirement: `An image block that draws a generated image requires Canvas schema version ${String(CANVAS_GENERATED_IMAGE_BLOCK_SCHEMA_VERSION)}.`,
+  },
 ];
 
 /**
@@ -3340,6 +3391,7 @@ export const decodeCanvasId = Schema.decodeUnknownSync(CanvasId);
 export const decodeCanvasVersionId = Schema.decodeUnknownSync(CanvasVersionId);
 export const decodeCanvasSourceId = Schema.decodeUnknownSync(CanvasSourceId);
 export const decodeCanvasBlockId = Schema.decodeUnknownSync(CanvasBlockId);
+export const decodeCanvasDesignAssetId = Schema.decodeUnknownSync(CanvasDesignAssetId);
 export const decodeCanvasSchemaVersion = Schema.decodeUnknownSync(CanvasSchemaVersion);
 export const decodeCanvasActor = Schema.decodeUnknownSync(CanvasActor);
 export const decodeCanvasProvenance = Schema.decodeUnknownSync(CanvasProvenance);

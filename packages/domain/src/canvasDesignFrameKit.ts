@@ -703,3 +703,327 @@ export function designFrameTokenValueIsSafe(value: string): boolean {
     !/url\s*\(|@import|expression\s*\(/i.test(value)
   );
 }
+
+// What stands right before an address the browser loads, in the positions the
+// markup policy admits a design asset reference: a `url()`, a `src`, `srcset`,
+// `poster`, or `background` value (or a later srcset candidate), and a quoted
+// `image-set()` candidate. The same token in prose, `alt`, or any other
+// attribute is the author's text and is left as written.
+const DESIGN_ASSET_ADDRESS_LEAD = String.raw`(?:url\(\s*["']?\s*|(?:^|[\s"'/])(?:src|srcset|poster|background)\s*=\s*["']?\s*|(?:^|[\s"'/])srcset\s*=\s*(?:"[^"]*?,\s*|'[^']*?,\s*)|image-set\((?:[^()]|\([^()]*\))*?["']\s*)`;
+const DESIGN_ASSET_REFERENCE = new RegExp(
+  `(?<=${DESIGN_ASSET_ADDRESS_LEAD})octant-asset:([A-Za-z0-9][A-Za-z0-9._-]{0,63})`,
+  "gi",
+);
+
+/**
+ * A design's markup with each `octant-asset:<id>` reference in an image
+ * position replaced by the address `address` gives that id, for a page that
+ * draws a design without a host to ask, such as a shared copy.
+ */
+export function withDesignAssetAddresses(
+  markup: string,
+  address: (assetId: string) => string,
+): string {
+  if (!/octant-asset:/i.test(markup)) return markup;
+  // Only the scheme as the markup policy admits it, in lowercase, is a reference.
+  return markup.replace(DESIGN_ASSET_REFERENCE, (reference: string, id: string) =>
+    reference.startsWith("octant-asset:") ? address(id) : reference,
+  );
+}
+
+/** Half-open [start, end) offsets of the comments a browser ignores in some markup. */
+type CommentRanges = ReadonlyArray<readonly [number, number]>;
+
+/** The end of a quoted string opened at `start`, past its closing quote. */
+function quotedEnd(text: string, start: number, stopAtNewline: boolean): number {
+  const quote = text[start];
+  for (let index = start + 1; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === "\\") index += 1;
+    else if (char === quote) return index + 1;
+    else if (stopAtNewline && char === "\n") return index;
+  }
+  return text.length;
+}
+
+/** Comments in CSS from `start` to `end`: block comments outside strings. */
+function cssComments(text: string, start: number, end: number, into: Array<[number, number]>) {
+  let index = start;
+  while (index < end) {
+    const char = text[index];
+    if (char === '"' || char === "'") {
+      index = Math.min(quotedEnd(text, index, true), end);
+    } else if (char === "/" && text[index + 1] === "*") {
+      const close = text.indexOf("*/", index + 2);
+      const stop = close === -1 || close + 2 > end ? end : close + 2;
+      into.push([index, stop]);
+      index = stop;
+    } else {
+      index += 1;
+    }
+  }
+}
+
+/** Comments in a script from `start` to `end`: block and line comments outside strings. */
+/** ECMAScript line terminators, which end a `//` comment. */
+const LINE_TERMINATOR = /[\n\r\u2028\u2029]/g;
+/** A `/` after one of these (or at the start) opens a regular expression literal. */
+const REGEX_PRECEDES = new Set([
+  "",
+  "(",
+  ",",
+  "=",
+  ":",
+  "[",
+  "!",
+  "&",
+  "|",
+  "?",
+  "{",
+  "}",
+  ";",
+  "+",
+  "-",
+  "*",
+  "%",
+  "<",
+  ">",
+  "~",
+  "^",
+]);
+
+/** The end of a regular expression literal opened at `start`, past its closing `/`. */
+function regexEnd(text: string, start: number, end: number): number {
+  let inClass = false;
+  for (let index = start + 1; index < end; index += 1) {
+    const char = text[index];
+    if (char === "\\") index += 1;
+    else if (char === "\n" || char === "\r") return index;
+    else if (char === "[") inClass = true;
+    else if (char === "]") inClass = false;
+    else if (char === "/" && !inClass) return index + 1;
+  }
+  return end;
+}
+
+/**
+ * Comments in a script from `start` to `end`: block and line comments outside
+ * strings and regular expression literals. A `/` opens a regular expression
+ * where an expression may begin, read from the last code character before
+ * it; that reading misses only rare forms such as a regex after a keyword.
+ */
+function scriptComments(text: string, start: number, end: number, into: Array<[number, number]>) {
+  let index = start;
+  let previous = "";
+  while (index < end) {
+    const char = text[index] ?? "";
+    if (char === '"' || char === "'" || char === "`") {
+      index = Math.min(quotedEnd(text, index, char !== "`"), end);
+      previous = char;
+    } else if (char === "/" && text[index + 1] === "*") {
+      const close = text.indexOf("*/", index + 2);
+      const stop = close === -1 || close + 2 > end ? end : close + 2;
+      into.push([index, stop]);
+      index = stop;
+    } else if (char === "/" && text[index + 1] === "/") {
+      LINE_TERMINATOR.lastIndex = index + 2;
+      const close = LINE_TERMINATOR.exec(text)?.index ?? -1;
+      const stop = close === -1 || close > end ? end : close;
+      into.push([index, stop]);
+      index = stop;
+    } else if (char === "/" && REGEX_PRECEDES.has(previous)) {
+      index = regexEnd(text, index, end);
+      previous = "/";
+    } else {
+      if (!/\s/.test(char)) previous = char;
+      index += 1;
+    }
+  }
+}
+
+// Character references a browser decodes in an attribute before compiling a
+// handler: numeric ones with or without their semicolon, and the named ones a
+// handler's quotes, ampersands, brackets and line breaks are written with.
+const CHARACTER_REFERENCE =
+  /&(?:#(\d{1,7});?|#[xX]([0-9a-fA-F]{1,6});?|(quot|apos|amp|lt|gt|NewLine|Tab|sol|bsol|ast|lpar|rpar);)/y;
+const NAMED_CHARACTERS: Readonly<Record<string, string>> = {
+  quot: '"',
+  apos: "'",
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  NewLine: "\n",
+  Tab: "\t",
+  sol: "/",
+  bsol: "\\",
+  ast: "*",
+  lpar: "(",
+  rpar: ")",
+};
+
+/**
+ * Comments in an inline event handler's value from `start` to `end`. A
+ * browser decodes the value's character references before compiling it, so
+ * `&quot;` opens a string there; the comments are read in the decoded script
+ * and mapped back to the markup.
+ */
+function handlerComments(text: string, start: number, end: number, into: Array<[number, number]>) {
+  let decoded = "";
+  const offsets: number[] = [];
+  let index = start;
+  while (index < end) {
+    CHARACTER_REFERENCE.lastIndex = index;
+    const reference = text[index] === "&" ? CHARACTER_REFERENCE.exec(text) : null;
+    if (reference !== null && reference.index + reference[0].length <= end) {
+      const code =
+        reference[1] !== undefined
+          ? Number(reference[1])
+          : reference[2] !== undefined
+            ? Number.parseInt(reference[2], 16)
+            : undefined;
+      decoded +=
+        code === undefined
+          ? (NAMED_CHARACTERS[reference[3] ?? ""] ?? "")
+          : code <= 0x10ffff
+            ? String.fromCodePoint(code)
+            : "\ufffd";
+      while (offsets.length < decoded.length) offsets.push(index);
+      index += reference[0].length;
+    } else {
+      decoded += text[index] ?? "";
+      offsets.push(index);
+      index += 1;
+    }
+  }
+  offsets.push(end);
+  const local: Array<[number, number]> = [];
+  scriptComments(decoded, 0, decoded.length, local);
+  for (const [from, to] of local) into.push([offsets[from] ?? end, offsets[to] ?? end]);
+}
+
+// The element name ends at a tag delimiter: `<script-preview>` is a custom
+// element whose children are HTML, not a script.
+const RAW_TEXT_OPEN =
+  /<(style|script|textarea|title|xmp|iframe|noembed|noframes|plaintext)(?=[\t\n\f\r />])[^>]*>/iy;
+const TAG_NAME = /<[A-Za-z][^\s/>]*/y;
+const ATTRIBUTE = /[\s/]*([^\s=/>][^\s=>]*)(?:\s*=\s*("[^"]*"?|'[^']*'?|[^\s>]*))?/y;
+/** Attributes whose value a browser loads as an image. */
+const IMAGE_ATTRIBUTES = new Set(["src", "srcset", "poster", "background"]);
+
+/**
+ * Where a browser would never draw an image reference in a design's frame
+ * markup or stylesheet: comments (HTML comments in markup; CSS comments in a
+ * stylesheet, a `<style>` element and a `style` attribute, quoted or not;
+ * script comments in a `<script>` element or an inline event handler), and in
+ * markup also text content and the values of attributes that load no image,
+ * such as `alt`. A `/*` in
+ * a frame's text, or a `<!--` inside CSS, opens nothing. It is a reading for
+ * finding image references, not a parser: a regular expression literal in a
+ * script is read as code, which can only hide a reference, never invent one.
+ */
+export function designMarkupInertRanges(markup: string, language: "html" | "css"): CommentRanges {
+  const ranges: Array<[number, number]> = [];
+  if (language === "css") {
+    cssComments(markup, 0, markup.length, ranges);
+    return ranges;
+  }
+  let index = 0;
+  let textStart = 0;
+  const endText = (at: number) => {
+    if (at > textStart) ranges.push([textStart, at]);
+  };
+  while (index < markup.length) {
+    if (markup.startsWith("<!--", index)) {
+      endText(index);
+      const close = markup.indexOf("-->", index + 4);
+      const stop = close === -1 ? markup.length : close + 3;
+      ranges.push([index, stop]);
+      index = textStart = stop;
+      continue;
+    }
+    TAG_NAME.lastIndex = index;
+    const name = markup[index + 1] === "/" ? null : TAG_NAME.exec(markup);
+    if (name === null) {
+      if (markup[index] === "<" && markup[index + 1] === "/") {
+        endText(index);
+        const close = markup.indexOf(">", index);
+        index = textStart = close === -1 ? markup.length : close + 1;
+      } else {
+        index += 1;
+      }
+      continue;
+    }
+    endText(index);
+    // The tag's attributes: an image attribute's value is live, a style
+    // value is CSS, and every other value is the author's text.
+    let cursor = index + name[0].length;
+    while (cursor < markup.length && markup[cursor] !== ">") {
+      ATTRIBUTE.lastIndex = cursor;
+      const attribute = ATTRIBUTE.exec(markup);
+      if (attribute === null || attribute[0].length === 0) {
+        cursor += 1;
+        continue;
+      }
+      const attributeName = (attribute[1] ?? "").toLowerCase();
+      const value = attribute[2];
+      if (value !== undefined) {
+        const valueStart = cursor + attribute[0].length - value.length;
+        const quoted = value.startsWith('"') || value.startsWith("'") ? 1 : 0;
+        const closed = quoted === 1 && value.length > 1 && value.endsWith(value[0] ?? "") ? 1 : 0;
+        const inner: [number, number] = [valueStart + quoted, valueStart + value.length - closed];
+        if (attributeName === "style") cssComments(markup, inner[0], inner[1], ranges);
+        // An inline event handler is script a running design runs, once the
+        // browser has decoded its character references.
+        else if (attributeName.startsWith("on"))
+          handlerComments(markup, inner[0], inner[1], ranges);
+        else if (!IMAGE_ATTRIBUTES.has(attributeName)) ranges.push(inner);
+      }
+      cursor += attribute[0].length;
+    }
+    const tagEnd = Math.min(cursor + 1, markup.length);
+    RAW_TEXT_OPEN.lastIndex = index;
+    const raw = RAW_TEXT_OPEN.exec(markup);
+    // A self-closing `<title/>` is an SVG element with no body. HTML ignores
+    // the marker on `style`, `script` and its other raw-text elements, and a
+    // `/` ending an unquoted value is part of the value.
+    const svgTitle = raw !== null && raw[1]?.toLowerCase() === "title" && /\s*\/>$/.test(raw[0]);
+    if (raw !== null && !svgTitle) {
+      const element = (raw[1] ?? "").toLowerCase();
+      const closing = new RegExp(`</${element}\\s*>`, "ig");
+      closing.lastIndex = tagEnd;
+      const close = closing.exec(markup);
+      const bodyEnd = close === null ? markup.length : close.index;
+      if (element === "style") cssComments(markup, tagEnd, bodyEnd, ranges);
+      else if (element === "script") scriptComments(markup, tagEnd, bodyEnd, ranges);
+      // The other elements' contents are text a browser shows or ignores,
+      // never markup: an `<img>` inside a `<textarea>` draws nothing.
+      else ranges.push([tagEnd, bodyEnd]);
+      index = textStart = bodyEnd;
+      continue;
+    }
+    index = textStart = tagEnd;
+  }
+  endText(markup.length);
+  return ranges;
+}
+
+/**
+ * {@link withDesignAssetAddresses} for the references a browser would draw:
+ * a reference in a comment, in text, or in an attribute that loads no image
+ * is left as written, which loads nothing, and `address` is never asked for
+ * it.
+ */
+export function withDrawnDesignAssetAddresses(
+  markup: string,
+  language: "html" | "css",
+  address: (assetId: string) => string,
+): string {
+  if (!/octant-asset:/i.test(markup)) return markup;
+  const inert = designMarkupInertRanges(markup, language);
+  return markup.replace(DESIGN_ASSET_REFERENCE, (reference: string, id: string, offset: number) =>
+    !reference.startsWith("octant-asset:") ||
+    inert.some(([start, end]) => offset >= start && offset < end)
+      ? reference
+      : address(id),
+  );
+}

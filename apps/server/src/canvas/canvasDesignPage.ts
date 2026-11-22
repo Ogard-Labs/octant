@@ -101,9 +101,15 @@ export interface CanvasDesignRunGrant {
   readonly block: CanvasDesignBlock;
   /**
    * The authority the design's declared images resolve under. Absent for a
-   * design read from a shared snapshot, which carries no image to resolve.
+   * design read from a shared snapshot, which carries its images instead.
    */
   readonly provenance?: CanvasProvenance;
+  /**
+   * The images a shared snapshot's design shows, from the bytes the snapshot
+   * carries. A snapshot's page is drawn from these and never resolves a live
+   * image, since the reader's authority is the snapshot's, not the thread's.
+   */
+  readonly sharedAssets?: ReadonlyArray<CanvasDesignAssetResolution>;
   /**
    * A local window asked for this page while its Canvas's **Allow network**
    * switch was on. Only such a ticket can be served with a proxy path; a
@@ -170,7 +176,7 @@ export class CanvasDesignRunTickets {
  */
 export function issueSharedDesignRun(
   tickets: CanvasDesignRunTickets | undefined,
-  document: Pick<CanvasStaticExportDocument, "canvasId" | "versionId" | "blocks">,
+  document: Pick<CanvasStaticExportDocument, "canvasId" | "versionId" | "blocks" | "images">,
   run: { readonly blockId: CanvasBlockId; readonly frameId?: string | undefined },
 ): string | undefined {
   if (tickets === undefined) return undefined;
@@ -185,14 +191,30 @@ export function issueSharedDesignRun(
   ) {
     return undefined;
   }
+  const images = new Map((document.images ?? []).map((image) => [String(image.imageRef), image]));
+  const sharedAssets = (block.assets ?? []).flatMap((asset): CanvasDesignAssetResolution[] => {
+    const image = images.get(String(asset.imageRef));
+    return image?.data === undefined
+      ? []
+      : [
+          {
+            assetId: asset.assetId,
+            status: "resolved",
+            mediaType: image.mediaType,
+            data: image.data,
+          },
+        ];
+  });
   return canvasDesignPagePath(
     tickets.issue({
       canvasId: document.canvasId,
       versionId: document.versionId,
       blockId: run.blockId,
       startFrameId: String(startFrameId),
-      // A shared design is a design without declared images.
+      // A shared design names its images by the share's own references; the
+      // page draws them from the bytes the snapshot carries.
       block: block as CanvasDesignBlock,
+      sharedAssets,
     }),
   );
 }
@@ -680,7 +702,7 @@ export class CanvasExportImages {
     return [...this.#leftOut].filter((key) => key.startsWith(prefix)).length;
   }
 
-  forDesign(block: CanvasDesignBlock): AssetAddresses {
+  forDesign(block: Pick<CanvasDesignBlock, "blockId" | "assets">): AssetAddresses {
     const blockId = String(block.blockId);
     const outcomes = this.#resolved.get(blockId) ?? [];
     const declared = new Set((block.assets ?? []).map((asset) => String(asset.assetId)));

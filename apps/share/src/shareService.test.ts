@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { CANVAS_PUBLIC_SHARE_MAX_DOCUMENT_BYTES, CANVAS_SHARE_SCHEMA_VERSION } from "./shareKit.ts";
 import { readShareConfig, type ShareConfig } from "./config.ts";
 import { startShareService, type ShareService } from "./server.ts";
+import { renderDesignFramePage } from "./frames.ts";
 import { ShareStore } from "./store.ts";
 import { runTakedown } from "./takedown.ts";
 
@@ -676,6 +677,145 @@ describe("share service", () => {
     expect(frame).not.toContain("allow-same-origin");
   });
 
+  test("keeps opening a link published under an earlier share version after the service learns a newer one", async () => {
+    start();
+    const body = createBody([heading, prose("Published before images")]);
+    const created = await create({
+      ...body,
+      document: { ...body.document, shareSchemaVersion: 17 },
+    });
+    // The service reads the stored document back on every view and owner call.
+    const view = await fetch(created.url);
+    expect(view.status).toBe(200);
+    expect(await view.text()).toContain("Published before images");
+    const status = await fetch(`${service?.publicUrl}/api/v1/shares/${created.shareId}`, {
+      headers: owner(created.ownerSecret),
+    });
+    expect(status.status).toBe(200);
+  });
+
+  test("draws the images a share carries on the page and in design frames, and takes images past the document budget", async () => {
+    start();
+    // A picture larger than the whole document budget still leaves with its
+    // share: images count against their own budget, not the text's.
+    const bytes = Buffer.alloc(CANVAS_PUBLIC_SHARE_MAX_DOCUMENT_BYTES + 1024, 7);
+    bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const data = bytes.toString("base64");
+    const image = {
+      imageRef: "image-1",
+      mediaType: "image/png",
+      byteLength: bytes.byteLength,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      data,
+    };
+    const cover = {
+      blockId: "cover",
+      schemaVersion: 30,
+      kind: "image",
+      alt: "A lighthouse at dusk",
+      caption: "Cover art",
+      imageRef: "image-1",
+    };
+    const framed = design({
+      frames: [
+        { frameId: "home", title: "Home", html: '<img src="octant-asset:hero" alt="Hero">' },
+      ],
+      assets: [{ assetId: "hero", imageRef: "image-1" }],
+    });
+    const body = createBody([cover, framed]);
+    const created = await create({ ...body, document: { ...body.document, images: [image] } });
+    const page = await (await fetch(created.url)).text();
+    // Each image is served once at its own address on the share's path.
+    const viewerImage = `/s/${created.shareId}/images/${image.sha256}`;
+    expect(page).toContain(
+      `<figure class="image"><img src="${viewerImage}" alt="A lighthouse at dusk"><figcaption>Cover art</figcaption></figure>`,
+    );
+    expect(page).not.toContain(data.slice(0, 64));
+    const served = await fetch(`${service?.publicUrl}${viewerImage}`);
+    expect(served.status).toBe(200);
+    expect(served.headers.get("content-type")).toBe("image/png");
+    // The browser asks again before reusing it, so a revoked link stops serving it.
+    expect(served.headers.get("cache-control")).toBe("private, no-cache");
+    expect(served.headers.get("etag")).toBe(`"${image.sha256}"`);
+    const revalidated = await fetch(`${service?.publicUrl}${viewerImage}`, {
+      headers: { "if-none-match": `"${image.sha256}"` },
+    });
+    expect(revalidated.status).toBe(304);
+    expect(revalidated.headers.get("content-type")).toBeNull();
+    expect(Buffer.from(await served.arrayBuffer()).equals(bytes)).toBe(true);
+    // An image the share does not carry is not found.
+    expect(
+      (await fetch(`${service?.publicUrl}/s/${created.shareId}/images/${"0".repeat(64)}`)).status,
+    ).toBe(404);
+
+    const frameSrc = (
+      /src="([^"]+)"/.exec(/<iframe[^>]*>/.exec(page)?.[0] ?? "")?.[1] ?? ""
+    ).replace(/&amp;/g, "&");
+    const frameResponse = await fetch(frameSrc);
+    const frameImages = `${service?.usercontentUrl}/f/${created.shareId}/landing/images/`;
+    expect(frameResponse.headers.get("content-security-policy")).toContain(
+      `img-src data: ${frameImages};`,
+    );
+    const frame = await frameResponse.text();
+    expect(frame).not.toContain("octant-asset:");
+    const frameImage = /<img src="([^"]+)" alt="Hero">/.exec(frame)?.[1] ?? "";
+    expect(frameImage.startsWith(`/f/${created.shareId}/landing/images/${image.sha256}?t=`)).toBe(
+      true,
+    );
+    const drawn = await fetch(`${service?.usercontentUrl}${frameImage}`);
+    expect(drawn.status).toBe(200);
+    // A sandboxed frame's own images are a cross-origin load to it.
+    expect(drawn.headers.get("access-control-allow-origin")).toBe("*");
+    expect(Buffer.from(await drawn.arrayBuffer()).equals(bytes)).toBe(true);
+    // A prototype left open past its frame token still draws its images.
+    now += 11 * 60_000;
+    expect((await fetch(`${service?.usercontentUrl}${frameImage}`)).status).toBe(200);
+    // The frame's image answers only under the frame's token.
+    expect(
+      (await fetch(`${service?.usercontentUrl}${frameImage.split("?")[0] ?? ""}`)).status,
+    ).toBe(403);
+
+    // A revoked share serves its images no more.
+    await fetch(`${service?.publicUrl}/api/v1/shares/${created.shareId}`, {
+      method: "DELETE",
+      headers: owner(created.ownerSecret),
+    });
+    expect((await fetch(`${service?.publicUrl}${viewerImage}`)).status).toBe(404);
+    expect((await fetch(`${service?.usercontentUrl}${frameImage}`)).status).toBe(404);
+  });
+
+  test("serves a protected link's images only with its password grant", async () => {
+    start();
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    const image = {
+      imageRef: "image-1",
+      mediaType: "image/png",
+      byteLength: bytes.byteLength,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      data: bytes.toString("base64"),
+    };
+    const cover = {
+      blockId: "cover",
+      schemaVersion: 30,
+      kind: "image",
+      alt: "Cover",
+      imageRef: "image-1",
+    };
+    const body = createBody([cover], { password: "correct horse" });
+    const created = await create({ ...body, document: { ...body.document, images: [image] } });
+    const address = `${service?.publicUrl}/s/${created.shareId}/images/${image.sha256}`;
+    expect((await fetch(address)).status).toBe(404);
+    const unlocked = await fetch(created.url, {
+      method: "POST",
+      body: new URLSearchParams({ password: "correct horse" }),
+      redirect: "manual",
+    });
+    const cookie = (unlocked.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+    const granted = await fetch(address, { headers: { cookie } });
+    expect(granted.status).toBe(200);
+    expect(Buffer.from(await granted.arrayBuffer()).equals(bytes)).toBe(true);
+  });
+
   test("offers a running prototype only as a link until the viewer asks to run it", async () => {
     start();
     const created = await create(createBody([design({ runsScript: true })]));
@@ -932,5 +1072,47 @@ describe("share configuration", () => {
       expect(result.config.usercontentOrigin).toBe("http://127.0.0.1:4101");
       expect(result.config.maxTotalBytes).toBe(5 * 1024 * 1024 * 1024);
     }
+  });
+});
+
+describe("design frame pages", () => {
+  test("names each carried image by its address however often the frame shows it, and draws nothing a comment names", () => {
+    const image = {
+      imageRef: "image-1",
+      mediaType: "image/png",
+      byteLength: 12,
+      sha256: "a".repeat(64),
+      data: "iVBORw0KGgoBAgME",
+    } as const;
+    const address = () => "/f/share/landing/images/aaa?t=token";
+    // A frame naming one image a hundred times, under a dozen asset ids.
+    const aliases = Array.from({ length: 12 }, (_, index) => `alias-${String(index)}`);
+    const page = renderDesignFramePage(
+      design({
+        schemaVersion: 30,
+        frames: [
+          {
+            frameId: "home",
+            title: "Home",
+            html:
+              '<img src="octant-asset:hero" alt="">'.repeat(100) +
+              aliases.map((id) => `<img src="octant-asset:${id}" alt="">`).join("") +
+              '<!-- <img src="octant-asset:hero" alt=""> -->',
+          },
+        ],
+        styles: ".hero { background: url(octant-asset:hero); } /* url(octant-asset:hero) */",
+        assets: [
+          { assetId: "hero", imageRef: "image-1" },
+          ...aliases.map((assetId) => ({ assetId, imageRef: "image-1" })),
+        ],
+      }) as never,
+      [image as never],
+      address,
+    );
+    expect(page.split(address()).length - 1).toBe(113);
+    expect(page.length).toBeLessThan(16 * 1024);
+    expect(page).not.toContain(image.data);
+    expect(page).toContain('<!-- <img src="octant-asset:hero" alt=""> -->');
+    expect(page).toContain("/* url(octant-asset:hero) */");
   });
 });
