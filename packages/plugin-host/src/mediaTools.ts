@@ -825,7 +825,11 @@ export function createContributedMediaTool(input: {
   if (input.plugin.kind !== MEDIA_TOOL_CONTRIBUTION_KIND) return undefined;
   if (!input.plugin.modes.includes(input.port.turn.mode)) return undefined;
   const inner = input.plugin.createTools(input.port);
-  if (inner === undefined || inner.definitions.length === 0) return undefined;
+  if (inner === undefined) return undefined;
+  if (inner.definitions.length === 0) {
+    closeWithheldMediaTool(inner);
+    return undefined;
+  }
   const seenInternal = new Set<string>();
   const routed = new Map<string, string>();
   const definitions: ProviderToolDefinition[] = [];
@@ -836,6 +840,7 @@ export function createContributedMediaTool(input: {
       !isValidContributedDefinition(definition) ||
       seenInternal.has(definition.name)
     ) {
+      closeWithheldMediaTool(inner);
       return undefined;
     }
     seenInternal.add(definition.name);
@@ -844,7 +849,10 @@ export function createContributedMediaTool(input: {
       input.componentId,
       inner.definitions.length === 1 ? undefined : index,
     );
-    if (isReservedBuiltinMediaToolName(assignedName)) return undefined;
+    if (isReservedBuiltinMediaToolName(assignedName)) {
+      closeWithheldMediaTool(inner);
+      return undefined;
+    }
     routed.set(assignedName, definition.name);
     definitions.push({ ...definition, name: assignedName });
   }
@@ -923,14 +931,18 @@ export function registerContributedMediaTools(input: {
       (definition) => (assignedNameCounts.get(definition.name) ?? 0) > 1,
     );
     if (collides) {
-      try {
-        void Promise.resolve(set.close()).catch(() => undefined);
-      } catch {
-        // A failing close on a withheld colliding plugin must not abort sibling registration.
-      }
+      closeWithheldMediaTool(set);
       continue;
     }
     active.push(set);
   }
   return active;
+}
+
+function closeWithheldMediaTool(set: MediaToolSet): void {
+  try {
+    void Promise.resolve(set.close()).catch(() => undefined);
+  } catch {
+    // A failing close on a withheld plugin must not abort sibling registration.
+  }
 }

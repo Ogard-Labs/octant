@@ -225,6 +225,92 @@ describe("public media tool host bridge and built-in plugins", () => {
     ]);
   });
 
+  it.each(["empty", "invalid", "duplicate"] as const)(
+    "closes a withheld %s tool set without closing the shared turn port",
+    (kind) => {
+      const close = vi.fn(async () => undefined);
+      const closePort = vi.fn(async () => undefined);
+      const definition = {
+        name: "transcribe",
+        description: kind === "invalid" ? "" : "Transcribe audio",
+        inputSchema: { type: "object", properties: {} },
+      };
+      const set = createContributedMediaTool({
+        packageId: PACKAGE_ID,
+        componentId: "rejected",
+        facts: { installed: true, trusted: true, enabled: true },
+        port: basePort({ close: closePort }),
+        plugin: {
+          kind: MEDIA_TOOL_CONTRIBUTION_KIND,
+          id: "rejected",
+          modes: ["work"],
+          createTools: () => ({
+            definitions:
+              kind === "empty"
+                ? []
+                : kind === "duplicate"
+                  ? [definition, definition]
+                  : [definition],
+            taintPolicy: "outside-content",
+            execute: async () => ({ result: {} }),
+            close,
+          }),
+        },
+      });
+      expect(set).toBeUndefined();
+      expect(close).toHaveBeenCalledOnce();
+      expect(closePort).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["throw", "reject"] as const)(
+    "keeps sibling registration working when a withheld tool's close fails by %s",
+    async (failure) => {
+      const close = vi.fn(() => {
+        if (failure === "throw") throw new Error("Close failed");
+        return Promise.reject(new Error("Close failed"));
+      });
+      const plugin: MediaToolPluginDefinition = {
+        kind: MEDIA_TOOL_CONTRIBUTION_KIND,
+        id: "media",
+        modes: ["work"],
+        createTools: () => ({
+          definitions: [],
+          taintPolicy: "outside-content",
+          execute: async () => ({ result: {} }),
+          close,
+        }),
+      };
+      const facts = { installed: true, trusted: true, enabled: true };
+      const closeSibling = vi.fn(async () => undefined);
+      const sets = registerContributedMediaTools({
+        port: basePort(),
+        contributions: [
+          { packageId: PACKAGE_ID, componentId: "rejected", plugin, facts },
+          {
+            packageId: PACKAGE_ID,
+            componentId: "sibling",
+            facts,
+            plugin: {
+              ...plugin,
+              createTools: () => ({
+                definitions: [{ name: "valid", description: "Valid tool", inputSchema: {} }],
+                taintPolicy: "outside-content",
+                execute: async () => ({ result: {} }),
+                close: closeSibling,
+              }),
+            },
+          },
+        ],
+      });
+      expect(close).toHaveBeenCalledOnce();
+      expect(sets).toHaveLength(1);
+      expect(closeSibling).not.toHaveBeenCalled();
+      await sets[0]?.close();
+      expect(closeSibling).toHaveBeenCalledOnce();
+    },
+  );
+
   it("keeps the shared turn port open for sibling contributed media tools when one set closes", async () => {
     const closePort = vi.fn(async () => undefined);
     const closeFirst = vi.fn(async () => undefined);
