@@ -82,7 +82,8 @@ added the same day and is designed, not built. Slices 13 to 20, starting a
 coding session on any member from one window, the hub as the front door, Code
 delegation, adding a computer over SSH, telling every connected device of a
 new one, and placement advice, were added on
-2026-11-19 and are designed, not built, except slice 18, built for a hub
+2026-11-19; slice 13 is built for a directly paired computer, slice 18 is
+built for a hub, and the rest are designed, not built
 ([The hub coordinates](#the-hub-coordinates-each-member-runs-its-own-work)).
 What remains of slices 1 to 10 is
 the maintainer's: the live checks the slices name (a real Wake-on-LAN wake, a
@@ -542,7 +543,19 @@ otherwise.
   as its person. Until the window can route a create, a create aimed at
   another computer is refused with a reason and never runs on this one, as
   [Hosts never trust each other](../architecture.md#security-and-authority)
-  requires.
+  requires. Built for a computer the window paired directly (slice 13): when
+  the Code start screen's picker names it and its session is ready, the pane
+  shows that computer's own Code start screen and threads, the paired
+  browser's Code surface over that computer's session, and an open thread is
+  followed by short reads through the desktop's paired-computer channel. A
+  thread started there takes the same create a local start screen sends (a
+  dedicated worktree when that is the Project's default, else the current
+  checkout) and the first model the Project's provider policy allows. The
+  chosen computer stays chosen while its session reconnects, with sending
+  held until it is ready; opening a draft from one of this computer's
+  Projects (its row, New coordinator) chooses this computer. A
+  computer the hub introduced follows in slice 16; choosing a folder there,
+  merged lists across computers, and image attachments are not built yet.
 - **What a hub-introduced device may do.** A device the member's own person
   paired acts as that person there. A device that only the hub introduced acts
   within the member's **Act** hub-grant item: the Projects it names, the
@@ -1332,16 +1345,47 @@ the check that the new member is the person's own.
   member is accepted: its name, role, and key fingerprint, with **Remove** one
   tap away. The alert comes from each spoke itself, not from the hub, so a
   hub that adds a member cannot hide it. Decided 2026-11-19
-  ([decision H27](#decisions); designed, not built): every device connected
-  to the hub or to the host is told, not only spokes and owner devices. That
-  covers the hub, every spoke, guests (phones and browsers) and each host's
-  paired devices, whether the new device joined the hub (by code or over SSH)
-  or paired with a host. The alert names the new device and its IP address on
-  the private network, keeps the role and key fingerprint, and reaches a phone
-  as a push notification when that phone turned push on; push is off by
-  default, so every connected device also shows the alert in its own window
-  or app while connected, and a device that was offline sees it when it next
-  connects.
+  ([decision H27](#decisions)): every device connected to the hub or to the
+  host is told, not only spokes and owner devices. That covers the hub, every
+  spoke, guests (phones and browsers) and each host's paired devices, whether
+  the new device joined the hub (by code or over SSH) or paired with a host.
+  The alert names the new device and its IP address on the private network,
+  keeps the role and key fingerprint, and reaches a phone as a push
+  notification when that phone turned push on; push is off by default, so
+  every connected device also shows the alert in its own window or app while
+  connected, and a device that was offline sees it when it next connects.
+  Settled the same day:
+  - The address lives in the alert alone. A spoke takes a member's from its
+    roster entry; a guest names none there, so the spoke adds the address of
+    the connection the guest is admitted over. A host takes a directly paired
+    device's from the connection it claimed its ticket over, never from the
+    claim itself. Only a LAN or Tailscale address is kept; a public or
+    loopback one, or a hostname, never is. The journal records that an alert
+    was raised or cleared (`new-member-alerted`, and
+    `remote.device-alert-changed@1` for a direct pairing), never an address
+    or a name.
+  - Every device connected to a host reads its alerts on
+    `GET /api/new-device-alerts`: a window, a device the person paired and a
+    hub guest; an agent grant is no device and is refused. **Remove** stays
+    with a window on the host and an owner device with an unlock; any other
+    device is told where to go. A window can also dismiss a direct pairing's
+    alert, and a device that loses its standing takes its alert with it.
+  - The phone push is a new sealed "device joined" kind with its own phone
+    setting, on by default once push itself is on; turning it off leaves the
+    in-app alert. Every
+    phone paired with the host hears of a direct pairing and of a member the
+    spoke's own roster comparison added, except the new device itself, at
+    high urgency; the receipt (`remote.push-device-joined-delivery-recorded@1`)
+    names the alert, never the device or its address. A phone from before
+    the setting is told. The notification opens the phone's Computers screen,
+    whose New devices list reads every paired computer's alerts.
+
+  Partly built: the addresses, the read route, the direct-pairing alert, the
+  alerts in the paired browser, the window and the phone, and the phone push
+  with its setting. Not built: the hub telling its own window about a member
+  it added. The phone push has run only in tests; a real phone is a
+  maintainer check.
+
 - **Confirm new members (optional).** A spoke can turn on a setting that
   holds each new member at status-only until the person confirms it, after
   comparing a short code shown on the new device. They confirm either in that
@@ -3858,7 +3902,11 @@ command in `sh` with a stand-in signed build, a stand-in hello and a
 stand-in release host serving a signed listing, and component tests of the
 sheets; a real machine and a published listing are maintainer gates.
 
-13. **Start a coding session on a paired computer from one window.** A Code
+13. **Start a coding session on a paired computer from one window.** Built for a
+    computer paired directly: the Code start screen shows that computer's Code
+    surface over its session, the desktop's paired-computer channel carries
+    the Code routes, and thread events are read without waiting (`wait=0`). A
+    Code
     client per host on the client runtime's routing to the owning host, the
     desktop's paired-computer channel carrying the Code commands, reads and
     stream, and the composer reading that host's Projects, providers, models

@@ -616,6 +616,26 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("a poll-mode controller reads thread events again on its own timer, not the reconnect delay", async () => {
+    // A poll-mode read ends as soon as the host has caught up, so the next read
+    // comes from the controller's pace; with a minute-long reconnect delay a
+    // second read within a few seconds can only come from that pace.
+    const subscribe = vi.fn(async function* () {});
+    const client = fakeClient({
+      threadEvents: "poll",
+      subscribe,
+      thread: vi.fn().mockResolvedValue(view(1)),
+    });
+    const { unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() => expect(subscribe.mock.calls.length).toBeGreaterThanOrEqual(2), {
+      timeout: 3_000,
+    });
+    unmount();
+  });
+
   it("keeps catching up after a failed snapshot instead of freezing the thread", async () => {
     const gap = deferred<void>();
     const thread = vi

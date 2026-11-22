@@ -2,11 +2,13 @@ import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { decodeCodeThread, type CodeThread } from "@octant/contracts/code";
+import { DEFAULT_CODE_NEW_THREAD_WORKSPACE } from "@octant/contracts/projects";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import type { ProjectSummary } from "@octant/contracts/projects";
 import { decodeThreadWorkingDirectory } from "@octant/contracts";
 import { decodeWorkThreadId, type WorkThread } from "@octant/contracts/work-threads";
 import {
+  defaultDeliveryBranchIntent,
   defaultPermissionModeFor,
   resolveDraftProviderSelection,
   selectWorktreeRemote,
@@ -15,7 +17,9 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import { useState } from "react";
+import { planCodeThreadCreate } from "../code/codeThreadCreate";
 import type { useCodeController } from "../code/useCodeController";
+import { providerGroupsForProject } from "../projects/ProjectProviderPolicySection";
 import { useProjectController } from "../projects/useProjectController";
 import { firstSelectableProviderSelection } from "../providers/firstSelectableProviderSelection";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -174,10 +178,6 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
     const settings = controller.bootstrap?.settings;
     if (chosen?.type !== "code" || text.length === 0) return undefined;
     if (settings === undefined) return "Code is still loading on this host.";
-    const model = firstSelectableProviderSelection(props.providerGroups);
-    if (model === undefined) {
-      return "No provider is available. Configure a provider before starting a Code thread.";
-    }
     const prepared = await controller.execute({
       kind: "prepare-code-project-checkout",
       projectId: chosen.id,
@@ -232,24 +232,33 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
     const access = threadAccessOf(
       defaultPermissionModeFor({ project: currentProject, settings: currentSettings }),
     );
+    // The host refuses a model its Project's provider policy does not allow,
+    // so the start picks the first model the policy admits; an EU or ZDR tag
+    // may sit on the model alone, so the models are filtered, not just providers.
+    const model = firstSelectableProviderSelection(
+      providerGroupsForProject(currentProject, props.providerGroups),
+    );
+    if (model === undefined) {
+      return `No provider allowed by ${chosen.name}'s provider policy is available on this host.`;
+    }
     const timestamp = new Date().toISOString();
-    const created = await controller.execute({
-      kind: "create-code-thread",
-      thread: decodeCodeThread({
-        id: globalThis.crypto.randomUUID(),
-        projectId: chosen.id,
-        bindingRevisionId: prepared.bindingRevisionId,
-        repositoryId: prepared.checkout.repositoryId,
-        checkoutId: prepared.checkout.id,
-        title: text.length > 60 ? `${text.slice(0, 57)}…` : text,
-        lifecycle: "active",
-        providerInstanceId: model.providerInstanceId,
-        modelId: model.modelId,
+    const threadId = globalThis.crypto.randomUUID();
+    const baseBranch = String(prepared.checkout.head.name);
+    // The same planner a local start screen uses, so a Project whose default is
+    // a dedicated worktree gets one here too instead of the current checkout.
+    const plan = planCodeThreadCreate({
+      composer: {
+        prompt: text,
         executionPolicy: access.executionPolicy,
-        ...(access.autoApprove ? { autoApprove: true } : {}),
         permissionPersistence: currentSettings.defaultPermissionPersistence,
+        ...(access.autoApprove ? { autoApprove: true } : {}),
+        workspace: currentProject.newThreadWorkspace ?? DEFAULT_CODE_NEW_THREAD_WORKSPACE,
+        worktreeSource: {
+          startFromOrigin: remote.status === "selected",
+          remoteName: remote.status === "selected" ? remote.remoteName : "",
+        },
         deliveryTarget: {
-          branchIntent: prepared.checkout.head.name,
+          branchIntent: defaultDeliveryBranchIntent(baseBranch, threadId.slice(0, 8)),
           // A repository with no remote still needs a name here; Git's own
           // default is the one the host's own thread starts use, and a draft
           // diff falls back to the local base branch when no such remote exists.
@@ -261,17 +270,28 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
             chosen.connectedRepository === undefined
               ? String(prepared.checkout.repositoryId)
               : `${chosen.connectedRepository.owner}/${chosen.connectedRepository.repository}`,
-          // A thread in the current checkout is based on the branch it is on.
-          proposedBaseBranch: prepared.checkout.head.name,
+          // The thread is based on the branch the prepared checkout is on.
+          proposedBaseBranch: baseBranch,
           outcomeKind: suggestCodeDeliveryOutcome(text),
-          confirmedAt: timestamp,
         },
-        version: 1,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      }),
+      },
+      modelId: model.modelId,
+      prepared,
+      projectId: chosen.id,
+      providerInstanceId: model.providerInstanceId,
+      threadId,
+      timestamp,
+      title: text.length > 60 ? `${text.slice(0, 57)}…` : text,
     });
-    if (created?.kind !== "thread-created") return "The Code thread could not be created.";
+    if (plan.kind === "rejected") return plan.message;
+    const created = await controller.execute(plan.command);
+    if (created?.kind !== "thread-created" && created?.kind !== "managed-thread-created") {
+      // The host's own reason, such as a worktree source branch that was never
+      // published, tells the person what to change; the message stays typed.
+      return (
+        controller.lastExecuteError.current?.message ?? "The Code thread could not be created."
+      );
+    }
     // The thread is durable whether or not its first turn starts, so it is
     // opened first and a failed send is retried from there.
     props.onCreated(created.thread);

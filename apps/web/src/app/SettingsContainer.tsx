@@ -118,6 +118,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     folderBrowseClient,
     hostControlClient,
     protectedFilesClient,
+    newDeviceAlertsClient,
     blockedToolsClient,
     sandboxRestrictionsClient,
     archivedWorktreesClient,
@@ -289,6 +290,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
         ? {}
         : { browserAutomationClient: props.browserAutomationClient })}
       protectedFilesClient={protectedFilesClient}
+      newDeviceAlertsClient={newDeviceAlertsClient}
       blockedToolsClient={blockedToolsClient}
       sandboxRestrictionsClient={sandboxRestrictionsClient}
       sandboxScopes={[

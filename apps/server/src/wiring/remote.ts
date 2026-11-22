@@ -127,6 +127,8 @@ import {
 } from "../agentAccess/agentAccessSession";
 import { stopAgentTurn } from "@octant/cli/agent-tools";
 import { createHubOwnerRouteHandler } from "../hub/hubOwnerRoutes";
+import { createNewDeviceAlertRouteHandler } from "../hub/newDeviceAlertRoutes";
+import { PairedDeviceAlerts } from "../remote/pairedDeviceAlerts";
 import { OwnerCredentialCopyService } from "../hub/ownerCredentialCopy";
 import { createProviderCredentialCopyBroker } from "../hub/ownerCredentialBroker";
 import { createOwnerPostureHost } from "../hub/ownerPostureHost";
@@ -344,8 +346,14 @@ export type RemoteDependencies = {
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
     readonly threadMoveState: ThreadMoveStatePort;
-    /** Tells owner phones, through the phone notification path, that a move waits. */
-    readonly threadNotifications: Pick<ThreadNotificationDeliveryService, "notifyMoveWaiting">;
+    /**
+     * Tells phones through the phone notification path: owner phones that a
+     * move waits, every phone that a new device joined or paired.
+     */
+    readonly threadNotifications: Pick<
+      ThreadNotificationDeliveryService,
+      "notifyMoveWaiting" | "notifyDeviceJoined"
+    >;
     /** What this start did with the turns a restart cut off. */
     readonly restartRecovery: () => HostRestartRecovery | undefined;
   };
@@ -529,6 +537,17 @@ export function wireRemote(deps: RemoteDependencies) {
       journal: persistence.journal,
       registrationLifetime: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).pairedDeviceLifetime,
+      onDevicePaired: (device) => {
+        const alert = pairedDeviceAlerts.raise(device);
+        deps.threadNotifications.notifyDeviceJoined({
+          alertId: String(alert.alertId),
+          deviceName: alert.name,
+          ...(alert.privateAddress === undefined ? {} : { privateAddress: alert.privateAddress }),
+          joined: "host",
+          newDeviceId: alert.deviceId,
+        });
+      },
+      onDeviceRemoved: (deviceId) => pairedDeviceAlerts.dropDevice(deviceId),
       hostId: identity.hostId,
       displayName: identity.displayName,
       serverBuildVersion: version,
@@ -602,7 +621,7 @@ export function wireRemote(deps: RemoteDependencies) {
         hubLink:
           services.hubLink ??
           (async (request, facts) =>
-            (await hubLinkRoutes(request)) ??
+            (await hubLinkRoutes(request, facts)) ??
             (await peerDelegationRoutes(request)) ??
             (await peerCredentialRoutes(request)) ??
             (await threadMoveRoutes(request)) ??
@@ -646,6 +665,16 @@ export function wireRemote(deps: RemoteDependencies) {
     options.authorityStateFiles?.hub,
   );
   const hubTransport = createPinnedHubTransport();
+  const pairedDeviceAlerts = new PairedDeviceAlerts({
+    state: hubStateStore,
+    journal: persistence.journal,
+    connection: persistence.connection,
+    hostId: () => String(resolveHubIdentity().hostId),
+    localActorId: OCTANT_LOCAL_ACTOR_ID,
+    uuid: randomUUID,
+    now: Date.now,
+  });
+  let ownerBrowserAuthorityChanged: (() => void) | undefined;
   const writeHubMembership = createHubMembershipJournal({
     journal: persistence.journal,
     connection: persistence.connection,
@@ -655,7 +684,28 @@ export function wireRemote(deps: RemoteDependencies) {
     clock: () => new Date().toISOString(),
   });
   const recordHubMembership = (change: Parameters<typeof writeHubMembership>[0]): void => {
-    writeHubMembership(change);
+    try {
+      writeHubMembership(change);
+    } finally {
+      ownerBrowserAuthorityChanged?.();
+    }
+    // A spoke raised an alert for a member a newer roster added; every phone
+    // paired here hears of it, from this spoke's own alert, never the hub's word.
+    if (change.change === "new-member-alerted") {
+      const status = spokeLinkService.status();
+      const alert =
+        status.membership === "member"
+          ? status.alerts.find((entry) => String(entry.memberId) === String(change.memberId))
+          : undefined;
+      if (alert !== undefined) {
+        deps.threadNotifications.notifyDeviceJoined({
+          alertId: String(alert.alertId),
+          deviceName: alert.name,
+          ...(alert.privateAddress === undefined ? {} : { privateAddress: alert.privateAddress }),
+          joined: "hub",
+        });
+      }
+    }
   };
   const hubPairing = (): HubPairingPort | undefined => {
     const gateway = currentRemoteGateway;
@@ -1094,6 +1144,15 @@ export function wireRemote(deps: RemoteDependencies) {
   const ownerApprovalAnswerUnlock = new OwnerApprovalAnswerUnlock({
     state: hubStateStore,
     record: recordHubMembership,
+  });
+  const newDeviceAlertRoutes = createNewDeviceAlertRouteHandler({
+    memberAlerts: () => {
+      const status = spokeLinkService.status();
+      return status.membership === "member" ? status.alerts : [];
+    },
+    pairedAlerts: () => pairedDeviceAlerts.list(),
+    dismissPaired: (alertId) => pairedDeviceAlerts.dismiss(alertId),
+    windowAuthorityStore,
   });
   const hubAdministrationRoutes = createHubAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
@@ -2718,6 +2777,9 @@ export function wireRemote(deps: RemoteDependencies) {
     hostControlRoutes,
     externalContentRoutes,
     memberInstallRoutes,
+    // Paired browsers and hub guests reach this chain, not the loopback
+    // listener's own handlers, so the alert read must be bound here too.
+    newDeviceAlertRoutes,
   ]);
   return {
     composeHostDiagnostics,
@@ -2727,6 +2789,7 @@ export function wireRemote(deps: RemoteDependencies) {
     personQuitRoutes,
     supportBundleRoutes,
     hubAdministrationRoutes,
+    newDeviceAlertRoutes,
     localDeviceAdministrationRoutes,
     memberInstallRoutes,
     agentAccessAdministrationRoutes,

@@ -9,6 +9,7 @@ import {
   HUB_WAKE_MAX_SPOKES,
   HUB_WAKE_MAX_TIMES_PER_SPOKE,
   HubMemberId,
+  PairedDeviceAlert,
   decodeHubStandInHandback,
   decodeHubWakeCopy,
   encodeSignedHubRoster,
@@ -216,6 +217,23 @@ describe("the hub principal on a spoke", () => {
 
     expect(response?.status).toBe(401);
     expect(await response?.json()).toEqual({ status: "refused", kind: "not-a-spoke" });
+  });
+
+  it("keeps a directly paired device's alert when the spoke leaves its hub", async () => {
+    const { b } = await joinedPair();
+    const alert = Schema.decodeUnknownSync(PairedDeviceAlert)({
+      alertId: randomUUID(),
+      deviceId: randomUUID(),
+      name: "Ada's phone",
+      deviceKeyFingerprint: "d".repeat(64),
+      raisedAt: "2026-11-21T12:00:00.000Z",
+    });
+    b.state.save({ ...b.state.load(), pairedDeviceAlerts: [alert] });
+
+    await b.spoke.leave(window);
+
+    expect(b.state.load().link).toBeUndefined();
+    expect(b.state.load().pairedDeviceAlerts).toEqual([alert]);
   });
 
   it("is not the hub when signed by another key, replayed, stale, or changed in flight", async () => {

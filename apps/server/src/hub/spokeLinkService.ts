@@ -42,6 +42,7 @@ import {
   holdsOnlyStatusGrant,
   hubRosterSigningPayload,
   introduceGuests,
+  newDevicePrivateAddress,
   newMemberConfirmationSigningPayload,
   reconcileHeldGrants,
   rosterMemberWebOrigin,
@@ -1212,19 +1213,10 @@ export class SpokeLinkService {
     // The link is read again: a roster that arrived while the hub was being
     // told may have changed which guest devices exist.
     const current = this.#options.state.load();
-    this.#options.state.save({
-      ...(current.hub === undefined ? {} : { hub: current.hub }),
-      ...(current.pendingDeviceRevocations === undefined
-        ? {}
-        : { pendingDeviceRevocations: current.pendingDeviceRevocations }),
-      // A host-wide switch only its window sets; leaving a hub never turns it off.
-      ...(current.ownerUnlockBeforePairedMerge === undefined
-        ? {}
-        : { ownerUnlockBeforePairedMerge: current.ownerUnlockBeforePairedMerge }),
-      ...(current.ownerUnlockPerApprovalAnswer === undefined
-        ? {}
-        : { ownerUnlockPerApprovalAnswer: current.ownerUnlockPerApprovalAnswer }),
-    });
+    // Only the link goes: direct pairings, their alerts, and host-wide switches
+    // the window set do not belong to the hub and outlive leaving it.
+    const { link: _leftLink, ...kept } = current;
+    this.#options.state.save(kept);
     this.#revokeGuestDevices(
       current.link?.guestDevices ?? link.guestDevices ?? [],
       link.hubMemberId,
@@ -1520,14 +1512,18 @@ export class SpokeLinkService {
         )
       : [];
     const raisedAt = decodeTimestamp(new Date(this.#options.now()).toISOString());
-    const raised = added.map((member) => ({
-      alertId: decodeAlertId(randomUUID()),
-      memberId: member.memberId,
-      name: member.name,
-      role: member.role,
-      identityKeyFingerprint: member.identityKeyFingerprint,
-      raisedAt,
-    }));
+    const raised = added.map((member) => {
+      const privateAddress = newDevicePrivateAddress(member.addresses);
+      return {
+        alertId: decodeAlertId(randomUUID()),
+        memberId: member.memberId,
+        name: member.name,
+        role: member.role,
+        identityKeyFingerprint: member.identityKeyFingerprint,
+        raisedAt,
+        ...(privateAddress === undefined ? {} : { privateAddress }),
+      };
+    });
     const alerts = [...(link.alerts ?? []), ...raised].slice(-MAX_ALERTS);
     // A guest the roster no longer lists loses its device here. A spoke the
     // roster no longer lists is out: the hub principal is revoked and every
@@ -1602,6 +1598,8 @@ export class SpokeLinkService {
     readonly path: string;
     readonly body: string;
     readonly request: HubGuestAdmissionRequest;
+    /** The phone's private-network address from its connection, for its alert. */
+    readonly privateAddress?: string;
   }): GuestAdmission {
     this.settlePendingRevocations();
     const state = this.#options.state.load();
@@ -1673,6 +1671,15 @@ export class SpokeLinkService {
           ),
           { memberId: request.memberId, deviceId: device.deviceId },
         ],
+        // A guest names no address in the roster, so its alert learns one from
+        // the connection it is admitted over, if it has none yet.
+        alerts: (link.alerts ?? []).map((alert) =>
+          String(alert.memberId) === String(request.memberId) &&
+          alert.privateAddress === undefined &&
+          input.privateAddress !== undefined
+            ? { ...alert, privateAddress: input.privateAddress }
+            : alert,
+        ),
       },
     });
     if (existing !== undefined) {
