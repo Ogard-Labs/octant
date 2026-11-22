@@ -144,7 +144,7 @@ jobs:
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "$file" --clobber
           elif [ "$RING" = "stable" ]; then
-            gh release create "$tag" "$file" --title "${PRODUCT} ${VERSION}" --generate-notes \
+            gh release create "$tag" "$file" --title "${PRODUCT} ${VERSION}" --generate-notes --latest=false \
               || gh release upload "$tag" "$file" --clobber
           else
             gh release create "$tag" "$file" \
