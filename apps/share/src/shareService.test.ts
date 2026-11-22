@@ -20,7 +20,6 @@ import { CANVAS_PUBLIC_SHARE_MAX_DOCUMENT_BYTES, CANVAS_SHARE_SCHEMA_VERSION } f
 import { readShareConfig, type ShareConfig } from "./config.ts";
 import { startShareService, type ShareService } from "./server.ts";
 import { renderDesignFramePage } from "./frames.ts";
-import { renderBlocks, SharePageImages } from "./render.ts";
 import { ShareStore } from "./store.ts";
 import { runTakedown } from "./takedown.ts";
 
@@ -726,15 +725,83 @@ describe("share service", () => {
     const body = createBody([cover, framed]);
     const created = await create({ ...body, document: { ...body.document, images: [image] } });
     const page = await (await fetch(created.url)).text();
+    // Each image is served once at its own address on the share's path.
+    const viewerImage = `/s/${created.shareId}/images/${image.sha256}`;
     expect(page).toContain(
-      `<figure class="image"><img src="data:image/png;base64,${data}" alt="A lighthouse at dusk"><figcaption>Cover art</figcaption></figure>`,
+      `<figure class="image"><img src="${viewerImage}" alt="A lighthouse at dusk"><figcaption>Cover art</figcaption></figure>`,
     );
+    expect(page).not.toContain(data.slice(0, 64));
+    const served = await fetch(`${service?.publicUrl}${viewerImage}`);
+    expect(served.status).toBe(200);
+    expect(served.headers.get("content-type")).toBe("image/png");
+    expect(served.headers.get("cache-control")).toContain("immutable");
+    expect(Buffer.from(await served.arrayBuffer()).equals(bytes)).toBe(true);
+    // An image the share does not carry is not found.
+    expect(
+      (await fetch(`${service?.publicUrl}/s/${created.shareId}/images/${"0".repeat(64)}`)).status,
+    ).toBe(404);
+
     const frameSrc = (
       /src="([^"]+)"/.exec(/<iframe[^>]*>/.exec(page)?.[0] ?? "")?.[1] ?? ""
     ).replace(/&amp;/g, "&");
-    const frame = await (await fetch(frameSrc)).text();
-    expect(frame).toContain(`<img src="data:image/png;base64,${data}" alt="Hero">`);
+    const frameResponse = await fetch(frameSrc);
+    const frameImages = `${service?.usercontentUrl}/f/${created.shareId}/landing/images/`;
+    expect(frameResponse.headers.get("content-security-policy")).toContain(
+      `img-src data: ${frameImages};`,
+    );
+    const frame = await frameResponse.text();
     expect(frame).not.toContain("octant-asset:");
+    const frameImage = /<img src="([^"]+)" alt="Hero">/.exec(frame)?.[1] ?? "";
+    expect(frameImage.startsWith(`/f/${created.shareId}/landing/images/${image.sha256}?t=`)).toBe(
+      true,
+    );
+    const drawn = await fetch(`${service?.usercontentUrl}${frameImage}`);
+    expect(drawn.status).toBe(200);
+    expect(Buffer.from(await drawn.arrayBuffer()).equals(bytes)).toBe(true);
+    // The frame's image answers only under the frame's token.
+    expect(
+      (await fetch(`${service?.usercontentUrl}${frameImage.split("?")[0] ?? ""}`)).status,
+    ).toBe(403);
+
+    // A revoked share serves its images no more.
+    await fetch(`${service?.publicUrl}/api/v1/shares/${created.shareId}`, {
+      method: "DELETE",
+      headers: owner(created.ownerSecret),
+    });
+    expect((await fetch(`${service?.publicUrl}${viewerImage}`)).status).toBe(404);
+    expect((await fetch(`${service?.usercontentUrl}${frameImage}`)).status).toBe(404);
+  });
+
+  test("serves a protected link's images only with its password grant", async () => {
+    start();
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    const image = {
+      imageRef: "image-1",
+      mediaType: "image/png",
+      byteLength: bytes.byteLength,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      data: bytes.toString("base64"),
+    };
+    const cover = {
+      blockId: "cover",
+      schemaVersion: 30,
+      kind: "image",
+      alt: "Cover",
+      imageRef: "image-1",
+    };
+    const body = createBody([cover], { password: "correct horse" });
+    const created = await create({ ...body, document: { ...body.document, images: [image] } });
+    const address = `${service?.publicUrl}/s/${created.shareId}/images/${image.sha256}`;
+    expect((await fetch(address)).status).toBe(404);
+    const unlocked = await fetch(created.url, {
+      method: "POST",
+      body: new URLSearchParams({ password: "correct horse" }),
+      redirect: "manual",
+    });
+    const cookie = (unlocked.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+    const granted = await fetch(address, { headers: { cookie } });
+    expect(granted.status).toBe(200);
+    expect(Buffer.from(await granted.arrayBuffer()).equals(bytes)).toBe(true);
   });
 
   test("offers a running prototype only as a link until the viewer asks to run it", async () => {
@@ -997,131 +1064,43 @@ describe("share configuration", () => {
 });
 
 describe("design frame pages", () => {
-  test("writes each carried image once and stops repeating it past the page budget", () => {
-    const bytes = Buffer.alloc(1024 * 1024, 7);
-    bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    const data = bytes.toString("base64");
+  test("names each carried image by its address however often the frame shows it, and draws nothing a comment names", () => {
     const image = {
       imageRef: "image-1",
       mediaType: "image/png",
-      byteLength: bytes.byteLength,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-      data,
+      byteLength: 12,
+      sha256: "a".repeat(64),
+      data: "iVBORw0KGgoBAgME",
     } as const;
-    // A small frame naming one 1 MiB image a hundred times.
-    const html = '<img src="octant-asset:hero" alt="">'.repeat(100);
+    const address = () => "/f/share/landing/images/aaa?t=token";
+    // A frame naming one image a hundred times, under a dozen asset ids.
+    const aliases = Array.from({ length: 12 }, (_, index) => `alias-${String(index)}`);
     const page = renderDesignFramePage(
       design({
         schemaVersion: 30,
-        frames: [{ frameId: "home", title: "Home", html }],
-        assets: [{ assetId: "hero", imageRef: "image-1" }],
-      }) as never,
-      [image as never],
-    );
-    expect(page).toContain(`data:image/png;base64,${data}`);
-    expect(page.length).toBeLessThan(2 * 1024 * 1024);
-    expect(page).toContain('src="data:,"');
-
-    // A dozen asset ids naming the same image get one free copy between them.
-    const aliases = Array.from({ length: 12 }, (_, index) => `alias-${String(index)}`);
-    const aliased = renderDesignFramePage(
-      design({
-        schemaVersion: 30,
         frames: [
           {
             frameId: "home",
             title: "Home",
-            html: aliases.map((id) => `<img src="octant-asset:${id}" alt="">`).join(""),
+            html:
+              '<img src="octant-asset:hero" alt="">'.repeat(100) +
+              aliases.map((id) => `<img src="octant-asset:${id}" alt="">`).join("") +
+              '<!-- <img src="octant-asset:hero" alt=""> -->',
           },
         ],
-        assets: aliases.map((assetId) => ({ assetId, imageRef: "image-1" })),
-      }) as never,
-      [image as never],
-    );
-    expect(aliased.length).toBeLessThan(2 * 1024 * 1024);
-
-    // A reference inside a comment draws nothing and leaves the visible one its copy.
-    const commented = renderDesignFramePage(
-      design({
-        schemaVersion: 30,
-        frames: [
-          {
-            frameId: "home",
-            title: "Home",
-            html: '<!-- <img src="octant-asset:hero" alt=""> --><style>/* url(octant-asset:hero) */</style><img id="live" src="octant-asset:hero" alt="">',
-          },
+        styles: ".hero { background: url(octant-asset:hero); } /* url(octant-asset:hero) */",
+        assets: [
+          { assetId: "hero", imageRef: "image-1" },
+          ...aliases.map((assetId) => ({ assetId, imageRef: "image-1" })),
         ],
-        styles: "/* .old { background: url(octant-asset:hero); } */",
-        assets: [{ assetId: "hero", imageRef: "image-1" }],
       }) as never,
       [image as never],
+      address,
     );
-    expect(commented).toContain(`<img id="live" src="data:image/png;base64,${data}"`);
-    expect(commented).toContain('<!-- <img src="octant-asset:hero" alt=""> -->');
-    expect(commented).toContain("/* .old { background: url(octant-asset:hero); } */");
-
-    // The stylesheet styles the opening frame, so it takes the image's copy first.
-    const styled = renderDesignFramePage(
-      design({
-        schemaVersion: 30,
-        frames: [
-          { frameId: "home", title: "Home", html: '<div class="hero">Home</div>' },
-          { frameId: "later", title: "Later", html: html.repeat(2) },
-        ],
-        styles: ".hero { background: url(octant-asset:hero); }",
-        assets: [{ assetId: "hero", imageRef: "image-1" }],
-      }) as never,
-      [image as never],
-    );
-    expect(styled).toContain(`.hero { background: url(data:image/png;base64,${data}); }`);
-
-    // The opening frame's own image comes before a stylesheet rule for a later screen.
-    const opening = renderDesignFramePage(
-      design({
-        schemaVersion: 30,
-        frames: [
-          {
-            frameId: "home",
-            title: "Home",
-            html: '<img id="cover" src="octant-asset:hero" alt="">',
-          },
-          { frameId: "later", title: "Later", html: '<div class="next">Next</div>' },
-        ],
-        styles: ".next { background: url(octant-asset:hero); }",
-        assets: [{ assetId: "hero", imageRef: "image-1" }],
-      }) as never,
-      [image as never],
-    );
-    expect(opening).toContain(`<img id="cover" src="data:image/png;base64,${data}"`);
-  });
-
-  test("draws a shared image once in full however many blocks show it", () => {
-    const bytes = Buffer.alloc(1024 * 1024, 7);
-    bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    const data = bytes.toString("base64");
-    const image = {
-      imageRef: "image-1",
-      mediaType: "image/png",
-      byteLength: bytes.byteLength,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-      data,
-    } as const;
-    const blocks = Array.from({ length: 64 }, (_, index) => ({
-      blockId: `cover-${String(index)}`,
-      schemaVersion: 30,
-      kind: "image",
-      alt: `Cover ${String(index)}`,
-      imageRef: "image-1",
-    }));
-    const page = renderBlocks(blocks as never, {
-      shareId: "share",
-      frameAddress: () => "",
-      runBlockId: undefined,
-      images: new SharePageImages([image as never]),
-    });
-    expect(page).toContain(`data:image/png;base64,${data}`);
-    expect(page.length).toBeLessThan(2 * 1024 * 1024);
-    // A repeat past the page's budget reads as its description.
-    expect(page).toContain("Cover 63");
+    expect(page.split(address()).length - 1).toBe(113);
+    expect(page.length).toBeLessThan(16 * 1024);
+    expect(page).not.toContain(image.data);
+    expect(page).toContain('<!-- <img src="octant-asset:hero" alt=""> -->');
+    expect(page).toContain("/* url(octant-asset:hero) */");
   });
 });

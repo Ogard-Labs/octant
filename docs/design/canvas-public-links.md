@@ -140,7 +140,7 @@ update. The document's text, everything but its images, is bounded at
 larger one; its images are bounded apart, at 3 MiB each and 4 MiB together,
 and the service stores them with the share, counting them toward its total
 storage cap. A view counts in a small file beside the share, so a share's
-images are never rewritten when it is read. Each page the service draws (the viewer and a design's frame page) writes each carried image in whole at its first reference, once per image however many blocks or asset ids name it; repeats share a budget of 128 KiB beyond those copies, and a repeat past it is not drawn (the viewer shows the image block's description, a frame an empty image), so a document within every input limit cannot build an unbounded page. On a frame page each image's guaranteed copy goes to what a reader sees first: the opening frame's markup, then the stylesheet, then the later frames. Only a reference a browser would draw counts, both for what a share carries and for this budget: one in a `src`, `srcset`, `poster`, or `background` attribute, in CSS, or in a script or inline event handler, outside comments. A reference in a comment, in text, or in another attribute such as `alt` is left as written: it draws nothing, is not carried, and spends none of the budget.
+images are never rewritten when it is read. The service serves each carried image once, at its own content-addressed address beside the page that shows it: `/s/<id>/images/<sha256>` for the viewer and `/f/<id>/<block>/images/<sha256>?t=<frame token>` for a design's frame. Every reference names that address, so a page that shows one image many times stays small and the browser fetches it once. An image address answers only as its page does: a live link, its password grant when it has a password (the viewer's cookie is scoped to the link's path), or the frame's own token, and only for an image the document carries by that digest (and, for a frame, one its design names); the response is the raster with its sniffed type, `nosniff`, and a private, immutable cache lifetime no longer than the grant or token. A revoked or expired link's images are not found. _Rationale:_ writing each reference as a `data:` image grows the page with every repeat, and capping the repeats would make a large image shown many times fall back to its description; one address per image is how the web shares a picture across a page. Only a reference a browser would draw counts, both for what a share carries and for what a frame draws: one in a `src`, `srcset`, `poster`, or `background` attribute, in CSS, or in a script or inline event handler, outside comments. A reference in a comment, in text, or in another attribute such as `alt` is left as written: it draws nothing and is not carried.
 
 ## Link terms
 
@@ -309,7 +309,10 @@ frame-ancestors 'none'`. The page loads one first-party stylesheet and
   policy. A design that runs script is not loaded until the viewer clicks
   **Run**, a plain link that draws the page again with that one frame as
   `sandbox="allow-scripts"`, served under the running frame policy with its
-  own `sandbox` directive. Frame responses carry `frame-ancestors` naming the
+  own `sandbox` directive. A frame that shows carried images adds its own
+  image route's path (`<user-content origin>/f/<id>/<block>/images/`) to
+  `img-src`, and nothing wider, so even a running frame reaches only those
+  images. Frame responses carry `frame-ancestors` naming the
   public origin only, and a frame address carries a short-lived token the
   service signs for one link and revision, so a protected link's frames are
   not open without its password. The token also names whether it opens the

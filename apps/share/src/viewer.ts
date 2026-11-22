@@ -5,7 +5,7 @@ import {
 } from "./shareKit.ts";
 import { readLimitedBody } from "./api.ts";
 import { isHttps, type ServiceContext } from "./context.ts";
-import { escapeHtml as e, renderBlocks, SharePageImages } from "./render.ts";
+import { escapeHtml as e, renderBlocks } from "./render.ts";
 import { isShareId, type StoredShare } from "./store.ts";
 import { mintFrameToken, mintViewGrant, viewGrantIsValid } from "./tokens.ts";
 import { VIEWER_CSS } from "./viewerStyles.ts";
@@ -150,7 +150,10 @@ function renderShare(
   );
   const body = renderBlocks(document.blocks, {
     shareId: id,
-    images: new SharePageImages(document.images ?? []),
+    imageAddress: (imageRef) => {
+      const image = (document.images ?? []).find((each) => String(each.imageRef) === imageRef);
+      return image === undefined ? undefined : `/s/${id}/images/${image.sha256}`;
+    },
     runBlockId: runnable === undefined ? undefined : String(runnable.blockId),
     frameAddress: (blockId, mode) =>
       `${ctx.usercontentOrigin}/f/${id}/${encodeURIComponent(blockId)}?t=${mintFrameToken(
@@ -232,6 +235,37 @@ async function viewShare(
   return renderShare(ctx, id, share, url.searchParams.get("run"));
 }
 
+/**
+ * One image a live share carries, served once at its own address so a page
+ * that shows it many times stays small. It answers only as the page does: a
+ * live share, its password grant when it has a password, and an image the
+ * share's document carries by that digest. The bytes never change at an
+ * address, so a reader's browser keeps them, privately and for no longer
+ * than a view grant lasts.
+ */
+function viewImage(request: Request, ctx: ServiceContext, id: string, sha256: string): Response {
+  const missing = () =>
+    new Response("Not found", {
+      status: 404,
+      headers: { ...viewerHeaders(ctx, "text/plain; charset=utf-8") },
+    });
+  if (!isShareId(id)) return missing();
+  const lookup = ctx.store.lookup(id);
+  if (lookup.status !== "active") return missing();
+  const { share } = lookup;
+  if (share.passwordHash !== null && !hasViewGrant(ctx, request, id, share)) return missing();
+  const image = (share.document.images ?? []).find((each) => each.sha256 === sha256);
+  if (image?.data === undefined) return missing();
+  return new Response(Buffer.from(image.data, "base64"), {
+    status: 200,
+    headers: {
+      ...viewerHeaders(ctx, image.mediaType),
+      "cache-control": "private, max-age=3600, immutable",
+      "cross-origin-resource-policy": "same-origin",
+    },
+  });
+}
+
 function redirect(ctx: ServiceContext, path: string, extra?: Record<string, string>): Response {
   // Never place anything but the link's own path in Location.
   return new Response(null, {
@@ -279,6 +313,12 @@ export function handleViewer(
   if (url.pathname === "/static/viewer.css") {
     if (request.method !== "GET") return undefined;
     return new Response(VIEWER_CSS, { headers: viewerHeaders(ctx, "text/css; charset=utf-8") });
+  }
+  const image = /^\/s\/([^/]+)\/images\/([0-9a-f]{64})$/.exec(url.pathname);
+  if (image !== null) {
+    return request.method === "GET"
+      ? viewImage(request, ctx, image[1] ?? "", image[2] ?? "")
+      : undefined;
   }
   const match = /^\/s\/([^/]+)(\/report)?$/.exec(url.pathname);
   if (match === null) return undefined;

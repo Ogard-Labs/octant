@@ -8,7 +8,6 @@ import {
   canvasMockupNodeReading,
   type CanvasPlacedReadingItem,
   canvasReadingOrder,
-  type CanvasShareImage,
   type CanvasStaticExportBlock,
   COMPARISON_MATRIX_GLYPH_LABEL,
   formatCanvasNumber,
@@ -32,53 +31,13 @@ export interface RenderContext {
   readonly frameAddress: (blockId: string, mode: FrameMode) => string;
   /** The one prototype the viewer asked to run, if any. */
   readonly runBlockId: string | undefined;
-  /** The images the share carries, drawn against one budget for the page. */
-  readonly images: SharePageImages;
-}
-
-/** A share image as an address a page draws without loading anything. */
-export function shareImageAddress(image: CanvasShareImage): string {
-  return `data:${image.mediaType};base64,${image.data}`;
-}
-
-/** Room for repeated images beyond every carried image written once. */
-const SHARE_PAGE_REPEAT_BUDGET = 128 * 1024;
-
-/**
- * The `data:` address each image reference on one page is drawn from. Each
- * reference writes the whole image, so a document of 64 blocks showing one
- * 3 MiB image would otherwise build a page of hundreds of MiB from a
- * document within every input limit. Each image's first reference is
- * reserved up front, so repeats early in the page cannot crowd out a
- * different image later; repeats share a 128 KiB budget beyond those copies,
- * and a repeat past it is not drawn.
- */
-export class SharePageImages {
-  readonly #addresses: ReadonlyMap<string, string>;
-  readonly #drawn = new Set<string>();
-  readonly #limit: number;
-  #spent = 0;
-
-  constructor(images: ReadonlyArray<CanvasShareImage>) {
-    this.#addresses = new Map(
-      images.map((image) => [String(image.imageRef), shareImageAddress(image)]),
-    );
-    for (const address of this.#addresses.values()) this.#spent += address.length;
-    this.#limit = this.#spent + SHARE_PAGE_REPEAT_BUDGET;
-  }
-
-  /** The image's address, or undefined when the share does not carry it or the page is out of room. */
-  address(imageRef: string): string | undefined {
-    const address = this.#addresses.get(imageRef);
-    if (address === undefined) return undefined;
-    if (!this.#drawn.has(imageRef)) {
-      this.#drawn.add(imageRef);
-      return address;
-    }
-    if (this.#spent + address.length > this.#limit) return undefined;
-    this.#spent += address.length;
-    return address;
-  }
+  /**
+   * The address of an image the share carries, by the share's own name for
+   * it, or undefined for one it does not carry. Each carried image is served
+   * once at its own address, so a page that shows it many times names it
+   * many times and the browser fetches it once.
+   */
+  readonly imageAddress: (imageRef: string) => string | undefined;
 }
 
 export function escapeHtml(value: string): string {
@@ -656,11 +615,10 @@ function blockBody(block: Block, ctx: RenderContext): string {
     case "evidence-reference":
       return labelled(block.label, block.detail);
     case "image": {
-      // An image the share carries is drawn; any other image block names a
-      // source that stayed on the host, and a repeat past the page's image
-      // budget is not drawn again, so its alt text stands there.
+      // An image the share carries is drawn; any other image block
+      // names a source that stayed on the host, so its alt text stands there.
       const address =
-        block.imageRef === undefined ? undefined : ctx.images.address(String(block.imageRef));
+        block.imageRef === undefined ? undefined : ctx.imageAddress(String(block.imageRef));
       if (address === undefined) {
         return `<figure class="image-placeholder"><figcaption>${e(block.alt)}${
           block.caption === undefined ? "" : ` — ${e(block.caption)}`

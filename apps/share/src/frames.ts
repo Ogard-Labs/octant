@@ -6,7 +6,7 @@ import {
   withDrawnDesignAssetAddresses,
 } from "./shareKit.ts";
 import type { ServiceContext } from "./context.ts";
-import { escapeHtml, SharePageImages } from "./render.ts";
+import { escapeHtml } from "./render.ts";
 import { readFrameToken, type FrameMode } from "./tokens.ts";
 
 type DesignBlock = Extract<CanvasStaticExportBlock, { readonly kind: "design" }>;
@@ -18,14 +18,22 @@ const FRAME_HEADERS = {
   "cache-control": "no-store",
 } as const;
 
-/** The policy a static frame is served under: no script, nothing loaded but inline style and data images. */
-export function staticFramePolicy(publicOrigin: string): string {
-  return `sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors ${publicOrigin}`;
+/**
+ * The policy a static frame is served under: no script, nothing loaded but
+ * inline style, data images, and the share's own images under `images`, the
+ * path prefix of this frame's image route.
+ */
+export function staticFramePolicy(publicOrigin: string, images = ""): string {
+  return `sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:${images === "" ? "" : ` ${images}`}; font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors ${publicOrigin}`;
 }
 
-/** The policy a running frame is served under: script allowed, the network not. */
-export function runningFramePolicy(publicOrigin: string): string {
-  return `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors ${publicOrigin}`;
+/**
+ * The policy a running frame is served under: script allowed, the network
+ * not, except the share's own images under `images`, this frame's image
+ * route, which answers only for the images the share carries.
+ */
+export function runningFramePolicy(publicOrigin: string, images = ""): string {
+  return `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:${images === "" ? "" : ` ${images}`}; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors ${publicOrigin}`;
 }
 
 // One frame shown at a time on a device size: the one the address names, the
@@ -160,40 +168,33 @@ function themeStyles(): string {
  */
 export function renderDesignFramePage(
   block: DesignBlock,
-  images: ReadonlyArray<CanvasShareImage> = [],
+  images: ReadonlyArray<CanvasShareImage>,
+  imageAddress: (image: CanvasShareImage) => string,
 ): string {
-  // An image the share carries is written in as a data: image, which the
-  // frame policy admits, once whole however many asset ids name it; repeats
-  // share the page's image budget.
+  // An image the share carries is drawn from its own address on this
+  // origin, which the browser fetches once however often the frame names it;
+  // a declared image the share does not carry keeps its reference, which
+  // loads nothing.
+  const carried = new Map(images.map((image) => [String(image.imageRef), image]));
   const imageOf = new Map(
     (block.assets ?? []).map((asset) => [String(asset.assetId), String(asset.imageRef)]),
   );
-  const named = new Set(imageOf.values());
-  const carried = images.filter((image) => named.has(String(image.imageRef)));
-  const carriedRefs = new Set(carried.map((image) => String(image.imageRef)));
-  const pageImages = new SharePageImages(carried);
-  // A declared image the share does not carry keeps its reference, which
-  // loads nothing; a carried one past the budget draws an empty image.
   const draw = (markup: string, language: "html" | "css") =>
     withDrawnDesignAssetAddresses(markup, language, (assetId) => {
-      const imageRef = imageOf.get(assetId);
-      if (imageRef === undefined || !carriedRefs.has(imageRef)) return `octant-asset:${assetId}`;
-      return pageImages.address(imageRef) ?? "data:,";
+      const image = carried.get(imageOf.get(assetId) ?? "");
+      return image === undefined ? `octant-asset:${assetId}` : imageAddress(image);
     });
-  // Each image's one guaranteed copy goes to what a reader sees first: the
-  // opening frame's markup, then the stylesheet, then the later frames.
-  const drawFrame = (frame: (typeof block.frames)[number]) => {
-    const id = String(frame.frameId);
-    return `<div class="octant-frame" id="${escapeHtml(id)}"${id === first ? " data-start" : ""}>${draw(frame.html, "html")}</div>`;
-  };
   const isDocument = block.size === "document";
   const themed = (block.theme ?? (isDocument ? "workspace" : "none")) === "workspace";
   const viewport = block.size === "document" ? undefined : CANVAS_DESIGN_VIEWPORT[block.size];
-  const [opening, ...later] = block.frames;
-  const first = String(opening?.frameId ?? "");
-  const openingFrame = opening === undefined ? "" : drawFrame(opening);
+  const first = String(block.frames[0]?.frameId ?? "");
   const styles = draw(block.styles ?? "", "css");
-  const frames = openingFrame + later.map(drawFrame).join("");
+  const frames = block.frames
+    .map((frame) => {
+      const id = String(frame.frameId);
+      return `<div class="octant-frame" id="${escapeHtml(id)}"${id === first ? " data-start" : ""}>${draw(frame.html, "html")}</div>`;
+    })
+    .join("");
   return [
     "<!doctype html>",
     '<html><head><meta charset="utf-8">',
@@ -219,13 +220,19 @@ function plain(status: number, text: string, policy: string): Response {
   });
 }
 
-/** The user-content origin: `GET /f/<id>/<blockId>?t=<token>` and nothing else. */
+/**
+ * The user-content origin: `GET /f/<id>/<blockId>?t=<token>`, a design's
+ * frame page, and `GET /f/<id>/<blockId>/images/<sha256>?t=<token>`, one
+ * image that frame shows, and nothing else. Both answer under the same frame
+ * token, so an image is served only to a frame the viewer opened.
+ */
 export function handleFrame(request: Request, ctx: ServiceContext): Response {
   const refused = staticFramePolicy(ctx.publicOrigin);
   const url = new URL(request.url);
-  const match = /^\/f\/([^/]+)\/([^/]+)$/.exec(url.pathname);
+  const match = /^\/f\/([^/]+)\/([^/]+)(?:\/images\/([0-9a-f]{64}))?$/.exec(url.pathname);
   if (request.method !== "GET" || match === null) return plain(404, "Not found", refused);
   const id = match[1] ?? "";
+  const sha256 = match[3];
   let blockId: string;
   try {
     blockId = decodeURIComponent(match[2] ?? "");
@@ -253,15 +260,36 @@ export function handleFrame(request: Request, ctx: ServiceContext): Response {
   // A token minted for a static frame never opens the script policy, and a
   // running token only opens a design that declared it runs script.
   if (mode === "running" && block.runsScript !== true) return plain(404, "Not found", refused);
-  return new Response(renderDesignFramePage(block, share.document.images ?? []), {
+  // Only the images this design names, by the share's own references.
+  const named = new Set((block.assets ?? []).map((asset) => String(asset.imageRef)));
+  const images = (share.document.images ?? []).filter((image) => named.has(String(image.imageRef)));
+  const base = `/f/${id}/${encodeURIComponent(blockId)}/images/`;
+  if (sha256 !== undefined) {
+    const image = images.find((each) => each.sha256 === sha256);
+    if (image?.data === undefined) return plain(404, "Not found", refused);
+    return new Response(Buffer.from(image.data, "base64"), {
+      status: 200,
+      headers: {
+        ...FRAME_HEADERS,
+        "content-type": image.mediaType,
+        "content-security-policy": refused,
+        // The bytes at an address never change; the token in it expires.
+        "cache-control": "private, max-age=600, immutable",
+      },
+    });
+  }
+  const imagePrefix = images.length === 0 ? "" : `${new URL(ctx.usercontentOrigin).origin}${base}`;
+  const address = (image: CanvasShareImage) =>
+    `${base}${image.sha256}?t=${encodeURIComponent(token)}`;
+  return new Response(renderDesignFramePage(block, images, address), {
     status: 200,
     headers: {
       ...FRAME_HEADERS,
       "content-type": "text/html; charset=utf-8",
       "content-security-policy":
         mode === "running"
-          ? runningFramePolicy(ctx.publicOrigin)
-          : staticFramePolicy(ctx.publicOrigin),
+          ? runningFramePolicy(ctx.publicOrigin, imagePrefix)
+          : staticFramePolicy(ctx.publicOrigin, imagePrefix),
     },
   });
 }
