@@ -1,11 +1,12 @@
 import {
   AutomationFileActivityWindowLimit,
   AutomationFileArrivalTrigger,
-  AutomationFileArrivalReceipt,
   AutomationFileSourceCheckpoint,
   AutomationFileSourceSummary,
-  AutomationFileSourceReview,
   AutomationSourceDigest,
+  AutomationSourceRelativePath,
+  MAX_AUTOMATION_FILE_START_LIMIT,
+  MAX_AUTOMATION_SOURCE_FILES,
 } from "./automationFileArrival";
 export * from "./automationFileArrival";
 import {
@@ -329,6 +330,86 @@ export const AutomationClientPrincipal = Schema.Union(
 export type AutomationClientPrincipal = typeof AutomationClientPrincipal.Type;
 export const ClientPrincipal = AutomationClientPrincipal;
 export type ClientPrincipal = AutomationClientPrincipal;
+
+const reviewCounter = Schema.Int.pipe(Schema.between(0, Number.MAX_SAFE_INTEGER));
+const reviewPositiveCounter = Schema.Int.pipe(Schema.between(1, Number.MAX_SAFE_INTEGER));
+const AutomationFileSourceReviewFields = {
+  expectedDefinitionVersion: reviewPositiveCounter,
+  previousObservationRevision: reviewPositiveCounter,
+  previousSourceIdentity: AutomationSourceDigest,
+  previousBatchDigest: AutomationSourceDigest,
+  disposition: Schema.Literal("skip", "run-once"),
+  reviewedAt: UtcTimestamp,
+} as const;
+
+/**
+ * The person's review of a held file batch, naming who reviewed it: a window
+ * on this host, or a device the host's own person paired, which may do what a
+ * window may (maintainer decision, 2026-11-12). Recovery rebuilds the
+ * routine's author from it, so it carries the whole device principal. A
+ * hub-introduced or restricted device never reviews, so its form is refused.
+ */
+export const AutomationFileSourceReview = Schema.Union(
+  Schema.Struct({
+    ...AutomationFileSourceReviewFields,
+    reviewedWindowId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+    reviewedCapabilityGeneration: reviewCounter,
+  }).annotations(strict),
+  Schema.Struct({
+    ...AutomationFileSourceReviewFields,
+    reviewedDevice: AutomationRemoteDevicePrincipal,
+  })
+    .annotations(strict)
+    .pipe(Schema.filter((review) => review.reviewedDevice.admittedBy === "host-person")),
+);
+export type AutomationFileSourceReview = typeof AutomationFileSourceReview.Type;
+
+/** Whether this principal is the one that reviewed the held batch. */
+export function automationFileSourceReviewedBy(
+  review: AutomationFileSourceReview,
+  principal: AutomationClientPrincipal | AutomationAuthorPrincipal,
+): boolean {
+  if ("reviewedDevice" in review)
+    return (
+      principal.kind === "remote-device" &&
+      String(principal.hostId) === String(review.reviewedDevice.hostId) &&
+      String(principal.deviceId) === String(review.reviewedDevice.deviceId) &&
+      principal.credentialGeneration === review.reviewedDevice.credentialGeneration &&
+      String(principal.sessionId) === String(review.reviewedDevice.sessionId)
+    );
+  return (
+    principal.kind === "local-window" &&
+    String(principal.windowId) === review.reviewedWindowId &&
+    principal.capabilityGeneration === review.reviewedCapabilityGeneration
+  );
+}
+
+export const AutomationFileArrivalReceipt = Schema.Struct({
+  checkpoint: AutomationFileSourceCheckpoint,
+  files: Schema.Array(AutomationSourceRelativePath).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(MAX_AUTOMATION_SOURCE_FILES),
+  ),
+  automaticStartOrdinal: Schema.Int.pipe(Schema.between(1, MAX_AUTOMATION_FILE_START_LIMIT)),
+  rearm: Schema.optional(AutomationFileSourceReview),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (receipt) =>
+        (receipt.rearm === undefined || receipt.rearm.disposition === "run-once") &&
+        receipt.automaticStartOrdinal === receipt.checkpoint.automaticStarts &&
+        receipt.checkpoint.baselineReady &&
+        (receipt.checkpoint.phase === "watching" ||
+          (receipt.checkpoint.phase === "needs-rearm" &&
+            receipt.checkpoint.reason === "automatic-start-limit")) &&
+        new Set(receipt.files).size === receipt.files.length &&
+        receipt.files.every((path) =>
+          receipt.checkpoint.baseline.some((file) => file.path === path),
+        ),
+    ),
+  );
+export type AutomationFileArrivalReceipt = typeof AutomationFileArrivalReceipt.Type;
 
 /** Separate author attribution may retain the local actor identity. */
 export const AutomationAuthorPrincipal = Schema.Union(
@@ -1598,10 +1679,7 @@ export const AutomationDefinitionLifecycleChanged = Schema.Struct({
           (event.fileSourceReview !== undefined &&
             event.automation.trigger.kind === "file-arrival" &&
             event.automation.lifecycle === "enabled" &&
-            event.automation.updatedBy.kind === "local-window" &&
-            event.automation.updatedBy.windowId === event.fileSourceReview.reviewedWindowId &&
-            event.automation.updatedBy.capabilityGeneration ===
-              event.fileSourceReview.reviewedCapabilityGeneration &&
+            automationFileSourceReviewedBy(event.fileSourceReview, event.automation.updatedBy) &&
             event.automation.version === event.fileSourceReview.expectedDefinitionVersion + 1 &&
             event.fileSource.sourceIdentity === event.fileSourceReview.previousSourceIdentity &&
             event.fileSource.observationRevision ===
