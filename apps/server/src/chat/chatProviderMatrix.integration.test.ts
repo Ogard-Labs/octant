@@ -92,7 +92,7 @@ const CHAT_OUTCOMES = {
 
 describe("Chat provider matrix", () => {
   it("consumes Chat conformance evidence for every registered provider kind", () => {
-    expect(new Set(registeredProviderDriverKinds).size).toBe(29);
+    expect(new Set(registeredProviderDriverKinds).size).toBe(30);
 
     for (const driverKind of registeredProviderDriverKinds) {
       if (CHAT_OUTCOMES[driverKind] === "unavailable") continue;
