@@ -3,12 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { MediaIconSetTarget } from "@octant/plugin-api/media-tools";
-import {
-  checkNewFileUnder,
-  removeCreatedFileUnder,
-  writeIconFileUnder,
-  type CreatedFileReceipt,
-} from "./generatedImageSave";
+import { checkNewFileUnder } from "./generatedImageSave";
 import { pngWithoutAlpha } from "./pngOpacity";
 
 /**
@@ -311,10 +306,6 @@ export function hostIconSetsUnder(root: string, dataDirectory: string) {
         iconSets: {
           render,
           check: (relativePath: string) => checkNewFileUnder({ root, relativePath }),
-          write: (relativePath: string, bytes: Uint8Array) =>
-            writeIconFileUnder({ root, relativePath, bytes }),
-          remove: (relativePath: string, receipt: CreatedFileReceipt) =>
-            removeCreatedFileUnder({ root, relativePath, receipt }),
         },
       };
 }

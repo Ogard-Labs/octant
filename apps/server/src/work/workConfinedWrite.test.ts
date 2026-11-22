@@ -22,34 +22,6 @@ describe("writeConfinedWorkFile", () => {
     expect(decoder.decode(filesystem.readBytes("/work/notes.md"))).toBe("# Hello");
   });
 
-  it("reports what an exclusive create made from its own handle, and nothing for an overwrite", async () => {
-    const filesystem = workFilesystemFixture();
-    const created: Array<{ readonly phase: string; readonly size: number }> = [];
-    await writeConfinedWorkFile({
-      filesystem,
-      canonicalPath: "/work/notes.md",
-      allowCreate: true,
-      bytes: encoder.encode("# Hello"),
-      onCreated: (stat, phase) => created.push({ phase, size: stat.size }),
-    });
-    expect(created).toEqual([
-      { phase: "opened", size: 0 },
-      { phase: "written", size: 7 },
-    ]);
-
-    const overwritten: Array<string> = [];
-    const original = await filesystem.lstat("/work/notes.md");
-    await writeConfinedWorkFile({
-      filesystem,
-      canonicalPath: "/work/notes.md",
-      allowCreate: false,
-      expected: { device: original.device, inode: original.inode },
-      bytes: encoder.encode("# Again"),
-      onCreated: (_stat, phase) => overwritten.push(phase),
-    });
-    expect(overwritten).toEqual([]);
-  });
-
   it("refuses to create through a symlink planted at the target name", async () => {
     const filesystem = workFilesystemFixture();
     filesystem.putFile("/outside/secret.md", encoder.encode("host credentials"));

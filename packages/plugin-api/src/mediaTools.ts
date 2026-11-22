@@ -233,15 +233,11 @@ export type MediaImageIconSetOutcome =
       readonly snippets?: { readonly html: string; readonly manifestIcons: string };
     }
   | { readonly status: "not-saved" }
-  /**
-   * Nothing was written, or a set stopped part way (Stop, a lowered level, a
-   * failed write) removed every file it had created, leaving the folder as it
-   * was.
-   */
+  /** Nothing was written: a check refused, or the set stopped before its first file. */
   | { readonly status: "refused"; readonly error: string }
   /**
-   * A set stopped part way and some files it wrote could not be removed
-   * again (edited or replaced since, or the removal failed); they are named.
+   * The set stopped part way (Stop, a lowered level, or a failed write).
+   * The files already written are complete and kept, and are named.
    */
   | { readonly status: "failed"; readonly error: string; readonly written: ReadonlyArray<string> };
 

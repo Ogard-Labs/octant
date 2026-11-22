@@ -14,13 +14,7 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { SpendCeilingService } from "../spendCeilingService";
-import {
-  checkNewFileUnder,
-  removeCreatedFileUnder,
-  saveGeneratedImageUnder,
-  writeIconFileUnder,
-  type CreatedFileReceipt,
-} from "./generatedImageSave";
+import { checkNewFileUnder, saveGeneratedImageUnder } from "./generatedImageSave";
 import { GeneratedImageStore } from "./generatedImageStore";
 import { createImageAgentTools, IMAGE_TOOL_NAME, type ImageAgentToolPort } from "./imageAgentTools";
 import type {
@@ -703,25 +697,18 @@ describe("createImageAgentTools", () => {
       const root = mkdtempSync(join(tmpdir(), "octant-icon-set-"));
       folders.push(root);
       const write = vi.fn((relativePath: string, bytes: Uint8Array) =>
-        writeIconFileUnder({ root, relativePath, bytes }),
+        saveGeneratedImageUnder({ root, relativePath, bytes }),
       );
       return {
         root,
         write,
-        save: {
-          posture: () => posture,
-          write: (relativePath: string, bytes: Uint8Array) =>
-            saveGeneratedImageUnder({ root, relativePath, bytes }),
-        },
+        save: { posture: () => posture, write },
         iconSets: {
           render: vi.fn(async () => ({
             status: "rendered" as const,
             files: webIcons.map((path) => ({ path, bytes: Uint8Array.from([1, 2, 3]) })),
           })),
           check: (relativePath: string) => checkNewFileUnder({ root, relativePath }),
-          write,
-          remove: (relativePath: string, receipt: CreatedFileReceipt) =>
-            removeCreatedFileUnder({ root, relativePath, receipt }),
         },
       };
     }
@@ -806,7 +793,7 @@ describe("createImageAgentTools", () => {
       expect(folder.write).not.toHaveBeenCalled();
     });
 
-    it("stops when the thread moves to Plan between files and removes what it had written", async () => {
+    it("stops when the thread moves to Plan between files and names what it had written", async () => {
       const folder = iconSetFolder("allow");
       let level: "allow" | "refuse" = "allow";
       const write = vi.fn(async (relativePath: string, bytes: Uint8Array) => {
@@ -816,19 +803,20 @@ describe("createImageAgentTools", () => {
       });
       const { set } = tools([imageProfile()], [job("completed")], [], {
         ...folder,
-        save: { ...folder.save, posture: () => level },
-        iconSets: { ...folder.iconSets, write },
+        save: { posture: () => level, write },
       });
       const outcome = await call(set, iconSet);
       expect(write).toHaveBeenCalledOnce();
       expect(outcome.isError).toBe(true);
       expect(outcome.result).toMatchObject({
-        error: expect.stringMatching(/Plan mode.*Nothing was kept/),
+        status: "failed",
+        error: expect.stringMatching(/Plan mode/),
+        written: ["public/favicon-16.png"],
       });
-      expect(readdirSync(join(folder.root, "public"))).toEqual([]);
+      expect(readdirSync(join(folder.root, "public"))).toEqual(["favicon-16.png"]);
     });
 
-    it("writes no further file once the turn is stopped, and leaves the folder as it was", async () => {
+    it("writes no further file once the turn is stopped, and names what it had written", async () => {
       const folder = iconSetFolder("allow");
       const stop = new AbortController();
       const write = vi.fn(async (relativePath: string, bytes: Uint8Array) => {
@@ -838,7 +826,7 @@ describe("createImageAgentTools", () => {
       });
       const { set } = tools([imageProfile()], [job("completed")], [], {
         ...folder,
-        iconSets: { ...folder.iconSets, write },
+        save: { posture: () => "allow", write },
       });
       if (set === undefined) throw new Error("The image tool was not offered.");
       const outcome = await set.execute({
@@ -848,12 +836,13 @@ describe("createImageAgentTools", () => {
       });
       expect(write).toHaveBeenCalledOnce();
       expect(outcome.result).toMatchObject({
-        error: expect.stringMatching(/stopped.*Nothing was kept/),
+        status: "failed",
+        error: expect.stringMatching(/stopped/),
+        written: ["public/favicon-16.png"],
       });
-      expect(existsSync(join(folder.root, "public", "favicon-16.png"))).toBe(false);
     });
 
-    it("stops and removes what it wrote when the level drops to Ask first mid-set without consent", async () => {
+    it("stops when the level drops to Ask first mid-set without consent", async () => {
       const folder = iconSetFolder("allow");
       let level: "allow" | "ask" = "allow";
       const write = vi.fn(async (relativePath: string, bytes: Uint8Array) => {
@@ -863,82 +852,37 @@ describe("createImageAgentTools", () => {
       });
       const { ask, set } = tools([imageProfile()], [job("completed")], [], {
         ...folder,
-        save: { ...folder.save, posture: () => level },
-        iconSets: { ...folder.iconSets, write },
+        save: { posture: () => level, write },
       });
       const outcome = await call(set, iconSet);
       expect(ask).not.toHaveBeenCalled();
       expect(write).toHaveBeenCalledOnce();
-      expect(outcome.result).toMatchObject({ error: expect.stringMatching(/asks before edits/) });
-      expect(readdirSync(join(folder.root, "public"))).toEqual([]);
-    });
-
-    it("keeps a written icon someone replaced before the set stopped, and names it", async () => {
-      const folder = iconSetFolder("allow");
-      // The level is read before each write. Once the first favicon exists,
-      // a person's editor swaps it for its own file of the same size, and
-      // the thread moves to Plan.
-      const posture = (): "allow" | "refuse" => {
-        const target = join(folder.root, "public", "favicon-16.png");
-        if (!existsSync(target)) return "allow";
-        rmSync(target);
-        writeFileSync(target, Uint8Array.from([9, 9, 9]));
-        return "refuse";
-      };
-      const { set } = tools([imageProfile()], [job("completed")], [], {
-        ...folder,
-        save: { ...folder.save, posture },
-      });
-      const outcome = await call(set, iconSet);
       expect(outcome.result).toMatchObject({
         status: "failed",
+        error: expect.stringMatching(/asks before edits/),
         written: ["public/favicon-16.png"],
       });
-      expect(existsSync(join(folder.root, "public", "favicon-16.png"))).toBe(true);
     });
 
-    it("removes a part-written file its own exclusive open created when a later write fails", async () => {
-      const folder = iconSetFolder("allow");
-      let calls = 0;
-      const write = vi.fn(async (relativePath: string, bytes: Uint8Array) => {
-        calls += 1;
-        if (calls !== 2) return folder.write(relativePath, bytes);
-        // The open succeeded and a few bytes landed before the disk filled.
-        const created = await folder.write(relativePath, Uint8Array.from([7]));
-        if (created.status !== "saved") throw new Error("setup failed");
-        return {
-          status: "failed" as const,
-          reason: "The disk is full.",
-          created: { device: created.receipt.device, inode: created.receipt.inode },
-        };
-      });
-      const { set } = tools([imageProfile()], [job("completed")], [], {
-        ...folder,
-        iconSets: { ...folder.iconSets, write },
-      });
-      const outcome = await call(set, iconSet);
-      expect(outcome.result).toMatchObject({ error: expect.stringMatching(/Nothing was kept/) });
-      expect(readdirSync(join(folder.root, "public"))).toEqual([]);
-    });
-
-    it("claims no leftover for a write whose exclusive open never created the file", async () => {
+    it("names the failed path and the files already written when a write fails", async () => {
       const folder = iconSetFolder("allow");
       let calls = 0;
       const write = vi.fn(async (relativePath: string, bytes: Uint8Array) => {
         calls += 1;
         return calls === 2
-          ? { status: "failed" as const, reason: "The folder is read-only." }
+          ? { status: "failed" as const, reason: "The disk is full." }
           : folder.write(relativePath, bytes);
       });
       const { set } = tools([imageProfile()], [job("completed")], [], {
         ...folder,
-        iconSets: { ...folder.iconSets, write },
+        save: { posture: () => "allow", write },
       });
       const outcome = await call(set, iconSet);
       expect(outcome.result).toMatchObject({
-        error: expect.stringMatching(/read-only.*Nothing was kept/),
+        status: "failed",
+        error: expect.stringMatching(/public\/favicon-32\.png: The disk is full/),
+        written: ["public/favicon-16.png"],
       });
-      expect(outcome.result).not.toHaveProperty("written");
     });
 
     it("refuses an Android set where a launcher icon exists in another format", async () => {

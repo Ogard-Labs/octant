@@ -2,7 +2,6 @@ import type {
   WorkFileIdentity,
   WorkFilesystemPort,
   WorkOpenDirectory,
-  WorkOpenFileStat,
   WorkOpenWriteFile,
   WorkWriteOpenOptions,
 } from "./workFilesystemPort";
@@ -34,14 +33,6 @@ export interface WorkConfinedWriteRequest {
   /** Permission bits for a created file; the port's private default when absent. */
   readonly createMode?: number;
   readonly bytes: Uint8Array;
-  /**
-   * Told what an exclusive create made, from its own handle: once when the
-   * open succeeds and again after the bytes are written. A caller that may
-   * have to undo the create uses this instead of a later path lookup, which
-   * could see an object someone put there since. Never called for an
-   * overwrite.
-   */
-  readonly onCreated?: (stat: WorkOpenFileStat, phase: "opened" | "written") => void;
 }
 
 /**
@@ -70,7 +61,7 @@ export async function writeConfinedWorkFile(request: WorkConfinedWriteRequest): 
   if (!request.allowCreate) return false;
   const created = await openWrite(request, true);
   if (created === undefined) return false;
-  return await writeOpened(created, request.bytes, undefined, request.onCreated);
+  return await writeOpened(created, request.bytes);
 }
 
 async function writeCreatedUnderParent(
@@ -101,7 +92,7 @@ async function writeCreatedUnderParent(
       directory = next;
     }
     const created = await directory.openWriteFile(leaf, writeOptions(request, true));
-    return await writeOpened(created, request.bytes, undefined, request.onCreated);
+    return await writeOpened(created, request.bytes);
   } catch {
     return false;
   } finally {
@@ -152,7 +143,6 @@ async function writeOpened(
   file: WorkOpenWriteFile,
   bytes: Uint8Array,
   expected?: WorkFileIdentity,
-  onCreated?: WorkConfinedWriteRequest["onCreated"],
 ): Promise<boolean> {
   try {
     const opened = await file.stat();
@@ -163,9 +153,7 @@ async function writeOpened(
     ) {
       return false;
     }
-    onCreated?.(opened, "opened");
     await file.write(bytes);
-    if (onCreated !== undefined) onCreated(await file.stat(), "written");
     return true;
   } catch {
     return false;

@@ -39,7 +39,6 @@ import type {
   ImageGenerationOfferOutcome,
   ImageGenerationOfferService,
 } from "./imageGenerationOfferService";
-import type { CreatedFileReceipt, IconFileWrite } from "./generatedImageSave";
 import { webIconSnippets, type IconSetRenderOutcome } from "./iconSetRenderer";
 import type { EnqueueImageJobInput, ImageJobService } from "./imageJobService";
 import type { KeptImageGenerationChoices } from "./keptImageGenerationChoices";
@@ -122,16 +121,6 @@ export interface ImageIconSetPort {
   readonly check: (
     relativePath: string,
   ) => Promise<{ readonly status: "ok" } | { readonly status: "refused"; readonly reason: string }>;
-  /**
-   * Writes one icon file as new under the turn's folder, confined and
-   * exclusive, with the receipt of the object it made, from its own handle.
-   */
-  readonly write: (relativePath: string, bytes: Uint8Array) => Promise<IconFileWrite>;
-  /**
-   * Removes a file this call created, when the set stops part way, only while
-   * it is still the object its receipt names; false when it was left.
-   */
-  readonly remove: (relativePath: string, receipt: CreatedFileReceipt) => Promise<boolean>;
 }
 
 /** What the tool asks the person; the binding adds the thread it asks in. */
@@ -528,25 +517,20 @@ async function executeHostIconSet(
       return { status: "refused", error: "Plan mode cannot save files." };
     }
   }
-  const written: Array<{ readonly relativePath: string; readonly receipt: CreatedFileReceipt }> =
-    [];
-  // A set stopped part way removes the files this call created, so the
-  // folder is left as it was: a stopped turn drops its tool result, and files
-  // nobody was shown would only block the next try at the same directory. A
-  // file is removed only while it is still the object its own write handle
-  // reported; one edited or replaced since is kept and named.
-  const undo = async (
-    reason: string,
-    partial?: { readonly relativePath: string; readonly receipt: CreatedFileReceipt },
-  ): Promise<MediaImageIconSetOutcome> => {
-    const kept: string[] = [];
-    for (const file of partial === undefined ? written : [...written, partial]) {
-      if (!(await iconSets.remove(file.relativePath, file.receipt))) kept.push(file.relativePath);
-    }
-    return kept.length === 0
-      ? { status: "refused", error: `${reason} Nothing was kept.` }
-      : { status: "failed", error: `${reason} These files were left in place.`, written: kept };
-  };
+  const written: string[] = [];
+  // A set that stops part way writes no further file and names the files it
+  // already wrote, so the agent and the person know what to clear before a
+  // retry. It deletes nothing: every file was an exclusive create of a
+  // complete icon, and removing one again would need proof no one changed it
+  // since.
+  const stoppedAfter = (reason: string): MediaImageIconSetOutcome =>
+    written.length === 0
+      ? { status: "refused", error: `${reason} Nothing was written.` }
+      : {
+          status: "failed",
+          error: `${reason} The rest of the icon set was not written.`,
+          written,
+        };
   for (const file of files) {
     // Each write is awaited, so the level and the turn's Stop are read again
     // before the next one starts. A drop to Plan, or to a level that asks
@@ -561,23 +545,15 @@ async function executeHostIconSet(
           : posture === "ask" && !confirmed
             ? "The thread now asks before edits; ask the person before saving the icon set."
             : undefined;
-    if (stopped !== undefined) return await undo(stopped);
-    const saved = await iconSets.write(file.relativePath, file.bytes);
-    if (saved.status !== "saved") {
-      // Only a file this call's exclusive open created is its own to remove.
-      return await undo(
-        `${file.relativePath}: ${saved.reason}`,
-        saved.created === undefined
-          ? undefined
-          : { relativePath: file.relativePath, receipt: saved.created },
-      );
-    }
-    written.push({ relativePath: saved.relativePath, receipt: saved.receipt });
+    if (stopped !== undefined) return stoppedAfter(stopped);
+    const saved = await save.write(file.relativePath, file.bytes);
+    if (saved.status !== "saved") return stoppedAfter(`${file.relativePath}: ${saved.reason}`);
+    written.push(saved.relativePath);
   }
   return {
     status: "saved",
     directory: request.directory,
-    files: written.map((file) => file.relativePath),
+    files: written,
     ...(request.target === "web" ? { snippets: webIconSnippets() } : {}),
   };
 }
