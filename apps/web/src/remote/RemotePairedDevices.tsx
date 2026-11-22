@@ -8,6 +8,13 @@ import type {
   RemotePairingTicketSourceClass,
   RemotePendingPairingRequest,
 } from "@octant/contracts/desktop-bridge";
+import {
+  DEFAULT_DEVICE_ACCESS_LEVEL,
+  DEVICE_ACCESS_LEVEL_LABELS,
+  DEVICE_ACCESS_LEVELS,
+  isDeviceAccessLevel,
+  type DeviceAccessLevel,
+} from "@octant/contracts/remote-access";
 import { useCallback, useEffect, useState } from "react";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -24,6 +31,11 @@ const SOURCE_OPTIONS: ReadonlyArray<{
   { id: "lan-private", label: "Private LAN" },
   { id: "tailscale", label: "Tailscale" },
 ];
+
+const ACCESS_LEVEL_OPTIONS = DEVICE_ACCESS_LEVELS.map((id) => ({
+  id,
+  label: DEVICE_ACCESS_LEVEL_LABELS[id],
+}));
 
 /** Often enough that a device waiting to be approved shows up while its code is still on screen. */
 const REFRESH_MS = 5_000;
@@ -50,6 +62,11 @@ export function RemotePairedDevices(props: RemotePairedDevicesProps) {
   const [busy, setBusy] = useState(false);
   const [renaming, setRenaming] = useState<{ readonly deviceId: string; readonly label: string }>();
   const [confirmingRevokeAll, setConfirmingRevokeAll] = useState(false);
+  const [confirmingSignOut, setConfirmingSignOut] = useState(false);
+  const [confirmingPause, setConfirmingPause] = useState(false);
+  const [approvalLevels, setApprovalLevels] = useState<ReadonlyMap<string, DeviceAccessLevel>>(
+    new Map(),
+  );
   const [source, setSource] = useState<RemotePairingTicketSourceClass>("lan-private");
   const [ticket, setTicket] = useState<RemoteMintedPairingTicket>();
 
@@ -97,10 +114,28 @@ export function RemotePairedDevices(props: RemotePairedDevicesProps) {
             <li className="flex flex-wrap items-center gap-1" key={request.ticketId}>
               <span>{request.deviceLabel}</span>
               <span className="oct-meta--mono">{request.comparisonCode}</span>
+              <OctantSelectField
+                aria-label={`Access for ${request.deviceLabel}`}
+                disabled={busy}
+                onValueChange={(next) => {
+                  if (isDeviceAccessLevel(next)) {
+                    setApprovalLevels(new Map(approvalLevels).set(request.ticketId, next));
+                  }
+                }}
+                options={ACCESS_LEVEL_OPTIONS}
+                value={approvalLevels.get(request.ticketId) ?? DEFAULT_DEVICE_ACCESS_LEVEL}
+              />
               <OctantButton
                 aria-label={`Approve ${request.deviceLabel}`}
                 disabled={busy}
-                onClick={() => void change(() => client.approvePairingRequest(request.ticketId))}
+                onClick={() =>
+                  void change(() =>
+                    client.approvePairingRequest(
+                      request.ticketId,
+                      approvalLevels.get(request.ticketId) ?? DEFAULT_DEVICE_ACCESS_LEVEL,
+                    ),
+                  )
+                }
                 size="sm"
                 type="button"
               >
@@ -149,6 +184,19 @@ export function RemotePairedDevices(props: RemotePairedDevicesProps) {
               <>
                 <span>{device.deviceLabel}</span>
                 <span className="text-xs text-muted-foreground">{device.state}</span>
+                {device.accessLevel === undefined || device.state !== "active" ? null : (
+                  <OctantSelectField
+                    aria-label={`Access for ${device.deviceLabel}`}
+                    disabled={busy}
+                    onValueChange={(next) => {
+                      if (isDeviceAccessLevel(next)) {
+                        void change(() => client.setDeviceAccessLevel(device.deviceId, next));
+                      }
+                    }}
+                    options={ACCESS_LEVEL_OPTIONS}
+                    value={device.accessLevel}
+                  />
+                )}
                 <OctantButton
                   disabled={busy}
                   onClick={() =>
@@ -220,6 +268,43 @@ export function RemotePairedDevices(props: RemotePairedDevicesProps) {
           variant="ghost"
         >
           {confirmingRevokeAll ? "Revoke all, this browser included" : "Revoke all devices"}
+        </OctantButton>
+        <OctantButton
+          disabled={busy || devices.length === 0}
+          onClick={() => {
+            if (!confirmingSignOut) {
+              setConfirmingSignOut(true);
+              return;
+            }
+            setConfirmingSignOut(false);
+            void change(() => client.signOutOtherDevices());
+          }}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          {confirmingSignOut
+            ? "Sign out every device but this browser"
+            : "Sign out all other devices"}
+        </OctantButton>
+        {/* Pausing refuses this browser too, and only the computer itself resumes it. */}
+        <OctantButton
+          disabled={busy}
+          onClick={() => {
+            if (!confirmingPause) {
+              setConfirmingPause(true);
+              return;
+            }
+            setConfirmingPause(false);
+            void change(() => client.pauseRemoteAccess());
+          }}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          {confirmingPause
+            ? "Pause, this browser included; resume on the computer"
+            : "Pause remote access"}
         </OctantButton>
       </div>
       {ticket === undefined ? null : (
