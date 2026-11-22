@@ -40,6 +40,18 @@ const modelId = "claude-sonnet" as ProviderModelId;
 const projectRoot = "/tmp/octant-claude-conformance";
 const occurredAt = "2026-07-17T00:00:00.000Z";
 
+// A runtime that claims server placement must start through the placement it
+// is given; the stand-in SDK port counts each query opened with one.
+let placedQueries = 0;
+const conformancePlacement = {
+  placement: {
+    serverName: "devbox",
+    start: () => ({ status: "unreachable" as const, message: "Not reached in this check." }),
+    run: async () => ({ status: "unreachable" as const, message: "Not reached in this check." }),
+  },
+  used: () => placedQueries > 0,
+};
+
 function conformanceDriver(
   makeQuery: (input: ClaudeOpenQueryInput, sdkSessionId: string) => ConformanceQuery = (
     input,
@@ -53,6 +65,7 @@ function conformanceDriver(
     openQuery: (input) =>
       Effect.acquireRelease(
         Effect.sync(() => {
+          if (input.serverPlacement !== undefined) placedQueries += 1;
           const query = makeQuery(
             input,
             input.resumeSessionId ?? `sdk-conformance-${++runtimeNumber}`,
@@ -199,6 +212,7 @@ describe("Claude provider conformance", () => {
         unknownUserInput: "protocol",
       },
       isReleased: () => opened.length > 0 && opened.every((query) => query.closed),
+      serverPlacement: conformancePlacement,
     });
     // The lifecycle runtime above leaves its turn waiting on an approval and a
     // question, so it never finishes. Claude takes images, so the chat turn is

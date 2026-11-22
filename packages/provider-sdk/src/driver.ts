@@ -24,6 +24,7 @@ import type {
   ProviderFileReviewRead,
 } from "@octant/contracts";
 import type { Effect, Scope, Stream } from "effect";
+import type { Readable, Writable } from "node:stream";
 import type { ProviderContextFactsSource, ProviderLocalUsageHistorySource } from "./contextFacts";
 import type { CloudSessionDriver } from "./cloudSessions";
 import type { ProviderProjectFolderDiscoveryPort } from "./projectFolderDiscovery";
@@ -39,6 +40,48 @@ export { ProviderOutputStopReason } from "@octant/contracts";
 
 export interface ProviderProbeInput {
   readonly instanceId: ProviderInstanceId;
+}
+
+/** One program's standard streams on a server, held open until stopped. */
+export type ProviderServerStream =
+  | {
+      readonly status: "open";
+      readonly stdin: Writable;
+      readonly stdout: Readable;
+      readonly stderr: Readable;
+      /** Ends the program: closes its standard input, then the connection. */
+      readonly stop: () => void;
+      readonly exited: Promise<{ readonly exitCode: number | null }>;
+    }
+  | { readonly status: "unreachable"; readonly message: string };
+
+/** What a short program printed on a server, or why it could not run. */
+export type ProviderServerRun =
+  | {
+      readonly status: "ran";
+      readonly exitCode: number;
+      readonly output: string;
+      readonly errorOutput: string;
+    }
+  | { readonly status: "unreachable"; readonly message: string };
+
+/**
+ * The host's connection to the server a thread's Project lives on. The host
+ * owns the connection, its pinned host key and its shell quoting; a runtime
+ * names only the program and its arguments, which run in the Project's
+ * folder there. No secret may travel as an argument, because the server's
+ * process list shows them.
+ */
+export interface ProviderServerPlacement {
+  /** The server's name as the person registered it, for the words they read. */
+  readonly serverName: string;
+  /** Starts a long-running program in the folder, its streams passed through unchanged. */
+  readonly start: (program: ReadonlyArray<string>) => ProviderServerStream;
+  /** Runs a short program in the folder and returns what it printed. */
+  readonly run: (
+    program: ReadonlyArray<string>,
+    options: { readonly timeoutMs: number },
+  ) => Promise<ProviderServerRun>;
 }
 
 export interface ProviderAcquireInput {
@@ -64,6 +107,13 @@ export interface ProviderAcquireInput {
    * Absent means the thread has none.
    */
   readonly attachmentsFolder?: string;
+  /**
+   * Present when the turn runs on a server Project's server: `projectRoot` is
+   * then a folder on that server, and the runtime's program must be started
+   * there through this placement, never on this host. Only a runtime that
+   * reports `serverPlacement: "supported"` is given one.
+   */
+  readonly serverPlacement?: ProviderServerPlacement;
   readonly mode?: "chat" | "work" | "code";
   /** Context used by the server-owned Work request projection subscriber. */
   readonly workRequest?: {
@@ -101,6 +151,18 @@ export interface ProviderCompactionPoint {
   readonly contextWindow: number;
 }
 
+/**
+ * The provider's own channels to its vendor that the person lets it use.
+ * `true` means Octant sets none of that family's guards on the launch, so the
+ * provider's own settings decide; `false` means Octant keeps them set.
+ */
+export interface ProviderOwnChannels {
+  /** Usage metrics, error reports, trace uploads and feedback uploads. */
+  readonly telemetry: boolean;
+  /** The provider replacing or checking for a newer version of itself. */
+  readonly selfUpdate: boolean;
+}
+
 export interface ProviderSessionStart {
   readonly sessionId: ProviderSessionId;
   readonly modelId: ProviderModelId;
@@ -132,6 +194,23 @@ export interface ProviderSessionStart {
    * never loosens one.
    */
   readonly strict?: boolean;
+  /**
+   * The session's surface asks a question that wants a secret (a password or
+   * key) masked and keeps the typed answer out of every record, for a session
+   * that is not Strict but carries no `strict` of its own (a subagent, whose
+   * parent thread is outside Strict). A session with `strict: false` asks
+   * such questions already; `strict: true` never does. Absent, a driver that
+   * can tell such a question refuses it unseen.
+   */
+  readonly asksSecretQuestions?: true;
+  /**
+   * Which of the provider's own channels to its vendor the person lets it
+   * use, from Settings › Providers & Models. Read only outside Strict: under
+   * Strict every telemetry and self-update guard stays set whatever this
+   * says. Absent outside Strict keeps the default: both stay off, every
+   * telemetry and self-update guard set.
+   */
+  readonly ownChannels?: ProviderOwnChannels;
   /**
    * Tools the person blocked for this provider in Settings, by the name its
    * runtime gives them, or `server__tool` for a tool of the provider's own
@@ -314,6 +393,10 @@ export interface ProviderSessionResume {
   readonly fullAccessSandbox?: boolean;
   /** Same meaning as in {@link ProviderSessionStart.strict}. */
   readonly strict?: boolean;
+  /** Same meaning as in {@link ProviderSessionStart.asksSecretQuestions}. */
+  readonly asksSecretQuestions?: true;
+  /** Same meaning as in {@link ProviderSessionStart.ownChannels}. */
+  readonly ownChannels?: ProviderOwnChannels;
   /** As on {@link ProviderSessionStart}; restated on every resume. */
   readonly blockedTools?: ReadonlyArray<string>;
   /**

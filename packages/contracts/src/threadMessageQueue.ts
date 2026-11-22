@@ -125,6 +125,12 @@ export const ThreadMessageQueueItem = Schema.Struct({
   createdAt: UtcTimestamp,
   /** Missing private content is explicit; metadata cannot recreate it. */
   payload: Schema.optional(ThreadMessageQueuePayload),
+  /**
+   * The message is offered to the thread's running turn and its runtime has
+   * not answered yet, so it cannot be edited, removed or moved until it either
+   * leaves the queue or waits again. Host memory only; never journaled.
+   */
+  steering: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 export type ThreadMessageQueueItem = typeof ThreadMessageQueueItem.Type;
 export const ThreadMessageQueueSnapshot = Schema.Struct({

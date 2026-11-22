@@ -3,9 +3,7 @@ import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 import { Readable } from "node:stream";
 import { createBrotliDecompress, createGunzip, createInflate } from "node:zlib";
-import { isPrivateAddress } from "./privateAddress";
-
-export { isPrivateAddress };
+import { isPrivateAddress } from "./browserNavigation";
 
 const MAX_CONTENT_ENCODINGS = 4;
 
@@ -109,18 +107,13 @@ export function createPinnedUpdateFetch(
               responseHeaders.delete("content-length");
             }
             resolve(
-              new Response(
-                decoded.body === null
-                  ? null
-                  : (Readable.toWeb(decoded.body) as ReadableStream<Uint8Array>),
-                {
-                  status,
-                  ...(incoming.statusMessage === undefined
-                    ? {}
-                    : { statusText: incoming.statusMessage }),
-                  headers: responseHeaders,
-                },
-              ),
+              new Response(decoded.body === null ? null : webStreamOf(decoded.body, incoming), {
+                status,
+                ...(incoming.statusMessage === undefined
+                  ? {}
+                  : { statusText: incoming.statusMessage }),
+                headers: responseHeaders,
+              }),
             );
           } catch (error) {
             incoming.destroy();
@@ -132,6 +125,28 @@ export function createPinnedUpdateFetch(
       request.end();
     });
   }) as typeof globalThis.fetch;
+}
+
+/**
+ * The response body as a Web stream, read on demand so a slow reader holds
+ * the socket back. Made by hand rather than with `Readable.toWeb`, whose
+ * result has a different type under Bun's typings than under Node's, and
+ * this transport runs in the desktop and in a Bun host. Canceling it
+ * destroys the decoders and the socket.
+ */
+function webStreamOf(body: Readable, incoming: Readable): ReadableStream<Uint8Array> {
+  const chunks = body[Symbol.asyncIterator]();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const next = await chunks.next();
+      if (next.done === true) controller.close();
+      else controller.enqueue(next.value as Buffer);
+    },
+    cancel() {
+      body.destroy();
+      incoming.destroy();
+    },
+  });
 }
 
 function decodeResponseBody(
@@ -155,7 +170,7 @@ function decodeResponseBody(
   // Canceling the Web stream destroys every Node stream in the composition
   // with AbortError. The composition still propagates real errors downstream;
   // these listeners keep cancellation from also escaping as an uncaught
-  // EventEmitter error in Electron's main process.
+  // EventEmitter error in the desktop or host process.
   incoming.on("error", () => undefined);
   for (const decoder of decoders) decoder.on("error", () => undefined);
   let body = incoming;

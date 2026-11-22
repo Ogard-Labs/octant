@@ -5,6 +5,7 @@ import {
   partitionAttachedFiles,
   type AttachedFileByPath,
 } from "../attachments/attachedFiles";
+import type { TurnAcceptance } from "../hostDrain";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import type { ConversationInputReceipt } from "@octant/contracts/conversation-inputs";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
@@ -106,6 +107,7 @@ import {
   type WorkThreadAdoptedSession,
   decodeThreadWorkingDirectory,
   ProviderNativeSessionId,
+  personalSignInRefusals,
   type ImportedSessionHistory,
 } from "@octant/contracts";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
@@ -257,6 +259,36 @@ export class WorkTurnServiceError extends Error {
   constructor(readonly failure: WorkTurnFailure) {
     super(failure.message);
   }
+}
+
+/**
+ * A Work turn's admission as the host sees it: the person's own start reads
+ * a drain as an unavailable failure, while a host caller that retries (a due
+ * wake-up) waits for the drain to lift instead of ending its schedule.
+ */
+export type WorkTurnAdmission =
+  | WorkTurnLookupResult
+  | { readonly kind: "draining"; readonly failure: WorkTurnFailure };
+
+/**
+ * A host-started Work turn (a due wake-up) as the wake-up schedule reads it.
+ * A drain that began while the turn was prepared refuses it late; that reads
+ * as busy, so the wake-up is offered again once the drain lifts rather than
+ * ending its schedule.
+ */
+export async function wakeupTurnOutcome(
+  start: Promise<{ readonly kind: string }>,
+  turnId: string,
+): Promise<
+  | { readonly status: "started"; readonly turnId: string }
+  | { readonly status: "busy" }
+  | { readonly status: "refused"; readonly message: string }
+> {
+  const result = await start;
+  if (result.kind === "draining") return { status: "busy" };
+  return result.kind === "accepted"
+    ? { status: "started", turnId }
+    : { status: "refused", message: "The turn was not admitted." };
 }
 
 /** What the turn's latest usage report said about the window and model time. */
@@ -569,6 +601,11 @@ export interface WorkTurnServiceDependencies {
     ) => void;
     /** Absent means every turn is admitted. */
     readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
+    /**
+     * Rechecks the host drain right before a prepared turn is accepted and
+     * counts the turn as running; the refusal, or nothing when admitted.
+     */
+    readonly acceptTurn?: (scope: NativeHarnessTurnScope) => TurnAcceptance;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
     /** Every turn's end, whatever its outcome, with what the turn cost and how it ran. */
     readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
@@ -1061,6 +1098,20 @@ export class WorkTurnService {
     input: unknown,
     options?: WorkTurnStartOptions,
   ): Promise<WorkTurnLookupResult> {
+    const admission = await this.startHostTurn(authenticatedWindowId, input, options);
+    if (admission.kind === "draining") throw new WorkTurnServiceError(admission.failure);
+    return admission;
+  }
+
+  /**
+   * Starts a turn as `startFirstTurn` does, but returns a drain refusal as a
+   * value, so a host caller that retries (a due wake-up) keeps its schedule.
+   */
+  async startHostTurn(
+    authenticatedWindowId: WindowId,
+    input: unknown,
+    options?: WorkTurnStartOptions,
+  ): Promise<WorkTurnAdmission> {
     this.#assertReady();
     const command = decodeStartWorkThreadTurnCommand(input);
     const existing = this.#projection.lookup(command.requestId);
@@ -1485,7 +1536,7 @@ export class WorkTurnService {
     authenticatedWindowId: WindowId,
     command: StartWorkThreadTurnCommand,
     options: WorkTurnStartOptions | undefined,
-  ): Promise<WorkTurnLookupResult> {
+  ): Promise<WorkTurnAdmission> {
     const externalData =
       options?.externalData === undefined
         ? undefined
@@ -1529,6 +1580,14 @@ export class WorkTurnService {
       driverKind: providerInstance?.driverKind,
     });
     if (sandboxRefusal !== undefined) throw this.#failure("unavailable", sandboxRefusal);
+    // A turn the host starts as itself (a routine, a wake, a goal round, a
+    // usage-limit or restart continuation, a child's result, a peer's task)
+    // has no person driving it, which some providers' personal sign-in does
+    // not cover. A person's own send carries their window, never this scope.
+    const unattended = isRoutineHostScope(authenticatedWindowId)
+      ? personalSignInRefusals(providerInstance?.driverKind ?? "")?.refusesUnattendedRuns
+      : undefined;
+    if (unattended !== undefined) throw this.#failure("unauthorized", unattended);
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
     // A thread in a server Work Project binds its turn here, before anything
     // starts: the harness's tools on the server, or why it cannot run there.
@@ -1598,6 +1657,12 @@ export class WorkTurnService {
             modelId: thread.modelId,
             projectId: thread.projectId,
           });
+    if (admission?.kind === "draining") {
+      return {
+        kind: "draining",
+        failure: decodeWorkTurnFailure({ category: "unavailable", message: admission.detail }),
+      };
+    }
     if (admission?.kind === "paused") {
       throw this.#failure(
         "unavailable",
@@ -1853,6 +1918,7 @@ export class WorkTurnService {
         ? hostTools
         : combineAppManagedToolSets(hostTools, extensionTools);
     let toolsLaunched = false;
+    let releaseDrain: (() => void) | undefined;
     try {
       const acceptedAt = decodeTimestamp(this.#clock());
       const nativeConversation = driver.conversationOwnership === "provider";
@@ -2356,6 +2422,28 @@ export class WorkTurnService {
         throw this.#failure("unauthorized", "Work turn admission is no longer current.");
       }
 
+      // A drain that began while the turn was prepared refuses it here; from
+      // here the drain counts it, before its provider reports a start.
+      const acceptance =
+        thread === undefined
+          ? undefined
+          : this.#nativeHarness?.acceptTurn?.({
+              threadId: String(thread.id),
+              mode: "work",
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+              projectId: thread.projectId,
+            });
+      if (acceptance?.status === "refused") {
+        return {
+          kind: "draining",
+          failure: decodeWorkTurnFailure({ category: "unavailable", message: acceptance.message }),
+        };
+      }
+      // A turn that ends before its launch (a spend refusal, a failed journal
+      // write) never reports an end, so it stops counting here.
+      if (acceptance?.status === "accepted") releaseDrain = acceptance.release;
+
       const spendReservationId = decodeSpendCeilingReservationId(this.#uuid());
       const spendAdmission = this.#spendCeiling?.admit({
         reservationId: spendReservationId,
@@ -2518,6 +2606,7 @@ export class WorkTurnService {
       toolsLaunched = true;
       return decodeWorkTurnLookupResult({ kind: "accepted", turn: this.#withLive(accepted) });
     } finally {
+      if (!toolsLaunched) releaseDrain?.();
       if (!toolsLaunched)
         await Effect.runPromise(
           Effect.promise(async () => {

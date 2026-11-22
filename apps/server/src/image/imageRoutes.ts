@@ -1,4 +1,5 @@
 import {
+  MAX_GENERATED_IMAGE_BYTES,
   THREAD_IMAGE_CHUNK_BYTES,
   decodeImageArtifactId,
   decodeImageGenerationEnqueueRequest,
@@ -9,6 +10,8 @@ import {
   decodeImageGenerationScopeId,
   decodeImageJob,
   decodeImageJobId,
+  type ImageArtifactId,
+  type ImageArtifactMediaType,
   type ImageGenerationSaveResult,
   type ImageGenerationScopeId,
   type ImageGenerationSettings,
@@ -27,8 +30,15 @@ import type { ImageJobService, ImageJobServiceError } from "./imageJobService";
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
 const JSON_BODY_LIMIT = 8_388_608;
+const THREAD_IMAGE_CACHE_TTL_MS = 30_000;
 const ARTIFACT_PATH =
   /^jobs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/artifacts\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/(cancel|save))?$/i;
+
+export interface ImageRouteHandler {
+  (request: Request): Promise<Response | undefined>;
+  readonly evictScope: (scopeId: ImageGenerationScopeId) => void;
+  readonly close: () => void;
+}
 
 export interface ImageRouteDependencies {
   readonly jobs: ImageJobService;
@@ -57,11 +67,12 @@ export interface ImageRouteDependencies {
  * Composer and preview entry for image generation. Window authority first;
  * every job is then re-checked against the thread the window can already Open.
  */
-export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
+export function createImageRouteHandler(dependencies: ImageRouteDependencies): ImageRouteHandler {
   const now = dependencies.now ?? Date.now;
   const jsonLimit = dependencies.maxJsonBodySize ?? JSON_BODY_LIMIT;
+  const threadImageCache = new VerifiedThreadImageCache(now, THREAD_IMAGE_CACHE_TTL_MS);
 
-  return async (request: Request): Promise<Response | undefined> => {
+  const handle = async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     if (!url.pathname.startsWith("/api/image/")) return undefined;
     const route = url.pathname.slice("/api/image/".length);
@@ -179,12 +190,27 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
 
       if (route === "thread-artifact" && request.method === "GET") {
         const jobId = parseJobId(url.searchParams.get("jobId") ?? "");
+        const rawAttachmentId = url.searchParams.get("attachmentId");
         const job = jobId === undefined ? undefined : dependencies.jobs.get(jobId);
-        const attachment = job?.artifacts.find(
-          (item) => String(item.attachmentId) === url.searchParams.get("attachmentId"),
-        );
-        if (!job || !attachment || job.threadKind === "image-library")
+        const attachment =
+          job?.status === "completed"
+            ? job.artifacts.find((item) => String(item.attachmentId) === rawAttachmentId)
+            : undefined;
+        if (
+          !job ||
+          job.status !== "completed" ||
+          !attachment ||
+          job.threadKind === "image-library"
+        ) {
+          if (jobId !== undefined) {
+            if (!job || job.status !== "completed") {
+              threadImageCache.evictJob(jobId);
+            } else if (!attachment && rawAttachmentId !== null) {
+              threadImageCache.evictAttachment(jobId, rawAttachmentId);
+            }
+          }
           return failure("The generated image is unavailable.", 404, origin);
+        }
         const canRead = async () =>
           (await dependencies.authorizeScope(
             windowId,
@@ -201,11 +227,46 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
           offset % THREAD_IMAGE_CHUNK_BYTES !== 0
         )
           return failure("Image offset is invalid.", 416, origin);
-        const artifact = await dependencies.jobs.readArtifact(job.id, attachment.attachmentId);
+        const cacheKey: VerifiedThreadImageKey = {
+          jobId: String(job.id),
+          scopeId: String(job.scopeId),
+          attachmentId: String(attachment.attachmentId),
+          hash: attachment.hash,
+          size: attachment.size,
+          mime: attachment.mime,
+        };
+        const cacheGeneration = threadImageCache.generation;
+        const cached = threadImageCache.read(cacheKey);
+        const artifact =
+          cached ?? (await dependencies.jobs.readArtifact(job.id, attachment.attachmentId));
         if (!artifact || !(await canRead()))
           return failure("The generated image is unavailable.", 404, origin);
-        if (artifact.bytes.byteLength !== attachment.size)
+        const currentJob = dependencies.jobs.get(job.id);
+        const currentAttachment =
+          currentJob?.status === "completed"
+            ? currentJob.artifacts.find(
+                (item) => String(item.attachmentId) === String(attachment.attachmentId),
+              )
+            : undefined;
+        const attachmentStillMatches =
+          currentJob !== undefined &&
+          currentAttachment !== undefined &&
+          currentJob.threadKind === job.threadKind &&
+          String(currentJob.scopeId) === String(job.scopeId) &&
+          currentAttachment.hash === attachment.hash &&
+          currentAttachment.size === attachment.size &&
+          currentAttachment.mime === attachment.mime;
+        if (
+          !attachmentStillMatches ||
+          artifact.bytes.byteLength !== attachment.size ||
+          artifact.mime !== attachment.mime
+        ) {
+          threadImageCache.evictAttachment(job.id, attachment.attachmentId);
           return failure("The generated image is unavailable.", 404, origin);
+        }
+        if (cached === undefined && artifact.bytes.byteLength <= MAX_GENERATED_IMAGE_BYTES) {
+          threadImageCache.store(cacheKey, artifact, cacheGeneration);
+        }
         const end = Math.min(offset + THREAD_IMAGE_CHUNK_BYTES, attachment.size);
         return new Response(artifact.bytes.slice(offset, end), {
           status: 206,
@@ -317,6 +378,164 @@ export function createImageRouteHandler(dependencies: ImageRouteDependencies) {
 
     return failure("Image request is invalid.", 405, origin);
   };
+
+  return Object.assign(handle, {
+    evictScope: (scopeId: ImageGenerationScopeId) => {
+      threadImageCache.evictScope(scopeId);
+    },
+    close: () => {
+      threadImageCache.close();
+    },
+  });
+}
+
+interface VerifiedThreadImageKey {
+  readonly jobId: string;
+  readonly scopeId: string;
+  readonly attachmentId: string;
+  readonly hash: string;
+  readonly size: number;
+  readonly mime: ImageArtifactMediaType;
+}
+
+interface VerifiedThreadImageEntry {
+  readonly key: VerifiedThreadImageKey;
+  readonly bytes: Uint8Array;
+  readonly mime: ImageArtifactMediaType;
+  readonly cachedAt: number;
+  readonly expiresAt: number;
+}
+
+/**
+ * Single-entry short-lived cache of verified thread image bytes.
+ *
+ * Chunked `GET /api/image/thread-artifact` reads slice a generated image in
+ * 4 MiB responses up to `MAX_GENERATED_IMAGE_BYTES`. Holding only the latest
+ * verified read briefly avoids repeated full-file disk reads and SHA-256 passes
+ * across slices while bounding memory to one image; every chunk still checks
+ * authorization and current job metadata before slicing bytes out.
+ */
+class VerifiedThreadImageCache {
+  readonly #now: () => number;
+  readonly #ttlMs: number;
+  #entry: VerifiedThreadImageEntry | undefined;
+  #timer: ReturnType<typeof setTimeout> | undefined;
+  #generation = 0;
+  #closed = false;
+
+  constructor(now: () => number, ttlMs: number) {
+    this.#now = now;
+    this.#ttlMs = ttlMs;
+  }
+
+  get generation(): number {
+    return this.#generation;
+  }
+
+  read(
+    key: VerifiedThreadImageKey,
+  ): { readonly bytes: Uint8Array; readonly mime: ImageArtifactMediaType } | undefined {
+    const entry = this.#entry;
+    if (entry === undefined) return undefined;
+    const currentNow = this.#now();
+    if (currentNow < entry.cachedAt || currentNow >= entry.expiresAt) {
+      this.#clearEntry();
+      return undefined;
+    }
+    if (!sameVerifiedThreadImageKey(entry.key, key)) return undefined;
+    if (entry.bytes.byteLength !== key.size || entry.mime !== key.mime) {
+      this.#clearEntry();
+      return undefined;
+    }
+    return { bytes: entry.bytes, mime: entry.mime };
+  }
+
+  store(
+    key: VerifiedThreadImageKey,
+    artifact: { readonly bytes: Uint8Array; readonly mime: ImageArtifactMediaType },
+    expectedGeneration: number,
+  ): void {
+    if (this.#closed || this.#generation !== expectedGeneration) return;
+    if (
+      this.#ttlMs <= 0 ||
+      artifact.bytes.byteLength === 0 ||
+      artifact.bytes.byteLength > MAX_GENERATED_IMAGE_BYTES ||
+      artifact.bytes.byteLength !== key.size ||
+      artifact.mime !== key.mime
+    ) {
+      return;
+    }
+    this.#clearEntry();
+    const cachedAt = this.#now();
+    const entry: VerifiedThreadImageEntry = {
+      key,
+      bytes: artifact.bytes,
+      mime: artifact.mime,
+      cachedAt,
+      expiresAt: cachedAt + this.#ttlMs,
+    };
+    this.#entry = entry;
+    const timer = setTimeout(() => {
+      if (this.#entry === entry) this.#clearEntry();
+    }, this.#ttlMs);
+    if (typeof timer === "object" && timer !== null && typeof timer.unref === "function") {
+      timer.unref();
+    }
+    this.#timer = timer;
+  }
+
+  evictJob(jobId: ImageJobId): void {
+    this.#generation += 1;
+    if (this.#entry !== undefined && this.#entry.key.jobId === String(jobId)) {
+      this.#clearEntry();
+    }
+  }
+
+  evictAttachment(jobId: ImageJobId, attachmentId: string | ImageArtifactId): void {
+    this.#generation += 1;
+    if (
+      this.#entry !== undefined &&
+      this.#entry.key.jobId === String(jobId) &&
+      this.#entry.key.attachmentId === String(attachmentId)
+    ) {
+      this.#clearEntry();
+    }
+  }
+
+  evictScope(scopeId: ImageGenerationScopeId): void {
+    this.#generation += 1;
+    if (this.#entry !== undefined && this.#entry.key.scopeId === String(scopeId)) {
+      this.#clearEntry();
+    }
+  }
+
+  close(): void {
+    this.#closed = true;
+    this.#generation += 1;
+    this.#clearEntry();
+  }
+
+  #clearEntry(): void {
+    this.#entry = undefined;
+    if (this.#timer !== undefined) {
+      clearTimeout(this.#timer);
+      this.#timer = undefined;
+    }
+  }
+}
+
+function sameVerifiedThreadImageKey(
+  left: VerifiedThreadImageKey,
+  right: VerifiedThreadImageKey,
+): boolean {
+  return (
+    left.jobId === right.jobId &&
+    left.scopeId === right.scopeId &&
+    left.attachmentId === right.attachmentId &&
+    left.hash === right.hash &&
+    left.size === right.size &&
+    left.mime === right.mime
+  );
 }
 
 function parseThreadKind(value: string | null): ImageJobThreadKind | undefined {

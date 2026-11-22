@@ -21,6 +21,7 @@ import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
 import { openSqlite } from "./persistence/sqlitePort";
 import { readProviderInstances } from "./providers/providerProjection";
+import { acpUsageUnverified } from "./providers/acpProfiles";
 import { ProviderRuntimeRegistry } from "./providers/providerRuntimeRegistry";
 import {
   decodeSpendCeilingReservationId,
@@ -92,15 +93,17 @@ function insertUsage(
     readonly id: string;
     readonly subjectType: string;
     readonly subjectId: string;
-    readonly tokens: { readonly input: number; readonly output: number };
+    readonly tokens: {
+      readonly input: number;
+      readonly output: number;
+      readonly reasoning?: number;
+    };
     readonly quality?: string;
     readonly sequence: number;
     readonly observedAt?: string;
     readonly costUsdMicros?: number;
     readonly costKind?: "provider-recorded" | "api-estimate";
     readonly providerInstanceId?: string;
-    /** Absent: a row written before the ledger recorded the turn's level. */
-    readonly ranAtFullAccess?: boolean;
   },
 ): void {
   connection
@@ -111,8 +114,8 @@ function insertUsage(
         cache_read_input_tokens, cache_write_input_tokens, provider_execution_duration_ms,
         cost_usd_micros, cost_kind,
         planned_input_tokens, variance_tokens, schema_version, attribution_json,
-        observed_at, last_sequence, host_id, ran_at_full_access
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        observed_at, last_sequence, host_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.id,
@@ -124,7 +127,7 @@ function insertUsage(
       input.quality ?? "exact",
       input.tokens.input,
       input.tokens.output,
-      null,
+      input.tokens.reasoning ?? null,
       null,
       null,
       null,
@@ -137,7 +140,6 @@ function insertUsage(
       input.observedAt ?? now,
       input.sequence,
       "local",
-      input.ranAtFullAccess === undefined ? null : input.ranAtFullAccess ? 1 : 0,
     );
 }
 
@@ -325,6 +327,73 @@ describe("SpendCeilingService", () => {
     if (admission.status !== "refused") return;
     expect(admission.refusal.kind).toBe("exhausted");
   });
+
+  it("counts reasoning once, as the part of output it already is", () => {
+    const { connection, service } = openService();
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "thread", threadType: "code-thread", threadId: ids.thread },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { tokenBudget: 1_000 },
+      window: { kind: "lifetime" },
+    });
+    insertUsage(connection, {
+      id: "73000000-0000-4000-8000-000000000102",
+      subjectType: "code-thread",
+      subjectId: ids.thread,
+      tokens: { input: 500, output: 300, reasoning: 250 },
+      sequence: 1,
+    });
+    const admission = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "code-thread",
+      turnUpperBoundTokens: 200,
+    });
+    expect(admission.status).toBe("admitted");
+  });
+
+  it.each([
+    ["as OpenCode now reports it, reasoning inside output", 350, false],
+    ["from before OpenCode's reasoning was added into output", 200, true],
+  ] as const)(
+    "counts an OpenCode turn's reasoning against a token ceiling %s",
+    (_label, output, reasoningOutsideOutput) => {
+      const { connection, service } = openService();
+      service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "code-thread", threadId: ids.thread },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { tokenBudget: 1_000 },
+        window: { kind: "lifetime" },
+      });
+      const id = "73000000-0000-4000-8000-000000000103";
+      // 500 input, 200 of answer and 150 of reasoning: 850 spent.
+      insertUsage(connection, {
+        id,
+        subjectType: "code-thread",
+        subjectId: ids.thread,
+        tokens: { input: 500, output, reasoning: 150 },
+        sequence: 1,
+      });
+      if (reasoningOutsideOutput)
+        connection
+          .prepare("INSERT INTO usage_reasoning_outside_output (reconciliation_id) VALUES (?)")
+          .run(id);
+      const admit = (reservationId: typeof ids.reservationA, turnUpperBoundTokens: number) =>
+        service.admit({
+          reservationId,
+          threadId: ids.thread,
+          threadType: "code-thread",
+          turnUpperBoundTokens,
+        });
+      expect(admit(ids.reservationA, 250)).toMatchObject({
+        status: "refused",
+        refusal: { kind: "exhausted" },
+      });
+      expect(admit(ids.reservationB, 150)).toMatchObject({ status: "admitted" });
+    },
+  );
 
   it("counts Octant Shield's reviews against the reviewed Code thread's ceiling", () => {
     const { connection, journal, service } = openService();
@@ -1830,12 +1899,13 @@ describe("notMeasuredProvider", () => {
     registry: ProviderRuntimeRegistry,
     id: string,
     usage: ProviderCapabilitySupport,
-    atFullAccess?: ProviderCapabilitySupport,
+    detectedVersion?: string,
   ): void {
     registry.setObservedState({
       instanceId: id,
       readiness: "ready",
       processState: "stopped",
+      ...(detectedVersion === undefined ? {} : { detectedVersion }),
       models: [],
       capabilities: {
         streaming: "supported",
@@ -1855,147 +1925,10 @@ describe("notMeasuredProvider", () => {
         appManagedTools: "unsupported",
         citations: "unsupported",
         harnessAutoReview: "unsupported",
-        ...(atFullAccess === undefined
-          ? {}
-          : {
-              atFullAccess: {
-                release: "unverified",
-                usage: atFullAccess,
-                userQuestions: "unsupported",
-                appManagedTools: "unsupported",
-              },
-            }),
       },
       observedAt: now,
     });
   }
-
-  describe("an ACP release newer than the one Octant reviewed", () => {
-    // Its probe reads usage unsupported below Full access and supported at
-    // Full access, where the driver reports each turn's usage.
-    const unverified = {
-      providerInstanceId: decodeProviderInstanceId(providerIds.measuredOut),
-      displayName: "Mistral Vibe",
-    };
-
-    function openUnverified(dimension: "tokens" | "monetary") {
-      const registry = new ProviderRuntimeRegistry();
-      const opened = openService({
-        notMeasuredProvider: (id, ranAtFullAccess) =>
-          notMeasuredProvider(
-            {
-              readProviderInstances: () => readProviderInstances(opened.connection),
-              observedState: registry.observedState.bind(registry),
-            },
-            id,
-            ranAtFullAccess,
-          ),
-      });
-      append(opened.journal, providerIds.measuredOut, 0, "provider.instance-created@1", {
-        instance: instance(providerIds.measuredOut, {
-          displayName: "Mistral Vibe",
-          driverKind: "mistral-vibe",
-          configuration: {
-            kind: "mistral-vibe-acp",
-            binaryPath: "/usr/local/bin/vibe-acp",
-            authentication: "api-key",
-          },
-        }),
-      });
-      observe(registry, providerIds.measuredOut, "unsupported", "supported");
-      opened.service.execute("local-window", {
-        kind: "set-spend-ceiling",
-        scope: { kind: "thread", threadType: "chat-thread", threadId: ids.thread },
-        expectedVersion: decodeAggregateVersion(0),
-        policy: dimension === "tokens" ? { tokenBudget: 1_000 } : { costBudgetUsdCents: 25_00 },
-        window: { kind: "lifetime" },
-      });
-      return opened;
-    }
-
-    function turn(
-      connection: ReturnType<typeof openSqlite>,
-      input: { readonly reported: boolean; readonly ranAtFullAccess?: boolean },
-    ): void {
-      insertUsage(connection, {
-        id: "73000000-0000-4000-8000-000000000521",
-        subjectType: "chat-thread",
-        subjectId: ids.thread,
-        providerInstanceId: providerIds.measuredOut,
-        tokens: input.reported ? { input: 900, output: 50 } : { input: 0, output: 0 },
-        ...(input.reported ? { costUsdMicros: 30_000_000 } : { quality: "unavailable" }),
-        sequence: 1,
-        ...(input.ranAtFullAccess === undefined ? {} : { ranAtFullAccess: input.ranAtFullAccess }),
-      });
-    }
-
-    const admit = (service: SpendCeilingService) =>
-      service.admit({
-        reservationId: ids.reservationA,
-        threadId: ids.thread,
-        threadType: "chat-thread",
-        turnUpperBoundTokens: 100,
-      });
-    const remaining = (service: SpendCeilingService) =>
-      remainingOf(
-        service.snapshot({
-          principalKind: "local-window",
-          threadId: ids.thread,
-          threadType: "chat-thread",
-        }),
-        "thread",
-      );
-
-    it.each(["tokens", "monetary"] as const)(
-      "counts its reported Full access usage against a %s ceiling",
-      (dimension) => {
-        const { connection, service } = openUnverified(dimension);
-        turn(connection, { reported: true, ranAtFullAccess: true });
-
-        expect(admit(service)).toMatchObject({
-          status: "refused",
-          refusal: { kind: "exhausted", dimension },
-        });
-        expect(remaining(service)).not.toHaveProperty("notMeasuredProviders");
-      },
-    );
-
-    it.each(["tokens", "monetary"] as const)(
-      "refuses a %s ceiling over a Full access turn that reported no usage",
-      (dimension) => {
-        const { connection, service } = openUnverified(dimension);
-        turn(connection, { reported: false, ranAtFullAccess: true });
-
-        expect(admit(service)).toMatchObject({
-          status: "refused",
-          refusal: { kind: "unknown-spend", dimension },
-        });
-        expect(remaining(service)).not.toHaveProperty("notMeasuredProviders");
-      },
-    );
-
-    it.each(["tokens", "monetary"] as const)(
-      "leaves a guarded turn that reported no usage out of a %s ceiling and names it not measured",
-      (dimension) => {
-        const { connection, service } = openUnverified(dimension);
-        turn(connection, { reported: false, ranAtFullAccess: false });
-
-        expect(admit(service).status).toBe("admitted");
-        expect(remaining(service)).toMatchObject({ notMeasuredProviders: [unverified] });
-      },
-    );
-
-    it.each(["tokens", "monetary"] as const)(
-      "reads an unreported row that recorded no level as before under a %s ceiling",
-      (dimension) => {
-        const { connection, service } = openUnverified(dimension);
-        turn(connection, { reported: false });
-
-        expect(admit(service).status).toBe("admitted");
-        expect(remaining(service)).toMatchObject({ notMeasuredProviders: [unverified] });
-      },
-    );
-  });
 
   it.each([
     ["historical unreported", "tokens"],
@@ -2006,14 +1939,13 @@ describe("notMeasuredProvider", () => {
     (quality, dimension) => {
       const registry = new ProviderRuntimeRegistry();
       const { connection, journal, service } = openService({
-        notMeasuredProvider: (id, ranAtFullAccess) =>
+        notMeasuredProvider: (id) =>
           notMeasuredProvider(
             {
               readProviderInstances: () => readProviderInstances(connection),
               observedState: registry.observedState.bind(registry),
             },
             id,
-            ranAtFullAccess,
           ),
       });
       const providerId = providerIds.measuredOut;
@@ -2074,6 +2006,94 @@ describe("notMeasuredProvider", () => {
     },
   );
 
+  it.each(["tokens", "monetary"] as const)(
+    "keeps leaving out a guarded Vibe turn from before the upgrade under a %s ceiling while its release keeps usage unverified, and refuses one at Full access",
+    (dimension) => {
+      const registry = new ProviderRuntimeRegistry();
+      const { connection, journal, service } = openService({
+        notMeasuredProvider: (id, keptBelowFullAccess) =>
+          notMeasuredProvider(
+            {
+              readProviderInstances: () => readProviderInstances(connection),
+              observedState: registry.observedState.bind(registry),
+              usageUnverified: (instance, version) =>
+                acpUsageUnverified(instance.driverKind, version),
+            },
+            id,
+            keptBelowFullAccess,
+          ),
+      });
+      const providerId = providerIds.measuredOut;
+      append(journal, providerId, 0, "provider.instance-created@1", {
+        instance: instance(providerId, {
+          displayName: "Mistral Vibe",
+          driverKind: "mistral-vibe",
+          configuration: {
+            kind: "mistral-vibe-acp",
+            binaryPath: "/usr/local/bin/vibe-acp",
+            authentication: "api-key",
+          },
+        }),
+      });
+      service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "code-thread", threadId: ids.thread },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: dimension === "tokens" ? { tokenBudget: 1_000 } : { costBudgetUsdCents: 25_00 },
+        window: { kind: "lifetime" },
+      });
+      const unreported = (id: string, sequence: number) =>
+        insertUsage(connection, {
+          id,
+          subjectType: "code-thread",
+          subjectId: ids.thread,
+          providerInstanceId: providerId,
+          tokens: { input: 0, output: 0 },
+          quality: "unavailable",
+          sequence,
+        });
+      // A guarded turn the upgrade that dropped the ledger's level kept.
+      unreported("73000000-0000-4000-8000-000000000521", 1);
+      connection
+        .prepare("INSERT INTO usage_unreported_guarded_turn (reconciliation_id) VALUES (?)")
+        .run("73000000-0000-4000-8000-000000000521");
+      const admit = (reservationId: typeof ids.reservationA) =>
+        service.admit({
+          reservationId,
+          threadId: ids.thread,
+          threadType: "code-thread",
+          turnUpperBoundTokens: 100,
+        });
+      // The reviewed release measured guarded turns then too, so the turn counts.
+      observe(registry, providerId, "supported", "3.0.3");
+      expect(admit(ids.reservationA)).toMatchObject({
+        status: "refused",
+        refusal: { kind: "unknown-spend", dimension },
+      });
+      observe(registry, providerId, "supported", "3.0.4");
+      expect(
+        remainingOf(
+          service.snapshot({
+            principalKind: "local-window",
+            threadId: ids.thread,
+            threadType: "code-thread",
+          }),
+          "thread",
+        ),
+      ).toMatchObject({
+        notMeasuredProviders: [{ providerInstanceId: providerId, displayName: "Mistral Vibe" }],
+      });
+      expect(admit(ids.reservationA)).toMatchObject({ status: "admitted" });
+      service.release(ids.reservationA);
+      // A Full access turn from the same release was measured, so its missing report refuses.
+      unreported("73000000-0000-4000-8000-000000000522", 2);
+      expect(admit(ids.reservationB)).toMatchObject({
+        status: "refused",
+        refusal: { kind: "unknown-spend", dimension },
+      });
+    },
+  );
+
   it("leaves out only an enabled instance whose runtime declares usage unsupported", () => {
     const { connection, journal } = openService();
     const registry = new ProviderRuntimeRegistry();
@@ -2099,7 +2119,7 @@ describe("notMeasuredProvider", () => {
       observedState: registry.observedState.bind(registry),
     };
 
-    expect(notMeasuredProvider(host, providerIds.measuredOut, false)).toEqual({
+    expect(notMeasuredProvider(host, providerIds.measuredOut)).toEqual({
       providerInstanceId: decodeProviderInstanceId(providerIds.measuredOut),
       displayName: "Agent 501",
     });
@@ -2109,7 +2129,7 @@ describe("notMeasuredProvider", () => {
       providerIds.unprobed,
       providerIds.unproven,
     ]) {
-      expect(notMeasuredProvider(host, counted, false)).toBeUndefined();
+      expect(notMeasuredProvider(host, counted)).toBeUndefined();
     }
   });
 });

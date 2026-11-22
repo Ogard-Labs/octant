@@ -43,6 +43,7 @@ import {
 import { reportedChildUsage } from "@octant/provider-sdk/child-observations";
 import type {
   ProviderAcquireInput,
+  ProviderServerPlacement,
   ProviderCompactionPoint,
   ProviderConnection,
   ProviderDriver,
@@ -759,6 +760,13 @@ interface SessionState {
   readonly autoApprove: boolean | undefined;
   readonly fullAccessSandbox: boolean | undefined;
   readonly strict: boolean | undefined;
+  /**
+   * Whether a secret question Codex asks is shown to the person: a session
+   * outside Strict, whose surface (a Code, Work or Chat thread, or a subagent
+   * of one) answers it masked and keeps the typed value out of every record.
+   * A Strict session, or one whose surface never said, refuses it unseen.
+   */
+  readonly asksSecretQuestions: boolean;
   /** The sandbox this session's commands run in; see {@link CodexSessionSandbox}. */
   readonly sandbox: CodexSessionSandbox;
   /** Whether Codex's own sandbox runs under Octant's permissions profile. */
@@ -858,6 +866,9 @@ const capabilities = {
   sessionRollback: "supported",
   // One app-server process serves every thread, so killing it ends them all.
   forceStop: "unsupported",
+  // Its app-server speaks over standard streams and carries Octant's tools in
+  // its own protocol, so it runs on a server Project's server over SSH.
+  serverPlacement: "supported",
   ...unsupportedChatCapabilities,
   appManagedTools: "supported",
   nativeSetup: {
@@ -1355,19 +1366,27 @@ export function codexExecutionSettings(
     (policy === "approval-gated" || policy === "auto-accept-edits")
   ) {
     // Outside Strict Codex runs in its own workspace-write sandbox, as it
-    // does on its own, with the same approval policies as below. Auto's
-    // `on-request` now runs a command unasked inside Codex's own sandbox, as
-    // Codex's own Auto does, and a command that needs to leave it raises
-    // Codex's escalation, which reaches the person or Reviewed's reviewer as
-    // an approval. Ask first and Accept edits keep `untrusted`, which asks for
-    // every command Codex does not know to be read-only and escalates a
-    // command its sandbox refused.
+    // does on its own. Auto's `on-request` runs a command unasked inside
+    // Codex's own sandbox, as Codex's own Auto does, and a command that needs
+    // to leave it raises Codex's escalation, which reaches the person or
+    // Reviewed's reviewer as an approval. Accept edits is `on-request` too
+    // (maintainer decision, 2026-11-21): Codex decides when to ask, as in its
+    // own CLI, and its sandbox, not Octant's, refuses what leaves the
+    // Project's folders. That is safe only here: under Octant's external
+    // sandbox below, `on-request` would run every command unasked, so Accept
+    // edits keeps `untrusted` there. Ask first keeps `untrusted` everywhere,
+    // which asks for every command Codex does not know to be read-only and
+    // escalates a command its sandbox refused.
     const { approvalPolicy, approvalsReviewer } = codexExecutionSettings(
       policy,
       autoApprove,
       fullAccessSandbox,
     );
-    return { approvalPolicy, sandbox: "workspace-write", approvalsReviewer };
+    return {
+      approvalPolicy: policy === "auto-accept-edits" ? "on-request" : approvalPolicy,
+      sandbox: "workspace-write",
+      approvalsReviewer,
+    };
   }
   if (policy === "full-access") {
     // The opt-in sandbox at Full access runs the process inside Octant's
@@ -2125,6 +2144,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       extraFolders = [],
       attachmentsFolder,
       sandboxPolicy,
+      serverPlacement,
     }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
@@ -2153,15 +2173,17 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       // it is part of the posture the key names. So is the account's own
       // memory, which rides there too: it is read from the person's switch
       // here, so a lease started after they change it is a new process.
-      const keepsOwnMemory = (executionPolicy: ProviderExecutionPolicy) =>
+      const keepsOwnMemory = (executionPolicy: ProviderExecutionPolicy, strict: boolean) =>
         providerOwnMemoryLaunches({
           accountAllows: options.ownMemory?.() === true,
           mode,
           executionPolicy,
           // Codex writes memories by itself after a turn, into
           // `~/.codex/memories`, outside any tool call Octant's gate sees, so
-          // its memory stays off in Plan and Chat.
+          // under Strict its memory stays off in Plan and Chat; outside
+          // Strict the person's setting decides there too.
           memoryWrites: "background",
+          strict,
         });
       const platform = options.platform ?? process.platform;
       const isWindowsStrictConfined = (posture: CodexLeasePosture): boolean =>
@@ -2180,6 +2202,8 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
         const { executionPolicy, ownSubagents, fullAccessSandbox, strict } = posture;
         const windowsConfined = isWindowsStrictConfined(posture);
         return JSON.stringify([
+          // A folder on a server is not the folder of the same path here.
+          ...(serverPlacement === undefined ? [] : [`server:${serverPlacement.serverName}`]),
           projectRoot,
           // The read-only folders ride with the extra folders, so a lease's
           // shape (root, folders, mode, posture) stays what idle-lease
@@ -2187,7 +2211,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           [...extraFolders, ...readOnlyFolders.map((folder) => `read-only:${folder}`)],
           threadMode,
           `${executionPolicy}${ownSubagents ? "+own-subagents" : ""}${
-            keepsOwnMemory(executionPolicy) ? "+own-memory" : ""
+            keepsOwnMemory(executionPolicy, strict) ? "+own-memory" : ""
           }${strict ? "" : "+not-strict"}`,
           ...(fullAccessSandbox ? ["+sandbox"] : []),
           {
@@ -2214,7 +2238,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
               mode: threadMode,
               executionPolicy,
               ...(ownSubagents ? { ownSubagents: true as const } : {}),
-              ...(keepsOwnMemory(executionPolicy) ? { ownMemory: true as const } : {}),
+              ...(keepsOwnMemory(executionPolicy, strict) ? { ownMemory: true as const } : {}),
               ...(fullAccessSandbox ? { fullAccessSandbox: true as const } : {}),
               ...(explicitStrict && executionPolicy === "full-access"
                 ? { strict: true as const }
@@ -2224,6 +2248,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             },
             leaseKey(posture),
             windowsConfined ? 0 : undefined,
+            serverPlacement,
           );
           // Turn starts probe first, but not every caller does (compaction,
           // summaries, agent runs), so the session itself refuses too. Only
@@ -2257,7 +2282,11 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           options.runtimeRegistry.closeIdleLeasesWhere(options.instanceId, (lease) => {
             if (lease === leaseKey(posture)) return false;
             const parsed = codexThreadLease(lease);
-            return parsed?.root === projectRoot && parsed.mode === threadMode;
+            return (
+              parsed?.server === serverPlacement?.serverName &&
+              parsed?.root === projectRoot &&
+              parsed.mode === threadMode
+            );
           }),
         );
       return Effect.gen(function* () {
@@ -2268,6 +2297,8 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           projectRoot,
           extraFolders,
           mode,
+          serverPlacement,
+          sandboxPolicy !== undefined,
           {
             instanceId: options.instanceId,
             clock,
@@ -2327,27 +2358,36 @@ interface CodexLeasedRuntime {
   readonly exited: Promise<void>;
   /** Whether the process launched without Octant's egress proxy, so its commands reach every host. */
   readonly networkOpen: boolean;
+  /** Codex on a server: the server login's sign-ins its own sandbox refuses. */
+  readonly protectedSignIns?: CodexAppServerConnection["protectedSignIns"];
 }
 
-/** The root and mode a thread lease key names, or undefined for any other lease. */
+/**
+ * The server, root and mode a thread lease key names, or undefined for any
+ * other lease. A server lease leads with `server:<name>`; a local root is an
+ * absolute path, so the two never read as each other.
+ */
 function codexThreadLease(
   lease: string,
-): { readonly root: string; readonly mode: string } | undefined {
+):
+  | { readonly server: string | undefined; readonly root: string; readonly mode: string }
+  | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(lease);
   } catch {
     return undefined;
   }
-  if (
-    !Array.isArray(parsed) ||
-    parsed.length < 4 ||
-    parsed.length > 7 ||
-    typeof parsed[3] !== "string"
-  )
-    return undefined;
-  const [root, , mode] = parsed;
-  return typeof root === "string" && typeof mode === "string" ? { root, mode } : undefined;
+  if (!Array.isArray(parsed)) return undefined;
+  const head: unknown = parsed[0];
+  const server =
+    typeof head === "string" && head.startsWith("server:")
+      ? head.slice("server:".length)
+      : undefined;
+  const fields: ReadonlyArray<unknown> = server === undefined ? parsed : parsed.slice(1);
+  if (fields.length < 4 || fields.length > 7 || typeof fields[3] !== "string") return undefined;
+  const [root, , mode] = fields;
+  return typeof root === "string" && typeof mode === "string" ? { server, root, mode } : undefined;
 }
 
 function acquireRuntime(
@@ -2356,6 +2396,7 @@ function acquireRuntime(
   authority: CodexLaunchAuthority,
   lease?: string,
   idleMs?: number,
+  server?: ProviderServerPlacement,
 ) {
   return options.runtimeRegistry.acquireRuntime<CodexLeasedRuntime>(options.instanceId, {
     idleMs:
@@ -2368,15 +2409,21 @@ function acquireRuntime(
       const scope = await Effect.runPromise(Scope.make());
       let receipt: Awaited<ReturnType<ProviderRuntimeRegistry["trackProcess"]>> | undefined;
       try {
-        const environment = await resolveCodexLaunchEnvironment(
-          options,
-          !(authority.kind === "thread" && authority.strict === false),
-        );
+        // Codex on a server signs in as that server's login; no environment
+        // or credential of this host goes there.
+        const environment =
+          server === undefined
+            ? await resolveCodexLaunchEnvironment(
+                options,
+                !(authority.kind === "thread" && authority.strict === false),
+              )
+            : undefined;
         const processExit = await Effect.runPromiseExit(
           options.process
             .start({
               binaryPath: options.binaryPath,
               authority,
+              ...(server === undefined ? {} : { server }),
               ...(environment === undefined ? {} : { environment }),
               onProcessStarted: async (process) => {
                 receipt = await options.runtimeRegistry.trackProcess(options.instanceId, process);
@@ -2396,6 +2443,9 @@ function acquireRuntime(
             version: connection.version,
             exited: connection.exited,
             networkOpen: connection.networkOpen === true,
+            ...(connection.protectedSignIns === undefined
+              ? {}
+              : { protectedSignIns: connection.protectedSignIns }),
           },
           pid: connection.pid,
           ...(receipt === undefined ? {} : { receipt }),
@@ -2708,6 +2758,9 @@ function makeConnection(
   projectRoot: string,
   extraFolders: ReadonlyArray<string>,
   mode: ProviderAcquireInput["mode"],
+  serverPlacement: ProviderServerPlacement | undefined,
+  /** The thread chose a sandbox policy, which keeps Octant's profile. */
+  sandboxPolicySelected: boolean,
   factories: ConnectionFactories,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
@@ -2716,6 +2769,7 @@ function makeConnection(
     let version = "";
     let leased: CodexLeasePosture | undefined;
     let leasedNetworkOpen = false;
+    let leasedServerSignIns: CodexAppServerConnection["protectedSignIns"];
     let closed = false;
     const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ProviderSessionId, SessionState>();
@@ -2798,16 +2852,19 @@ function makeConnection(
     // Windows has no Octant profile to hold Plan read-only, so a Plan session
     // there outside Strict keeps Codex's own read-only sandbox; Strict is
     // refused there before the process starts.
+    // A server has no Octant profile either: Octant's sandbox cannot run
+    // there, so a server Plan session takes Codex's own read-only sandbox.
     const codexPlanRunsNativeSandbox = (input: {
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly strict?: boolean;
     }) =>
-      (options.platform ?? process.platform) === "win32" &&
+      ((options.platform ?? process.platform) === "win32" || serverPlacement !== undefined) &&
       mode !== "chat" &&
       input.executionPolicy === "plan" &&
       input.strict === false;
     const sessionSandbox = (input: {
       readonly executionPolicy: ProviderExecutionPolicy;
+      readonly fullAccessSandbox?: boolean;
       readonly strict?: boolean;
     }): CodexSessionSandbox =>
       (process.platform === "win32" && input.strict !== true) ||
@@ -2815,6 +2872,8 @@ function makeConnection(
         mode: mode ?? "code",
         executionPolicy: input.executionPolicy,
         strict: input.strict,
+        fullAccessSandbox: input.fullAccessSandbox,
+        sandboxPolicySelected,
       }) ||
       codexPlanRunsNativeSandbox(input)
         ? { kind: "native", writableRoots: [projectRoot, ...extraFolders] }
@@ -2833,10 +2892,15 @@ function makeConnection(
         input.strict === false
           ? (options.openEnvironment ?? options.environment)
           : options.environment;
-      const signIns = codexProtectedSignIns(
-        options.protectedSignIns?.() ?? [],
-        launchEnvironment?.CODEX_HOME ?? join(homedir(), ".codex"),
-      );
+      // This host's sign-in paths name nothing on a server; there the list
+      // was resolved for the server's login when Codex started on it.
+      const signIns =
+        serverPlacement === undefined
+          ? codexProtectedSignIns(
+              options.protectedSignIns?.() ?? [],
+              launchEnvironment?.CODEX_HOME ?? join(homedir(), ".codex"),
+            )
+          : (leasedServerSignIns ?? { denied: [], allowed: [] });
       return codexNativePermissionProfile({
         sessionSandbox: sessionSandbox(input),
         policy: input.executionPolicy,
@@ -2863,6 +2927,63 @@ function makeConnection(
         }),
         ...(profile === undefined ? {} : { permissions: { [CODEX_OCTANT_PROFILE]: profile } }),
       };
+    };
+    /**
+     * Fails a session on a server whose Codex cannot carry the deny paths for
+     * the server login's other provider sign-ins, rather than leave them
+     * readable. At Guarded and Accept edits that is a release before
+     * permission profiles: Codex's built-in workspace sandbox has no deny
+     * field. Plan always: its built-in read-only sandbox has no deny field
+     * either, and the only profile Octant has measured Codex taking extends
+     * `:workspace`, which can write the folder, so no read-only profile can
+     * carry the list.
+     */
+    const refuseServerUnprotectedSignIns = (input: {
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly fullAccessSandbox?: boolean;
+      readonly strict?: boolean;
+    }) => {
+      if (
+        serverPlacement === undefined ||
+        // Full access on a server runs with no sandbox (its opt-in sandbox is
+        // refused there), so it carries no list.
+        input.executionPolicy === "full-access" ||
+        sessionSandbox(input).kind !== "native" ||
+        input.fullAccessSandbox === true
+      ) {
+        return Effect.void;
+      }
+      // Codex on a server always arrives with the list its launch read there;
+      // without one the sign-ins cannot be kept out, so nothing runs.
+      if (leasedServerSignIns === undefined) {
+        return Effect.fail(
+          failure(
+            "unavailable",
+            `Octant could not read the home folder of the login on ${serverPlacement.serverName}, so it cannot keep other providers' sign-ins there out of Codex's reach.`,
+          ),
+        );
+      }
+      // An empty list is the person's choice: they removed the Provider
+      // sign-ins group from Protected files.
+      if (leasedServerSignIns.denied.length === 0) return Effect.void;
+      if (input.executionPolicy === "plan") {
+        return Effect.fail(
+          failure(
+            "incompatible",
+            `Plan can't run Codex on ${serverPlacement.serverName}: Codex's read-only sandbox can't keep other providers' sign-ins there out of its reach. Use Guarded instead.`,
+          ),
+        );
+      }
+      return (input.executionPolicy === "approval-gated" ||
+        input.executionPolicy === "auto-accept-edits") &&
+        nativeProfile(input) === undefined
+        ? Effect.fail(
+            failure(
+              "incompatible",
+              `Codex ${version} on ${serverPlacement.serverName} cannot keep other providers' sign-ins there out of its reach at this level. Update Codex on the server to ${CODEX_PERMISSION_PROFILES_RELEASE.join(".")} or later, or use Full access.`,
+            ),
+          )
+        : Effect.void;
     };
     /** Fails a Strict session whose Project holds Codex configuration the person has not allowed. */
     const refuseStrictProjectConfig = (input: {
@@ -3559,6 +3680,7 @@ function makeConnection(
               version = runtime.version;
               leased = posture;
               leasedNetworkOpen = runtime.networkOpen;
+              leasedServerSignIns = runtime.protectedSignIns;
               const lost = () => {
                 if (!closed) runtimeLost();
               };
@@ -3601,6 +3723,7 @@ function makeConnection(
         readonly autoApprove?: boolean;
         readonly fullAccessSandbox?: boolean;
         readonly strict?: boolean;
+        readonly asksSecretQuestions?: true;
       },
       thread: CodexThreadResult,
       modelId: string,
@@ -3630,6 +3753,9 @@ function makeConnection(
         autoApprove: input.autoApprove,
         fullAccessSandbox: input.fullAccessSandbox,
         strict: input.strict,
+        asksSecretQuestions:
+          input.strict === false ||
+          (input.strict === undefined && input.asksSecretQuestions === true),
         sandbox: sessionSandbox(input),
         permissionProfile: nativeProfile(input) !== undefined,
         threadId: thread.thread.id,
@@ -3693,6 +3819,7 @@ function makeConnection(
             }
             const dynamicTools = codexDynamicTools(input.tools);
             yield* refuseStrictProjectConfig(input);
+            yield* refuseServerUnprotectedSignIns(input);
             const modeConfig = yield* modeThreadConfig(
               input.nativeSetup,
               input.executionPolicy,
@@ -3794,6 +3921,7 @@ function makeConnection(
             yield* ensureRuntime(codexLeasePosture(input));
             ensureSubscribed();
             yield* refuseStrictProjectConfig(input);
+            yield* refuseServerUnprotectedSignIns(input);
             const modeConfig = yield* modeThreadConfig(
               input.nativeSetup,
               input.executionPolicy,
@@ -4390,6 +4518,7 @@ function makeEventContext(state: SessionState, factories: ConnectionFactories): 
     sequence: state.context?.sequence ?? 1,
     terminal: false,
     ...(state.compaction === undefined ? {} : { compactionRequested: true }),
+    ...(state.asksSecretQuestions ? { asksSecretQuestions: true } : {}),
     requestIds: new Map(),
     agentMessages: new Map(),
     taskIds: new Map(),

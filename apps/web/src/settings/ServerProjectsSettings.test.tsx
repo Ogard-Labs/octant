@@ -413,6 +413,7 @@ describe("ServerProjectsSettings", () => {
           view: { servers: registry, sshAgent: "available" as const },
         };
       }),
+      memberInstall: vi.fn(async () => ({ kind: "member-computers" as const, members: [] })),
     };
     const projects = {
       read: vi.fn(async () => ({ projects: [] })),
@@ -684,6 +685,7 @@ describe("machines in the person's cloud account", () => {
         servers={{
           read: async () => ({ servers: [WEB], sshAgent: "available" as const }),
           command: vi.fn(),
+          memberInstall: vi.fn(async () => ({ kind: "member-computers" as const, members: [] })),
         }}
       />,
     );

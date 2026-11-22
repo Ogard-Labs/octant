@@ -25,6 +25,7 @@ import type {
 import { frameExternalContentForModel } from "../context/externalContentFraming";
 import {
   MAX_CODE_OPERATION_PATHS,
+  MAX_CODE_SECRET_ANSWER_LENGTH,
   type AutomationRunReference,
   type CodeGitOperationId,
   type CodeRelativePath,
@@ -35,6 +36,7 @@ import {
   type CodeReviewCorrectionPrepared,
   type CodeTurnReviewPreview,
   type CodeTurnReviewCapture,
+  personalSignInRefusals,
 } from "@octant/contracts";
 import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "../chat/sideChatReturn";
 import type { GitService } from "./gitService";
@@ -119,6 +121,7 @@ import {
   hostProviderTurnRefusal,
   providerHoldsLevelWithoutSandbox,
 } from "@octant/domain/guardrail-policy";
+import { isRoutineHostScope } from "../routineHostScope";
 import {
   coordinatorTurnPosture,
   decideRunMerge,
@@ -1165,6 +1168,12 @@ export interface CodeOperationTurnPort {
     readonly checkoutRoot: string;
     readonly requestId: string;
     readonly response: string;
+    /**
+     * The response answers a secret question and exists only in memory. The
+     * port refuses it for any other question, and refuses a non-secret
+     * response to a secret one, so neither path can stand in for the other.
+     */
+    readonly secret?: true;
   }) => Promise<CodeOperationTurnResult>;
   readonly answerApproval: (input: {
     readonly thread: CodeThread;
@@ -1234,6 +1243,8 @@ export type CodeTurnPendingRequest = {
       readonly requestId: string;
       readonly prompt: string;
       readonly options: ReadonlyArray<string>;
+      /** Answered only in its thread, masked; see `input-requested`'s `secret`. */
+      readonly secret?: true;
     }
 );
 
@@ -2965,6 +2976,7 @@ export class CodeOperationService {
               kind: "question",
               text: request.prompt,
               options: request.options.map((label) => ({ label })),
+              ...(request.secret === true ? { secret: true } : {}),
               answer: {
                 threadId: scope.thread.id,
                 checkoutId: scope.checkout.id,
@@ -4908,7 +4920,7 @@ export class CodeOperationService {
           includeProductFeedback,
         );
       case "answer-provider-input":
-        return this.#providerInput(command, thread, root.checkoutRoot);
+        return this.#providerInput(command, thread, root.checkoutRoot, initiator);
       case "answer-provider-approval":
         return this.#providerResult(
           command.operationId,
@@ -6812,6 +6824,17 @@ export class CodeOperationService {
     });
     if (sandboxRefusal !== undefined)
       return this.#failed(command.operationId, "unavailable", sandboxRefusal, "refused");
+    // A turn the host starts as itself (a routine, a wake, Auto-fix, a
+    // coordinator's worker, a usage-limit or restart continuation, a child's
+    // result) has no person driving it, which some providers' personal
+    // sign-in does not cover. A person's own send carries their window.
+    if (isRoutineHostScope(windowId)) {
+      const unattended = personalSignInRefusals(
+        String((await this.#options.providerDriverKind?.(thread)) ?? ""),
+      )?.refusesUnattendedRuns;
+      if (unattended !== undefined)
+        return this.#failed(command.operationId, "unauthorized", unattended, "refused");
+    }
     const prompt = await this.#options.evidence.read?.(command.prompt);
     if (prompt === undefined)
       return this.#failed(
@@ -7480,8 +7503,47 @@ export class CodeOperationService {
     command: Extract<CodeOperationCommand, { readonly kind: "answer-provider-input" }>,
     thread: CodeThread,
     checkoutRoot: string,
+    initiator: "user" | "agent",
   ): Promise<CodeOperationResult> {
-    const response = await this.#options.evidence.read?.(command.response);
+    if ((command.secretAnswer === undefined) === (command.response === undefined))
+      return this.#failed(
+        command.operationId,
+        "invalid",
+        "Answer a question with either its response or its secret answer.",
+      );
+    if (command.secretAnswer !== undefined) {
+      // A secret is the person's own to give: only a window on this host or
+      // a device they paired answers one, never an agent acting for them.
+      if (initiator !== "user")
+        return this.#failed(
+          command.operationId,
+          "unauthorized",
+          "Only you, from a window or a device you paired, can answer a secret question.",
+        );
+      if (
+        command.secretAnswer.trim().length === 0 ||
+        command.secretAnswer.length > MAX_CODE_SECRET_ANSWER_LENGTH
+      )
+        return this.#failed(
+          command.operationId,
+          "invalid",
+          `A secret answer is between 1 and ${String(MAX_CODE_SECRET_ANSWER_LENGTH)} characters.`,
+        );
+      return this.#providerResult(
+        command.operationId,
+        await this.#options.turns.answerInput({
+          thread,
+          checkoutRoot,
+          requestId: command.requestId,
+          response: command.secretAnswer,
+          secret: true,
+        }),
+      );
+    }
+    const response =
+      command.response === undefined
+        ? undefined
+        : await this.#options.evidence.read?.(command.response);
     if (response === undefined)
       return this.#failed(
         command.operationId,

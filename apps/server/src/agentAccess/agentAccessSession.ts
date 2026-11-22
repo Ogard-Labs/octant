@@ -18,6 +18,7 @@ import type {
   OpenedLocalControlSession,
 } from "@octant/cli/agent-tools";
 import { Schema } from "effect";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import type { AuthenticatedProductDispatchHandoff } from "../authenticatedProductRoutes";
 import { AGENT_ACCESS_ORIGIN, createRemoteDevicePrincipal } from "../clientPrincipal";
 import type { AgentAccessService } from "./agentAccessService";
@@ -62,8 +63,39 @@ export interface AgentSessionDependencies {
   readonly markOutsideContent: (threadId: string, grant: AgentGrant) => void;
 }
 
+/**
+ * Every provider a Chat turn an outside agent sends or answers could run on:
+ * the thread's own, the running turn's (which a model pool or the Chat
+ * provider fallback may have chosen), each of this host's pool candidates,
+ * and the fallback. The grant's check runs before the thread is marked as
+ * having read outside content, so it fails closed over all of them rather
+ * than waiting for the route the turn would take.
+ */
+export function chatTurnProviders(input: {
+  readonly selected: string;
+  readonly live?: string;
+  readonly pool?: ReadonlyArray<{ readonly hostId: string; readonly providerInstanceId: string }>;
+  readonly fallback?: string;
+  /**
+   * Whether a provider is on. Routing never sends a turn to one that is off,
+   * so a pool candidate or fallback that still names it is left out.
+   */
+  readonly isEnabled?: (providerInstanceId: string) => boolean;
+}): ReadonlyArray<string> {
+  const routable = (providerInstanceId: string) => input.isEnabled?.(providerInstanceId) ?? true;
+  return [
+    input.selected,
+    ...(input.live === undefined ? [] : [input.live]),
+    ...(input.pool ?? [])
+      .filter((candidate) => candidate.hostId === String(LOCAL_HOST_ID))
+      .map((candidate) => candidate.providerInstanceId)
+      .filter(routable),
+    ...(input.fallback === undefined || !routable(input.fallback) ? [] : [input.fallback]),
+  ];
+}
+
 /** What a thread is and runs on now: its mode (`kind`), model, and access. */
-export type AgentThreadAccess =
+export type AgentThreadAccess = (
   | {
       readonly kind: "code";
       readonly modelId: string;
@@ -77,7 +109,14 @@ export type AgentThreadAccess =
       readonly access: string;
       readonly fullAccessSandbox: boolean;
     }
-  | { readonly kind: "chat"; readonly modelId: string };
+  | { readonly kind: "chat"; readonly modelId: string }
+) & {
+  /**
+   * Why the thread's provider takes no turn an outside agent sends, as its
+   * profile declares for its personal sign-in; absent when it declares none.
+   */
+  readonly outsideAgentRefusal?: string;
+};
 
 /**
  * The in-process session an outside agent's tool calls run in. Every request
@@ -309,6 +348,7 @@ export function guardAgentRequest(input: {
     if (access === undefined || !modelAllowed(grant, access.modelId)) {
       return refused("That thread runs on a model this agent's grant does not include.");
     }
+    if (access.outsideAgentRefusal !== undefined) return refused(access.outsideAgentRefusal);
     return {
       kind: "allowed",
       marksThread: threadId,

@@ -8,6 +8,10 @@ import {
   type WorkRequestList,
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
+import type { HubGrant } from "@octant/contracts";
+import { createRemoteDevicePrincipal } from "./clientPrincipal";
+import { hubActScopeFromSpokeLink } from "./hub/hubActScope";
+import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 import { createWorkRequestRouteHandler } from "./workRequestRoutes";
 
@@ -89,10 +93,13 @@ describe("Work request routes", () => {
       }),
     );
     expect(response?.status).toBe(200);
-    expect(execute).toHaveBeenCalledWith(windowId, command, {
-      kind: "local-user",
-      actorId: "00000000-0000-4000-8000-000000000002",
-    });
+    // A window on this host speaks for the person, who alone answers a secret question.
+    expect(execute).toHaveBeenCalledWith(
+      windowId,
+      command,
+      { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" },
+      "user",
+    );
   });
 
   it("maps request failures to typed HTTP responses", async () => {
@@ -116,6 +123,77 @@ describe("Work request routes", () => {
       code: "not-found",
       message: "Work request was not found.",
     });
+  });
+
+  it("a hub-introduced device answers a Work approval or question only in a Project the member's Act item names", async () => {
+    const execute = vi.fn(async () => ({
+      kind: "work-request-cancelled",
+      request: {
+        ...pendingRequest,
+        status: "cancelled",
+        settledAt: "2026-08-10T08:05:00.000Z",
+        version: 2,
+      },
+    }));
+    const otherRequestId = "00000000-0000-4000-8000-0000000009c3";
+    const grant: { current: HubGrant } = {
+      current: { items: ["roster", "introduce", "act"], actProjects: [projectId] },
+    };
+    const route = routeFixture(
+      { execute },
+      {
+        hubActScope: () =>
+          hubActScopeFromSpokeLink({
+            status: () => ({ membership: "member", grant: grant.current }) as never,
+          }),
+        // The named request is in the named Project; the other in another.
+        requestProjectId: (id: string) =>
+          id === String(requestId) ? String(projectId) : "30000000-0000-4000-8000-0000000000cc",
+      },
+    );
+    const remoteDeviceId = "00000000-0000-4000-8000-0000000009c0";
+    const answer = (id: string, admittedBy: "host-person" | "hub-roster" = "hub-roster") => {
+      const remote = request("/api/work/requests/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "cancel-work-request", requestId: id, expectedVersion: 1 }),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-0000000009c1" as never,
+          admittedBy,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+
+    expect((await route(answer(String(requestId))))?.status).toBe(200);
+    const unnamed = await route(answer(otherRequestId));
+    expect(unnamed?.status).toBe(403);
+    expect(await unnamed?.json()).toMatchObject({
+      message:
+        "This computer's Act item for its hub does not name this Project, so a device the hub introduced cannot answer approvals or questions in it here.",
+    });
+    expect(execute).toHaveBeenCalledOnce();
+
+    // Unticking Act refuses the next answer; a device the member's own person
+    // paired answers anywhere, as before.
+    grant.current = { items: ["roster", "introduce"], actProjects: [] };
+    const unticked = await route(answer(String(requestId)));
+    expect(unticked?.status).toBe(403);
+    expect(await unticked?.json()).toMatchObject({
+      message:
+        "This computer has not ticked Act for its hub, so a device the hub introduced cannot answer approvals or questions here.",
+    });
+    expect((await route(answer(otherRequestId, "host-person")))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(2);
   });
 
   it("rejects a request that supplies window identity", async () => {
@@ -145,7 +223,10 @@ function request(path: string, init: RequestInit = {}): Request {
   return new Request(`http://127.0.0.1${path}`, { ...init, headers });
 }
 
-function routeFixture(overrides: Record<string, unknown> = {}) {
+function routeFixture(
+  overrides: Record<string, unknown> = {},
+  dependencies: Record<string, unknown> = {},
+) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
   const service = {
@@ -165,6 +246,7 @@ function routeFixture(overrides: Record<string, unknown> = {}) {
     service: service as never,
     windowAuthorityStore: store,
     now: () => 1,
+    ...dependencies,
   });
 }
 

@@ -1,3 +1,4 @@
+import type { HubActScopeSlot } from "../hub/hubActScope";
 import { eventActorForPrincipal } from "../principalEventActor";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
@@ -43,7 +44,7 @@ import { readJournaledSessionHistory } from "../providers/nativeSessionHistory";
 import { createWorkSessionRouteHandler } from "../work/workSessionRoutes";
 import { stopKeptSessionsOfChangedWorkThreads } from "../work/workKeptSessions";
 import { codeThreadTurns } from "../code/codeForkPoint";
-import { SERVER_RUNTIME_NOT_HARNESS } from "../serverProjects/serverProjectThreads";
+import { SERVER_WORK_RUNTIME_NOT_HARNESS } from "../serverProjects/serverProjectThreads";
 import {
   bindServerWorkTurn,
   serverWorkBindingRevisionId,
@@ -51,6 +52,7 @@ import {
 } from "../serverProjects/serverWorkThreads";
 import { ThreadMessageQueueService } from "../messageQueue/threadMessageQueueService";
 import { createThreadMessageQueuePort } from "../messageQueue/threadMessageQueuePorts";
+import { journalThreadMessageSteered } from "../messageQueue/threadMessageSteeredRecord";
 import { createThreadMessageQueueAuthority } from "../messageQueue/threadMessageQueueAuthority";
 import { createThreadMessageQueueAttachments } from "../messageQueue/threadMessageQueueAttachments";
 import { createThreadMessageQueueRouteHandler } from "../messageQueue/threadMessageQueueRoutes";
@@ -61,7 +63,7 @@ import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
 import { WorkTurnFileObserver } from "../work/workTurnFileObserver";
 import { WorkThreadService } from "../work/workThreadService";
 import { WorkTurnRuntime, workSessionKey, workSessionTerms } from "../work/workTurnRuntime";
-import { WorkTurnService } from "../work/workTurnService";
+import { WorkTurnService, wakeupTurnOutcome } from "../work/workTurnService";
 import { withWorkflowLifecycle } from "../work/workThreadWorkflowHook";
 import { WorkflowEventStore } from "../work/workflowEventStore";
 import { WorkflowProjection } from "../work/workflowProjection";
@@ -168,6 +170,8 @@ import type { WorkRequestStateWiring } from "./workRequestState";
 import { workTurnToolLevel } from "../work/workTurnToolLevel";
 
 export type WorkDependencies = Pick<ServerStart, "persistence"> & {
+  /** The member's Act item, which holds a hub-introduced device's queued Code turns. */
+  readonly hubActScopeSlot: HubActScopeSlot;
   /** Sees images; absent on a host started without one. */
   readonly imageDescriber?: ImageDescriber;
   readonly transcriptionForTurn: TranscriptionForTurn;
@@ -677,7 +681,7 @@ export function wireWork(deps: WorkDependencies) {
         holds: (thread) => serverWorkProjectOf(serverProjectStore, thread) !== undefined,
         bind: (thread, turn) => {
           if (nativeHarnessComposition === undefined)
-            return { status: "refused", message: SERVER_RUNTIME_NOT_HARNESS };
+            return { status: "refused", message: SERVER_WORK_RUNTIME_NOT_HARNESS };
           const bound = bindServerWorkTurn(
             {
               store: serverProjectStore,
@@ -1892,12 +1896,48 @@ export function wireWork(deps: WorkDependencies) {
         },
         projectType: (projectId) => persistence.readProject(projectId)?.type,
         hasActiveCodeProject: (projectId) => codeProjectAccess.hasActiveCodeProject(projectId),
+        isRestrictedDevice: isRestrictedDeviceScope,
+        hubActScope: deps.hubActScopeSlot.current,
       }),
       effectiveCodeThread: (windowId, thread) =>
         codeSessionAuthority.effectiveThread(windowId, thread),
       recoveryRequired: (threadId) =>
         nativeHarnessSessions.read(threadId)?.session.status === "recovery-required",
       attachments: queueAttachments,
+      steering: {
+        liveTurn: (threadId) => liveTurns.answeringConnection(threadId),
+        isPersonWindow: (windowId) =>
+          !isPairedDeviceScope(windowId) && !isRoutineHostScope(windowId),
+        // The turn that took the message is the thread's newest: it was
+        // running when the runtime accepted it.
+        recordSteered: ({ scope, messageId, body }) => {
+          const threadId = String(scope.threadId);
+          const turnKey =
+            scope.mode === "work"
+              ? workTurnProjection.latestForThread(decodeWorkThreadId(threadId))?.requestId
+              : scope.mode === "code"
+                ? persistence.journal.latestThreadEvents({
+                    aggregateType: "code-operation",
+                    threadId,
+                    kind: "conversation-turn-started",
+                    limit: 1,
+                  })[0]?.aggregateId
+                : undefined;
+          if (turnKey === undefined || scope.mode === "chat") return;
+          const record = journalThreadMessageSteered(persistence.journal, {
+            mode: scope.mode,
+            threadId,
+            turnKey: String(turnKey),
+            messageId: String(messageId),
+            body,
+            steeredAt: new Date().toISOString(),
+            uuid: randomUUID,
+            actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+          });
+          // Work keeps its turns in memory; the journal rebuilds them at start.
+          if (scope.mode === "work") workTurnProjection.applySteeredMessage(record);
+        },
+      },
     });
     const threadMessageQueue = new ThreadMessageQueueService({
       connection: persistence.connection,
@@ -1907,6 +1947,7 @@ export function wireWork(deps: WorkDependencies) {
       // A device the host's own person paired manages the queue as a window
       // does; any other device keeps to its own messages.
       isRestrictedDevice: isRestrictedDeviceScope,
+      onSteeringChanged: () => machineChangeFeed.publish(["thread-message-queue"]),
       deviceActor: (scopeId) =>
         isPairedDeviceScope(scopeId)
           ? eventActorForPrincipal({ kind: "remote-device", deviceId: String(scopeId) })
@@ -2024,28 +2065,28 @@ export function wireWork(deps: WorkDependencies) {
         }
         if (workTurnService.isTurnActive(thread.id)) return { status: "busy" };
         const requestId = randomUUID();
-        const result = await workTurnService.startFirstTurn(ROUTINE_HOST_SCOPE_ID, {
-          kind: "start-work-thread-turn",
-          requestId: decodeWorkTurnRequestId(requestId),
-          threadId: thread.id,
-          turnId: decodeWorkTurnId(randomUUID()),
-          prompt,
-          authority: {
-            hostId: LOCAL_HOST_ID,
-            projectId: thread.projectId,
-            bindingRevisionId: thread.bindingRevisionId,
-            workingDirectory: thread.workingDirectory ?? ".",
-            ...(thread.workingFolderId === undefined
-              ? {}
-              : { workingFolderId: thread.workingFolderId }),
-            confinementPosture: "project-root-confined",
-            providerInstanceId: thread.providerInstanceId,
-            modelId: thread.modelId,
-          },
-        });
-        return result.kind === "accepted"
-          ? { status: "started", turnId: requestId }
-          : { status: "refused", message: "The turn was not admitted." };
+        return await wakeupTurnOutcome(
+          workTurnService.startHostTurn(ROUTINE_HOST_SCOPE_ID, {
+            kind: "start-work-thread-turn",
+            requestId: decodeWorkTurnRequestId(requestId),
+            threadId: thread.id,
+            turnId: decodeWorkTurnId(randomUUID()),
+            prompt,
+            authority: {
+              hostId: LOCAL_HOST_ID,
+              projectId: thread.projectId,
+              bindingRevisionId: thread.bindingRevisionId,
+              workingDirectory: thread.workingDirectory ?? ".",
+              ...(thread.workingFolderId === undefined
+                ? {}
+                : { workingFolderId: thread.workingFolderId }),
+              confinementPosture: "project-root-confined",
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+            },
+          }),
+          requestId,
+        );
       },
     };
     // The runtime's own turn runs at the thread's level as the host, like a

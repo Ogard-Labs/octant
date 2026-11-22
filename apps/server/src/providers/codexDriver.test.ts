@@ -14,7 +14,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderToolDefinition,
 } from "@octant/contracts";
-import { Effect, Exit, Fiber, Scope, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, Scope, Stream } from "effect";
 import {
   PROVIDER_CONTEXT_RESTATED,
   renderProviderContextSections,
@@ -175,6 +175,7 @@ function fixture(
       readonly turn: { readonly id: string; readonly status: "inProgress" };
     }>;
     readonly version?: string;
+    readonly serverSignIns?: CodexAppServerConnection["protectedSignIns"];
     readonly threadCompactStart?: (input: { readonly threadId: string }) => Promise<void>;
     readonly threadInjectItems?: (input: unknown) => Promise<void>;
     readonly threadFork?: NonNullable<CodexClientPort["threadFork"]>;
@@ -315,6 +316,7 @@ function fixture(
             pid: starts,
             rpc: {} as CodexAppServerConnection["rpc"],
             exited,
+            ...(input.serverSignIns === undefined ? {} : { protectedSignIns: input.serverSignIns }),
           };
         }),
         () => Effect.sync(() => void (closes += 1)),
@@ -1162,7 +1164,12 @@ describe("Codex driver probe and runtime lifecycle", () => {
                   : "externalSandbox"
                 : "workspaceWrite",
           },
-          approvalPolicy: executionPolicy === "plan" ? "never" : "untrusted",
+          approvalPolicy:
+            executionPolicy === "plan"
+              ? "never"
+              : executionPolicy === "auto-accept-edits"
+                ? "on-request"
+                : "untrusted",
         });
       } finally {
         await acquired.close();
@@ -3113,6 +3120,198 @@ describe("Codex execution authority and approvals", () => {
     expect(linux.turn).toMatchObject({ sandboxPolicy: { type: "externalSandbox" } });
   });
 
+  it("keeps a Plan session on a server in Codex's own read-only sandbox, since no outside sandbox runs there", async () => {
+    // Octant's profile cannot run on a server, so naming the sandbox external
+    // with `never` would leave Plan's commands free to write there.
+    // An empty sign-in list is a person who removed the Provider sign-ins group.
+    const f = fixture({ serverSignIns: { denied: [], allowed: [] } });
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      makeCodexDriver(f.options({ platform: "linux" }))
+        .acquire({
+          instanceId,
+          projectRoot,
+          mode: "code",
+          serverPlacement: {
+            serverName: "devbox",
+            start: () => ({ status: "unreachable", message: "Not reached." }),
+            run: async () => ({ status: "unreachable", message: "Not reached." }),
+          },
+        })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    await Effect.runPromise(
+      connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "plan",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(
+      connection.send({ sessionId, prompt: "go", attachments: [], tools: [] }),
+    );
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
+      sandbox: "read-only",
+      approvalPolicy: "never",
+    });
+    expect(f.calls.find(({ method }) => method === "turn/start")?.input).toMatchObject({
+      sandboxPolicy: { type: "readOnly" },
+    });
+  });
+
+  it("denies the server login's other provider sign-ins to Codex's own sandbox at Guarded on a server", async () => {
+    const serverSignIns = {
+      denied: [
+        "/home/build/.claude/.credentials.json",
+        "/home/build/.local/share/opencode/auth.json",
+      ],
+      allowed: [],
+    };
+    const guardedOnServer = async (version: string) => {
+      const f = fixture({ version, serverSignIns });
+      const scope = await Effect.runPromise(Scope.make());
+      const connection = await Effect.runPromise(
+        makeCodexDriver(f.options({ platform: "linux" }))
+          .acquire({
+            instanceId,
+            projectRoot,
+            mode: "code",
+            serverPlacement: {
+              serverName: "devbox",
+              start: () => ({ status: "unreachable", message: "Not reached." }),
+              run: async () => ({ status: "unreachable", message: "Not reached." }),
+            },
+          })
+          .pipe(Effect.provideService(Scope.Scope, scope)),
+      );
+      const started = await Effect.runPromiseExit(
+        connection.start({
+          sessionId,
+          modelId: "gpt-5.4" as never,
+          executionPolicy: "approval-gated",
+          strict: false,
+        }),
+      );
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      return { started, thread: f.calls.find(({ method }) => method === "thread/start")?.input };
+    };
+    const current = await guardedOnServer("0.170.0");
+    expect(Exit.isSuccess(current.started)).toBe(true);
+    expect(current.thread).toMatchObject({
+      config: {
+        permissions: {
+          [CODEX_OCTANT_PROFILE]: {
+            filesystem: {
+              [projectRoot]: "write",
+              "/home/build/.claude/.credentials.json": "deny",
+              "/home/build/.local/share/opencode/auth.json": "deny",
+            },
+          },
+        },
+      },
+    });
+    // A release that cannot carry deny paths is refused rather than run open.
+    const older = await guardedOnServer("0.168.0");
+    expect(Exit.isFailure(older.started)).toBe(true);
+    expect(older.thread).toBeUndefined();
+  });
+
+  it("refuses Codex on a server when no sign-in list was read for the login", async () => {
+    const f = fixture({ version: "0.170.0" });
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      makeCodexDriver(f.options({ platform: "linux" }))
+        .acquire({
+          instanceId,
+          projectRoot,
+          mode: "code",
+          serverPlacement: {
+            serverName: "devbox",
+            start: () => ({ status: "unreachable", message: "Not reached." }),
+            run: async () => ({ status: "unreachable", message: "Not reached." }),
+          },
+        })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    const started = await Effect.runPromiseExit(
+      connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    expect(Exit.isFailure(started)).toBe(true);
+    expect(f.calls.find(({ method }) => method === "thread/start")).toBeUndefined();
+  });
+  it("starts Full access for Codex on a server with no sign-in list, since it runs no sandbox there", async () => {
+    const f = fixture({ version: "0.170.0" });
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      makeCodexDriver(f.options({ platform: "linux" }))
+        .acquire({
+          instanceId,
+          projectRoot,
+          mode: "code",
+          serverPlacement: {
+            serverName: "devbox",
+            start: () => ({ status: "unreachable", message: "Not reached." }),
+            run: async () => ({ status: "unreachable", message: "Not reached." }),
+          },
+        })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    const started = await Effect.runPromiseExit(
+      connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    expect(Exit.isSuccess(started)).toBe(true);
+  });
+
+  it("refuses Plan for Codex on a server, whose read-only sandbox cannot deny the login's other sign-ins", async () => {
+    const f = fixture({
+      version: "0.170.0",
+      serverSignIns: { denied: ["/home/build/.claude/.credentials.json"], allowed: [] },
+    });
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      makeCodexDriver(f.options({ platform: "linux" }))
+        .acquire({
+          instanceId,
+          projectRoot,
+          mode: "code",
+          serverPlacement: {
+            serverName: "devbox",
+            start: () => ({ status: "unreachable", message: "Not reached." }),
+            run: async () => ({ status: "unreachable", message: "Not reached." }),
+          },
+        })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    const started = await Effect.runPromiseExit(
+      connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "plan",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    expect(Exit.isFailure(started)).toBe(true);
+    expect(String(Exit.isFailure(started) ? Cause.pretty(started.cause) : "")).toContain(
+      "Plan can't run Codex on devbox",
+    );
+    expect(f.calls.find(({ method }) => method === "thread/start")).toBeUndefined();
+  });
+
   it("tells Codex its sandbox has network when the launch took no egress proxy", () => {
     // Network limits are off by default, so the process keeps open network;
     // `restricted` would tell the model it has none.
@@ -3581,14 +3780,17 @@ describe("Codex execution authority and approvals", () => {
           turn: f.calls.find(({ method }) => method === "turn/start")?.input,
         };
       };
+      // Outside Strict Accept edits lets Codex decide when to ask, as its own
+      // CLI does; Ask first keeps asking for every command it does not know.
+      const openApprovals = policy === "auto-accept-edits" ? "on-request" : "untrusted";
       const open = await turnFor(false);
       expect(open.authority).toMatchObject({ kind: "thread", strict: false });
       expect(open.thread).toMatchObject({
         sandbox: "workspace-write",
-        approvalPolicy: "untrusted",
+        approvalPolicy: openApprovals,
       });
       expect(open.turn).toMatchObject({
-        approvalPolicy: "untrusted",
+        approvalPolicy: openApprovals,
         sandboxPolicy: {
           type: "workspaceWrite",
           writableRoots: [projectRoot, extra],
@@ -3600,8 +3802,11 @@ describe("Codex execution authority and approvals", () => {
       for (const strict of [true, undefined]) {
         const held = await turnFor(strict);
         expect(held.authority).not.toHaveProperty("strict");
-        expect(held.thread).toMatchObject({ sandbox: "read-only" });
+        // Under Octant's external sandbox `on-request` would run every command
+        // unasked, so both levels keep `untrusted` there.
+        expect(held.thread).toMatchObject({ sandbox: "read-only", approvalPolicy: "untrusted" });
         expect(held.turn).toMatchObject({
+          approvalPolicy: "untrusted",
           sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },
         });
       }
@@ -3665,6 +3870,28 @@ describe("Codex execution authority and approvals", () => {
       approvalPolicy: "never",
       sandboxPolicy: { type: "externalSandbox" },
     });
+  });
+
+  it("runs Codex's own sandbox for Work and Code outside Strict and keeps Octant's profile under Strict or a chosen sandbox", () => {
+    for (const mode of ["work", "code"] as const) {
+      for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
+        expect(codexRunsNativeSandbox({ mode, executionPolicy, strict: false })).toBe(true);
+        expect(codexRunsNativeSandbox({ mode, executionPolicy, strict: true })).toBe(false);
+        // A caller that never resolved Strict keeps Octant's profile.
+        expect(codexRunsNativeSandbox({ mode, executionPolicy })).toBe(false);
+        expect(
+          codexRunsNativeSandbox({
+            mode,
+            executionPolicy,
+            strict: false,
+            sandboxPolicySelected: true,
+          }),
+        ).toBe(false);
+        expect(
+          codexRunsNativeSandbox({ mode, executionPolicy, strict: false, fullAccessSandbox: true }),
+        ).toBe(false);
+      }
+    }
   });
 
   it("runs Reviewed's escalation past Codex's reviewer in its own sandbox outside Strict", () => {
@@ -4773,6 +5000,112 @@ describe("Codex execution authority and approvals", () => {
     await acquired.close();
   });
 
+  it("asks a secret question outside Strict, on every surface and for a subagent, as a masked question and hands Codex the typed answer", async () => {
+    const userInput = (id: string, questions: ReadonlyArray<object>): CodexServerMessage =>
+      ({
+        kind: "request",
+        id,
+        method: "item/tool/requestUserInput",
+        params: { threadId: "thread-1", turnId: "turn-1", itemId: `item-${id}`, questions },
+      }) as CodexServerMessage;
+    const secretSet = [
+      { id: "pw", header: "Database", question: "Database credential?", isSecret: true },
+      { id: "host", header: "Host", question: "Which host?", options: null },
+    ];
+    const open = async (
+      mode: "code" | "work" | "chat",
+      posture: { readonly strict?: boolean; readonly asksSecretQuestions?: true },
+    ) => {
+      const f = fixture();
+      let request = 0;
+      const acquired = await acquireConnection(
+        makeCodexDriver(f.options({ requestId: () => `request-${++request}` })),
+        mode,
+      );
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId: "gpt-5.4" as never,
+          executionPolicy: "plan",
+          ...posture,
+        }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "plan it", attachments: [], tools: [] }),
+      );
+      return { f, acquired };
+    };
+
+    // A Code, Work or Chat thread outside Strict, and a subagent whose
+    // surface says its parent is outside Strict, all ask it.
+    for (const [mode, posture] of [
+      ["code", { strict: false }],
+      ["work", { strict: false }],
+      ["chat", { strict: false }],
+      ["work", { asksSecretQuestions: true }],
+    ] as const) {
+      const { f, acquired } = await open(mode, posture);
+      const asked = takeEvents(acquired.connection, 2);
+      f.emit(userInput("ask-secret", secretSet));
+      const events = await asked;
+      expect(events).toMatchObject([
+        { kind: "user-input-request", prompt: "Database credential?", secret: true },
+        { kind: "user-input-request", prompt: "Which host?" },
+      ]);
+      expect(events[1]).not.toHaveProperty("secret");
+      for (const [event, answer] of [
+        [events[0], "hunter2-sentinel"],
+        [events[1], "db.internal"],
+      ] as const) {
+        if (event?.kind !== "user-input-request") throw new Error("Codex asked a question.");
+        await Effect.runPromise(
+          acquired.connection.answerUserInput({ sessionId, requestId: event.requestId, answer }),
+        );
+      }
+      expect(f.calls.filter((call) => call.method === "approval/respond")).toEqual([
+        {
+          method: "approval/respond",
+          input: {
+            providerRequestId: "ask-secret",
+            result: {
+              answers: {
+                pw: { answers: ["hunter2-sentinel"] },
+                host: { answers: ["db.internal"] },
+              },
+            },
+          },
+        },
+      ]);
+      await acquired.close();
+    }
+
+    // Strict refuses the set unseen, whatever the surface says, and so does a
+    // session whose surface never said it keeps the answer out of its record.
+    for (const [mode, posture] of [
+      ["code", { strict: true }],
+      ["chat", { strict: true, asksSecretQuestions: true }],
+      ["work", {}],
+    ] as const) {
+      const held = await open(mode, posture);
+      held.f.emit(userInput("ask-held", secretSet));
+      await vi.waitFor(() =>
+        expect(held.f.calls.at(-1)).toEqual({
+          method: "approval/respond",
+          input: {
+            providerRequestId: "ask-held",
+            result: {
+              answers: {
+                pw: { answers: [SECRET_QUESTION_REFUSAL] },
+                host: { answers: [SECRET_QUESTION_REFUSAL] },
+              },
+            },
+          },
+        }),
+      );
+      await held.acquired.close();
+    }
+  });
+
   it("runs a Plan session in Codex's own Plan mode and returns a thread that recorded it to the default mode", async () => {
     const plan = fixture();
     const planned = await acquireConnection(makeCodexDriver(plan.options()));
@@ -5239,14 +5572,17 @@ describe("Codex running as itself", () => {
     expect(codexAppServerArgs("0.164.0")).toContain("agents.enabled=false");
   });
 
-  it("leases a process that keeps Codex's memories only for a Work or Code session outside Plan on an account whose person turned them on", async () => {
-    for (const [mode, executionPolicy, ownMemory, keeps] of [
-      ["code", "approval-gated", true, true],
-      ["work", "full-access", true, true],
-      ["code", "plan", true, false],
-      ["chat", "approval-gated", true, false],
+  it("leases a process that keeps Codex's memories on an account whose person turned them on, in Plan and Chat only outside Strict", async () => {
+    for (const [mode, executionPolicy, ownMemory, strict, keeps] of [
+      ["code", "approval-gated", true, true, true],
+      ["work", "full-access", true, true, true],
+      ["code", "plan", true, true, false],
+      ["chat", "approval-gated", true, true, false],
+      ["code", "plan", true, false, true],
+      ["chat", "approval-gated", true, false, true],
       // Full access and running as itself never turn the account's memory on.
-      ["code", "full-access", false, false],
+      ["code", "full-access", false, true, false],
+      ["code", "plan", false, false, false],
     ] as const) {
       const f = fixture();
       const acquired = await acquireConnection(
@@ -5259,10 +5595,11 @@ describe("Codex running as itself", () => {
           modelId: "gpt-5.4" as never,
           executionPolicy,
           nativeSetup: ownSetup,
+          ...(strict ? {} : { strict: false }),
         }),
       );
       const authority = f.authorities()[0];
-      const label = `${mode} ${executionPolicy} ${String(ownMemory)}`;
+      const label = `${mode} ${executionPolicy} ${String(ownMemory)} strict=${String(strict)}`;
       if (keeps) expect(authority, label).toMatchObject({ ownMemory: true });
       else expect(authority, label).not.toHaveProperty("ownMemory");
       await acquired.close();

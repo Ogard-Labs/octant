@@ -24,6 +24,7 @@ import {
 } from "@octant/provider-sdk/chat-conformance";
 import type {
   ProviderBackgroundWork,
+  ProviderServerPlacement,
   ProviderWakeup,
   ProviderWakeupRequest,
   ProviderWakeupSchedule,
@@ -62,9 +63,13 @@ import {
   claudeWithheldTools,
   CLAUDE_LEVEL_CHANGE_REFUSAL,
   CLAUDE_WAKEUP_UNAVAILABLE,
+  CLAUDE_SERVER_PROTECTED_REFUSAL,
+  CLAUDE_SERVER_SEARCH_REFUSAL,
+  claudeServerFileToolSecretRefusal,
   claudeSessionMessages,
   makeClaudeDriver,
 } from "./claudeDriver";
+import { CLAUDE_SERVER_STRICT_REFUSAL, claudeServerSignInRefusal } from "./claudeServerProcess";
 import type { ClaudeResumeIdentity, ClaudeResumeIdentityPort } from "./claudeDriver";
 import {
   REQUIRED_GUARDS,
@@ -76,6 +81,7 @@ import {
   claudeLoginKeychainPath,
   claudePlanRunsCommands,
   claudeProjectFolderName,
+  makeClaudeProcessLive,
   type ClaudeProcessPort,
 } from "./claudeProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
@@ -1688,6 +1694,33 @@ describe("Claude execution policy", () => {
       expect(refused.opens).toHaveLength(0);
       await connection.close();
     }
+  });
+
+  it("keeps Claude's telemetry and self-update closed outside Strict for a thread that keeps its sandbox, whatever the person's provider switches say", async () => {
+    const launchedWith = async (fullAccessSandbox: boolean) => {
+      const seen: Array<ClaudeEnvironmentScopeOptions | undefined> = [];
+      const f = harness("subscription", "current-session", {
+        makeEnvironmentScope: (_selected, options) => {
+          seen.push(options);
+          return Effect.succeed({ environment: { PATH: "/usr/bin" } });
+        },
+      });
+      const acquired = await acquire(f.driver);
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "full-access",
+          fullAccessSandbox,
+          strict: false,
+          ownChannels: { telemetry: true, selfUpdate: true },
+        }),
+      );
+      await acquired.close();
+      return seen[0]?.ownChannels;
+    };
+    expect(await launchedWith(false)).toEqual({ telemetry: true, selfUpdate: true });
+    expect(await launchedWith(true)).toEqual({ telemetry: false, selfUpdate: false });
   });
 
   it("passes the gate for calls made after a cd into a subfolder and refuses a cd out of the Project", async () => {
@@ -9785,13 +9818,39 @@ describe("Claude Code's own permission modes and sandbox outside Strict", () => 
         executionPolicy: "plan",
         fullAccessSandbox: false,
         ownPermissions: false,
+        mode: "work",
+        strict: false,
+        sandboxPolicySelected: false,
       }),
     ).toBe(false);
   });
 
-  it("keeps Octant's sandbox and gate outside Strict when the session reads none of the person's Claude settings", async () => {
+  it("keeps Octant's sandbox configuration under Strict, in Chat and for a chosen sandbox policy, and drops it for Work and Code outside Strict", () => {
+    const configures = (input: {
+      readonly mode: "chat" | "work" | "code";
+      readonly strict: boolean;
+      readonly sandboxPolicySelected?: boolean;
+    }) =>
+      claudeOctantConfiguresSandbox({
+        executionPolicy: "approval-gated",
+        fullAccessSandbox: false,
+        ownPermissions: false,
+        mode: input.mode,
+        strict: input.strict,
+        sandboxPolicySelected: input.sandboxPolicySelected ?? false,
+      });
+    expect(configures({ mode: "work", strict: false })).toBe(false);
+    expect(configures({ mode: "code", strict: false })).toBe(false);
+    expect(configures({ mode: "code", strict: true })).toBe(true);
+    expect(configures({ mode: "chat", strict: false })).toBe(true);
+    expect(configures({ mode: "code", strict: false, sandboxPolicySelected: true })).toBe(true);
+  });
+
+  it("runs on Claude's permission modes and Octant's gate with no sandbox outside Strict when the session reads none of the person's Claude settings", async () => {
     // With no setup, or only subagents and web tools on, the launch reads no
-    // home settings, so the person's own sandbox and deny rules would not load.
+    // home settings, so the person's own rules do not load and Octant's gate
+    // answers every call, with no sandbox of Octant's around the commands
+    // (maintainer decision, 2026-11-21).
     for (const nativeSetup of [
       undefined,
       { ...readsHome, skills: false, subagents: true, webTools: true },
@@ -9803,10 +9862,7 @@ describe("Claude Code's own permission modes and sandbox outside Strict", () => 
         nativeSetup === undefined ? {} : { nativeSetup },
       );
       expect(session.open.ownPermissions).toBeUndefined();
-      expect(session.open.sandbox).toMatchObject({
-        enabled: true,
-        autoAllowBashIfSandboxed: false,
-      });
+      expect(session.open.sandbox).toBeUndefined();
       await Effect.runPromise(
         session.acquired.connection.send({ sessionId, prompt: "go", attachments: [], tools: [] }),
       );
@@ -9820,6 +9876,18 @@ describe("Claude Code's own permission modes and sandbox outside Strict", () => 
           signal: new AbortController().signal,
         }),
       ).resolves.toEqual({ behavior: "allow" });
+      // A command is never settled unasked: Claude's own `default` mode
+      // decides it, and its ask reaches the person through `canUseTool`.
+      await expect(
+        session.open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Bash",
+          input: { command: "touch a.ts" },
+          toolUseId: "bash",
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toEqual({ behavior: "own-rules" });
       await session.acquired.close();
     }
     expect(
@@ -10121,6 +10189,220 @@ describe("Claude artifacts outside Strict", () => {
       publishes: false,
     });
     expect(claudeArtifactCall({ type_url: "not a url" })).toEqual({ publishes: true });
+  });
+});
+
+describe("Claude Code on a server Project's server", () => {
+  /** A placement whose server holds a transcript for any session it is asked about. */
+  function serverPlacement() {
+    const runs: Array<ReadonlyArray<string>> = [];
+    const placement: ProviderServerPlacement = {
+      serverName: "devbox",
+      start: () => ({ status: "unreachable", message: "Not started in this test." }),
+      run: async (program) => {
+        runs.push(program);
+        // The server holds no instruction files in this stand-in.
+        if (program[2]?.startsWith("for f in") === true)
+          return { status: "ran", exitCode: 0, output: "", errorOutput: "" };
+        const asked = program.at(-1) ?? "";
+        return {
+          status: "ran",
+          exitCode: 0,
+          output: `${projectRoot}\n/home/build/.claude/projects/${claudeProjectFolderName(projectRoot)}/${asked}.jsonl\n`,
+          errorOutput: "",
+        };
+      },
+    };
+    return { placement, runs };
+  }
+
+  async function acquirePlaced(
+    driver: ReturnType<typeof makeClaudeDriver>,
+    placement: ProviderServerPlacement,
+  ) {
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      driver
+        .acquire({ instanceId, projectRoot, mode: "code", serverPlacement: placement })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    return { connection, close: () => Effect.runPromise(Scope.close(scope, Exit.void)) };
+  }
+
+  it("a placed session reads none of this host's Claude config or instruction files", async () => {
+    const configDirectory = await mkdtemp(join(tmpdir(), "octant-claude-placed-config-"));
+    try {
+      await writeFile(join(configDirectory, "CLAUDE.md"), "host instructions sentinel\n");
+      const makeEnvironmentScope = vi.fn(() =>
+        Effect.fail<ProviderFailure>({ category: "protocol", message: "host environment read" }),
+      );
+      const gitIdentity = vi.fn(async () => ({ name: "Host Person" }));
+      const f = harness("api-key", "current-session", {
+        configDirectory,
+        makeEnvironmentScope,
+        gitIdentity,
+      });
+      const { placement, runs } = serverPlacement();
+      const acquired = await acquirePlaced(f.driver, placement);
+      const started = await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          strict: false,
+        }),
+      );
+      await Effect.runPromise(acquired.connection.stop(sessionId));
+      const cursor = started.resumeCursor;
+      if (cursor === undefined) throw new Error("The session reported no cursor.");
+      await Effect.runPromise(
+        acquired.connection.resume({
+          sessionId,
+          resumeCursor: cursor,
+          executionPolicy: "approval-gated",
+          strict: false,
+        }),
+      );
+      await Effect.runPromise(acquired.connection.stop(sessionId));
+      await acquired.close();
+
+      expect(makeEnvironmentScope).not.toHaveBeenCalled();
+      expect(gitIdentity).not.toHaveBeenCalled();
+      expect(f.credentialResolver.resolve).not.toHaveBeenCalled();
+      // The sign-in asked about is the server login's, never this host's account.
+      for (const [, environment, confinement] of vi.mocked(f.process.probeSubscription).mock
+        .calls) {
+        expect(environment).toEqual({});
+        expect(confinement?.server).toBe(placement);
+      }
+      expect(f.process.probeSubscription).toHaveBeenCalledTimes(2);
+      expect(f.process.probeVersion).toHaveBeenCalledWith("/opt/homebrew/bin/claude", placement);
+      // The resume looked for the transcript on the server, not in this host's account.
+      expect(f.sdk.findSession).not.toHaveBeenCalled();
+      expect(runs.some((program) => program.at(-1) === cursor.value)).toBe(true);
+      expect(f.opens).toHaveLength(2);
+      for (const opened of f.opens) {
+        expect(opened.serverPlacement).toBe(placement);
+        expect(opened.authEnvironment).toEqual({});
+        expect(opened).not.toHaveProperty("instructions");
+        expect(opened).not.toHaveProperty("sandbox");
+        expect(opened).not.toHaveProperty("network");
+      }
+      expect(f.opens[1]).toMatchObject({ resumeSessionId: cursor.value });
+    } finally {
+      await rm(configDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a Claude Code turn on a server where Claude Code is not signed in", async () => {
+    const f = harness("api-key");
+    // The real process port reads `claude auth status --json` through the
+    // placement; the server's login answers that it is signed out.
+    vi.mocked(f.process.probeSubscription).mockImplementation(
+      makeClaudeProcessLive().probeSubscription,
+    );
+    const statusReads: Array<ReadonlyArray<string>> = [];
+    const placement: ProviderServerPlacement = {
+      serverName: "devbox",
+      start: () => ({ status: "unreachable", message: "Not started in this test." }),
+      run: async (program) => {
+        if (program.join(" ") !== "claude auth status --json") throw new Error("unexpected run");
+        statusReads.push(program);
+        return { status: "ran", exitCode: 1, output: '{"loggedIn":false}\n', errorOutput: "" };
+      },
+    };
+    const acquired = await acquirePlaced(f.driver, placement);
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          strict: false,
+        }),
+      ),
+    );
+    expect(refused).toEqual({
+      category: "unauthenticated",
+      message: claudeServerSignInRefusal("devbox"),
+    });
+    expect(refused.message).toContain("Project terminal");
+    expect(statusReads).toHaveLength(1);
+    // Nothing started, and no key of this host was read for it.
+    expect(f.opens).toHaveLength(0);
+    expect(f.credentialResolver.resolve).not.toHaveBeenCalled();
+    await acquired.close();
+  });
+
+  it("gives a placed session the server's instruction files when Claude Code would not load them itself", async () => {
+    const f = harness("api-key", "current-session");
+    const placement: ProviderServerPlacement = {
+      serverName: "devbox",
+      start: () => ({ status: "unreachable", message: "Not started in this test." }),
+      run: async () => ({
+        status: "ran",
+        exitCode: 0,
+        output: "\u001eCLAUDE.md\nRun the unit tests first.\n",
+        errorOutput: "",
+      }),
+    };
+    const acquired = await acquirePlaced(f.driver, placement);
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    await acquired.close();
+    expect(f.opens[0]?.instructions).toContain("CLAUDE.md:\nRun the unit tests first.");
+  });
+
+  it("refuses Claude Code on a server under Strict, before anything starts", async () => {
+    const f = harness();
+    const { placement } = serverPlacement();
+    const acquired = await acquirePlaced(f.driver, placement);
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      ),
+    );
+    expect(refused).toEqual({ category: "unsupported", message: CLAUDE_SERVER_STRICT_REFUSAL });
+    expect(f.process.probeVersion).not.toHaveBeenCalled();
+    expect(f.opens).toHaveLength(0);
+    await acquired.close();
+  });
+
+  it("runs a placed Plan turn in Claude's own plan mode, with no shell and no sandbox of Octant's", async () => {
+    const f = harness("subscription", "current-session", { platform: "darwin" });
+    const { placement } = serverPlacement();
+    const acquired = await acquirePlaced(f.driver, placement);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "plan", strict: false }),
+    );
+    expect(f.opens[0]?.executionPolicy).toBe("plan");
+    expect(f.opens[0]?.tools).not.toContain("Bash");
+    expect(f.opens[0]).not.toHaveProperty("sandbox");
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    await acquired.close();
+  });
+
+  it("matches the protected-file list by name for a path on the server", () => {
+    const refusal = (tool: string, input: Record<string, unknown>) =>
+      claudeServerFileToolSecretRefusal(tool, input, "/srv/app", true, (path) =>
+        `${path}/`.startsWith("/srv/app/"),
+      );
+    expect(refusal("Read", { file_path: "/home/build/.codex/auth.json" })).toBe(
+      CLAUDE_SERVER_PROTECTED_REFUSAL,
+    );
+    expect(refusal("Read", { file_path: "src/index.ts" })).toBeUndefined();
+    // A search outside the Project's folders cannot be walked from here, so
+    // it is refused whole; one inside them runs.
+    expect(refusal("Grep", { path: "../../home/build/.codex" })).toBe(CLAUDE_SERVER_SEARCH_REFUSAL);
+    expect(refusal("Glob", { pattern: "../../home/build/**" })).toBe(CLAUDE_SERVER_SEARCH_REFUSAL);
+    expect(refusal("Grep", { path: "src" })).toBeUndefined();
   });
 });
 

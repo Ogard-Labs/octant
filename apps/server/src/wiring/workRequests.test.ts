@@ -23,6 +23,7 @@ import {
   principalActsAsHostPerson,
   type ClientPrincipal,
 } from "../clientPrincipal";
+import { createHubActScopeSlot } from "../hub/hubActScope";
 import { chatImageScopeAllowedForWindow } from "../image/imageScopeAuthority";
 import { ServiceOfferService } from "../offers/serviceOfferService";
 import { makePersistenceLive, Persistence } from "../persistence/persistenceService";
@@ -214,6 +215,7 @@ describe("wireWorkRequests service offers", () => {
           const emptyList = () => [];
           const emptyAsync = async () => [];
           const wired = wireWorkRequests({
+            hubActScopeSlot: createHubActScopeSlot(),
             persistence,
             windowAuthorityStore,
             serviceOffers,

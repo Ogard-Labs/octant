@@ -8,6 +8,7 @@ import {
   windowsLogonEntryPolicy,
 } from "./windowsHost";
 import { resolveServerRunOptions, runServerRunCommand } from "./serverRun";
+import { resolveServerDrainCliCommand, runServerDrainCliCommand } from "./serverDrain";
 import {
   resolveHostRuntimePaths,
   ServicePolicyStore,
@@ -289,7 +290,9 @@ export async function runCli(
       printUsage(context.identity);
       return 1;
     }
-    if (action !== "logs" && Object.keys(lifecycleFlags).length > 0) {
+    // `--remove-service` belongs to `disable` alone.
+    const removeService = action === "disable" && lifecycleFlags["remove-service"] === true;
+    if (action !== "logs" && Object.keys(lifecycleFlags).length > (removeService ? 1 : 0)) {
       printUsage(context.identity);
       return 1;
     }
@@ -308,6 +311,7 @@ export async function runCli(
           action,
           ...lifecycleHostDependencies(context),
           stdout: process.stdout,
+          ...(removeService ? { removeService } : {}),
           ...(logs === undefined ? {} : { logs }),
           ...(followAbortController === undefined ? {} : { signal: followAbortController.signal }),
         });
@@ -399,6 +403,21 @@ export async function runCli(
       return 1;
     }
     return await runServerRunCommand(options);
+  }
+  if (args.command === "server" && args.positional[0] === "drain") {
+    const command = resolveServerDrainCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage(context.identity);
+      return 1;
+    }
+    return await withLocalControlSession(context, (session) =>
+      runServerDrainCliCommand({
+        command,
+        session,
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
+    );
   }
   // `octant agent mcp` is the one-word form; longer words after `agent` are a
   // prompt, so `octant agent mcp servers are slow` still reaches the agent.
@@ -801,6 +820,7 @@ async function runHubFlow(context: CliContext, command: HubCliCommand): Promise<
       runHubCliCommand({
         command,
         session,
+        stdin: process.stdin,
         stdout: process.stdout,
         stderr: process.stderr,
         platform: process.platform,
@@ -953,6 +973,8 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
     nightly: null,
   },
   { octant: "server stop|restart|enable|disable", nightly: null },
+  { octant: "server disable --remove-service", nightly: null },
+  { octant: "server drain --wait <minutes 1-60> | --lift", nightly: null },
   { octant: "server logs [--since <ISO-8601>] [--limit <n>] [--follow]" },
   {
     octant:
@@ -1030,7 +1052,7 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
   { octant: "hub join-code [--owner]" },
   {
     octant:
-      "hub join <code> [--items <roster,status,introduce,wake,owners,standby,push,provision,act|none>]",
+      "hub join <code|-> [--items <roster,status,introduce,wake,owners,standby,push,provision,act|none>]",
   },
   { octant: "hub grant [--items <list>|none]" },
   { octant: "hub leave" },

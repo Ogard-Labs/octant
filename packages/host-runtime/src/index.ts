@@ -267,6 +267,19 @@ export {
   type ReleaseRing,
 } from "./updateReleaseKeys";
 export {
+  DEFAULT_OCTANT_UPDATE_FEED_BASE_URL,
+  fetchReleaseFeedDocument,
+  fetchVerifiedArtifact,
+  headlessBuildFeedRelativePath,
+  isHttpsUrl,
+  resolveUpdateFeedBaseUrl,
+  UPDATE_FEED_BASE_URL_ENVIRONMENT_VARIABLE,
+  type ArtifactFetchOutcome,
+  type FeedFetchFailure,
+  type FeedFetchResult,
+} from "./releaseFeedFetch";
+export { createPinnedUpdateFetch, UpdateDestinationRefused } from "./updateHttpsTransport";
+export {
   browserDownloadHoldRoot,
   isInsideBrowserDownloadHold,
   prepareBrowserDownloadHoldRoot,

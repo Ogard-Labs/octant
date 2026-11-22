@@ -431,6 +431,38 @@ describe("ProjectService", () => {
     ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
   });
 
+  it("refuses to create a Project for another host and leaves its folder receipt unspent", async () => {
+    const receipts = new BindingReceiptStore(() => Buffer.alloc(32));
+    const issued = receipts.issue({
+      windowId,
+      projectType: "work",
+      canonicalBinding: { canonicalRoot: "/canonical/work" },
+      now: 0,
+    });
+    const fixture = fixtureService({ receipts, nowMs: 1 });
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "create-work-project",
+        projectId: workId,
+        expectedVersion: 0,
+        name: "Work",
+        receiptId: issued.receiptId,
+        hostId: "22222222-2222-4222-8222-222222222222",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(fixture.append).not.toHaveBeenCalled();
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "create-work-project",
+        projectId: workId,
+        expectedVersion: 0,
+        name: "Work",
+        receiptId: issued.receiptId,
+        hostId: "local",
+      }),
+    ).resolves.toMatchObject({ kind: "work-project-created" });
+  });
+
   it("rejects disabled modes and archived mutations", async () => {
     const fixture = fixtureService({ settings: { chatEnabled: false, workEnabled: false } });
     const archived = fixtureService({ projects: [{ ...chatProject(), lifecycle: "archived" }] });
@@ -2144,6 +2176,65 @@ describe("ProjectService", () => {
           expect.objectContaining({ id: codeId, codeAccessPersistence: "project-default" }),
         ]),
       );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("replays a Code Project's delegated Code target and its removal across persistence restart", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-project-delegated-code-service-"));
+    const codeId = decodeProjectId("00000000-0000-4000-8000-00000000069a");
+    const receiptId = `${"A".repeat(42)}A` as never;
+    const delegatedCode = {
+      remoteName: "origin",
+      baseBranch: "main",
+      outcomeKind: "opened-pr",
+      confirmedAt: now,
+    } as const;
+    const run = <A>(body: (service: ReturnType<typeof persistentService>) => Promise<A>) =>
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const persistence = yield* Persistence;
+            return yield* Effect.promise(() => body(persistentService(persistence)));
+          }).pipe(
+            Effect.provide(makePersistenceLive({ dataDirectory: directory, clock: () => now })),
+          ),
+        ),
+      );
+    const restoredProject = async () =>
+      (await run((service) => service.bootstrap(windowId))).active.find(
+        (project) => String(project.id) === String(codeId),
+      );
+    try {
+      await run(async (service) => {
+        await service.executeProject(windowId, {
+          kind: "create-code-project",
+          projectId: codeId,
+          expectedVersion: 0,
+          name: "Delegated Code",
+          receiptId,
+          hostId: "local",
+        });
+        await service.executeProject(windowId, {
+          kind: "change-code-project-delegated-code",
+          projectId: codeId,
+          expectedVersion: 1,
+          delegatedCode,
+        });
+      });
+      expect(await restoredProject()).toMatchObject({ delegatedCode });
+
+      await run((service) =>
+        service.executeProject(windowId, {
+          kind: "change-code-project-delegated-code",
+          projectId: codeId,
+          expectedVersion: 2,
+        }),
+      );
+      const cleared = await restoredProject();
+      expect(cleared?.version).toBe(3);
+      expect(cleared).not.toHaveProperty("delegatedCode");
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

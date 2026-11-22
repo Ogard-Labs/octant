@@ -397,7 +397,12 @@ export function mapOpenCodeEvent(
       // is all input, cached or not, so context math and the cache hit rate
       // never depend on whether a model caches.
       const allInputTokens = inputTokens + cacheReadInputTokens + cacheWriteInputTokens;
-      if (!Number.isSafeInteger(allInputTokens)) {
+      // OpenCode also reports output apart from reasoning (it prices the two
+      // separately), while `outputTokens` counts thinking and `reasoningTokens`
+      // is its part, as every other runtime reports them; a spend ceiling sums
+      // input and output only.
+      const allOutputTokens = outputTokens + reasoningTokens;
+      if (!Number.isSafeInteger(allInputTokens) || !Number.isSafeInteger(allOutputTokens)) {
         return [
           mappedEvent(context, {
             kind: "failed",
@@ -409,7 +414,7 @@ export function mapOpenCodeEvent(
         mappedEvent(context, {
           kind: "usage",
           inputTokens: allInputTokens,
-          outputTokens,
+          outputTokens: allOutputTokens,
           reasoningTokens,
           cacheReadInputTokens,
           cacheWriteInputTokens,

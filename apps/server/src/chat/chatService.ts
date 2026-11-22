@@ -4,6 +4,7 @@ import {
   type ConversationInputPolicy,
   type ConversationInputReceipt,
 } from "@octant/contracts/conversation-inputs";
+import type { TurnAcceptance } from "../hostDrain";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
@@ -60,6 +61,7 @@ import {
   decodeContextSubjectRef,
   decodeProviderAttachmentInput,
   decodeProviderInstanceId,
+  personalSignInRefusals,
   decodeProviderModelId,
   decodeProviderSessionId,
   MAX_PROVIDER_TOOLS,
@@ -121,6 +123,7 @@ import {
   type MentionableThreadId,
   type PendingRequest,
   type ProviderServiceLimits,
+  MAX_SECRET_ANSWER_LENGTH,
   USAGE_RESUME_CANCELLED,
   USAGE_RESUME_SCHEDULED,
   type UsageResumeRecord,
@@ -314,6 +317,7 @@ import {
 } from "../context/inheritedExternalContentMark";
 import type { RuntimeOutsideContentMarking } from "../context/runtimeOutsideContentMark";
 import { STOP_CONFIRMATION_MS } from "../stopConfirmation";
+import { isRoutineHostScope } from "../routineHostScope";
 
 const RESEARCH_TOOL_NAME = WEB_SEARCH_TOOL_DEFINITION.name;
 const DEFAULT_CHAT_PERSONALITY_INSTRUCTIONS = "Be calm, direct, and useful.";
@@ -667,6 +671,18 @@ export interface ChatServiceExecutionContext {
    * route resolved it for. Absent, the change is the local person's.
    */
   readonly actor?: EventActor;
+  /**
+   * `user` when the person sent the command, from a window on this host or a
+   * device they paired, as the route resolved it. Only the person answers a
+   * question that asks for a secret; absent, a secret answer is refused.
+   */
+  readonly initiator?: "user" | "agent";
+  /**
+   * An outside agent's grant sent this, through the ordinary route: its
+   * grant's scope stands in as the window, so the window alone cannot say
+   * it is not the person. Set only by the route; absent, it is not one.
+   */
+  readonly fromOutsideAgent?: boolean;
   /** One-hop coordination calls cannot expose the coordination tool again. */
   readonly coordinationDepth?: number;
   /**
@@ -875,6 +891,11 @@ export interface ChatServiceOptions {
     }) => TurnToolEffects;
     /** Absent means every turn is admitted. */
     readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
+    /**
+     * Rechecks the host drain right before a prepared turn is accepted and
+     * counts the turn as running; the refusal, or nothing when admitted.
+     */
+    readonly acceptTurn?: (scope: NativeHarnessTurnScope) => TurnAcceptance;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
     /** Every turn's end, whatever its outcome, with what the turn cost and how it ran. */
     readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
@@ -1813,6 +1834,8 @@ export class ChatService {
             threadTitle: thread.title,
             text: question.prompt,
             options: question.options,
+            // A secret question's row finds the thread; only its masked field answers it.
+            ...(question.secret === true ? { secret: true } : {}),
             // A question carries no time of its own; journaling it is the
             // attempt's last update while the turn stays parked on it.
             requestedAt: attempt.updatedAt,
@@ -1846,6 +1869,13 @@ export class ChatService {
         return await this.#threadWork.execute(input);
       }
       const command = decodeChatCommand(input);
+      if (
+        command.kind === "send-chat-turn" ||
+        command.kind === "retry-chat-turn" ||
+        command.kind === "resume-chat-turn" ||
+        command.kind === "deliver-chat-agent-result"
+      )
+        this.#refuseUnattendedTurn(command.threadId, executionContext);
       switch (command.kind) {
         case "create-chat-thread":
           return await this.#createThread(command, executionContext?.inheritedMark);
@@ -1896,7 +1926,7 @@ export class ChatService {
           return await this.#forceStopTurn(command);
         case "answer-chat-turn-question":
           return await this.#withThreadAdmission(command.threadId, () =>
-            this.#answerTurnQuestion(command),
+            this.#answerTurnQuestion(command, executionContext?.initiator, executionContext),
           );
         case "snooze-chat-thread-at-usage-reset":
           return await this.#withThreadAdmission(command.threadId, () =>
@@ -2550,6 +2580,64 @@ export class ChatService {
   }
 
   /**
+   * Refuses a turn no person sent on a thread whose provider's personal
+   * sign-in does not cover it. The host's own sends (a restart continuation,
+   * a usage-limit retry, a routine, a benchmark, a child's result) carry no
+   * window or the host's scope, and another thread's message carries a
+   * coordination depth; a person's send carries their window and neither.
+   */
+  #refuseUnattendedTurn(threadId: string, context: ChatServiceExecutionContext | undefined): void {
+    let thread: ChatThread | undefined;
+    try {
+      thread = this.#persistence.readChatThread(decodeChatThreadId(threadId));
+    } catch {
+      // An id that does not decode is refused by the command's own handler.
+      return;
+    }
+    if (thread === undefined) return;
+    // A pool may route the turn to any of its candidates, and routing probes
+    // them all, so each is checked before a route is computed.
+    this.#refuseUnattendedOn(thread.providerInstanceId, context);
+    for (const candidate of thread.multiModelPool?.candidates ?? [])
+      if (candidate.hostId === LOCAL_HOST_ID)
+        this.#refuseUnattendedOn(candidate.providerInstanceId, context, "routable-only");
+  }
+
+  /**
+   * The same refusal for the provider a turn actually resolved to: a model
+   * pool or the Chat provider fallback can route a turn to a provider other
+   * than the thread's own, and a retry or resume runs on its attempt's.
+   */
+  #refuseUnattendedOn(
+    providerInstanceId: string,
+    context: ChatServiceExecutionContext | undefined,
+    /**
+     * `routable-only` for a pool candidate or the fallback: routing and
+     * fallback probing skip a provider that is off, so one still named there
+     * blocks no turn. The thread's own, routed or attempt provider is always
+     * checked.
+     */
+    among: "routable-only" | "always" = "always",
+  ): void {
+    const unattended =
+      context?.windowId === undefined ||
+      isRoutineHostScope(context.windowId) ||
+      (context.coordinationDepth ?? 0) > 0 ||
+      context.limitRecovery === true;
+    if (!unattended && context?.fromOutsideAgent !== true) return;
+    const instance = this.#persistence.readProviderInstance(
+      decodeProviderInstanceId(providerInstanceId),
+    );
+    if (among === "routable-only" && instance?.enabled !== true) return;
+    const refusals = personalSignInRefusals(instance?.driverKind ?? "");
+    // The grant's own check read the thread's provider; a pool or fallback
+    // can still route the agent's turn onto one that refuses outside agents.
+    const refusal = unattended ? refusals?.refusesUnattendedRuns : refusals?.refusesOutsideAgents;
+    if (refusal !== undefined)
+      throw new ChatServiceError({ category: "unauthorized", message: refusal });
+  }
+
+  /**
    * Moves the thread to another account of its provider by the ordinary
    * provider change, so the next turn hands the conversation over with the
    * same disclosed handoff a provider change makes. Only the person moves a
@@ -3014,7 +3102,10 @@ export class ChatService {
     return { kind: "thread-updated", thread: next };
   }
 
-  /** A paused harness session refuses a new prompt, whether sent or edited in. */
+  /**
+   * A paused harness session refuses a new prompt, whether sent or edited in,
+   * and so does a host draining before an update.
+   */
   #admitHarnessTurn(thread: ChatThread): void {
     const admission = this.#nativeHarness?.admitTurn?.({
       threadId: String(thread.id),
@@ -3023,6 +3114,11 @@ export class ChatService {
       modelId: decodeProviderModelId(thread.modelId),
       ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
     });
+    if (admission?.kind === "draining") {
+      throw new ChatServiceError(
+        decodeChatFailure({ category: "unavailable", message: admission.detail }),
+      );
+    }
     if (admission?.kind === "paused") {
       throw new ChatServiceError(
         decodeChatFailure({
@@ -3191,34 +3287,56 @@ export class ChatService {
           message: "Queued Chat admission was revoked during preparation.",
         });
       }
-      this.#persistence.journal.append(
-        {
-          aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
-          expectedVersion: command.expectedVersion,
-          events: [
-            this.#pending("chat.thread-updated@1", {
-              kind: "thread-updated",
-              thread: updatedThread,
-            }),
-            this.#pending("chat.turn-created@1", { kind: "turn-created", turn }),
-            ...(routing !== undefined && routing.decision.decision.kind === "selected"
-              ? [
-                  this.#pending("chat.turn-route-decided@1", {
-                    kind: "turn-route-decided",
-                    decision: routing.decision,
-                  }),
-                ]
-              : []),
-          ],
-        },
-        {
-          beforeEvents: (connection) => {
-            this.#writePreparedContent(connection, userMessage);
-            for (const content of prepared.describedContents ?? [])
-              this.#writePreparedContent(connection, content);
+      // A drain that began while the send was prepared refuses it here; from
+      // here the drain counts it, before its provider reports a start.
+      const acceptance = this.#nativeHarness?.acceptTurn?.({
+        threadId: String(thread.id),
+        mode: "chat",
+        providerInstanceId: decodeProviderInstanceId(thread.providerInstanceId),
+        modelId: decodeProviderModelId(thread.modelId),
+        ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+      });
+      if (acceptance?.status === "refused") {
+        await prepared.appManagedTools?.close?.().catch(() => undefined);
+        throw new ChatServiceError(
+          decodeChatFailure({ category: "unavailable", message: acceptance.message }),
+        );
+      }
+      // A send whose journal write fails never starts, so it stops counting.
+      const releaseDrain = acceptance?.status === "accepted" ? acceptance.release : () => {};
+      try {
+        this.#persistence.journal.append(
+          {
+            aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+            expectedVersion: command.expectedVersion,
+            events: [
+              this.#pending("chat.thread-updated@1", {
+                kind: "thread-updated",
+                thread: updatedThread,
+              }),
+              this.#pending("chat.turn-created@1", { kind: "turn-created", turn }),
+              ...(routing !== undefined && routing.decision.decision.kind === "selected"
+                ? [
+                    this.#pending("chat.turn-route-decided@1", {
+                      kind: "turn-route-decided",
+                      decision: routing.decision,
+                    }),
+                  ]
+                : []),
+            ],
           },
-        },
-      );
+          {
+            beforeEvents: (connection) => {
+              this.#writePreparedContent(connection, userMessage);
+              for (const content of prepared.describedContents ?? [])
+                this.#writePreparedContent(connection, content);
+            },
+          },
+        );
+      } catch (error) {
+        releaseDrain();
+        throw error;
+      }
       return {
         kind: "accepted" as const,
         thread: updatedThread,
@@ -4726,7 +4844,30 @@ export class ChatService {
    */
   async #answerTurnQuestion(
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "answer-chat-turn-question" }>,
+    initiator: "user" | "agent" | undefined,
+    context?: ChatServiceExecutionContext,
   ): Promise<ChatCommandResult> {
+    if ((command.secretAnswer === undefined) === (command.answer === undefined))
+      throw new ChatServiceError({
+        category: "invalid",
+        message: "Answer a question with either its answer or its secret answer.",
+      });
+    // A secret is the person's own to give: only a window on this host or a
+    // device they paired answers one, never an agent acting for them.
+    if (command.secretAnswer !== undefined && initiator !== "user")
+      throw new ChatServiceError({
+        category: "unauthorized",
+        message: "Only you, from a window or a device you paired, can answer a secret question.",
+      });
+    if (
+      command.secretAnswer !== undefined &&
+      (command.secretAnswer.trim().length === 0 ||
+        command.secretAnswer.length > MAX_SECRET_ANSWER_LENGTH)
+    )
+      throw new ChatServiceError({
+        category: "invalid",
+        message: `A secret answer is between 1 and ${String(MAX_SECRET_ANSWER_LENGTH)} characters.`,
+      });
     const thread = this.#requireActiveThread(command.threadId);
     this.#assertExpectedThreadVersion(thread, command.expectedVersion);
     const view = this.#requireThreadView(command.threadId);
@@ -4746,15 +4887,38 @@ export class ChatService {
         message: "Chat attempt has no open question by that identity.",
       });
     }
+    // An outside agent's grant checked the thread's providers before the
+    // request reached here; the answer goes to the attempt's own provider,
+    // which a pool or fallback chose, so that is read too.
+    if (context?.fromOutsideAgent === true) {
+      const refusal = personalSignInRefusals(
+        this.#persistence.readProviderInstance(decodeProviderInstanceId(attempt.providerInstanceId))
+          ?.driverKind ?? "",
+      )?.refusesOutsideAgents;
+      if (refusal !== undefined)
+        throw new ChatServiceError({ category: "unauthorized", message: refusal });
+    }
+    // A secret answer reaches only the question that asked for one, and a
+    // secret question takes no answer the attempt would record.
+    if ((question.secret === true) !== (command.secretAnswer !== undefined))
+      throw new ChatServiceError({
+        category: "invalid",
+        message:
+          question.secret === true
+            ? "That question asks for a secret. Answer it in its thread."
+            : "That question does not ask for a secret.",
+      });
+    const answer = command.secretAnswer ?? command.answer ?? "";
     if (question.questionnaire !== undefined) {
-      const validation = validateQuestionnaireAnswer(question.questionnaire, command.answer);
+      const validation = validateQuestionnaireAnswer(question.questionnaire, answer);
       if (validation.status === "invalid")
         throw new ChatServiceError({ category: "invalid", message: validation.message });
     }
     const answered = await this.#turnRunner.deliverQuestionAnswer({
       attemptId: String(command.attemptId),
       requestId: String(command.requestId),
-      answer: command.answer,
+      answer,
+      ...(command.secretAnswer === undefined ? {} : { secret: true }),
     });
     if (answered === undefined) {
       // The turn is not running in this host: its provider session died with
@@ -4857,7 +5021,17 @@ export class ChatService {
     admittedInputReceipt?: ConversationInputReceipt,
   ): Promise<PreparedChatTurn> {
     const settings = this.#requireChatSettings();
-    const routed = await this.#resolveTurnProvider(requestedThread, settings, extensionPhase);
+    // Every send, retry, resume and delivery is prepared here, before its
+    // turn or attempt is journaled: the provider it was routed to (a pool's
+    // choice, or a retry's attempt) is checked before it is probed, and the
+    // fallback is checked before it is, so no session opens for a refusal.
+    this.#refuseUnattendedOn(requestedThread.providerInstanceId, executionContext);
+    const routed = await this.#resolveTurnProvider(
+      requestedThread,
+      settings,
+      extensionPhase,
+      executionContext,
+    );
     const thread = routed.thread;
     const providerInstanceId = routed.providerInstanceId;
     const driver = routed.driver;
@@ -5456,6 +5630,7 @@ export class ChatService {
     thread: ChatThread,
     settings: ConfiguredChatSettings,
     extensionPhase: "send" | "replay" | "resume",
+    executionContext?: ChatServiceExecutionContext,
   ): Promise<{
     readonly thread: ChatThread;
     readonly providerInstanceId: ProviderInstanceId;
@@ -5498,6 +5673,11 @@ export class ChatService {
       return { thread, providerInstanceId, driver: probed.driver, probe: probed.probe };
     }
     const preference = settings.providerFallback;
+    if (
+      preference !== undefined &&
+      String(preference.providerInstanceId) !== String(providerInstanceId)
+    )
+      this.#refuseUnattendedOn(preference.providerInstanceId, executionContext, "routable-only");
     const candidate =
       preference === undefined ||
       String(preference.providerInstanceId) === String(providerInstanceId)

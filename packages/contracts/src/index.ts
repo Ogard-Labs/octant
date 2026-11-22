@@ -112,6 +112,7 @@ export * from "./launchSession";
 export * from "./machineChanges";
 export * from "./localServers";
 export * from "./remoteServerGrants";
+export * from "./remotePortForwards";
 export * from "./modes";
 export * from "./multiModelPool";
 export * from "./nativeHarnessRouting";
@@ -224,6 +225,7 @@ export * from "./simulatorDevice";
 export * from "./gitHistory";
 
 export * from "./threadMessageQueue";
+export * from "./threadMessageSteering";
 export * from "./threadWakeups";
 export * from "./codeSessions";
 export * from "./workSessions";

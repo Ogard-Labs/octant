@@ -1,3 +1,4 @@
+import type { NewDeviceAlertsClient } from "@octant/client-runtime/new-device-alerts-client";
 import { SandboxRestrictionsSettings } from "../settings/SandboxRestrictionsSettings";
 import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-restrictions-client";
 import type { SandboxSettingsScope } from "../settings/SandboxRestrictionsSettings";
@@ -299,6 +300,8 @@ export interface SettingsViewProps {
   >;
   /** Settings › Permissions › Protected files; absent where the host publishes no list. */
   readonly protectedFilesClient?: ProtectedFilesClient;
+  /** The host's new-device alerts, read and cleared from this window. */
+  readonly newDeviceAlertsClient?: NewDeviceAlertsClient;
   readonly blockedToolsClient?: BlockedToolsClient;
   readonly sandboxRestrictionsClient?: SandboxRestrictionsClient;
   readonly sandboxInitialScope?:
@@ -347,6 +350,8 @@ export interface SettingsViewProps {
   readonly extensionClient?: ExtensionClient;
   /** Project names by Project id, to head the remembered tool approvals. */
   readonly projectNames?: ReadonlyMap<string, string>;
+  /** The Code and Work Projects by id, which the hub grant's Act item can name. */
+  readonly actProjectNames?: ReadonlyMap<string, string>;
   readonly pickLocalPluginFolder?: () => Promise<
     Readonly<{ receiptId: string; displayName: string }> | undefined
   >;
@@ -1309,6 +1314,42 @@ function ActiveSectionContent({
               </div>
             </SettingsSection>
           </div>
+          <div hidden={harnessEndpointOpen} id="settings-provider-channels">
+            <SettingsSection title="Provider channels">
+              <div className="setgroup">
+                <SettingRow
+                  description="Leaves each provider's own usage metrics, error reports and feedback uploads to its own settings. Off by default: Octant turns them off at launch. Strict turns them off whatever this says. Applies from the next turn."
+                  focused={focusedSetting === settingId("provider-own-telemetry")}
+                  label="Let providers send their own telemetry"
+                  scope="host"
+                  settingId="provider-own-telemetry"
+                >
+                  <OctantSwitch
+                    label="Let providers send their own telemetry"
+                    checked={props.settings.providerTelemetry}
+                    onCheckedChange={(checked) =>
+                      props.onSettingsChange({ providerTelemetry: checked })
+                    }
+                  />
+                </SettingRow>
+                <SettingRow
+                  description="Lets each provider check for and install a newer version of itself. Off by default, since Octant installs and updates provider CLIs; Update CLI is unaffected. Strict keeps it off whatever this says. Applies from the next turn."
+                  focused={focusedSetting === settingId("provider-self-update")}
+                  label="Let providers update themselves"
+                  scope="host"
+                  settingId="provider-self-update"
+                >
+                  <OctantSwitch
+                    label="Let providers update themselves"
+                    checked={props.settings.providerSelfUpdate}
+                    onCheckedChange={(checked) =>
+                      props.onSettingsChange({ providerSelfUpdate: checked })
+                    }
+                  />
+                </SettingRow>
+              </div>
+            </SettingsSection>
+          </div>
           <ProviderCatalogSection
             discoveryController={props.discoveryController}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
@@ -1500,7 +1541,9 @@ function ActiveSectionContent({
             }
             ownerUnlock={ownerUnlockOf(props.hostBridge)}
             pairedComputers={pairedComputersOf(props.hostBridge)}
+            projectNames={props.actProjectNames ?? NO_PROJECT_NAMES}
             pairedDeviceLifetime={props.settings.pairedDeviceLifetime}
+            newDeviceAlerts={props.newDeviceAlertsClient}
           />
           {agentAccess}
         </div>
@@ -1603,6 +1646,12 @@ function ActiveSectionContent({
               ? {}
               : { actionStoragePrefix: props.projectActionStoragePrefix })}
             focusedSetting={focusedSetting}
+            onOpenPrivateNetworkGuide={() =>
+              onApplyDeepLink({
+                section: "remote-access",
+                setting: settingId("remote-setup-checks"),
+              })
+            }
             projectNames={props.projectNames ?? NO_PROJECT_NAMES}
             projects={props.serverProjectsClient}
             servers={props.shieldServersClient}

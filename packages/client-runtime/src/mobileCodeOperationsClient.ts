@@ -382,6 +382,8 @@ export interface MobileCodeConversationTurn {
    * to resume it at reset. Absent on every other turn.
    */
   readonly usageLimit?: NonNullable<CodeConversationTurn["failure"]>["usageLimit"];
+  /** The person's messages the runtime took into this turn while it ran; absent when none. */
+  readonly steeredMessages?: NonNullable<CodeConversationTurn["steeredMessages"]>;
   readonly updatedAt: string;
 }
 
@@ -473,6 +475,9 @@ export async function loadMobileCodeConversation(
       ...(turn.status === "waiting" && turn.failure?.usageLimit !== undefined
         ? { usageLimit: turn.failure.usageLimit }
         : {}),
+      ...(turn.steeredMessages === undefined || turn.steeredMessages.length === 0
+        ? {}
+        : { steeredMessages: turn.steeredMessages }),
       updatedAt: turn.updatedAt,
     })),
     hasEarlier: read.hasEarlier || kept.length < read.turns.length,

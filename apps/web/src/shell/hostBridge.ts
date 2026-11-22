@@ -47,6 +47,8 @@ import type {
   ForgetPairedComputerOutcome,
   HostCapabilities,
   KeepAwakeStatus,
+  HubWindowIntroductionOutcome,
+  HubWindowIntroductionRequest,
   LocalPluginFolderPickerResult,
   MenuBarOpenThread,
   OpenInApplicationDescriptor,
@@ -179,6 +181,17 @@ export interface PairedComputersBridge {
   readonly requestPairedComputer: (request: PairedComputerRequest) => Promise<PairedComputerAnswer>;
 }
 
+/**
+ * The hub's other members as this desktop window's computers. Present only in
+ * the desktop app: main asks this computer's host to have the hub list the
+ * window as a guest, and keeps the pins of the members the host names.
+ */
+export interface HubComputersBridge {
+  readonly introduceWindowToHub: (
+    request: HubWindowIntroductionRequest,
+  ) => Promise<HubWindowIntroductionOutcome>;
+}
+
 const pairedComputersByBridge = new WeakMap<OctantHostBridge, PairedComputersBridge>();
 
 /**
@@ -267,6 +280,7 @@ export type HubAdministrationOperation =
   | "owners-add"
   | "owners-remove"
   | "confirm-new-members"
+  | "delegation-accepting"
   | "paired-merge-unlock"
   | "owner-approval-answer-unlock"
   | "confirm-member"
@@ -278,6 +292,7 @@ export type HubAdministrationOperation =
   | "promote"
   | "wake"
   | "accept-moved-threads"
+  | "act-projects"
   | "wake-hardware-address"
   | "push"
   | "direct-push"
@@ -423,6 +438,7 @@ export interface OctantHostBridge
     EmbeddedBrowserBridge,
     Partial<RemoteAccessAdministrationBridge>,
     Partial<PairedComputersBridge>,
+    Partial<HubComputersBridge>,
     Partial<HubAdministrationBridge>,
     Partial<AgentAccessAdministrationBridge>,
     Partial<ProviderDeviceSignInBridge>,
@@ -436,6 +452,17 @@ export interface OctantHostBridge
     request: unknown,
   ) => Promise<
     | { readonly kind: "opened"; readonly notice?: string }
+    | { readonly kind: "refused"; readonly message: string }
+  >;
+  /**
+   * Listens on this computer's loopback for a port forward another paired
+   * computer opened for this device; this window signs each connection.
+   * Absent outside the desktop app.
+   */
+  readonly openRemotePortForward?: (
+    request: unknown,
+  ) => Promise<
+    | { readonly kind: "listening"; readonly port: number }
     | { readonly kind: "refused"; readonly message: string }
   >;
   /**

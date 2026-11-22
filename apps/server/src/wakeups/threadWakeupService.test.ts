@@ -7,10 +7,12 @@ import {
   THREAD_WAKEUP_CHANGED,
   THREAD_WAKEUP_TURN_HEADING,
 } from "@octant/contracts";
+import { HOST_DRAINING_REFUSAL } from "../hostDrain";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
+import { wakeupTurnOutcome } from "../work/workTurnService";
 import {
   ThreadWakeupService,
   type ThreadWakeupLimits,
@@ -94,9 +96,11 @@ function service(
   code: ThreadWakeupModePort,
   hostStartedAt = new Date(time.now()),
   limits?: ThreadWakeupLimits,
+  refusesNewTurns?: () => boolean,
 ) {
   return new ThreadWakeupService({
     ...(limits === undefined ? {} : { limits: () => limits }),
+    ...(refusesNewTurns === undefined ? {} : { refusesNewTurns }),
     journal,
     clock: () => new Date(time.now()),
     uuid: () => crypto.randomUUID(),
@@ -272,6 +276,75 @@ describe("thread wake-ups", () => {
     await time.advanceTo(START + 10 * 60_000);
     expect(code.startTurn).toHaveBeenCalledTimes(2);
     expect(wakeups.list("code", threadId)).toEqual([]);
+  });
+
+  it("keeps a wake-up that comes due while the host drains longer than the due-time grace, and fires it once the drain lifts", async () => {
+    const time = fakeTime();
+    const { journal } = openJournal(time.now);
+    let draining = true;
+    const code = port({
+      startTurn: vi.fn(async () =>
+        draining
+          ? { status: "refused" as const, message: "The host is draining." }
+          : { status: "started" as const, turnId: "turn-1" },
+      ),
+    });
+    const wakeups = service(time, journal, code, new Date(time.now()), undefined, () => draining);
+    wakeups.start();
+    await wakeups.forSession("code", threadId).schedule({
+      kind: "delay",
+      providerToolName: "ScheduleWakeup",
+      delaySeconds: 60,
+      prompt: "Check again.",
+    });
+    // A ten-minute drain, longer than the due-time grace, retried every 15 s.
+    for (let at = START + 60_000; at <= START + 11 * 60_000; at += 15_000) {
+      await time.advanceTo(at);
+    }
+    expect(code.startTurn).not.toHaveBeenCalled();
+    expect(wakeups.list("code", threadId)).toHaveLength(1);
+    draining = false;
+    await time.advanceTo(START + 11 * 60_000 + 15_000);
+    expect(code.startTurn).toHaveBeenCalledOnce();
+    expect(journaledChanges(journal)).toEqual(["scheduled", "fired"]);
+  });
+
+  it("keeps a Work wake-up a drain refused while its turn was prepared, and fires it once the drain lifts", async () => {
+    const time = fakeTime();
+    const { journal } = openJournal(time.now);
+    let draining = true;
+    const work = port({
+      startTurn: vi.fn(async () =>
+        wakeupTurnOutcome(
+          Promise.resolve(
+            draining
+              ? {
+                  kind: "draining",
+                  failure: { category: "unavailable", message: HOST_DRAINING_REFUSAL },
+                }
+              : { kind: "accepted" },
+          ),
+          "turn-1",
+        ),
+      ),
+    });
+    // The drain began after the wake-up's own admission, so only the turn's
+    // late acceptance refuses it.
+    const wakeups = service(time, journal, work);
+    wakeups.start();
+    await wakeups.forSession("code", threadId).schedule({
+      kind: "delay",
+      providerToolName: "ScheduleWakeup",
+      delaySeconds: 60,
+      prompt: "Check again.",
+    });
+    await time.advanceTo(START + 60_000);
+    expect(work.startTurn).toHaveBeenCalledOnce();
+    expect(wakeups.list("code", threadId)).toHaveLength(1);
+    draining = false;
+    await time.advanceTo(START + 60_000 + 15_000);
+    expect(work.startTurn).toHaveBeenCalledTimes(2);
+    expect(journaledChanges(journal)).toEqual(["scheduled", "fired"]);
   });
 
   it("ends a recurring wake-up that outlived its seven days while its thread was busy, without starting a turn", async () => {

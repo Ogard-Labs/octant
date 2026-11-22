@@ -81,6 +81,7 @@ import {
   CodeProjectAutoReviewerChanged,
   CodeProjectAgentDefaultBranchPushChanged,
   CodeProjectAgentMergeChanged,
+  CodeProjectDelegatedCodeChanged,
   CodeProjectOwnToolchainChanged,
   CodeProjectAgentPullRequestCommentsChanged,
   CodeProjectPullRequestBackgroundRefreshChanged,
@@ -214,6 +215,7 @@ import {
   AgentRunResultAcknowledged,
   AgentRunResultDeliverySettled,
   AgentResultSteered,
+  ThreadMessageSteered,
   AgentRunStatusChanged,
   AutomationNotificationDeliveryRecorded,
   AutomationNotificationPreferences,
@@ -249,13 +251,21 @@ import {
   HubMembershipChangedPayload,
   REMOTE_PUSH_DELIVERY_EVENT_NAMES,
   REMOTE_PUSH_MOVE_WAITING_DELIVERY_EVENT_NAMES,
+  REMOTE_PUSH_DEVICE_JOINED_DELIVERY_EVENT_NAMES,
   REMOTE_PUSH_REGISTRATION_EVENT_NAMES,
+  REMOTE_PORT_FORWARD_CLOSED,
+  REMOTE_PORT_FORWARD_OPENED,
+  REMOTE_PORT_FORWARD_OPENED_V2,
   REMOTE_SERVER_GRANT_CLOSED,
   REMOTE_SERVER_GRANT_OPENED,
   RemotePushDeliveryRecordedV1,
   RemotePushMoveWaitingDeliveryRecordedV1,
+  RemotePushDeviceJoinedDeliveryRecordedV1,
   RemotePushRegistrationClearedV1,
   RemotePushRegistrationRecordedV1,
+  RemotePortForwardClosedPayload,
+  RemotePortForwardOpenedPayload,
+  RemotePortForwardOpenedPayloadV2,
   RemoteServerGrantClosedPayload,
   RemoteServerGrantOpenedPayload,
   BROWSER_EXTENSION_EVENT_NAMES,
@@ -327,6 +337,13 @@ import {
   ShieldForgeChangeObservedPayload,
 } from "@octant/contracts";
 import {
+  MemberInstallRequestedPayload,
+  MemberInstallStepRecordedPayload,
+  MemberRemovalRequestedPayload,
+  MemberRemovalStepRecordedPayload,
+  MemberUpdateRequestedPayload,
+  MemberUpdateRequestedPayloadV1,
+  MemberUpdateStepRecordedPayload,
   SHIELD_REMOTE_COMMAND_EVENT_NAMES,
   SHIELD_SERVERS_EVENT_NAMES,
   ShieldRemoteCommandRanPayload,
@@ -339,9 +356,13 @@ import {
   SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES,
   SERVER_PROJECTS_EVENT_NAMES,
   SERVER_PROJECTS_EVENT_NAMES_V2,
+  SERVER_PROJECTS_PORT_FORWARD_CLOSED,
+  SERVER_PROJECTS_PORT_FORWARD_OPENED,
   SERVER_PROJECTS_PREVIEW_OUTCOME_V1,
   ServerAttachmentCleanupPendingPayload,
   ServerAttachmentCleanupSettledPayload,
+  ServerPortForwardClosedPayload,
+  ServerPortForwardOpenedPayload,
   ServerPreviewOutcomePayloadV1,
   ServerPreviewOutcomePayloadV2,
   ServerProjectActionsReplacedPayload,
@@ -405,6 +426,7 @@ import {
   RemoteSessionInvalidatedV1,
   HostIdentityInitializedV1,
   SecurityAuditRecordedV1,
+  DeviceAlertChangedV1,
 } from "@octant/contracts/remote-access";
 import { Schema } from "effect";
 import { AggregateHeadsProjection } from "./aggregateHeadsProjection";
@@ -481,6 +503,7 @@ import {
 import { AgentRunProjection } from "../agentRun/agentRunProjection";
 import { ActivityHistoryProjection } from "./activityHistoryProjection";
 import { AGENT_RESULT_STEERED } from "../agentRun/agentResultSteeredRecord";
+import { THREAD_MESSAGE_STEERED } from "../messageQueue/threadMessageSteeredRecord";
 import {
   AGENT_RUN_REQUESTED,
   AGENT_RUN_RESULT_ACKNOWLEDGED,
@@ -596,6 +619,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       CodeProjectPullRequestBackgroundRefreshChanged,
     )
     .register("project.code-agent-merge-changed@1", 1, CodeProjectAgentMergeChanged)
+    .register("project.code-delegated-code-changed@1", 1, CodeProjectDelegatedCodeChanged)
     .register("project.code-own-toolchain-changed@1", 1, CodeProjectOwnToolchainChanged)
     .register(
       "project.code-agent-pull-request-comments-changed@1",
@@ -758,6 +782,25 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       1,
       ShieldProjectServersClearedPayload,
     )
+    .register(SHIELD_SERVERS_EVENT_NAMES.memberInstallRequested, 1, MemberInstallRequestedPayload)
+    .register(
+      SHIELD_SERVERS_EVENT_NAMES.memberInstallStepRecorded,
+      1,
+      MemberInstallStepRecordedPayload,
+    )
+    .register(SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequestedV1, 1, MemberUpdateRequestedPayloadV1)
+    .register(SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequested, 1, MemberUpdateRequestedPayload)
+    .register(
+      SHIELD_SERVERS_EVENT_NAMES.memberUpdateStepRecorded,
+      1,
+      MemberUpdateStepRecordedPayload,
+    )
+    .register(SHIELD_SERVERS_EVENT_NAMES.memberRemovalRequested, 1, MemberRemovalRequestedPayload)
+    .register(
+      SHIELD_SERVERS_EVENT_NAMES.memberRemovalStepRecorded,
+      1,
+      MemberRemovalStepRecordedPayload,
+    )
     .register(SHIELD_REMOTE_COMMAND_EVENT_NAMES.ran, 1, ShieldRemoteCommandRanPayload)
     .register(SERVER_PROJECTS_EVENT_NAMES.bound, 1, ServerProjectBoundPayload)
     .register(SERVER_PROJECTS_EVENT_NAMES_V2.bound, 1, ServerProjectBoundPayloadV2)
@@ -783,6 +826,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     )
     .register(SERVER_PROJECTS_PREVIEW_OUTCOME_V1, 1, ServerPreviewOutcomePayloadV1)
     .register(SERVER_PROJECTS_EVENT_NAMES_V2.previewOutcome, 1, ServerPreviewOutcomePayloadV2)
+    .register(SERVER_PROJECTS_PORT_FORWARD_OPENED, 1, ServerPortForwardOpenedPayload)
+    .register(SERVER_PROJECTS_PORT_FORWARD_CLOSED, 1, ServerPortForwardClosedPayload)
     .register(
       SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.pending,
       1,
@@ -833,6 +878,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)
     .register(AGENT_RUN_RESULT_DELIVERY_SETTLED, 1, AgentRunResultDeliverySettled)
     .register(AGENT_RESULT_STEERED, 1, AgentResultSteered)
+    .register(THREAD_MESSAGE_STEERED, 1, ThreadMessageSteered)
     .register(AGENT_RUN_SETTINGS_UPDATED, 1, AgentRunPolicySettings)
     .register(AGENT_MESSAGE_EVENT_NAMES.sent, 1, AgentMessageSent)
     .register(AGENT_MESSAGE_EVENT_NAMES.delivered, 1, AgentMessageDelivered)
@@ -899,6 +945,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(REMOTE_ACCESS_EVENT_NAMES.sessionInvalidated, 1, RemoteSessionInvalidatedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.commandReceiptRecorded, 1, RemoteCommandReceiptRecordedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.securityAuditRecorded, 1, SecurityAuditRecordedV1)
+    .register(REMOTE_ACCESS_EVENT_NAMES.deviceAlertChanged, 1, DeviceAlertChangedV1)
     .register(REMOTE_PUSH_REGISTRATION_EVENT_NAMES.recorded, 1, RemotePushRegistrationRecordedV1)
     .register(REMOTE_PUSH_REGISTRATION_EVENT_NAMES.cleared, 1, RemotePushRegistrationClearedV1)
     .register(REMOTE_PUSH_DELIVERY_EVENT_NAMES.recorded, 1, RemotePushDeliveryRecordedV1)
@@ -906,6 +953,11 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       REMOTE_PUSH_MOVE_WAITING_DELIVERY_EVENT_NAMES.recorded,
       1,
       RemotePushMoveWaitingDeliveryRecordedV1,
+    )
+    .register(
+      REMOTE_PUSH_DEVICE_JOINED_DELIVERY_EVENT_NAMES.recorded,
+      1,
+      RemotePushDeviceJoinedDeliveryRecordedV1,
     )
     .register(PRODUCT_FEEDBACK_CAPTURED, 1, ProductFeedbackCaptured)
     .register(PRODUCT_FEEDBACK_DISCARDED, 1, ProductFeedbackDiscarded)
@@ -941,6 +993,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(AGENT_ACCESS_EVENT_NAMES.turnSent, 1, AgentTurnSentV1)
     .register(REMOTE_SERVER_GRANT_OPENED, 1, RemoteServerGrantOpenedPayload)
     .register(REMOTE_SERVER_GRANT_CLOSED, 1, RemoteServerGrantClosedPayload)
+    .register(REMOTE_PORT_FORWARD_OPENED, 1, RemotePortForwardOpenedPayload)
+    .register(REMOTE_PORT_FORWARD_OPENED_V2, 1, RemotePortForwardOpenedPayloadV2)
+    .register(REMOTE_PORT_FORWARD_CLOSED, 1, RemotePortForwardClosedPayload)
     .register(THREAD_CHECKPOINT_MARKED, 1, ThreadCheckpointMarked)
     .register(THREAD_CHECKPOINT_FORGOTTEN, 1, ThreadCheckpointForgotten)
     .register(THREAD_CHECKPOINT_RESTORED, 1, ThreadCheckpointRestored)

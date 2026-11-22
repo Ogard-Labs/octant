@@ -4,7 +4,14 @@ import { basename, dirname, join, resolve } from "node:path";
 
 import type { ClaudeAuthentication } from "@octant/contracts";
 
+import type { ProviderOwnChannels } from "@octant/provider-sdk";
+
 import { providerHostEnvironment } from "./providerHostEnvironment";
+import {
+  DEFAULT_PROVIDER_OWN_CHANNELS,
+  guardsForOwnChannels,
+  launchOwnChannels,
+} from "./providerOwnChannels";
 
 /**
  * Isolated Claude-account launch environment.
@@ -68,20 +75,46 @@ export const ISOLATED_CLAUDE_LAUNCH_GUARDS = {
 } as const;
 
 /**
- * The switches a launch outside Strict still sets. None is a channel: the
- * runtime replacing its own binary stays off because Octant installs and
- * updates provider CLIs itself, and memory and the built-in subagents keep
- * the lifts the account's and the session's own settings decide. Telemetry,
- * error reports, `/bug`, `/feedback`, the feedback survey and marketplace
- * auto-install follow the person's own Claude Code settings, as they do in
- * Claude Code on its own (Architecture: "Octant adds no restrictions of its
- * own unless Strict is on").
+ * The guards that close one of the runtime's telemetry channels: usage
+ * metrics, error reports, and the conversation uploads of `/bug`,
+ * `/feedback` and the session survey.
  */
-export const OPEN_CLAUDE_LAUNCH_GUARDS = {
-  DISABLE_AUTOUPDATER: "1",
-  CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
-  CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: "1",
-} as const;
+export const CLAUDE_TELEMETRY_GUARDS: ReadonlyArray<string> = [
+  "DISABLE_TELEMETRY",
+  "DISABLE_ERROR_REPORTING",
+  "DISABLE_BUG_COMMAND",
+  "DISABLE_FEEDBACK_COMMAND",
+  "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY",
+];
+
+/** The guard that keeps the runtime from replacing its own binary. */
+export const CLAUDE_SELF_UPDATE_GUARDS: ReadonlyArray<string> = ["DISABLE_AUTOUPDATER"];
+
+/**
+ * The switches a launch outside Strict sets. Memory and the built-in
+ * subagents keep the lifts the account's and the session's own settings
+ * decide. The telemetry guards are set only while the person keeps provider
+ * telemetry off, and the self-update guard unless the person lets providers
+ * update themselves (Settings › Providers & Models); left out, the person's
+ * own Claude Code settings decide, as in Claude Code on its own.
+ * Marketplace auto-install always follows those settings outside Strict
+ * (Architecture: "Octant adds no restrictions of its own unless Strict is
+ * on").
+ */
+export function openClaudeLaunchGuards(
+  channels: ProviderOwnChannels,
+): Readonly<Record<string, string>> {
+  const { CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL: _marketplace, ...guards } =
+    ISOLATED_CLAUDE_LAUNCH_GUARDS;
+  return guardsForOwnChannels(
+    guards,
+    { telemetry: CLAUDE_TELEMETRY_GUARDS, selfUpdate: CLAUDE_SELF_UPDATE_GUARDS },
+    channels,
+  );
+}
+
+/** The switches a launch outside Strict sets when the person changed neither provider switch. */
+export const OPEN_CLAUDE_LAUNCH_GUARDS = openClaudeLaunchGuards(DEFAULT_PROVIDER_OWN_CHANNELS);
 
 const HOST_DISABLE_ONLY_SWITCH = "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";
 
@@ -117,14 +150,19 @@ export function hostDisableOnlySwitches(hostEnvironment: NodeJS.ProcessEnv): Nod
   };
 }
 
-/** Whether a launch environment carries one of the host's own switches that keep Claude artifacts off. */
+/**
+ * Whether a launch environment carries one of the host's own switches that
+ * keep Claude artifacts off. `telemetryGuarded` says whether the launch
+ * carries Octant's own telemetry guards: true under Strict and outside it
+ * while the person keeps provider telemetry off.
+ */
 export function disablesNonessentialTraffic(
   environment: NodeJS.ProcessEnv,
-  strict = true,
+  telemetryGuarded = true,
 ): boolean {
-  if (!strict) {
-    // Outside Strict nothing of Octant's sits in the launch, so the person's
-    // own exported switches are read as Claude Code reads them.
+  if (!telemetryGuarded) {
+    // Without Octant's telemetry guards in the launch, the person's own
+    // exported switches are read as Claude Code reads them.
     return (
       environment[HOST_DISABLE_ONLY_SWITCH] === "1" ||
       HOST_TELEMETRY_OPT_OUTS.some((name) => optsOut(environment[name]))
@@ -154,19 +192,21 @@ export const CLAUDE_ARTIFACT_LIFTED_GUARD = "DISABLE_TELEMETRY";
 
 /**
  * The environment of a launch that offers Claude's Artifact tool: the
- * runtime's opt-in for an Agent SDK launch, and under Strict every guard but
- * {@link CLAUDE_ARTIFACT_LIFTED_GUARD}. A host that exports the umbrella or its
- * own telemetry opt-out keeps its launch exactly as it was: either would keep
- * the flag service off anyway, and the person's own switch is never weakened.
- * Outside Strict the launch carries no guard of Octant's on telemetry, so the
- * switch lifts nothing: the person's own Claude Code settings decide.
+ * runtime's opt-in for an Agent SDK launch, and, where the launch carries
+ * Octant's telemetry guards, every guard but {@link CLAUDE_ARTIFACT_LIFTED_GUARD}.
+ * A host that exports the umbrella or its own telemetry opt-out keeps its
+ * launch exactly as it was: either would keep the flag service off anyway,
+ * and the person's own switch is never weakened. A launch outside Strict
+ * that lets providers send their own telemetry carries no guard of Octant's
+ * on telemetry, so the switch lifts nothing: the person's own Claude Code
+ * settings decide.
  */
 export function claudeArtifactLaunchEnvironment(
   environment: NodeJS.ProcessEnv,
-  strict = true,
+  telemetryGuarded = true,
 ): NodeJS.ProcessEnv {
-  if (disablesNonessentialTraffic(environment, strict)) return environment;
-  if (!strict) return { ...environment, CLAUDE_CODE_ARTIFACT: "1" };
+  if (disablesNonessentialTraffic(environment, telemetryGuarded)) return environment;
+  if (!telemetryGuarded) return { ...environment, CLAUDE_CODE_ARTIFACT: "1" };
   const { [CLAUDE_ARTIFACT_LIFTED_GUARD]: _lifted, ...kept } = environment;
   return { ...kept, CLAUDE_CODE_ARTIFACT: "1" };
 }
@@ -211,6 +251,8 @@ export interface IsolatedClaudeAccountEnvironmentInput {
    * Octant's own variables and other providers' keys.
    */
   readonly strict?: boolean;
+  /** The person's provider telemetry and self-update switches; read only outside Strict. */
+  readonly ownChannels?: ProviderOwnChannels;
 }
 
 /**
@@ -271,7 +313,7 @@ export function isolatedClaudeAccountEnvironment(
  * The launch environment for one Claude account outside Strict: the host's
  * environment as `providerHostEnvironment` leaves it, with Octant's account
  * directory and an API-key or gateway account's own credential applied and only
- * {@link OPEN_CLAUDE_LAUNCH_GUARDS} set. An Octant account's own sign-in
+ * {@link openClaudeLaunchGuards} set. An Octant account's own sign-in
  * decides which account a turn runs as, so no host Anthropic key or token
  * crosses (`providerHostEnvironment` names none of them as Claude's own) and
  * the host's account directories are replaced by the account's.
@@ -289,7 +331,26 @@ function openClaudeAccountEnvironment(
     delete environment.ANTHROPIC_BASE_URL;
   }
   applyAccountCredential(environment, input);
-  return { ...environment, ...OPEN_CLAUDE_LAUNCH_GUARDS };
+  return {
+    ...environment,
+    ...openLaunchTelemetryOptOut(input.hostEnvironment, input.ownChannels),
+    ...openClaudeLaunchGuards(launchOwnChannels(false, input.ownChannels)),
+  };
+}
+
+/**
+ * Where a launch outside Strict carries Octant's telemetry guards, the
+ * host's own telemetry opt-out is also carried as `DO_NOT_TRACK=1`, as under
+ * Strict, so a thread that chose Claude artifacts, whose launch goes without
+ * Octant's `DISABLE_TELEMETRY`, still keeps the person's own opt-out.
+ */
+export function openLaunchTelemetryOptOut(
+  hostEnvironment: NodeJS.ProcessEnv,
+  ownChannels: ProviderOwnChannels | undefined,
+): NodeJS.ProcessEnv {
+  return launchOwnChannels(false, ownChannels).telemetry
+    ? {}
+    : hostDisableOnlySwitches(hostEnvironment);
 }
 
 /**

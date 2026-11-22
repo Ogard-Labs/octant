@@ -49,3 +49,7 @@
 .thread-message-queue__toggle[aria-expanded="true"] svg {
   transform: rotate(180deg);
 }
+/* A message steered into a running turn says so above its bubble. */
+.turn-user__steered {
+  margin: 0;
+}

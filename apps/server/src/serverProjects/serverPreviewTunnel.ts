@@ -7,6 +7,7 @@ import {
   type EventActor,
   type RemoteServerGrantId,
 } from "@octant/contracts";
+import type { ServerPortForwardCloseReason } from "@octant/contracts/server-projects";
 import type { RelayUpstreamStream } from "../remote/remoteServerProxyRelay";
 import {
   pinnedHostKeyOptions,
@@ -28,6 +29,34 @@ export type ServerPreviewResult =
   | { readonly kind: "refused"; readonly reason: string };
 export type ServerPreviewCleanup = { readonly status: "settled" | "unsettled" };
 
+/**
+ * A forward of one TCP port on the server's loopback to this computer's
+ * `127.0.0.1`. It is the preview's raw relay without its browser link: the
+ * same streams, owner, hour and binding checks, journaled with the ports alone.
+ */
+export interface ServerPortForwardView {
+  readonly projectId: string;
+  readonly remotePort: number;
+  readonly localPort: number;
+  readonly status: ServerPreviewView["status"];
+}
+export type ServerPortForwardResult =
+  | { readonly kind: "forward"; readonly view: ServerPortForwardView }
+  | Refusal;
+export type ServerPortForwardRecord = {
+  readonly projectId: string;
+  readonly remotePort: number;
+  readonly localPort: number;
+} & (
+  | { readonly event: "opened" }
+  | { readonly event: "closed"; readonly reason: ServerPortForwardCloseReason }
+);
+
+type Refusal = { readonly kind: "refused"; readonly reason: string };
+/** A tunnel this class holds, before it is shown as a preview or a forward. */
+type Held = { readonly kind: "held"; readonly preview: Preview } | Refusal;
+type TunnelKind = "preview" | "forward";
+
 export interface ServerPreviewDevicePrincipal {
   readonly kind: "person-paired-device";
   readonly credentialGeneration: number;
@@ -44,6 +73,8 @@ export type ServerPreviewRelayStreamResult =
   | { readonly kind: "refused"; readonly reason: "grant-closed" | "server-unreachable" | "busy" };
 
 const CLEANUP_WAIT_MS = 3_000;
+/** How long a normally ended connection may take to flush its reply before it is cut. */
+const FLUSH_AFTER_EXIT_MS = 30_000;
 const DEVICE_PREVIEW_QUIET_MS = 60_000;
 
 interface PreviewDeviceOwnership {
@@ -54,6 +85,7 @@ interface PreviewDeviceOwnership {
 }
 
 interface Preview {
+  readonly kind: TunnelKind;
   readonly projectId: string;
   readonly owner: string;
   readonly identity: string;
@@ -64,14 +96,23 @@ interface Preview {
   readonly grantId: RemoteServerGrantId | undefined;
   readonly device: PreviewDeviceOwnership | undefined;
   readonly streams: Map<Duplex, ChildProcessWithoutNullStreams>;
+  /**
+   * Accepted sockets whose SSH child already exited while their reply still
+   * drains. The listener's close waits for them, so teardown must reach them
+   * without a child to wait on.
+   */
+  readonly flushing: Set<Socket>;
   readonly expiresAt: number;
   readonly ownerCurrent: () => boolean;
   status: ServerPreviewView["status"];
   cleanup?: Promise<void>;
+  /** Its listener and streams are confirmed closed; only its last status is kept. */
+  released?: true;
   recordedStatus?: ServerPreviewView["status"];
 }
 
 interface PreviewOpening {
+  readonly kind: TunnelKind;
   readonly projectId: string;
   readonly owner: string;
   readonly remotePort: number;
@@ -96,6 +137,8 @@ export interface ServerPreviewOptions {
     record: ServerPreviewView & { readonly owner: string },
     principal?: ServerPreviewDevicePrincipal,
   ) => boolean;
+  /** Journals a port forward's opening and closing; with none, no forward opens. */
+  readonly recordForward?: (record: ServerPortForwardRecord) => boolean;
   readonly sshPath?: string;
   readonly configFile?: string;
   /** Why no stream may go to a server now, such as its machine being suspended. */
@@ -137,11 +180,16 @@ export function serverPreviewSshArguments(
   ];
 }
 
+/** A Project's preview and its forward are held apart, so both can be open at once. */
+function tunnelKey(kind: TunnelKind, projectId: string): string {
+  return kind === "forward" ? `forward:${projectId}` : projectId;
+}
+
 /** Owns listeners and SSH streams only. It never starts a program on the server. */
 export class ServerPreviewTunnels {
   readonly #options: ServerPreviewOptions;
   readonly #previews = new Map<string, Preview>();
-  readonly #pending = new Map<string, Promise<ServerPreviewResult>>();
+  readonly #pending = new Map<string, Promise<Held>>();
   readonly #sweep: ReturnType<typeof setInterval>;
   #closed = false;
   constructor(options: ServerPreviewOptions) {
@@ -274,26 +322,29 @@ export class ServerPreviewTunnels {
     ) {
       return refused("already-owned");
     }
-    if (this.#previews.size >= 64 && existing === undefined) return refused("too-many-tunnels");
-    return this.#queueStart({
-      projectId: input.projectId,
-      owner: input.owner,
-      remotePort: input.remotePort,
-      localPort: 0,
-      ownerCurrent: input.ownerCurrent,
-      server: address.server,
-      identity: address.identity,
-      previous: existing,
-      previousStatus: existing?.status === "revoked" ? "revoked" : "stopped",
-      relayed: {
-        device: {
-          credentialGeneration: input.credentialGeneration,
-          sessionId: input.sessionId,
-          actor: input.actor,
-          lastSeenMs: this.#options.now(),
+    if (this.#unreleased() >= 64 && existing === undefined) return refused("too-many-tunnels");
+    return this.#previewResult(
+      await this.#queueStart({
+        kind: "preview",
+        projectId: input.projectId,
+        owner: input.owner,
+        remotePort: input.remotePort,
+        localPort: 0,
+        ownerCurrent: input.ownerCurrent,
+        server: address.server,
+        identity: address.identity,
+        previous: existing,
+        previousStatus: existing?.status === "revoked" ? "revoked" : "stopped",
+        relayed: {
+          device: {
+            credentialGeneration: input.credentialGeneration,
+            sessionId: input.sessionId,
+            actor: input.actor,
+            lastSeenMs: this.#options.now(),
+          },
         },
-      },
-    });
+      }),
+    );
   }
   async start(
     projectId: string,
@@ -302,6 +353,41 @@ export class ServerPreviewTunnels {
     localPort: number,
     ownerCurrent: () => boolean = () => this.#options.ownerCurrent(owner),
   ): Promise<ServerPreviewResult> {
+    return this.#previewResult(
+      await this.#startOwned("preview", projectId, owner, remotePort, localPort, ownerCurrent),
+    );
+  }
+  /**
+   * Forwards one TCP port on the server's loopback to this computer's
+   * `127.0.0.1`, on the same port number when it is free and another free one
+   * otherwise. Only a local window's caller reaches this.
+   */
+  async startForward(
+    projectId: string,
+    owner: string,
+    remotePort: number,
+    ownerCurrent: () => boolean = () => this.#options.ownerCurrent(owner),
+  ): Promise<ServerPortForwardResult> {
+    if (this.#options.recordForward === undefined) return refused("forward-unavailable");
+    return this.#forwardResult(
+      await this.#startOwned("forward", projectId, owner, remotePort, remotePort, ownerCurrent),
+    );
+  }
+  readForward(projectId: string, owner: string): ServerPortForwardView | undefined {
+    const forward = this.#previews.get(tunnelKey("forward", projectId));
+    return forward?.owner === owner ? forwardView(forward) : undefined;
+  }
+  async stopForward(projectId: string, owner: string): Promise<ServerPortForwardResult> {
+    return this.#forwardResult(await this.#stopOwned(tunnelKey("forward", projectId), owner));
+  }
+  async #startOwned(
+    kind: TunnelKind,
+    projectId: string,
+    owner: string,
+    remotePort: number,
+    localPort: number,
+    ownerCurrent: () => boolean,
+  ): Promise<Held> {
     if (this.#closed || !this.#options.ownerCurrent(owner) || !ownerCurrent())
       return refused("owner-revoked");
     const address = this.#options.address(projectId);
@@ -315,17 +401,19 @@ export class ServerPreviewTunnels {
       localPort > 65535
     )
       return refused("invalid-port");
-    const existing = this.#previews.get(projectId);
+    const key = tunnelKey(kind, projectId);
+    const existing = this.#previews.get(key);
     // A revoked preview has released its owner (window closed, lifetime
     // expired or binding changed); keeping it would refuse every later start
     // until the host restarts, since only that gone owner could stop it.
     if (
-      this.#pending.has(projectId) ||
+      this.#pending.has(key) ||
       (existing !== undefined && existing.status !== "stopped" && existing.status !== "revoked")
     )
       return refused("already-owned");
-    if (this.#previews.size >= 64 && existing === undefined) return refused("too-many-tunnels");
+    if (this.#unreleased() >= 64 && existing === undefined) return refused("too-many-tunnels");
     return this.#queueStart({
+      kind,
       projectId,
       owner,
       remotePort,
@@ -338,13 +426,22 @@ export class ServerPreviewTunnels {
     });
   }
   async stop(projectId: string, owner: string): Promise<ServerPreviewResult> {
-    const preview = this.#previews.get(projectId);
+    return this.#previewResult(await this.#stopOwned(tunnelKey("preview", projectId), owner));
+  }
+  async #stopOwned(key: string, owner: string): Promise<Held> {
+    const preview = this.#previews.get(key);
     if (preview?.owner !== owner) return refused("not-owned");
     if (preview.device !== undefined) preview.device.lastSeenMs = this.#options.now();
     const cleanup = await this.#end(preview, "stopped");
     return cleanup.status === "unsettled"
       ? refused("cleanup-unsettled")
-      : { kind: "tunnel", view: this.#view(preview) };
+      : { kind: "held", preview };
+  }
+  #previewResult(held: Held): ServerPreviewResult {
+    return held.kind === "held" ? { kind: "tunnel", view: this.#view(held.preview) } : held;
+  }
+  #forwardResult(held: Held): ServerPortForwardResult {
+    return held.kind === "held" ? { kind: "forward", view: forwardView(held.preview) } : held;
   }
   async reconnect(projectId: string, owner: string): Promise<ServerPreviewResult> {
     const preview = this.#previews.get(projectId);
@@ -356,25 +453,28 @@ export class ServerPreviewTunnels {
     }
     // Keep the old ownership visible until its receipt settles and the same
     // endpoint has reopened. Stop can still cancel this pending reconnect.
-    return this.#queueStart({
-      projectId,
-      owner,
-      remotePort: preview.remotePort,
-      localPort: preview.localPort,
-      ownerCurrent: preview.ownerCurrent,
-      server: preview.server,
-      identity: preview.identity,
-      previous: preview,
-      previousStatus: "lost",
-      ...(preview.device === undefined
-        ? {}
-        : {
-            relayed: {
-              ...(preview.grantId === undefined ? {} : { grantId: preview.grantId }),
-              device: { ...preview.device, lastSeenMs: this.#options.now() },
-            },
-          }),
-    });
+    return this.#previewResult(
+      await this.#queueStart({
+        kind: "preview",
+        projectId,
+        owner,
+        remotePort: preview.remotePort,
+        localPort: preview.localPort,
+        ownerCurrent: preview.ownerCurrent,
+        server: preview.server,
+        identity: preview.identity,
+        previous: preview,
+        previousStatus: "lost",
+        ...(preview.device === undefined
+          ? {}
+          : {
+              relayed: {
+                ...(preview.grantId === undefined ? {} : { grantId: preview.grantId }),
+                device: { ...preview.device, lastSeenMs: this.#options.now() },
+              },
+            }),
+      }),
+    );
   }
   async reconcile(): Promise<void> {
     await Promise.all(
@@ -401,20 +501,22 @@ export class ServerPreviewTunnels {
           : "unsettled",
     };
   }
-  #queueStart(input: PreviewOpening): Promise<ServerPreviewResult> {
+  #queueStart(input: PreviewOpening): Promise<Held> {
+    const key = tunnelKey(input.kind, input.projectId);
     if (this.#closed) return Promise.resolve(refused("owner-revoked"));
-    if (this.#pending.has(input.projectId)) return Promise.resolve(refused("already-owned"));
+    if (this.#pending.has(key)) return Promise.resolve(refused("already-owned"));
     // Register before listening or awaiting old cleanup, so shutdown owns the
     // whole opening attempt, including a listener not yet in the catalog.
     const opening = Promise.resolve()
       .then(() => this.#open(input))
       .finally(() => {
-        this.#pending.delete(input.projectId);
+        this.#pending.delete(key);
       });
-    this.#pending.set(input.projectId, opening);
+    this.#pending.set(key, opening);
     return opening;
   }
-  async #open(input: PreviewOpening): Promise<ServerPreviewResult> {
+  async #open(input: PreviewOpening): Promise<Held> {
+    const key = tunnelKey(input.kind, input.projectId);
     if (input.previous?.cleanup !== undefined) {
       const cleanup = await cleanupWithin(input.previous.cleanup);
       if (cleanup.status === "unsettled") return refused("cleanup-unsettled");
@@ -428,6 +530,7 @@ export class ServerPreviewTunnels {
         input.relayed.grantId ??
         decodeRemoteServerGrantId(`rsg_${randomBytes(32).toString("hex")}`);
       const preview: Preview = {
+        kind: input.kind,
         projectId: input.projectId,
         owner: input.owner,
         identity: input.identity,
@@ -438,6 +541,7 @@ export class ServerPreviewTunnels {
         grantId,
         device: input.relayed.device,
         streams: new Map(),
+        flushing: new Set(),
         expiresAt: this.#options.now() + 60 * 60 * 1_000,
         ownerCurrent: input.ownerCurrent,
         status: "listening",
@@ -455,42 +559,59 @@ export class ServerPreviewTunnels {
       ) {
         return refused("authority-or-record-unavailable");
       }
-      this.#previews.set(input.projectId, preview);
-      return { kind: "tunnel", view: this.#view(preview) };
+      this.#previews.set(key, preview);
+      return { kind: "held", preview };
     }
-    const listener = createServer((socket) => this.#accept(input.projectId, socket));
-    const port = await new Promise<number | undefined>((resolve) => {
-      listener.once("error", () => resolve(undefined));
-      listener.listen(input.localPort, "127.0.0.1", () => {
-        const bound = listener.address();
-        resolve(bound !== null && typeof bound !== "string" ? bound.port : undefined);
-      });
-    });
+    // A forward carries any TCP protocol, and some clients end their request
+    // with a write-side FIN and then wait for the answer; Node's default
+    // closes the reply side on that FIN, and the client received nothing.
+    const listen = () =>
+      createServer({ allowHalfOpen: input.kind === "forward" }, (socket) =>
+        this.#accept(key, socket),
+      );
+    let listener = listen();
+    let port = await listenOnLoopback(listener, input.localPort);
+    if (port === undefined && input.kind === "forward") {
+      // A forward takes the server's port number when this computer has it
+      // free, as a forward from another Octant computer does, else any free one.
+      listener = listen();
+      port = await listenOnLoopback(listener, 0);
+    }
     if (port === undefined) return refused("port-unavailable");
+    const bound = listener;
     const preview: Preview = {
+      kind: input.kind,
       projectId: input.projectId,
       owner: input.owner,
       identity: input.identity,
       server: input.server,
       remotePort: input.remotePort,
       localPort: port,
-      listener,
+      listener: bound,
       grantId: undefined,
       device: undefined,
       streams: new Map(),
+      flushing: new Set(),
       expiresAt: this.#options.now() + 60 * 60 * 1_000,
       ownerCurrent: input.ownerCurrent,
       status: "listening",
     };
-    if (
-      !this.#openingCurrent(input) ||
-      !this.#options.record({ ...this.#view(preview), owner: input.owner })
-    ) {
-      await new Promise<void>((resolve) => listener.close(() => resolve()));
+    if (!this.#openingCurrent(input) || !this.#recordOpened(preview)) {
+      await new Promise<void>((resolve) => bound.close(() => resolve()));
       return refused("authority-or-record-unavailable");
     }
-    this.#previews.set(input.projectId, preview);
-    return { kind: "tunnel", view: this.#view(preview) };
+    this.#previews.set(key, preview);
+    return { kind: "held", preview };
+  }
+  #recordOpened(preview: Preview): boolean {
+    if (preview.kind === "preview") {
+      return this.#options.record({ ...this.#view(preview), owner: preview.owner });
+    }
+    if (this.#options.recordForward?.({ event: "opened", ...forwardPorts(preview) }) !== true) {
+      return false;
+    }
+    preview.recordedStatus = "listening";
+    return true;
   }
   #openingCurrent(input: PreviewOpening): boolean {
     const ownerOk =
@@ -502,7 +623,7 @@ export class ServerPreviewTunnels {
       ownerOk &&
       this.#options.address(input.projectId)?.identity === input.identity &&
       (input.previous === undefined ||
-        (this.#previews.get(input.projectId) === input.previous &&
+        (this.#previews.get(tunnelKey(input.kind, input.projectId)) === input.previous &&
           input.previous.status === input.previousStatus))
     );
   }
@@ -532,8 +653,8 @@ export class ServerPreviewTunnels {
       ...(preview.grantId === undefined ? {} : { grantId: preview.grantId }),
     };
   }
-  #accept(projectId: string, socket: Socket): void {
-    const preview = this.#previews.get(projectId);
+  #accept(key: string, socket: Socket): void {
+    const preview = this.#previews.get(key);
     if (
       preview === undefined ||
       preview.status !== "listening" ||
@@ -582,19 +703,64 @@ export class ServerPreviewTunnels {
     });
     child.on("close", (code) => {
       preview.streams.delete(socket);
-      socket.destroy();
+      if (code === 0 && !socket.destroyed) {
+        // SSH closing is not the socket flushing: a client still reading a
+        // large reply would lose its tail to destroy(). The stdout pipe ends
+        // the socket; a client that never drains it is cut after a bound.
+        const flushed = setTimeout(() => socket.destroy(), FLUSH_AFTER_EXIT_MS);
+        flushed.unref();
+        preview.flushing.add(socket);
+        socket.once("close", () => {
+          clearTimeout(flushed);
+          preview.flushing.delete(socket);
+        });
+        socket.end();
+      } else {
+        socket.destroy();
+      }
       if (code !== 0 && !clientClosed && preview.status === "listening")
         void this.#end(preview, "lost");
     });
     socket.pipe(child.stdin);
     child.stdout.pipe(socket);
   }
+  /**
+   * Tunnels still holding resources. A stopped entry is kept for its status
+   * and receipt, and once a Project's preview and forward were separate
+   * entries, counting kept ones refused every start after 32 Projects had
+   * opened and stopped both.
+   */
+  #unreleased(): number {
+    let count = 0;
+    for (const preview of this.#previews.values()) if (preview.released !== true) count += 1;
+    return count;
+  }
   async #end(preview: Preview, status: ServerPreviewView["status"]): Promise<ServerPreviewCleanup> {
     preview.status = status;
     // A status change is not a cleanup receipt. Retain actual settlement even
     // when a caller times out, so another stop, restart or shutdown must await it.
-    preview.cleanup ??= Promise.resolve().then(() => this.#cleanup(preview));
+    preview.cleanup ??= Promise.resolve()
+      .then(() => this.#cleanup(preview))
+      .then(() => {
+        preview.released = true;
+      });
     const cleanup = await cleanupWithin(preview.cleanup);
+    if (preview.kind === "forward") {
+      // A forward is journaled closed once, however its status changes after.
+      if (
+        cleanup.status === "settled" &&
+        preview.recordedStatus !== preview.status &&
+        (preview.recordedStatus !== "listening" ||
+          this.#options.recordForward?.({
+            event: "closed",
+            ...forwardPorts(preview),
+            reason: this.#forwardCloseReason(preview),
+          }) === true)
+      ) {
+        preview.recordedStatus = preview.status;
+      }
+      return cleanup;
+    }
     if (cleanup.status === "settled" && preview.recordedStatus !== preview.status) {
       const devicePrincipal: ServerPreviewDevicePrincipal | undefined =
         preview.device === undefined
@@ -610,6 +776,11 @@ export class ServerPreviewTunnels {
     }
     return cleanup;
   }
+  #forwardCloseReason(preview: Preview): ServerPortForwardCloseReason {
+    if (preview.status === "lost") return "lost";
+    if (preview.status === "stopped") return this.#closed ? "host-stopped" : "stopped";
+    return this.#options.now() >= preview.expiresAt ? "expired" : "revoked";
+  }
   async #cleanup(preview: Preview): Promise<void> {
     const exits = [...preview.streams].map(
       ([socket, child]) =>
@@ -624,6 +795,7 @@ export class ServerPreviewTunnels {
           child.kill("SIGTERM");
         }),
     );
+    for (const socket of preview.flushing) socket.destroy();
     await Promise.all([
       preview.listener === undefined
         ? Promise.resolve()
@@ -726,8 +898,35 @@ class SshStdioDuplex extends Duplex {
     }
   }
 }
-function refused(reason: string): ServerPreviewResult {
+function refused(reason: string): Refusal {
   return { kind: "refused", reason };
+}
+
+function forwardPorts(preview: Preview): {
+  readonly projectId: string;
+  readonly remotePort: number;
+  readonly localPort: number;
+} {
+  return {
+    projectId: preview.projectId,
+    remotePort: preview.remotePort,
+    localPort: preview.localPort,
+  };
+}
+
+function forwardView(preview: Preview): ServerPortForwardView {
+  return { ...forwardPorts(preview), status: preview.status };
+}
+
+/** Listens on `127.0.0.1` alone; the port it took, or none when it is taken. */
+function listenOnLoopback(listener: Server, port: number): Promise<number | undefined> {
+  return new Promise<number | undefined>((resolve) => {
+    listener.once("error", () => resolve(undefined));
+    listener.listen(port, "127.0.0.1", () => {
+      const bound = listener.address();
+      resolve(bound !== null && typeof bound !== "string" ? bound.port : undefined);
+    });
+  });
 }
 
 /** A deadline reports uncertainty; it never releases the retained resource receipt. */

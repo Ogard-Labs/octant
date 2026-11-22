@@ -97,6 +97,8 @@ export interface RequestTransportFacts {
   readonly listenerTrust: RemoteListenerTrust;
   readonly sourceClass: RemoteSourceClass;
   readonly sourceKey: string;
+  /** The peer's address, only when it is on the private network: shown in a new-device alert, never journaled. */
+  readonly privateAddress?: string;
 }
 
 export interface ServeOptions {

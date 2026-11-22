@@ -37,6 +37,7 @@ import {
   windowsUnconfinedLaunch,
 } from "../process/windowsProviderProgram";
 import {
+  providerHoldsLevelWithoutSandbox,
   WINDOWS_SANDBOX_MISSING_REASON,
   windowsProviderLaunch,
   type WindowsProviderLaunch,
@@ -55,6 +56,8 @@ import {
 import { secretGuardRefusal } from "../process/secretGuard";
 import { makeBoundedProviderStderr } from "./providerProcessDiagnostic";
 import { awsProfileReadPaths } from "./providerHostEnvironment";
+import type { ProviderOwnChannels } from "@octant/provider-sdk";
+import { guardsForOwnChannels, launchOwnChannels } from "./providerOwnChannels";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import {
   acquireProviderRuntimeNetwork,
@@ -78,11 +81,13 @@ export interface OpenCodeServerConnection {
   /** Attested only when user/project MCP, plugins, and skills cannot enter an OS-confined process. */
   readonly isolatedConfiguration?: true;
   /**
-   * Attested when a Windows outside-Strict launch runs a verified release with
-   * Octant's private configuration (no Project config loaded), admitting
-   * app-managed tools without claiming OS confinement.
+   * Attested when an outside-Strict launch with no Octant sandbox (any Windows
+   * launch, or Work and Code elsewhere per `providerHoldsLevelWithoutSandbox`)
+   * runs a verified release with Octant's private configuration (no Project
+   * config loaded), admitting app-managed tools without claiming OS
+   * confinement.
    */
-  readonly windowsPrivateConfiguration?: true;
+  readonly privateConfiguration?: true;
   readonly authorization: string;
   readonly pid: number;
   /** Runtime protocol attested by the binary version probe before startup. */
@@ -120,11 +125,18 @@ export interface OpenCodeProcessStartInput {
   /**
    * Whether the launch is Strict; absent is Strict. Outside Strict the wall
    * refuses only other providers' sign-ins among the protected files, so
-   * OpenCode's own tools use the rest as they do on their own. On Windows a
-   * launch below Full access runs only outside Strict, with OpenCode's own
-   * permission rules and no Octant sandbox.
+   * OpenCode's own tools use the rest as they do on their own. Below Full
+   * access, Work and Code outside Strict run with no Octant sandbox, held by
+   * OpenCode's own permission rules (`openCodeStartsUnconfined`); on Windows
+   * a launch below Full access runs only outside Strict, the same way.
    */
   readonly strict?: boolean;
+  /**
+   * The person's provider telemetry and self-update switches; read only
+   * outside Strict. OpenCode has no telemetry guard of Octant's, so only its
+   * self-update guard follows them.
+   */
+  readonly ownChannels?: ProviderOwnChannels;
   /**
    * `probe` for the readiness check Settings runs, which serves no one thread
    * and carries no Strict value of its own. On Windows it runs only for a host
@@ -267,15 +279,34 @@ function openCodeGuardsWithOwnSkills(): Readonly<Record<string, string>> {
   return kept;
 }
 
-/** The guards a launch keeps: `projectConfig` lifts only the Project configuration switch. */
+/**
+ * The guards a launch keeps: `projectConfig` lifts only the Project
+ * configuration switch, and `selfUpdate` only the updater switch.
+ */
 function openCodeLaunchGuards(
   ownSkills: boolean,
   projectConfig: boolean,
+  selfUpdate: boolean,
 ): Readonly<Record<string, string>> {
-  const guards = ownSkills ? openCodeGuardsWithOwnSkills() : OPENCODE_GUARDS;
+  const guards = guardsForOwnChannels(
+    ownSkills ? openCodeGuardsWithOwnSkills() : OPENCODE_GUARDS,
+    { selfUpdate: ["OPENCODE_DISABLE_AUTOUPDATE"] },
+    { telemetry: false, selfUpdate },
+  );
   if (!projectConfig) return guards;
   const { OPENCODE_DISABLE_PROJECT_CONFIG: _projectConfigOff, ...kept } = guards;
   return kept;
+}
+
+/**
+ * Whether a launch keeps Strict's guards: an explicit sandbox and a Full
+ * access thread that keeps the sandbox keep them as Strict does, as every
+ * other provider launch does.
+ */
+function launchIsStrict(input: OpenCodeProcessStartInput): boolean {
+  return (
+    input.strict !== false || input.fullAccessSandbox === true || input.sandboxPolicy !== undefined
+  );
 }
 
 /** Plan stays read-only and Chat keeps no folder, so neither loads a Project's own configuration. */
@@ -890,6 +921,7 @@ export function createPrivateOpenCodeProfile(
   ownToolServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
   projectConfig = false,
   chatDenyAll = false,
+  selfUpdate = false,
 ): PrivateOpenCodeProfile {
   const root = temporaryDirectory();
   const directories: string[] = [];
@@ -930,7 +962,7 @@ export function createPrivateOpenCodeProfile(
     Object.assign(environment, {
       OPENCODE_CONFIG: configPath,
       OPENCODE_CONFIG_DIR: configDirectory,
-      ...openCodeLaunchGuards(ownSkills, projectConfig),
+      ...openCodeLaunchGuards(ownSkills, projectConfig, selfUpdate),
       TMPDIR: tempHome,
       XDG_CACHE_HOME: cacheHome,
       XDG_CONFIG_HOME: configHome,
@@ -1310,6 +1342,28 @@ function openCodeWallPolicy(input: OpenCodeProcessStartInput): ProviderExecution
 }
 
 /**
+ * Whether a macOS or Linux launch runs with no Octant sandbox: open Full
+ * access, or Work and Code outside Strict at a level below it, where
+ * OpenCode's permission rules ask Octant before each edit, shell command, and
+ * folder outside the Project and so hold the level
+ * (`providerHoldsLevelWithoutSandbox`, maintainer decision 2026-11-21). Chat,
+ * Plan, Strict, a kept sandbox, a chosen sandbox policy, and the readiness
+ * check stay confined.
+ */
+function openCodeStartsUnconfined(input: OpenCodeProcessStartInput): boolean {
+  if (input.sandboxPolicy !== undefined || input.fullAccessSandbox === true) return false;
+  return (
+    input.executionPolicy === "full-access" ||
+    providerHoldsLevelWithoutSandbox({
+      mode: input.mode ?? "code",
+      executionPolicy: input.executionPolicy ?? "approval-gated",
+      strict: input.strict,
+      purpose: input.purpose,
+    })
+  );
+}
+
+/**
  * How one OpenCode launch runs on Windows, from that launch's own authority. A
  * readiness check serves no one thread, so it runs only for a host whose new
  * threads run with no Octant sandbox.
@@ -1454,11 +1508,7 @@ function prepareOpenCodeLaunch(
         stateHome,
         providerDataDirectory,
       ]);
-      if (
-        executionPolicy === "full-access" &&
-        input.sandboxPolicy === undefined &&
-        input.fullAccessSandbox !== true
-      ) {
+      if (openCodeStartsUnconfined(input)) {
         return {
           command: input.binaryPath,
           args,
@@ -1796,6 +1846,7 @@ function acquireOpenCodeServer(
           windowsChatDenyAll ? undefined : input.ownToolServers,
           windowsChatDenyAll ? false : launchLoadsProjectConfig(input),
           windowsChatDenyAll,
+          launchOwnChannels(launchIsStrict(input), input.ownChannels).selfUpdate,
         );
       } catch {
         resume(
@@ -1993,10 +2044,11 @@ function acquireOpenCodeServer(
                   launch.command !== input.binaryPath
                     ? { isolatedConfiguration: true as const }
                     : {}),
-                  ...(options.platform === "win32" &&
-                  isolationAttested &&
-                  (input.purpose === "probe" || input.strict === false)
-                    ? { windowsPrivateConfiguration: true as const }
+                  ...(isolationAttested &&
+                  (options.platform === "win32"
+                    ? input.purpose === "probe" || input.strict === false
+                    : input.strict === false && openCodeStartsUnconfined(input))
+                    ? { privateConfiguration: true as const }
                     : {}),
                   runtime,
                   version,
@@ -2175,10 +2227,12 @@ export function makeOpenCodeProcessLive(
             failure("invalid-configuration", "OpenCode runtime routing could not be prepared."),
         });
         const executionPolicy = openCodeWallPolicy(input);
-        // A Windows launch has no Octant wall to hold a proxy or a server
-        // folder to, so it takes neither.
+        // A launch with no Octant wall (Windows, or an unconfined one
+        // elsewhere) has nothing to hold a proxy or a server folder to, so it
+        // takes neither, as Full access does.
+        const unwalled = windows !== undefined || openCodeStartsUnconfined(input);
         const network =
-          executionPolicy === "full-access" || windows !== undefined
+          executionPolicy === "full-access" || unwalled
             ? undefined
             : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
                 ...(input.sandboxPolicy === undefined
@@ -2190,18 +2244,17 @@ export function makeOpenCodeProcessLive(
                 loopbackPorts: input.loopbackPorts ?? [],
                 environment: options.inheritedEnvironment ?? process.env,
               });
-        const servers =
-          windows === undefined
-            ? yield* acquireProviderServerAccess(
-                input.sandboxPolicy?.policy.hostServices === "blocked"
-                  ? undefined
-                  : options.serverAccess,
-                {
-                  root: input.cwd,
-                  executionPolicy,
-                },
-              )
-            : undefined;
+        const servers = !unwalled
+          ? yield* acquireProviderServerAccess(
+              input.sandboxPolicy?.policy.hostServices === "blocked"
+                ? undefined
+                : options.serverAccess,
+              {
+                root: input.cwd,
+                executionPolicy,
+              },
+            )
+          : undefined;
         const { network: _ignored, servers: _ignoredServers, ...requested } = input;
         let terminate: (() => Promise<void>) | undefined;
         return yield* Effect.acquireReleaseInterruptible(

@@ -28,6 +28,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -4505,6 +4506,103 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("hands a secret question's answer to the provider from the person alone and never records it", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(10);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: startOperation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    for (const [requestId, secret] of [
+      ["secret-question", true],
+      ["plain-question", false],
+    ] as const)
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "user-input-request",
+            requestId,
+            prompt: secret ? "Database credential?" : "Which host?",
+            options: [],
+            ...(secret ? { secret: true as const } : {}),
+          }),
+        ),
+      );
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
+      expect(
+        frames.flatMap((frame) => (frame.event.kind === "input-requested" ? [frame.event] : [])),
+      ).toMatchObject([
+        { requestId: "secret-question", secret: true },
+        { requestId: "plain-question" },
+      ]);
+    });
+    const sentinel = "hunter2-secret-sentinel";
+    let nextOperation = 20;
+    const answer = (requestId: string, answered: Record<string, unknown>) =>
+      fixture.runtime.execute(
+        windowId,
+        {
+          kind: "answer-provider-input",
+          operationId: operationId(nextOperation++),
+          threadId,
+          checkoutId,
+          requestId,
+          ...answered,
+        } as never,
+        { initiator: "user" },
+      );
+
+    // An agent acting for the person cannot answer it, and neither path
+    // stands in for the other: a secret goes to no plain question, and a
+    // secret question takes no answer put as evidence.
+    await expect(
+      fixture.runtime.execute(
+        windowId,
+        {
+          kind: "answer-provider-input",
+          operationId: operationId(11),
+          threadId,
+          checkoutId,
+          requestId: "secret-question",
+          secretAnswer: sentinel,
+        },
+        { initiator: "agent" },
+      ),
+    ).resolves.toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
+    await expect(answer("plain-question", { secretAnswer: sentinel })).resolves.toMatchObject({
+      failure: { category: "invalid" },
+    });
+    await expect(answer("secret-question", { response: fixture.response })).resolves.toMatchObject({
+      failure: { category: "invalid" },
+    });
+    expect(connection.answerUserInput).not.toHaveBeenCalled();
+
+    await expect(answer("secret-question", { secretAnswer: sentinel })).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+    expect(connection.answerUserInput).toHaveBeenCalledWith({
+      sessionId,
+      requestId: "secret-question",
+      answer: sentinel,
+    });
+    await fixture.runtime.close();
+    expect([...fixture.evidenceValues.values()]).not.toContain(sentinel);
+    for (const file of readdirSync(fixture.directory))
+      if (statSync(join(fixture.directory, file)).isFile())
+        expect(readFileSync(join(fixture.directory, file)).includes(sentinel)).toBe(false);
+    fixture.close();
+  });
+
   it("refuses an answer to a turn that was cancelled while it waited, naming why", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -5111,6 +5209,69 @@ describe("CodeOperationRuntime", () => {
       { kind: "approval-answered", approvalId: denied, decision: "denied" },
     ]);
     expect(await fixture.runtime.pendingRequests?.(windowId)).toEqual([]);
+    fixture.close();
+  });
+
+  it("delivers an allow for this one call on a thread that keeps answers only as the Project's default", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    fixture.setThread(decodeCodeThread({ ...thread(), permissionPersistence: "project-default" }));
+    const startOperation = operationId(31);
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "approval-request",
+          requestId: "provider-approval-project-default",
+          action: "write",
+          description: "Modify src/a.ts",
+        }),
+      ),
+    );
+    let approvalId:
+      | Extract<OperationFrame["event"], { kind: "approval-requested" }>["approvalId"]
+      | undefined;
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 40);
+      approvalId = frames
+        .map((frame) => frame.event)
+        .find((event) => event.kind === "approval-requested")?.approvalId;
+      expect(approvalId).toBeDefined();
+    });
+    if (approvalId === undefined) throw new Error("Expected a provider approval");
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(32),
+        threadId,
+        checkoutId,
+        approvalId,
+        decision: "approved",
+      }),
+    ).resolves.toMatchObject({ state: "running" });
+    // The driver reads the host's default, which may keep answers for the
+    // session; this thread's own setting must still hold the allow to one call.
+    expect(connection.answerApproval).toHaveBeenCalledWith({
+      sessionId,
+      requestId: "provider-approval-project-default",
+      approved: true,
+      scope: "once",
+    });
     fixture.close();
   });
 
@@ -19403,6 +19564,37 @@ describe("continuing a Code turn a restart cut off", () => {
       expect(third.connection.send).not.toHaveBeenCalled();
     } finally {
       for (const host of hosts) host.close();
+    }
+  });
+
+  it("starts no turn the host begins as itself on Google Antigravity, and takes the person's own", async () => {
+    const antigravity = provider();
+    const host = runtimeFixture({
+      provider: {
+        ...providerDriver(antigravity.connection),
+        kind: "antigravity",
+      } as ProviderDriver,
+    });
+    try {
+      // A continuation, a wake, Auto-fix, a coordinator's worker, a routine
+      // and a child's result all start a Code turn under the host's scope.
+      await expect(host.runtime.execute(ROUTINE_HOST_SCOPE_ID, start(71))).resolves.toMatchObject({
+        kind: "operation-failed",
+        admission: "refused",
+        failure: {
+          category: "unauthorized",
+          message:
+            "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Choose a provider that uses a Gemini API key, such as Gemini CLI with an API key.",
+        },
+      });
+      expect(antigravity.connection.send).not.toHaveBeenCalled();
+
+      await expect(host.runtime.execute(windowId, start(72))).resolves.toMatchObject({
+        kind: "provider-turn-state",
+        state: "running",
+      });
+    } finally {
+      host.close();
     }
   });
 

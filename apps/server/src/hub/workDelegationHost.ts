@@ -6,8 +6,8 @@
 //
 // Code is not carried here. A Code thread needs a managed worktree and a
 // delivery target a person confirmed, and a peer's request cannot stand in for
-// that person, so a Code Project reports no delegable mode and the request is
-// refused.
+// that person, so Code goes to the Code delegation host, and only into a
+// Project its person marked with that target.
 
 import { randomUUID } from "node:crypto";
 import {
@@ -78,6 +78,12 @@ export interface WorkDelegationServices {
   /** The host's own scope, which no window or device can claim. */
   readonly scope: WindowId;
   /**
+   * Why a provider runs no helper, as its profile declares for its personal
+   * sign-in. A peer's task is a helper run another agent started, so the Work
+   * default it would run on is checked before any thread exists.
+   */
+  readonly helperRunRefusal: (providerInstanceId: string) => string | undefined;
+  /**
    * Called once a peer-delegated Work thread is created and before its first
    * turn starts, so host-wide person memory is withheld from the turn and any
    * child run it spawns.
@@ -126,7 +132,8 @@ export function createWorkDelegationHost(services: WorkDelegationServices): Peer
       if (
         binding === undefined ||
         settings?.defaultProviderInstanceId === undefined ||
-        settings.defaultModelId === undefined
+        settings.defaultModelId === undefined ||
+        services.helperRunRefusal(settings.defaultProviderInstanceId) !== undefined
       ) {
         return { status: "refused", kind: "provider-unavailable" };
       }

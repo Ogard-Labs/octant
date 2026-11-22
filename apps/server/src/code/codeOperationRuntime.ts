@@ -1,4 +1,5 @@
 import { OwnerApprovalId } from "@octant/contracts/owner-approvals";
+import type { ProviderServerPlacement } from "@octant/provider-sdk/driver";
 import { strictKeptForLaunch } from "../strictResolution";
 import { sanitizeLoopNoticeToolName, type StalledTurnScope } from "../providers/turnBudget";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
@@ -794,8 +795,11 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly windowId: WindowId;
     readonly secrets: ReadonlyArray<string>;
+    readonly placesOnServer: boolean;
+    readonly strict: boolean;
   }) =>
     | { readonly status: "bound"; readonly tools: AppManagedToolSet }
+    | { readonly status: "placed"; readonly placement: ProviderServerPlacement }
     | { readonly status: "refused"; readonly message: string }
     | undefined;
   readonly spendCeiling?: {
@@ -1769,6 +1773,10 @@ export function createCodeOperationRuntime(
   const compactableSession = (threadId: CodeThreadId) => {
     const thread = options.persistence.readCodeThread(threadId);
     if (thread === undefined || thread.lifecycle !== "active") return undefined;
+    // Compaction opens its own runtime here, which a server thread's session
+    // cannot run on, so the action is not offered for one.
+    if (options.persistence.readCodeCheckout(thread.checkoutId)?.kind === "remote-root")
+      return undefined;
     const recovered = events.providerSessionForThread(thread.id, NO_OPERATION);
     if (recovered.status !== "ok") return undefined;
     const session = recovered.session;
@@ -2260,6 +2268,11 @@ export function createCodeOperationRuntime(
                   modelId: thread.modelId,
                   projectId: thread.projectId,
                 });
+          if (admission?.kind === "draining") {
+            throw new CodeServiceError(
+              decodeCodeFailure({ category: "unavailable", message: admission.detail }),
+            );
+          }
           if (admission?.kind === "paused") {
             throw new CodeServiceError(
               decodeCodeFailure({
@@ -3293,6 +3306,11 @@ interface ActiveTurn {
    * this host's checkout tools joins them.
    */
   readonly serverTools?: AppManagedToolSet;
+  /**
+   * A server Project's turn whose runtime runs on the server itself: its own
+   * tools act there, and only the sets that touch this host's records join it.
+   */
+  readonly serverPlacement?: ProviderServerPlacement;
   readonly extensionSelections?: ReadonlyArray<
     import("@octant/contracts/extensions").ExtensionSelection
   >;
@@ -3375,6 +3393,8 @@ interface ActiveTurn {
   readonly browserGrantKeys: Set<string>;
   readonly browserProfileContexts: Set<string>;
   readonly questions: Set<string>;
+  /** The provider questions on this turn that ask for a secret; see `answerInput`. */
+  readonly secretQuestions: Set<string>;
   readonly providerQuestionnaires: Map<string, Questionnaire>;
   /** Questions the native harness asked on this turn; answered by the host, not the provider. */
   readonly harnessQuestions: Set<string>;
@@ -4255,17 +4275,23 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // no refusal after this point leaves them behind. The provider is
     // checked here too: only the Octant Harness runs on a server.
     let serverTools: AppManagedToolSet | undefined;
+    let serverPlacement: ProviderServerPlacement | undefined;
     if (remoteThread) {
       const bound = this.#options.serverCodeTurn?.({
         thread: input.thread,
         windowId: input.windowId,
         secrets,
+        placesOnServer:
+          this.#options.resolveProviderCapabilities?.(input.thread)?.serverPlacement ===
+          "supported",
+        strict: this.#options.resolveStrict?.(input.thread.id) ?? true,
       });
       if (bound === undefined || bound.status === "refused") {
         await input.extensionTools?.close?.().catch(() => undefined);
         return failStart(bound?.message ?? REMOTE_FOLDER_UNSUPPORTED);
       }
-      serverTools = bound.tools;
+      if (bound.status === "bound") serverTools = bound.tools;
+      else serverPlacement = bound.placement;
       // Extensions' tools act on this host; the server tool set is the turn's whole set.
       await input.extensionTools?.close?.().catch(() => undefined);
     }
@@ -4386,15 +4412,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           : {}),
       ...(forkMerges.records.length === 0 ? {} : { pendingForkMerges: forkMerges.records }),
       ...(computerUseDestination === undefined ? {} : { computerUseDestination }),
-      ...(input.extensionTools === undefined || serverTools !== undefined
+      ...(input.extensionTools === undefined || remoteThread
         ? {}
         : { extensionTools: input.extensionTools }),
       // A server thread's runtime runs on its server, where this host's
       // attachments folder is not.
-      ...(input.attachmentsFolder === undefined || serverTools !== undefined
+      ...(input.attachmentsFolder === undefined || remoteThread
         ? {}
         : { attachmentsFolder: input.attachmentsFolder }),
       ...(serverTools === undefined ? {} : { serverTools }),
+      ...(serverPlacement === undefined ? {} : { serverPlacement }),
       ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
         ? {}
         : { extensionSelections: command.extensionSelections }),
@@ -4448,6 +4475,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       browserGrantKeys: new Set(),
       browserProfileContexts: new Set(),
       questions: new Set(),
+      secretQuestions: new Set(),
       harnessQuestions: new Set(),
       providerQuestionnaires: new Map(),
       cursor: 0,
@@ -4867,6 +4895,20 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       active.harnessQuestions.delete(input.requestId);
       return answeredTurnState(active.state);
     }
+    // A secret answer reaches the provider only for the question that asked
+    // for one, and a secret question takes no answer that was put as
+    // evidence, so the value is never stored either way.
+    if ((input.secret === true) !== active.secretQuestions.has(input.requestId))
+      return {
+        state: active.state,
+        failure: {
+          category: "invalid",
+          message:
+            input.secret === true
+              ? "That question does not ask for a secret."
+              : "That question asks for a secret. Answer it in its thread.",
+        },
+      };
     if (active.connection === undefined) {
       return turnState("failed", { category: "failed", message: APPROVAL_SESSION_GONE_MESSAGE });
     }
@@ -4884,6 +4926,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       };
     }
     active.questions.delete(input.requestId);
+    active.secretQuestions.delete(input.requestId);
     active.providerQuestionnaires.delete(input.requestId);
     await Effect.runPromise(
       active.connection.answerUserInput({
@@ -5120,6 +5163,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             requestId: event.requestId,
             prompt: event.prompt,
             options: event.options,
+            ...(event.secret === true ? { secret: true } : {}),
           });
         }
       }
@@ -5578,9 +5622,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const connection = active.connection;
     // The provider session was opened with the persistence the turn started
     // with. After the person changed it, an allow is delivered for this one
-    // call, so nothing is remembered beyond what either setting allows.
+    // call, so nothing is remembered beyond what either setting allows. A
+    // driver reads the host's default persistence, not this thread's, so a
+    // thread that keeps answers only as the Project's default says so with
+    // each answer; otherwise a host default of `current-session` would let
+    // the runtime remember the allow for the session.
     const once =
       ownerCurrent !== undefined ||
+      active.thread.permissionPersistence !== "current-session" ||
       active.thread.permissionPersistence !== input.thread.permissionPersistence;
     const askedUnder = active.approvalPostures.get(input.approvalId);
     if (ownerCurrent === undefined) {
@@ -6070,10 +6119,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     ) {
       return undefined;
     }
-    if (active.serverTools !== undefined) {
+    if (active.serverTools !== undefined || active.serverPlacement !== undefined) {
       // The server tools and the few sets that touch only this host's
       // records: every other set reads or acts on a folder or a device of
-      // this host. The runner closes them when the turn ends.
+      // this host. The runner closes them when the turn ends. A runtime on
+      // the server brings its own tools there, so only the latter join it.
       const tools = combineAppManagedToolSets(
         active.serverTools,
         this.#options.serverTurnTools?.({
@@ -6647,6 +6697,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(active.attachmentsFolder === undefined
             ? {}
             : { attachmentsFolder: active.attachmentsFolder }),
+          ...(active.serverPlacement === undefined
+            ? {}
+            : { serverPlacement: active.serverPlacement }),
           prompt,
           ...(delivery.context.length === 0 ? {} : { context: delivery.context }),
           contextAccount,
@@ -6768,7 +6821,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             Effect.promise(async () => {
               // A server folder is no folder of this host, so no local Git
               // process may observe a path that only names it.
-              if (active.serverTools !== undefined) {
+              if (active.serverTools !== undefined || active.serverPlacement !== undefined) {
                 return {
                   status: "not-confirmed" as const,
                   summary: "The checkout is on a server; this host does not observe it.",
@@ -7374,6 +7427,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return (
       this.#active.get(String(active.thread.id)) === active &&
       active.serverTools === undefined &&
+      active.serverPlacement === undefined &&
       thread?.lifecycle === "active" &&
       thread.checkoutId === active.thread.checkoutId &&
       thread.projectId === active.thread.projectId &&
@@ -7903,6 +7957,7 @@ function normalizedOperationEvent(
   }
   if (event.category === "question" && event.requestId !== undefined) {
     active.questions.add(event.requestId);
+    if (event.secret === true) active.secretQuestions.add(event.requestId);
     if (event.questionnaire !== undefined)
       active.providerQuestionnaires.set(event.requestId, event.questionnaire);
     return {
@@ -7916,6 +7971,7 @@ function normalizedOperationEvent(
         ) ?? "Provider input requested.",
       options: boundProviderInputOptions(event.options ?? []),
       ...(event.questionnaire === undefined ? {} : { questionnaire: event.questionnaire }),
+      ...(event.secret === true ? { secret: true } : {}),
     };
   }
   if (

@@ -165,6 +165,7 @@ export interface ThreadPaneContainerProps {
     | "setProjectActions"
     | "setProjectWorkStatusFile"
     | "setProjectOwnToolchain"
+    | "setProjectDelegatedCode"
     | "setProjectWorkDeveloperTools"
     | "setUsageOpen"
     | "setWorkComposerSelection"
@@ -206,6 +207,8 @@ export interface ThreadPaneContainerProps {
   readonly crossContextOffer: ShellController["crossContextOffer"];
   readonly createHostId: HostId;
   readonly createHostViewScope: CreateHostViewScope;
+  /** The paired computer's Code start screen while the picker names one; see WorkspaceView. */
+  readonly renderPairedComputerCodeStart?: () => ReactNode | undefined;
   readonly dockOpen: boolean;
   readonly dockSurface?: RightUtilityDockSurfaceId;
   readonly draftCreating: boolean;
@@ -312,6 +315,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     crossContextOffer,
     createHostId,
     createHostViewScope,
+    renderPairedComputerCodeStart,
     dockOpen,
     dockSurface,
     draftCreating,
@@ -446,6 +450,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setProjectActions,
     setProjectWorkStatusFile,
     setProjectOwnToolchain,
+    setProjectDelegatedCode,
     setProjectWorkDeveloperTools,
     setUsageOpen,
     setWorkComposerSelection,
@@ -749,6 +754,9 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   hosts={hosts}
                   selectedCreateHostId={createHostId}
                   createHostViewScope={createHostViewScope}
+                  {...(renderPairedComputerCodeStart === undefined
+                    ? {}
+                    : { renderPairedComputerCodeStart })}
                   {...(lastSelectedHealthyHostId === undefined
                     ? {}
                     : { lastSelectedHealthyHostId })}
@@ -891,6 +899,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   onOwnToolchainChange={(projectId, enabled) =>
                     setProjectOwnToolchain(projectId, enabled ? "enabled" : "disabled")
                   }
+                  onDelegatedCodeChange={setProjectDelegatedCode}
                   onWorkDeveloperToolsChange={setProjectWorkDeveloperTools}
                   onSplitPane={(paneId, orientation, placement) =>
                     void splitPane(paneId, orientation, placement)
@@ -1051,6 +1060,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                     const destinationHostId = refuseUnlessCreatableDestination({
                       action: "create-project",
                       requiredCapability: mode,
+                      onlyThisHost: true,
                       onRefuse: (reason) => setDraftError(reason),
                     });
                     if (destinationHostId === undefined) {
@@ -1068,6 +1078,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                     const destinationHostId = refuseUnlessCreatableDestination({
                       action: "create-project",
                       requiredCapability: mode,
+                      onlyThisHost: true,
                       onRefuse: (reason) => setDraftError(reason),
                     });
                     if (destinationHostId === undefined) {

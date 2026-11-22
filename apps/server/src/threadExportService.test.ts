@@ -591,6 +591,33 @@ describe("ThreadExportService", () => {
     expect(outcome.bundle.evidence.completion?.satisfactionEvidence).toBe("The brief is on disk.");
   });
 
+  it("exports a message the person steered into a running turn after that turn's prompt, at the time it was sent", async () => {
+    const fixture = workFixture();
+    const steeredAt = "2026-10-03T18:00:05.000Z";
+    const turns = fixture.turns.map((turn) => ({
+      ...turn,
+      steeredMessages: [
+        {
+          messageId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          body: "Keep it to one page.",
+          steeredAt,
+        },
+      ],
+    })) as unknown as ReadonlyArray<WorkTurnState>;
+    const outcome = await service({
+      work: { ...fixture, turns },
+    }).exportThread(windowId as never, "local-window", { mode: "work", threadId: workThreadId });
+    expect(outcome.kind).toBe("exported");
+    if (outcome.kind !== "exported") return;
+    expect(
+      outcome.bundle.transcript.entries.map((entry) => [entry.role, entry.text, entry.occurredAt]),
+    ).toEqual([
+      ["user", "Write the brief.", now],
+      ["user", "Keep it to one page.", steeredAt],
+      ["assistant", "Here is the brief.", now],
+    ]);
+  });
+
   it("exports every turn of a Code thread longer than one conversation page", async () => {
     const codeThreadId = "00000000-0000-4000-8000-000000000903";
     const uuid = (kind: string, index: number) =>

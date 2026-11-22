@@ -18,7 +18,7 @@ import { createCiFailuresCard } from "../home/CiFailuresCard";
 import { currentCodeProjectBranches } from "../home/ciFailures";
 import { createComputersCard } from "../home/ComputersCard";
 import { computerConnection, sameHostOrigin } from "../home/computers";
-import { createNeedsYouCard } from "../home/NeedsYouCard";
+import { createNeedsYouCard, type OtherComputerAsk } from "../home/NeedsYouCard";
 import {
   isChildPendingRequest,
   type WaitingAskAnswerClients,
@@ -30,7 +30,11 @@ import {
   type PullRequestCardRow,
 } from "../home/pullRequests";
 import { createPullRequestsCard } from "../home/PullRequestsCard";
-import type { RemoteOpenMode, RemoteOpenOutcome } from "../home/runningServices";
+import type {
+  RemoteForwardOutcome,
+  RemoteOpenMode,
+  RemoteOpenOutcome,
+} from "../home/runningServices";
 import { createRunningServicesCard } from "../home/RunningServicesCard";
 import { createWorkingNowCard, type WorkingNowCardSource } from "../home/WorkingNowCard";
 import type { WorkingNowThread } from "../home/workingNow";
@@ -104,18 +108,29 @@ export interface HomeStartInput {
   readonly needsYouThreadProviders: ReadonlyMap<string, ThreadProviderIdentity>;
   /** The clients the Needs you card answers a host-held ask through, kept by identity. */
   readonly needsYouAskClients: WaitingAskAnswerClients;
+  /** What the person's other computers hold for them, each opened on its own computer. */
+  readonly otherComputerAsks: ReadonlyArray<OtherComputerAsk>;
+  readonly onOpenOtherComputerAsk: (hostId: string, threadId: string) => void;
   readonly now: number;
   /** The shell's safe door for a link the records point at; absent leaves anchors. */
   readonly onOpenExternal?: (url: string) => void;
   readonly openRunningServiceLive:
     | ((service: RunningService, mode: RemoteOpenMode) => Promise<RemoteOpenOutcome>)
     | undefined;
+  readonly forwardRunningServicePort:
+    | ((service: RunningService) => Promise<RemoteForwardOutcome>)
+    | undefined;
   readonly pendingRequestClient: LaunchedShellClients["pendingRequestClient"];
   readonly remoteRunningServicesClient: ReturnType<typeof createLocalServerClient> | undefined;
   readonly runningServicesClient: ReturnType<typeof createLocalServerClient> | undefined;
   readonly runningServicesRemoteHost:
     | { readonly status: "disconnected"; readonly hostName: string }
-    | { readonly status: "ready"; readonly hostName: string }
+    | {
+        readonly status: "ready";
+        readonly hostName: string;
+        /** That computer admitted this device because the hub introduced it. */
+        readonly throughHub?: boolean;
+      }
     | undefined;
   readonly serverUrl: string;
   readonly settings: ShellController["settings"];
@@ -170,8 +185,11 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
     needsYouCoordinatorTitles,
     needsYouThreadProviders,
     needsYouAskClients,
+    otherComputerAsks,
+    onOpenOtherComputerAsk,
     now,
     openRunningServiceLive,
+    forwardRunningServicePort,
     pendingRequestClient,
     remoteRunningServicesClient,
     runningServicesClient,
@@ -281,6 +299,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
       modes: workingNowModes,
       now: now,
       onOpenInbox: actions.openInbox,
+      ...(activeMode === "code" ? { otherComputerAsks, onOpenOtherComputerAsk } : {}),
       onOpenThread: (request) => {
         actions.closeWorkspaceReaders();
         if (isChildPendingRequest(request)) actions.openSubagentRequest(request);
@@ -316,6 +335,13 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
           canOpen: () => false,
           onOpenTarget: actions.openRunningService,
           ...(openRunningServiceLive === undefined ? {} : { openLive: openRunningServiceLive }),
+          ...(forwardRunningServicePort === undefined
+            ? {}
+            : { forwardPort: forwardRunningServicePort }),
+          ...(runningServicesRemoteHost.status === "ready" &&
+          runningServicesRemoteHost.throughHub === true
+            ? { forwardsThreadServersOnly: true }
+            : {}),
         }),
     createPullRequestsCard({
       available: pullRequestCardAvailable({

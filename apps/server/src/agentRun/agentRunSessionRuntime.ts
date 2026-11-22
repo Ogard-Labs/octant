@@ -262,6 +262,14 @@ export interface AgentRunSessionInteractions {
 }
 
 export interface AgentRunSessionRuntimeOptions {
+  /**
+   * Whether the child's provider may ask it a question that wants a secret:
+   * only when its parent thread is outside Strict, read the way every other
+   * child policy reads its parent's Strict. Its answer reaches the child in
+   * memory and is kept nowhere. The child's session still runs Strict in
+   * every other respect. Absent, or unreadable, such a question is refused.
+   */
+  readonly asksSecretQuestions?: (run: AgentRun) => boolean;
   readonly reviewCapture?: AgentRunReviewCapture;
   readonly canCaptureReview?: (run: AgentRun) => boolean;
   readonly interactions?: AgentRunSessionInteractions;
@@ -288,6 +296,12 @@ export interface AgentRunSessionRuntimeOptions {
     readonly providerInstanceId: ProviderInstanceId;
     readonly modelId: ProviderModelId;
   }) => boolean;
+  /**
+   * Why a provider runs no helper, as its profile declares for its personal
+   * sign-in; read when the child starts or resumes, so a child admitted before
+   * its provider declared it, or on a later retry, still never runs there.
+   */
+  readonly helperRunRefusal?: (providerInstanceId: ProviderInstanceId) => string | undefined;
   /** Resolves the configured driver for a provider instance, or undefined. */
   readonly resolveDriver: (
     providerInstanceId: ProviderInstanceId,
@@ -485,7 +499,7 @@ export function createAgentRunSessionRuntime(
     return values;
   };
 
-  const refuseTargetOutsideProjectPolicy = (
+  const refuseDisallowedTarget = (
     run: AgentRun,
     target: ReturnType<typeof effectiveAgentRunExecutionTarget>,
   ) => {
@@ -500,6 +514,8 @@ export function createAgentRunSessionRuntime(
         "provider-unavailable",
         "The Project's provider policy does not allow this child's provider or model. Delegate a new child on an allowed provider.",
       );
+    const refusal = options.helperRunRefusal?.(target.providerInstanceId);
+    if (refusal !== undefined) throw new AgentRunSessionError("provider-unavailable", refusal);
   };
 
   const savedConversation = (run: AgentRun): AgentRunSessionRecord => {
@@ -515,7 +531,7 @@ export function createAgentRunSessionRuntime(
       );
     }
     const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
-    refuseTargetOutsideProjectPolicy(run, target);
+    refuseDisallowedTarget(run, target);
     const driver = options.resolveDriver(target.providerInstanceId, run);
     clampAgentRunSessionAuthority(run);
     const projectRoot = resolveProjectRoot(run, options.scratchRoot);
@@ -572,7 +588,7 @@ export function createAgentRunSessionRuntime(
     // widened since admission, and a child must never gain from that.
     const authority = clampAgentRunSessionAuthority(run);
     const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
-    refuseTargetOutsideProjectPolicy(run, target);
+    refuseDisallowedTarget(run, target);
     const driver = options.resolveDriver(target.providerInstanceId, run);
     if (driver === undefined) {
       throw new AgentRunSessionError(
@@ -1177,6 +1193,7 @@ export function createAgentRunSessionRuntime(
             outsideContentMarks: options.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS,
             onUserMessage: options.onUserMessage,
             interactions: options.interactions,
+            asksSecretQuestions: safeAsksSecretQuestions(options, run),
             onSessionEnding: () => {
               live.steer = undefined;
               inputController.abort();
@@ -1375,6 +1392,14 @@ export function createAgentRunSessionRuntime(
   };
 }
 
+function safeAsksSecretQuestions(options: AgentRunSessionRuntimeOptions, run: AgentRun): boolean {
+  try {
+    return options.asksSecretQuestions?.(run) === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Intersects the run's persisted authority with the mode ceiling and the
  * immutable authority its routing receipt recorded. Both inputs come from the
@@ -1539,6 +1564,8 @@ interface ManagedSessionInput {
   readonly outsideContentMarks: RuntimeOutsideContentMarking;
   readonly onUserMessage?: AgentRunSessionRuntimeOptions["onUserMessage"];
   readonly interactions: AgentRunSessionRuntimeOptions["interactions"];
+  /** See {@link AgentRunSessionRuntimeOptions.asksSecretQuestions}. */
+  readonly asksSecretQuestions: boolean;
   readonly onConnectionReady: (
     connection: ProviderConnection,
     sessionId: ProviderSessionId,
@@ -1939,6 +1966,7 @@ function runSessionTurn(
             // Every approval a helper gets holds for that one call.
             answersOncePerCall: true,
             ...(sandboxPolicy === undefined ? {} : { fullAccessSandbox: true }),
+            ...(input.asksSecretQuestions ? { asksSecretQuestions: true } : {}),
             tools: input.appManagedTools?.definitions ?? [],
           })
         : connection.resume({
@@ -1951,6 +1979,7 @@ function runSessionTurn(
             executionPolicy: input.authority.executionPolicy,
             answersOncePerCall: true,
             ...(sandboxPolicy === undefined ? {} : { fullAccessSandbox: true }),
+            ...(input.asksSecretQuestions ? { asksSecretQuestions: true } : {}),
             tools: input.appManagedTools?.definitions ?? [],
           });
     const handle = yield* startup.pipe(
@@ -2315,7 +2344,10 @@ function collectSessionEvents(
                     input.onUserMessage?.({
                       runId: input.run.id,
                       kind: "answer",
-                      text: `Question: ${event.prompt}\nAnswer: ${answer}`,
+                      // A secret answer is never shown or kept, only that it was given.
+                      text: `Question: ${event.prompt}\nAnswer: ${
+                        event.secret === true ? "(a secret, not kept)" : answer
+                      }`,
                       occurredAt: decodeUtcTimestamp(new Date().toISOString()),
                     });
                   } catch {

@@ -63,7 +63,8 @@ const QueueState = Schema.Struct({
 export type QueueState = typeof QueueState.Type;
 const Settled = Schema.Struct({
   messageId: ThreadQueueMessageId,
-  status: Schema.Literal("removed", "completed", "failed", "cancelled"),
+  /** `steered`: delivered into the turn that was running, never a turn of its own. */
+  status: Schema.Literal("removed", "completed", "failed", "cancelled", "steered"),
 });
 export type QueueSettlement = typeof Settled.Type;
 const QueueChanged = Schema.Struct({

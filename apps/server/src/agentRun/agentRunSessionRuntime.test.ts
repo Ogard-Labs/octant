@@ -1690,6 +1690,21 @@ describe("createAgentRunSessionRuntime", () => {
     expect(provider.acquired).toHaveLength(0);
   });
 
+  it("starts no child on a provider that refuses helper runs, even one admitted before it did", () => {
+    const provider = fakeProvider();
+    const refusal = "Google doesn't support Google Antigravity as a helper agent.";
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        helperRunRefusal: (id) => (String(id) === providerInstanceId ? refusal : undefined),
+      }),
+    );
+
+    expect(() => runtime.start(agentRun())).toThrowError(
+      expect.objectContaining({ reason: "provider-unavailable", message: refusal }),
+    );
+    expect(provider.acquired).toHaveLength(0);
+  });
+
   it("refuses to resume a saved child whose provider the Project policy no longer allows", async () => {
     const runtime = createAgentRunSessionRuntime(
       runtimeOptions(fakeProvider({ resumable: true }), {
@@ -2812,6 +2827,53 @@ it("answers a child's repeated question only once and records the person's answe
   expect(onUserMessage).toHaveBeenCalledWith(
     expect.objectContaining({ kind: "answer", text: "Question: Which branch?\nAnswer: main" }),
   );
+});
+
+it("lets a child outside Strict be asked a secret, hands it the answer and keeps only that one was given", async () => {
+  const sentinel = "hunter2-secret-sentinel";
+  for (const parentOutsideStrict of [true, false]) {
+    const provider = fakeProvider();
+    const askUser = vi.fn(async () => sentinel);
+    const onUserMessage = vi.fn();
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        interactions: { askUser },
+        onUserMessage,
+        asksSecretQuestions: () => parentOutsideStrict,
+      }),
+    );
+    const result = settled(runtime.start(agentRun()));
+    await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+    // Strict is not loosened for the child: only the secret question is.
+    expect(provider.starts[0]).not.toHaveProperty("strict");
+    if (!parentOutsideStrict) {
+      expect(provider.starts[0]).not.toHaveProperty("asksSecretQuestions");
+      await provider.emit({ kind: "completed", sessionId });
+      await result;
+      continue;
+    }
+    expect(provider.starts[0]).toMatchObject({ asksSecretQuestions: true });
+    await provider.emit({
+      kind: "user-input-request",
+      sessionId,
+      requestId: "question-1",
+      prompt: "Database credential?",
+      options: [],
+      secret: true,
+    });
+    await vi.waitFor(() => expect(provider.answeredQuestions).toHaveLength(1));
+    await provider.emit({ kind: "text-delta", sessionId, text: "Connected", occurredAt: now });
+    await provider.emit({ kind: "completed", sessionId });
+    expect((await result).kind).toBe("completed");
+    expect(provider.answeredQuestions[0]).toMatchObject({ answer: sentinel });
+    expect(onUserMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "answer",
+        text: expect.stringContaining("Database credential?"),
+      }),
+    );
+    expect(JSON.stringify(onUserMessage.mock.calls)).not.toContain(sentinel);
+  }
 });
 
 it("refuses an unanswered question instead of manufacturing an empty provider answer", async () => {

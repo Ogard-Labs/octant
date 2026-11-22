@@ -305,6 +305,13 @@ export const RunningService = Schema.Struct({
   ownership: RunningServiceOwnership,
   health: LocalServerHealth,
   openAvailable: Schema.Boolean,
+  /**
+   * Whether a connection to `127.0.0.1` on this port reaches the socket, which
+   * is where a port forward dials. A service bound only to a LAN address or to
+   * `[::1]` shares the port number but not the connection, so it is not
+   * forwardable; absent means the host did not say, and no forward is offered.
+   */
+  forwardable: Schema.optional(Schema.Boolean),
   stop: LocalServerStopAvailability,
   projectId: ProjectId,
   projectName: Schema.NonEmptyTrimmedString,

@@ -117,6 +117,7 @@ import {
   WorkTurnService,
   WorkTurnServiceError,
   type WorkTurnServiceDependencies,
+  wakeupTurnOutcome,
 } from "./workTurnService";
 import { WorkProjectStatusFiles } from "./workProjectStatusFiles";
 import { WorkTurnRuntime, workSessionTerms, type WorkTurnRuntimePort } from "./workTurnRuntime";
@@ -129,6 +130,7 @@ import { liveWorkFilesystem } from "./workFilesystemPort";
 import type { TurnEndSummary } from "../metrics/turnEnd";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { HOST_DRAINING_REFUSAL, HostDrain } from "../hostDrain";
 import { frameExternalContentForModel } from "../context/externalContentFraming";
 import {
   WINDOWS_KEPT_SANDBOX_REFUSAL,
@@ -2190,6 +2192,124 @@ describe("WorkTurnService", () => {
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("a draining host refuses a new turn and lets a running one finish", async () => {
+    // Composed as the harness wiring composes it: the drain answers admission
+    // first and counts the turns every mode reports starting and ending.
+    const drain = new HostDrain({ now: Date.now });
+    const started = deferred<void>();
+    const release = deferred<void>();
+    const run = vi.fn<WorkTurnRuntimePort["run"]>(async () => {
+      started.resolve();
+      await release.promise;
+      return { kind: "completed", response: "Provider reply" };
+    });
+    const fixture = serviceFixture({
+      turnRuntime: { run },
+      nativeHarness: {
+        contextFor: () => [],
+        admitTurn: () => {
+          const refusal = drain.refusal();
+          return refusal === undefined
+            ? { kind: "admitted" }
+            : { kind: "draining", detail: refusal };
+        },
+        turnStarted: (scope) => drain.turnStarted(scope),
+        turnCompleted: vi.fn(async () => undefined),
+        turnEnded: (scope) => drain.turnEnded(scope),
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await started.promise;
+
+    expect(drain.enter(10)).toEqual({ state: "draining", running: 1 });
+    const next = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    await expect(
+      fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        requestId: decodeWorkTurnRequestId(next),
+        turnId: decodeWorkTurnId(next),
+        prompt: "One more thing",
+      }),
+    ).rejects.toMatchObject({
+      failure: { category: "unavailable", message: HOST_DRAINING_REFUSAL },
+    });
+    expect(run).toHaveBeenCalledOnce();
+
+    release.resolve();
+    await fixture.waitForIdle();
+    expect(await fixture.service.lookupFirstTurn(ids.window, ids.request)).toMatchObject({
+      kind: "accepted",
+      turn: { status: "completed" },
+    });
+    expect(drain.status()).toEqual({ state: "drained" });
+  });
+
+  it("a drain that begins while a due wake-up's turn describes its image keeps the wake-up for later instead of reporting drained", async () => {
+    const drain = new HostDrain({ now: Date.now });
+    const describing = deferred<void>();
+    const describe = deferred<void>();
+    const store = await attachmentStore();
+    const attachmentId = decodeWorkAttachmentId("30000000-0000-4000-8000-000000000012");
+    const run = vi.fn<WorkTurnRuntimePort["run"]>(async () => ({
+      kind: "completed",
+      response: "Should not run",
+    }));
+    const fixture = serviceFixture({
+      attachments: store,
+      supportsAttachments: () => false,
+      describeImages: async (input) => {
+        describing.resolve();
+        await describe.promise;
+        return {
+          status: "described",
+          images: input.images.map((image) => ({
+            attachmentId: image.attachmentId,
+            name: image.name,
+            describedBy: { model: "Haiku 5.5", provider: "Anthropic" },
+            text: "A chart.",
+          })),
+        };
+      },
+      turnRuntime: { run },
+      nativeHarness: {
+        contextFor: () => [],
+        admitTurn: () => {
+          const refusal = drain.refusal();
+          return refusal === undefined
+            ? { kind: "admitted" }
+            : { kind: "draining", detail: refusal };
+        },
+        acceptTurn: (scope) => drain.accept(scope),
+        turnStarted: (scope) => drain.turnStarted(scope),
+        turnCompleted: vi.fn(async () => undefined),
+        turnEnded: (scope) => drain.turnEnded(scope),
+      },
+    });
+    await fixture.service.stageAttachment(ids.window, {
+      threadId: ids.thread,
+      attachmentId,
+      displayName: "chart.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([137, 80, 78]),
+    });
+    // The wake-up schedule's own path: admission returns the late drain as a
+    // value, which the schedule reads as busy and offers again later.
+    const sending = wakeupTurnOutcome(
+      fixture.service.startHostTurn(ids.window, {
+        ...startCommand(),
+        attachmentIds: [attachmentId],
+      }),
+      String(ids.turn),
+    );
+    await describing.promise;
+
+    expect(drain.enter(10)).toEqual({ state: "drained" });
+    describe.resolve();
+    await expect(sending).resolves.toEqual({ status: "busy" });
+    expect(run).not.toHaveBeenCalled();
+    expect(drain.status()).toEqual({ state: "drained" });
+  });
+
   it("hands what a Work turn cost and how it ran to the harness when it completes and when it ends", async () => {
     const summary: TurnEndSummary = {
       stopReason: "end-of-turn",
@@ -3271,6 +3391,40 @@ describe("WorkTurnService", () => {
     expect(kinds.indexOf("project-memory")).toBe(yours + 3);
   });
 
+  it("starts no turn the host begins as itself on Google Antigravity, and takes the person's own", async () => {
+    const runs: Array<string> = [];
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          runs.push(input.command.prompt);
+          return { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+    const provider = fixture.persistence.readProviderInstance();
+    fixture.persistence.readProviderInstance.mockReturnValue({
+      ...provider,
+      driverKind: "antigravity",
+    } as never);
+
+    // A routine, a wake, a goal round, a usage-limit resume, a child's
+    // result, a peer's task and a restart continuation all start this way.
+    await expect(
+      fixture.service.startFirstTurn(ROUTINE_HOST_SCOPE_ID, startCommand()),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "unauthorized",
+        message:
+          "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Choose a provider that uses a Gemini API key, such as Gemini CLI with an API key.",
+      },
+    });
+    expect(runs).toEqual([]);
+
+    await expect(fixture.service.startFirstTurn(ids.window, startCommand())).resolves.toMatchObject(
+      { kind: "accepted" },
+    );
+  });
+
   it("gives a routine's Work turn your instructions though it gets no person memory", async () => {
     const contexts: Array<ReadonlyArray<ProviderContextBlock>> = [];
     const fixture = serviceFixture({
@@ -3660,6 +3814,33 @@ describe("WorkTurnService", () => {
       gate.resolve();
       await fixture.waitForIdle();
     }
+  });
+
+  it("a Work send the spend ceiling refuses does not hold a later drain open", async () => {
+    const drain = new HostDrain({ now: Date.now });
+    const run = vi.fn<WorkTurnRuntimePort["run"]>();
+    const fixture = serviceFixture({
+      spendCeiling: {
+        admit: vi.fn().mockReturnValue({
+          status: "refused",
+          refusal: { message: "This Project reached its spend ceiling." },
+        }),
+        settle: vi.fn(),
+      },
+      turnRuntime: { run },
+      nativeHarness: {
+        contextFor: () => [],
+        acceptTurn: (scope) => drain.accept(scope),
+        turnStarted: (scope) => drain.turnStarted(scope),
+        turnCompleted: vi.fn(async () => undefined),
+        turnEnded: (scope) => drain.turnEnded(scope),
+      },
+    });
+    await expect(fixture.service.startFirstTurn(ids.window, startCommand())).rejects.toMatchObject({
+      failure: { message: "This Project reached its spend ceiling." },
+    });
+    expect(run).not.toHaveBeenCalled();
+    expect(drain.enter(10)).toEqual({ state: "drained" });
   });
 
   it("releases the spend reservation when a Work turn is cancelled", async () => {

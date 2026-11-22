@@ -162,10 +162,12 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   pairedComputerForget: "octant-only",
   pairedComputerSettle: "octant-only",
   pairedComputerRequest: "octant-only",
+  pairedComputerIntroduceToHub: "octant-only",
   remoteServerPageOpen: "octant-only",
   remoteServerPageSign: "octant-only",
   remoteServerPageSigned: "octant-only",
   remoteServerPageForgetHost: "octant-only",
+  remotePortForwardOpen: "octant-only",
 } as const satisfies Readonly<Record<ChannelKey, NightlyChannelClass>>;
 
 const CLASS_BY_CHANNEL: ReadonlyMap<string, NightlyChannelClass> = new Map(

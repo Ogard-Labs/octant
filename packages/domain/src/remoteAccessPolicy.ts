@@ -166,6 +166,9 @@ const LOCAL_HOST_ACTIONS = new Set([
   "host-key.rotate",
   "host.service.start",
   "host.service.stop",
+  // Refusing new turns before an update stops the host, and is the person's
+  // to start as stopping is.
+  "host.service.drain",
   "host.service.restart",
   "host.service.enable",
   "host.service.disable",

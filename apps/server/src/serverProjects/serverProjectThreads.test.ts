@@ -15,6 +15,7 @@ import {
   serverCodeCheckoutRoot,
   serverProjectOf,
 } from "./serverProjectThreads";
+import { ServerRuntimeRecords } from "./serverRuntimeRecords";
 import {
   canRunThrowawaySshd,
   startThrowawaySshd,
@@ -164,6 +165,7 @@ describe.skipIf(!canRunThrowawaySshd)("a server Project's turn", () => {
           refusal: () => options.refusal,
         },
         composition,
+        runtimes: new ServerRuntimeRecords({ connection, hostId: () => "test-host" }),
         record: (input) => {
           recorded.push({
             command: input.command,
@@ -176,7 +178,7 @@ describe.skipIf(!canRunThrowawaySshd)("a server Project's turn", () => {
       { thread, windowId, secrets: [] },
     );
     const call = async (name: string, input: unknown) => {
-      if (bound.status !== "bound") throw new Error(bound.message);
+      if (bound.status !== "bound") throw new Error("The harness tools were not bound.");
       return bound.tools.execute({
         name,
         inputJson: JSON.stringify(input),

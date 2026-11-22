@@ -1,15 +1,18 @@
 import type { ClaudeAuthentication, ProviderFailure } from "@octant/contracts";
+import type { ProviderOwnChannels } from "@octant/provider-sdk";
 import { Effect, type Scope } from "effect";
 
 import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
 import { providerHostEnvironment } from "./providerHostEnvironment";
 import {
   ISOLATED_CLAUDE_LAUNCH_GUARDS,
-  OPEN_CLAUDE_LAUNCH_GUARDS,
   ensureClaudeAccountConfigDirectory,
   hostDisableOnlySwitches,
   isolatedClaudeAccountEnvironment,
+  openClaudeLaunchGuards,
+  openLaunchTelemetryOptOut,
 } from "./claudeAccountIsolation";
+import { launchOwnChannels } from "./providerOwnChannels";
 
 export interface ClaudeEnvironmentScope {
   readonly environment: NodeJS.ProcessEnv;
@@ -26,6 +29,8 @@ export interface ClaudeEnvironmentScopeOptions {
   readonly configDirectory?: string;
   /** Whether the launch is Strict; absent is Strict (`isolatedClaudeAccountEnvironment`). */
   readonly strict?: boolean;
+  /** The person's provider telemetry and self-update switches; read only outside Strict. */
+  readonly ownChannels?: ProviderOwnChannels;
 }
 
 interface ClaudeEnvironmentOverrides {
@@ -33,6 +38,7 @@ interface ClaudeEnvironmentOverrides {
   readonly gatewayBaseUrl?: string;
   readonly configDirectory?: string;
   readonly strict?: boolean;
+  readonly ownChannels?: ProviderOwnChannels;
 }
 
 const PASSTHROUGH_VARIABLES = new Set([
@@ -114,6 +120,7 @@ export function sanitizeClaudeEnvironment(
         ? {}
         : { gatewayBaseUrl: overrides.gatewayBaseUrl }),
       ...(overrides.strict === false ? { strict: false } : {}),
+      ...(overrides.ownChannels === undefined ? {} : { ownChannels: overrides.ownChannels }),
     });
     Object.assign(environment, packagedSmokeObserverEnvironment(hostEnvironment));
     return environment;
@@ -122,12 +129,13 @@ export function sanitizeClaudeEnvironment(
   if (overrides.strict === false && authentication === "subscription") {
     // The host's own Claude sign-in, outside Strict: the host's environment
     // less Octant's variables and other providers' keys, which keeps the
-    // host's Claude account directories, with only the switches that are not
-    // channels set.
+    // host's Claude account directories, with the telemetry and self-update
+    // guards the person's provider switches keep.
     return {
       ...providerHostEnvironment(hostEnvironment),
       ...packagedSmokeObserverEnvironment(hostEnvironment),
-      ...OPEN_CLAUDE_LAUNCH_GUARDS,
+      ...openLaunchTelemetryOptOut(hostEnvironment, overrides.ownChannels),
+      ...openClaudeLaunchGuards(launchOwnChannels(false, overrides.ownChannels)),
     };
   }
 
@@ -199,6 +207,7 @@ export function makeClaudeEnvironmentScope(
                   : {}),
                 configDirectory,
                 ...(options.strict === false ? { strict: false } : {}),
+                ...(options.ownChannels === undefined ? {} : { ownChannels: options.ownChannels }),
               }),
             } satisfies ClaudeEnvironmentScope;
           },
@@ -221,6 +230,7 @@ export function makeClaudeEnvironmentScope(
             environment: sanitizeClaudeEnvironment(authentication, hostEnvironment, {
               configDirectory,
               ...(options.strict === false ? { strict: false } : {}),
+              ...(options.ownChannels === undefined ? {} : { ownChannels: options.ownChannels }),
             }),
           } satisfies ClaudeEnvironmentScope;
         },
@@ -236,7 +246,12 @@ export function makeClaudeEnvironmentScope(
       environment: sanitizeClaudeEnvironment(
         authentication,
         hostEnvironment,
-        options.strict === false ? { strict: false } : {},
+        options.strict === false
+          ? {
+              strict: false,
+              ...(options.ownChannels === undefined ? {} : { ownChannels: options.ownChannels }),
+            }
+          : {},
       ),
     });
   }

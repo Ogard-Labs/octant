@@ -3,10 +3,12 @@ import {
   LOCAL_HOST_ID,
   MAX_PROVIDER_TOOL_RESULT_BYTES,
   decodeAgentRunControlRequest,
+  decodeAgentRunParentThreadId,
   decodeAgentRunResumeRequest,
   decodeProjectId,
   decodeProviderInstanceId,
   decodeProviderModelId,
+  personalSignInRefusals,
   ProviderFailureCategory,
   type AgentRun,
   type AgentRunRole,
@@ -64,7 +66,7 @@ export interface AgentsToolUnavailableTarget {
   readonly providerInstanceId: string;
   readonly displayName: string;
   readonly driverKind: string;
-  readonly reason: "not-ready" | "tools-unsupported" | "project-policy";
+  readonly reason: "not-ready" | "tools-unsupported" | "project-policy" | "helper-runs-refused";
 }
 
 export interface AgentRunDelegationInput {
@@ -100,6 +102,25 @@ export interface RemoteDelegationPort {
     readonly targetProjectId: string;
     readonly task: string;
   }) => Promise<AgentRunDelegationResult>;
+  /**
+   * The members this host may delegate to and each one's Projects, as each
+   * member lists them under the grant it gave this host: names and ids only.
+   */
+  readonly listTargets?: () => Promise<
+    ReadonlyArray<{
+      readonly memberId: string;
+      readonly name: string;
+      readonly projects: ReadonlyArray<{
+        readonly projectId: string;
+        readonly name: string;
+        readonly modes: ReadonlyArray<"work" | "code">;
+      }>;
+      /** False when that member stopped accepting delegated work. */
+      readonly accepting?: boolean;
+      /** How busy that member is: light, busy or heavy. */
+      readonly load?: "light" | "busy" | "heavy";
+    }>
+  >;
 }
 
 export interface AgentRunDelegationRouting {
@@ -189,21 +210,58 @@ async function markedDelegationRefused(
   return options.askMarkedDelegation === undefined || !(await options.askMarkedDelegation(signal));
 }
 
+/**
+ * Why this parent starts no helper at all: its own provider's declared
+ * refusal, so capabilities report delegation blocked before the model tries.
+ */
+function parentHelperRunRefusal(options: AgentRunDelegationOptions): string | undefined {
+  let parentThreadId: AgentRunControlRequest["parentThreadId"];
+  try {
+    parentThreadId = decodeAgentRunParentThreadId(options.parentThreadId);
+  } catch {
+    // An id that does not decode names no parent to report on; delegating
+    // from it is refused when the request decodes.
+    return undefined;
+  }
+  return options.admission.authorizeCreation({ parentThreadId, windowId: options.windowId })
+    ?.helperRunRefusal;
+}
+
+/** The declared refusal of an explicit target its provider keeps from helper runs. */
+function targetHelperRunRefusal(
+  options: AgentRunDelegationOptions,
+  providerInstanceId: string | undefined,
+): string | undefined {
+  const target = options
+    .listUnavailableTargets?.()
+    .find(
+      (candidate) =>
+        candidate.providerInstanceId === providerInstanceId &&
+        candidate.reason === "helper-runs-refused",
+    );
+  return target === undefined
+    ? undefined
+    : personalSignInRefusals(target.driverKind)?.refusesHelperRuns;
+}
+
 export function agentRunDelegationCapabilities(options: AgentRunDelegationOptions) {
   const posture = options.admission.settings.current().creationPosture;
   // A thread that can still ask its person is not blocked: the call asks.
   const tainted = options.isTainted?.() === true && options.askMarkedDelegation === undefined;
   const paused = options.isPaused?.() === true;
+  const refused = parentHelperRunRefusal(options) !== undefined;
   return {
     posture,
-    delegationBlocked: posture !== "automatic" || tainted || paused,
-    ...(paused
-      ? { reason: "session-paused" }
-      : tainted
-        ? { reason: "delegate-tainted" }
-        : posture !== "automatic"
-          ? { reason: "creation-posture-off" }
-          : {}),
+    delegationBlocked: posture !== "automatic" || tainted || paused || refused,
+    ...(refused
+      ? { reason: "helper-runs-refused" }
+      : paused
+        ? { reason: "session-paused" }
+        : tainted
+          ? { reason: "delegate-tainted" }
+          : posture !== "automatic"
+            ? { reason: "creation-posture-off" }
+            : {}),
     roles: [...allowedAgentRunRolesForMode(options.mode)],
     targetSelection: {
       explicit: true,
@@ -212,9 +270,10 @@ export function agentRunDelegationCapabilities(options: AgentRunDelegationOption
     },
     dependencies: true,
     parentContext: options.admission.parentContext !== undefined,
-    // Reported by what this thread can do, so a Chat or Code thread never offers it.
+    // Reported by what this thread can do: a Work thread sends Work and a Code
+    // thread sends Code; a Chat thread never offers it.
     remoteDelegation:
-      options.remote !== undefined && options.mode === "work"
+      options.remote !== undefined && (options.mode === "work" || options.mode === "code")
         ? ("target-member" as const)
         : ("unavailable" as const),
     targets: options.listTargets(),
@@ -333,8 +392,14 @@ export async function startAgentRunDelegation(
       input.providerInstanceId === undefined ||
       input.modelId === undefined ||
       !eligible(input.providerInstanceId, input.modelId, input.reasoning)
-    )
-      return { status: "refused", reason: "delegate-target-unavailable" };
+    ) {
+      const refusal = targetHelperRunRefusal(options, input.providerInstanceId);
+      return {
+        status: "refused",
+        reason: "delegate-target-unavailable",
+        ...(refusal === undefined ? {} : { message: refusal }),
+      };
+    }
     try {
       explicitTarget = {
         providerInstanceId: decodeProviderInstanceId(input.providerInstanceId),
@@ -346,6 +411,7 @@ export async function startAgentRunDelegation(
     }
   }
   let refusal: string | undefined;
+  let refusalMessage: string | undefined;
   let decision: NativeHarnessRouteDecision | undefined;
   let selected: AgentRunControlParentFacts["parentRoute"] | undefined;
   const admission = await admitAgentRunControlRequest(
@@ -354,6 +420,13 @@ export async function startAgentRunDelegation(
       authorizeCreation: (request) => {
         const parent = options.admission.authorizeCreation(request);
         if (parent === undefined) return undefined;
+        // Read before a route replaces the parent's own, so a thread on such
+        // a provider starts no helper on any provider.
+        if (parent.helperRunRefusal !== undefined) {
+          refusal = "helper-runs-refused";
+          refusalMessage = parent.helperRunRefusal;
+          return undefined;
+        }
         if (!allowedAgentRunRolesForMode(parent.parentMode).includes(controlRequest.role)) {
           refusal = "unsupported";
           return undefined;
@@ -437,7 +510,12 @@ export async function startAgentRunDelegation(
     },
     { controlRequest, windowId: options.windowId, confirmed: false },
   );
-  if (refusal !== undefined) return { status: "refused", reason: refusal };
+  if (refusal !== undefined)
+    return {
+      status: "refused",
+      reason: refusal,
+      ...(refusalMessage === undefined ? {} : { message: refusalMessage }),
+    };
   if (admission.kind === "refused") return { status: "refused", reason: admission.reason };
   if (admission.kind === "invalid")
     return { status: "refused", reason: "invalid-delegation", message: admission.message };
@@ -540,6 +618,12 @@ export function agentRunTargetAvailability(input: AgentRunTargetAvailabilityInpu
       displayName: instance.displayName,
       driverKind: String(instance.driverKind),
     };
+    // A provider whose own personal sign-in does not cover helper runs is
+    // never a target, however ready it is.
+    if (personalSignInRefusals(instance.driverKind)?.refusesHelperRuns !== undefined) {
+      unavailable.push({ ...named, reason: "helper-runs-refused" });
+      continue;
+    }
     const observed = input.observedState(instance.id);
     if (observed === undefined || observed.models.length === 0) {
       unavailable.push({ ...named, reason: "not-ready" });
@@ -638,6 +722,8 @@ export async function followUpAgentRunDelegation(
     !parent.liveAuthority.subagents
   )
     return { status: "refused", reason: "unauthorized" };
+  if (parent.helperRunRefusal !== undefined)
+    return { status: "refused", reason: "helper-runs-refused", message: parent.helperRunRefusal };
   if (run.version !== request.expectedVersion)
     return { status: "refused", reason: "stale-version" };
   if (run.executionKind !== "octant-managed" || run.lifecycleStatus !== "completed")

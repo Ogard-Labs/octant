@@ -48,6 +48,7 @@ import { createReplyDetailRouteHandler } from "../replyDetailRoutes";
 import { defaultShellSettings, windowAdmitsProject } from "@octant/domain/shell-policy";
 import { OCTANT_LOCAL_ACTOR_ID, ShellService } from "../shellService";
 import { notMeasuredProvider, SpendCeilingService } from "../spendCeilingService";
+import { acpUsageUnverified } from "../providers/acpProfiles";
 import { requireJournalHydration } from "../persistence/journalHydration";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -164,14 +165,16 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
         return workThreadProjection.read(input.threadId as never) !== undefined;
       },
       projectExists: (projectId) => persistence.readProject(projectId as never) !== undefined,
-      notMeasuredProvider: (providerInstanceId, ranAtFullAccess) =>
+      notMeasuredProvider: (providerInstanceId, keptBelowFullAccess) =>
         notMeasuredProvider(
           {
             readProviderInstances: () => persistence.readProviderInstances(),
             observedState: (instanceId) => providerRuntimeRegistry.observedState(instanceId),
+            usageUnverified: (instance, version) =>
+              acpUsageUnverified(instance.driverKind, version),
           },
           providerInstanceId,
-          ranAtFullAccess,
+          keptBelowFullAccess,
         ),
     });
     spendCeilingHolder.service = spendCeilingService;

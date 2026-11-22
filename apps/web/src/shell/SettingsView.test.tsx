@@ -595,6 +595,7 @@ describe("SettingsView", () => {
           sshAgent: "available",
         }),
         command,
+        memberInstall: async () => ({ kind: "member-computers", members: [] }),
       } as never,
     });
     await user.click(screen.getByRole("button", { name: "Work in a server folder" }));
@@ -804,6 +805,25 @@ describe("SettingsView", () => {
     expect(props.onSettingsChange).toHaveBeenCalledWith({
       providerToolCallPauseLimitMinutes: null,
     });
+  });
+
+  it("keeps provider telemetry and self-update off by default, and saves either switch the person turns", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings({
+      providerController: providerControllerFixture(),
+      discoveryController: discoveryControllerFixture(),
+      initialDeepLink: { section: "providers" },
+    });
+    const telemetry = await screen.findByRole("switch", {
+      name: "Let providers send their own telemetry",
+    });
+    const selfUpdate = screen.getByRole("switch", { name: "Let providers update themselves" });
+    expect(telemetry).not.toBeChecked();
+    expect(selfUpdate).not.toBeChecked();
+    await user.click(telemetry);
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ providerTelemetry: true });
+    await user.click(selfUpdate);
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ providerSelfUpdate: true });
   });
 
   it("lists the provider catalog on Providers & Models and opens a driver's setup without another scan", async () => {

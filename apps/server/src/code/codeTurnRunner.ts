@@ -1,4 +1,5 @@
 import { beginSandboxTurn } from "../process/sandboxRuntimePolicy";
+import type { ProviderServerPlacement } from "@octant/provider-sdk/driver";
 import type { Questionnaire } from "@octant/contracts";
 import type { StalledTurnScope } from "../providers/turnBudget";
 import { isAbsolute } from "node:path";
@@ -188,6 +189,8 @@ export interface CodeTurnEvent {
   /** The labels a provider question offers; absent on every other category. */
   readonly options?: ReadonlyArray<string>;
   readonly questionnaire?: Questionnaire;
+  /** The question asks for a secret, answered masked and never recorded; only on `question`. */
+  readonly secret?: true;
   /** The ids a restated plan still lists, in order; only on `task-list`. */
   readonly taskIds?: ReadonlyArray<string>;
   readonly toolCallId?: string;
@@ -252,6 +255,8 @@ export interface CodeTurnRunnerInput {
   readonly extraFolders?: ReadonlyArray<string>;
   /** The thread's attachments folder, which the session reads and never writes. */
   readonly attachmentsFolder?: string;
+  /** The server a server Project's runtime runs on, for a runtime that runs there. */
+  readonly serverPlacement?: ProviderServerPlacement;
   readonly prompt: string;
   readonly resumeCursor?: ProviderResumeCursor;
   readonly onSessionReady?: (handle: ProviderSessionHandle) => Effect.Effect<void, CodeTurnFailure>;
@@ -539,6 +544,9 @@ export class CodeTurnRunner {
           ...(input.attachmentsFolder === undefined
             ? {}
             : { attachmentsFolder: input.attachmentsFolder }),
+          ...(input.serverPlacement === undefined
+            ? {}
+            : { serverPlacement: input.serverPlacement }),
           permissionPersistence: input.thread.permissionPersistence,
         })
         .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
@@ -1062,6 +1070,7 @@ export class CodeTurnRunner {
           }
         }),
       });
+      input.liveTurn?.promptSent();
 
       const awaitCollection = Fiber.join(collected).pipe(
         Effect.catchAll((error) =>
@@ -1339,6 +1348,7 @@ function normalizeProviderEvent(
         text: text(event.prompt),
         options: event.options.map((option) => text(option.label)),
         ...(event.questionnaire === undefined ? {} : { questionnaire: event.questionnaire }),
+        ...(event.secret === true ? { secret: true } : {}),
       });
     case "tool-request":
       return Effect.succeed({

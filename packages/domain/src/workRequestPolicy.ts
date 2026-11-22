@@ -74,6 +74,8 @@ function sameResolution(left: WorkRequestResolution, right: WorkRequestResolutio
     return left.approved === right.approved;
   }
   if (left.kind === "user-input" && right.kind === "user-input") {
+    // Two secret answers read alike: neither record holds the value.
+    if ("secret" in left || "secret" in right) return "secret" in left && "secret" in right;
     return left.answer === right.answer;
   }
   return false;

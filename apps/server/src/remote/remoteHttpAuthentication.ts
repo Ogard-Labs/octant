@@ -1,4 +1,10 @@
 import { createHash } from "node:crypto";
+import type {
+  ObserveForwardedServer,
+  RemotePortForwardAsker,
+  RemotePortForwardService,
+} from "./remotePortForwardService";
+import { decodeRemotePortForwardRequest, encodeRemotePortForwardResult } from "@octant/contracts";
 import type { RemoteClientPrincipal, StableHostId } from "@octant/contracts/remote-access";
 import {
   decodeRemoteChallengeRequestV1,
@@ -21,11 +27,16 @@ import {
   encodeRemoteServerGrantResult,
   encodeRemoteServerProxyRefusal,
   type RemoteServerGrantRequest,
+  type RemoteServerGrantSource,
   type RemoteServerProxyRefusalReason,
 } from "@octant/contracts";
 import type { RemoteAuthenticatedRequestResultV1 } from "@octant/contracts/remote-request-proof";
 import { buildRemoteSessionMetadataPayload, canonicalizeRemotePathQuery } from "@octant/domain";
-import { isAgentGrantSession, principalActsAsHostPerson } from "../clientPrincipal";
+import {
+  isAgentGrantSession,
+  principalActsAsHostPerson,
+  principalIsHubIntroduced,
+} from "../clientPrincipal";
 import {
   RemoteRequestProofError,
   type RemoteRequestProofService,
@@ -38,6 +49,7 @@ import type {
   RemoteServerGrantOpening,
   RemoteServerRelayOutcome,
   RemoteServerUpgradeOutcome,
+  RemoteThreadServerObservation,
 } from "./remoteServerGrantService";
 import {
   REMOTE_SERVER_PROXY_PATH,
@@ -62,8 +74,12 @@ export const REMOTE_AUTH_ROUTE_IDS = {
 /** Routes a proxy session reaches, and nothing else does. */
 export const REMOTE_SERVER_PROXY_ROUTE_IDS = {
   grants: "server-proxy-grants",
+  forwards: "server-proxy-forwards",
   relay: "server-proxy-relay",
 } as const;
+
+/** `/api/server-proxy/<forward id>`: one connection of a port forward, as a WebSocket of bytes. */
+const FORWARD_PATH_PATTERN = new RegExp(`^${REMOTE_SERVER_PROXY_PATH}(rpf_[a-f0-9]{64})$`);
 
 /** `/api/server-proxy/<grant id>` and the dev server's own path after it. */
 const RELAY_PATH_PATTERN = new RegExp(`^${REMOTE_SERVER_PROXY_PATH}(rsg_[a-f0-9]{64})(/.*)?$`);
@@ -160,6 +176,7 @@ export interface RequestTransportFacts {
   readonly listenerTrust: "loopback" | "remote";
   readonly sourceClass: "loopback" | "lan-private" | "tailscale" | "unknown";
   readonly sourceKey: string;
+  readonly privateAddress?: string;
 }
 
 export interface RemoteVerifiedRequestFacts {
@@ -247,6 +264,17 @@ export interface RemoteServerProxyGrantPort {
     readonly stillAuthorized: () => boolean;
     readonly signal: AbortSignal;
   }) => Promise<RemoteServerRelayOutcome>;
+  /**
+   * Observe a thread's listed server for a port forward, under the device's
+   * own scope as a grant request is. Absent, a forward naming a server is
+   * refused as unavailable.
+   */
+  readonly observeThreadServer?: (input: {
+    readonly request: Request;
+    readonly principal: Extract<RemoteClientPrincipal, { readonly kind: "remote-device" }>;
+    readonly source: RemoteServerGrantSource;
+    readonly signal: AbortSignal;
+  }) => Promise<RemoteThreadServerObservation>;
   /** Open a WebSocket under a grant to its dev server, for an authenticated upgrade. */
   readonly relayUpgrade: (input: {
     readonly request: Request;
@@ -263,6 +291,8 @@ export interface RemoteServerProxyGrantPort {
 export interface RemoteServerProxyAuthentication {
   readonly sessions: RemoteServerProxySessions;
   readonly grants: RemoteServerProxyGrantPort;
+  /** Ports a paired device reaches as raw TCP; absent, both forward routes refuse. */
+  readonly forwards?: RemotePortForwardService;
 }
 
 interface RemoteRequestVerifier {
@@ -679,6 +709,70 @@ export function createRemoteHttpAuthentication(
         admittedBy === undefined
           ? verified
           : { ...verified, principal: Object.freeze({ ...verified.principal, admittedBy }) };
+      // A forward's server is observed under the device's own scope, bound to
+      // this request; the host, not the client, says which port it holds.
+      const remoteDevice = handoff.principal;
+      const observeThreadServer = proxy.grants.observeThreadServer;
+      const observeServer: ObserveForwardedServer | undefined =
+        observeThreadServer === undefined || remoteDevice.kind !== "remote-device"
+          ? undefined
+          : (source, signal) =>
+              observeThreadServer({
+                request: handoff.request,
+                principal: remoteDevice,
+                source,
+                signal: signal ?? request.signal,
+              });
+      if (route.id === REMOTE_SERVER_PROXY_ROUTE_IDS.forwards) {
+        if (proxy.forwards === undefined) throw new RemoteHttpAuthFailure(503, "unavailable");
+        const forwardRequest = decodeBounded(
+          decodeRemotePortForwardRequest,
+          await readJsonObject(handoff.request),
+        );
+        return jsonResponse(
+          200,
+          encodeRemotePortForwardResult(
+            await proxy.forwards.open({
+              deviceId: String(verified.principal.deviceId),
+              asker: forwardAsker(handoff.principal),
+              sessionIdDigest: digestRemoteServerProxySessionId(sessionId),
+              request: forwardRequest,
+              ...(observeServer === undefined ? {} : { observeServer }),
+              stillAuthorized: () => proxy.sessions.describe(sessionId) !== undefined,
+              signal: request.signal,
+            }),
+          ),
+        );
+      }
+      const forwardId = FORWARD_PATH_PATTERN.exec(new URL(request.url).pathname)?.[1];
+      if (route.id === REMOTE_SERVER_PROXY_ROUTE_IDS.relay && forwardId !== undefined) {
+        if (
+          proxy.forwards === undefined ||
+          handoff.requestFacts.method !== "GET" ||
+          request.headers.get("upgrade")?.toLowerCase() !== "websocket"
+        ) {
+          return refusedRelay("upgrade-refused").response;
+        }
+        const accepted = await proxy.forwards.accept({
+          deviceId: String(verified.principal.deviceId),
+          sessionIdDigest: digestRemoteServerProxySessionId(sessionId),
+          forwardId,
+          ...(observeServer === undefined ? {} : { observeServer }),
+          signal: request.signal,
+        });
+        if (accepted.kind === "refused") {
+          if (accepted.reason === "busy") throw new RemoteHttpAuthFailure(503, "rate-limited");
+          if (accepted.reason === "unavailable") {
+            throw new RemoteHttpAuthFailure(503, "unavailable");
+          }
+          return refusedRelay("grant-closed").response;
+        }
+        const held = release;
+        release = undefined;
+        return held === undefined
+          ? accepted.response
+          : withAdmissionRelease(accepted.response, held);
+      }
       if (route.id === REMOTE_SERVER_PROXY_ROUTE_IDS.relay) {
         const relayed = await relayToGrant(request, handoff, sessionId, proxy);
         if (relayed.kind !== "relayed") return relayed.response;
@@ -736,6 +830,18 @@ export function createRemoteHttpAuthentication(
   };
 
   return { handlePreAuthRoute, handleAuthenticated, handleServerProxy, hasServerProxySession };
+}
+
+/**
+ * Who asks for a port forward, from the host's own record of the device: a
+ * device its person paired forwards any port, a device only the hub
+ * introduced forwards a thread's server within the member's Act item, and an
+ * agent grant forwards nothing.
+ */
+function forwardAsker(principal: RemoteClientPrincipal): RemotePortForwardAsker {
+  if (isAgentGrantSession(principal)) return "agent-grant";
+  if (principalActsAsHostPerson(principal)) return "host-person";
+  return principalIsHubIntroduced(principal) ? "hub-introduced" : "agent-grant";
 }
 
 /**

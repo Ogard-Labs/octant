@@ -1,4 +1,9 @@
-import { boundPrincipalIsRestricted, boundPrincipalIsAgent } from "./principalRouteContext";
+import {
+  boundPrincipalIsRestricted,
+  boundPrincipalIsAgent,
+  boundPrincipalIsHubIntroduced,
+} from "./principalRouteContext";
+import { hubActRefusal, type HubActScopePort } from "./hub/hubActScope";
 import { principalActsAsHostPerson } from "./clientPrincipal";
 import {
   decodeImportProviderFoldersRequest,
@@ -42,6 +47,8 @@ export interface ProjectRouteDependencies {
   readonly providerFolderScan?: ProviderFolderScanApi;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
+  /** The member's Act item, read at each request; undefined while this host is in no hub. */
+  readonly hubActScope?: () => HubActScopePort | undefined;
 }
 
 export function createProjectRouteHandler(dependencies: ProjectRouteDependencies) {
@@ -160,10 +167,42 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
     }
 
     try {
-      if (isBootstrap) return response(await dependencies.service.bootstrap(windowId), 200, origin);
+      // A device only the hub introduced starts Code threads only in a
+      // Project the member's Act item names, so the Code Projects it reads
+      // are those, read at this request; the Code route refuses the rest.
+      const actScope = boundPrincipalIsHubIntroduced(request)
+        ? dependencies.hubActScope?.()
+        : undefined;
+      const outsideAct = (project: { readonly id: unknown; readonly type: string }) =>
+        actScope !== undefined &&
+        project.type === "code" &&
+        hubActRefusal(actScope, String(project.id), "start") !== undefined;
+      if (isBootstrap) {
+        const bootstrap = await dependencies.service.bootstrap(windowId);
+        if (actScope === undefined) return response(bootstrap, 200, origin);
+        const hidden = new Set(
+          [...bootstrap.active, ...bootstrap.archived]
+            .filter(outsideAct)
+            .map((project) => String(project.id)),
+        );
+        return response(
+          {
+            active: bootstrap.active.filter((project) => !hidden.has(String(project.id))),
+            archived: bootstrap.archived.filter((project) => !hidden.has(String(project.id))),
+            availability: bootstrap.availability.filter(
+              (entry) => !hidden.has(String(entry.projectId)),
+            ),
+            memory: bootstrap.memory.filter((entry) => !hidden.has(String(entry.projectId))),
+          },
+          200,
+          origin,
+        );
+      }
       if (isSearch)
         return response(
-          await dependencies.service.search(url.searchParams.get("q") ?? ""),
+          (await dependencies.service.search(url.searchParams.get("q") ?? "")).filter(
+            (project) => !outsideAct(project),
+          ),
           200,
           origin,
         );
@@ -500,6 +539,24 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           {
             category: "unauthorized",
             message: "A Project's trust in a provider's own setup is set on the host.",
+          },
+          403,
+          origin,
+        );
+      }
+      // Opening a Project to other members' Code work is the person's choice
+      // about their own repository, and the mark carries the delivery target
+      // they confirmed, so a device the hub introduced cannot set it.
+      if (
+        command.kind === "change-code-project-delegated-code" &&
+        principal !== undefined &&
+        !principalActsAsHostPerson(principal)
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message:
+              "Whether a Project takes delegated Code work is set by this computer's person.",
           },
           403,
           origin,

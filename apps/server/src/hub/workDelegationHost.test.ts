@@ -99,6 +99,7 @@ function services(overrides: Partial<WorkDelegationServices> = {}) {
       },
     },
     scope: SCOPE,
+    helperRunRefusal: () => undefined,
     uuid: () => ids.shift() ?? "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
     ...overrides,
   };
@@ -227,6 +228,22 @@ describe("the Work thread a delegation becomes on the receiving spoke", () => {
     });
     expect(executed).toEqual([]);
     expect(noDefault.executed).toEqual([]);
+  });
+
+  it("starts no thread when this host's Work default is a provider that refuses helper runs", async () => {
+    const { host, executed, firstTurns } = services({
+      helperRunRefusal: (providerInstanceId) =>
+        providerInstanceId === "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+          ? "Google doesn't support Google Antigravity as a helper agent."
+          : undefined,
+    });
+
+    expect(await host.startThread(input)).toEqual({
+      status: "refused",
+      kind: "provider-unavailable",
+    });
+    expect(executed).toEqual([]);
+    expect(firstTurns).toEqual([]);
   });
 
   it("refuses a delegation and starts nothing while Work is turned off on this host", async () => {

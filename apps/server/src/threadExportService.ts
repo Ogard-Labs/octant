@@ -61,6 +61,22 @@ const IN_PROGRESS = new Set(["queued", "streaming", "waiting", "running", "accep
 const MAX_CODE_EXPORT_CONVERSATION_PAGES = 100;
 const decodeCut = Schema.decodeUnknownSync(UtcTimestamp);
 
+/**
+ * The person's messages a running turn took in, as that turn's user lines at
+ * the times they were sent. They are journaled beside the turn, not in it, so
+ * an export that read only the turn would leave out what the person said.
+ */
+function steeredEntries(
+  steered: WorkTurnState["steeredMessages"],
+): ReadonlyArray<ThreadExportTranscriptEntry> {
+  return (steered ?? []).map((message) => ({
+    role: "user",
+    text: message.body,
+    occurredAt: message.steeredAt,
+    status: "completed",
+  }));
+}
+
 export interface ThreadExportChatPort {
   readonly read: (threadId: string) => ChatThreadView | undefined;
 }
@@ -373,6 +389,7 @@ export class ThreadExportService {
           occurredAt: turn.acceptedAt,
           status: "completed",
         });
+        entries.push(...steeredEntries(turn.steeredMessages));
         if (turn.response !== undefined && turn.response.length > 0) {
           entries.push({
             role: "assistant",
@@ -383,6 +400,8 @@ export class ThreadExportService {
         }
         continue;
       }
+      // The person's steered messages follow the turn's own prompt line.
+      let steered = false;
       for (const line of turn.transcript) {
         entries.push({
           role: line.role,
@@ -390,7 +409,12 @@ export class ThreadExportService {
           occurredAt: line.role === "user" ? turn.acceptedAt : turn.updatedAt,
           status: transcriptStatus(line.status ?? turn.status, false),
         });
+        if (!steered && line.role === "user") {
+          entries.push(...steeredEntries(turn.steeredMessages));
+          steered = true;
+        }
       }
+      if (!steered) entries.push(...steeredEntries(turn.steeredMessages));
     }
     const attachments = this.#threadAttachments(threadId, withCaptures);
     const completion =
@@ -529,6 +553,7 @@ export class ThreadExportService {
           status: "completed",
         });
       }
+      entries.push(...steeredEntries(turn.steeredMessages));
       if (turn.status !== "completed") continue;
       const response = await this.#readEvidenceText(
         windowId,

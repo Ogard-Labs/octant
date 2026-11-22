@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import {
   HUB_AUTO_APPLY_KINDS,
   HUB_GRANT_ITEMS,
@@ -285,6 +286,11 @@ function parseGrantItems(text: string): ReadonlyArray<HubGrantItem> | undefined 
 
 export interface RunHubCliCommandInput {
   readonly command: HubCliCommand;
+  /**
+   * Where `octant hub join -` reads its code: one line, so a code passed by
+   * another program never appears in the computer's process list.
+   */
+  readonly stdin?: NodeJS.ReadableStream;
   readonly session: OpenedLocalControlSession;
   /** `isTTY` decides whether the QR code sets its own colours. */
   readonly stdout: { readonly write: (chunk: string) => unknown; readonly isTTY?: boolean };
@@ -328,8 +334,14 @@ export async function runHubCliCommand(input: Input): Promise<number> {
       return await runDisable(input, command.removeService);
     case "join-code":
       return await runJoinCode(input, command.owner);
-    case "join":
-      return await runJoin(input, command.code, command.items);
+    case "join": {
+      const code = command.code === "-" ? await readOneLine(input.stdin) : command.code;
+      if (code === undefined || code.trim() === "") {
+        input.stderr.write("No join code arrived on standard input.\n");
+        return 1;
+      }
+      return await runJoin(input, code.trim(), command.items);
+    }
     case "grant":
       return await runGrant(input, command.items);
     case "leave":
@@ -795,6 +807,18 @@ async function runJoinCode(input: Input, owner: boolean): Promise<number> {
     ].join("\n"),
   );
   return 0;
+}
+
+/** The first line a stream carries, or undefined when it ends without one. */
+async function readOneLine(stream: NodeJS.ReadableStream | undefined): Promise<string | undefined> {
+  if (stream === undefined) return undefined;
+  const lines = createInterface({ input: stream, terminal: false });
+  try {
+    for await (const line of lines) return line;
+    return undefined;
+  } finally {
+    lines.close();
+  }
 }
 
 async function runJoin(
