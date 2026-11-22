@@ -251,15 +251,15 @@ Side Chat never gets the tool.
 Octant offers what each model declares. It adds only the bounds a host needs
 to stay healthy:
 
-| Bound                    | Value                                                              | Why                                                                                                                                                                                                                                   |
-| ------------------------ | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Clip length              | The model's declared range; default its declared default, else 8 s | The provider's own range; a short default keeps a first clip quick and cheap                                                                                                                                                          |
-| Resolution, ratio, audio | The model's declared values; default its declared default          | The provider's own range                                                                                                                                                                                                              |
-| Stored size of one clip  | 1 GB                                                               | Far above a 30-second 4K MP4; a larger response is refused, not truncated, so a broken one cannot fill the disk                                                                                                                       |
-| Job time                 | 30 minutes                                                         | Long enough for a 4K clip under load; the job then fails as `timeout`, and the driver is asked to cancel and forget it                                                                                                                |
-| Running jobs             | The image job service's host concurrency                           | Video jobs share the bounded queue image jobs already use                                                                                                                                                                             |
-| Queued jobs              | 16 video jobs per host, counting only video jobs waiting to start  | A kept choice lets calls start without a card, so a runaway loop cannot queue without end; image jobs waiting in the shared queue do not count against it, and a further video call is refused with "Too many video jobs are queued." |
-| Agent call wait          | 2 minutes                                                          | As for images; after that the call answers `generating` and the clip appears when done                                                                                                                                                |
+| Bound                    | Value                                                                                         | Why                                                                                                                                                                                                                                   |
+| ------------------------ | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Clip length              | The model's declared range; default its declared default, else the allowed length nearest 8 s | The provider's own range; a short default keeps a first clip quick and cheap                                                                                                                                                          |
+| Resolution, ratio, audio | The model's declared values; default its declared default                                     | The provider's own range                                                                                                                                                                                                              |
+| Stored size of one clip  | 1 GB                                                                                          | Far above a 30-second 4K MP4; a larger response is refused, not truncated, so a broken one cannot fill the disk                                                                                                                       |
+| Job time                 | 30 minutes                                                                                    | Long enough for a 4K clip under load; the job then fails as `timeout`, and the driver is asked to cancel and forget it                                                                                                                |
+| Running jobs             | The image job service's host concurrency                                                      | Video jobs share the bounded queue image jobs already use                                                                                                                                                                             |
+| Queued jobs              | 16 video jobs per host, counting only video jobs waiting to start                             | A kept choice lets calls start without a card, so a runaway loop cannot queue without end; image jobs waiting in the shared queue do not count against it, and a further video call is refused with "Too many video jobs are queued." |
+| Agent call wait          | 2 minutes                                                                                     | As for images; after that the call answers `generating` and the clip appears when done                                                                                                                                                |
 
 ### Spend ceilings
 
@@ -292,7 +292,10 @@ which the person sets, like any turn.
   - the job's events (`video.job-queued@1`, `video.job-status-changed@1`);
   - a prompt hash;
   - the driver kind;
-  - the provider's opaque job id while the job runs;
+  - the profile and the provider's opaque job id, kept from the start until
+    the provider confirms its copy is removed (or, for a model that cannot
+    remove it, until the job ends), so a `forget` retried after a restart
+    reaches the right profile's key;
   - the artifact reference (hash, size, duration, resolution).
 
   It never holds video bytes, prompt text or a provider download URL, as for
@@ -381,8 +384,12 @@ export interface VideoModelCapabilities {
   /** Provider labels, e.g. "720p", "1080p", "4k", "768P". */
   readonly resolutions: ReadonlyArray<string>;
   readonly defaultResolution?: string;
-  /** e.g. "16:9", "9:16", "1:1". */
-  readonly aspectRatios: ReadonlyArray<string>;
+  /**
+   * e.g. "16:9", "9:16", "1:1". `needsImage` marks a ratio the model takes
+   * only from a first frame (Runway's wider ratios), so the card offers it
+   * only once an image is chosen.
+   */
+  readonly aspectRatios: ReadonlyArray<{ readonly ratio: string; readonly needsImage?: boolean }>;
   readonly audio: "none" | "always" | "optional";
   readonly inputs: {
     readonly firstFrame: boolean;
@@ -423,6 +430,16 @@ export type VideoPrice =
       readonly outputUsdMicrosPerMillionTokens: number;
       readonly inputUsdMicrosPerMillionTokens?: number;
     }
+  | {
+      /** A flat price per clip, by duration and resolution, as many aggregator endpoints publish. */
+      readonly kind: "per-clip";
+      readonly rates: ReadonlyArray<{
+        readonly durationSeconds: number;
+        readonly resolution: string;
+        readonly audio?: boolean;
+        readonly usdMicros: number;
+      }>;
+    }
   | { readonly kind: "unpublished" };
 ```
 
@@ -430,6 +447,8 @@ Gemini Omni Flash, for example, declares 3–15 s; 360p, 720p, 1080p and 4K;
 16:9 and 9:16; audio `always`; up to six reference images; a per-token price;
 and `cancel: "running"`, `removal: delete`, with a resume window of 55 days.
 xAI would declare `cancel: "none"`, which puts the Stop line on the card.
+A model priced `per-clip` is offered only at the durations and resolutions it
+has a rate for, so the card never multiplies a flat fee by seconds.
 
 Bundled drivers state prices from the provider's own published pages, checked
 when the driver is built or updated. An aggregator driver (fal) reads each
