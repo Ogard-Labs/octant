@@ -21,6 +21,7 @@ import {
   type CodeThreadId,
   decodeChatAttachmentId,
   decodeChatThreadId,
+  decodeAgentAccessCommand,
   decodeCodeThreadId,
   decodeImageArtifactId,
   decodeImageGenerationScopeId,
@@ -60,7 +61,18 @@ import { SpokeProvisionService } from "../hub/spokeProvisionService";
 import { createSignInHostPorts } from "../hub/signInHostPorts";
 import { SignInService } from "../hub/signInService";
 import { SpokeSignInService } from "../hub/spokeSignInService";
-import { createProviderCredentialRouteHandler } from "../providers/providerCredentialRoutes";
+import {
+  createProviderCredentialRouteHandler,
+  removeProviderApiKey,
+  type ProviderCredentialRouteOptions,
+} from "../providers/providerCredentialRoutes";
+import { createAccessActivityRouteHandler } from "../remote/accessActivityRoutes";
+import {
+  permissionModeOf,
+  permissionModeOfWorkAccess,
+  threadAccessOf,
+  workThreadAccessOfMode,
+} from "@octant/domain/guardrail-policy";
 import {
   makeProviderKeyReferenceReader,
   makePushPlatformCredentialBrokerClient,
@@ -2603,7 +2615,7 @@ export function wireRemote(deps: RemoteDependencies) {
       deleteKey: (id) => credentialResolver.delete(id),
     }).catch(() => undefined);
   }
-  const providerCredentialRoutes = createProviderCredentialRouteHandler({
+  const providerCredentialOptions: ProviderCredentialRouteOptions = {
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
     readProviderInstances: () => persistence.readProviderInstances(),
@@ -2638,6 +2650,107 @@ export function wireRemote(deps: RemoteDependencies) {
         }
         throw error;
       }
+    },
+  };
+  const providerCredentialRoutes = createProviderCredentialRouteHandler(providerCredentialOptions);
+  // Access activity and change notices. Undo and revoke run each change's own
+  // command as the person who pressed it, so its service checks still apply.
+  const failed = (error: unknown) => ({
+    status: "refused" as const,
+    message: error instanceof Error && error.message !== "" ? error.message : "That did not work.",
+  });
+  const readThread = (surface: "code" | "work", threadId: string) => {
+    try {
+      return surface === "code"
+        ? persistence.readCodeThread(decodeCodeThreadId(threadId))
+        : workThreadProjection.read(decodeWorkThreadId(threadId));
+    } catch {
+      return undefined;
+    }
+  };
+  const accessActivityRoutes = createAccessActivityRouteHandler({
+    connection: persistence.connection,
+    journal: persistence.journal,
+    windowAuthorityStore,
+    names: {
+      threadTitle: (surface, threadId) => readThread(surface, threadId)?.title,
+      providerName: (id) =>
+        persistence.readProviderInstances().find((instance) => String(instance.id) === id)
+          ?.displayName,
+    },
+    threadLevel: (surface, threadId) => {
+      try {
+        if (surface === "code") {
+          const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          return thread === undefined ? undefined : permissionModeOf(thread);
+        }
+        const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+        return thread === undefined ? undefined : permissionModeOfWorkAccess(thread.access);
+      } catch {
+        return undefined;
+      }
+    },
+    setThreadLevel: async ({ surface, threadId, level, scopeId, actor }) => {
+      try {
+        if (surface === "code") {
+          const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          if (thread === undefined) return failed(undefined);
+          await deps.codeService.execute(
+            scopeId,
+            {
+              kind: "change-code-thread-access",
+              threadId: thread.id,
+              expectedVersion: thread.version,
+              permissionPersistence: thread.permissionPersistence,
+              ...threadAccessOf(level),
+            },
+            undefined,
+            { actor },
+          );
+        } else {
+          const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+          if (thread === undefined) return failed(undefined);
+          await workThreadService.execute(
+            scopeId,
+            {
+              kind: "change-work-thread-access",
+              threadId: thread.id,
+              expectedVersion: thread.version,
+              access: workThreadAccessOfMode(level),
+            },
+            { actor },
+          );
+        }
+        return { status: "done" };
+      } catch (error) {
+        return failed(error);
+      }
+    },
+    removeKey: ({ instanceId, keyId, scopeId, actor }) =>
+      removeProviderApiKey(providerCredentialOptions, {
+        instanceId,
+        keyId,
+        windowId: scopeId,
+        actor,
+      }),
+    revokeDevice: (deviceId, actor) => {
+      const administration = currentRemoteGateway?.localDeviceAdministration();
+      if (administration === undefined) return failed(undefined);
+      try {
+        administration.revokeDevice({ deviceId, actor });
+        return { status: "done" };
+      } catch (error) {
+        return failed(error);
+      }
+    },
+    endAgentGrant: (grantId, actor) => {
+      const result = agentAccessService.execute(
+        decodeAgentAccessCommand({ kind: "revoke", grantId }),
+        actor,
+      );
+      return result.kind === "refused"
+        ? { status: "refused", message: result.message }
+        : { status: "done" };
     },
   });
   // Linked secret stores: the broker holds each pointer and follows it at use;
@@ -3018,6 +3131,7 @@ export function wireRemote(deps: RemoteDependencies) {
     // Paired browsers and hub guests reach this chain, not the loopback
     // listener's own handlers, so the alert read must be bound here too.
     newDeviceAlertRoutes,
+    accessActivityRoutes,
   ]);
   return {
     defaultTodoListHost: () => {
@@ -3038,6 +3152,7 @@ export function wireRemote(deps: RemoteDependencies) {
     supportBundleRoutes,
     hubAdministrationRoutes,
     newDeviceAlertRoutes,
+    accessActivityRoutes,
     localDeviceAdministrationRoutes,
     memberInstallRoutes,
     agentAccessAdministrationRoutes,

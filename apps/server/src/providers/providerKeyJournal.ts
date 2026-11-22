@@ -56,6 +56,9 @@ export interface ProviderKeyJournal {
     readonly windowId: WindowId;
     /** The paired device the key came from. Absent, the change is the local person's. */
     readonly actor?: EventActor;
+    /** On a `set` that stores a new secret: added (with the key's id) or replaced. */
+    readonly keyChange?: "added" | "replaced";
+    readonly keyId?: string;
   }) => ProviderKeyChangeRecorder;
   readonly unsettled: () => ReadonlyArray<UnsettledProviderKeyChange>;
   /** Records the outcome of a request found without one. */
@@ -129,6 +132,8 @@ export function providerKeyJournal(options: {
           action: input.action,
           instanceVersion: decodeAggregateVersion(input.instanceVersion),
           windowId: input.windowId,
+          ...(input.keyChange === undefined ? {} : { keyChange: input.keyChange }),
+          ...(input.keyId === undefined ? {} : { keyId: input.keyId }),
         },
         input.actor,
       );

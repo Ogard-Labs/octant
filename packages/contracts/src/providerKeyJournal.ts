@@ -23,6 +23,14 @@ export const PROVIDER_KEY_AGGREGATE_TYPE = "provider-key";
 
 const RequestId = Schema.UUID;
 
+/**
+ * A key's id in its provider's pool: random, never derived from the key.
+ * `default` is the one key a plain stored value holds.
+ */
+const ApiKeyId = Schema.String.pipe(
+  Schema.pattern(/^(default|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/),
+);
+
 export const ProviderKeyJournalRecord = Schema.Union(
   Schema.Struct({
     name: Schema.Literal("provider-key.change-requested"),
@@ -32,6 +40,14 @@ export const ProviderKeyJournalRecord = Schema.Union(
     /** The instance version the change was made against, so a restart can tell a later reconfiguration. */
     instanceVersion: AggregateVersion,
     windowId: WindowId,
+    /**
+     * On a `set` that stores a new secret: whether it added a key (and which,
+     * so a change notice's Undo removes exactly that one) or replaced one.
+     * Absent on a rename, a reorder, a change of active key, and on every
+     * record written before change notices.
+     */
+    keyChange: Schema.optional(Schema.Literal("added", "replaced")),
+    keyId: Schema.optional(ApiKeyId),
   }).annotations(strict),
   Schema.Struct({
     name: Schema.Literal("provider-key.change-completed"),

@@ -2119,6 +2119,7 @@ export function startOctantServer(
       threadMoveAdministrationRoutes,
       hubAdministrationRoutes,
       newDeviceAlertRoutes,
+      accessActivityRoutes,
       localDeviceAdministrationRoutes,
       memberInstallRoutes,
       agentAccessAdministrationRoutes,
@@ -2333,6 +2334,7 @@ export function startOctantServer(
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await hubAdministrationRoutes(request)) ??
                 (await newDeviceAlertRoutes(request)) ??
+                (await accessActivityRoutes(request)) ??
                 (await threadMoveAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
                 (await secretStoresRoutes(request)) ??
