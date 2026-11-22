@@ -121,6 +121,12 @@ export interface CodeOperationEventStoreOptions {
   readonly actor: typeof EventActor.Type;
 }
 
+/**
+ * Who an event names when it is not simply its operation's own: `host` for
+ * what the host does by itself, or the actor a request resolved to.
+ */
+export type CodeOperationEventAuthor = "host" | { readonly actor: typeof EventActor.Type };
+
 export interface AppendCodeOperationEventInput {
   readonly threadId: CodeThreadId;
   readonly operationId: CodeOperationId;
@@ -129,9 +135,13 @@ export interface AppendCodeOperationEventInput {
   /**
    * `host` journals the event as the host's own doing (the store's actor)
    * whoever started the operation: what the host settles by itself after a
-   * restart has no person behind it.
+   * restart has no person behind it. An actor names the person whose request
+   * put this event on an operation other than the request's own (a Stop's
+   * marker, an approval's answer on the turn that asked): `actingFor` binds
+   * only the request's own operation, so without it the event would name
+   * whoever started the turn.
    */
-  readonly journaledAs?: "host";
+  readonly journaledAs?: CodeOperationEventAuthor;
 }
 
 /**
@@ -450,6 +460,7 @@ export class CodeOperationEventStore {
 
   #actorFor(input: AppendCodeOperationEventInput): typeof EventActor.Type {
     if (input.journaledAs === "host") return this.#actor;
+    if (input.journaledAs !== undefined) return input.journaledAs.actor;
     const key = String(input.operationId);
     const requested = this.#requests.get(key)?.actor;
     if (requested !== undefined) return requested;

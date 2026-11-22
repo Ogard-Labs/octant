@@ -1884,6 +1884,91 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("names the paired device that answered and stopped a turn a window started", async () => {
+    const localPerson = eventActorForPrincipal({ kind: "local-window" });
+    const device = eventActorForPrincipal({
+      kind: "remote-device",
+      deviceId: "90000000-0000-4000-8000-0000000000e1",
+    });
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    try {
+      const start = operationId(4_300);
+      await expect(
+        fixture.runtime.execute(
+          windowId,
+          {
+            kind: "start-provider-turn",
+            operationId: start,
+            threadId,
+            checkoutId,
+            sessionId,
+            prompt: fixture.prompt,
+          },
+          { actor: localPerson },
+        ),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId: "provider-approval-1",
+            action: "write",
+            description: "Modify src/a.ts",
+          }),
+        ),
+      );
+      let frames: readonly OperationFrame[] = [];
+      await vi.waitFor(async () => {
+        frames = await fixture.runtime.subscribe(windowId, threadId, start, 0, 100);
+        expect(frames.some((frame) => frame.event.kind === "approval-requested")).toBe(true);
+      });
+      const approval = frames.find(
+        (
+          frame,
+        ): frame is OperationFrame & {
+          event: { kind: "approval-requested"; approvalId: string };
+        } => frame.event.kind === "approval-requested",
+      );
+      await fixture.runtime.execute(
+        windowId,
+        {
+          kind: "answer-provider-approval",
+          operationId: operationId(4_301),
+          threadId,
+          checkoutId,
+          approvalId: approval!.event.approvalId,
+          decision: "approved",
+        },
+        { actor: device },
+      );
+      await fixture.runtime.execute(
+        windowId,
+        {
+          kind: "cancel-provider-turn",
+          operationId: operationId(4_302),
+          threadId,
+          checkoutId,
+        },
+        { actor: device },
+      );
+
+      frames = await fixture.runtime.subscribe(windowId, threadId, start, 0, 100);
+      const actors = fixture.operationActors(start);
+      const actorOf = (kind: string) =>
+        actors[frames.findIndex((frame) => frame.event.kind === kind)];
+      expect(actorOf("approval-requested")).toEqual(localPerson);
+      expect(actorOf("approval-answered")).toEqual(device);
+      expect(actorOf("conversation-turn-stop-requested")).toEqual(device);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it("keeps feedback images pending through refused credentials and sends them once on retry", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);

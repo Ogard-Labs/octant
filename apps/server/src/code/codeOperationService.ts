@@ -1,4 +1,5 @@
 import type { EventActor, ProviderDriverKind } from "@octant/contracts";
+import type { CodeOperationEventAuthor } from "./codeOperationEventStore";
 import {
   attachedFilesMessage,
   partitionAttachedFiles,
@@ -380,6 +381,7 @@ export interface CodeOperationEventPort {
     readonly operationId: CodeOperationId;
     readonly expectedCursor: number;
     readonly event: CodeOperationEvent;
+    readonly journaledAs?: CodeOperationEventAuthor;
   }) => void;
   /**
    * Names `actor` (the host when undefined) on what this request journals for
@@ -1209,6 +1211,11 @@ export interface CodeOperationTurnPort {
      * they are. Honored only on an ask that offered it.
      */
     readonly rememberedForProjectBy?: CodeProjectAnswerApprover;
+    /**
+     * Who the answer's receipt on the asking turn names: the request's own
+     * actor, which may differ from whoever started the turn.
+     */
+    readonly answeredAs?: CodeOperationEventAuthor;
   }) => Promise<CodeOperationTurnResult>;
   readonly forceStop?: (input: {
     readonly thread: CodeThread;
@@ -1216,6 +1223,8 @@ export interface CodeOperationTurnPort {
     readonly turnOperationId: CodeOperationId;
     /** `"person"` only on the person's own Stop command; cleanup callers omit it. */
     readonly stopRequestedBy?: "person";
+    /** Who the Stop's marker on the turn names, when `stopRequestedBy` is set. */
+    readonly stopRequestedAs?: CodeOperationEventAuthor;
   }) => Promise<CodeOperationTurnResult>;
   readonly cancel: (input: {
     readonly thread: CodeThread;
@@ -1224,6 +1233,8 @@ export interface CodeOperationTurnPort {
     readonly turnOperationId?: CodeOperationId;
     /** `"person"` only on the person's own Stop command; cleanup callers omit it. */
     readonly stopRequestedBy?: "person";
+    /** Who the Stop's marker on the turn names, when `stopRequestedBy` is set. */
+    readonly stopRequestedAs?: CodeOperationEventAuthor;
   }) => Promise<
     CodeOperationTurnResult & {
       /** The operation of the live turn this stopped, when there was one. */
@@ -1676,6 +1687,8 @@ interface StartingTurn {
   cancelled: boolean;
   /** `"person"` when the person's own Stop released the start; nothing else sets it. */
   stopRequestedBy: "person" | undefined;
+  /** Who that Stop's marker names: the stopping request's actor, not the start's. */
+  stopRequestedAs: CodeOperationEventAuthor | undefined;
   /**
    * Whether the start's own result is journaled, by the start or by the Stop
    * that released it. Exactly one of them writes it.
@@ -2156,6 +2169,7 @@ export class CodeOperationService {
                     ),
                     cancelled: false,
                     stopRequestedBy: undefined,
+                    stopRequestedAs: undefined,
                     journaled: false,
                   }
                 : undefined;
@@ -2509,6 +2523,7 @@ export class CodeOperationService {
         stopped,
         cancelled: false,
         stopRequestedBy: undefined,
+        stopRequestedAs: undefined,
         journaled: false,
       };
       startingTurn = held;
@@ -2577,6 +2592,9 @@ export class CodeOperationService {
           operationId: starting.operationId,
           expectedCursor: cursor,
           event: { kind: "conversation-turn-stop-requested" },
+          ...(starting.stopRequestedAs === undefined
+            ? {}
+            : { journaledAs: starting.stopRequestedAs }),
         });
         cursor += 1;
       }
@@ -4132,6 +4150,12 @@ export class CodeOperationService {
     personActor?: EventActor,
   ): Promise<CodeOperationResult> {
     const workingDirectory = root.workingDirectory ?? root.checkoutRoot;
+    // What this request journals on another operation (a Stop's marker or an
+    // approval's receipt on the turn that asked) names the request's own
+    // actor: `actingFor` binds only this command's operation, and the turn's
+    // would otherwise credit whoever started it.
+    const requestedAs: CodeOperationEventAuthor =
+      personActor === undefined ? "host" : { actor: personActor };
     // A server thread's Git runs on its server; it never reaches this host's.
     const git =
       checkout.kind === "remote-root" ? this.#options.serverGit?.(thread) : this.#options.git;
@@ -4988,6 +5012,7 @@ export class CodeOperationService {
                       : { kind: "window" as const, windowId },
                 }
               : {}),
+            answeredAs: requestedAs,
           }),
         );
       case "force-stop-provider-turn":
@@ -5006,6 +5031,7 @@ export class CodeOperationService {
                 checkoutRoot: root.checkoutRoot,
                 turnOperationId: command.turnOperationId,
                 stopRequestedBy: "person",
+                stopRequestedAs: requestedAs,
               }),
         );
       case "cancel-provider-turn": {
@@ -5022,6 +5048,7 @@ export class CodeOperationService {
           ) {
             starting.cancelled = true;
             starting.stopRequestedBy = "person";
+            starting.stopRequestedAs = requestedAs;
             this.#startingTurns.delete(starting);
             stoppedStarts.push(starting);
           }
@@ -5030,6 +5057,7 @@ export class CodeOperationService {
           thread,
           checkoutRoot: root.checkoutRoot,
           stopRequestedBy: "person",
+          stopRequestedAs: requestedAs,
           ...(command.turnOperationId === undefined
             ? {}
             : { turnOperationId: command.turnOperationId }),

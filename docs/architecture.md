@@ -18587,7 +18587,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     other id. A Code operation's own events name whoever started it, a local
     window or a paired device: what the request journals names its caller,
     and what the operation journals after answering (a turn's streamed
-    output, a terminal's) names whoever its first event names. An operation
+    output, a terminal's) names whoever its first event names. A person's
+    action that lands on a turn another principal started names the person
+    who acted: a Stop's marker and an approval's answer on the turn that
+    asked name the window or device that sent them. An operation
     the host starts by itself (a routine, a recovery) and what the host
     settles by itself after a restart (a turn the restart cut off) are the
     system's. Cancelling a connector sign-in that is still waiting, by
