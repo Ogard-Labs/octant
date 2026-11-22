@@ -2,6 +2,11 @@
 
 One or two sentences: what changes and why a user or contributor cares.
 
+Delivers: Fixes OCT-___
+
+Keep the line above, starting with "Delivers:"; use "Part of OCT-___" for one
+layer of a stack. The "One pull request per issue" check reads only that line.
+
 ## User guide
 
 Link the companion guide PR in [octant-site](https://github.com/Ogard-Labs/octant-site),
