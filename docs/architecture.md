@@ -21058,7 +21058,9 @@ Silicon technical preview with the provider-neutral plugin/skill marketplace.
 Builds of `main` are meant to publish daily on the `preview` ring as the second
 app Octant Nightly, and on-demand pre-releases of the next stable on the
 `candidate` ring as Octant's Preview channel, as GitHub pre-releases named
-`v0.1.0-<ring>.<date>.<build>`; each carries a macOS zip, a linux-x64
+`v0.1.0-<ring>.<date>.<build>` (until the first stable release, the newest
+Preview is promoted out of prerelease to carry the public download link,
+below); each carries a macOS zip, a linux-x64
 AppImage and a signed per-user Windows installer. Nightly is a usable client; a scheduled or rollback Nightly run is
 built and published only after its secret-free
 [usable-client preflight](design/nightly-app.md#the-usable-client-preflight)
@@ -21087,14 +21089,25 @@ the same condition as the app, and unsigned when the app is. The zip stays the
 only artifact the update feed lists; the disk image is a download, never an
 update source. Octant Nightly builds no disk image.
 
-The newest Preview, and later the newest stable, is also the repository's
-latest GitHub release. Only a last release job moves the link — release
-creation stays off latest — and it runs only after every build row has
-published, attaches the disk image a second time under the fixed name
-`Octant-darwin-arm64.dmg`, and marks the release latest, so
-`https://github.com/Ogard-Labs/octant/releases/latest/download/Octant-darwin-arm64.dmg`
-always serves the current Preview. Nightly builds and the `feed-*` mailbox
-releases stay prereleases, so the link never resolves to them.
+GitHub's latest release carries the public download link,
+`https://github.com/Ogard-Labs/octant/releases/latest/download/Octant-darwin-arm64.dmg`.
+Only stable may hold it once the first stable release exists; until then the
+newest Preview holds it (maintainer decision, 2026-11-22). Only a last release
+job, `scripts/publish-latest-download.sh`, moves the link: release creation
+stays off latest. It runs only after every build row has published, refuses
+a disk image that is empty or not fully uploaded, attaches that image a second
+time under the fixed name `Octant-darwin-arm64.dmg`, checks the copy, and then
+marks the release latest. A Preview builds as a GitHub prerelease and stops
+being one only when this job promotes it, because `releases/latest` skips
+prereleases. A promoted Preview stays a non-prerelease after stable takes the
+link, so the job orders releases by tag, never by the prerelease flag. The
+Preview and stable promotion jobs share one concurrency group. A candidate
+after the first stable release, or a release older than the one holding the
+link, is left as it is, so rerunning an old run's job cannot move the link
+backward. Re-promoting the release that holds the link changes nothing.
+Nightly builds and the `feed-*` mailbox releases stay prereleases, so the
+link never resolves to them. Whether an unauthenticated download of that URL
+works is verified only after a real release, not by the workflow's tests.
 
 Cross-platform desktop (macOS, Linux, Windows) remains authorized: the Linux
 desktop shell, then the Linux AppImage with its signed feed, then Windows.

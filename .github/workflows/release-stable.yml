@@ -287,6 +287,14 @@ jobs:
   latest:
     name: Mark the release latest
     needs: [verify, publish, windows, headless]
+    # One promotion at a time across Preview and stable runs, so two runs
+    # never interleave the script's read-compare-edit of the latest release.
+    # A run queued behind another can replace that run's still-pending job;
+    # rerunning a cancelled promotion is safe, since the script ignores an
+    # older release and re-promoting the current one is harmless.
+    concurrency:
+      group: release-latest-download
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

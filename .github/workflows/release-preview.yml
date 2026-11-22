@@ -62,11 +62,21 @@ jobs:
 
   # The build above creates the release as a prerelease; only after every row
   # has published does this job attach the fixed-name disk image and mark the
-  # release latest, so releases/latest/download/Octant-darwin-arm64.dmg always
-  # serves the newest Preview. A failed or partial build never reaches here.
+  # release latest, so releases/latest/download/Octant-darwin-arm64.dmg serves
+  # the newest Preview until the first stable release exists; after that the
+  # script leaves the link with stable. A failed or partial build never
+  # reaches here.
   latest:
     name: Mark the release latest
     needs: [decide, release]
+    # One promotion at a time across Preview and stable runs, so two runs
+    # never interleave the script's read-compare-edit of the latest release.
+    # A run queued behind another can replace that run's still-pending job;
+    # rerunning a cancelled promotion is safe, since the script ignores an
+    # older release and re-promoting the current one is harmless.
+    concurrency:
+      group: release-latest-download
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
