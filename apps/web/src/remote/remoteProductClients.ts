@@ -204,7 +204,10 @@ export function createRemoteProviderOAuth(bridge: RemoteSessionBridge) {
  * The ordinary product clients, carried over the paired device's
  * authenticated session. Nothing here knows about the desktop window.
  */
-export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteProductClients {
+export function createRemoteProductClients(
+  bridge: RemoteSessionBridge,
+  options: { readonly threadEvents?: "poll" } = {},
+): RemoteProductClients {
   const port = {
     baseUrl: REMOTE_CLIENT_BASE_URL,
     fetch: createRemoteProductFetch({ bridge }),
@@ -233,6 +236,7 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
     // the browser gives it with its passkey if it is an owner of that host.
     code: createCodeClient({
       ...port,
+      ...(options.threadEvents === undefined ? {} : { threadEvents: options.threadEvents }),
       ownerMergeUnlock: browserOwnerMergeUnlock({
         store: createBrowserGuestStore(createBrowserHostRegistryStorage()),
         deviceKeyStore: createDefaultDeviceKeyStore(),

@@ -54,7 +54,10 @@ export function RemoteTodoDraft(props: {
   readonly onCreated: (link: TodoThreadLink) => Promise<void>;
   readonly onClose: () => void;
 }) {
-  const clients = useMemo(() => createRemoteProductClients(props.bridge), [props.bridge]);
+  const clients = useMemo(
+    () => createRemoteProductClients(props.bridge, { threadEvents: "poll" }),
+    [props.bridge],
+  );
   const [standing, setStanding] = useState<RemoteSessionStanding>(RESTRICTED_REMOTE_SESSION);
   useEffect(() => {
     setStanding(RESTRICTED_REMOTE_SESSION);
