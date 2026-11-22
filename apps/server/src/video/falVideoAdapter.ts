@@ -53,11 +53,17 @@ const MODEL_DEFAULT = "model default";
 /** How one endpoint takes its options, read from its published input schema. */
 interface FalEndpoint {
   readonly endpointId: string;
-  readonly durationFormat: "seconds-suffix" | "string" | "integer";
+  readonly durationFormat: "seconds-suffix" | "string" | "integer" | "frames";
+  /** The fixed frame rate a frame-counted endpoint runs at, when its schema gives one. */
+  readonly framesPerSecond: number | undefined;
   readonly takesResolution: boolean;
   readonly takesAspectRatio: boolean;
   readonly takesAudio: boolean;
-  readonly takesImage: boolean;
+  /** The field a first frame goes in, when the endpoint takes one. */
+  readonly firstFrameField: "image_url" | "first_frame_url" | undefined;
+  readonly takesLastFrame: boolean;
+  readonly firstFrameRequired: boolean;
+  readonly lastFrameRequired: boolean;
   readonly model: VideoModelCapabilities;
 }
 
@@ -120,41 +126,172 @@ function inputSchema(document: unknown, endpointId: string): unknown {
 }
 
 /**
- * The options an endpoint declares, in Octant's terms, or undefined when the
- * schema does not say how long a clip is. A price comes separately.
+ * The frame rate a schema fixes: a single number wherever the schema mentions
+ * one — a default, a constant, a one-value enum, or matching minimum and
+ * maximum — so frames can be turned into seconds. A selectable rate, or none,
+ * gives no honest translation.
+ */
+function fixedFramesPerSecond(property: unknown): number | undefined {
+  const declared = [
+    jsonField(property, "const"),
+    jsonField(property, "default"),
+    ...(enumOf(property) ?? []),
+    jsonField(property, "minimum"),
+    jsonField(property, "maximum"),
+  ].filter((value): value is number => typeof value === "number" && value > 0);
+  const [first] = declared;
+  return first !== undefined && declared.every((value) => value === first)
+    ? first
+    : undefined;
+}
+
+interface FalDuration {
+  readonly durations: { kind: "values"; values: ReadonlyArray<number> } | { kind: "range"; min: number; max: number };
+  readonly defaultDuration: number | undefined;
+  readonly format: FalEndpoint["durationFormat"];
+  readonly framesPerSecond: number | undefined;
+}
+
+/**
+ * How long a clip is, in the endpoint's own terms: a `duration` field in
+ * seconds, or a `num_frames` count at a schema-fixed frame rate. Only whole
+ * seconds are offered — Octant's clip options count whole seconds.
+ */
+function readFalDuration(properties: unknown): FalDuration | string {
+  const duration = jsonField(properties, "duration");
+  if (duration !== undefined) {
+    const durationValues = (enumOf(duration) ?? [])
+      .map(secondsOf)
+      .filter((seconds): seconds is number => seconds !== undefined);
+    const durationMin = jsonField(duration, "minimum");
+    const durationMax = jsonField(duration, "maximum");
+    const durations =
+      durationValues.length > 0
+        ? { kind: "values" as const, values: durationValues }
+        : typeof durationMin === "number" &&
+            typeof durationMax === "number" &&
+            Number.isInteger(durationMin) &&
+            Number.isInteger(durationMax) &&
+            durationMin > 0 &&
+            durationMin <= durationMax
+          ? { kind: "range" as const, min: durationMin, max: durationMax }
+          : undefined;
+    if (durations === undefined) {
+      return "the endpoint's duration values are not whole seconds";
+    }
+    const enumValues = enumOf(duration);
+    return {
+      durations,
+      defaultDuration: secondsOf(jsonField(duration, "default")),
+      format:
+        enumValues !== undefined && typeof enumValues[0] === "string"
+          ? String(enumValues[0]).endsWith("s")
+            ? "seconds-suffix"
+            : "string"
+          : "integer",
+      framesPerSecond: undefined,
+    };
+  }
+
+  const frames = jsonField(properties, "num_frames");
+  if (frames === undefined) {
+    return "the endpoint's schema declares no clip length";
+  }
+  const framesPerSecond = fixedFramesPerSecond(jsonField(properties, "frames_per_second"));
+  if (framesPerSecond === undefined) {
+    return "the endpoint counts frames at a frame rate its schema does not fix";
+  }
+  const frameValues = (enumOf(frames) ?? []).filter(
+    (value): value is number => typeof value === "number" && Number.isInteger(value) && value > 0,
+  );
+  const wholeSeconds = (frame: number) =>
+    Number.isInteger(frame / framesPerSecond) ? frame / framesPerSecond : undefined;
+  if (frameValues.length > 0) {
+    const values = [
+      ...new Set(
+        frameValues
+          .map(wholeSeconds)
+          .filter((seconds): seconds is number => seconds !== undefined),
+      ),
+    ].sort((a, b) => a - b);
+    if (values.length === 0) {
+      return "no whole-second clip length fits the endpoint's frame counts";
+    }
+    const defaultFrame = jsonField(frames, "default");
+    const defaultSeconds =
+      typeof defaultFrame === "number" ? wholeSeconds(defaultFrame) : undefined;
+    return {
+      durations: { kind: "values", values },
+      defaultDuration:
+        defaultSeconds !== undefined && values.includes(defaultSeconds)
+          ? defaultSeconds
+          : values[0],
+      format: "frames",
+      framesPerSecond,
+    };
+  }
+  const frameMin = jsonField(frames, "minimum");
+  const frameMax = jsonField(frames, "maximum");
+  if (typeof frameMin !== "number" || typeof frameMax !== "number") {
+    return "the endpoint's frame counts have no usable limits";
+  }
+  const min = Math.ceil(frameMin / framesPerSecond);
+  const max = Math.floor(frameMax / framesPerSecond);
+  if (min > max || min <= 0) {
+    return "no whole-second clip length fits the endpoint's frame counts";
+  }
+  const defaultFrame = jsonField(frames, "default");
+  const defaultSeconds = typeof defaultFrame === "number" ? wholeSeconds(defaultFrame) : undefined;
+  return {
+    durations: { kind: "range", min, max },
+    defaultDuration:
+      defaultSeconds !== undefined && defaultSeconds >= min && defaultSeconds <= max
+        ? defaultSeconds
+        : min,
+    format: "frames",
+    framesPerSecond,
+  };
+}
+
+/**
+ * The options an endpoint declares, in Octant's terms, or why the endpoint
+ * cannot be offered. A price comes separately.
  */
 export function readFalEndpoint(
   endpointId: string,
   document: unknown,
   price: VideoPrice,
-): FalEndpoint | undefined {
+): { readonly endpoint: FalEndpoint } | { readonly reason: string } {
   const schema = inputSchema(document, endpointId);
   const properties = jsonField(schema, "properties");
-  if (properties === undefined) return undefined;
+  if (properties === undefined) {
+    return { reason: "the endpoint's published schema declares no inputs" };
+  }
   const required = jsonField(schema, "required");
   const isRequired = (name: string) => Array.isArray(required) && required.includes(name);
+  // The only inputs the adapter can fill; an endpoint that requires anything
+  // else cannot be run, so it is not offered.
+  const SUPPLIABLE = new Set([
+    "prompt",
+    "duration",
+    "num_frames",
+    "frames_per_second",
+    "resolution",
+    "aspect_ratio",
+    "generate_audio",
+    "image_url",
+    "first_frame_url",
+    "last_frame_url",
+  ]);
+  if (
+    Array.isArray(required) &&
+    required.some((name) => typeof name === "string" && !SUPPLIABLE.has(name))
+  ) {
+    return { reason: "the endpoint requires inputs the driver cannot supply" };
+  }
 
-  const duration = jsonField(properties, "duration");
-  const durationValues = (enumOf(duration) ?? [])
-    .map(secondsOf)
-    .filter((seconds): seconds is number => seconds !== undefined);
-  const durationMin = jsonField(duration, "minimum");
-  const durationMax = jsonField(duration, "maximum");
-  const durations =
-    durationValues.length > 0
-      ? { kind: "values" as const, values: durationValues }
-      : typeof durationMin === "number" && typeof durationMax === "number"
-        ? { kind: "range" as const, min: durationMin, max: durationMax }
-        : undefined;
-  if (durations === undefined) return undefined;
-  const durationDefault = secondsOf(jsonField(duration, "default"));
-  const enumValues = enumOf(duration);
-  const durationFormat =
-    enumValues !== undefined && typeof enumValues[0] === "string"
-      ? String(enumValues[0]).endsWith("s")
-        ? "seconds-suffix"
-        : "string"
-      : "integer";
+  const duration = readFalDuration(properties);
+  if (typeof duration === "string") return { reason: duration };
 
   const resolutionValues = (enumOf(jsonField(properties, "resolution")) ?? []).filter(
     (value): value is string => typeof value === "string",
@@ -163,8 +300,16 @@ export function readFalEndpoint(
     (value): value is string => typeof value === "string" && value !== "auto",
   );
   const audio = jsonField(properties, "generate_audio");
-  const takesImage = jsonField(properties, "image_url") !== undefined;
-  const imageRequired = isRequired("image_url");
+  const firstFrameField =
+    jsonField(properties, "image_url") !== undefined
+      ? ("image_url" as const)
+      : jsonField(properties, "first_frame_url") !== undefined
+        ? ("first_frame_url" as const)
+        : undefined;
+  const takesLastFrame = jsonField(properties, "last_frame_url") !== undefined;
+  const firstFrameRequired =
+    isRequired("image_url") || isRequired("first_frame_url");
+  const lastFrameRequired = isRequired("last_frame_url");
   const resolutions = resolutionValues.length > 0 ? resolutionValues : [MODEL_DEFAULT];
   const ratios = ratioValues.length > 0 ? ratioValues : [MODEL_DEFAULT];
   const resolutionDefault = jsonField(jsonField(properties, "resolution"), "default");
@@ -174,14 +319,16 @@ export function readFalEndpoint(
     const model = decodeVideoModelCapabilities({
       modelId: endpointId,
       displayName: endpointId,
-      durations,
-      ...(durationDefault === undefined ? {} : { defaultDuration: durationDefault }),
+      durations: duration.durations,
+      ...(duration.defaultDuration === undefined
+        ? {}
+        : { defaultDuration: duration.defaultDuration }),
       resolutions,
       ...(typeof resolutionDefault === "string" && resolutions.includes(resolutionDefault)
         ? { defaultResolution: resolutionDefault }
         : {}),
       aspectRatios: ratios.map((ratio) =>
-        imageRequired ? { ratio, needsImage: true } : { ratio },
+        firstFrameRequired || lastFrameRequired ? { ratio, needsImage: true } : { ratio },
       ),
       ...(typeof ratioDefault === "string" && ratios.includes(ratioDefault)
         ? { defaultAspectRatio: ratioDefault }
@@ -190,7 +337,11 @@ export function readFalEndpoint(
       ...(typeof jsonField(audio, "default") === "boolean"
         ? { defaultAudio: jsonField(audio, "default") }
         : {}),
-      inputs: { firstFrame: takesImage, lastFrame: false, maxReferenceImages: 0 },
+      inputs: {
+        firstFrame: firstFrameField !== undefined,
+        lastFrame: takesLastFrame,
+        maxReferenceImages: 0,
+      },
       price,
       job: {
         cancel: "running",
@@ -199,16 +350,22 @@ export function readFalEndpoint(
       },
     });
     return {
-      endpointId,
-      durationFormat,
-      takesResolution: resolutionValues.length > 0,
-      takesAspectRatio: ratioValues.length > 0,
-      takesAudio: audio !== undefined,
-      takesImage,
-      model,
+      endpoint: {
+        endpointId,
+        durationFormat: duration.format,
+        framesPerSecond: duration.framesPerSecond,
+        takesResolution: resolutionValues.length > 0,
+        takesAspectRatio: ratioValues.length > 0,
+        takesAudio: audio !== undefined,
+        firstFrameField,
+        takesLastFrame,
+        firstFrameRequired,
+        lastFrameRequired,
+        model,
+      },
     };
   } catch {
-    return undefined;
+    return { reason: "the endpoint's declared options could not be described" };
   }
 }
 
@@ -225,6 +382,8 @@ export function falPrice(
     readonly durationSeconds: number | undefined;
     readonly resolutions: ReadonlyArray<string>;
     readonly defaultResolution: string | undefined;
+    /** The endpoint lets the request choose audio, which fal prices separately. */
+    readonly audioSelectable: boolean;
   },
 ): VideoPrice {
   const unitPrice = jsonField(entry, "unit_price");
@@ -234,17 +393,21 @@ export function falPrice(
   }
   const usdMicros = Math.round(unitPrice * 1_000_000);
   if (unit === "second" || unit === "seconds") {
-    const [first, ...rest] = defaults.resolutions;
-    if (first === undefined) return { kind: "unpublished" };
+    // One unit price cannot stand for billing that varies with resolution or
+    // audio — fal's Veo 3.1 runs $0.20/s to $0.60/s over those options — so
+    // only a single-resolution endpoint without an audio choice can take it;
+    // anything else is unpublished and the dollar ceiling refuses it.
+    const [first] = defaults.resolutions;
+    if (
+      first === undefined ||
+      defaults.resolutions.length > 1 ||
+      defaults.audioSelectable
+    ) {
+      return { kind: "unpublished" };
+    }
     return {
       kind: "per-second",
-      rates: [first, ...rest].map((resolution) => ({
-        resolution,
-        usdMicrosPerSecond: usdMicros,
-      })) as [
-        { resolution: string; usdMicrosPerSecond: number },
-        ...Array<{ resolution: string; usdMicrosPerSecond: number }>,
-      ],
+      rates: [{ resolution: first, usdMicrosPerSecond: usdMicros }],
     };
   }
   const resolution = defaults.defaultResolution ?? defaults.resolutions[0];
@@ -255,6 +418,28 @@ export function falPrice(
     };
   }
   return { kind: "unpublished" };
+}
+
+/**
+ * fal serves finished clips from its own media hosts; a result that points
+ * elsewhere is refused rather than fetched from the host's network.
+ */
+function falDownloadAllowed(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") return false;
+    const host = parsed.hostname;
+    return (
+      host === "fal.media" ||
+      host.endsWith(".fal.media") ||
+      host === "fal.run" ||
+      host.endsWith(".fal.run") ||
+      host === "fal.ai" ||
+      host.endsWith(".fal.ai")
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** The endpoint id and fal's request id a job is tracked by, as one remote id. */
@@ -274,8 +459,26 @@ function queueUrls(remoteId: string) {
   return { status: `${base}/status`, result: base, cancel: `${base}/cancel` };
 }
 
+interface QueueUrls {
+  readonly status: string;
+  readonly result: string;
+  readonly cancel: string;
+}
+
 function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGenerationPorts) {
   let declared: Promise<FalEndpoints> | undefined;
+  /** Routes fal's submit answer returned, per request id; ids are reconstructed otherwise. */
+  const remembered = new Map<string, QueueUrls>();
+  const urlsFor = (remoteId: string): QueueUrls | undefined =>
+    remembered.get(remoteId) ?? queueUrls(remoteId);
+  const rememberUrls = (remoteId: string, urls: QueueUrls) => {
+    while (remembered.size >= 512) {
+      const oldest = remembered.keys().next().value;
+      if (oldest === undefined) break;
+      remembered.delete(oldest);
+    }
+    remembered.set(remoteId, urls);
+  };
 
   const readEndpoints = async (): Promise<FalEndpoints> => {
     const ids = profile.modelIds.map(String).filter((id) => ENDPOINT_PATTERN.test(id));
@@ -293,6 +496,7 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
       failure = asFailure(error);
     }
     const endpoints: Array<FalEndpoint> = [];
+    const reasons: Array<string> = [];
     for (const endpointId of ids) {
       try {
         const url = new URL(SCHEMA_URL);
@@ -305,21 +509,34 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
         const document = await readVideoJson(response);
         // Read once without a price to learn the defaults the price depends on.
         const shape = readFalEndpoint(endpointId, document, { kind: "unpublished" });
-        if (shape === undefined) continue;
+        if ("reason" in shape) {
+          reasons.push(`${endpointId}: ${shape.reason}`);
+          continue;
+        }
         const entry = prices.find(
           (candidate) => jsonField(candidate, "endpoint_id") === endpointId,
         );
         const price = falPrice(entry, {
-          durationSeconds: shape.model.defaultDuration,
-          resolutions: shape.model.resolutions,
-          defaultResolution: shape.model.defaultResolution,
+          durationSeconds: shape.endpoint.model.defaultDuration,
+          resolutions: shape.endpoint.model.resolutions,
+          defaultResolution: shape.endpoint.model.defaultResolution,
+          audioSelectable: shape.endpoint.model.audio === "optional",
         });
         const endpoint = readFalEndpoint(endpointId, document, price);
-        if (endpoint !== undefined) endpoints.push(endpoint);
+        if ("endpoint" in endpoint) {
+          endpoints.push(endpoint.endpoint);
+        } else {
+          reasons.push(`${endpointId}: ${endpoint.reason}`);
+        }
       } catch (error) {
         // An endpoint whose schema cannot be read is not offered.
         failure = asFailure(error);
       }
+    }
+    // A profile whose endpoints all read cleanly but none can be offered is a
+    // configuration problem, said aloud rather than offered as nothing.
+    if (failure === undefined && endpoints.length === 0 && reasons.length > 0) {
+      failure = videoFailure("invalid-configuration", `No fal endpoint can be offered — ${reasons.join("; ")}.`);
     }
     return failure === undefined ? { endpoints } : { endpoints, failure };
   };
@@ -363,23 +580,51 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
       };
     }
     const seconds = request.options.durationSeconds;
-    const frame = request.firstFrame;
+    const dataUrl = (frame: NonNullable<VideoAdapterRequest["firstFrame"]>) =>
+      `data:${frame.mediaType};base64,${Buffer.from(frame.bytes).toString("base64")}`;
+    if (endpoint.firstFrameRequired && request.firstFrame === undefined) {
+      return {
+        status: "failed",
+        providerFailure: videoFailure(
+          "invalid-configuration",
+          `${endpoint.endpointId} needs a first frame.`,
+        ),
+      };
+    }
+    if (endpoint.lastFrameRequired && request.lastFrame === undefined) {
+      return {
+        status: "failed",
+        providerFailure: videoFailure(
+          "invalid-configuration",
+          `${endpoint.endpointId} needs a last frame.`,
+        ),
+      };
+    }
+    const framesPerSecond = endpoint.framesPerSecond;
     const body = {
       prompt: request.prompt,
-      duration:
-        endpoint.durationFormat === "seconds-suffix"
-          ? `${seconds}s`
-          : endpoint.durationFormat === "string"
-            ? String(seconds)
-            : seconds,
+      ...(endpoint.durationFormat === "frames" && framesPerSecond !== undefined
+        ? {
+            num_frames: seconds * framesPerSecond,
+            frames_per_second: framesPerSecond,
+          }
+        : {
+            duration:
+              endpoint.durationFormat === "seconds-suffix"
+                ? `${seconds}s`
+                : endpoint.durationFormat === "string"
+                  ? String(seconds)
+                  : seconds,
+          }),
       ...(endpoint.takesResolution ? { resolution: request.options.resolution } : {}),
       ...(endpoint.takesAspectRatio ? { aspect_ratio: request.options.aspectRatio } : {}),
       ...(endpoint.takesAudio ? { generate_audio: request.options.audio } : {}),
-      ...(frame === undefined || !endpoint.takesImage
+      ...(request.firstFrame === undefined || endpoint.firstFrameField === undefined
         ? {}
-        : {
-            image_url: `data:${frame.mediaType};base64,${Buffer.from(frame.bytes).toString("base64")}`,
-          }),
+        : { [endpoint.firstFrameField]: dataUrl(request.firstFrame) }),
+      ...(request.lastFrame === undefined || !endpoint.takesLastFrame
+        ? {}
+        : { last_frame_url: dataUrl(request.lastFrame) }),
     };
     try {
       const response = await ports.request({
@@ -393,16 +638,28 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
       if (!response.ok) {
         return { status: "failed", providerFailure: classifyVideoHttpFailure(response) };
       }
-      const requestId = jsonField(await readVideoJson(response), "request_id");
+      const submitted = await readVideoJson(response);
+      const requestId = jsonField(submitted, "request_id");
       if (typeof requestId !== "string" || !REQUEST_ID_PATTERN.test(requestId)) return invalidId();
-      return { status: "started", remoteId: remoteIdOf(endpoint.endpointId, requestId) };
+      const remoteId = remoteIdOf(endpoint.endpointId, requestId);
+      const [status, result, cancel] = ["status_url", "response_url", "cancel_url"].map((name) =>
+        jsonField(submitted, name),
+      );
+      if (
+        typeof status === "string" &&
+        typeof result === "string" &&
+        typeof cancel === "string"
+      ) {
+        rememberUrls(remoteId, { status, result, cancel });
+      }
+      return { status: "started", remoteId };
     } catch (error) {
       return { status: "failed", providerFailure: asFailure(error) };
     }
   };
 
   const poll = async (remoteId: string, signal?: AbortSignal): Promise<VideoAdapterPoll> => {
-    const urls = queueUrls(remoteId);
+    const urls = urlsFor(remoteId);
     if (urls === undefined) return invalidId();
     const withSignal = signal === undefined ? {} : { signal };
     try {
@@ -429,10 +686,13 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
       }
       const units = Number(result.headers.get("x-fal-billable-units"));
       const videoUrl = jsonField(await readVideoJson(result), "video", "url");
-      if (typeof videoUrl !== "string" || !videoUrl.startsWith("https://")) {
+      if (typeof videoUrl !== "string" || !falDownloadAllowed(videoUrl)) {
         return {
           status: "failed",
-          providerFailure: videoFailure("protocol", "fal returned no clip address."),
+          providerFailure: videoFailure(
+            "protocol",
+            "fal returned a clip address outside fal's media hosts.",
+          ),
         };
       }
       const fetched = await ports.fetchApprovedVideoUrl({ url: videoUrl, ...withSignal });
@@ -456,13 +716,14 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
   };
 
   const cancel = async (remoteId: string): Promise<VideoAdapterPoll> => {
-    const urls = queueUrls(remoteId);
+    const urls = urlsFor(remoteId);
     if (urls === undefined) return invalidId();
     try {
       const response = await ports.request({ url: urls.cancel, method: "PUT", auth: AUTH });
-      // 200: removed from the queue. 202: fal signalled the runner, which
-      // decides whether to stop, so the job keeps polling. 400: already done.
-      if (response.status === 200) return { status: "cancelled" };
+      // 200: removed from the queue, which fal bills nothing for. 202: fal
+      // signalled the runner, which decides whether to stop, so the job keeps
+      // polling. 400: already done.
+      if (response.status === 200) return { status: "cancelled", usage: { costUsdMicros: 0 } };
       if (response.status === 202) return { status: "running" };
       if (response.status === 400) return await poll(remoteId);
       return { status: "failed", providerFailure: classifyVideoHttpFailure(response) };
@@ -476,7 +737,13 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
   const forget = async (): Promise<VideoAdapterForget> => ({ status: "removed" });
 
   return {
-    models: async () => (await endpoints()).endpoints.map((endpoint) => endpoint.model),
+    // A failed or partial discovery is thrown, not cached: the host keeps no
+    // stale model list and the next read tries again.
+    models: async () => {
+      const read = await endpoints();
+      if (read.failure !== undefined) throw read.failure;
+      return read.endpoints.map((endpoint) => endpoint.model);
+    },
     start,
     poll: (remoteId: string, signal: AbortSignal) => poll(remoteId, signal),
     cancel,
@@ -492,6 +759,7 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
  */
 export const falVideoDriver: VideoGenerationDriver = {
   driverKind: "fal-video",
+  providerName: "fal",
   providerHosts: ["queue.fal.run", "api.fal.ai", "fal.ai"],
   create: ({ profile, ports }) => createFalAdapter(profile, ports),
 };

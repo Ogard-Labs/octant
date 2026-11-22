@@ -175,6 +175,41 @@ describe("Runway video driver", () => {
     expect(recorder.sent).toHaveLength(0);
   });
 
+  it("refuses a first frame in a format Runway cannot take before calling it", async () => {
+    const recorder = ports(script());
+    const adapter = runwayVideoDriver.create({ profile, ports: recorder.ports });
+    const started = await adapter.start({
+      modelId: gen45,
+      prompt: "A boat",
+      options,
+      firstFrame: { bytes: new Uint8Array([0x47, 0x49, 0x46]), mediaType: "image/gif" },
+      references: [],
+      signal: new AbortController().signal,
+    });
+    expect(started.status).toBe("failed");
+    expect(recorder.sent).toHaveLength(0);
+  });
+
+  it("settles a cancelled task at nothing, since Runway refunds its credits", async () => {
+    const adapter = runwayVideoDriver.create({
+      profile,
+      ports: ports(() => new Response(null, { status: 204 })).ports,
+    });
+    expect(await adapter.cancel(taskId)).toEqual({
+      status: "cancelled",
+      usage: { costUsdMicros: 0 },
+    });
+
+    const polled = runwayVideoDriver.create({
+      profile,
+      ports: ports(() => Response.json({ id: taskId, status: "CANCELLED" })).ports,
+    });
+    expect(await polled.poll(taskId, new AbortController().signal)).toEqual({
+      status: "cancelled",
+      usage: { costUsdMicros: 0 },
+    });
+  });
+
   it("keeps to the imports a third-party video plugin could make", () => {
     const source = readFileSync(join(import.meta.dirname, "runwayVideoAdapter.ts"), "utf8");
     const specifiers = [

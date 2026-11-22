@@ -146,7 +146,7 @@ activation ladder.
    - It reuses the Gemini API key a person already set up for Gemini images.
    - Its published price is low: about $0.07/s at 720p.
    - Its range is wide: 3–15 s, up to 4K, with audio.
-   - It is the only provider that reports usage Octant can settle from (tokens).
+   - It reports usage Octant can settle from (tokens), as Runway does with credits.
    - It can both cancel a running job and delete its stored copy.
 2. **Runway.**
    - It is a dedicated video provider with self-serve keys and a published

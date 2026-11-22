@@ -152,6 +152,20 @@ async function start(
     };
   }
   const frame = request.firstFrame;
+  // Runway takes JPEG, PNG or WebP prompt images; the shared reader accepts
+  // more, so what Runway cannot use is refused before it is sent.
+  if (
+    frame !== undefined &&
+    !["image/jpeg", "image/png", "image/webp"].includes(frame.mediaType)
+  ) {
+    return {
+      status: "failed",
+      providerFailure: videoFailure(
+        "invalid-configuration",
+        "Runway takes a JPEG, PNG or WebP first frame.",
+      ),
+    };
+  }
   const body = {
     model: String(request.modelId),
     promptText: request.prompt,
@@ -214,7 +228,12 @@ async function poll(
       case "RUNNING":
         return { status: "running" };
       case "CANCELLED":
-        return usage === undefined ? { status: "cancelled" } : { status: "cancelled", usage };
+        // Runway refunds a cancelled task's credits; where it still reports a
+        // charge, that charge stands.
+        return {
+          status: "cancelled",
+          usage: usage ?? { costUsdMicros: 0 },
+        };
       case "FAILED": {
         const code = jsonField(payload, "failureCode");
         // Runway does not refund SAFETY.INPUT failures (its task-failure
@@ -284,7 +303,9 @@ async function cancel(ports: VideoGenerationPorts, remoteId: string): Promise<Vi
   try {
     const response = await remove(ports, remoteId);
     if (response === undefined) return invalidId();
-    if (response.ok || response.status === 404) return { status: "cancelled" };
+    // A cancelled task's credits are refunded, so the job settles at nothing.
+    if (response.ok || response.status === 404)
+      return { status: "cancelled", usage: { costUsdMicros: 0 } };
     return { status: "failed", providerFailure: classifyVideoHttpFailure(response) };
   } catch (error) {
     return { status: "failed", providerFailure: asFailure(error) };
@@ -314,6 +335,7 @@ async function forget(ports: VideoGenerationPorts, remoteId: string): Promise<Vi
  */
 export const runwayVideoDriver: VideoGenerationDriver = {
   driverKind: "runway-video",
+  providerName: "Runway",
   providerHosts: ["api.dev.runwayml.com"],
   create: ({ profile, ports }) => ({
     models: async () => declaredFor(profile),
