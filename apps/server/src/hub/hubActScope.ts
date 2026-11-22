@@ -78,10 +78,11 @@ export function hubActScopeFromHost(sides: {
  * threads, answer their approvals and questions, Stop, and forward the port of
  * a running server of one of its threads (maintainer decision, 2026-11-21).
  */
-export type HubActAction = "start" | "answer" | "stop" | "forward";
+export type HubActAction = "start" | "turn" | "answer" | "stop" | "forward";
 
 const ACTION_WORDS: Readonly<Record<HubActAction, string>> = {
   start: "start threads",
+  turn: "send turns",
   answer: "answer approvals or questions",
   stop: "stop turns",
   forward: "forward ports",

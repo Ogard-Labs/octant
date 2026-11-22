@@ -217,6 +217,58 @@ function coordinatorFixture() {
 }
 
 describe("RemoteWorkspace", () => {
+  it("offers a device only the hub introduced the Code start form for the Projects its host lists, and none without them", async () => {
+    // The host lists such a device only the Code Projects the member's Act item names.
+    const actProject = {
+      id: "30000000-0000-4000-8000-000000000021",
+      type: "code",
+      name: "Tools",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      binding: { canonicalRoot: "/repositories/tools" },
+      bindingRevisionId: "30000000-0000-4000-8000-000000000022",
+      codeAccessPersistence: "current-session",
+    };
+    const listing = (projects: ReadonlyArray<typeof actProject>) =>
+      ({
+        ...unused<ProjectClient>("project"),
+        bootstrap: async () => ({
+          active: projects,
+          archived: [],
+          availability: projects.map((project) => ({
+            projectId: project.id,
+            status: "available",
+            observedAt: now,
+          })),
+          memory: [],
+        }),
+      }) as unknown as ProjectClient;
+
+    const named = coordinatorFixture();
+    const { unmount } = render(
+      <RemoteWorkspace
+        clients={{ ...named.clients, project: listing([actProject]) }}
+        connected
+        mode="code"
+      />,
+    );
+    expect(await screen.findByRole("textbox", { name: "First message" })).toBeInTheDocument();
+    // Making a Project from a folder stays with the host's own person.
+    expect(screen.queryByRole("button", { name: /New Project from a folder/ })).toBeNull();
+    unmount();
+
+    const none = coordinatorFixture();
+    render(
+      <RemoteWorkspace clients={{ ...none.clients, project: listing([]) }} connected mode="code" />,
+    );
+    await screen.findByRole("button", { name: "Backlog coordinator" });
+    expect(screen.queryByRole("textbox", { name: "First message" })).toBeNull();
+  });
+
   it("lists a host-created Work thread after navigation refresh without remounting", async () => {
     vi.useFakeTimers();
     let threads: ReturnType<typeof hostCreatedThread>[] = [];

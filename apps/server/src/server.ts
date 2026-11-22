@@ -780,6 +780,7 @@ export function startOctantServer(
       roots,
       workAttachments,
     } = yield* wireCode({
+      hubActScopeSlot,
       isPairedDeviceScope,
       projectMemoryAccess,
       threadMoveHolds,

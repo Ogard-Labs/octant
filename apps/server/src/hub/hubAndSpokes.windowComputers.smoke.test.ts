@@ -481,12 +481,40 @@ describe("a desktop window on a hub member", () => {
     const desktop = desktopWindow(a, network);
     await desktop.sync();
     const onStudio = await readySession(desktop, b);
+    const prepare = (projectId: string) =>
+      onStudio.authenticatedFetch({
+        method: "POST",
+        path: "/api/code/commands",
+        body: JSON.stringify({ kind: "prepare-code-project-checkout", projectId }),
+      });
 
+    // The start's first step, preparing the checkout, is held to the Act item too.
+    expect((await prepare(ACT_PROJECT)).status).toBe(200);
+    expect((await prepare(OTHER_PROJECT)).status).toBe(403);
     const named = await onStudio.authenticatedFetch({
       method: "POST",
       path: "/api/code/commands",
       body: createIn(ACT_PROJECT),
     });
+    // Its first message is a turn in that thread, sent in the named Project.
+    const firstTurn = await onStudio.authenticatedFetch({
+      method: "POST",
+      path: "/api/code/commands",
+      body: JSON.stringify({
+        kind: "start-provider-turn",
+        operationId: crypto.randomUUID(),
+        threadId: thread.id,
+        checkoutId: thread.checkoutId,
+        sessionId: "00000000-0000-4000-8000-0000000009a6",
+        prompt: {
+          contentId: "00000000-0000-4000-8000-0000000009a7",
+          digest: "d".repeat(64),
+          byteLength: 42,
+        },
+      }),
+    });
+    expect(firstTurn.status, await firstTurn.clone().text()).toBe(200);
+    expect(bCode.operated).toEqual([{ kind: "start-provider-turn", threadId: thread.id }]);
     const unnamed = await onStudio.authenticatedFetch({
       method: "POST",
       path: "/api/code/commands",

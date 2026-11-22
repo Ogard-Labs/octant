@@ -83,7 +83,8 @@ coding session on any member from one window, the hub as the front door, Code
 delegation, adding a computer over SSH, telling every connected device of a
 new one, and placement advice, were added on 2026-11-19; slices 13, 14 and
 15 are built for directly paired computers, slice 16 is partly built (the
-Act item bounds where a hub-introduced device starts threads, unticking Act
+Act item bounds where a hub-introduced device starts threads, including the
+Code start form, its Project list, checkout reads and Code turns, unticking Act
 ends such a device's sessions, and a desktop window on a member lists the
 hub and the other spokes as its computers, the hub bounding it by its own
 Act list), slice 17 (Code delegation) and slice 19 (new-device alerts) are
@@ -660,8 +661,17 @@ otherwise.
   when a spoke's or the hub's listener has moved, the window's next ask is
   given a new device at the current address and the old one is revoked, as
   for an expired device; a device the person revoked stays refused.
-  Not built yet: a turn sent into an existing thread, and Chat threads, held
-  to the Act item.
+  Built for starting a Code thread from such a device: the member lists it
+  only the Code Projects its Act item names (the Projects bootstrap and
+  search), holds the start's checkout preparation and remote read to the
+  same item, and holds a Code turn, the new thread's first message included,
+  to it, each refused with the action's sentence (`send turns` for a turn).
+  A paired browser and a desktop window's paired computer show such a device
+  the Code start form with those Projects alone, never New Project from a
+  folder, and none when the item names no Code Project; a Project whose
+  default is Full access starts at Ask first, since such a device may lower a
+  thread but never raise one. Not built yet: a Work turn sent into an
+  existing thread, and Chat threads, held to the Act item.
 
   **The hub as one of a member window's computers** (maintainer decision,
   2026-11-21). A spoke's or standby's window also lists the hub, marked
@@ -4119,9 +4129,13 @@ sheets; a real machine and a published listing are maintainer gates.
     leaves the list. Approvals and Stop are held to the Act item. The hub is
     one of a spoke window's computers, labelled hub, holding the window to
     its own Act list, which Hub settings on the hub name; the smoke starts,
-    answers, and stops on the hub only in a Project that list names. Not
-    built: a turn sent into an existing thread, and Chat threads, held to the
-    Act item. Acceptance: a hub-introduced device starts a Code thread only
+    answers, and stops on the hub only in a Project that list names. Code
+    start under Act is built: the member lists such a device only the Code
+    Projects its Act item names, holds checkout preparation, remote reads
+    and Code turns to it, and the start form offers those Projects alone;
+    the smoke prepares, starts, and sends the first turn in a named Project
+    and is refused preparing in another. Not built: a Work turn sent into an
+    existing thread, and Chat threads, held to the Act item. Acceptance: a hub-introduced device starts a Code thread only
     in a Project the Act item names; removing the item refuses the next
     create; from a phone and from a browser, that thread's turn streams, its
     approvals are answered within the Act item, and Stop reaches it.
