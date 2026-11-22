@@ -4,6 +4,7 @@ import {
   driverLabel,
   incompatibleReadinessFacts,
   providerProcessFailureSummary,
+  providerRefusalCopy,
   providerRefusalGuidance,
   providerRowReadinessLabel,
   ownReviewerLabel,
@@ -440,5 +441,56 @@ describe("windowsChatBoundaryLabel", () => {
     expect(windowsChatBoundaryLabel("claude", "win32")).toBeUndefined();
     expect(windowsChatBoundaryLabel("codex", "win32")).toBeUndefined();
     expect(windowsChatBoundaryLabel("pi", "win32")).toBeUndefined();
+  });
+});
+
+describe("sign-in recovery advice", () => {
+  const antigravity = (configuration: Record<string, unknown>) =>
+    decodeProviderInstance({
+      id: "80000000-0000-4000-8000-0000000000a9",
+      displayName: "Antigravity",
+      driverKind: "antigravity",
+      configuration: {
+        kind: "antigravity-acp",
+        binaryPath: "/opt/homebrew/bin/agy",
+        ...configuration,
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-11-22T10:00:00.000Z",
+      updatedAt: "2026-11-22T10:00:00.000Z",
+    });
+
+  it("sends a refused Gemini API key back to the key, not to a CLI login", () => {
+    expect(
+      providerRefusalCopy("authentication-required", antigravity({ authentication: "api-key" })),
+    ).toEqual({
+      reason: "Google Antigravity did not accept its Gemini API key.",
+      nextStep:
+        "Check the Gemini API key in this provider's settings, then check the connection again.",
+    });
+  });
+
+  it("sends a refused Agent Platform sign-in to its project and Application Default Credentials", () => {
+    expect(
+      providerRefusalCopy(
+        "authentication-required",
+        antigravity({
+          authentication: "agent-platform",
+          googleCloud: { project: "octant-example-1", location: "us-central1" },
+        }),
+      ),
+    ).toEqual({
+      reason: "Google Antigravity could not sign in to Agent Platform.",
+      nextStep:
+        "Check the Google Cloud project and location in this provider's settings, run gcloud auth application-default login on this computer, then check the connection again.",
+    });
+  });
+
+  it("keeps the CLI login advice for the personal sign-in", () => {
+    expect(providerRefusalCopy("authentication-required", antigravity({})).nextStep).toBe(
+      "Sign in to Google Antigravity with its provider-owned login, then check the connection again.",
+    );
   });
 });
