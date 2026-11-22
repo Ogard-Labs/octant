@@ -63,12 +63,12 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 4       | 2            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 2       | 1            | 0                   |
 | [Device workbench and mobile](#device-workbench-and-mobile)                           | 8         | 4       | 4            | 0                   |
-| [Hubs and Nightly](#hubs-and-nightly)                                                 | 6         | 0       | 5            | 1                   |
+| [Hubs and Nightly](#hubs-and-nightly)                                                 | 6         | 0       | 6            | 0                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **294**   | **177** | **112**      | **5**               |
+| **All areas**                                                                         | **294**   | **177** | **113**      | **4**               |
 
 ## Principles and hard lines
 
@@ -3957,11 +3957,11 @@ A person starts and manages a coding session on whichever of their computers the
 - The hub is the front door (a device paired with the hub reaches every member), the directory, and the owner of the shared services a specification places on it; it carries no session traffic, and two computers can pair directly with no hub. _Designed, not built._
 - A start-screen composer's computer picker makes the thread on the computer it names, in that computer's Project with its providers, models and defaults; until the window can route a create, a create aimed at another computer is refused with a sentence and never runs on this one. _Designed, not built._
 - A device only the hub introduced acts on a member within that member's Act hub-grant item; a device the member's own person paired acts as that person there. _Designed, not built._
-- A computer can be added as a member over SSH without visiting it: the signed headless installer, carrying its own runtime, runs after the person confirms in one dialog that also approves the one join that follows; the comparison code exists only once the installed listener runs and the join opens, so the window reads it over the pinned SSH connection then and completes the join only if it matches the hub's; it joins with a join code passed in the same session, Octant never runs sudo, the install is journaled on the server registry, and updates drain, swap and roll back. _Designed, not built._
+- A computer can be added as a member over SSH without visiting it: the signed headless build, carrying its own runtime, is installed over SSH as a user service after the person confirms, with no sudo; the join code is passed in the same session and the join is approved for its one ticket when the comparison code read over SSH matches; the install, update (drain, swap, roll back when the signed hello does not come) and Remove Octant are journaled on the server registry. Built for a hub; a join made from a member's window, pairing with no hub, and rolling back a swap that migrated the store are not built, and a real machine is a maintainer gate. Detail: [Adding a computer over SSH](hub-and-spokes.md#adding-a-computer-over-ssh).
 - When a new device joins the hub or pairs with a host, every device connected to that hub or host is told: the alert names the device and its private-network IP address, keeps its role and key fingerprint, offers Remove, and shows in each connected window or app, and also reaches a phone as a push notification when push is on (maintainer request, 2026-11-19). _Designed, not built._
 - Each member reports a load level beside the roster, and a member can stop accepting delegated work with one switch. _Designed, not built._
 
-Status: Designed, not built. Since: 2026-11-19. Detail: [Hub and spokes: the hub coordinates](hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work) and [decisions](hub-and-spokes.md#decisions).
+Status: Partly built. Since: 2026-11-19. Detail: [Hub and spokes: the hub coordinates](hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work) and [decisions](hub-and-spokes.md#decisions).
 
 ### Octant Nightly
 
