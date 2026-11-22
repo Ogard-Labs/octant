@@ -2996,8 +2996,9 @@ that declaration, never by the profile id:
   provider is read live at dispatch, so a routine saved earlier is refused at
   its next run. The refusal is not part of the revalidation itself, which
   source polling and file arming share, so an integration or file routine on
-  Antigravity keeps observing and each occurrence it turns into a run is
-  recorded as refused rather than the routine going quiet with no reason. Every other turn the host starts
+  Antigravity keeps observing until its first run is refused, which pauses
+  it with the reason, rather than going quiet with no reason; later
+  occurrences make no runs while it is paused. Every other turn the host starts
   as itself runs under the host's own scope (`ROUTINE_HOST_SCOPE_ID`), which
   no window or device can claim, and is refused at that mode's turn
   admission: a Work turn (`startFirstTurn`) and a Code turn
