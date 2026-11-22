@@ -18164,8 +18164,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   a server route for a window that holds the Project and the thread: it returns
   names (page title and host, thread id and title, whether an agent drives it)
   and never page text or a picture; a paired device reads the same list
-  (maintainer decision, 2026-11-12; not built yet: today a paired device is told
-  a stored-profile page exists and nothing more).
+  (maintainer decision, 2026-11-12; built for a device the host's own person
+  paired; a hub-introduced or restricted device is told only that a
+  stored-profile page exists).
 - **Browser profiles and extensions.** A Browser page is Private (in-memory,
   per browsing context) unless the person, at a local window or a paired device, puts it in their
   Project's persistent profile or the host's Personal profile; a profile page
@@ -18186,7 +18187,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   no parent authority or transfer permission. See [delegated sessions](design/browser-profiles.md#delegated-sessions).
   A hub-introduced or restricted device sees only that a signed-in page exists.
   The person signs out of a profile (closing its pages and removing its storage)
-  at a local window or a device they paired, and the host journals
+  at a local window or a device they paired (the host admits a person-paired
+  device; the phone has no control for it yet), and the host journals
   that it happened without naming a site or
   a cookie. The person may also import another browser's cookies into one
   profile, only by picking a browser and profile in Settings: the host reads a
