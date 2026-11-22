@@ -10,17 +10,6 @@ export interface FileMentionRankable {
 }
 import { canonicalizeWorkRelativePath, WorkConfinementRejected } from "./workConfinementPolicy";
 
-/**
- * The `@` token under the caret. `start` is the `@`; `query` is whatever the
- * user has typed after it. A mention only opens at a word boundary so an
- * email address never becomes a picker, and it closes at whitespace so the
- * token stays one path.
- */
-export interface FileMentionToken {
-  readonly start: number;
-  readonly query: string;
-}
-
 export type FileMentionPathClassification =
   | { readonly kind: "in-root"; readonly path: string }
   | { readonly kind: "out-of-root" };
@@ -66,27 +55,6 @@ export function classifyFileMentionExtraFolderPath(
   return { kind: "out-of-root" };
 }
 
-/**
- * Find the `@…` token the caret sits in, if any.
- *
- * Typing `@` never resolves anything by itself: an unmatched `@text` stays
- * ordinary text, which is why this returns only a token and never a candidate.
- */
-export function parseFileMentionToken(
-  draft: string,
-  caretIndex: number,
-): FileMentionToken | undefined {
-  if (caretIndex < 0 || caretIndex > draft.length) return undefined;
-  const before = draft.slice(0, caretIndex);
-  const at = before.lastIndexOf("@");
-  if (at === -1) return undefined;
-  const preceding = at === 0 ? "" : before.charAt(at - 1);
-  if (preceding !== "" && !/\s/.test(preceding)) return undefined;
-  const query = before.slice(at + 1);
-  if (/\s/.test(query)) return undefined;
-  return { start: at, query };
-}
-
 function score(candidate: FileMentionRankable, query: string): number {
   const path = candidate.path.toLocaleLowerCase();
   const name = path.slice(path.lastIndexOf("/") + 1);
@@ -119,30 +87,6 @@ export function rankFileMentionCandidates<T extends FileMentionRankable>(
     )
     .slice(0, limit)
     .map((entry) => entry.candidate);
-}
-
-export interface AppliedFileMention {
-  readonly draft: string;
-  readonly caret: number;
-}
-
-/**
- * Replaces the open `@…` token with the chosen path. A directory keeps its
- * trailing slash so the user can keep typing into it.
- */
-export function applyFileMention(
-  draft: string,
-  token: FileMentionToken,
-  candidate: FileMentionRankable,
-): AppliedFileMention {
-  const after = draft.slice(token.start + 1 + token.query.length);
-  const suffix =
-    candidate.kind === "directory" ? "/" : after.length > 0 && /^\s/.test(after) ? "" : " ";
-  const replacement = `@${candidate.path}${suffix}`;
-  return {
-    draft: `${draft.slice(0, token.start)}${replacement}${after}`,
-    caret: token.start + replacement.length,
-  };
 }
 
 /**

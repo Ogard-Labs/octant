@@ -66,6 +66,7 @@
     "smoke:packaged-claude": "bun scripts/smoke-packaged-claude.ts",
     "smoke:packaged-opencode": "bun scripts/smoke-packaged-opencode.ts",
     "bench:harness": "bun scripts/harness-benchmark.ts",
+    "replay:run-cases": "bun scripts/replay-run-cases.ts",
     "seed:canvas-fixtures": "bun scripts/seed-canvas-fixtures.ts",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
@@ -73,7 +74,8 @@
     "computer-use:prepare": "bun scripts/prepare-computer-use-driver.ts",
     "docs:theme": "bun scripts/export-docs-theme.ts",
     "smoke:browser-download-manifest-ui": "bun scripts/smoke-browser-download-manifest-ui.ts",
-    "smoke:browser-download-source": "bun scripts/smoke-browser-download-source.ts"
+    "smoke:browser-download-source": "bun scripts/smoke-browser-download-source.ts",
+    "smoke:browser-local-navigation": "bun scripts/smoke-browser-local-navigation.ts"
   },
   "devDependencies": {
     "@types/node": "catalog:",

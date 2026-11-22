@@ -54,6 +54,14 @@ export interface ServerCallInput {
   readonly timeoutMs: number;
   readonly maxOutputBytes: number;
   readonly signal?: AbortSignal;
+  /**
+   * An agent socket offering only the key Octant keeps for this server, used
+   * in place of the person's agent. Such a call opens its own login and never
+   * shares a connection made with the person's keys. It is named on the
+   * command line for the destination alone (see `keptKeyOptions`), so a
+   * `ProxyJump` hop still signs in to its jump host with the person's agent.
+   */
+  readonly identityAgent?: string;
 }
 
 export interface ServerConnectionOptions {
@@ -77,6 +85,21 @@ export interface ServerConnectionOptions {
   readonly pinnedHostKeys?: (server: ServerAddress) => ReadonlyArray<string> | undefined;
   /** Why no call may go to a server now (its machine is suspended), read each call. */
   readonly refuses?: (server: ServerAddress) => string | undefined;
+}
+
+/** Shown to a paired device when a server's SSH key requires local confirmation or hardware touch. */
+export const SSH_KEY_CONFIRMATION_MESSAGE =
+  "This server's key needs a confirmation at this computer.";
+
+/**
+ * Whether OpenSSH failed because the person's SSH agent or hardware security key
+ * needs an interactive confirmation or touch at this computer, which cannot be
+ * answered from a paired device under `BatchMode=yes`.
+ */
+export function sshNeedsHostKeyConfirmation(errorText: string): boolean {
+  return /agent refused operation|confirm user presence|user presence|requires? confirmation|confirmation required|touch.*key|sk_sign.*refused/i.test(
+    errorText,
+  );
 }
 
 /** The name a pinned server's keys are recorded under, so its alias never has to be a host pattern. */
@@ -189,6 +212,8 @@ export function serverSshArguments(
     readonly controlSocket?: string | undefined;
     /** A known hosts file holding only the server's pinned keys. */
     readonly pinnedKnownHosts?: string | undefined;
+    /** An agent socket offering only the key Octant keeps for this server. */
+    readonly identityAgent?: string | undefined;
   },
 ): ReadonlyArray<string> {
   const control =
@@ -204,6 +229,7 @@ export function serverSshArguments(
     ...[
       ...SERVER_CONNECTION_OPTIONS,
       ...pinnedHostKeyOptions(options.pinnedKnownHosts),
+      ...keptKeyOptions(options.identityAgent),
       ...control,
     ].flatMap((option) => ["-o", option]),
     options.terminal ? "-tt" : "-T",
@@ -213,6 +239,22 @@ export function serverSshArguments(
     server.alias,
     ...(remoteCommand === undefined ? [] : [remoteCommand]),
   ];
+}
+
+/**
+ * Signs in to the destination with the kept key's agent. A command-line
+ * option wins over the person's config, so an `IdentityAgent` of theirs cannot
+ * replace the kept agent, and `IdentitiesOnly=no` keeps a configured
+ * `IdentitiesOnly yes` from filtering the kept key out. `IdentityFile` is the
+ * one setting OpenSSH accumulates across sources (`ssh -G` lists a config's
+ * files after `none`), so a configured file is still tried, but only after the
+ * agent's key, which the server is registered to accept. These options reach
+ * the destination only: a `ProxyJump` hop runs its own `ssh` without them and
+ * keeps the person's agent from the inherited `SSH_AUTH_SOCK`.
+ */
+export function keptKeyOptions(identityAgent: string | undefined): ReadonlyArray<string> {
+  if (identityAgent === undefined) return [];
+  return [`IdentityAgent=${identityAgent}`, "IdentitiesOnly=no", "IdentityFile=none"];
 }
 
 /**
@@ -263,9 +305,22 @@ export class ServerConnection {
   #controlDirectory: string | undefined;
   /** What each pinned file holds now, so an unchanged pin is not rewritten on every call. */
   readonly #pinnedWritten = new Map<string, string>();
+  readonly #connectedListeners = new Set<(server: ServerAddress) => void>();
 
   constructor(options: ServerConnectionOptions) {
     this.#options = options;
+  }
+
+  /**
+   * Notified whenever a regular SSH call reaches the server (`status === "ran"`).
+   * Read-only setup diagnostics (`freshConnection: true`) never trigger this so
+   * diagnostics never mutate server or journal state.
+   */
+  subscribeConnected(listener: (server: ServerAddress) => void): () => void {
+    this.#connectedListeners.add(listener);
+    return () => {
+      this.#connectedListeners.delete(listener);
+    };
   }
 
   /** Why no call may go to this server now, or nothing. */
@@ -347,7 +402,9 @@ export class ServerConnection {
     const pinned = this.#options.pinnedHostKeys?.(server) ?? [];
     let controlSocket: string | undefined;
     try {
-      if (input.freshConnection !== true) controlSocket = this.#controlSocket(server, pinned);
+      if (input.freshConnection !== true && input.identityAgent === undefined) {
+        controlSocket = this.#controlSocket(server, pinned);
+      }
     } catch {
       return Promise.resolve({
         status: "unreachable",
@@ -359,6 +416,7 @@ export class ServerConnection {
       configFile: this.#options.configFile,
       controlSocket,
       pinnedKnownHosts: this.pinnedKnownHostsFile(server, pinned),
+      identityAgent: input.identityAgent,
     });
     return new Promise((resolve) => {
       if (input.signal?.aborted === true) {
@@ -366,7 +424,10 @@ export class ServerConnection {
         return;
       }
       const child = spawn(this.#options.sshPath ?? "ssh", [...args], {
-        env: { ...this.#environment(), ...(input.freshConnection === true ? { LC_ALL: "C" } : {}) },
+        env: {
+          ...this.#environment(),
+          ...(input.freshConnection === true ? { LC_ALL: "C" } : {}),
+        },
         detached: input.freshConnection === true,
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -457,6 +518,15 @@ export class ServerConnection {
           return;
         }
         finish({ status: "ran", exitCode: code ?? 1, output, truncated, errorOutput: errorText });
+        if (input.freshConnection !== true) {
+          for (const listener of this.#connectedListeners) {
+            try {
+              listener(server);
+            } catch {
+              // A listener failure never disrupts the SSH call that succeeded.
+            }
+          }
+        }
       });
     });
   }

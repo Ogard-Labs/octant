@@ -57,7 +57,7 @@ export function inboxStatusCounts(rows: ReadonlyArray<MobileInboxRow>): InboxSta
   let inReview = 0;
 
   for (const row of rows) {
-    if (row.mode === "chat") continue;
+    if (row.mode === "chat" && row.waitingOfferText === undefined) continue;
     all += 1;
     const section = sectionFor(row.status, row.reviewState, row.live);
     if (section === "working") working += 1;
@@ -85,7 +85,7 @@ export function inboxPriorityRows(
   limit: number,
 ): ReadonlyArray<MobileInboxRow> {
   return rows
-    .filter((row) => row.mode !== "chat")
+    .filter((row) => row.mode !== "chat" || row.waitingOfferText !== undefined)
     .map((row, index) => ({
       row,
       index,

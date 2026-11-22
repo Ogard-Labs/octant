@@ -1,5 +1,5 @@
 import { Minus, Plus } from "../icons";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { OctantButton } from "./OctantButton";
 import { OctantInput } from "./OctantInput";
 
@@ -23,7 +23,16 @@ export function OctantNumberStepper(props: OctantNumberStepperProps) {
   const step = props.step ?? 1;
   const decimals = decimalPlaces(step);
   const [draft, setDraft] = useState(String(props.value));
-  useEffect(() => setDraft(String(props.value)), [props.value]);
+  // Follow a new value during render, not in an effect. An effect also ran on
+  // mount, and when the stepper mounted outside act (a settings panel that
+  // appears once its load resolves) a first edit could land before it: React
+  // flushed the pending effect after queuing the edit, so the field snapped
+  // back to the old value and the next keystroke appended to it.
+  const [shownValue, setShownValue] = useState(props.value);
+  if (props.value !== shownValue) {
+    setShownValue(props.value);
+    setDraft(String(props.value));
+  }
   const commit = (next: number) => {
     const bounded = Math.min(props.max, Math.max(props.min, next));
     const normalized = Number(bounded.toFixed(decimals));

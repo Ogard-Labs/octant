@@ -1,6 +1,6 @@
 import type { CodeProjectPullRequestRow } from "@octant/contracts";
 import type { CodeThreadId } from "@octant/contracts/code";
-import type { CodeOperationEvent, CodeThreadFollowUp } from "@octant/contracts/code-operations";
+import type { CodeThreadFollowUp } from "@octant/contracts/code-operations";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
 
 /**
@@ -145,63 +145,6 @@ export function completeCodeFollowUp(
 }
 
 /**
- * The reason and origin of an automatic follow-up trigger derived from one Code
- * operation event, or `undefined` when the event is not itself a user-actionable
- * edge. Only structural, normalized operation events produce triggers; ordinary
- * assistant prose (`provider-content`) and telemetry (`usage`, `diff`, plain
- * running progress) never do. The caller supplies the monotonic source sequence
- * and stable source-event id used for edge-based, idempotent evaluation.
- */
-export interface CodeFollowUpAutomaticTrigger {
-  readonly reason: string;
-  readonly origin: "automatic";
-}
-
-export function deriveCodeFollowUpTrigger(
-  event: CodeOperationEvent,
-): CodeFollowUpAutomaticTrigger | undefined {
-  switch (event.kind) {
-    case "approval-requested":
-      return { origin: "automatic", reason: `Approval requested: ${event.action}` };
-    case "input-requested":
-      return { origin: "automatic", reason: "The agent is waiting for your input." };
-    case "operation-state":
-      if (event.state === "waiting") {
-        return { origin: "automatic", reason: "The operation is waiting for you." };
-      }
-      if (event.state === "failed") {
-        const detail = event.failure?.message;
-        return {
-          origin: "automatic",
-          reason:
-            detail === undefined
-              ? "An operation failed and needs attention."
-              : `Operation failed: ${detail}`,
-        };
-      }
-      return undefined;
-    case "task-progress":
-      if (event.state === "waiting") {
-        return { origin: "automatic", reason: `Task needs attention: ${event.summary}` };
-      }
-      if (event.state === "failed") {
-        return { origin: "automatic", reason: `Task failed: ${event.summary}` };
-      }
-      return undefined;
-    case "child-activity":
-      if (event.state === "waiting") {
-        return { origin: "automatic", reason: `Subagent is waiting: ${event.summary}` };
-      }
-      if (event.state === "failed") {
-        return { origin: "automatic", reason: `Subagent failed: ${event.summary}` };
-      }
-      return undefined;
-    default:
-      return undefined;
-  }
-}
-
-/**
  * The last definitively observed checks summary for one linked pull request on
  * one owning thread. `unknown` is deliberately not representable: an unknown
  * observation says the snapshot lost sight of the checks, not that they
@@ -223,7 +166,8 @@ export interface FailingChecksFollowUpTrigger {
 }
 
 function linkedPullRequestChecksKey(threadId: string, row: CodeProjectPullRequestRow): string {
-  return `${threadId}|${String(row.projectId)}:${row.repositoryOwner}/${row.repositoryName}:${row.number}`;
+  if (row.linkId !== undefined) return `${threadId}|link:${String(row.linkId)}`;
+  return `${threadId}|${String(row.projectId)}:${row.repositoryOwner.toLowerCase()}/${row.repositoryName.toLowerCase()}:${row.number}`;
 }
 
 /**

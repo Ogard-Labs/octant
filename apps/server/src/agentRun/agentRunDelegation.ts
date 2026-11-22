@@ -100,6 +100,25 @@ export interface RemoteDelegationPort {
     readonly targetProjectId: string;
     readonly task: string;
   }) => Promise<AgentRunDelegationResult>;
+  /**
+   * The members this host may delegate to and each one's Projects, as each
+   * member lists them under the grant it gave this host: names and ids only.
+   */
+  readonly listTargets?: () => Promise<
+    ReadonlyArray<{
+      readonly memberId: string;
+      readonly name: string;
+      readonly projects: ReadonlyArray<{
+        readonly projectId: string;
+        readonly name: string;
+        readonly modes: ReadonlyArray<"work" | "code">;
+      }>;
+      /** False when that member stopped accepting delegated work. */
+      readonly accepting?: boolean;
+      /** How busy that member is: light, busy or heavy. */
+      readonly load?: "light" | "busy" | "heavy";
+    }>
+  >;
 }
 
 export interface AgentRunDelegationRouting {
@@ -212,9 +231,10 @@ export function agentRunDelegationCapabilities(options: AgentRunDelegationOption
     },
     dependencies: true,
     parentContext: options.admission.parentContext !== undefined,
-    // Reported by what this thread can do, so a Chat or Code thread never offers it.
+    // Reported by what this thread can do: a Work thread sends Work and a Code
+    // thread sends Code; a Chat thread never offers it.
     remoteDelegation:
-      options.remote !== undefined && options.mode === "work"
+      options.remote !== undefined && (options.mode === "work" || options.mode === "code")
         ? ("target-member" as const)
         : ("unavailable" as const),
     targets: options.listTargets(),
@@ -450,7 +470,9 @@ export async function startAgentRunDelegation(
   if (selected === undefined) return { status: "refused", reason: "delegate-routing-unavailable" };
   let run: AgentRun = accepted.run;
   if (run.lifecycleStatus === "queued" && run.recoveryReason === undefined) {
-    const started = options.orchestration.start(run.id, run.version, admission.liveAuthority);
+    const started = options.orchestration.start(run.id, run.version, admission.liveAuthority, {
+      ownerWindowId: options.windowId,
+    });
     if (started.kind === "run-command-failed")
       return { status: "refused", reason: started.reason, message: started.message };
     run = started.run;
@@ -671,6 +693,7 @@ export async function followUpAgentRunDelegation(
       parent.liveAuthority,
       {
         message: request.message,
+        ownerWindowId: options.windowId,
         resolveLiveAuthority: () => {
           if (
             options.admission.settings.current().creationPosture !== "automatic" ||

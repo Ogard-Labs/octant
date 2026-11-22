@@ -24,11 +24,13 @@ import { RemoteDeviceSelfPanel } from "./RemoteDeviceSelfPanel";
 import {
   createRemoteAgentGrantClient,
   createRemoteExtensionClient,
+  createRemoteNewDeviceAlertsClient,
   createRemotePairedDeviceAdministrationClient,
   createRemoteProductClients,
   createRemoteProviderCredentialClient,
   createRemoteProviderOAuth,
 } from "./remoteProductClients";
+import { NewDeviceAlerts } from "../host/NewDeviceAlerts";
 import { RemoteHostSettings } from "./RemoteHostSettings";
 import { RemoteWorkspace } from "./RemoteWorkspace";
 import { useRemoteSession } from "./useRemoteSession";
@@ -81,6 +83,10 @@ export function RemoteShellView(props: RemoteShellViewProps) {
   );
   const pairedDevices = useMemo(
     () => createRemotePairedDeviceAdministrationClient(props.bridge),
+    [props.bridge],
+  );
+  const newDeviceAlerts = useMemo(
+    () => createRemoteNewDeviceAlertsClient(props.bridge),
     [props.bridge],
   );
   const providerKeys = useMemo(
@@ -188,6 +194,8 @@ export function RemoteShellView(props: RemoteShellViewProps) {
         />
       ) : null}
 
+      <NewDeviceAlerts client={newDeviceAlerts} />
+
       <ContinuityScreenContext.Provider
         value={{
           hostLabel: hosts[0]?.displayName ?? "Paired host",
@@ -211,6 +219,9 @@ export function RemoteShellView(props: RemoteShellViewProps) {
         pairedDevices={pairedDevices}
         projectClient={clients.project}
         providerClient={clients.provider}
+        {...(clients.code.providerCloudSessions === undefined
+          ? {}
+          : { providerCloudSessionClient: clients.code.providerCloudSessions })}
         providerKeys={providerKeys}
         providerOAuth={providerOAuth}
         reachable={reachableSettings}

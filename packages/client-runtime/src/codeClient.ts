@@ -126,6 +126,12 @@ import {
   type CodeLanguageDocumentRequest,
   type CodeLanguageReadRequest,
 } from "@octant/contracts/code-language";
+import {
+  ActivityView,
+  decodeActivityQuery,
+  encodeActivityQuery,
+  type ActivityQuery,
+} from "@octant/contracts/code-home-activity";
 import { bindFetchPort } from "./bindFetchPort";
 import {
   sendWithOwnerUnlock,
@@ -154,6 +160,13 @@ export interface CodeClientOptions {
    * Absent in a desktop window, whose own click needs none.
    */
   readonly ownerMergeUnlock?: OwnerMergeUnlock;
+  /**
+   * How thread events are followed. `"poll"` asks the host not to wait for
+   * the next change (`wait=0`), for a window that reaches its host through a
+   * bounded request channel that cannot hold a request open; the controller
+   * then reads again on a timer. Absent, the host holds the read until a change.
+   */
+  readonly threadEvents?: "wait" | "poll";
 }
 
 export interface CodeFileIdentity {
@@ -175,6 +188,8 @@ export interface CodeFileSave {
 }
 
 export interface CodeClient {
+  /** `"poll"` when thread events are read without waiting; see `CodeClientOptions`. */
+  readonly threadEvents?: "poll";
   readProviderFileReview?(
     input: CodeProviderFileReviewRequest,
     signal?: AbortSignal,
@@ -257,6 +272,14 @@ export interface CodeClient {
   ): Promise<CodeProjectPullRequestSwitchOutcome>;
   /** Tells the host the person is composing in a Code thread, so Auto-fix holds back. */
   noteComposerActivity?(threadId: CodeThreadId): Promise<void>;
+  /**
+   * The authorized Code Home activity view: one initial read with totals and
+   * the first page, or a later page of the snapshot that read froze.
+   *
+   * Optional like `listTests`: a host without the history answers unavailable
+   * through the view itself, and a client composite without it renders none.
+   */
+  readHomeActivity?(query: ActivityQuery): Promise<ActivityView>;
   readFollowUp(threadId: CodeThreadId): Promise<CodeThreadFollowUpView>;
   executeFollowUp(command: CodeFollowUpCommand): Promise<CodeThreadFollowUpUpdated>;
   /**
@@ -431,6 +454,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         ),
     });
   return {
+    ...(options.threadEvents === "poll" ? { threadEvents: "poll" as const } : {}),
     providerCloudSessions: createProviderCloudSessionClient(options),
     bootstrap() {
       return request(
@@ -767,6 +791,24 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         },
       );
       if (!response.ok) await rejectFailure(response);
+    },
+    async readHomeActivity(query) {
+      let validated: ActivityQuery;
+      try {
+        validated = decodeActivityQuery(query);
+      } catch {
+        throw invalidCommand();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/home-activity", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(encodeActivityQuery(validated)),
+        },
+        decodeHostAnswer(ActivityView),
+      );
     },
     readFollowUp(threadId) {
       try {
@@ -1225,6 +1267,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         options.baseUrl,
       );
       url.searchParams.set("afterSequence", String(afterSequence));
+      if (options.threadEvents === "poll") url.searchParams.set("wait", "0");
       return parseNdjsonFrames(
         requestRaw(fetch, url.toString(), { method: "GET", headers, signal }),
         threadId,

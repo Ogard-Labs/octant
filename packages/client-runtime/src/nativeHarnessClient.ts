@@ -97,7 +97,10 @@ export interface NativeHarnessClient {
   ): Promise<NativeHarnessFollowUpActivationResult>;
   answerQuestion(
     threadId: string,
-    input: { readonly questionId: string; readonly answer: string },
+    input:
+      | { readonly questionId: string; readonly answer: string }
+      /** A subagent's secret question: the answer goes to it in memory and is never journaled. */
+      | { readonly questionId: string; readonly secretAnswer: string },
     signal?: AbortSignal,
   ): Promise<NativeHarnessQuestionAnswerResult>;
   decideApproval(

@@ -1,24 +1,35 @@
 import {
   decodeWorkThreadRewound,
   decodeWorkTurnAccepted,
+  decodeWorkTurnLoopNoticed,
+  decodeWorkTurnLoopStopped,
   decodeWorkTurnRequestId,
+  decodeWorkTurnStallNoticed,
   decodeWorkTurnState,
   decodeWorkTurnUpdated,
   type WorkThreadId,
   type WorkThreadRewound,
   type WorkTurnAccepted,
+  type WorkTurnLoopNoticed,
+  type WorkTurnLoopStopped,
   type WorkTurnRequestId,
+  type WorkTurnStallNoticed,
   type WorkTurnState,
   type WorkTurnUpdated,
   type ProjectId,
 } from "@octant/contracts";
 import { WORK_TURN_CAPABILITIES, decodeAgentResultSteered } from "@octant/contracts";
-import type { AgentResultSteered } from "@octant/contracts";
+import type { AgentResultSteered, ThreadMessageSteered } from "@octant/contracts";
 import {
   AGENT_RESULT_STEERED,
   AGENT_RESULT_STEERING_AGGREGATE_TYPE,
   withAgentResultSteered,
 } from "../agentRun/agentResultSteeredRecord";
+import {
+  THREAD_MESSAGE_STEERING_AGGREGATE_TYPE,
+  threadMessageSteeredFrom,
+  withThreadMessageSteered,
+} from "../messageQueue/threadMessageSteeredRecord";
 import { hydrateJournalProjection } from "../persistence/journalHydration";
 
 /** Isolate the new receipt from event and caller object aliases; legacy rows retain their shape. */
@@ -48,7 +59,69 @@ export class WorkTurnProjection {
    */
   readonly #rewoundSinceLatest = new Set<string>();
 
-  apply(event: WorkTurnAccepted | WorkTurnUpdated | WorkThreadRewound): void {
+  apply(
+    event:
+      | WorkTurnAccepted
+      | WorkTurnUpdated
+      | WorkTurnLoopNoticed
+      | WorkTurnLoopStopped
+      | WorkTurnStallNoticed
+      | WorkThreadRewound,
+  ): void {
+    if (event.kind === "turn-loop-noticed" || event.kind === "turn-loop-stopped") {
+      const recorded =
+        event.kind === "turn-loop-noticed"
+          ? decodeWorkTurnLoopNoticed(event)
+          : decodeWorkTurnLoopStopped(event);
+      const current = this.#byRequest.get(recorded.requestId);
+      if (current === undefined) return;
+      if (
+        String(current.threadId) !== String(recorded.threadId) ||
+        String(current.turnId) !== String(recorded.turnId)
+      ) {
+        return;
+      }
+      this.#byRequest.set(
+        recorded.requestId,
+        decodeWorkTurnState({
+          ...current,
+          loopNotice: {
+            kind: recorded.kind,
+            toolName: recorded.toolName,
+            count: recorded.count,
+            occurredAt: recorded.occurredAt,
+          },
+          version: current.version + 1,
+          updatedAt: recorded.occurredAt,
+        }),
+      );
+      return;
+    }
+    if (event.kind === "turn-stall-noticed") {
+      const recorded = decodeWorkTurnStallNoticed(event);
+      const current = this.#byRequest.get(recorded.requestId);
+      if (current === undefined) return;
+      if (
+        String(current.threadId) !== String(recorded.threadId) ||
+        String(current.turnId) !== String(recorded.turnId)
+      ) {
+        return;
+      }
+      this.#byRequest.set(
+        recorded.requestId,
+        decodeWorkTurnState({
+          ...current,
+          stallNotice: {
+            kind: "turn-stall-noticed",
+            idleMs: recorded.idleMs,
+            occurredAt: recorded.occurredAt,
+          },
+          version: current.version + 1,
+          updatedAt: recorded.occurredAt,
+        }),
+      );
+      return;
+    }
     if (event.kind === "thread-rewound") {
       const rewound = decodeWorkThreadRewound(event);
       if (this.#rewinds.has(String(rewound.rewindId))) return;
@@ -151,6 +224,7 @@ export class WorkTurnProjection {
       ...(updated.toolStepsTruncated === undefined
         ? {}
         : { toolStepsTruncated: updated.toolStepsTruncated }),
+      ...(updated.reasoningMs === undefined ? {} : { reasoningMs: updated.reasoningMs }),
       ...(updated.strictKept === undefined ? {} : { strictKept: updated.strictKept }),
       ...(updated.childObservations === undefined
         ? {}
@@ -177,6 +251,22 @@ export class WorkTurnProjection {
     const steeredResults = withAgentResultSteered(current.steeredResults, record);
     if (steeredResults === current.steeredResults) return;
     this.#byRequest.set(current.requestId, decodeWorkTurnState({ ...current, steeredResults }));
+  }
+
+  /**
+   * A message the person sent while one of this thread's turns ran, which the
+   * runtime took into it. Like a steered result, it leaves the turn's version
+   * alone, and a record already shown changes nothing.
+   */
+  applySteeredMessage(record: ThreadMessageSteered): void {
+    const requestId = this.#byThread
+      .get(String(record.threadId))
+      ?.find((candidate) => String(candidate) === record.turnKey);
+    const current = requestId === undefined ? undefined : this.#byRequest.get(requestId);
+    if (current === undefined) return;
+    const steeredMessages = withThreadMessageSteered(current.steeredMessages, record);
+    if (steeredMessages === current.steeredMessages) return;
+    this.#byRequest.set(current.requestId, decodeWorkTurnState({ ...current, steeredMessages }));
   }
 
   lookup(requestId: WorkTurnRequestId): WorkTurnState | undefined {
@@ -351,13 +441,34 @@ export function hydrateWorkTurnProjectionFromJournal(input: {
         input.projection.apply(event.payload as WorkTurnAccepted);
       } else if (event.eventName === "work.turn-updated@1") {
         input.projection.apply(event.payload as WorkTurnUpdated);
+      } else if (event.eventName === "work.turn-loop-noticed@1") {
+        input.projection.apply(event.payload as WorkTurnLoopNoticed);
+      } else if (event.eventName === "work.turn-loop-stopped@1") {
+        input.projection.apply(event.payload as WorkTurnLoopStopped);
+      } else if (event.eventName === "work.turn-stall-noticed@1") {
+        input.projection.apply(event.payload as WorkTurnStallNoticed);
       } else if (event.eventName === "work.thread-rewound@1") {
         input.projection.apply(event.payload as WorkThreadRewound);
       }
     },
   });
   if (turns !== "ok") return turns;
-  // Steered results name turns the first pass already rebuilt.
+  // Steered messages and results name turns the first pass already rebuilt.
+  const messages = hydrateJournalProjection({
+    replay: input.replay,
+    aggregateType: THREAD_MESSAGE_STEERING_AGGREGATE_TYPE,
+    ...(input.maxScan === undefined ? {} : { maxScan: input.maxScan }),
+    apply: (event) => {
+      if (
+        event.aggregateType !== undefined &&
+        event.aggregateType !== THREAD_MESSAGE_STEERING_AGGREGATE_TYPE
+      )
+        return;
+      const record = threadMessageSteeredFrom(event);
+      if (record?.mode === "work") input.projection.applySteeredMessage(record);
+    },
+  });
+  if (messages !== "ok") return messages;
   return hydrateJournalProjection({
     replay: input.replay,
     aggregateType: AGENT_RESULT_STEERING_AGGREGATE_TYPE,

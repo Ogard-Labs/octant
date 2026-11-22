@@ -11,10 +11,12 @@ import {
 } from "@octant/contracts/shell";
 import { decodeChatBootstrap, decodeChatThreadView } from "@octant/contracts/chat";
 import { decodeCodeBoardView } from "@octant/contracts";
+import { decodeActivityView } from "@octant/contracts/code-home-activity";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createNewTaskDrafts, NewTaskDraftsContext } from "../composer/useNewTaskPrompt";
+import { Activity } from "../ui/icons";
 import { WorkspaceView, type WorkspaceViewProps } from "./WorkspaceView";
 import { stubSurfaceDragHandle } from "../App.test-fixtures";
 import { createChatReadCursorStore } from "../chat/useChatController";
@@ -229,6 +231,46 @@ describe("WorkspaceView welcome", () => {
       />,
     );
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue("");
+  });
+
+  it("shows the paired computer's Code start screen in place of the local Code draft", () => {
+    const first = codeProject("active");
+    const tab = {
+      kind: "draft-thread",
+      id: decodeWorkspaceTabId(ids.tab),
+      mode: "code",
+      title: "New Code thread",
+      projectId: first.id,
+    } as WorkspaceTab;
+    render(
+      <WorkspaceView
+        {...propsFor(tab)}
+        projects={[first]}
+        renderPairedComputerCodeStart={() => <p>Laptop's Code threads</p>}
+      />,
+    );
+    expect(screen.getByText("Laptop's Code threads")).toBeInTheDocument();
+    // No local composer is offered, so nothing can be created on this computer.
+    expect(screen.queryByRole("textbox", { name: "First message" })).toBeNull();
+  });
+
+  it("keeps the local Code draft while the picker names this computer", async () => {
+    const first = codeProject("active");
+    const tab = {
+      kind: "draft-thread",
+      id: decodeWorkspaceTabId(ids.tab),
+      mode: "code",
+      title: "New Code thread",
+      projectId: first.id,
+    } as WorkspaceTab;
+    render(
+      <WorkspaceView
+        {...propsFor(tab)}
+        projects={[first]}
+        renderPairedComputerCodeStart={() => undefined}
+      />,
+    );
+    expect(await screen.findByRole("textbox", { name: "First message" })).toBeInTheDocument();
   });
 
   it("clears only the draft pane whose reset revision moved", async () => {
@@ -477,6 +519,86 @@ describe("WorkspaceView welcome", () => {
     ).toBeVisible();
     expect(screen.getAllByText("Octant").length).toBeGreaterThan(0);
     expect(screen.queryByRole("region", { name: "Code welcome" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Code Home activity", () => {
+  const codeWelcome = {
+    id: decodeWorkspaceTabId(ids.tab),
+    kind: "welcome",
+    mode: "code",
+    title: "Welcome to Code",
+  } as WorkspaceTab;
+  const activityRead = () =>
+    vi.fn(async () =>
+      decodeActivityView({
+        status: "ready",
+        source: "github",
+        count: 3,
+        checkedAt: "2026-11-04T09:00:00.000Z",
+        snapshotId: "20000000-0000-4000-8000-000000000001",
+        records: [],
+      }),
+    );
+
+  const homeStart = (
+    read: ReturnType<typeof activityRead>,
+  ): NonNullable<WorkspaceViewProps["homeStart"]> => ({
+    cards: [
+      {
+        id: "stub-card",
+        title: "Stub card",
+        icon: Activity,
+        defaultOn: true,
+        available: true,
+        emptyLabel: "quiet",
+        useContent: () => ({ status: "ready", count: 0, body: null }),
+      },
+    ],
+    cardCustomization: { order: [], visibility: [] },
+    onCardCustomizationChange: vi.fn(),
+    codeActivity: { read, openThread: vi.fn() },
+  });
+
+  it("mounts the activity panel on Code Home's start", async () => {
+    const read = activityRead();
+    render(<WorkspaceView {...propsFor(codeWelcome)} homeStart={homeStart(read)} />);
+
+    const panel = await screen.findByRole("region", { name: "Activity" });
+    expect(
+      await within(panel).findByRole("region", { name: "Pull requests merged" }),
+    ).toBeInTheDocument();
+    expect(read).toHaveBeenCalled();
+  });
+
+  it("keeps the same start model's panel off a New task draft", async () => {
+    const read = activityRead();
+    const draft = {
+      id: decodeWorkspaceTabId(ids.tab),
+      kind: "draft-thread",
+      mode: "code",
+      title: "New Code thread",
+    } as WorkspaceTab;
+    render(<WorkspaceView {...propsFor(draft)} homeStart={homeStart(read)} />);
+
+    await screen.findByRole("region", { name: "Home cards" });
+    expect(screen.queryByRole("region", { name: "Activity" })).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("keeps the same start model's panel off the Work start", async () => {
+    const read = activityRead();
+    const tab = {
+      id: decodeWorkspaceTabId(ids.tab),
+      kind: "welcome",
+      mode: "work",
+      title: "Welcome to Work",
+    } as WorkspaceTab;
+    render(<WorkspaceView {...propsFor(tab)} homeStart={homeStart(read)} />);
+
+    await screen.findByRole("region", { name: "Home cards" });
+    expect(screen.queryByRole("region", { name: "Activity" })).toBeNull();
+    expect(read).not.toHaveBeenCalled();
   });
 });
 

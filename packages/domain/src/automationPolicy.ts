@@ -539,8 +539,6 @@ function recurringDueMatchesTrigger(
   return automationScheduledAtMatchesTrigger(trigger, nextDueAt);
 }
 
-export const resolveNextOccurrence = resolveNextAutomationOccurrence;
-
 export interface ReconcileMissedAutomationOccurrencesInput {
   readonly trigger: AutomationTrigger;
   readonly nextDueAt: UtcTimestamp | null;
@@ -634,8 +632,6 @@ export function reconcileMissedAutomationOccurrences(
   return { kind: "reconciled", skipped, claimed, nextDueAt: nextDueAt ?? null };
 }
 
-export const reconcileMissedOccurrences = reconcileMissedAutomationOccurrences;
-
 export interface ScheduledAutomationOccurrenceKeyInput {
   readonly automationId: AutomationId;
   readonly definitionRevision: number;
@@ -679,9 +675,6 @@ export function buildManualAutomationOccurrenceKey(
     return reject("invalid-revision", "Manual occurrence identity is malformed.");
   }
 }
-
-export const buildScheduledOccurrenceKey = buildScheduledAutomationOccurrenceKey;
-export const buildManualOccurrenceKey = buildManualAutomationOccurrenceKey;
 
 const authorityRank: Record<AgentRunAuthority["executionPolicy"], number> = {
   plan: 0,
@@ -781,15 +774,6 @@ export const intersectAuthority = intersectAutomationAuthority;
 
 export function isAutomationMutationAllowed(origin: AutomationOrigin): boolean {
   return origin.kind === "interactive";
-}
-
-export function assertAutomationMutationAllowed(origin: AutomationOrigin): void {
-  if (!isAutomationMutationAllowed(origin)) {
-    reject(
-      "automation-recursion",
-      "Automation-origin execution cannot create, edit, control, or archive an automation.",
-    );
-  }
 }
 
 /** A Work or Code thread's turn that reads or asks about routines, as the host knows it. */
@@ -1077,19 +1061,24 @@ export function decideAutomationFollowUp(input: {
   readonly scheduledAt: UtcTimestamp;
   readonly now: UtcTimestamp;
   readonly thread: AutomationFollowUpThreadFacts;
+  /** Settings' `followUpLatenessLimitHours`; absent is the former fixed day. */
+  readonly latenessLimitHours?: number;
 }): AutomationFollowUpDecision {
   const blocked = (reason: AutomationBlockReason, message: string): AutomationFollowUpDecision => ({
     kind: "blocked",
     reason,
     message,
   });
+  const latenessHours = input.latenessLimitHours;
   if (
     Date.parse(input.now) - Date.parse(input.scheduledAt) >
-    AUTOMATION_FOLLOW_UP_MISSED_WINDOW_MS
+    (latenessHours === undefined
+      ? AUTOMATION_FOLLOW_UP_MISSED_WINDOW_MS
+      : latenessHours * 3_600_000)
   ) {
     return blocked(
       "follow-up-missed",
-      "The follow-up was more than a day late, so it was recorded as missed and did not run.",
+      `The follow-up was more than ${latenessHours === undefined ? "a day" : `${String(latenessHours)} hours`} late, so it was recorded as missed and did not run.`,
     );
   }
   const thread = input.thread;
@@ -1236,11 +1225,6 @@ export function validateAutomationDefinition(input: AutomationDefinition): Autom
   }
   return definition;
 }
-
-// Kept as named aliases so callers can describe the policy at either the
-// aggregate or trigger level without creating a second implementation.
-export const validateAutomation = validateAutomationDefinition;
-export const classifyRunNow = classifyAutomationRunNow;
 
 /**
  * How a routine a thread's agent sets up comes to exist. `create-paused`

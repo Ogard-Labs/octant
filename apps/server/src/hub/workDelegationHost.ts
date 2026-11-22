@@ -6,8 +6,8 @@
 //
 // Code is not carried here. A Code thread needs a managed worktree and a
 // delivery target a person confirmed, and a peer's request cannot stand in for
-// that person, so a Code Project reports no delegable mode and the request is
-// refused.
+// that person, so Code goes to the Code delegation host, and only into a
+// Project its person marked with that target.
 
 import { randomUUID } from "node:crypto";
 import {
@@ -77,6 +77,12 @@ export interface WorkDelegationServices {
   };
   /** The host's own scope, which no window or device can claim. */
   readonly scope: WindowId;
+  /**
+   * Called once a peer-delegated Work thread is created and before its first
+   * turn starts, so host-wide person memory is withheld from the turn and any
+   * child run it spawns.
+   */
+  readonly onDelegatedThreadCreated?: (threadId: string) => void;
   readonly uuid?: () => string;
 }
 
@@ -142,6 +148,9 @@ export function createWorkDelegationHost(services: WorkDelegationServices): Peer
         if (!wasCreated(created)) return { status: "refused", kind: "start-failed" };
         // Work may have been turned off while the thread was being created.
         if (!services.isWorkEnabled()) return { status: "refused", kind: "mode-unavailable" };
+        // Mark the thread before starting the turn so person memory is
+        // withheld before the provider sees any context or tools.
+        services.onDelegatedThreadCreated?.(threadId);
         const turnId = uuid();
         const started = await services.turns.startFirstTurn(
           services.scope,

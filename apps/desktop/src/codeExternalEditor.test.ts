@@ -90,4 +90,46 @@ describe("launchCodeExternalEditor", () => {
       column: 4,
     });
   });
+
+  it("opens a resolved file in the system default application when requested", async () => {
+    const fetch = vi.fn(
+      async (..._args: Parameters<typeof globalThis.fetch>): Promise<Response> =>
+        Response.json({
+          file: "/private/repo/assets/logo.png",
+          line: 1,
+          column: 1,
+        }),
+    );
+    const spawn = vi.fn(() => ({ unref: vi.fn() }));
+    const openDefaultApplication = vi.fn(async () => undefined);
+    await openCodeExternalEditorFromServer({
+      serverUrl: "http://127.0.0.1:13773/",
+      brokerHeaders: () => ({ "x-octant-desktop-secret": "private-secret" }),
+      windowId: "10000000-0000-4000-8000-000000000001",
+      request: {
+        threadId: "20000000-0000-4000-8000-000000000001",
+        checkoutId: "30000000-0000-4000-8000-000000000001",
+        fileId: "40000000-0000-4000-8000-000000000001",
+        line: 1,
+        column: 1,
+        defaultApplication: true,
+      },
+      fetch,
+      spawn,
+      openDefaultApplication,
+    });
+
+    expect(spawn).not.toHaveBeenCalled();
+    expect(openDefaultApplication).toHaveBeenCalledWith("/private/repo/assets/logo.png");
+    const [, init] = fetch.mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      windowId: "10000000-0000-4000-8000-000000000001",
+      threadId: "20000000-0000-4000-8000-000000000001",
+      checkoutId: "30000000-0000-4000-8000-000000000001",
+      fileId: "40000000-0000-4000-8000-000000000001",
+      line: 1,
+      column: 1,
+      defaultApplication: true,
+    });
+  });
 });

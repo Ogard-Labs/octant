@@ -8,6 +8,56 @@ and the composer are in [DESIGN.md](../../DESIGN.md#composer-row).
 Update this specification with an approved change, following the
 [design workflow](README.md#changing-the-design).
 
+## First-run provider folder scan
+
+On first run, the **Project** step (in Code mode) offers a host-side, read-only
+scan of folders the person already used with Claude Code, Codex, OpenCode, and
+Pi, so they can tick existing folders and import them as Code Projects in one
+click (continuing existing sessions is already built per provider).
+
+- **Scope and sources.** The scan reads only session metadata on the host from
+  registered provider homes and extra account directories: `~/.claude`,
+  `CLAUDE_CONFIG_DIR`, `~/.claude-accounts/*`, `~/.codex`, `CODEX_HOME`,
+  `~/.codex-accounts/*` (both `sessions` and `archived_sessions`), OpenCode's
+  data directories (`OPENCODE_DATA`, `$XDG_DATA_HOME/opencode`,
+  `~/.local/share/opencode`, SQLite and legacy JSON sessions), and Pi's session
+  directories (`PI_CODING_AGENT_SESSION_DIR`, `$PI_CODING_AGENT_DIR/sessions`,
+  `~/.pi/agent/sessions`). It never writes to another tool's files and never
+  sends data off the machine.
+- **Entry shape and privacy.** Each entry reports a credential-free
+  `owner/name` repository label when its Git remote names one (or the safe
+  single-segment folder name when none), which providers used it, its session
+  count, and its last activity. Clones of the same remote are grouped together
+  (disambiguating same-name clones with an ordinal rather than host paths).
+  Initialized Git submodules keep their own checkout root rather than binding
+  the parent repository. Linked Git worktrees, `Downloads` (and subfolders
+  inside it), the home directory itself, and the filesystem root are excluded.
+  Only opaque window-bound IDs and safe display labels reach the renderer; raw
+  host paths never leave the host during discovery.
+- **Bounded scan.** The host enforces explicit file/row, distinct-folder, and
+  wall-clock time limits (2,000 files/rows, 200 entries, 5 seconds by default).
+  When a file or folder count bound is reached, the host still canonicalizes
+  and returns already-discovered folders while wall-clock time remains, and
+  reports explicitly that the scan stopped early and which limit was reached.
+- **Import and authority.** Discovery grants no authority and ticks nothing by
+  default. While Code requires a Git repository, plain non-Git folders remain
+  listed with a note directing the person to **Choose a folder…** to initialize
+  Git explicitly rather than initializing Git silently; the host also refuses
+  direct import of plain folders while Git is required. Importing ticked opaque
+  IDs re-verifies each directory's canonical path and inode (refusing symlink
+  redirects or replaced directories), issues one-time folder receipts, and
+  creates Code Projects at the first-run access level (`current-session`,
+  inheriting Settings defaults and trusting no native providers) through the
+  existing `create-code-project` path. Selections exceeding one request's
+  64-folder cap are sent in sequential batches, and **Scan again** refreshes
+  expired listings. Already imported Code Projects are marked and never
+  duplicated. Only a local window may scan or import; remote and paired
+  sessions are refused.
+- **Strict.** When Strict is active on the host, the server hides the scan
+  without reading provider files, re-checks Strict throughout in-flight scans
+  and imports before returning labels or issuing receipts, and the UI omits the
+  scan section.
+
 ## Optional capability card in Your first task
 
 The existing first-run readiness view, **Your first task**, includes an optional
@@ -330,7 +380,8 @@ or choices, so the answer is given in the child's own detail view. The agent's
 own harness approval ("needs your approval") and a Work agent's own question
 ("is waiting for your answer") are rows the same way, with the request text and
 one action, **Review request**, which opens the thread, whose approval or
-question card above the composer answers it. If the window's thread list does not hold the parent yet, it reads the list once more and, when the parent is still missing, says it could not open the thread rather than doing nothing. This pending-request projection lists Work and Code children only; Chat's
+question card above the composer answers it; so is a Code, Work or Chat
+question that asks for a secret, which only the thread's masked field answers. If the window's thread list does not hold the parent yet, it reads the list once more and, when the parent is still missing, says it could not open the thread rather than doing nothing. This pending-request projection lists Work and Code children only; Chat's
 [Agents dock](workspace.md#subagents) does not extend that scope. At most five rows show, then **+N more**, which
 opens the Inbox. The card is hidden while nothing waits, and unavailable where
 this window has no reader (a remote window).
@@ -529,6 +580,82 @@ hidden; a window that is visible but not focused still reads. It never polls in
 the background. A host whose last read has not answered is not asked again, a
 read that takes longer than five seconds is abandoned and leaves that host
 without figures, and leaving the start screen cancels the reads in flight.
+
+### Activity timeframes
+
+Code Home's start screen carries an **Activity** section below the card
+area; the New task draft and the other modes' starts share the card
+registry but never the panel. The section holds four cards — **Pull
+requests merged**, **Issues closed**, **Releases published** and
+**Successful runs** — each counting work over a named timeframe against
+the matching previous stretch. Its header holds one shared timeframe
+control, a **Refresh activity** button and a **Customize activity** dialog
+with the history source, a show/hide and reorder for each card, and a
+per-card timeframe pin shown at the card's header end. Every card draws
+the same rows — its count as the figure, one context line, and the source
+it read — so loading, empty, unavailable and ready cards keep one shape.
+The count itself opens a drill-down dialog listing the records (at most 25
+a page against the frozen snapshot); a run opens its thread, a pull
+request or issue opens its GitHub page. The context line compares the
+count to the previous stretch only when the read is complete, and every
+card always names where its answer came from — **Your GitHub account** or
+**Recorded by Octant**. Runs always read Octant's journal; the source
+choice applies to the three delivery cards.
+
+Recording is journaled: a confirmed pull-request merge, each issue closure
+it caused, and every finished run become one activity fact per linked
+thread; an issue outside the pull request's own repository is not counted. Facts dedupe by identity, so a delivery witnessed by several
+threads counts once, and a run's first terminal state wins. A delivery
+title longer than 256 UTF-8 bytes is cut on a code-point boundary rather
+than dropping the record. A run counts as canceled when the person stopped
+it: Chat, Work and agent runs journal a cancelled outcome, and a Code turn
+counts as canceled when the journal recorded the person's stop request
+before it was interrupted. Any other interruption, such as a restart,
+counts as failed.
+
+The read authorizes every record against the thread that witnessed it and
+freezes the answer in a snapshot that the drill-down pages from. Losing
+access to any witness, including one that counted only toward the
+comparison, or a change to the Project set expires the snapshot, and the
+page answers `authorization-changed` with no totals.
+
+A GitHub source answers through the connected account's `gh` and counts
+only that account's own merges, closures and releases. Each card is a
+date-bounded read per connected repository: merges and closures through
+GitHub's issue search, releases through the repository's own list. A
+release counts when that account created it and it was published inside
+the range. The release list is ordered by creation, so the walk stops 30
+days before the range begins, and a draft created earlier than that and
+published inside the range is not counted. A card reads partial only when a repository could not be read
+or a range holds more than 200 matches per repository, and it says so when
+its read is partial, stale or unavailable.
+
+The choices are per device and travel inside the existing card
+order/visibility store: every card follows one shared timeframe, **This
+week** by default, reads the signed-in GitHub account by default, and up to
+four cards may be pinned to their own timeframe.
+
+A timeframe resolves to a half-open
+`[start, end)` instant window plus an optional comparison window in the
+person's own time zone and week start (Sunday = 0 through Saturday = 6).
+**Today**, **This week**, **This month** and **This year** run from the
+local period start to now and compare the same wall-clock position already
+elapsed in the previous period — Wednesday to last Wednesday at the same
+wall time, even across a daylight-saving shift — capped at the previous
+period's end and omitted while the current period has just begun.
+**Yesterday** and **Last month** take the whole civil period against the
+whole previous one, so a skipped or repeated hour reads as a 23- or 25-hour
+day. **Last 24 hours** counts exact elapsed milliseconds against the
+preceding exact 24; **Total** runs unbounded to now with no comparison. A
+custom pair of strict `YYYY-MM-DD` dates covers both whole local days,
+refuses impossible or reversed dates, and compares the equally many civil
+days before it.
+
+For Code Home, a confirmed repository access loss invalidates cached reads
+and frozen pages for that account and repository, even when it contributed
+only to a comparison. An older read still in flight cannot restore those
+records, and the initial view is refused the same way when the admitted
+Project or repository set itself changes while the read is gathered.
 
 ## Needs you across surfaces
 

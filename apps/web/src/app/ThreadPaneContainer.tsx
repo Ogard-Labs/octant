@@ -16,7 +16,11 @@ import type {
   CreateHostViewScope,
   listEligibleImageProfiles,
 } from "@octant/domain";
-import { CoordinatorWorkersToggle, WorkerOfStrip } from "../code/CoordinatorWorkersPanel";
+import {
+  CoordinatorDoneWhenButton,
+  CoordinatorWorkersToggle,
+  WorkerOfStrip,
+} from "../code/CoordinatorWorkersPanel";
 import { threadRowActivity } from "../shell/navigationModel";
 import { memo, useMemo, type ReactNode, type RefObject } from "react";
 import type { useAgentProfiles } from "../agentProfile/useAgentProfiles";
@@ -110,6 +114,7 @@ export interface ThreadPaneContainerProps {
     | "openCrossContextInNewWindow"
     | "openDraftThread"
     | "openDraftInProject"
+    | "requestMoveToProject"
     | "openInbox"
     | "openSettings"
     | "openSideChat"
@@ -160,6 +165,7 @@ export interface ThreadPaneContainerProps {
     | "setProjectActions"
     | "setProjectWorkStatusFile"
     | "setProjectOwnToolchain"
+    | "setProjectDelegatedCode"
     | "setProjectWorkDeveloperTools"
     | "setUsageOpen"
     | "setWorkComposerSelection"
@@ -201,6 +207,8 @@ export interface ThreadPaneContainerProps {
   readonly crossContextOffer: ShellController["crossContextOffer"];
   readonly createHostId: HostId;
   readonly createHostViewScope: CreateHostViewScope;
+  /** The paired computer's Code start screen while the picker names one; see WorkspaceView. */
+  readonly renderPairedComputerCodeStart?: () => ReactNode | undefined;
   readonly dockOpen: boolean;
   readonly dockSurface?: RightUtilityDockSurfaceId;
   readonly draftCreating: boolean;
@@ -236,6 +244,8 @@ export interface ThreadPaneContainerProps {
   readonly memoryRevision: number;
   readonly navigation: ShellNavigationModel;
   readonly pendingDraftBranch?: string;
+  /** Set by "New task on another branch…": that Project's draft opens with its branch choice shown. */
+  readonly draftStartFrom?: { readonly projectId: string } | undefined;
   /** The Project whose draft New coordinator opened. */
   readonly pendingDraftCoordinator?: ProjectId;
   /** The workers' level and bounds the person chose in that draft. */
@@ -305,6 +315,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     crossContextOffer,
     createHostId,
     createHostViewScope,
+    renderPairedComputerCodeStart,
     dockOpen,
     dockSurface,
     draftCreating,
@@ -439,6 +450,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setProjectActions,
     setProjectWorkStatusFile,
     setProjectOwnToolchain,
+    setProjectDelegatedCode,
     setProjectWorkDeveloperTools,
     setUsageOpen,
     setWorkComposerSelection,
@@ -469,14 +481,25 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     if (row === undefined) return undefined;
     if (row.coordinator === true) {
       const workers = rows.filter((thread) => thread.coordinatorThreadId === row.threadId);
+      const thread = codeController.bootstrap?.threads.find(
+        (candidate) => String(candidate.id) === String(row.threadId),
+      );
       return (
-        <CoordinatorWorkersToggle
-          coordinatorThreadId={row.threadId}
-          needsYouCount={
-            workers.filter((thread) => threadRowActivity(thread) === "attention").length
-          }
-          workerCount={workers.length}
-        />
+        <span className="coordinator-header-controls">
+          {thread?.coordinator === true ? (
+            <CoordinatorDoneWhenButton
+              count={thread.coordinatorDoneWhen?.items.length ?? 0}
+              onClick={() => actions.editCodeThreadCoordinatorBounds(thread.id)}
+            />
+          ) : null}
+          <CoordinatorWorkersToggle
+            coordinatorThreadId={row.threadId}
+            needsYouCount={
+              workers.filter((candidate) => threadRowActivity(candidate) === "attention").length
+            }
+            workerCount={workers.length}
+          />
+        </span>
       );
     }
     const coordinator =
@@ -514,11 +537,14 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     goalClient,
     goalLoopClient,
     imageGenerationClient,
+    serviceOfferClient,
     nativeHarnessClient,
     planClient,
     previewClient,
     sideTaskClient,
+    finishedReceiptClient,
     spendCeilingClient,
+    pullRequestReviewClient,
     usageDashboardClient,
     workMutationClient,
     workOverviewClient,
@@ -621,6 +647,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   followUpSuggestions={{
                     client: followUpSuggestionClient,
                     sideTaskClient,
+                    finishedReceiptClient,
                     onCreated: openCreatedFollowUp,
                   }}
                   draftResetRevisions={draftResetRevisions}
@@ -661,7 +688,13 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                     draftProjectBinding.current = binding;
                     void binding.catch(() => undefined);
                   }}
-                  onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
+                  onNewThreadInProject={(projectId, options) =>
+                    void openDraftInProject(projectId, options)
+                  }
+                  onRequestMoveToProject={actions.requestMoveToProject}
+                  {...(props.draftStartFrom === undefined
+                    ? {}
+                    : { draftStartFrom: props.draftStartFrom })}
                   appleToolchainClient={appleToolchainClient}
                   agentRunClient={agentRunClient}
                   nativeHarnessClient={nativeHarnessClient}
@@ -721,6 +754,9 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   hosts={hosts}
                   selectedCreateHostId={createHostId}
                   createHostViewScope={createHostViewScope}
+                  {...(renderPairedComputerCodeStart === undefined
+                    ? {}
+                    : { renderPairedComputerCodeStart })}
                   {...(lastSelectedHealthyHostId === undefined
                     ? {}
                     : { lastSelectedHealthyHostId })}
@@ -794,6 +830,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   }}
                   usageDashboardClient={usageDashboardClient}
                   spendCeilingClient={spendCeilingClient}
+                  pullRequestReviewClient={pullRequestReviewClient}
                   {...(settings.spendCeilingShown ? { spendCeilingShown: true } : {})}
                   onOpenUsageDashboard={(filter) => {
                     setPendingUsageFilter(filter);
@@ -827,7 +864,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   }
                   onSelectPullRequest={selectProjectPullRequestIdentity}
                   onOpenPullRequests={() => setCodePullRequestsOpen(true)}
-                  onOpenCodeSurface={(kind, threadId, title, terminalId) =>
+                  onOpenCodeSurface={(kind, threadId, title, terminalId, program) =>
                     void openCodeSurface(
                       kind === "code-terminal"
                         ? {
@@ -835,6 +872,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                             threadId,
                             title,
                             ...(terminalId === undefined ? {} : { terminalId }),
+                            ...(program === undefined ? {} : { program }),
                           }
                         : { kind, threadId, title },
                     )
@@ -861,6 +899,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   onOwnToolchainChange={(projectId, enabled) =>
                     setProjectOwnToolchain(projectId, enabled ? "enabled" : "disabled")
                   }
+                  onDelegatedCodeChange={setProjectDelegatedCode}
                   onWorkDeveloperToolsChange={setProjectWorkDeveloperTools}
                   onSplitPane={(paneId, orientation, placement) =>
                     void splitPane(paneId, orientation, placement)
@@ -900,6 +939,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   previewClient={previewClient}
                   canvasClient={canvasClient}
                   imageGenerationClient={imageGenerationClient}
+                  serviceOfferClient={serviceOfferClient}
                   {...(imageGenerationProfiles === undefined ? {} : { imageGenerationProfiles })}
                   onOpenCanvasInSidebar={openCanvasInSidebar}
                   onOpenCanvasReference={(card) =>
@@ -1020,6 +1060,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                     const destinationHostId = refuseUnlessCreatableDestination({
                       action: "create-project",
                       requiredCapability: mode,
+                      onlyThisHost: true,
                       onRefuse: (reason) => setDraftError(reason),
                     });
                     if (destinationHostId === undefined) {
@@ -1037,6 +1078,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                     const destinationHostId = refuseUnlessCreatableDestination({
                       action: "create-project",
                       requiredCapability: mode,
+                      onlyThisHost: true,
                       onRefuse: (reason) => setDraftError(reason),
                     });
                     if (destinationHostId === undefined) {

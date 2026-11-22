@@ -24,6 +24,10 @@ import {
   BrowserSessionResumed,
 } from "@octant/contracts/browser-session-grants";
 import {
+  ActivityDeliveryObserved,
+  CODE_HOME_DELIVERY_OBSERVED,
+} from "@octant/contracts/code-home-activity";
+import {
   CHILD_WORKTREE_SOURCE_UPDATED,
   ChildWorktreeSourceUpdated,
   CHILD_WORKTREE_SEED_UPDATED,
@@ -32,9 +36,13 @@ import {
   ThreadWakeupChanged,
 } from "@octant/contracts";
 import {
-  OWNER_BROWSER_AUDIT_EVENT,
-  OwnerBrowserAuditRecord,
-} from "@octant/contracts/owner-browser";
+  LEGACY_OWNER_BROWSER_AUDIT_EVENT,
+  LegacyOwnerBrowserAuditRecord,
+  PAIRED_BROWSER_HOLD_ENDED_EVENT,
+  PAIRED_BROWSER_HOLD_STARTED_EVENT,
+  PairedBrowserHoldEndedPayload,
+  PairedBrowserHoldStartedPayload,
+} from "@octant/contracts/paired-browser-control";
 import {
   registerThreadMessageQueueEvents,
   ThreadMessageQueueProjection,
@@ -63,6 +71,9 @@ import {
   ChatThreadRewound,
   ChatThreadUpdated,
   ChatTurnCreated,
+  ChatTurnLoopNoticed,
+  ChatTurnLoopStopped,
+  ChatTurnStallNoticed,
   ChatTurnRouteDecided,
   CodeProjectAccessChanged,
   CodeProjectNewThreadWorkspaceChanged,
@@ -70,6 +81,7 @@ import {
   CodeProjectAutoReviewerChanged,
   CodeProjectAgentDefaultBranchPushChanged,
   CodeProjectAgentMergeChanged,
+  CodeProjectDelegatedCodeChanged,
   CodeProjectOwnToolchainChanged,
   CodeProjectAgentPullRequestCommentsChanged,
   CodeProjectPullRequestBackgroundRefreshChanged,
@@ -83,6 +95,16 @@ import {
   CodeProjectPullRequestAutoFixRecorded,
   CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED,
   CodeProjectPullRequestWatchRecorded,
+  CODE_PULL_REQUEST_LINK_CREATED,
+  CodePullRequestLinkCreated,
+  CODE_PULL_REQUEST_LINK_THREAD_ATTACHED,
+  CodePullRequestLinkThreadAttached,
+  CODE_PULL_REQUEST_LINK_FORGE_IDS_BACKFILLED,
+  CodePullRequestLinkForgeIdsBackfilled,
+  CODE_PULL_REQUEST_LINK_DISPLAY_UPDATED,
+  CodePullRequestLinkDisplayUpdated,
+  CODE_PULL_REQUEST_LINK_MERGED_INTO,
+  CodePullRequestLinkMergedInto,
   WorkProjectStatusFileChanged,
   ProjectAgentMemoryWritesChanged,
   ProjectImageGenerationChoiceChanged,
@@ -95,6 +117,8 @@ import {
   GuardrailLevelLowered,
   PROVIDER_TOOLING_APPLIED,
   ProviderToolingAppliedRecordSchema,
+  PROVIDER_ACP_AGENT_INSTALL_SCRIPTS_RAN,
+  ProviderAcpAgentInstallScriptsRan,
   CodeProjectActionsChanged,
   ProjectExtraFolderAdded,
   ProjectExtraFolderRemoved,
@@ -120,6 +144,9 @@ import {
   WorkThreadCompletionConfirmed,
   WorkSettingsUpdated,
   WorkTurnAccepted,
+  WorkTurnLoopNoticed,
+  WorkTurnLoopStopped,
+  WorkTurnStallNoticed,
   WorkTurnUpdated,
   WorkThreadRewound,
   WorkPromotionFrame,
@@ -141,6 +168,8 @@ import {
   NavigatorAssistantThreadBound,
   OllamaHistoryRecorded,
   ClaudeResumeIdentityRecorded,
+  NATIVE_SESSION_HISTORY_IMPORTED_EVENT,
+  NativeSessionHistoryImported,
   ProjectBindingRelinked,
   ProjectCreated,
   ProjectLifecycleChanged,
@@ -186,6 +215,7 @@ import {
   AgentRunResultAcknowledged,
   AgentRunResultDeliverySettled,
   AgentResultSteered,
+  ThreadMessageSteered,
   AgentRunStatusChanged,
   AutomationNotificationDeliveryRecorded,
   AutomationNotificationPreferences,
@@ -221,11 +251,13 @@ import {
   HubMembershipChangedPayload,
   REMOTE_PUSH_DELIVERY_EVENT_NAMES,
   REMOTE_PUSH_MOVE_WAITING_DELIVERY_EVENT_NAMES,
+  REMOTE_PUSH_DEVICE_JOINED_DELIVERY_EVENT_NAMES,
   REMOTE_PUSH_REGISTRATION_EVENT_NAMES,
   REMOTE_SERVER_GRANT_CLOSED,
   REMOTE_SERVER_GRANT_OPENED,
   RemotePushDeliveryRecordedV1,
   RemotePushMoveWaitingDeliveryRecordedV1,
+  RemotePushDeviceJoinedDeliveryRecordedV1,
   RemotePushRegistrationClearedV1,
   RemotePushRegistrationRecordedV1,
   RemoteServerGrantClosedPayload,
@@ -299,6 +331,13 @@ import {
   ShieldForgeChangeObservedPayload,
 } from "@octant/contracts";
 import {
+  MemberInstallRequestedPayload,
+  MemberInstallStepRecordedPayload,
+  MemberRemovalRequestedPayload,
+  MemberRemovalStepRecordedPayload,
+  MemberUpdateRequestedPayload,
+  MemberUpdateRequestedPayloadV1,
+  MemberUpdateStepRecordedPayload,
   SHIELD_REMOTE_COMMAND_EVENT_NAMES,
   SHIELD_SERVERS_EVENT_NAMES,
   ShieldRemoteCommandRanPayload,
@@ -308,21 +347,38 @@ import {
   ShieldServerSetPayload,
 } from "@octant/contracts/shield-servers";
 import {
+  SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES,
   SERVER_PROJECTS_EVENT_NAMES,
-  ServerProjectBoundPayload,
-  ServerProjectRemovedPayload,
-  ServerProjectRenamedPayload,
+  SERVER_PROJECTS_EVENT_NAMES_V2,
+  SERVER_PROJECTS_PREVIEW_OUTCOME_V1,
+  ServerAttachmentCleanupPendingPayload,
+  ServerAttachmentCleanupSettledPayload,
+  ServerPreviewOutcomePayloadV1,
+  ServerPreviewOutcomePayloadV2,
   ServerProjectActionsReplacedPayload,
+  ServerProjectActionsReplacedPayloadV2,
+  ServerProjectBoundPayload,
+  ServerProjectBoundPayloadV2,
+  ServerProjectRemovedPayload,
+  ServerProjectRemovedPayloadV2,
+  ServerProjectRenamedPayload,
+  ServerProjectRenamedPayloadV2,
   ServerWorkDeveloperToolsChangedPayload,
+  ServerWorkDeveloperToolsChangedPayloadV2,
 } from "@octant/contracts/server-projects";
 import {
   CLOUD_MACHINES_EVENT_NAMES,
+  CLOUD_MACHINES_EVENT_NAMES_V2,
   CloudMachineCreatedPayload,
   CloudMachineCreationEndedPayload,
   CloudMachineCreationRequestedPayload,
+  CloudMachineCreationRequestedPayloadV2,
   CloudMachineDestroyedPayload,
+  CloudMachineDestroyedPayloadV2,
   CloudMachineProjectBoundPayload,
+  CloudMachineProjectBoundPayloadV2,
   CloudMachineStateChangedPayload,
+  CloudMachineStateChangedPayloadV2,
 } from "@octant/contracts/cloud-machines";
 import {
   RUNTIME_NETWORK_EVENT_NAMES,
@@ -360,6 +416,7 @@ import {
   RemoteSessionInvalidatedV1,
   HostIdentityInitializedV1,
   SecurityAuditRecordedV1,
+  DeviceAlertChangedV1,
 } from "@octant/contracts/remote-access";
 import { Schema } from "effect";
 import { AggregateHeadsProjection } from "./aggregateHeadsProjection";
@@ -434,7 +491,9 @@ import {
   DIAGNOSTICS_FAILURE_INCIDENT_RECORDED_V1,
 } from "./diagnosticsExportProjection";
 import { AgentRunProjection } from "../agentRun/agentRunProjection";
+import { ActivityHistoryProjection } from "./activityHistoryProjection";
 import { AGENT_RESULT_STEERED } from "../agentRun/agentResultSteeredRecord";
+import { THREAD_MESSAGE_STEERED } from "../messageQueue/threadMessageSteeredRecord";
 import {
   AGENT_RUN_REQUESTED,
   AGENT_RUN_RESULT_ACKNOWLEDGED,
@@ -462,6 +521,7 @@ import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { registerTurnMetricsEvents } from "../metrics/turnMetricsStore";
 import { registerToolEffectEvents } from "../toolEffects/toolEffectLedger";
 import { registerSideTaskEvents } from "../sideTasks/sideTaskStore";
+import { registerFinishedReceiptEvents } from "../finishedReceipts/finishedReceiptStore";
 import { registerThreadNoteEvents } from "../threadNotes/threadNotes";
 import { registerShipEvents } from "../ship/shipEventStore";
 import { registerCanvasChoiceAnswerEvents } from "../canvas/canvasChoiceAnswerService";
@@ -489,6 +549,7 @@ import {
 } from "./githubCloneProjection";
 import { ImageJobProjection } from "../image/imageJobProjection";
 import { registerBenchmarkEvents } from "../benchmarks/benchmarkEventStore";
+import { registerPullRequestReviewEvents } from "../pullRequestReviewers/pullRequestReviewService";
 import { BenchmarkProjection } from "../benchmarks/benchmarkProjection";
 import {
   DesktopLeaseProjection,
@@ -548,6 +609,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       CodeProjectPullRequestBackgroundRefreshChanged,
     )
     .register("project.code-agent-merge-changed@1", 1, CodeProjectAgentMergeChanged)
+    .register("project.code-delegated-code-changed@1", 1, CodeProjectDelegatedCodeChanged)
     .register("project.code-own-toolchain-changed@1", 1, CodeProjectOwnToolchainChanged)
     .register(
       "project.code-agent-pull-request-comments-changed@1",
@@ -570,6 +632,11 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     )
     .register(CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED, 1, CodeProjectPullRequestAutoFixRecorded)
     .register(CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED, 1, CodeProjectPullRequestWatchRecorded)
+    .register(CODE_PULL_REQUEST_LINK_CREATED, 1, CodePullRequestLinkCreated)
+    .register(CODE_PULL_REQUEST_LINK_THREAD_ATTACHED, 1, CodePullRequestLinkThreadAttached)
+    .register(CODE_PULL_REQUEST_LINK_FORGE_IDS_BACKFILLED, 1, CodePullRequestLinkForgeIdsBackfilled)
+    .register(CODE_PULL_REQUEST_LINK_DISPLAY_UPDATED, 1, CodePullRequestLinkDisplayUpdated)
+    .register(CODE_PULL_REQUEST_LINK_MERGED_INTO, 1, CodePullRequestLinkMergedInto)
     .register("project.provider-policy-changed@1", 1, ProjectProviderPolicyChanged)
     .register("project.native-providers-changed@1", 1, ProjectNativeProvidersChanged)
     .register("project.work-status-file-changed@1", 1, WorkProjectStatusFileChanged)
@@ -601,6 +668,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("provider.instance-removed@1", 1, ProviderInstanceRemoved)
     .register("provider.defaults-updated@1", 1, ProviderDefaultsUpdated)
     .register("provider.catalog-updated@1", 1, ProviderCatalogUpdated)
+    .register(PROVIDER_ACP_AGENT_INSTALL_SCRIPTS_RAN, 1, ProviderAcpAgentInstallScriptsRan)
     .register("host-oauth.recorded@1", 1, HostOAuthJournalRecord)
     .register("provider-key.recorded@1", 1, ProviderKeyJournalRecord)
     .register("pending-question.deferred@1", 1, PendingQuestionDeferral)
@@ -608,6 +676,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("secret-store.recorded@1", 1, SecretStoreJournalRecord)
     .register("ollama.history-recorded@1", 1, OllamaHistoryRecorded)
     .register("claude.resume-identity-recorded@1", 1, ClaudeResumeIdentityRecorded)
+    .register(NATIVE_SESSION_HISTORY_IMPORTED_EVENT, 1, NativeSessionHistoryImported)
     .register("context.manifest-created@1", 1, ContextManifestCreated)
     .register("context.overrides-updated@1", 1, ContextOverridesUpdated)
     .register("context.plan-created@1", 1, ContextPlanCreated)
@@ -628,6 +697,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("chat.attempt-updated@1", 1, ChatAttemptUpdated)
     .register("chat.attempt-response-appended@1", 1, ChatAttemptResponseAppended)
     .register("chat.attempt-tool-step@1", 1, ChatAttemptToolStepChanged)
+    .register("chat.turn-loop-noticed@1", 1, ChatTurnLoopNoticed)
+    .register("chat.turn-loop-stopped@1", 1, ChatTurnLoopStopped)
+    .register("chat.turn-stall-noticed@1", 1, ChatTurnStallNoticed)
     .register("chat.turn-route-decided@1", 1, ChatTurnRouteDecided)
     .register("chat.attachment-updated@1", 1, ChatAttachmentUpdated)
     .register("chat.citation-recorded@1", 1, ChatCitationRecorded)
@@ -655,6 +727,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       persistedSchema: PersistedCodeThreadFollowUpUpdated,
     })
     .register("code.operation-event-recorded@1", 1, CodeOperationEventFrame)
+    .register(CODE_HOME_DELIVERY_OBSERVED, 1, ActivityDeliveryObserved)
     .register("code.planner-designation-updated@1", 1, CodePlannerDesignationUpdated)
     .register("code.planner-proposal-updated@1", 1, CodePlannerProposalUpdated)
     .register(
@@ -699,22 +772,74 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       1,
       ShieldProjectServersClearedPayload,
     )
+    .register(SHIELD_SERVERS_EVENT_NAMES.memberInstallRequested, 1, MemberInstallRequestedPayload)
+    .register(
+      SHIELD_SERVERS_EVENT_NAMES.memberInstallStepRecorded,
+      1,
+      MemberInstallStepRecordedPayload,
+    )
+    .register(SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequestedV1, 1, MemberUpdateRequestedPayloadV1)
+    .register(SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequested, 1, MemberUpdateRequestedPayload)
+    .register(
+      SHIELD_SERVERS_EVENT_NAMES.memberUpdateStepRecorded,
+      1,
+      MemberUpdateStepRecordedPayload,
+    )
+    .register(SHIELD_SERVERS_EVENT_NAMES.memberRemovalRequested, 1, MemberRemovalRequestedPayload)
+    .register(
+      SHIELD_SERVERS_EVENT_NAMES.memberRemovalStepRecorded,
+      1,
+      MemberRemovalStepRecordedPayload,
+    )
     .register(SHIELD_REMOTE_COMMAND_EVENT_NAMES.ran, 1, ShieldRemoteCommandRanPayload)
     .register(SERVER_PROJECTS_EVENT_NAMES.bound, 1, ServerProjectBoundPayload)
+    .register(SERVER_PROJECTS_EVENT_NAMES_V2.bound, 1, ServerProjectBoundPayloadV2)
     .register(SERVER_PROJECTS_EVENT_NAMES.renamed, 1, ServerProjectRenamedPayload)
+    .register(SERVER_PROJECTS_EVENT_NAMES_V2.renamed, 1, ServerProjectRenamedPayloadV2)
     .register(SERVER_PROJECTS_EVENT_NAMES.removed, 1, ServerProjectRemovedPayload)
+    .register(SERVER_PROJECTS_EVENT_NAMES_V2.removed, 1, ServerProjectRemovedPayloadV2)
     .register(SERVER_PROJECTS_EVENT_NAMES.actionsReplaced, 1, ServerProjectActionsReplacedPayload)
+    .register(
+      SERVER_PROJECTS_EVENT_NAMES_V2.actionsReplaced,
+      1,
+      ServerProjectActionsReplacedPayloadV2,
+    )
     .register(
       SERVER_PROJECTS_EVENT_NAMES.developerToolsChanged,
       1,
       ServerWorkDeveloperToolsChangedPayload,
     )
+    .register(
+      SERVER_PROJECTS_EVENT_NAMES_V2.developerToolsChanged,
+      1,
+      ServerWorkDeveloperToolsChangedPayloadV2,
+    )
+    .register(SERVER_PROJECTS_PREVIEW_OUTCOME_V1, 1, ServerPreviewOutcomePayloadV1)
+    .register(SERVER_PROJECTS_EVENT_NAMES_V2.previewOutcome, 1, ServerPreviewOutcomePayloadV2)
+    .register(
+      SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.pending,
+      1,
+      ServerAttachmentCleanupPendingPayload,
+    )
+    .register(
+      SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.settled,
+      1,
+      ServerAttachmentCleanupSettledPayload,
+    )
     .register(CLOUD_MACHINES_EVENT_NAMES.creationRequested, 1, CloudMachineCreationRequestedPayload)
+    .register(
+      CLOUD_MACHINES_EVENT_NAMES_V2.creationRequested,
+      1,
+      CloudMachineCreationRequestedPayloadV2,
+    )
     .register(CLOUD_MACHINES_EVENT_NAMES.created, 1, CloudMachineCreatedPayload)
     .register(CLOUD_MACHINES_EVENT_NAMES.creationEnded, 1, CloudMachineCreationEndedPayload)
     .register(CLOUD_MACHINES_EVENT_NAMES.projectBound, 1, CloudMachineProjectBoundPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES_V2.projectBound, 1, CloudMachineProjectBoundPayloadV2)
     .register(CLOUD_MACHINES_EVENT_NAMES.stateChanged, 1, CloudMachineStateChangedPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES_V2.stateChanged, 1, CloudMachineStateChangedPayloadV2)
     .register(CLOUD_MACHINES_EVENT_NAMES.destroyed, 1, CloudMachineDestroyedPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES_V2.destroyed, 1, CloudMachineDestroyedPayloadV2)
     .register(SHIELD_TAG_EVENT_NAMES.recorded, 1, ShieldTagRecordedPayload)
     .register(SHIELD_FORGE_CHANGE_EVENT_NAMES.observed, 1, ShieldForgeChangeObservedPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.limitsSet, 1, SafeNetworksLimitsSetPayload)
@@ -741,6 +866,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)
     .register(AGENT_RUN_RESULT_DELIVERY_SETTLED, 1, AgentRunResultDeliverySettled)
     .register(AGENT_RESULT_STEERED, 1, AgentResultSteered)
+    .register(THREAD_MESSAGE_STEERED, 1, ThreadMessageSteered)
     .register(AGENT_RUN_SETTINGS_UPDATED, 1, AgentRunPolicySettings)
     .register(AGENT_MESSAGE_EVENT_NAMES.sent, 1, AgentMessageSent)
     .register(AGENT_MESSAGE_EVENT_NAMES.delivered, 1, AgentMessageDelivered)
@@ -767,6 +893,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("work.settings-updated@1", 1, WorkSettingsUpdated)
     .register("work.turn-accepted@1", 1, WorkTurnAccepted)
     .register("work.turn-updated@1", 1, WorkTurnUpdated)
+    .register("work.turn-loop-noticed@1", 1, WorkTurnLoopNoticed)
+    .register("work.turn-loop-stopped@1", 1, WorkTurnLoopStopped)
+    .register("work.turn-stall-noticed@1", 1, WorkTurnStallNoticed)
     .register("work.thread-rewound@1", 1, WorkThreadRewound)
     .register("work.artifact-mutation-recorded@1", 1, WorkArtifactMutationFrame)
     .register("work.promotion-recorded@1", 1, WorkPromotionFrame)
@@ -804,6 +933,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(REMOTE_ACCESS_EVENT_NAMES.sessionInvalidated, 1, RemoteSessionInvalidatedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.commandReceiptRecorded, 1, RemoteCommandReceiptRecordedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.securityAuditRecorded, 1, SecurityAuditRecordedV1)
+    .register(REMOTE_ACCESS_EVENT_NAMES.deviceAlertChanged, 1, DeviceAlertChangedV1)
     .register(REMOTE_PUSH_REGISTRATION_EVENT_NAMES.recorded, 1, RemotePushRegistrationRecordedV1)
     .register(REMOTE_PUSH_REGISTRATION_EVENT_NAMES.cleared, 1, RemotePushRegistrationClearedV1)
     .register(REMOTE_PUSH_DELIVERY_EVENT_NAMES.recorded, 1, RemotePushDeliveryRecordedV1)
@@ -811,6 +941,11 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       REMOTE_PUSH_MOVE_WAITING_DELIVERY_EVENT_NAMES.recorded,
       1,
       RemotePushMoveWaitingDeliveryRecordedV1,
+    )
+    .register(
+      REMOTE_PUSH_DEVICE_JOINED_DELIVERY_EVENT_NAMES.recorded,
+      1,
+      RemotePushDeviceJoinedDeliveryRecordedV1,
     )
     .register(PRODUCT_FEEDBACK_CAPTURED, 1, ProductFeedbackCaptured)
     .register(PRODUCT_FEEDBACK_DISCARDED, 1, ProductFeedbackDiscarded)
@@ -831,7 +966,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.issued, 1, TerminalBrowserGrantIssued)
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.revoked, 1, TerminalBrowserGrantRevoked)
     .register(HUB_MEMBERSHIP_CHANGED, 1, HubMembershipChangedPayload)
-    .register(OWNER_BROWSER_AUDIT_EVENT, 1, OwnerBrowserAuditRecord)
+    .register(LEGACY_OWNER_BROWSER_AUDIT_EVENT, 1, LegacyOwnerBrowserAuditRecord)
+    .register(PAIRED_BROWSER_HOLD_STARTED_EVENT, 1, PairedBrowserHoldStartedPayload)
+    .register(PAIRED_BROWSER_HOLD_ENDED_EVENT, 1, PairedBrowserHoldEndedPayload)
     .register(OWNER_APPROVAL_AUDIT_EVENT, 1, OwnerApprovalAuditRecord)
     .register(HUB_DELEGATION_RECORDED, 1, HubDelegationRecordedPayload)
     .register(AGENT_ACCESS_EVENT_NAMES.grantCreated, 1, AgentGrantCreatedV1)
@@ -911,6 +1048,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerThreadMoveEvents(events);
   registerMovedHistoryEvents(events);
   registerSideTaskEvents(events);
+  registerFinishedReceiptEvents(events);
   registerThreadNoteEvents(events);
   registerShipEvents(events);
   registerThreadMessageQueueEvents(events);
@@ -919,6 +1057,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerReplicaStoreSettingsEvents(events);
   registerDesktopLeaseEvents(events);
   registerBenchmarkEvents(events);
+  registerPullRequestReviewEvents(events);
 
   const hostIdentityMigrations = createRuntimeHostIdentityMigrationRegistry(events);
   const agentRunProjection = new AgentRunProjection();
@@ -974,6 +1113,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ThreadNativeSetupProjection())
       .register(new RemoteAccessProjection())
       .register(new ThreadCheckpointProjection())
+      .register(new ActivityHistoryProjection())
       .register(new ProductFeedbackProjection())
       .register(new ProjectTerminalProjection())
       .register(new RemoteServerGrantProjection())

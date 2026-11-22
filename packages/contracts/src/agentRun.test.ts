@@ -2,7 +2,6 @@ import { Schema } from "effect";
 import { decodeChatCommand } from "./chat";
 import { describe, expect, it } from "vitest";
 import {
-  AGENT_RUN_EVENT_NAMES,
   AgentRunResultDeliveryMark,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_CHARACTERS,
@@ -312,7 +311,6 @@ describe("agentRun contracts", () => {
       version: 4,
     });
     expect(event.toStatus).toBe("completed");
-    expect(AGENT_RUN_EVENT_NAMES).toContain("agent.run-requested@1");
   });
 
   it("rejects invalid code worktree receipts that claim chat mode", () => {

@@ -1174,12 +1174,16 @@ it has not read.
 
 ### What leaves the computer
 
-Answers and notes are the person's own and stay on this computer. A share, a
-public link, and the Markdown and HTML export carry the questions, options, and
-sections (share version 17, naming blocks up to Canvas version 29) and never an
-answer or note. Artifact sync does not carry answers in this design; carrying
-them is a follow-up to [Artifact replica sync](artifact-replica-sync.md), as the
-comments' path is.
+Answers and notes are the person's own. A share, a public link, and the
+Markdown and HTML export carry the questions, options, and sections (share
+version 17, naming blocks up to Canvas version 29) and never an answer or note.
+For a Canvas the person's own replica carries, artifact sync carries saved
+answers, notes, and clears between that person's own computers as
+`canvas-choice-answer` entries under the share filter and the same ordering
+rules as comments ([Artifact replica sync](artifact-replica-sync.md)); an
+answer whose question fingerprint no longer matches the Canvas head is still
+carried and reads as stale, never as an answer to the revised question. Writing
+answers stays host-window only.
 
 ### Rejected and deferred
 
@@ -1463,7 +1467,11 @@ host as a self-contained SVG and is absent when it could not be drawn;
 opening an entry opens the same document by `canvasId`; and the listing is
 bounded and says when it is cut. The dock's **Artifacts** tool reads the
 same listing asked for the thread's Project, and opens an entry in the dock
-beside the thread rather than in a tab.
+beside the thread rather than in a tab. Its list is the library's List table
+(not a second row design). In the dock it keeps the name and the sync mark at
+every width, without the tags, share and edited columns, so a dock resized past
+its 480px minimum never squeezes the name to make room for them. Below 360px the
+Export and Versions words go too.
 
 The page opens grouped by Project, because that is how a person comes back to
 their work; **All** stays the flat reading, **Shared** the live shares, and
@@ -1488,9 +1496,9 @@ artifact sync all leave it here. The pure `admitCanvasTagCommand` policy
 validates shape and budgets, and the refusals are named values
 (`malformed-request`, `oversized-payload`, `duplicate-tag`, `unknown-tag`,
 `tag-budget-exceeded`, `stale-version`). Only the person changes tags, at a
-window on this host or a paired device (maintainer decision, 2026-11-12; not
-built yet: today the command route is host-window only, and a paired device
-reads a listing's tags and changes none), and the host stamps the event's
+window on this host or a paired device (maintainer decision, 2026-11-12; server
+policy admits a person-paired device and refuses hub-introduced devices; paired
+UI follow-up remains), and the host stamps the event's
 timestamp
 and its own person, never a field the request carries. The listing carries
 each entry's tags and a roster of every tag with how many artifacts carry
@@ -2249,7 +2257,9 @@ artifact format and copies no other product's identifiers.
   context and is refused. The paired browser offers **Import HTML…** in a
   Chat thread's Canvas tools to a device that acts as the host's person, on
   its own: a device's plain create is not built, so no create draft is
-  shown beside it.
+  shown beside it. The phone offers the same import from a Chat thread's
+  Views and panes, from a file or pasted markup with an optional title, and
+  shows the host's summary of what was taken out or its refusal.
 - **Bounds and refusals.** The page is at most 256 KiB of UTF-8
   (`CANVAS_HTML_IMPORT_MAX_BYTES`), checked on the host; a body past the
   route's 1 MiB read is answered as too large too. What survives the import

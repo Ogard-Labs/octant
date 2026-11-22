@@ -13,14 +13,17 @@ import type {
   NativeHarnessFollowUpCreation,
   NativeHarnessFollowUpPreview,
   NativeHarnessFollowUpSuggestion,
+  NextMessageSuggestionsSetting,
   OctantMode,
   ThreadFollowUpSuggestions,
 } from "@octant/contracts";
+import { nextMessageSuggestionsOn } from "@octant/domain/shell-policy";
 import {
   FollowUpSuggestionClientFailure,
   type FollowUpSuggestionClient,
 } from "@octant/client-runtime/follow-up-suggestion-client";
 import type { SideTaskClient } from "@octant/client-runtime/side-task-client";
+import type { FinishedReceiptClient } from "@octant/client-runtime/finished-receipt-client";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import {
@@ -28,6 +31,7 @@ import {
   useThreadActivityRevision,
 } from "../polling/ThreadActivityRevisions";
 import { SideTaskProvider } from "./SideTaskCards";
+import { FinishedReceiptProvider } from "../finishedReceipts/FinishedReceiptCard";
 import { EnvironmentCard } from "../environment/EnvironmentGroup";
 import "./follow-up-suggestions.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -59,6 +63,7 @@ export interface ComposerOffers extends FollowUpSuggestionChipsProps {
     SideTaskClient,
     "sideTasks" | "start" | "continueHere" | "dismiss"
   >;
+  readonly finishedReceiptClient?: Pick<FinishedReceiptClient, "receipts">;
 }
 
 /**
@@ -67,18 +72,30 @@ export interface ComposerOffers extends FollowUpSuggestionChipsProps {
  */
 export const FollowUpSuggestionContext = createContext<ComposerOffers | undefined>(undefined);
 
+/**
+ * Settings › Replies' next-message suggestions, for every composer in the
+ * window. Absent means on in every mode, as the host reads it.
+ */
+export const NextMessageSuggestionsContext = createContext<
+  NextMessageSuggestionsSetting | undefined
+>(undefined);
+
 /** The follow-up chips for the thread around this composer, if any. */
 export function ComposerFollowUpSuggestions() {
   const context = useContext(FollowUpSuggestionContext);
   if (context === undefined) return null;
-  const { sideTaskClient: _sideTasks, ...chips } = context;
+  const {
+    sideTaskClient: _sideTasks,
+    finishedReceiptClient: _finishedReceipts,
+    ...chips
+  } = context;
   return <FollowUpSuggestionChips {...chips} />;
 }
 
 /**
- * Loads the pane thread's side-task offers once for the transcript's inline
- * cards, and opens the thread a start creates. It always renders its children,
- * so a pane with no offers keeps its tree.
+ * Loads the pane thread's side-task offers and finished receipts once for the
+ * transcript's inline cards, and opens the thread a start creates. It always
+ * renders its children, so a pane with none keeps its tree.
  */
 export function PaneSideTasks(props: { readonly children: ReactNode }) {
   const context = useContext(FollowUpSuggestionContext);
@@ -100,7 +117,9 @@ export function PaneSideTasks(props: { readonly children: ReactNode }) {
         })
       }
     >
-      {props.children}
+      <FinishedReceiptProvider client={context?.finishedReceiptClient} threadId={context?.threadId}>
+        {props.children}
+      </FinishedReceiptProvider>
     </SideTaskProvider>
   );
 }
@@ -130,6 +149,7 @@ const noFollowUps = () => () => undefined;
  */
 export function useComposerSuggestion(): ComposerSuggestion | undefined {
   const context = useContext(FollowUpSuggestionContext);
+  const setting = useContext(NextMessageSuggestionsContext);
   const client = context?.client;
   const threadId = context?.threadId;
   const revision = useThreadActivityRevision("threadFollowUps");
@@ -146,7 +166,18 @@ export function useComposerSuggestion(): ComposerSuggestion | undefined {
   );
   useFollowUpRevision(client, threadId, revision);
   const dismissedTurnId = useDismissedTurn(threadId ?? "");
-  if (client === undefined || threadId === undefined || suggestions === null) return undefined;
+  if (
+    context === undefined ||
+    client === undefined ||
+    threadId === undefined ||
+    suggestions === null
+  ) {
+    return undefined;
+  }
+  // Off for this mode, the composer offers nothing on Tab: neither a stored
+  // prediction nor a next-step card's prompt. The cards themselves stay.
+  if (!nextMessageSuggestionsOn({ nextMessageSuggestions: setting }, context.mode))
+    return undefined;
   const turnId = suggestions.followUps.turnId;
   if (String(turnId) === dismissedTurnId) return undefined;
   if (suggestions.nextMessage !== undefined) {
@@ -513,7 +544,11 @@ export function FollowUpSuggestionChips(props: FollowUpSuggestionChipsProps) {
 export function EnvironmentSuggestedTasks() {
   const context = useContext(FollowUpSuggestionContext);
   if (context === undefined) return null;
-  const { sideTaskClient: _sideTasks, ...chips } = context;
+  const {
+    sideTaskClient: _sideTasks,
+    finishedReceiptClient: _finishedReceipts,
+    ...chips
+  } = context;
   return (
     <FollowUpSuggestionChips
       {...chips}

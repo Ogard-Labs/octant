@@ -41,6 +41,7 @@ import {
   type OpenCodeProcessPort,
   type OpenCodeProcessStartInput,
 } from "./openCodeProcess";
+import { WINDOWS_STRICT_CHAT_REFUSAL } from "@octant/domain/guardrail-policy";
 import { SECRET_QUESTION_REFUSAL } from "./secretQuestion";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeOpenCodeCli.ts", import.meta.url));
@@ -176,7 +177,7 @@ describe("OpenCode driver", () => {
     // kept turn, so the rewind preview may promise a copy.
     expect(probe.capabilities.sessionRollback).toBe("supported");
     expect(fixture.processInputs[0]).toMatchObject(
-      process.platform === "darwin" || process.platform === "linux"
+      process.platform === "darwin" || process.platform === "linux" || process.platform === "win32"
         ? { mode: "chat", executionPolicy: "plan", loopbackPorts: [expect.any(Number)] }
         : { mode: "code", executionPolicy: "approval-gated", loopbackPorts: [expect.any(Number)] },
     );
@@ -331,6 +332,35 @@ describe("OpenCode driver", () => {
     expect(fixture.calls.slice(probeCallCount).some((call) => call.startsWith("mcp.add:"))).toBe(
       false,
     );
+  });
+
+  it("offers app tools below Full access outside Strict to a runtime with no Octant sandbox on Octant's private configuration", async () => {
+    for (const strict of [false, true]) {
+      const fixture = driverFixture({
+        platform: "darwin",
+        isolatedConfiguration: false,
+        privateConfiguration: true,
+      });
+      const result = await Effect.runPromise(
+        Effect.scoped(
+          fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+            Effect.flatMap((connection) =>
+              Effect.exit(
+                connection.start({
+                  sessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                  strict,
+                  tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+                }),
+              ),
+            ),
+          ),
+        ),
+      );
+      // Under Strict the launch is confined, so only an OS receipt admits them.
+      expect(Exit.isSuccess(result)).toBe(!strict);
+    }
   });
 
   it("offers a Full access thread app tools on a runtime that can inherit external configuration", async () => {
@@ -664,7 +694,7 @@ describe("OpenCode driver", () => {
     ).toMatchObject([
       {
         inputTokens: 15,
-        outputTokens: 7,
+        outputTokens: 10,
         reasoningTokens: 3,
         cacheReadInputTokens: 2,
         cacheWriteInputTokens: 1,
@@ -672,7 +702,7 @@ describe("OpenCode driver", () => {
       },
       {
         inputTokens: 51,
-        outputTokens: 18,
+        outputTokens: 26,
         reasoningTokens: 8,
         cacheReadInputTokens: 6,
         cacheWriteInputTokens: 3,
@@ -1764,9 +1794,9 @@ describe("OpenCode driver", () => {
       sessionRollback: "supported",
     });
     // Where the Chat and Plan jail starts no process the launch refuses both,
-    // and the report says so.
+    // and the report says so. Windows runs Chat and Plan unconfined outside Strict.
     expect(probe.capabilities.turnModes).toEqual(
-      process.platform === "darwin" || process.platform === "linux"
+      process.platform === "darwin" || process.platform === "linux" || process.platform === "win32"
         ? undefined
         : {
             chat: "unsupported",
@@ -1777,6 +1807,281 @@ describe("OpenCode driver", () => {
           },
     );
   });
+
+  it("reports OpenCode 2 turns available in Chat and Plan on Windows without a host-confinement restriction", async () => {
+    const fixture = driverFixture({
+      platform: "win32",
+      healthVersion: "opencode v2.0.22",
+      process: {
+        start: () =>
+          Effect.acquireRelease(
+            Effect.succeed({
+              authorization: "Basic redacted",
+              pid: process.pid,
+              runtime: "beta" as const,
+              version: "opencode v2.0.22",
+              temporaryDirectory: launchScratchDirectory(),
+              url: new URL("http://127.0.0.1:1/"),
+            }),
+            () => Effect.void,
+          ),
+      },
+    });
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    expect(probe.readiness).toBe("ready");
+    expect(probe.capabilities.turnModes).toBeUndefined();
+  });
+
+  it("starts OpenCode Chat on Windows outside Strict with a deny-everything permission ruleset and refuses Strict", async () => {
+    const own = {
+      rules: [
+        { action: "read", resource: "*", effect: "allow" as const },
+        { action: "bash", resource: "*", effect: "allow" as const },
+      ],
+      toolServers: true,
+      webTools: true,
+      blockedTools: ["octant_blocked"],
+    };
+    const legacyWinChat = permissionRules(
+      "approval-gated",
+      "chat",
+      "octant-bridge",
+      ["/tmp/extra"],
+      true,
+      own,
+      { belowFullAccess: [], atFullAccess: [] },
+      [],
+      "win32",
+    );
+    expect(legacyWinChat).toEqual([
+      { permission: "*", pattern: "*", action: "deny" },
+      { permission: "octant-bridge_*", pattern: "*", action: "allow" },
+      { permission: "octant_blocked", pattern: "*", action: "deny" },
+    ]);
+
+    const betaWinChat = betaSessionPermissionRules(
+      "approval-gated",
+      "chat",
+      "octant-bridge",
+      ["/tmp/extra"],
+      true,
+      own,
+      { belowFullAccess: [], atFullAccess: [] },
+      [],
+      "win32",
+    );
+    expect(betaWinChat).toEqual([
+      { action: "*", resource: "*", effect: "deny" },
+      { action: "question", resource: "*", effect: "allow" },
+      { action: "octant-bridge_*", resource: "*", effect: "allow" },
+      { action: "octant_blocked", resource: "*", effect: "deny" },
+    ]);
+    expect(
+      betaAgentPermissionRules("approval-gated", "chat", [], own.rules, undefined, "win32"),
+    ).toEqual([{ action: "*", resource: "*", effect: "deny" }]);
+
+    // macOS / Linux Chat rules remain unchanged.
+    for (const posixPlatform of ["darwin", "linux"] as const) {
+      expect(
+        permissionRules(
+          "approval-gated",
+          "chat",
+          undefined,
+          [],
+          false,
+          undefined,
+          undefined,
+          [],
+          posixPlatform,
+        )[0],
+      ).toEqual({ permission: "*", pattern: "*", action: "ask" });
+    }
+
+    const fixture = driverFixture({
+      platform: "win32",
+      readOwnSetup: () => ({
+        rules: own.rules,
+        mcp: { docs: { type: "local", command: ["node", "docs.js"] } },
+      }),
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "chat" }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "approval-gated",
+              strict: false,
+              nativeSetup: {
+                subagents: true,
+                webTools: true,
+                skills: true,
+                toolServers: true,
+                hooks: false,
+                projectCode: false,
+              },
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(fixture.processInputs[0]).toMatchObject({
+      mode: "chat",
+      strict: false,
+      betaPermissions: [
+        { action: "*", resource: "*", effect: "deny" },
+        { action: "question", resource: "*", effect: "allow" },
+      ],
+    });
+    expect(fixture.processInputs[0]?.ownSkills).toBeUndefined();
+    expect(fixture.processInputs[0]?.ownToolServers).toBeUndefined();
+    expect(fixture.processInputs[0]?.projectConfig).toBeUndefined();
+    expect(fixture.createdPermissions[0]).toEqual([
+      { permission: "*", pattern: "*", action: "deny" },
+    ]);
+
+    // Under Strict on Windows, Chat refuses cleanly before spawning.
+    const strictFixture = driverFixture({
+      platform: "win32",
+      process: makeOpenCodeProcessLive({
+        platform: "win32",
+        runtimeConfigResolver: async () => undefined,
+      }),
+    });
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        Effect.scoped(
+          strictFixture.driver
+            .acquire({ instanceId, projectRoot: "/tmp/project", mode: "chat" })
+            .pipe(
+              Effect.flatMap((connection) =>
+                connection.start({
+                  sessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                  strict: true,
+                }),
+              ),
+            ),
+        ),
+      ),
+    );
+    expect(refused).toMatchObject({
+      category: "incompatible",
+      message: WINDOWS_STRICT_CHAT_REFUSAL,
+    });
+  });
+
+  it("offers app-managed tools in native Windows Chat outside Strict for a verified release with private config, and keeps unverified releases refused", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-opencode-windows-tools-")));
+    try {
+      const writeBinary = (name: string, mode: string) => {
+        const binaryPath = join(root, name);
+        writeFileSync(
+          binaryPath,
+          `#!/bin/sh\nOCTANT_FAKE_OPENCODE_MODE=${mode} exec '${fakeCliPath}' "$@"\n`,
+        );
+        chmodSync(binaryPath, 0o755);
+        return binaryPath;
+      };
+      const verifiedBinary = writeBinary("opencode-verified", "isolation-supported");
+      const unverifiedBinary = writeBinary("opencode-unverified", "ready");
+      const windowsProcessFor = (binaryPath: string): OpenCodeProcessPort => {
+        const live = makeOpenCodeProcessLive({
+          platform: "win32",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 10_000,
+          windowsCatalogUnconfined: () => true,
+        });
+        return { start: (input) => live.start({ ...input, binaryPath }) };
+      };
+      const tools = [{ name: "octant_browser", inputSchema: { type: "object" } }] as const;
+
+      const verified = driverFixture({
+        platform: "win32",
+        sessionDirectory: root,
+        process: windowsProcessFor(verifiedBinary),
+      });
+      const verifiedProbe = await Effect.runPromise(
+        Effect.scoped(verified.driver.probe({ instanceId })),
+      );
+      expect(verifiedProbe.readiness).toBe("ready");
+      expect(verifiedProbe.capabilities.appManagedTools).toBe("supported");
+
+      await Effect.runPromise(
+        Effect.scoped(
+          verified.driver.acquire({ instanceId, projectRoot: root, mode: "chat" }).pipe(
+            Effect.flatMap((connection) =>
+              connection
+                .start({
+                  sessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                  strict: false,
+                  tools: [...tools],
+                })
+                .pipe(
+                  Effect.flatMap(() =>
+                    connection.send({
+                      sessionId,
+                      prompt: "Use the browser tool",
+                      attachments: [],
+                      tools: [...tools],
+                    }),
+                  ),
+                ),
+            ),
+          ),
+        ),
+      );
+      expect(verified.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
+      expect(verified.calls).toContain("session.promptAsync");
+      expect(verified.createdPermissions[0]).toEqual([
+        { permission: "*", pattern: "*", action: "deny" },
+        {
+          permission: expect.stringMatching(/^octant-[0-9a-f]{16}_\*$/),
+          pattern: "*",
+          action: "allow",
+        },
+      ]);
+
+      // An unverified release without OS confinement still cannot carry app tools below Full access.
+      const unverified = driverFixture({
+        platform: "win32",
+        sessionDirectory: root,
+        process: windowsProcessFor(unverifiedBinary),
+      });
+      const unverifiedProbe = await Effect.runPromise(
+        Effect.scoped(unverified.driver.probe({ instanceId })),
+      );
+      expect(unverifiedProbe.capabilities.appManagedTools).toBe("unsupported");
+
+      const rejected = await Effect.runPromise(
+        Effect.flip(
+          Effect.scoped(
+            unverified.driver.acquire({ instanceId, projectRoot: root, mode: "chat" }).pipe(
+              Effect.flatMap((connection) =>
+                connection.start({
+                  sessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                  strict: false,
+                  tools: [...tools],
+                }),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(rejected).toMatchObject({
+        category: "unsupported",
+        message: "OpenCode app tools require a confined provider process.",
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   it("lists a 2.x runtime without offering turns when its confined server cannot resolve a Git work tree", async () => {
     const fixture = betaDriver({ worktreeSessionCreate: "refused" });
@@ -2461,7 +2766,106 @@ describe("OpenCode driver", () => {
     expect(locked.approvals.at(-1)).not.toContain("OpenCode's own settings");
   });
 
-  it("admits the edits OpenCode makes later on a grant it remembers from an always answer, and the requests it settles by itself", async () => {
+  it.each([false, true])(
+    "admits the edits OpenCode makes later on a grant it remembers from an always answer, and the requests it settles by itself (full ledger: %s)",
+    async (fullLedger) => {
+      const asked = (id: string, files: ReadonlyArray<string>) =>
+        ({
+          type: "permission.v2.asked",
+          properties: { id, sessionID: "provider-session", action: "edit", resources: [...files] },
+        }) as unknown as Event;
+      const edited = (file: string) =>
+        ({
+          type: "file.edited",
+          properties: { sessionID: "provider-session", file },
+        }) as unknown as Event;
+      const fixture = betaDriver({
+        permissionPersistence: "project-default",
+        events: [
+          asked(
+            "perm-a",
+            fullLedger
+              ? [
+                  "/tmp/project/a.ts",
+                  ...Array.from({ length: 1023 }, (_, index) => `/tmp/project/f${index}.ts`),
+                ]
+              : ["/tmp/project/a.ts"],
+          ),
+          asked("perm-b", ["/tmp/project/b.ts"]),
+        ],
+        eventsOnReply: [
+          {
+            type: "permission.v2.replied",
+            properties: { sessionID: "provider-session", requestID: "perm-a", reply: "always" },
+          } as unknown as Event,
+          // OpenCode settles the other pending request by the remembered grant.
+          {
+            type: "permission.v2.replied",
+            properties: { sessionID: "provider-session", requestID: "perm-b", reply: "always" },
+          } as unknown as Event,
+          edited("/tmp/project/a.ts"),
+          // A later edit of the same file asks nothing: OpenCode applies its grant.
+          edited("/tmp/project/a.ts"),
+          edited("/tmp/project/b.ts"),
+          // A full ledger leaves the settled b.ts grant one-use only: its
+          // first change spends it, so a second has nothing left to admit it.
+          ...(fullLedger ? [edited("/tmp/project/b.ts")] : []),
+          {
+            type: "session.idle",
+            properties: { sessionID: "provider-session" },
+          } as unknown as Event,
+        ],
+      });
+      const output = await Effect.runPromise(
+        Effect.scoped(
+          fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+            Effect.flatMap((connection) =>
+              Effect.gen(function* () {
+                const stream = yield* connection.subscribe;
+                const collector = yield* Effect.fork(
+                  Stream.runCollect(
+                    stream.pipe(
+                      Stream.takeUntil((event) =>
+                        ["completed", "failed", "interrupted"].includes(event.kind),
+                      ),
+                    ),
+                  ),
+                );
+                yield* connection.start({
+                  sessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                  nativeSetup: {
+                    subagents: false,
+                    webTools: true,
+                    skills: true,
+                    toolServers: true,
+                    hooks: true,
+                    projectCode: false,
+                  },
+                });
+                yield* Effect.sleep("20 millis");
+                yield* connection.answerApproval({
+                  sessionId,
+                  requestId: "perm-a",
+                  approved: true,
+                });
+                return yield* Fiber.join(collector);
+              }),
+            ),
+          ),
+        ),
+      );
+      const events = Array.from(output);
+      expect(fixture.calls).toContain("permission.reply:always");
+      expect(events.filter((event) => event.kind === "file-change")).toHaveLength(3);
+      // Only under a full ledger does the second b.ts report find its
+      // one-use grant spent and fail the turn.
+      expect(events.some((event) => event.kind === "failed")).toBe(fullLedger);
+    },
+  );
+
+  it("does not admit an always-remembered edit on a fresh connection of the same Project", async () => {
     const asked = (id: string, file: string) =>
       ({
         type: "permission.v2.asked",
@@ -2469,33 +2873,59 @@ describe("OpenCode driver", () => {
       }) as unknown as Event;
     const fixture = betaDriver({
       permissionPersistence: "project-default",
-      events: [asked("perm-a", "/tmp/project/a.ts"), asked("perm-b", "/tmp/project/b.ts")],
-      eventsOnReply: [
-        {
-          type: "permission.v2.replied",
-          properties: { sessionID: "provider-session", requestID: "perm-a", reply: "always" },
-        } as unknown as Event,
-        // OpenCode settles the other pending request by the remembered grant.
-        {
-          type: "permission.v2.replied",
-          properties: { sessionID: "provider-session", requestID: "perm-b", reply: "always" },
-        } as unknown as Event,
-        {
-          type: "file.edited",
-          properties: { sessionID: "provider-session", file: "/tmp/project/a.ts" },
-        } as unknown as Event,
-        // A later edit of the same file asks nothing: OpenCode applies its grant.
-        {
-          type: "file.edited",
-          properties: { sessionID: "provider-session", file: "/tmp/project/a.ts" },
-        } as unknown as Event,
-        {
-          type: "file.edited",
-          properties: { sessionID: "provider-session", file: "/tmp/project/b.ts" },
-        } as unknown as Event,
-        { type: "session.idle", properties: { sessionID: "provider-session" } } as unknown as Event,
-      ],
+      events: [asked("perm-1", "/tmp/project/a.ts"), asked("perm-2", "/tmp/project/b.ts")],
+      eventsOnReply: (requestId) =>
+        requestId === "perm-2"
+          ? [
+              {
+                type: "file.edited",
+                properties: { sessionID: "provider-session", file: "/tmp/project/b.ts" },
+              } as unknown as Event,
+              // The first connection answered `always` for this file; on this
+              // connection's process generation nothing remembers it.
+              {
+                type: "file.edited",
+                properties: { sessionID: "provider-session", file: "/tmp/project/a.ts" },
+              } as unknown as Event,
+              {
+                type: "session.idle",
+                properties: { sessionID: "provider-session" },
+              } as unknown as Event,
+            ]
+          : [],
     });
+    const resumeCursor = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const handle = yield* connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+                nativeSetup: {
+                  subagents: false,
+                  webTools: true,
+                  skills: true,
+                  toolServers: true,
+                  hooks: true,
+                  projectCode: false,
+                },
+              });
+              yield* Effect.sleep("20 millis");
+              yield* connection.answerApproval({
+                sessionId,
+                requestId: "perm-1",
+                approved: true,
+              });
+              return handle.resumeCursor;
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(fixture.calls).toContain("permission.reply:always");
+
     const output = await Effect.runPromise(
       Effect.scoped(
         fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
@@ -2511,6 +2941,58 @@ describe("OpenCode driver", () => {
                   ),
                 ),
               );
+              yield* connection.resume({
+                sessionId,
+                resumeCursor: resumeCursor!,
+                executionPolicy: "approval-gated",
+              });
+              yield* Effect.sleep("20 millis");
+              yield* connection.answerApproval({
+                sessionId,
+                requestId: "perm-2",
+                approved: true,
+                scope: "once",
+              });
+              return yield* Fiber.join(collector);
+            }),
+          ),
+        ),
+      ),
+    );
+    const events = Array.from(output);
+    expect(fixture.calls).toContain("permission.reply:once");
+    // b.ts is admitted by this connection's own one-use answer; a.ts fails
+    // because the remembered grant stayed with the first generation.
+    expect(events.filter((event) => event.kind === "file-change")).toEqual([
+      expect.objectContaining({ path: "/tmp/project/b.ts" }),
+    ]);
+    const failed = events.find((event) => event.kind === "failed");
+    expect(failed && "failure" in failed ? failed.failure.message : "").toContain(
+      "no approval or setting allowed",
+    );
+  });
+
+  it("answers once an always approval whose files the process's ledger cannot hold", async () => {
+    const asked = (id: string, files: ReadonlyArray<string>) =>
+      ({
+        type: "permission.v2.asked",
+        properties: { id, sessionID: "provider-session", action: "edit", resources: files },
+      }) as unknown as Event;
+    const fixture = betaDriver({
+      permissionPersistence: "project-default",
+      events: [
+        asked(
+          "perm-fill",
+          Array.from({ length: 1024 }, (_, index) => `/tmp/project/f${index}.ts`),
+        ),
+        asked("perm-one", ["/tmp/project/extra.ts"]),
+      ],
+    });
+    await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
               yield* connection.start({
                 sessionId,
                 modelId,
@@ -2525,17 +3007,27 @@ describe("OpenCode driver", () => {
                 },
               });
               yield* Effect.sleep("20 millis");
-              yield* connection.answerApproval({ sessionId, requestId: "perm-a", approved: true });
-              return yield* Fiber.join(collector);
+              yield* connection.answerApproval({
+                sessionId,
+                requestId: "perm-fill",
+                approved: true,
+              });
+              yield* connection.answerApproval({
+                sessionId,
+                requestId: "perm-one",
+                approved: true,
+              });
             }),
           ),
         ),
       ),
     );
-    const events = Array.from(output);
-    expect(fixture.calls).toContain("permission.reply:always");
-    expect(events.filter((event) => event.kind === "file-change")).toHaveLength(3);
-    expect(events.some((event) => event.kind === "failed")).toBe(false);
+    // The first batch fills the ledger, so the second's whole grant is refused
+    // rather than half-remembered: the answer degrades to a one-use grant.
+    expect(fixture.calls.filter((call) => call.startsWith("permission.reply:"))).toEqual([
+      "permission.reply:always",
+      "permission.reply:once",
+    ]);
   });
 
   it("does not reply to an approval-gated 2.x write until the user approves it", async () => {
@@ -3989,6 +4481,8 @@ function launchScratchDirectory(): string {
 function driverFixture(
   options: {
     readonly isolatedConfiguration?: boolean;
+    /** The launch ran with no Octant sandbox on Octant's private configuration. */
+    readonly privateConfiguration?: true;
     readonly process?: OpenCodeProcessPort;
     readonly events?: ReadonlyArray<OpenCodeEvent>;
     readonly permissionPersistence?:
@@ -4019,6 +4513,7 @@ function driverFixture(
     /** The command route fails after the turn's context was queued. */
     readonly commandFailure?: "context-queued";
     readonly protectedPaths?: { belowFullAccess: string[]; atFullAccess: string[] };
+    readonly platform?: NodeJS.Platform;
   } = {},
 ) {
   const calls: string[] = [];
@@ -4041,6 +4536,9 @@ function driverFixture(
                 ...(options.isolatedConfiguration === false
                   ? {}
                   : { isolatedConfiguration: true as const }),
+                ...(options.privateConfiguration === true
+                  ? { privateConfiguration: true as const }
+                  : {}),
                 authorization: "Basic redacted",
                 pid: process.pid,
                 url: new URL("http://127.0.0.1:1/"),
@@ -4173,6 +4671,7 @@ function driverFixture(
     driver: makeOpenCodeDriver({
       instanceId,
       binaryPath: "/opt/homebrew/bin/opencode",
+      ...(options.platform === undefined ? {} : { platform: options.platform }),
       process: options.process ?? processPort,
       runtimeRegistry: registry,
       clientFactory: (runtime, root) => {

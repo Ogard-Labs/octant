@@ -139,3 +139,23 @@ export function callDurationLabel(durationMs: number): string {
   if (seconds < 60) return `${seconds} s`;
   return `${Math.floor(seconds / 60)} m ${seconds % 60} s`;
 }
+
+/** The compact form an inline suffix uses where a long label would wrap. */
+export function compactDuration(durationMs: number): string {
+  if (durationMs < 1_000) return `${Math.max(0, Math.round(durationMs))}ms`;
+  const seconds = Math.floor(durationMs / 1_000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return seconds % 60 === 0 ? `${minutes}m` : `${minutes}m ${seconds % 60}s`;
+  const hours = Math.floor(minutes / 60);
+  return minutes % 60 === 0 ? `${hours}h` : `${hours}h ${minutes % 60}m`;
+}
+
+/**
+ * A completed call's time as one inline suffix: the net run time alone, or
+ * the person-facing wait beside it when a call paused on an approval.
+ */
+export function callTimingLabel(durationMs: number, waitedMs?: number): string {
+  if (waitedMs === undefined || waitedMs <= 0) return callDurationLabel(durationMs);
+  return `waited ${compactDuration(waitedMs)} · ran ${compactDuration(durationMs)}`;
+}

@@ -5,7 +5,11 @@ import type { WorkThread } from "@octant/contracts/work-threads";
 import type { NativeHarnessComposition } from "../harness/nativeHarnessComposition";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { ServerConnection } from "./serverConnection";
-import { transferServerAttachments, type ServerAttachmentTransfer } from "./serverAttachments";
+import {
+  transferServerAttachments,
+  type ServerAttachmentTransfer,
+  type ServerAttachmentTransferGuard,
+} from "./serverAttachments";
 import { ServerFileSystem } from "./serverFiles";
 import type { ServerProjectStore } from "./serverProjectStore";
 import { createServerShell, type ServerShellOptions } from "./serverShell";
@@ -86,6 +90,7 @@ export function bindServerWorkTurn(
     readonly record: (
       input: Parameters<ServerShellOptions["record"]>[0] & { readonly threadId: string },
     ) => "recorded" | "unavailable";
+    readonly guardTransfer?: ServerAttachmentTransferGuard;
   },
   input: { readonly thread: WorkThread },
 ): ServerWorkTurnBinding {
@@ -140,6 +145,7 @@ export function bindServerWorkTurn(
             threadId: String(input.thread.id),
             files,
             ...(signal === undefined ? {} : { signal }),
+            ...(options.guardTransfer === undefined ? {} : { guard: options.guardTransfer }),
           }),
       };
 }

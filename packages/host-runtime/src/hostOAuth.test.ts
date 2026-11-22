@@ -1455,3 +1455,350 @@ describe("the MCP authorization dialect", () => {
     }
   });
 });
+
+describe("paired-device MCP connector sign-in in the broker", () => {
+  it("runs RFC 8628 device authorization for MCP connectors, caps expiry at 15 minutes, slows on slow_down, and keeps device_code in the broker", async () => {
+    let clock = 1_700_000_000_000;
+    const sleeps: number[] = [];
+    let pollCalls = 0;
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "https://auth.example/device") {
+        const form = new URLSearchParams(String(init?.body ?? ""));
+        expect(form.get("client_id")).toBe("mcp-client");
+        expect(form.get("resource")).toBe("https://mcp.example/mcp");
+        return Response.json({
+          device_code: "secret-device-code-never-exposed",
+          user_code: "WXYZ-1234",
+          verification_uri: "https://verify.auth.example/device",
+          verification_uri_complete: "https://verify.auth.example/device?user_code=WXYZ-1234",
+          expires_in: 3_600, // Exceeds 15 minutes — must be capped at 900s.
+          interval: 2,
+        });
+      }
+      if (url === "https://auth.example/token") {
+        pollCalls += 1;
+        const form = new URLSearchParams(String(init?.body ?? ""));
+        expect(form.get("grant_type")).toBe("urn:ietf:params:oauth:grant-type:device_code");
+        expect(form.get("device_code")).toBe("secret-device-code-never-exposed");
+        expect(form.get("resource")).toBe("https://mcp.example/mcp");
+        if (pollCalls === 1) return Response.json({ error: "slow_down" }, { status: 400 });
+        return Response.json({
+          access_token: ACCESS,
+          refresh_token: REFRESH,
+          token_type: "Bearer",
+          expires_in: 600,
+          scope: "mcp:tools",
+        });
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+
+    const store = memoryStore();
+    const runtime = createHostOAuthRuntime({
+      store,
+      fetch: fetchImpl,
+      now: () => clock,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+        clock += ms;
+      },
+    });
+    const actorId = randomUUID();
+    try {
+      const started = await runtime.begin({
+        descriptor: {
+          descriptorId: "mcp-device",
+          dialect: "mcp-authorization",
+          flow: "device-code",
+          clientId: "mcp-client",
+          deviceAuthorizationEndpoint: "https://auth.example/device",
+          tokenEndpoint: "https://auth.example/token",
+          verificationHosts: ["auth.example", "verify.auth.example"],
+          resource: "https://mcp.example/mcp",
+          scopes: ["mcp:tools"],
+          termsId: "mcp-sign-in-terms-1",
+        },
+        actorId,
+        termsAcknowledgedAt: "2026-11-20T12:00:00.000Z",
+      });
+      expect(started).toMatchObject({
+        kind: "awaiting-consent",
+        flow: "device-code",
+        verificationUri: "https://verify.auth.example/device",
+        verificationUriComplete: "https://verify.auth.example/device?user_code=WXYZ-1234",
+        userCode: "WXYZ-1234",
+      });
+      if (started.kind !== "awaiting-consent" || started.flow !== "device-code") throw new Error();
+      expect(JSON.stringify(started)).not.toContain("secret-device-code-never-exposed");
+      expect(Date.parse(started.expiresAt) - 1_700_000_000_000).toBe(15 * 60 * 1_000);
+
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      const finished = runtime.status(started.attemptId);
+      expect(finished).toMatchObject({ kind: "signed-in", attemptId: started.attemptId });
+      expect(sleeps).toEqual([2_000, 7_000]);
+      if (finished.kind !== "signed-in") throw new Error();
+      expect(await runtime.access(finished.credentialRef)).toMatchObject({
+        kind: "granted",
+        accessToken: ACCESS,
+      });
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it("refuses an MCP device verification address outside the issuer's allowed https hosts", async () => {
+    const store = memoryStore();
+    for (const bad of [
+      { verification_uri: "http://auth.example/device" },
+      { verification_uri: "https://evil.example/device" },
+      {
+        verification_uri: "https://auth.example/device",
+        verification_uri_complete: "https://evil.example/device?user_code=ABCD-1234",
+      },
+    ]) {
+      const runtime = createHostOAuthRuntime({
+        store,
+        fetch: (async () =>
+          Response.json({
+            device_code: "dc-1",
+            user_code: "ABCD-1234",
+            expires_in: 300,
+            interval: 5,
+            ...bad,
+          })) as typeof fetch,
+      });
+      try {
+        expect(
+          await runtime.begin({
+            descriptor: {
+              descriptorId: "mcp-device-bad",
+              dialect: "mcp-authorization",
+              flow: "device-code",
+              clientId: "mcp-client",
+              deviceAuthorizationEndpoint: "https://auth.example/device",
+              tokenEndpoint: "https://auth.example/token",
+              verificationHosts: ["auth.example"],
+              resource: "https://mcp.example/mcp",
+              scopes: [],
+              termsId: "mcp-sign-in-terms-1",
+            },
+            actorId: randomUUID(),
+            termsAcknowledgedAt: "2026-11-20T12:00:00.000Z",
+          }),
+        ).toEqual({ kind: "refused", reason: "exchange-refused" });
+      } finally {
+        await runtime.close();
+      }
+    }
+  });
+
+  it("completes a relayable PKCE attempt once through the broker callback acceptor, enforces 3-failure cap, and refuses replays", async () => {
+    const store = memoryStore();
+    let seenCode = "";
+    let seenVerifier = "";
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "https://auth.example/token") {
+        const form = new URLSearchParams(String(init?.body ?? ""));
+        seenCode = form.get("code") ?? "";
+        seenVerifier = form.get("code_verifier") ?? "";
+        return Response.json({
+          access_token: ACCESS,
+          refresh_token: REFRESH,
+          token_type: "Bearer",
+          expires_in: 300,
+          scope: "mcp:tools",
+        });
+      }
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch;
+    let clock = 1_700_000_000_000;
+    const runtime = createHostOAuthRuntime({
+      store,
+      fetch: fetchImpl,
+      now: () => clock,
+      timeoutMs: 10 * 60 * 1_000,
+    });
+    const actorId = randomUUID();
+    try {
+      const descriptor = {
+        descriptorId: "mcp-relay",
+        dialect: "mcp-authorization" as const,
+        flow: "authorization-code-pkce" as const,
+        clientId: "mcp-client",
+        authorizationEndpoint: "https://auth.example/authorize",
+        tokenEndpoint: "https://auth.example/token",
+        resource: "https://mcp.example/mcp",
+        scopes: ["mcp:tools"],
+        termsId: "mcp-sign-in-terms-1",
+      };
+      const started = await runtime.begin({
+        descriptor,
+        actorId,
+        termsAcknowledgedAt: "2026-11-20T12:00:00.000Z",
+        relayable: true,
+      });
+      if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce")
+        throw new Error();
+      const authUrl = new URL(started.authorizationUrl);
+      const redirectUri = authUrl.searchParams.get("redirect_uri") ?? "";
+      const state = authUrl.searchParams.get("state") ?? "";
+      const challenge = authUrl.searchParams.get("code_challenge") ?? "";
+
+      // Two bad callbacks (fragment and wrong state) refuse without settling.
+      expect(
+        await runtime.relay({
+          attemptId: started.attemptId,
+          descriptorId: descriptor.descriptorId,
+          actorId,
+          callbackUrl: `${redirectUri}?code=good&state=${state}#frag`,
+        }),
+      ).toEqual({ kind: "retry", remainingAttempts: 2, reason: "invalid-callback" });
+      expect(
+        await runtime.relay({
+          attemptId: started.attemptId,
+          descriptorId: descriptor.descriptorId,
+          actorId,
+          callbackUrl: `${redirectUri}?code=good&state=wrong-state`,
+        }),
+      ).toEqual({ kind: "retry", remainingAttempts: 1, reason: "state-mismatch" });
+
+      // Valid callback on the same attempt succeeds via broker HTTP relay route too.
+      const relayResponse = await handleHostOAuthBrokerRoute(
+        "/v1/oauth/relay",
+        new Request("http://127.0.0.1/v1/oauth/relay", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            attemptId: started.attemptId,
+            descriptorId: descriptor.descriptorId,
+            actorId,
+            callbackUrl: `${redirectUri}?code=relayed-code-1&state=${state}`,
+          }),
+        }),
+        runtime,
+      );
+      expect(relayResponse.status).toBe(200);
+      const settled = (await relayResponse.json()) as { kind: string; credentialRef?: string };
+      expect(settled.kind).toBe("signed-in");
+      expect(seenCode).toBe("relayed-code-1");
+      expect(codeVerifierMatchesChallenge(seenVerifier, challenge)).toBe(true);
+
+      // Replaying the callback is refused sign-in-settled.
+      expect(
+        await runtime.relay({
+          attemptId: started.attemptId,
+          descriptorId: descriptor.descriptorId,
+          actorId,
+          callbackUrl: `${redirectUri}?code=relayed-code-1&state=${state}`,
+        }),
+      ).toEqual({ kind: "sign-in-settled" });
+
+      // A third bad callback on a fresh attempt ends the attempt as failed.
+      const second = await runtime.begin({
+        descriptor,
+        actorId,
+        termsAcknowledgedAt: "2026-11-20T12:00:00.000Z",
+        relayable: true,
+      });
+      if (second.kind !== "awaiting-consent" || second.flow !== "authorization-code-pkce")
+        throw new Error();
+      const secondRedirect =
+        new URL(second.authorizationUrl).searchParams.get("redirect_uri") ?? "";
+      expect(
+        await runtime.relay({
+          attemptId: second.attemptId,
+          descriptorId: descriptor.descriptorId,
+          actorId,
+          callbackUrl: "https://evil.example/oauth/callback?code=x&state=y",
+        }),
+      ).toMatchObject({ kind: "retry", remainingAttempts: 2 });
+      expect(
+        await runtime.relay({
+          attemptId: second.attemptId,
+          descriptorId: descriptor.descriptorId,
+          actorId,
+          callbackUrl: `http://user:pass@127.0.0.1:${new URL(secondRedirect).port}/oauth/callback?code=x&state=y`,
+        }),
+      ).toMatchObject({ kind: "retry", remainingAttempts: 1 });
+      expect(
+        await runtime.relay({
+          attemptId: second.attemptId,
+          descriptorId: descriptor.descriptorId,
+          actorId,
+          callbackUrl: `${secondRedirect}?code=x&state=wrong`,
+        }),
+      ).toMatchObject({ kind: "refused", reason: "state-mismatch" });
+      expect(runtime.status(second.attemptId)).toMatchObject({
+        kind: "refused",
+        reason: "state-mismatch",
+      });
+
+      // An error callback settles the attempt as denied.
+      const third = await runtime.begin({
+        descriptor,
+        actorId,
+        termsAcknowledgedAt: "2026-11-20T12:00:00.000Z",
+        relayable: true,
+      });
+      if (third.kind !== "awaiting-consent" || third.flow !== "authorization-code-pkce")
+        throw new Error();
+      const thirdAuth = new URL(third.authorizationUrl);
+      const thirdRedirect = thirdAuth.searchParams.get("redirect_uri") ?? "";
+      const thirdState = thirdAuth.searchParams.get("state") ?? "";
+      expect(
+        await runtime.relay({
+          attemptId: third.attemptId,
+          descriptorId: descriptor.descriptorId,
+          actorId,
+          callbackUrl: `${thirdRedirect}?error=access_denied&state=${thirdState}`,
+        }),
+      ).toMatchObject({ kind: "refused", reason: "denied" });
+
+      // A loopback completion settles first and refuses a later relay with sign-in-settled.
+      const fourth = await runtime.begin({
+        descriptor,
+        actorId,
+        termsAcknowledgedAt: "2026-11-20T12:00:00.000Z",
+        relayable: true,
+      });
+      if (fourth.kind !== "awaiting-consent" || fourth.flow !== "authorization-code-pkce")
+        throw new Error();
+      const fourthAuth = new URL(fourth.authorizationUrl);
+      const fourthRedirect = fourthAuth.searchParams.get("redirect_uri") ?? "";
+      const fourthState = fourthAuth.searchParams.get("state") ?? "";
+      const loopbackHit = await fetch(`${fourthRedirect}?code=loopback-won&state=${fourthState}`);
+      expect(loopbackHit.status).toBe(200);
+      expect(
+        await runtime.relay({
+          attemptId: fourth.attemptId,
+          descriptorId: descriptor.descriptorId,
+          actorId,
+          callbackUrl: `${fourthRedirect}?code=late-relay&state=${fourthState}`,
+        }),
+      ).toEqual({ kind: "sign-in-settled" });
+
+      // A relay arriving past 10 minutes times out and settles the attempt.
+      const fifth = await runtime.begin({
+        descriptor,
+        actorId,
+        termsAcknowledgedAt: "2026-11-20T12:00:00.000Z",
+        relayable: true,
+      });
+      if (fifth.kind !== "awaiting-consent" || fifth.flow !== "authorization-code-pkce")
+        throw new Error();
+      const fifthAuth = new URL(fifth.authorizationUrl);
+      clock += 10 * 60 * 1_000 + 1;
+      expect(
+        await runtime.relay({
+          attemptId: fifth.attemptId,
+          descriptorId: descriptor.descriptorId,
+          actorId,
+          callbackUrl: `${fifthAuth.searchParams.get("redirect_uri")}?code=late&state=${fifthAuth.searchParams.get("state")}`,
+        }),
+      ).toMatchObject({ kind: "refused", reason: "timeout" });
+    } finally {
+      await runtime.close();
+    }
+  });
+});

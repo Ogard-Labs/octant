@@ -20,6 +20,12 @@ import {
   type EventActor as EventActorValue,
 } from "@octant/contracts";
 import {
+  decodeMemberInstallRequestedPayload,
+  decodeMemberInstallStepRecordedPayload,
+  decodeMemberRemovalStepRecordedPayload,
+  decodeMemberUpdateRequestedPayload,
+  decodeMemberUpdateRequestedPayloadV1,
+  decodeMemberUpdateStepRecordedPayload,
   decodeShieldProjectServersClearedPayload,
   decodeShieldProjectServersSetPayload,
   decodeShieldServerRemovedPayload,
@@ -31,6 +37,13 @@ import {
   SHIELD_SERVERS_AGGREGATE,
   SHIELD_SERVERS_AGGREGATE_ID,
   SHIELD_SERVERS_EVENT_NAMES,
+  type MemberComputer,
+  type MemberInstallRequestedPayload,
+  type MemberInstallStepRecordedPayload,
+  type MemberRemovalRequestedPayload,
+  type MemberRemovalStepRecordedPayload,
+  type MemberUpdateRequestedPayload,
+  type MemberUpdateStepRecordedPayload,
   type ShieldRemoteCommandStatus,
   type ShieldServer,
   type ShieldServerFields,
@@ -64,7 +77,10 @@ import { redactSecretShaped } from "@octant/domain/secret-shaped-text-policy";
  * (`shield-servers.project-servers-set@1`, under the Project's id), which
  * replaces the account list for that Project's threads until
  * `shield-servers.project-override-cleared@1`. Only a person at a local
- * window changes either.
+ * window changes either. Making a server an Octant computer, updating it,
+ * and removing Octant from it journal each request and each step's outcome
+ * under the server's own id; those records change nothing in the registry,
+ * and are read back only to know which servers are Octant computers now.
  */
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
@@ -86,7 +102,10 @@ const ALIAS = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,252}$/;
 const CREDENTIAL_FOLDER =
   /(?:^|\/)(?:\.ssh|\.aws|\.gnupg|\.kube|\.docker|\.config\/gh|Library\/Keychains)(?:\/|$)|\/\.(?:netrc|git-credentials|npmrc|pypirc)$|\.(?:pem|key|p12|pfx)$/i;
 
-export type ShieldServerPrincipal = "local-window" | "remote-device";
+export type ShieldServerPrincipal =
+  | "local-window"
+  | "remote-device"
+  | { readonly kind: "person-paired-device"; readonly actor: EventActorValue };
 
 export type ShieldServersChange =
   | { readonly kind: "changed"; readonly server?: ShieldServer }
@@ -117,6 +136,11 @@ export class ShieldServerStore {
   readonly #servers = new Map<string, ShieldServer>();
   readonly #projectServers = new Map<string, ReadonlyArray<ShieldServer>>();
   readonly #versions = new Map<string, number>();
+  /** The servers a confirmed install made Octant computers, by server id. */
+  readonly #members = new Map<string, MemberComputer>();
+  /** Requests whose last step has not been read yet, by install or update id. */
+  readonly #installRequests = new Map<string, MemberInstallRequestedPayload>();
+  readonly #updateRequests = new Map<string, MemberUpdateRequestedPayload>();
 
   constructor(options: ShieldServerStoreOptions) {
     this.#options = options;
@@ -128,6 +152,9 @@ export class ShieldServerStore {
   load(): void {
     this.#servers.clear();
     this.#projectServers.clear();
+    this.#members.clear();
+    this.#installRequests.clear();
+    this.#updateRequests.clear();
     let after = 0;
     for (;;) {
       const batch = this.#options.journal.replayAggregateType({
@@ -193,7 +220,8 @@ export class ShieldServerStore {
     readonly servers: ReadonlyArray<ShieldServerFields>;
     readonly principal: ShieldServerPrincipal;
   }): ShieldServersChange {
-    if (input.principal !== "local-window") return refused("needs-local-window");
+    const person = this.#person(input.principal);
+    if (person === undefined) return refused("needs-local-window");
     if (input.servers.length > MAX_SHIELD_SERVERS) return refused("too-many-servers");
     // A server keeps its id across a save: the one this list already gave
     // its alias, else the account server's it was copied from. The key
@@ -221,14 +249,14 @@ export class ShieldServerStore {
     } catch {
       return refused("project-not-found");
     }
-    const payload = { projectId, servers, principal: { kind: "local-window" as const } };
+    const payload = { projectId, servers, principal: person.principal };
     if (
       !this.#append(
         SHIELD_SERVERS_AGGREGATE,
         String(projectId),
         SHIELD_SERVERS_EVENT_NAMES.projectServersSet,
         payload,
-        this.#personActor,
+        person.actor,
       )
     ) {
       return refused("unavailable");
@@ -242,11 +270,12 @@ export class ShieldServerStore {
     readonly projectId: string;
     readonly principal: ShieldServerPrincipal;
   }): ShieldServersChange {
-    if (input.principal !== "local-window") return refused("needs-local-window");
+    const person = this.#person(input.principal);
+    if (person === undefined) return refused("needs-local-window");
     if (!this.#projectServers.has(input.projectId)) return { kind: "changed" };
     const payload = {
       projectId: decodeAggregateId(input.projectId),
-      principal: { kind: "local-window" as const },
+      principal: person.principal,
     };
     if (
       !this.#append(
@@ -254,7 +283,7 @@ export class ShieldServerStore {
         input.projectId,
         SHIELD_SERVERS_EVENT_NAMES.projectOverrideCleared,
         payload,
-        this.#personActor,
+        person.actor,
       )
     ) {
       return refused("unavailable");
@@ -267,9 +296,13 @@ export class ShieldServerStore {
     readonly server: ShieldServerFields;
     readonly principal: ShieldServerPrincipal;
   }): ShieldServersChange {
-    if (input.principal !== "local-window") return refused("needs-local-window");
+    const person = this.#person(input.principal);
+    if (person === undefined) return refused("needs-local-window");
     if (this.#servers.size >= MAX_SHIELD_SERVERS) return refused("too-many-servers");
-    return this.#set({ serverId: decodeAggregateId(this.#options.uuid()), ...input.server });
+    return this.#set(
+      { serverId: decodeAggregateId(this.#options.uuid()), ...input.server },
+      person,
+    );
   }
 
   change(input: {
@@ -277,7 +310,8 @@ export class ShieldServerStore {
     readonly server: ShieldServerFields;
     readonly principal: ShieldServerPrincipal;
   }): ShieldServersChange {
-    if (input.principal !== "local-window") return refused("needs-local-window");
+    const person = this.#person(input.principal);
+    if (person === undefined) return refused("needs-local-window");
     const existing = this.#servers.get(input.serverId);
     if (existing === undefined) return refused("server-not-found");
     // A Project's folder was checked on the host this names. Editing the name
@@ -293,22 +327,103 @@ export class ShieldServerStore {
         };
       }
     }
-    return this.#set({ ...input.server, serverId: existing.serverId });
+    return this.#set({ ...input.server, serverId: existing.serverId }, person);
   }
 
   remove(input: {
     readonly serverId: string;
     readonly principal: ShieldServerPrincipal;
   }): ShieldServersChange {
-    if (input.principal !== "local-window") return refused("needs-local-window");
+    const person = this.#person(input.principal);
+    if (person === undefined) return refused("needs-local-window");
     const existing = this.#servers.get(input.serverId);
     if (existing === undefined) return refused("server-not-found");
-    const payload = { serverId: existing.serverId, principal: { kind: "local-window" as const } };
-    if (!this.#appendRegistry(SHIELD_SERVERS_EVENT_NAMES.serverRemoved, payload)) {
+    const payload = { serverId: existing.serverId, principal: person.principal };
+    if (!this.#appendRegistry(SHIELD_SERVERS_EVENT_NAMES.serverRemoved, payload, person.actor)) {
       return refused("unavailable");
     }
     this.#apply(SHIELD_SERVERS_EVENT_NAMES.serverRemoved, payload);
     return { kind: "changed" };
+  }
+
+  /** The servers this computer made Octant computers and has not removed Octant from since. */
+  memberComputers(): ReadonlyArray<MemberComputer> {
+    return [...this.#members.values()].filter((member) =>
+      this.#servers.has(String(member.serverId)),
+    );
+  }
+
+  memberComputer(serverId: string): MemberComputer | undefined {
+    return this.#servers.has(serverId) ? this.#members.get(serverId) : undefined;
+  }
+
+  /**
+   * Journals a request to make a registered server an Octant computer, or how
+   * one of its steps ended, on that server's own stream of the registry so a
+   * server's installs read in order. The actor is the person or the device
+   * they paired that confirmed it.
+   */
+  recordMemberInstall(
+    record:
+      | { readonly event: "requested"; readonly payload: MemberInstallRequestedPayload }
+      | { readonly event: "step"; readonly payload: MemberInstallStepRecordedPayload },
+    actor: EventActorValue,
+  ): boolean {
+    return this.#recordMember(
+      record.payload.serverId,
+      record.event === "requested"
+        ? SHIELD_SERVERS_EVENT_NAMES.memberInstallRequested
+        : SHIELD_SERVERS_EVENT_NAMES.memberInstallStepRecorded,
+      record.payload,
+      actor,
+    );
+  }
+
+  /** Journals a request to update a member, or how one of its steps ended, as installs are. */
+  recordMemberUpdate(
+    record:
+      | { readonly event: "requested"; readonly payload: MemberUpdateRequestedPayload }
+      | { readonly event: "step"; readonly payload: MemberUpdateStepRecordedPayload },
+    actor: EventActorValue,
+  ): boolean {
+    return this.#recordMember(
+      record.payload.serverId,
+      record.event === "requested"
+        ? SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequested
+        : SHIELD_SERVERS_EVENT_NAMES.memberUpdateStepRecorded,
+      record.payload,
+      actor,
+    );
+  }
+
+  /** Journals a request to remove Octant from a member, or how one of its steps ended. */
+  recordMemberRemoval(
+    record:
+      | { readonly event: "requested"; readonly payload: MemberRemovalRequestedPayload }
+      | { readonly event: "step"; readonly payload: MemberRemovalStepRecordedPayload },
+    actor: EventActorValue,
+  ): boolean {
+    return this.#recordMember(
+      record.payload.serverId,
+      record.event === "requested"
+        ? SHIELD_SERVERS_EVENT_NAMES.memberRemovalRequested
+        : SHIELD_SERVERS_EVENT_NAMES.memberRemovalStepRecorded,
+      record.payload,
+      actor,
+    );
+  }
+
+  #recordMember(
+    serverId: AggregateId,
+    eventName: string,
+    payload: unknown,
+    actor: EventActorValue,
+  ): boolean {
+    if (!this.#append(SHIELD_SERVERS_AGGREGATE, String(serverId), eventName, payload, actor)) {
+      return false;
+    }
+    this.#apply(eventName, payload);
+    return true;
   }
 
   /**
@@ -525,12 +640,33 @@ export class ShieldServerStore {
     );
   }
 
-  #set(server: ShieldServer): ShieldServersChange {
+  #person(principal: ShieldServerPrincipal):
+    | {
+        readonly principal: { readonly kind: "local-window" | "person-paired-device" };
+        readonly actor: EventActorValue;
+      }
+    | undefined {
+    if (principal === "local-window") {
+      return { principal: { kind: "local-window" }, actor: this.#personActor };
+    }
+    if (typeof principal === "object" && principal.kind === "person-paired-device") {
+      return { principal: { kind: "person-paired-device" }, actor: principal.actor };
+    }
+    return undefined;
+  }
+
+  #set(
+    server: ShieldServer,
+    person: {
+      readonly principal: { readonly kind: "local-window" | "person-paired-device" };
+      readonly actor: EventActorValue;
+    },
+  ): ShieldServersChange {
     const checked = canonicalServer(server, [...this.#servers.values()]);
     if (checked.kind === "refused") return checked;
     const canonical = checked.server;
-    const payload = { server: canonical, principal: { kind: "local-window" as const } };
-    if (!this.#appendRegistry(SHIELD_SERVERS_EVENT_NAMES.serverSet, payload)) {
+    const payload = { server: canonical, principal: person.principal };
+    if (!this.#appendRegistry(SHIELD_SERVERS_EVENT_NAMES.serverSet, payload, person.actor)) {
       return refused("unavailable");
     }
     this.#apply(SHIELD_SERVERS_EVENT_NAMES.serverSet, payload);
@@ -540,6 +676,14 @@ export class ShieldServerStore {
   #apply(eventName: string, payload: unknown): void {
     if (eventName === SHIELD_SERVERS_EVENT_NAMES.serverSet) {
       const { server } = decodeShieldServerSetPayload(payload);
+      // The install record names the login Octant was installed for. An edit
+      // to the alias or user may point at another install on that machine,
+      // and Update or Remove Octant would then act on it, so the server stops
+      // being an Octant computer here until it is made one again.
+      const before = this.#servers.get(String(server.serverId));
+      if (before !== undefined && (before.alias !== server.alias || before.user !== server.user)) {
+        this.#members.delete(String(server.serverId));
+      }
       this.#servers.set(String(server.serverId), server);
       return;
     }
@@ -556,16 +700,80 @@ export class ShieldServerStore {
       this.#projectServers.delete(
         String(decodeShieldProjectServersClearedPayload(payload).projectId),
       );
+      return;
+    }
+    this.#applyMember(eventName, payload);
+  }
+
+  /**
+   * A server is an Octant computer from the install whose join succeeded; an
+   * update whose confirmation succeeded moves its version on, and a removal
+   * whose delete succeeded ends it. Anything else leaves it as it was.
+   */
+  #applyMember(eventName: string, payload: unknown): void {
+    if (eventName === SHIELD_SERVERS_EVENT_NAMES.memberInstallRequested) {
+      const requested = decodeMemberInstallRequestedPayload(payload);
+      this.#installRequests.set(String(requested.installId), requested);
+      return;
+    }
+    if (eventName === SHIELD_SERVERS_EVENT_NAMES.memberInstallStepRecorded) {
+      const step = decodeMemberInstallStepRecordedPayload(payload);
+      const requested = this.#installRequests.get(String(step.installId));
+      if (requested === undefined || step.step !== "join" || step.outcome !== "succeeded") return;
+      this.#installRequests.delete(String(step.installId));
+      this.#members.set(String(requested.serverId), {
+        serverId: requested.serverId,
+        target: requested.target,
+        artifactVersion: requested.artifactVersion,
+        listenAddress: requested.listenAddress,
+        listenPort: requested.listenPort,
+        ...(step.memberId === undefined ? {} : { memberId: step.memberId }),
+      });
+      return;
+    }
+    if (eventName === SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequested) {
+      const requested = decodeMemberUpdateRequestedPayload(payload);
+      this.#updateRequests.set(String(requested.updateId), requested);
+      return;
+    }
+    if (eventName === SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequestedV1) {
+      const requested = decodeMemberUpdateRequestedPayloadV1(payload);
+      this.#updateRequests.set(String(requested.updateId), {
+        ...requested,
+        drain: { kind: "stop-now" },
+      });
+      return;
+    }
+    if (eventName === SHIELD_SERVERS_EVENT_NAMES.memberUpdateStepRecorded) {
+      const step = decodeMemberUpdateStepRecordedPayload(payload);
+      const requested = this.#updateRequests.get(String(step.updateId));
+      const member = this.#members.get(String(step.serverId));
+      if (requested === undefined || step.step !== "confirm" || step.outcome !== "succeeded")
+        return;
+      this.#updateRequests.delete(String(step.updateId));
+      if (member !== undefined) {
+        this.#members.set(String(step.serverId), {
+          ...member,
+          artifactVersion: requested.toVersion,
+        });
+      }
+      return;
+    }
+    if (eventName === SHIELD_SERVERS_EVENT_NAMES.memberRemovalStepRecorded) {
+      const step = decodeMemberRemovalStepRecordedPayload(payload);
+      if (step.step === "delete" && step.outcome === "succeeded") {
+        this.#members.delete(String(step.serverId));
+      }
     }
   }
 
-  #appendRegistry(eventName: string, payload: unknown): boolean {
+  #appendRegistry(eventName: string, payload: unknown, actor: EventActorValue): boolean {
     return this.#append(
       SHIELD_SERVERS_AGGREGATE,
       SHIELD_SERVERS_AGGREGATE_ID,
       eventName,
       payload,
-      this.#personActor,
+      actor,
     );
   }
 

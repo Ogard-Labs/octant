@@ -20,9 +20,10 @@ import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts
 import { Effect, Either, Fiber } from "effect";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
-  WINDOWS_CHAT_PROVIDER_REFUSAL,
   WINDOWS_KEPT_SANDBOX_REFUSAL,
+  WINDOWS_STRICT_CHAT_REFUSAL,
   WINDOWS_STRICT_REFUSAL,
+  windowsStrictRuntimeRefusal,
 } from "@octant/domain/guardrail-policy";
 import {
   captureOpenCodeRuntimeConfig,
@@ -435,6 +436,28 @@ describe("probeOpenCodeBinary", () => {
     }
   });
 
+  it("lifts only the updater switch when the person lets providers update themselves", () => {
+    const root = fixtureRoot();
+    const updating = createPrivateOpenCodeProfile(
+      { content: "{}" },
+      { HOME: root },
+      () => root,
+      undefined,
+      false,
+      undefined,
+      false,
+      false,
+      true,
+    );
+    try {
+      expect(updating.environment).not.toHaveProperty("OPENCODE_DISABLE_AUTOUPDATE");
+      expect(updating.environment.OPENCODE_DISABLE_MODELS_FETCH).toBe("1");
+      expect(updating.environment.OPENCODE_DISABLE_PROJECT_CONFIG).toBe("1");
+    } finally {
+      updating.cleanup();
+    }
+  });
+
   it("lets OpenCode read CLAUDE.md as it does on its own, while its .claude skills stay off until the person allows them", () => {
     const root = fixtureRoot();
     const launches = [
@@ -844,10 +867,18 @@ describe("OpenCodeProcessPort", () => {
     for (const [launch, message] of [
       [{ mode: "code", executionPolicy: "approval-gated" }, WINDOWS_STRICT_REFUSAL],
       [
+        { mode: "code", executionPolicy: "full-access", strict: true },
+        windowsStrictRuntimeRefusal("opencode"),
+      ],
+      [
         { mode: "code", executionPolicy: "full-access", fullAccessSandbox: true, strict: false },
         WINDOWS_KEPT_SANDBOX_REFUSAL,
       ],
-      [{ mode: "chat", executionPolicy: "plan", strict: false }, WINDOWS_CHAT_PROVIDER_REFUSAL],
+      [
+        { mode: "chat", executionPolicy: "approval-gated", strict: true },
+        WINDOWS_STRICT_CHAT_REFUSAL,
+      ],
+      [{ mode: "chat", executionPolicy: "plan" }, WINDOWS_STRICT_CHAT_REFUSAL],
     ] as const) {
       const prepare = vi.fn((input: { executable: string; args: ReadonlyArray<string> }) => ({
         command: input.executable,
@@ -868,6 +899,78 @@ describe("OpenCodeProcessPort", () => {
       expect(refused).toMatchObject({ category: "incompatible", message });
       expect(prepare).not.toHaveBeenCalled();
     }
+  });
+
+  it("writes a deny-everything Chat permission configuration for OpenCode on Windows outside Strict", () => {
+    const profile = createPrivateOpenCodeProfile(
+      projectOpenCodeRuntimeConfig({}),
+      {},
+      tmpdir,
+      [{ action: "*", resource: "*", effect: "deny" }],
+      true,
+      { docs: { type: "local", command: ["node", "docs.js"] } },
+      true,
+      true,
+    );
+    try {
+      const configPath = profile.environment.OPENCODE_CONFIG;
+      expect(configPath).toBeDefined();
+      const written = JSON.parse(readFileSync(configPath ?? "", "utf8")) as Record<string, unknown>;
+      expect(written.permission).toEqual({ "*": "deny" });
+      expect(written.permissions).toEqual([{ action: "*", resource: "*", effect: "deny" }]);
+      expect(written.mcp).toBeUndefined();
+    } finally {
+      profile.cleanup();
+    }
+  });
+
+  it("starts OpenCode Chat on Windows outside Strict unconfined with a deny-everything permission ruleset and separates private-config attestation from OS confinement", async () => {
+    const unverified = probeWrapper("v2-ready");
+    const verified = probeWrapper("isolation-supported");
+    const prepare = vi.fn((input: { executable: string; args: ReadonlyArray<string> }) => ({
+      command: input.executable,
+      args: input.args,
+    }));
+    const unverifiedStarted = await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement: { prepare },
+          platform: "win32",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+        }).start({
+          binaryPath: unverified.binaryPath,
+          cwd: unverified.root,
+          mode: "chat",
+          executionPolicy: "approval-gated",
+          strict: false,
+        }),
+      ),
+    );
+    expect(unverifiedStarted.runtime).toBe("beta");
+    expect(unverifiedStarted.isolatedConfiguration).toBeUndefined();
+    expect(unverifiedStarted.privateConfiguration).toBeUndefined();
+
+    const verifiedStarted = await Effect.runPromise(
+      Effect.scoped(
+        makeOpenCodeProcessLive({
+          confinement: { prepare },
+          platform: "win32",
+          runtimeConfigResolver: async () => undefined,
+          startupTimeoutMs: 2_000,
+        }).start({
+          binaryPath: verified.binaryPath,
+          cwd: verified.root,
+          mode: "chat",
+          executionPolicy: "approval-gated",
+          strict: false,
+        }),
+      ),
+    );
+    expect(verifiedStarted.runtime).toBe("legacy");
+    expect(verifiedStarted.isolatedConfiguration).toBeUndefined();
+    expect(verifiedStarted.privateConfiguration).toBe(true);
+    expect(prepare).not.toHaveBeenCalled();
   });
 
   it("refuses a 2.x Chat or Plan launch before anything starts where the jail can start no process", async () => {
@@ -1105,6 +1208,82 @@ describe("OpenCodeProcessPort", () => {
       ),
     );
     expect(prepared.some((args) => args.includes("serve"))).toBe(false);
+  });
+
+  it("starts Work and Code below Full access outside Strict with no wrapper, on OpenCode's own permission rules", async () => {
+    for (const platform of ["darwin", "linux"] as const) {
+      for (const mode of ["work", "code"] as const) {
+        for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
+          const fixture = profileRecordingWrapper("isolation-supported");
+          const prepared: Array<ReadonlyArray<string>> = [];
+          let proxied = 0;
+          const started = await Effect.runPromise(
+            Effect.scoped(
+              makeOpenCodeProcessLive({
+                confinement: {
+                  prepare: (input) => {
+                    prepared.push(input.args);
+                    return { command: input.executable, args: input.args };
+                  },
+                },
+                platform,
+                runtimeConfigResolver: async () => undefined,
+                startupTimeoutMs: 2_000,
+                runtimeNetwork: {
+                  start: async () => {
+                    proxied += 1;
+                    return { status: "open" };
+                  },
+                },
+              }).start({
+                binaryPath: fixture.binaryPath,
+                cwd: fixture.root,
+                mode,
+                executionPolicy,
+                strict: false,
+              }),
+            ),
+          );
+          expect(prepared.some((args) => args.includes("serve"))).toBe(false);
+          expect(proxied).toBe(0);
+          // A verified release on Octant's private configuration still
+          // carries app-managed tools, without claiming OS confinement.
+          expect(started.isolatedConfiguration).toBeUndefined();
+          expect(started.privateConfiguration).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("keeps the wrapper below Full access under Strict, in Plan and Chat, for a kept sandbox, and for the readiness check", async () => {
+    for (const launch of [
+      { mode: "code", executionPolicy: "approval-gated" },
+      { mode: "work", executionPolicy: "auto-accept-edits", strict: true },
+      { mode: "code", executionPolicy: "plan", strict: false },
+      { mode: "chat", executionPolicy: "approval-gated", strict: false },
+      { mode: "code", executionPolicy: "full-access", fullAccessSandbox: true, strict: false },
+      { mode: "code", executionPolicy: "approval-gated", purpose: "probe" },
+    ] as const) {
+      const fixture = profileRecordingWrapper("isolation-supported");
+      const prepared: Array<ReadonlyArray<string>> = [];
+      const started = await Effect.runPromise(
+        Effect.scoped(
+          makeOpenCodeProcessLive({
+            confinement: {
+              prepare: (input) => {
+                prepared.push(input.args);
+                return { command: input.executable, args: input.args };
+              },
+            },
+            platform: "darwin",
+            runtimeConfigResolver: async () => undefined,
+            startupTimeoutMs: 2_000,
+          }).start({ binaryPath: fixture.binaryPath, cwd: fixture.root, ...launch }),
+        ),
+      );
+      expect(prepared.some((args) => args.includes("serve"))).toBe(true);
+      expect(started.privateConfiguration).toBeUndefined();
+    }
   });
 
   it("wraps a Full access server that keeps the sandbox as Accept edits would, on its own egress proxy", async () => {
@@ -1733,11 +1912,20 @@ describe("OpenCodeProcessPort", () => {
       }
     });
 
-    it("is what an OpenCode 2.x launch running as itself finds outside Strict, opened as for 1.x", async () => {
+    it("is what an OpenCode 2.x launch running as itself finds outside Strict, opened as for 1.x where it is confined", async () => {
       const { home, file, folder } = agentsHome();
+      // Work below Full access outside Strict runs with no Octant sandbox;
+      // Plan keeps it, so the file is opened by the wall's rules there.
+      const unconfined = await launch(home, {
+        platform: "linux",
+        mode: "v2-0-1-ready",
+        strict: false,
+      });
+      expect(unconfined.seen).toBe("Answer in British English.\n");
       const onLinux = await launch(home, {
         platform: "linux",
         mode: "v2-0-1-ready",
+        executionPolicy: "plan",
         strict: false,
       });
       expect(onLinux.seen).toBe("Answer in British English.\n");
@@ -1746,7 +1934,12 @@ describe("OpenCodeProcessPort", () => {
         ...(onLinux.input?.readRoots ?? []),
       ];
       expect(granted.filter((path) => path.startsWith(folder))).toEqual([file]);
-      const onMac = await launch(home, { platform: "darwin", mode: "v2-0-1-ready", strict: false });
+      const onMac = await launch(home, {
+        platform: "darwin",
+        mode: "v2-0-1-ready",
+        executionPolicy: "plan",
+        strict: false,
+      });
       expect(onMac.seen).toBe("Answer in British English.\n");
       expect(
         new Set((onMac.input?.extraRules ?? []).filter((rule) => rule.includes(folder))),

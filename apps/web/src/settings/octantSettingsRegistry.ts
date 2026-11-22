@@ -74,6 +74,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "pause throttle testing helper agents commands",
         },
         {
+          id: settingId("resource-keepAwake"),
+          label: "Keep the computer awake while agents work",
+          scope: "host",
+          keywords:
+            "keep awake sleep prevent idle battery power ac suspend routines turns computer awake",
+        },
+        {
           id: settingId("resource-refresh"),
           label: "Refresh host load",
           scope: "host",
@@ -90,6 +97,31 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Enable Work",
           scope: "app",
           keywords: "enable work mode",
+        },
+        {
+          id: settingId("next-message-suggestions"),
+          label: "Suggest my next message",
+          scope: "app",
+          keywords:
+            "next message suggestion tab autocomplete complete predict composer placeholder",
+        },
+        {
+          id: settingId("next-message-suggestions-chat"),
+          label: "Suggest my next message in Chat",
+          scope: "app",
+          keywords: "next message suggestion tab autocomplete chat mode",
+        },
+        {
+          id: settingId("next-message-suggestions-work"),
+          label: "Suggest my next message in Work",
+          scope: "app",
+          keywords: "next message suggestion tab autocomplete work mode",
+        },
+        {
+          id: settingId("next-message-suggestions-code"),
+          label: "Suggest my next message in Code",
+          scope: "app",
+          keywords: "next message suggestion tab autocomplete code mode",
         },
         {
           id: settingId("background-host"),
@@ -271,13 +303,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "app",
           keywords:
             "reply detail transcript thinking reasoning tool calls expand collapse fold open verbose quiet low medium high",
-        },
-        {
-          id: settingId("usage-bars"),
-          label: "Usage bars",
-          scope: "app",
-          keywords:
-            "usage bars plan limits meters remaining left 5h week composer smooth pixelated pixel cells dither",
         },
         {
           id: settingId("app-background"),
@@ -858,7 +883,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Providers & Models",
       scope: "app",
       keywords:
-        "providers models agent runtimes provider type opencode codex kimi code acp cli login claude agent sdk subscription gemini qwen cline mistral vibe grok glm fx goose copilot devin kilo pi binary path permissions permission persistence runtime capabilities connection detected installed scan opencode update managed cli version provider catalog drivers bundled installed trusted available enabled authenticated signed in ready set up setup guided add runtime endpoint find look on this host install modes chat work code agent loop harness capabilities",
+        "providers models agent runtimes provider type opencode codex kimi code acp cli login claude agent sdk subscription gemini qwen cline mistral vibe grok glm fx goose copilot antigravity agy google devin kilo pi binary path permissions permission persistence runtime capabilities connection detected installed scan opencode update managed cli version provider catalog drivers bundled installed trusted available enabled authenticated signed in ready set up setup guided add runtime endpoint find look on this host install modes chat work code agent loop harness capabilities",
       settings: [
         {
           id: settingId("automatic-model-judge"),
@@ -908,6 +933,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "background task command dev server watch monitor live tasks session kept after turn idle stop limit hours off",
+        },
+        {
+          id: settingId("provider-own-telemetry"),
+          label: "Let providers send their own telemetry",
+          scope: "host",
+          keywords:
+            "provider telemetry usage metrics error reports crash feedback bug upload analytics tracking vendor own settings strict privacy claude code kimi grok mistral vibe kilo antigravity pi",
+        },
+        {
+          id: settingId("provider-self-update"),
+          label: "Let providers update themselves",
+          scope: "host",
+          keywords:
+            "provider self-update self update auto update autoupdate updater update check upgrade new version cli strict claude code opencode kimi grok kilo antigravity fx pi",
         },
         {
           id: settingId("opencode-managed-update"),
@@ -1025,7 +1064,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Model roles",
           scope: "host",
           keywords:
-            "model roles roles main model builder planner planning scout quick edit hard problems reviewer careful review research lookups quick jobs small jobs sees images reading images vision advisor backup fallback ask before using continue on the fallback coordinators workers helper agents which job uses which role slots default plan slow task smol deep",
+            "model roles roles main model builder scout quick edit hard problems reviewer careful review research lookups quick jobs sees images reading images vision advisor backup fallback ask before using continue on the fallback coordinators workers helper agents which job uses which role slots default plan slow task smol quick deep",
         },
         {
           id: settingId("subagent-creation-posture"),
@@ -1289,6 +1328,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "driver update check daily",
         },
         {
+          id: settingId("computer-use-remembered-apps"),
+          label: "Remembered applications",
+          scope: "host",
+          keywords: "computer use remembered applications project approvals forget",
+        },
+        {
           id: settingId("desktop-spend-cap"),
           label: "Monthly cap for desktops that bill you",
           scope: "host",
@@ -1545,7 +1590,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("thread-messages-per-turn"),
           label: "Thread messages per turn",
           scope: "host",
-          keywords: "thread messages ask mentioned chat per turn limit coordination",
+          keywords: "thread messages ask mentioned chat per turn limit coordination strict",
+        },
+        {
+          id: settingId("sibling-thread-reads-per-turn"),
+          label: "Sibling thread reads per turn",
+          scope: "host",
+          keywords: "sibling thread reads per turn limit messaging project strict",
+        },
+        {
+          id: settingId("sibling-thread-waits-per-turn"),
+          label: "Sibling thread waits per turn",
+          scope: "host",
+          keywords: "sibling thread waits per turn limit messaging project strict",
         },
         {
           id: settingId("coordinators-per-project"),
@@ -1575,13 +1632,37 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("browser-wait-limit"),
           label: "Longest Browser wait",
           scope: "host",
-          keywords: "browser wait minutes limit timeout page agent",
+          keywords: "browser wait minutes limit timeout page agent strict",
         },
         {
           id: settingId("child-run-wait-limit"),
           label: "Longest wait for a helper",
           scope: "host",
           keywords: "helper agent child subagent wait seconds limit timeout",
+        },
+        {
+          id: settingId("shield-denials-in-a-row"),
+          label: "Denials in a row before you decide",
+          scope: "host",
+          keywords: "octant shield denials brake pause reviewer auto in a row",
+        },
+        {
+          id: settingId("shield-denials-per-thread"),
+          label: "Denials per thread before you decide",
+          scope: "host",
+          keywords: "octant shield denials brake pause reviewer auto thread",
+        },
+        {
+          id: settingId("follow-up-lateness-limit"),
+          label: "Latest a follow-up still runs",
+          scope: "host",
+          keywords: "follow-up follow up late missed hours routine asleep",
+        },
+        {
+          id: settingId("tooling-command-confirm"),
+          label: "Time to run a shown provider command",
+          scope: "host",
+          keywords: "run this command once provider claude codex mcp plugin minutes expire",
         },
         {
           id: settingId("agent-routines-start-active"),
@@ -2024,6 +2105,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "hub confirm new members alert owner devices status-only fingerprint remove dismiss",
+        },
+        {
+          id: settingId("hub-delegation-accepting"),
+          label: "Take delegated work from other members",
+          scope: "host",
+          keywords:
+            "hub delegated work delegation take accept stop pause other members requests running carries on",
         },
         {
           id: settingId("hub-push-sender"),

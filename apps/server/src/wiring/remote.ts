@@ -4,9 +4,16 @@ import { createOwnerApprovalJournal } from "../hub/ownerApprovalJournal";
 import type { WorkRequestStateWiring } from "./workRequestState";
 import { CodeService } from "../code/codeService";
 import { randomUUID } from "node:crypto";
-import { OwnerBrowserControlService } from "../browser/ownerBrowserControl";
-import { createOwnerBrowserJournal } from "../browser/ownerBrowserJournal";
 import { homedir } from "node:os";
+import { join } from "node:path";
+import { readPrivateListener } from "../hub/privateListenerReading";
+import { createHeadlessBuilds, headlessBuildFeedFor } from "../shield/headlessBuilds";
+import { MemberInstallService, MemberServerWork } from "../shield/memberInstall";
+import { createMemberInstallRouteHandler } from "../shield/memberInstallRoutes";
+import { MemberUpkeepService } from "../shield/memberUpkeep";
+import { hubMemberAt, readMemberHello, rosterListsListener } from "../hub/memberHello";
+import { keptKeyServerConnection } from "../shield/keptKeyServerConnection";
+import { makeServerSshKeysBrokerClient } from "../shield/sshKeyBrokerClient";
 import {
   type AgentRunId,
   AgentRunParentThreadId,
@@ -35,6 +42,7 @@ import {
   decodeBrowserCaptureId,
   decodeBrowserThreadId,
 } from "@octant/contracts/browser-automation";
+import { REMOTE_ACCESS_PROTOCOL_VERSION } from "@octant/contracts/remote-access";
 import { canvasOutsideContentWriters } from "../canvas/canvasOutsideContentMark";
 import { conversationInputSource } from "./conversationInputs";
 import type { ThreadPartsDestination, ThreadPartsSource } from "../hub/movedThreadParts";
@@ -72,6 +80,7 @@ import {
   defaultShellSettings,
   enabledModes,
   isAgentRunActiveStatus,
+  readPairingCode,
   rosterMemberWebOrigin,
 } from "@octant/domain";
 import {
@@ -97,13 +106,16 @@ import { HostMemoryLimitsService } from "../hostMemoryLimitsService";
 import { ThreadRetentionService } from "../threadRetentionService";
 import { createLiveHostExportService } from "../hostExportService";
 import { createAgentRemoteDelegation } from "../hub/agentRemoteDelegation";
-import { createDelegationAdministrationRouteHandler } from "../hub/delegationAdministrationRoutes";
 import { createDelegationJournal } from "../hub/delegationJournal";
-import { createDelegationStateStore } from "../hub/delegationStateStore";
+import { createDelegationStateStore, delegationAcceptingSwitch } from "../hub/delegationStateStore";
 import { DelegatingSpokeService } from "../hub/delegatingSpokeService";
 import { PeerDelegationService } from "../hub/peerDelegationService";
 import { createPeerDelegationRouteHandler } from "../hub/peerDelegationRoutes";
 import { createWorkDelegationHost } from "../hub/workDelegationHost";
+import { MemberLoad } from "../hub/memberLoad";
+import { createCodeDelegationHost, delegationHostByProjectType } from "../hub/codeDelegationHost";
+import { createCodeDelegationServices } from "../hub/codeDelegationServices";
+import type { CodeRouteService } from "../codeRoutes";
 import { createHubAdministrationRouteHandler } from "../hub/hubAdministrationRoutes";
 import { createHubLinkRouteHandler } from "../hub/hubLinkRoutes";
 import { AgentAccessService } from "../agentAccess/agentAccessService";
@@ -119,6 +131,8 @@ import {
 } from "../agentAccess/agentAccessSession";
 import { stopAgentTurn } from "@octant/cli/agent-tools";
 import { createHubOwnerRouteHandler } from "../hub/hubOwnerRoutes";
+import { createNewDeviceAlertRouteHandler } from "../hub/newDeviceAlertRoutes";
+import { PairedDeviceAlerts } from "../remote/pairedDeviceAlerts";
 import { OwnerCredentialCopyService } from "../hub/ownerCredentialCopy";
 import { createProviderCredentialCopyBroker } from "../hub/ownerCredentialBroker";
 import { createOwnerPostureHost } from "../hub/ownerPostureHost";
@@ -148,7 +162,7 @@ import {
   readHandoverNote,
   remoteNamedFor,
 } from "../hub/codeThreadHandoverGit";
-import { branchExists } from "../hub/codeThreadMoveGit";
+import { branchExists, remoteFetchUrl } from "../hub/codeThreadMoveGit";
 import { createThreadMoveSenders } from "../hub/threadMoveSenders";
 import { createThreadMoveTicketClient } from "../hub/threadMoveTicketClient";
 import {
@@ -160,6 +174,7 @@ import type { ThreadMoveStatePort } from "../hub/threadMoveStateStore";
 import type { ChatService } from "../chat/chatService";
 import { OwnerUnlockService } from "../hub/ownerUnlock";
 import { PairedMergeUnlockService } from "../hub/pairedMergeUnlock";
+import { hubActScopeFromHost, type HubActScopeSlot } from "../hub/hubActScope";
 import { OwnerApprovalAnswerUnlock } from "../hub/ownerApprovalAnswerUnlock";
 import { createHubMembershipJournal } from "../hub/hubMembershipJournal";
 import { FailoverService } from "../hub/failoverService";
@@ -220,6 +235,7 @@ import type { WorkWiring } from "./work";
 import type { CanvasWiring } from "./canvas";
 import type { AutomationWiring } from "./automation";
 import type { RoutesWiring } from "./routes";
+import { HUB_ACT_WITHDRAWN_REASON } from "../remoteCredentialLifecycleService";
 
 /** How often a hub member looks for the hub; the failover time itself is the hub's setting in the roster. */
 const FAILOVER_LOOK_MS = 15_000;
@@ -244,12 +260,16 @@ export type RemoteDependencies = {
     readonly bind: (routes: ReadonlyArray<PairedDeviceRoutes>) => void;
   };
 } & Pick<ServerStart, "options" | "persistence" | "serve" | "startedAt" | "version"> &
-  Pick<HarnessWiring, "beginGoogleCliChange" | "webSearchSettings"> &
+  Pick<
+    HarnessWiring,
+    "beginGoogleCliChange" | "hostDrain" | "shieldServerStore" | "webSearchSettings"
+  > &
   Pick<
     AuthorityWiring,
     | "browserCaptureStore"
     | "browserCaptures"
     | "personMemory"
+    | "withholdThreadFromPersonMemory"
     | "octantInstructions"
     | "windowAuthorityStore"
   > &
@@ -262,7 +282,10 @@ export type RemoteDependencies = {
     | "remoteDelegationHolder"
     | "threadStandingAnswers"
   > &
-  Pick<HarnessStateWiring, "nativeHarnessSessions"> &
+  Pick<
+    HarnessStateWiring,
+    "nativeHarnessSessions" | "serverAttachmentCleanup" | "serverConnection"
+  > &
   Pick<IntegrationsWiring, "agentMessageService" | "toolEgressRules"> &
   Pick<ComputerUseWiring, "webAssets"> &
   Pick<CodeWiring, "codeAttachments" | "codeProjectAccess" | "workAttachments"> &
@@ -294,8 +317,10 @@ export type RemoteDependencies = {
     | "languageServerApprovals"
     | "pairedMergeUnlockSlot"
     | "remoteServerGrants"
-  > &
-  Pick<
+  > & {
+    /** Where the member's Act item is bound for the routes built before the hub side. */
+    readonly hubActScopeSlot: HubActScopeSlot;
+  } & Pick<
     WorkWiring,
     | "threadExportService"
     | "threadHandOffProvider"
@@ -320,17 +345,28 @@ export type RemoteDependencies = {
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
   Pick<FoundationsWiring, "workThreadProjection" | "resolveThreadStrict"> &
   Pick<FoundationsWiring, "hostMemoryGuard" | "providerRuntimeRegistry"> &
-  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "codeService"> &
+  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "codeService" | "onCodeTurnCancelled"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime" | "workRequestService"> & {
     readonly chatService: ChatService;
+    /** The Code route service a delegated Code thread is created and started through. */
+    readonly routeCodeService: Pick<
+      CodeRouteService,
+      "execute" | "read" | "stageEvidence" | "executeOperation" | "conversationWindow"
+    >;
     readonly liveTurns: LiveTurnRegistry;
     readonly managedWorktreeReceipts: ManagedWorktreeReceiptStore;
     readonly movedThreadHistory: MovedThreadHistory;
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
     readonly threadMoveState: ThreadMoveStatePort;
-    /** Tells owner phones, through the phone notification path, that a move waits. */
-    readonly threadNotifications: Pick<ThreadNotificationDeliveryService, "notifyMoveWaiting">;
+    /**
+     * Tells phones through the phone notification path: owner phones that a
+     * move waits, every phone that a new device joined or paired.
+     */
+    readonly threadNotifications: Pick<
+      ThreadNotificationDeliveryService,
+      "notifyMoveWaiting" | "notifyDeviceJoined"
+    >;
     /** What this start did with the turns a restart cut off. */
     readonly restartRecovery: () => HostRestartRecovery | undefined;
   };
@@ -364,10 +400,13 @@ export function wireRemote(deps: RemoteDependencies) {
     automationScheduler,
     browserCaptureStore,
     personMemory,
+    withholdThreadFromPersonMemory,
     octantInstructions,
     hubPushHandoffSlot,
     pairedMergeUnlockSlot,
+    hubActScopeSlot,
     nativeHarnessSessions,
+    serverAttachmentCleanup,
     remoteDelegationHolder,
     threadStandingAnswers,
     canvasNetworkAccess,
@@ -448,6 +487,9 @@ export function wireRemote(deps: RemoteDependencies) {
             credentialGeneration: input.principal.credentialGeneration,
             sessionIdDigest: input.sessionIdDigest,
             origin: input.principal.origin,
+            ...(input.principal.admittedBy === undefined
+              ? {}
+              : { admittedBy: input.principal.admittedBy }),
           },
           scopeId: context.scopeId,
           grantId: input.grantId,
@@ -473,6 +515,9 @@ export function wireRemote(deps: RemoteDependencies) {
             credentialGeneration: input.principal.credentialGeneration,
             sessionIdDigest: input.sessionIdDigest,
             origin: input.principal.origin,
+            ...(input.principal.admittedBy === undefined
+              ? {}
+              : { admittedBy: input.principal.admittedBy }),
           },
           scopeId: context.scopeId,
           grantId: input.grantId,
@@ -506,6 +551,17 @@ export function wireRemote(deps: RemoteDependencies) {
       journal: persistence.journal,
       registrationLifetime: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).pairedDeviceLifetime,
+      onDevicePaired: (device) => {
+        const alert = pairedDeviceAlerts.raise(device);
+        deps.threadNotifications.notifyDeviceJoined({
+          alertId: String(alert.alertId),
+          deviceName: alert.name,
+          ...(alert.privateAddress === undefined ? {} : { privateAddress: alert.privateAddress }),
+          joined: "host",
+          newDeviceId: alert.deviceId,
+        });
+      },
+      onDeviceRemoved: (deviceId) => pairedDeviceAlerts.dropDevice(deviceId),
       hostId: identity.hostId,
       displayName: identity.displayName,
       serverBuildVersion: version,
@@ -579,7 +635,7 @@ export function wireRemote(deps: RemoteDependencies) {
         hubLink:
           services.hubLink ??
           (async (request, facts) =>
-            (await hubLinkRoutes(request)) ??
+            (await hubLinkRoutes(request, facts)) ??
             (await peerDelegationRoutes(request)) ??
             (await peerCredentialRoutes(request)) ??
             (await threadMoveRoutes(request)) ??
@@ -623,6 +679,15 @@ export function wireRemote(deps: RemoteDependencies) {
     options.authorityStateFiles?.hub,
   );
   const hubTransport = createPinnedHubTransport();
+  const pairedDeviceAlerts = new PairedDeviceAlerts({
+    state: hubStateStore,
+    journal: persistence.journal,
+    connection: persistence.connection,
+    hostId: () => String(resolveHubIdentity().hostId),
+    localActorId: OCTANT_LOCAL_ACTOR_ID,
+    uuid: randomUUID,
+    now: Date.now,
+  });
   let ownerBrowserAuthorityChanged: (() => void) | undefined;
   const writeHubMembership = createHubMembershipJournal({
     journal: persistence.journal,
@@ -637,6 +702,23 @@ export function wireRemote(deps: RemoteDependencies) {
       writeHubMembership(change);
     } finally {
       ownerBrowserAuthorityChanged?.();
+    }
+    // A spoke raised an alert for a member a newer roster added; every phone
+    // paired here hears of it, from this spoke's own alert, never the hub's word.
+    if (change.change === "new-member-alerted") {
+      const status = spokeLinkService.status();
+      const alert =
+        status.membership === "member"
+          ? status.alerts.find((entry) => String(entry.memberId) === String(change.memberId))
+          : undefined;
+      if (alert !== undefined) {
+        deps.threadNotifications.notifyDeviceJoined({
+          alertId: String(alert.alertId),
+          deviceName: alert.name,
+          ...(alert.privateAddress === undefined ? {} : { privateAddress: alert.privateAddress }),
+          joined: "hub",
+        });
+      }
     }
   };
   const hubPairing = (): HubPairingPort | undefined => {
@@ -658,6 +740,11 @@ export function wireRemote(deps: RemoteDependencies) {
       },
       deviceKeyFingerprint: (deviceId) => gateway.pairedDeviceKeyFingerprint(deviceId),
       deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
+      admitIntroducedDevice: (input) => gateway.admitIntroducedDevice(input),
+      deviceLifecycle: (deviceId, now) =>
+        deviceLifecycleAt(administration.listDevices(), deviceId, now),
+      deviceOrigin: (deviceId) =>
+        administration.listDevices().find((device) => device.deviceId === deviceId)?.origin,
     };
   };
   const hubService = new HubService({
@@ -670,6 +757,174 @@ export function wireRemote(deps: RemoteDependencies) {
     record: recordHubMembership,
     now: Date.now,
   });
+  // Making a registered server an Octant computer: installed over its SSH
+  // connection and joined to this hub, whose pairing decides the one claim
+  // whose comparison code the server printed. A build the person placed is
+  // used; otherwise one is downloaded from this computer's ring through the
+  // updater's own feed, trusted only by its signed listing.
+  const headlessFeed = headlessBuildFeedFor({
+    environment: process.env,
+    chosenRing: () => persistence.readShellSettings()?.settings.releaseRing,
+    version,
+  });
+  const headlessBuilds = createHeadlessBuilds({
+    folder: join(providerDataDirectory, "headless-builds"),
+    ...(headlessFeed === undefined ? {} : { feed: headlessFeed }),
+  });
+  const memberServerWork = new MemberServerWork();
+  // A server that signs in with a key Octant keeps is reached with that key
+  // alone, as the harness's own SSH access does, never the person's agent.
+  const memberServerConnection = keptKeyServerConnection({
+    connection: deps.serverConnection,
+    servers: () => deps.shieldServerStore.servers(),
+    keys:
+      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? undefined
+        : makeServerSshKeysBrokerClient({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          }),
+  });
+  const memberInstalls = new MemberInstallService({
+    servers: () => deps.shieldServerStore.servers(),
+    connection: memberServerConnection,
+    builds: headlessBuilds,
+    work: memberServerWork,
+    hub: {
+      readiness: () => {
+        if (hubService.status().enabled) {
+          return readPrivateListener(privateListenerController.status()).status === "private"
+            ? { status: "ready", hubName: resolveHubIdentity().displayName }
+            : {
+                status: "refused",
+                reason: "hub-unavailable",
+                message:
+                  "This computer's listener is not running on a Tailscale or private network address, so its hub cannot make a join code. Turn it on in Settings › Remote access.",
+              };
+        }
+        return hubStateStore.load().link === undefined
+          ? {
+              status: "refused",
+              reason: "no-hub",
+              message:
+                "This computer is not a hub. Turn on the hub role in Settings › Remote access, then try again. Pairing a server with this computer without a hub is not built yet.",
+            }
+          : {
+              status: "refused",
+              reason: "not-the-hub",
+              message:
+                "This computer is a member of a hub, not the hub. Make the server an Octant computer from the hub's own window, where its join is approved.",
+            };
+      },
+      mintJoinCode: () => {
+        const minted = hubService.mintJoinCode({ owner: false });
+        const reading = minted.status === "minted" ? readPairingCode(minted.code) : undefined;
+        if (minted.status === "refused" || reading?.status !== "read") {
+          return {
+            status: "refused",
+            message:
+              "This computer's hub could not make a join code. Check its listener in Settings › Remote access, then try again.",
+          };
+        }
+        return { status: "minted", code: minted.code, ticketId: reading.contents.ticketId };
+      },
+      pendingComparisonCode: (ticketId) =>
+        currentRemoteGateway
+          ?.localDeviceAdministration()
+          ?.listPendingPairings()
+          .find((claim) => String(claim.ticketId) === ticketId)?.comparisonCode,
+      approve: (ticketId, actor) => {
+        const administration = currentRemoteGateway?.localDeviceAdministration();
+        if (administration === undefined) return false;
+        try {
+          // A window's approval is the host's own record, as the pairing
+          // route writes it; a paired device's names that device.
+          administration.approvePairing({
+            ticketId,
+            ...(actor.kind === "remote-device" ? { actor } : {}),
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      memberAt: (listener) => {
+        const member = hubMemberAt(hubStateStore, listener);
+        return member === undefined
+          ? undefined
+          : Schema.decodeUnknownSync(HubMemberId)(member.memberId);
+      },
+      deny: (ticketId, actor) => {
+        try {
+          currentRemoteGateway?.localDeviceAdministration()?.denyPairing({
+            ticketId,
+            reasonCode: "comparison-mismatch",
+            ...(actor.kind === "remote-device" ? { actor } : {}),
+          });
+        } catch {
+          // A claim already decided or gone is not approved either way.
+        }
+      },
+    },
+    journal: deps.shieldServerStore,
+    uuid: randomUUID,
+    now: Date.now,
+  });
+  // Updating such a member and removing Octant from it, over the same
+  // connection; this hub reads the updated member's signed hello and removes
+  // a member that could not leave by itself.
+  const rosterLists = (memberId: HubMemberId): boolean =>
+    hubStateStore
+      .load()
+      .hub?.roster?.roster.members.some(
+        (member) => String(member.memberId) === String(memberId),
+      ) === true;
+  const memberUpkeep = new MemberUpkeepService({
+    servers: () => deps.shieldServerStore.servers(),
+    connection: memberServerConnection,
+    builds: headlessBuilds,
+    hub: {
+      listed: (listener) => rosterListsListener(hubStateStore, listener),
+      hellosFrom: (listener) => hubMemberAt(hubStateStore, listener) !== undefined,
+      readHello: async (listener) => {
+        const member = hubMemberAt(hubStateStore, listener);
+        return member === undefined
+          ? { status: "unreachable" }
+          : await readMemberHello({ member, transport: hubTransport, now: Date.now });
+      },
+      roleOn: () => hubStateStore.load().hub?.enabled === true,
+      listsMember: (memberId) => rosterLists(memberId),
+      removeMember: async (memberId, actor) => {
+        if (!rosterLists(memberId)) return "not-listed";
+        const removed = await hubService.removeMember(
+          { memberId: String(memberId) },
+          actor.kind === "remote-device"
+            ? { kind: "remote-device", deviceId: actor.deviceId }
+            : { kind: "local-window" },
+        );
+        return removed.status === "removed" ? "removed" : "refused";
+      },
+    },
+    journal: deps.shieldServerStore,
+    work: memberServerWork,
+    protocolVersion: REMOTE_ACCESS_PROTOCOL_VERSION,
+    uuid: randomUUID,
+    now: Date.now,
+  });
+  const memberInstallRoutes = createMemberInstallRouteHandler({
+    windowAuthorityStore,
+    service: memberInstalls,
+    upkeep: memberUpkeep,
+  });
+  // Read every half minute; a new level shows only once it has held.
+  const memberLoad = new MemberLoad({
+    read: () => ({
+      memoryPressure: hostMemoryGuard.report().pressure,
+      liveTurns: deps.liveTurns.count(),
+    }),
+    now: Date.now,
+  });
+  setInterval(() => memberLoad.sample(), 30_000).unref();
   const spokeLinkService = new SpokeLinkService({
     state: hubStateStore,
     identity: resolveHubIdentity,
@@ -683,14 +938,25 @@ export function wireRemote(deps: RemoteDependencies) {
         admitIntroducedDevice: (input) => gateway.admitIntroducedDevice(input),
         deviceLifecycle: (deviceId, now) =>
           deviceLifecycleAt(administration.listDevices(), deviceId, now),
+        deviceOrigin: (deviceId) =>
+          administration.listDevices().find((device) => device.deviceId === deviceId)?.origin,
         revokeDevice: (deviceId) => {
           administration.revokeDevice({ deviceId });
         },
         deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
+        endActSessions: (deviceIds) => {
+          gateway.endDeviceSessions(deviceIds, HUB_ACT_WITHDRAWN_REASON);
+        },
       };
     },
     record: recordHubMembership,
     serverBuildVersion: version,
+    // Placement advice: the load level the status read and the Project list
+    // report, and whether this member takes delegated work.
+    placement: {
+      load: () => memberLoad.level(),
+      accepting: () => delegationAcceptingSwitch(delegationState).read(),
+    },
     now: Date.now,
   });
   // A member that cannot reach the hub for the failover time tries the standbys,
@@ -914,11 +1180,26 @@ export function wireRemote(deps: RemoteDependencies) {
     record: recordHubMembership,
   });
   pairedMergeUnlockSlot.bind(pairedMergeUnlock);
+  hubActScopeSlot.bind(hubActScopeFromHost({ hub: hubService, spoke: spokeLinkService }));
   const ownerApprovalAnswerUnlock = new OwnerApprovalAnswerUnlock({
     state: hubStateStore,
     record: recordHubMembership,
   });
+  const newDeviceAlertRoutes = createNewDeviceAlertRouteHandler({
+    memberAlerts: () => {
+      const status = spokeLinkService.status();
+      return status.membership === "member" ? status.alerts : [];
+    },
+    pairedAlerts: () => pairedDeviceAlerts.list(),
+    dismissPaired: (alertId) => pairedDeviceAlerts.dismiss(alertId),
+    windowAuthorityStore,
+  });
   const hubAdministrationRoutes = createHubAdministrationRouteHandler({
+    // Read at each request: the delegation state is opened below.
+    delegationAccepting: {
+      read: () => delegationAcceptingSwitch(delegationState).read(),
+      set: (accepting) => delegationAcceptingSwitch(delegationState).set(accepting),
+    },
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
     hub: hubService,
@@ -970,27 +1251,60 @@ export function wireRemote(deps: RemoteDependencies) {
     delegation: new PeerDelegationService({
       authenticate: (input) => spokeLinkService.authenticatePeer(input),
       currentPeer: (memberId) => spokeLinkService.currentPeer(memberId),
-      host: createWorkDelegationHost({
-        readProject: (projectId) => persistence.readProject(projectId),
-        isWorkEnabled: () =>
-          enabledModes(
-            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
-          ).includes("work"),
-        threads: {
-          execute: async (scope, command) =>
-            workThreadServiceWithWorkflows.execute(scope, command as never),
-          bootstrap: async (scope) => workThreadServiceWithWorkflows.bootstrap(scope),
+      // Each Project goes to the host for its type: Work as before, and Code
+      // only into a Project its person marked as taking delegated Code work.
+      host: delegationHostByProjectType({
+        readType: (projectId) => persistence.readProject(projectId)?.type,
+        work: createWorkDelegationHost({
+          readProject: (projectId) => persistence.readProject(projectId),
+          isWorkEnabled: () =>
+            enabledModes(
+              persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+            ).includes("work"),
+          threads: {
+            execute: async (scope, command) =>
+              workThreadServiceWithWorkflows.execute(scope, command as never),
+            bootstrap: async (scope) => workThreadServiceWithWorkflows.bootstrap(scope),
+          },
+          turns: {
+            startFirstTurn: async (scope, command, startOptions) =>
+              workTurnService.startFirstTurn(scope, command, startOptions),
+            turns: async (scope, threadId) => workTurnService.turns(scope, threadId),
+            cancelFirstTurn: async (scope, command) =>
+              workTurnService.cancelFirstTurn(scope, command),
+          },
+          scope: ROUTINE_HOST_SCOPE_ID,
+          onDelegatedThreadCreated: withholdThreadFromPersonMemory,
+        }),
+        code: createCodeDelegationHost(
+          createCodeDelegationServices({
+            scope: ROUTINE_HOST_SCOPE_ID,
+            readProject: (projectId) => persistence.readProject(projectId),
+            readProviderInstances: () => persistence.readProviderInstances(),
+            readProviderDefaults: () => persistence.readProviderDefaults(),
+            readProviderCatalogs: () => persistence.readProviderCatalogs?.() ?? [],
+            remoteUrl: remoteFetchUrl,
+            code: deps.routeCodeService,
+          }),
+        ),
+        // A delegated thread's reads and stops go back to the host that made it.
+        codeThreads: {
+          has: (threadId) => {
+            try {
+              return persistence.readCodeThread(decodeCodeThreadId(threadId)) !== undefined;
+            } catch {
+              return false;
+            }
+          },
         },
-        turns: {
-          startFirstTurn: async (scope, command, startOptions) =>
-            workTurnService.startFirstTurn(scope, command, startOptions),
-          turns: async (scope, threadId) => workTurnService.turns(scope, threadId),
-          cancelFirstTurn: async (scope, command) =>
-            workTurnService.cancelFirstTurn(scope, command),
-        },
-        scope: ROUTINE_HOST_SCOPE_ID,
       }),
+      projects: () =>
+        persistence
+          .readProjects()
+          .filter((project) => project.lifecycle === "active")
+          .map((project) => ({ projectId: project.id, name: project.name })),
       state: delegationState,
+      load: () => memberLoad.level(),
       record: recordDelegation,
       now: Date.now,
     }),
@@ -999,6 +1313,10 @@ export function wireRemote(deps: RemoteDependencies) {
     state: delegationState,
     identity: resolveHubIdentity,
     target: (memberId) => spokeLinkService.memberTarget(memberId),
+    members: () => {
+      const status = spokeLinkService.status();
+      return status.membership === "member" ? status.acceptedMemberIds : [];
+    },
     transport: hubTransport,
     parent: {
       check: (input) =>
@@ -1050,22 +1368,12 @@ export function wireRemote(deps: RemoteDependencies) {
   // delegation now and then. With none sent, a pass reads nothing.
   setInterval(() => void delegatingSpoke.trackOpen().catch(() => undefined), 5_000).unref();
   // A person stopping the parent thread's turn asks each target to stop the
-  // children that thread started there. Only Work parents have remote children:
-  // a Code request is refused by the target.
+  // children that thread started there, a Work parent's and a Code parent's.
   onWorkTurnCancelled((threadId) => {
     void delegatingSpoke.cancelParent(String(threadId)).catch(() => undefined);
   });
-  const delegationAdministrationRoutes = createDelegationAdministrationRouteHandler({
-    desktopBridgeSecret: options.desktopBridgeSecret,
-    windowAuthorityStore,
-    delegation: delegatingSpoke,
-    authorizeParent: ({ threadId, windowId }) =>
-      authorizeAgentRunParentThread({
-        persistence,
-        workThreadProjection,
-        parentThreadId: decodeAgentRunParentThreadId(threadId),
-        windowId,
-      }),
+  deps.onCodeTurnCancelled((threadId) => {
+    void delegatingSpoke.cancelParent(threadId).catch(() => undefined);
   });
   // A host with no credential broker has no sign-in to copy from or to.
   const ownerCredentialCopy = new OwnerCredentialCopyService({
@@ -1270,6 +1578,8 @@ export function wireRemote(deps: RemoteDependencies) {
   };
   const codeThreadMoveHost = createCodeThreadMoveHost({
     readThread: (threadId) => persistence.readCodeThread(threadId),
+    isDelegated: (threadId) =>
+      delegationState.load().received.some((received) => received.threadId === String(threadId)),
     isBusy: (threadId) =>
       deps.liveTurns.read(String(threadId)) !== undefined || childWorkGoing(String(threadId)),
     checkoutRoot: codeCheckoutRoot,
@@ -1890,34 +2200,6 @@ export function wireRemote(deps: RemoteDependencies) {
     () => void handoverExchange.deliverPendingReports().catch(() => undefined),
     HANDOVER_REPORT_RETRY_MS,
   ).unref();
-  const ownerBrowserControlService = new OwnerBrowserControlService({
-    host: browserAutomationService.ownerBrowserHost({
-      hostMemberId: () => Schema.decodeUnknownSync(HubMemberId)(hubService.hubMemberId()),
-      threadTitle: (threadId) => {
-        const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
-        return thread?.lifecycle === "active" ? thread.title : undefined;
-      },
-    }),
-    now: Date.now,
-    timestamp: () => new Date().toISOString(),
-    uuid: randomUUID,
-    onReclaim: (listener) => browserAutomationService.onOwnerControlReclaimed(listener),
-    onAuthorityChange: (listener) => {
-      ownerBrowserAuthorityChanged = listener;
-      const removeCommitted = persistence.journal.subscribeCommitted(listener);
-      return () => {
-        if (ownerBrowserAuthorityChanged === listener) ownerBrowserAuthorityChanged = undefined;
-        removeCommitted();
-      };
-    },
-    audit: createOwnerBrowserJournal({
-      journal: persistence.journal,
-      connection: persistence.connection,
-      localActorId: OCTANT_LOCAL_ACTOR_ID,
-      uuid: randomUUID,
-      clock: () => new Date().toISOString(),
-    }),
-  });
   const ownerApprovals = createOwnerApprovalHost({
     hostMemberId: String(hubService.hubMemberId()),
     pending: () => [
@@ -2002,7 +2284,6 @@ export function wireRemote(deps: RemoteDependencies) {
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     approvals: ownerApprovals,
     approvalAnswerNeedsOwnUnlock: () => ownerApprovalAnswerUnlock.required(),
-    browser: ownerBrowserControlService,
     hub: hubService,
     spoke: spokeLinkService,
     unlock: ownerUnlock,
@@ -2387,6 +2668,9 @@ export function wireRemote(deps: RemoteDependencies) {
         purgeChatAttachments: (id) => chatAttachmentStore.purgeThread(decodeChatThreadId(id)),
         purgeWorkAttachments: (id) => workAttachments.purgeThread(decodeWorkThreadId(id)),
         purgeCodeAttachments: (id) => codeAttachments.purgeThread(decodeCodeThreadId(id)),
+        purgeServerAttachments: async (scope) => {
+          await serverAttachmentCleanup.removeForThreadScope(scope);
+        },
         purgeGeneratedImages: async (id) => {
           try {
             await generatedImageStore.purgeScope(decodeImageGenerationScopeId(id));
@@ -2474,6 +2758,7 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   const hostControlRoutes = createHostControlRouteHandler({
     windowAuthorityStore,
+    drain: deps.hostDrain,
     diagnostics: composeHostDiagnostics,
     memory: () => hostMemoryGuard.report(),
     restartRecovery: deps.restartRecovery,
@@ -2576,18 +2861,22 @@ export function wireRemote(deps: RemoteDependencies) {
     localDeviceAdministrationRoutes,
     hostControlRoutes,
     externalContentRoutes,
+    memberInstallRoutes,
+    // Paired browsers and hub guests reach this chain, not the loopback
+    // listener's own handlers, so the alert read must be bound here too.
+    newDeviceAlertRoutes,
   ]);
   return {
-    ownerBrowserControlService,
     composeHostDiagnostics,
-    delegationAdministrationRoutes,
     threadMoveAdministrationRoutes,
     externalContentRoutes,
     hostControlRoutes,
     personQuitRoutes,
     supportBundleRoutes,
     hubAdministrationRoutes,
+    newDeviceAlertRoutes,
     localDeviceAdministrationRoutes,
+    memberInstallRoutes,
     agentAccessAdministrationRoutes,
     agentAccessLoopbackRoutes,
     privateListenerAdministrationRoutes,

@@ -1,5 +1,12 @@
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { compactAcpConversation } from "./acpCompaction";
+import {
+  readAcpSessionPages,
+  makeAcpNativeSessions,
+  acpReplayCollector,
+  type AcpSessionHistoryReader,
+  type AcpSessionLister,
+} from "./acpNativeSessions";
 import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
 import { readAcpFileReview } from "./acpFileReview";
 import { isAbsolute, resolve } from "node:path";
@@ -27,10 +34,17 @@ import {
   type ProviderToolAnswer,
   type ProviderToolDefinition,
   type ProviderApprovalCall,
+  type PermissionPersistence,
   type ProviderTurnInput,
 } from "@octant/contracts";
 import { attachedFileText } from "../attachments/attachedFiles";
-import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
+import type {
+  ProviderConnection,
+  ProviderDriver,
+  ProviderOwnChannels,
+  ProviderSessionOwnership,
+} from "@octant/provider-sdk/driver";
+import { launchOwnChannels } from "./providerOwnChannels";
 import {
   normalizeAcpElicitation,
   answerAcpElicitation,
@@ -38,20 +52,27 @@ import {
 } from "./acpElicitation";
 import { outputStopReason } from "./outputStopReason";
 import {
+  acpReportedUsageState,
+  beginAcpReportedTurn,
   beginAcpUsageTurn,
+  finishAcpReportedTurn,
   finishAcpUsageTurn,
   observeAcpUsage,
+  observeAcpUsageUpdate,
+  observedAcpUsageTurn,
+  type AcpReportedUsageState,
   type AcpUsageState,
 } from "./acpUsage";
 import { ACP_CLIENT_TERMINAL_TOOL_NAMES, ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
 import {
   attachmentMediaTypeToModality,
   rejectUnsupportedChatTurn,
+  renderProviderContextSections,
   renderProviderTurnPrompt,
   textOnlyInputModalities,
   unsupportedChatCapabilities,
 } from "@octant/provider-sdk/chat-conformance";
-import { Effect, Exit, PubSub, Scope, Stream } from "effect";
+import { Cause, Effect, Exit, Option, PubSub, Scope, Stream } from "effect";
 import {
   mapAcpNotification,
   mapAcpPermissionRequest,
@@ -64,7 +85,12 @@ import type {
   AcpProcessPort,
   AcpSessionMode,
 } from "./acpProcess";
-import { acpSubagentsRun, type AcpProviderProfile } from "./acpProfiles";
+import {
+  acpLoadsAllOwnSetup,
+  acpReleaseClaim,
+  acpSubagentsRun,
+  type AcpProviderProfile,
+} from "./acpProfiles";
 import { createAcpManagedToolsBridge, type AcpManagedToolsBridge } from "./acpManagedTools";
 import {
   AcpFailure,
@@ -113,7 +139,7 @@ export interface AcpClientPort {
   readonly closeSession: (sessionId: string) => Promise<void>;
   readonly prompt: (
     sessionId: string,
-    prompt: string,
+    prompt: string | ReadonlyArray<string>,
     attachments?: ReadonlyArray<AcpPromptAttachment>,
   ) => Promise<AcpPromptResult>;
   readonly setConfigOption: (
@@ -149,6 +175,23 @@ export interface AcpDriverOptions {
   readonly clock?: () => string;
   readonly correlationId?: () => string;
   readonly requestId?: () => string;
+  /** The person's setting for how long an approval holds. */
+  readonly permissionPersistence?: () => PermissionPersistence;
+  /** Which of the agent's own sessions Octant threads hold, for `importsSessions`. */
+  readonly sessionOwnership?: ProviderSessionOwnership;
+}
+
+/**
+ * The setting decides whether an approval may choose the agent's own
+ * `allow_always`, so a driver built without it (as added agents once were)
+ * fails closed to `project-default`, which keeps every answer to one call.
+ */
+function permissionPersistence(options: AcpDriverOptions): PermissionPersistence {
+  try {
+    return options.permissionPersistence?.() ?? "project-default";
+  } catch {
+    return "project-default";
+  }
 }
 
 interface ResumeIdentity {
@@ -161,7 +204,8 @@ interface ResumeIdentity {
 interface PendingApproval {
   readonly kind: "approval";
   readonly providerRequestId: string | number;
-  readonly allowOptionId: string;
+  readonly allowOptionId?: string;
+  readonly allowAlwaysOptionId?: string;
   readonly rejectOptionId: string;
   /** The pending call, for an automatic reviewer; never published. */
   readonly call?: ProviderApprovalCall;
@@ -175,7 +219,10 @@ interface PendingQuestion {
 }
 
 interface AcpRetainedRuntime {
+  /** A pinned profile's reviewed reading of its cumulative usage updates. */
   readonly usage?: AcpUsageState;
+  /** Every other agent's usage, read by ACP's standard schema. */
+  readonly reported?: AcpReportedUsageState;
   readonly source: AcpNewSessionResult;
   readonly scope: Scope.CloseableScope;
   readonly client: AcpClientPort;
@@ -202,6 +249,8 @@ interface SessionState {
   readonly sourceSessionId: string;
   readonly modelId: string;
   readonly executionPolicy: ProviderExecutionPolicy;
+  /** The host answers every approval for one call, as for a helper run. */
+  readonly answersOncePerCall: boolean;
   readonly scope: Scope.CloseableScope;
   readonly client: AcpClientPort;
   readonly context: AcpEventContext;
@@ -215,6 +264,8 @@ interface SessionState {
   readonly appManagedTools: ProviderCapabilitySupport;
   managedTools: AcpManagedToolsLease | undefined;
   promptActive: boolean;
+  /** The turn's prompts the agent has not answered: more than one once steered. */
+  openPrompts: number;
   compacting: boolean;
   closed: boolean;
 }
@@ -235,26 +286,31 @@ interface Factories {
   readonly makeCorrelation: () => string;
   readonly makeRequestId: () => string;
   /**
-   * What the last probe found of the profile's reviewed command inventory.
-   * `unverified`: the release listed another inventory, so it runs at Full
-   * access only; `unreviewed` names the commands it listed beyond the
-   * reviewed ones.
+   * The commands the last readiness check listed, for a profile that runs
+   * only listed commands, until a session lists its own.
    */
-  readonly commandInventory: { unverified: boolean; unreviewed: ReadonlyArray<string> };
+  readonly listedCommands: { names: ReadonlyArray<string> };
 }
 
 function hasVerifiedCompaction(profile: AcpProviderProfile): boolean {
   return profile.kind === "mistral-vibe" && profile.compactionVersions?.includes("3.0.3") === true;
 }
 
+/**
+ * Capabilities of one release, the same at every level. A feature reviewed
+ * on named releases is kept from the earliest of them on, unverified on a
+ * release that is not one of them (`acpReleaseClaim`).
+ */
 function baseCapabilities(
   profile: AcpProviderProfile,
   appManagedTools: ProviderCapabilitySupport = "unsupported",
   version?: string,
 ) {
+  const claims = (reviewed: ReadonlyArray<string> | undefined) =>
+    acpReleaseClaim(reviewed, version) !== "absent";
   const compaction: ProviderCapabilitySupport = !hasVerifiedCompaction(profile)
     ? "unsupported"
-    : version === "3.0.3"
+    : claims(profile.compactionVersions)
       ? "supported"
       : "unavailable";
   return {
@@ -265,12 +321,14 @@ function baseCapabilities(
     userQuestions:
       profile.kind !== "mistral-vibe" || profile.elicitationVersions === undefined
         ? profile.userQuestions
-        : version === "3.0.3" && profile.elicitationVersions.includes(version)
+        : claims(profile.elicitationVersions)
           ? "supported"
           : "unavailable",
     reasoning: "unavailable",
+    // A profile that pins its usage reading reports it only on those
+    // releases; every other agent's usage is read by ACP's standard schema.
     usage:
-      version !== undefined && profile.usageVersions?.includes(version) === true
+      profile.usageVersions === undefined || claims(profile.usageVersions)
         ? "supported"
         : "unsupported",
     toolActivity: "supported",
@@ -331,7 +389,7 @@ function negotiatedAppManagedTools(
   return appToolBridgeReachesLaunchOn(process.platform) &&
     (initialized.agentCapabilities.mcpCapabilities?.http === true ||
       (initialized.agentCapabilities.mcpCapabilities?.http === undefined &&
-        profile.unadvertisedHttpMcpVersions?.includes(version) === true))
+        acpReleaseClaim(profile.unadvertisedHttpMcpVersions, version) !== "absent"))
     ? "supported"
     : "unsupported";
 }
@@ -413,6 +471,8 @@ interface AcpPromptInputs {
   readonly image: boolean;
   /** `promptCapabilities.embeddedContext`: the agent takes embedded `resource` blocks. */
   readonly embeddedContext: boolean;
+  /** `promptCapabilities.audio`: the agent takes `audio` blocks. */
+  readonly audio: boolean;
 }
 
 /**
@@ -424,14 +484,19 @@ interface AcpPromptInputs {
  */
 function acceptedPromptInputs(initialized: AcpConnection["initialized"]): AcpPromptInputs {
   const prompt = initialized.agentCapabilities.promptCapabilities;
-  return { image: prompt?.image === true, embeddedContext: prompt?.embeddedContext === true };
+  return {
+    image: prompt?.image === true,
+    embeddedContext: prompt?.embeddedContext === true,
+    audio: prompt?.audio === true,
+  };
 }
 
 function promptInputModalities(inputs: AcpPromptInputs): readonly ProviderInputModality[] {
-  if (!inputs.image && !inputs.embeddedContext) return textOnlyInputModalities;
+  if (!inputs.image && !inputs.embeddedContext && !inputs.audio) return textOnlyInputModalities;
   return [
     "text",
     ...(inputs.image ? (["image"] as const) : []),
+    ...(inputs.audio ? (["audio"] as const) : []),
     ...(inputs.embeddedContext ? (["document"] as const) : []),
   ];
 }
@@ -454,6 +519,15 @@ function acpPromptAttachment(
           data: Buffer.from(attachment.bytes).toString("base64"),
         }
       : undefined;
+  }
+  // Audio goes as the `audio` block an agent advertised for it, and otherwise
+  // as an embedded file like any other.
+  if (modality === "audio" && inputs.audio) {
+    return {
+      type: "audio",
+      mimeType: attachment.mediaType,
+      data: Buffer.from(attachment.bytes).toString("base64"),
+    };
   }
   if (!inputs.embeddedContext) return undefined;
   const uri = `attachment:${encodeURIComponent(attachment.attachmentId)}/${encodeURIComponent(attachment.displayName)}`;
@@ -481,7 +555,7 @@ function normalizeModels(
   options: ReadonlyArray<AcpSessionConfigOption>,
   models: AcpSessionModelState | undefined,
   optionsByModel?: ReadonlyMap<string, ReadonlyArray<AcpSessionConfigOption>>,
-  promptInputs: AcpPromptInputs = { image: false, embeddedContext: false },
+  promptInputs: AcpPromptInputs = { image: false, embeddedContext: false, audio: false },
 ) {
   const model = options.find((option) => option.id === "model");
   // The config option and the session's model state are two ACP spellings of
@@ -616,6 +690,9 @@ function normalizeProbe(
     initialized.agentCapabilities.sessionCapabilities?.resume !== undefined
       ? ("supported" as const)
       : ("unsupported" as const);
+  const appManagedTools = negotiatedAppManagedTools(initialized, profile, version);
+  const capabilities = baseCapabilities(profile, appManagedTools, version);
+  const unverified = unverifiedFeatures(profile, version, initialized, capabilities);
   return decodeProviderProbeResult({
     instanceId,
     readiness: models.length === 0 ? "degraded" : "ready",
@@ -624,22 +701,60 @@ function normalizeProbe(
     ...(credentialStatus === undefined ? {} : { credentialStatus }),
     models,
     capabilities: {
-      ...baseCapabilities(
-        profile,
-        negotiatedAppManagedTools(initialized, profile, version),
-        version,
-      ),
+      ...capabilities,
       nativeAttachments:
-        promptInputs.image || promptInputs.embeddedContext ? "supported" : "unsupported",
+        promptInputs.image || promptInputs.embeddedContext || promptInputs.audio
+          ? "supported"
+          : "unsupported",
       resume,
       reasoning,
     },
     ...(models.length === 0
       ? { message: `${profile.displayName} did not report a selectable model.` }
-      : {}),
+      : unverified.length === 0
+        ? {}
+        : {
+            message: `${profile.displayName} ${version} keeps ${unverified.join(", ")}, unverified: Octant reviewed them on another release.`,
+          }),
     lastSuccessfulProbeAt: observedAt,
     observedAt,
   });
+}
+
+/**
+ * The features this release keeps without being one they were reviewed on,
+ * as the runtime card names them. A release keeps them at every level, so
+ * the card is where a person learns they run unverified.
+ */
+function unverifiedFeatures(
+  profile: AcpProviderProfile,
+  version: string,
+  initialized: AcpConnection["initialized"],
+  capabilities: ReturnType<typeof baseCapabilities>,
+): ReadonlyArray<string> {
+  const unverified = (reviewed: ReadonlyArray<string> | undefined) =>
+    acpReleaseClaim(reviewed, version) === "unverified";
+  return [
+    ...(capabilities.usage === "supported" && unverified(profile.usageVersions) ? ["usage"] : []),
+    ...(capabilities.userQuestions === "supported" && unverified(profile.elicitationVersions)
+      ? ["forms"]
+      : []),
+    ...(capabilities.appManagedTools === "supported" &&
+    initialized.agentCapabilities.mcpCapabilities?.http !== true &&
+    unverified(profile.unadvertisedHttpMcpVersions)
+      ? ["Octant's tools"]
+      : []),
+    ...(capabilities.sessionCompaction.code === "supported" &&
+    unverified(profile.compactionVersions)
+      ? ["compaction"]
+      : []),
+    ...(hasVerifiedFileReview(profile) && unverified(profile.fileReviewVersions)
+      ? ["file review"]
+      : []),
+    ...(profile.retainsSessions !== true && unverified(profile.retainedSessionVersions)
+      ? ["its process open between turns"]
+      : []),
+  ];
 }
 
 function makeClient(connection: AcpAgentConnection): AcpClientPort {
@@ -674,28 +789,6 @@ function advertisedCommandsOf(
   const update = notification.params.update;
   if (update.sessionUpdate !== "available_commands_update") return undefined;
   return advertisedSlashCommands(update.availableCommands);
-}
-
-/** What the runtime card says of a release whose command inventory Octant has not reviewed. */
-function unverifiedInventoryMessage(
-  name: string,
-  version: string,
-  unreviewed: ReadonlyArray<string>,
-): string {
-  const listed = unreviewed.length === 0 ? "" : ` (${unreviewed.join(", ")})`;
-  return `${name} ${version} is unverified: its commands${listed} differ from the ones Octant reviewed. It runs at Full access only, its listed commands with it; below Full access it is refused until Octant reviews this release.`;
-}
-
-function isReviewedCommandInventory(
-  reviewed: ReadonlyArray<string>,
-  commands: ReadonlyArray<string>,
-): boolean {
-  const reviewedSet = new Set(reviewed);
-  return (
-    commands.length === reviewed.length &&
-    new Set(commands).size === commands.length &&
-    commands.every((command) => reviewedSet.has(command))
-  );
 }
 
 function resolveApiKey(
@@ -739,7 +832,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
     clock: options.clock ?? (() => new Date().toISOString()),
     makeCorrelation: options.correlationId ?? (() => crypto.randomUUID()),
     makeRequestId: options.requestId ?? (() => crypto.randomUUID()),
-    commandInventory: { unverified: false, unreviewed: [] },
+    listedCommands: { names: [] },
   };
   const resumeIdentities = new Map<string, ResumeIdentity>();
   const request = <A>(
@@ -788,12 +881,9 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
     return undefined;
   };
 
-  const probeCommandInventory = (
-    client: AcpClientPort,
-    reviewed: ReadonlyArray<string>,
-    root: string,
-    detectedVersion: string,
-  ) =>
+  // An agent may list its commands just after it opens the session, so the
+  // readiness check waits a moment for the list it runs commands from.
+  const probeCommandListing = (client: AcpClientPort, root: string, detectedVersion: string) =>
     Effect.gen(function* () {
       let observedCommands: ReadonlyArray<string> | undefined;
       let resolveCommands: ((commands: ReadonlyArray<string>) => void) | undefined;
@@ -825,19 +915,90 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
       } finally {
         removeNotification();
       }
-      // A release whose inventory differs from the reviewed one is offered
-      // as unverified rather than refused: it runs at Full access, each of
-      // its listed commands with it, and below Full access the pin holds.
-      factories.commandInventory.unverified = !isReviewedCommandInventory(reviewed, commands);
-      factories.commandInventory.unreviewed = [
-        ...new Set(commands.filter((command) => !reviewed.includes(command))),
-      ].slice(0, 32);
+      factories.listedCommands.names = [...new Set(commands)];
       return scratch;
     });
+
+  // The agent's own sessions for a folder, read through a readiness-check
+  // process: `session/list` reads the agent's own store, not the folder.
+  const listAgentSessions: AcpSessionLister = (projectRoot) =>
+    Effect.runPromise(
+      Effect.scoped(
+        managedHomeClient.pipe(
+          Effect.flatMap(({ connection, client }) =>
+            Effect.tryPromise({
+              try: async () => {
+                if (
+                  connection.initialized.agentCapabilities.sessionCapabilities?.list === undefined
+                )
+                  return "unsupported" as const;
+                const listed = await readAcpSessionPages((cursor) =>
+                  client.call(
+                    "session/list",
+                    cursor === undefined ? { cwd: projectRoot } : { cwd: projectRoot, cursor },
+                  ),
+                );
+                if (listed === undefined)
+                  throw failure(
+                    "protocol",
+                    `${name} listed its sessions in a shape Octant cannot read.`,
+                  );
+                return listed;
+              },
+              catch: (error) => providerFailure(profile, error),
+            }),
+          ),
+        ),
+      ),
+    );
+  // A session's earlier conversation, read by loading it in a readiness-check
+  // process of its own: `session/load` replays the history as session
+  // updates before it answers (the ACP session setup reference), and the
+  // process closes with the read, so nothing runs a turn in it.
+  const readAgentSessionHistory: AcpSessionHistoryReader = (projectRoot, sessionId) =>
+    Effect.runPromise(
+      Effect.scoped(
+        managedHomeClient.pipe(
+          Effect.flatMap(({ connection, client }) =>
+            Effect.tryPromise({
+              try: async () => {
+                if (connection.initialized.agentCapabilities.loadSession !== true)
+                  return "unsupported" as const;
+                const replay = acpReplayCollector();
+                const stop = client.onNotification((notification) => {
+                  if (notification.params.sessionId === sessionId)
+                    replay.add(notification.params.update);
+                });
+                try {
+                  await client.loadSession(sessionId, projectRoot);
+                } finally {
+                  stop();
+                }
+                return replay.collected();
+              },
+              catch: (error) => providerFailure(profile, error),
+            }),
+          ),
+        ),
+      ),
+    );
+  const sessionOwnership = options.sessionOwnership;
 
   return {
     kind: profile.kind,
     conversationOwnership: "provider",
+    ...(profile.importsSessions === true && sessionOwnership !== undefined
+      ? {
+          nativeSessions: makeAcpNativeSessions({
+            instanceId: options.instanceId,
+            driverKind: profile.kind,
+            displayName: name,
+            heldSessions: () => sessionOwnership.held(profile.kind),
+            listSessions: listAgentSessions,
+            readHistory: readAgentSessionHistory,
+          }),
+        }
+      : {}),
     ...(hasVerifiedFileReview(profile) ? { fileReviewReads: true as const } : {}),
     ...(profile.authentication.kind === "delegated-browser"
       ? {
@@ -895,17 +1056,12 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
           });
         }
         const scratch =
-          profile.reviewedCommands === undefined
+          profile.listedCommandsOnly !== true
             ? yield* request(() => client.newSession(connection.root), {
                 stage: "model-discovery",
                 detectedVersion: connection.version,
               })
-            : yield* probeCommandInventory(
-                client,
-                profile.reviewedCommands,
-                connection.root,
-                connection.version,
-              );
+            : yield* probeCommandListing(client, connection.root, connection.version);
         const optionsByModel = new Map<string, ReadonlyArray<AcpSessionConfigOption>>();
         if (profile.discoverModelOptions === true) {
           // Devin's first session reports only its default model's settings.
@@ -950,19 +1106,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
           options.authentication === "api-key" ? "stored" : undefined,
           profile.discoverModelOptions === true ? optionsByModel : undefined,
         );
-        const commandsListed =
-          advertised.length === 0 ? observed : { ...observed, commands: advertised };
-        const listed =
-          !factories.commandInventory.unverified || profile.reviewedCommands === undefined
-            ? commandsListed
-            : {
-                ...commandsListed,
-                message: unverifiedInventoryMessage(
-                  name,
-                  connection.version,
-                  factories.commandInventory.unreviewed,
-                ),
-              };
+        const listed = advertised.length === 0 ? observed : { ...observed, commands: advertised };
         options.runtimeRegistry.setObservedState(listed);
         return listed;
       });
@@ -1087,6 +1231,14 @@ function makeConnection(
 
     const offer = (event: ProviderRuntimeEvent) => {
       Effect.runFork(PubSub.publish(queue, event));
+    };
+    // A turn's consumer stops reading at its failure, and a failed turn's
+    // reply (if one ever comes) arrives after that, so the usage a pinned
+    // profile's snapshots showed so far is offered before the failure.
+    const offerObservedUsage = (state: SessionState) => {
+      if (state.runtime.usage === undefined) return;
+      const usage = observedAcpUsageTurn(state.runtime.usage);
+      if (usage !== undefined) offer(eventFor(state, factories.clock, usage));
     };
 
     const requestManagedTool = async (
@@ -1236,12 +1388,21 @@ function makeConnection(
         observeAcpUsage(state.runtime.usage, notification.params.update);
         return;
       }
+      if (
+        state.runtime.reported !== undefined &&
+        notification.params.sessionId === state.sourceSessionId &&
+        notification.params.update.sessionUpdate === "usage_update"
+      ) {
+        observeAcpUsageUpdate(state.runtime.reported, notification.params.update);
+        return;
+      }
       if (state.compacting) return;
       for (const mapped of mapAcpNotification(state.context, notification)) {
         if (mapped.kind === "event") offer(mapped.event);
         else if (mapped.kind === "protocol-failure") {
           state.completed = false;
           state.context.terminal = true;
+          offerObservedUsage(state);
           offer(
             eventFor(state, factories.clock, {
               kind: "failed",
@@ -1282,8 +1443,7 @@ function makeConnection(
       if (requestMessage.method === "elicitation/create") {
         const enabled =
           profile.kind === "mistral-vibe" &&
-          state.runtime.version === "3.0.3" &&
-          profile.elicitationVersions?.includes(state.runtime.version) === true;
+          acpReleaseClaim(profile.elicitationVersions, state.runtime.version) !== "absent";
         const form = normalizeAcpElicitation(
           requestMessage.params.message,
           requestMessage.params.requestedSchema,
@@ -1301,6 +1461,7 @@ function makeConnection(
             if (pending.id === requestMessage.id) {
               state.forms.delete(key);
               state.context.terminal = true;
+              offerObservedUsage(state);
               offer(
                 eventFor(state, factories.clock, {
                   kind: "failed",
@@ -1338,6 +1499,7 @@ function makeConnection(
       if (mapped.kind === "protocol-failure") {
         state.completed = false;
         state.context.terminal = true;
+        offerObservedUsage(state);
         offer(eventFor(state, factories.clock, { kind: "failed", failure: mapped.failure }));
         void state.client.respondPermission(requestMessage.id).catch(() => undefined);
         return;
@@ -1354,11 +1516,34 @@ function makeConnection(
           .catch(() => undefined);
         return;
       }
+      // Offered only allow-always, an approval needs an answer that holds for
+      // the session, and a helper run's answers hold for one call. Asking the
+      // person would end in a refusal the run cannot get past, so the request
+      // is denied on arrival and the reason shown on the call.
+      if (
+        mapped.kind === "approval" &&
+        mapped.allowOptionId === undefined &&
+        state.answersOncePerCall
+      ) {
+        void state.client
+          .respondPermission(mapped.providerRequestId, mapped.rejectOptionId)
+          .catch(() => undefined);
+        if (mapped.event.kind === "approval-request" && mapped.event.toolCallId !== undefined)
+          offer(
+            eventFor(state, factories.clock, {
+              kind: "tool-progress",
+              toolCallId: mapped.event.toolCallId,
+              message: `${name} only offers Always allow, which a helper run can't grant; denied.`,
+            }),
+          );
+        return;
+      }
       if (mapped.kind === "question" && profile.userQuestions === "unsupported") {
         void state.client
           .respondPermission(mapped.providerRequestId, mapped.skipOptionId)
           .catch(() => undefined);
         state.context.terminal = true;
+        offerObservedUsage(state);
         offer(
           eventFor(state, factories.clock, {
             kind: "failed",
@@ -1380,6 +1565,7 @@ function makeConnection(
         readonly sessionId: ProviderSessionId;
         readonly modelId: string;
         readonly executionPolicy: ProviderExecutionPolicy;
+        readonly answersOncePerCall?: boolean;
         readonly tools: ReadonlyArray<ProviderToolDefinition>;
         readonly nativeSetup?: ProviderNativeSetup;
       },
@@ -1413,6 +1599,7 @@ function makeConnection(
         ...(profile.unseenChildCalls === undefined
           ? {}
           : { unseenChildCalls: profile.unseenChildCalls }),
+        ...(profile.toleratesStrayUpdates === true ? { toleratesStrayUpdates: true as const } : {}),
       };
       let state!: SessionState;
       const removeNotification = client.onNotification((message) =>
@@ -1428,6 +1615,7 @@ function makeConnection(
         sourceSessionId: source.sessionId,
         modelId: input.modelId,
         executionPolicy: input.executionPolicy,
+        answersOncePerCall: input.answersOncePerCall === true,
         scope,
         client,
         context,
@@ -1441,6 +1629,7 @@ function makeConnection(
         appManagedTools,
         managedTools,
         promptActive: false,
+        openPrompts: 0,
         compacting: false,
         closed: false,
       };
@@ -1465,6 +1654,7 @@ function makeConnection(
       executionPolicy: ProviderExecutionPolicy,
       fullAccessSandbox: boolean,
       strict: boolean,
+      ownChannels: ProviderOwnChannels | undefined,
       loopbackPorts: ReadonlyArray<number> = [],
       tools: ReadonlyArray<ProviderToolDefinition> = [],
       nativeSetup?: ProviderNativeSetup,
@@ -1476,16 +1666,25 @@ function makeConnection(
     }> => {
       const clientCapabilities = {
         readTextFile: tools.some((tool) => tool.name === ACP_CLIENT_TOOL_NAMES.readTextFile),
-        writeTextFile: tools.some((tool) => tool.name === ACP_CLIENT_TOOL_NAMES.writeTextFile),
+        writeTextFile:
+          profile.withholdsClientWrites !== true &&
+          tools.some((tool) => tool.name === ACP_CLIENT_TOOL_NAMES.writeTextFile),
         terminal: ACP_CLIENT_TERMINAL_TOOL_NAMES.every((name) =>
           tools.some((tool) => tool.name === name),
         ),
       };
       const scope = await Effect.runPromise(Scope.make());
       try {
-        const apiKey = await Effect.runPromise(resolveApiKey(options), { signal });
+        const runOptions = signal === undefined ? undefined : { signal };
+        const apiKeyExit = await Effect.runPromiseExit(resolveApiKey(options), runOptions);
+        if (Exit.isFailure(apiKeyExit)) {
+          throw Option.getOrElse(Cause.failureOption(apiKeyExit.cause), () =>
+            failure("provider-failed", `${name} credentials could not be resolved.`),
+          );
+        }
+        const apiKey = apiKeyExit.value;
         let receipt: Awaited<ReturnType<ProviderRuntimeRegistry["trackProcess"]>> | undefined;
-        const processConnection = await Effect.runPromise(
+        const startedExit = await Effect.runPromiseExit(
           options.process
             .start({
               ...(options.sandboxPolicy === undefined
@@ -1501,6 +1700,7 @@ function makeConnection(
               executionPolicy,
               ...(fullAccessSandbox ? { fullAccessSandbox: true } : {}),
               ...(strict ? {} : { strict: false }),
+              ...(strict || ownChannels === undefined ? {} : { ownChannels }),
               ...(apiKey === undefined ? {} : { apiKey }),
               ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
               ...(nativeSetup === undefined ? {} : { nativeSetup }),
@@ -1511,8 +1711,14 @@ function makeConnection(
               },
             })
             .pipe(Effect.provideService(Scope.Scope, scope)),
-          { signal },
+          runOptions,
         );
+        if (Exit.isFailure(startedExit)) {
+          throw Option.getOrElse(Cause.failureOption(startedExit.cause), () =>
+            failure("provider-failed", `${name} process failed without a typed failure.`),
+          );
+        }
+        const processConnection = startedExit.value;
         if (receipt === undefined) {
           await options.runtimeRegistry.trackProcess(options.instanceId, processConnection);
         }
@@ -1545,8 +1751,10 @@ function makeConnection(
       readonly sessionId: ProviderSessionId;
       readonly modelId: string;
       readonly executionPolicy: ProviderExecutionPolicy;
+      readonly answersOncePerCall?: boolean;
       readonly fullAccessSandbox?: boolean;
       readonly strict?: boolean;
+      readonly ownChannels?: ProviderOwnChannels;
       readonly modelOptionValues?: ProviderModelOptionValues;
       readonly autoApprove?: boolean;
       readonly nativeSetup?: ProviderNativeSetup;
@@ -1643,6 +1851,8 @@ function makeConnection(
             // process starts, so a Strict process never serves a session that
             // is not, nor the reverse.
             input.strict !== false,
+            // Its telemetry and self-update guards are fixed at start too.
+            launchOwnChannels(input.strict !== false, input.ownChannels),
             // The agent's own reviewer is the session's mode and the person's
             // setup is its launch's guards and filesystem denies; a retained
             // process opened under either other value is never taken up.
@@ -1698,20 +1908,13 @@ function makeConnection(
             if (refusal !== undefined) throw failure("incompatible", refusal);
             const shellRefusal = shellWithoutRequestRefusal(mode, input.executionPolicy);
             if (shellRefusal !== undefined) throw failure("unsupported", shellRefusal);
-            if (
-              profile.reviewedCommands !== undefined &&
-              factories.commandInventory.unverified &&
-              input.executionPolicy !== "full-access"
-            )
-              throw failure(
-                "incompatible",
-                `${name} lists commands Octant has not reviewed, so this release runs at Full access only, unverified.`,
-                { reason: "runtime-incompatible" },
-              );
-            // A Project trusted for the agent, outside Plan, loads the files
+            // A Project trusted for the agent, outside Plan, and any session
+            // outside Strict that carries the person's setup load the files
             // the refusal is about, as the agent does on its own.
             const projectRefusal =
-              runtimeRoot === projectRoot && input.nativeSetup?.projectCode !== true
+              runtimeRoot === projectRoot &&
+              input.nativeSetup?.projectCode !== true &&
+              !acpLoadsAllOwnSetup({ strict: input.strict, setup: input.nativeSetup })
                 ? profile.refusesProject?.(projectRoot)
                 : undefined;
             if (projectRefusal !== undefined) throw failure("incompatible", projectRefusal);
@@ -1728,6 +1931,7 @@ function makeConnection(
               input.executionPolicy,
               input.executionPolicy === "full-access" && input.fullAccessSandbox === true,
               input.strict !== false,
+              input.ownChannels,
               managedTools?.bridge.port === undefined ? [] : [managedTools.bridge.port],
               input.tools,
               input.nativeSetup,
@@ -1779,10 +1983,19 @@ function makeConnection(
             // new/load can send their baseline before replying. Listen before
             // opening the session, then keep only its exact native identity.
             const initialUsage: AcpUsageState | undefined =
-              profile.usageVersions?.includes(connection.version) === true ? {} : undefined;
+              acpReleaseClaim(profile.usageVersions, connection.version) === "absent"
+                ? undefined
+                : {};
+            // Every other agent's cumulative cost reported while loading or
+            // resuming is the baseline its first turn grows from, so the state
+            // exists before the session opens and is kept for the session.
+            const reportedUsage: AcpReportedUsageState | undefined =
+              profile.usageVersions === undefined
+                ? acpReportedUsageState(sourceSessionId === undefined ? "new" : "existing")
+                : undefined;
             let usageSessionId = sourceSessionId;
             let usageMismatch = false;
-            if (initialUsage !== undefined) {
+            if (initialUsage !== undefined || reportedUsage !== undefined) {
               removeUsage = client.onNotification((message) => {
                 if (message.params.update.sessionUpdate !== "usage_update") return;
                 usageSessionId ??= message.params.sessionId;
@@ -1790,7 +2003,10 @@ function makeConnection(
                   usageMismatch = true;
                   return;
                 }
-                observeAcpUsage(initialUsage, message.params.update);
+                if (initialUsage !== undefined)
+                  observeAcpUsage(initialUsage, message.params.update);
+                if (reportedUsage !== undefined)
+                  observeAcpUsageUpdate(reportedUsage, message.params.update);
               });
             }
             // Native resume keeps agent context without replaying its growing
@@ -1992,6 +2208,14 @@ function makeConnection(
                 : {
                     usage: usageMismatch || usageSessionId !== source.sessionId ? {} : initialUsage,
                   }),
+              ...(reportedUsage === undefined
+                ? {}
+                : {
+                    reported:
+                      usageMismatch || usageSessionId !== source.sessionId
+                        ? acpReportedUsageState(sourceSessionId === undefined ? "new" : "existing")
+                        : reportedUsage,
+                  }),
               source,
               scope: runtimeScope,
               client,
@@ -2015,7 +2239,16 @@ function makeConnection(
                 const refuse = () => {
                   void close().catch(() => undefined);
                 };
-                const removeNotification = client.onNotification(refuse);
+                // Google Antigravity sends a finished turn's usage and trailing
+                // chunks after its prompt answered; closing on them threw away
+                // the warm process it keeps open precisely to avoid a cold
+                // launch. Its updates are dropped while parked; a request,
+                // which needs an answer no turn is there to give, still closes.
+                const removeNotification = client.onNotification((message) => {
+                  if (profile.toleratesStrayUpdates === true && message.method === "session/update")
+                    return;
+                  refuse();
+                });
                 const removeRequest = client.onRequest(refuse);
                 removeIdle = () => {
                   removeNotification();
@@ -2067,6 +2300,123 @@ function makeConnection(
         return pending;
       });
 
+    /**
+     * Settles one prompt of a turn. A turn the agent steers holds more than
+     * one open prompt (`steer` sends each note as another `session/prompt`);
+     * an earlier prompt answering while a later one is open is part of the
+     * same turn, whatever stop reason it gives (the agent may end it as
+     * `cancelled` once the note takes over), so only the last prompt to
+     * answer ends the turn and settles its usage. A prompt that fails ends
+     * the turn at once, and the prompts still open answer into a turn that
+     * is already over.
+     */
+    const settlePrompt = (
+      state: SessionState,
+      outcome:
+        | { readonly status: "answered"; readonly result: AcpPromptResult }
+        | { readonly status: "failed"; readonly error: unknown },
+    ): void => {
+      state.openPrompts = Math.max(0, state.openPrompts - 1);
+      if (outcome.status === "answered" && state.openPrompts > 0) return;
+      state.promptActive = state.openPrompts > 0;
+      if (outcome.status === "answered") {
+        const { result } = outcome;
+        void cancelForms(state);
+        if (result.stopReason === "cancelled") cancelPendingTools(state);
+        // The reply settles the session's cumulative cost even
+        // when the turn already failed, so the next turn is
+        // charged only its own share.
+        const reported =
+          state.runtime.reported === undefined
+            ? undefined
+            : finishAcpReportedTurn(
+                state.runtime.reported,
+                result.usage,
+                profile.turnUsageWithoutTotal,
+              );
+        if (state.closed || state.context.terminal) return;
+        if (state.runtime.usage !== undefined) {
+          const usage = finishAcpUsageTurn(state.runtime.usage, result.usage);
+          if (usage !== undefined) offer(eventFor(state, factories.clock, usage));
+        } else if (reported !== undefined) {
+          offer(eventFor(state, factories.clock, reported));
+        }
+        state.context.terminal = true;
+        if (result.stopReason === "cancelled") {
+          offer(
+            eventFor(state, factories.clock, {
+              kind: "interrupted",
+              message: `${name} turn was interrupted.`,
+            }),
+          );
+        } else if (
+          result.stopReason === "end_turn" ||
+          outputStopReason(result.stopReason) !== undefined
+        ) {
+          const stop = outputStopReason(result.stopReason);
+          state.completed = true;
+          // A call the agent never finished (a subagent's read)
+          // is done once its turn is.
+          if (profile.toleratesStrayUpdates === true)
+            for (const tool of state.context.tools.values()) {
+              if (tool.terminal) continue;
+              tool.terminal = true;
+              offer(
+                eventFor(state, factories.clock, {
+                  kind: "tool-success",
+                  toolCallId: tool.toolCallId,
+                  summary: "Tool completed.",
+                }),
+              );
+            }
+          offer(
+            eventFor(state, factories.clock, {
+              kind: "completed",
+              resumeCursor: {
+                driverKind: profile.kind,
+                value: state.sourceSessionId,
+                binding: {
+                  instanceId: options.instanceId,
+                  sessionId: state.sessionId,
+                  projectRoot,
+                  mode,
+                  modelId: decodeProviderModelId(state.modelId),
+                },
+              },
+              ...(stop === undefined ? {} : { stopReason: stop }),
+            }),
+          );
+        } else {
+          offer(
+            eventFor(state, factories.clock, {
+              kind: "failed",
+              failure: failure(
+                "provider-failed",
+                result.stopReason === "refusal" && profile.refusalMessage !== undefined
+                  ? profile.refusalMessage
+                  : `${name} turn did not complete.`,
+              ),
+            }),
+          );
+        }
+        return;
+      }
+      const { error } = outcome;
+      void cancelForms(state);
+      // A steered turn's later reply still settles its cost.
+      if (state.runtime.reported !== undefined && state.openPrompts === 0)
+        finishAcpReportedTurn(state.runtime.reported, undefined);
+      if (state.closed || state.context.terminal) return;
+      state.context.terminal = true;
+      offerObservedUsage(state);
+      offer(
+        eventFor(state, factories.clock, {
+          kind: "failed",
+          failure: providerFailure(profile, error),
+        }),
+      );
+    };
+
     return {
       ...(hasVerifiedCompaction(profile)
         ? {
@@ -2079,8 +2429,8 @@ function makeConnection(
                   if (state.promptActive || state.compacting)
                     return { kind: "refused", reason: "turn-running" } as const;
                   if (
-                    state.runtime.version !== "3.0.3" ||
-                    profile.compactionVersions?.includes(state.runtime.version) !== true ||
+                    acpReleaseClaim(profile.compactionVersions, state.runtime.version) ===
+                      "absent" ||
                     !state.runtime.commands.has("compact")
                   )
                     return { kind: "refused", reason: "runtime-version-unsupported" } as const;
@@ -2125,10 +2475,9 @@ function makeConnection(
                   return { status: "refused", reason: "no-session" } as const;
                 if (state.promptActive || state.compacting)
                   return { status: "refused", reason: "turn-running" } as const;
-                if (profile.fileReviewVersions?.includes(state.runtime.version) !== true)
+                if (acpReleaseClaim(profile.fileReviewVersions, state.runtime.version) === "absent")
                   return { status: "refused", reason: "unsupported" } as const;
                 return readAcpFileReview({
-                  runtimeVersion: state.runtime.version,
                   sourceSessionId: state.sourceSessionId,
                   path: input.path,
                   root: projectRoot,
@@ -2200,8 +2549,10 @@ function makeConnection(
           sessionId: input.sessionId,
           modelId: identity.modelId,
           executionPolicy: input.executionPolicy,
+          ...(input.answersOncePerCall === true ? { answersOncePerCall: true } : {}),
           ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
           ...(input.strict === false ? { strict: false } : {}),
+          ...(input.ownChannels === undefined ? {} : { ownChannels: input.ownChannels }),
           sourceSessionId: input.resumeCursor.value,
           ...(input.current === undefined ? {} : { current: input.current }),
           ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
@@ -2233,7 +2584,8 @@ function makeConnection(
             if (
               input.attachments.length > 0 &&
               !promptInputs.image &&
-              !promptInputs.embeddedContext
+              !promptInputs.embeddedContext &&
+              !promptInputs.audio
             )
               return Effect.fail(failure("unsupported", "Native attachments are unsupported."));
             const attachments: AcpPromptAttachment[] = [];
@@ -2257,31 +2609,37 @@ function makeConnection(
             }).pipe(
               Effect.flatMap(() => {
                 const prompt = renderProviderTurnPrompt(input);
-                // An agent with a reviewed inventory runs only a command on
-                // that inventory, and one its session listed once it has
-                // listed any, so an unreviewed command cannot run. It does so
+                // An agent command must open the prompt to run: the command
+                // goes as its own first text block and Octant's context as
+                // the next, instead of the command following the context.
+                const promptBlocks =
+                  profile.commandLeadsPrompt === true &&
+                  input.prompt.trimStart().startsWith("/") &&
+                  input.context !== undefined &&
+                  input.context.length > 0
+                    ? [input.prompt, renderProviderContextSections(input.context)]
+                    : prompt;
+                // An agent that runs only listed commands runs one its
+                // session listed, or the readiness check listed until the
+                // session lists any, whatever its release lists. It does so
                 // in every mode; the level's tool rules decide what it does.
-                // At Full access an unverified release runs its listed
-                // commands too, as the agent does on its own.
-                const reviewed =
-                  profile.reviewedCommands === undefined
-                    ? undefined
-                    : state.executionPolicy === "full-access"
-                      ? [...profile.reviewedCommands, ...factories.commandInventory.unreviewed]
-                      : profile.reviewedCommands;
+                const sessionListed = [...state.runtime.commands];
+                const listed =
+                  sessionListed.length === 0 ? factories.listedCommands.names : sessionListed;
                 const opensWithSlash = prompt.trimStart().startsWith("/");
-                const listed = [...state.runtime.commands];
                 const command = providerCommandOf(
                   input.prompt,
-                  (reviewed ?? [])
-                    .filter((commandName) => listed.length === 0 || listed.includes(commandName))
-                    .map((commandName) => ({ name: commandName })),
+                  listed.map((commandName) => ({ name: commandName })),
                 );
-                if (reviewed !== undefined && opensWithSlash && command === undefined) {
+                if (
+                  profile.listedCommandsOnly === true &&
+                  opensWithSlash &&
+                  command === undefined
+                ) {
                   return Effect.fail(
                     failure(
                       "unauthorized",
-                      `${name} runs only the slash commands it listed and Octant reviewed. Rephrase the request without a leading slash.`,
+                      `${name} runs only the slash commands it listed. Rephrase the request without a leading slash.`,
                     ),
                   );
                 }
@@ -2304,75 +2662,50 @@ function makeConnection(
                   );
                 }
                 if (state.runtime.usage !== undefined) beginAcpUsageTurn(state.runtime.usage);
+                if (state.runtime.reported !== undefined)
+                  beginAcpReportedTurn(state.runtime.reported);
                 state.promptActive = true;
-                void state.client
-                  .prompt(state.sourceSessionId, prompt, attachments)
-                  .then((result) => {
-                    state.promptActive = false;
-                    void cancelForms(state);
-                    if (result.stopReason === "cancelled") cancelPendingTools(state);
-                    if (state.closed || state.context.terminal) return;
-                    if (state.runtime.usage !== undefined) {
-                      const usage = finishAcpUsageTurn(state.runtime.usage, result.usage);
-                      if (usage !== undefined) offer(eventFor(state, factories.clock, usage));
-                    }
-                    state.context.terminal = true;
-                    if (result.stopReason === "cancelled") {
-                      offer(
-                        eventFor(state, factories.clock, {
-                          kind: "interrupted",
-                          message: `${name} turn was interrupted.`,
-                        }),
-                      );
-                    } else if (
-                      result.stopReason === "end_turn" ||
-                      outputStopReason(result.stopReason) !== undefined
-                    ) {
-                      const stop = outputStopReason(result.stopReason);
-                      state.completed = true;
-                      offer(
-                        eventFor(state, factories.clock, {
-                          kind: "completed",
-                          resumeCursor: {
-                            driverKind: profile.kind,
-                            value: state.sourceSessionId,
-                            binding: {
-                              instanceId: options.instanceId,
-                              sessionId: state.sessionId,
-                              projectRoot,
-                              mode,
-                              modelId: decodeProviderModelId(state.modelId),
-                            },
-                          },
-                          ...(stop === undefined ? {} : { stopReason: stop }),
-                        }),
-                      );
-                    } else {
-                      offer(
-                        eventFor(state, factories.clock, {
-                          kind: "failed",
-                          failure: failure("provider-failed", `${name} turn did not complete.`),
-                        }),
-                      );
-                    }
-                  })
-                  .catch((error: unknown) => {
-                    state.promptActive = false;
-                    void cancelForms(state);
-                    if (state.closed || state.context.terminal) return;
-                    state.context.terminal = true;
-                    offer(
-                      eventFor(state, factories.clock, {
-                        kind: "failed",
-                        failure: providerFailure(profile, error),
-                      }),
-                    );
-                  });
+                state.openPrompts = 1;
+                void state.client.prompt(state.sourceSessionId, promptBlocks, attachments).then(
+                  (result) => settlePrompt(state, { status: "answered", result }),
+                  (error: unknown) => settlePrompt(state, { status: "failed", error }),
+                );
                 return Effect.void;
               }),
             );
           }),
         ),
+      ...(profile.steersMidTurn === true
+        ? {
+            // A note goes as another `session/prompt` on the running turn's
+            // session, which the agent folds into that turn; its events
+            // continue on the same turn, which ends when the last open
+            // prompt answers (`settlePrompt`). A note that opens with `/`
+            // would run an agent command no review admitted, so it is
+            // refused, as is one with no turn running to take it.
+            steer: (input: Parameters<NonNullable<ProviderConnection["steer"]>>[0]) =>
+              Effect.sync(() => {
+                const state = sessions.get(input.sessionId);
+                if (
+                  state === undefined ||
+                  state.closed ||
+                  state.context.terminal ||
+                  state.compacting ||
+                  !state.promptActive ||
+                  state.openPrompts === 0 ||
+                  input.message.trim().length === 0 ||
+                  input.message.trimStart().startsWith("/")
+                )
+                  return "unsupported" as const;
+                state.openPrompts += 1;
+                void state.client.prompt(state.sourceSessionId, [input.message]).then(
+                  (result) => settlePrompt(state, { status: "answered", result }),
+                  (error: unknown) => settlePrompt(state, { status: "failed", error }),
+                );
+                return "steered" as const;
+              }),
+          }
+        : {}),
       interrupt: (sessionId) =>
         stateFor(sessionId).pipe(
           Effect.flatMap((state) =>
@@ -2394,7 +2727,9 @@ function makeConnection(
               if (
                 options.sandboxPolicy === undefined &&
                 state.completed &&
-                profile.retainedSessionVersions?.includes(state.runtime.version) === true &&
+                (profile.retainsSessions === true ||
+                  acpReleaseClaim(profile.retainedSessionVersions, state.runtime.version) !==
+                    "absent") &&
                 state.approvals.size === 0 &&
                 state.questions.size === 0 &&
                 state.pendingToolAnswers.size === 0 &&
@@ -2441,8 +2776,8 @@ function makeConnection(
             if (pending === undefined) {
               return Effect.fail(failure("protocol", `${name} approval request is not pending.`));
             }
-            state.approvals.delete(input.requestId);
             if (state.executionPolicy === "plan" && input.approved) {
+              state.approvals.delete(input.requestId);
               return request(() =>
                 state.client.respondPermission(pending.providerRequestId, pending.rejectOptionId),
               ).pipe(
@@ -2453,7 +2788,34 @@ function makeConnection(
                 ),
               );
             }
-            const selected = input.approved ? pending.allowOptionId : pending.rejectOptionId;
+            // An agent that offers its own allow-always gets it when the
+            // person keeps answers for the session, so it stops asking for
+            // that call, as Octant would; never for a one-call answer (an
+            // automatic reviewer's, or one on a child's behalf), and never
+            // when answers are kept only as the Project's default.
+            const remembers =
+              input.scope !== "once" &&
+              pending.allowAlwaysOptionId !== undefined &&
+              permissionPersistence(options) === "current-session";
+            const allowOptionId =
+              remembers && pending.allowAlwaysOptionId !== undefined
+                ? pending.allowAlwaysOptionId
+                : pending.allowOptionId;
+            // Offered only allow-always, an approval that does not hold for
+            // the session has no option to choose. Sending the reject instead
+            // would let the host record an approval the agent never got, so
+            // nothing is sent and the request stays pending for a denial or an
+            // approval that holds for the session.
+            const selected = input.approved ? allowOptionId : pending.rejectOptionId;
+            if (selected === undefined) {
+              return Effect.fail(
+                failure(
+                  "unsupported",
+                  `${name} only offers Always allow here. Approve it for this session, or deny it.`,
+                ),
+              );
+            }
+            state.approvals.delete(input.requestId);
             return request(() =>
               state.client.respondPermission(pending.providerRequestId, selected),
             );
@@ -2480,6 +2842,7 @@ function makeConnection(
                 } catch (error) {
                   state.completed = false;
                   state.context.terminal = true;
+                  offerObservedUsage(state);
                   offer(
                     eventFor(state, factories.clock, {
                       kind: "failed",
@@ -2494,7 +2857,8 @@ function makeConnection(
               });
             }
             // The refusal names what the probe reported for this release, so a
-            // form-asking agent on an unverified release says `unavailable`.
+            // form-asking agent on a release older than its reviewed one says
+            // `unavailable`.
             const questions = baseCapabilities(
               profile,
               undefined,
@@ -2545,7 +2909,10 @@ function rememberPermission(state: SessionState, mapped: AcpMappedPermission): v
     state.approvals.set(mapped.requestId, {
       kind: "approval",
       providerRequestId: mapped.providerRequestId,
-      allowOptionId: mapped.allowOptionId,
+      ...(mapped.allowOptionId === undefined ? {} : { allowOptionId: mapped.allowOptionId }),
+      ...(mapped.allowAlwaysOptionId === undefined
+        ? {}
+        : { allowAlwaysOptionId: mapped.allowAlwaysOptionId }),
       rejectOptionId: mapped.rejectOptionId,
       ...(mapped.call === undefined ? {} : { call: mapped.call }),
     });

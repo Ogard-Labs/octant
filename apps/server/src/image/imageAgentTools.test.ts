@@ -1,10 +1,26 @@
-import { describe, expect, it, vi } from "vitest";
-import type { ImageGenerationCustomSource, ImageJob, ProviderInstance } from "@octant/contracts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  decodeAggregateVersion,
+  decodeProjectId,
+  type ImageGenerationCustomSource,
+  type ImageJob,
+  type ProviderInstance,
+} from "@octant/contracts";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
+import { openSqlite } from "../persistence/sqlitePort";
+import { SpendCeilingService } from "../spendCeilingService";
+import { GeneratedImageStore } from "./generatedImageStore";
 import { createImageAgentTools, IMAGE_TOOL_NAME, type ImageAgentToolPort } from "./imageAgentTools";
 import type {
   ImageGenerationChoice,
   ImageGenerationOfferOutcome,
 } from "./imageGenerationOfferService";
+import { ImageJobService } from "./imageJobService";
 
 const now = "2026-08-28T12:00:00.000Z";
 const scopeId = "a3000000-0000-4000-8000-000000000002" as never;
@@ -89,7 +105,9 @@ function tools(
   options: {
     readonly answer?: (
       offer: Parameters<ImageAgentToolPort["ask"]>[0]["offer"],
-    ) => ImageGenerationOfferOutcome;
+    ) => ImageGenerationOfferOutcome | Promise<ImageGenerationOfferOutcome>;
+    readonly imageSources?: ImageAgentToolPort["imageSources"];
+    readonly readArtifact?: NonNullable<ImageAgentToolPort["readArtifact"]>;
     readonly remembered?: ImageGenerationChoice;
     readonly fullAccess?: boolean;
     readonly defaultProfileInstanceId?: string;
@@ -114,7 +132,7 @@ function tools(
     };
   } = {},
 ) {
-  const enqueue = vi.fn(async () => job());
+  const enqueue = vi.fn<ImageAgentToolPort["enqueue"]>(async () => job());
   let remembered = options.remembered;
   const ask = vi.fn(
     async ({ offer }: Parameters<ImageAgentToolPort["ask"]>[0]) =>
@@ -137,6 +155,7 @@ function tools(
       ask,
       remembered: () => remembered,
       forget,
+      ...(options.imageSources === undefined ? {} : { imageSources: options.imageSources }),
       ...(options.fullAccess === undefined
         ? {}
         : { fullAccess: () => options.fullAccess === true }),
@@ -168,6 +187,7 @@ function tools(
             readsImages: () => options.readsImages === true,
             ...(options.waitMs === undefined ? {} : { waitMs: options.waitMs }),
           }),
+      ...(options.readArtifact === undefined ? {} : { readArtifact: options.readArtifact }),
     },
   });
   return { ask, enqueue, forget, set };
@@ -179,6 +199,116 @@ function call(set: ReturnType<typeof tools>["set"], input: Record<string, unknow
 }
 
 describe("createImageAgentTools", () => {
+  it("names the attached image and reads no bytes until the person chooses Generate", async () => {
+    const bytes = Uint8Array.of(137, 80, 78, 71, 13, 10, 26, 10);
+    const read = vi.fn(async () => bytes);
+    let approve: (value: ImageGenerationOfferOutcome) => void = () => undefined;
+    const answer = new Promise<ImageGenerationOfferOutcome>((resolve) => {
+      approve = resolve;
+    });
+    const { ask, enqueue, set } = tools([imageProfile()], [], [], {
+      answer: () => answer,
+      fullAccess: true,
+      imageSources: {
+        latestAttachments: () => [
+          { label: "your attached photo cat.png", size: bytes.length, read },
+        ],
+      },
+    });
+    const result = call(set, { prompt: "Restyle the photo", references: [{ kind: "attachment" }] });
+    await vi.waitFor(() => expect(ask).toHaveBeenCalledOnce());
+    expect(ask.mock.calls[0]?.[0].offer).toMatchObject({
+      references: [{ kind: "attachment", label: "your attached photo cat.png" }],
+    });
+    expect(read).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+    approve({
+      status: "generate",
+      profileInstanceId: profileId,
+      modelId: "gpt-image-2" as never,
+    });
+    await result;
+    expect(read).toHaveBeenCalledOnce();
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ references: [{ mediaType: "image/png", bytes }] }),
+    );
+  });
+
+  it("includes the parent among explicit references and never forwards both forms", async () => {
+    const bytes = Uint8Array.of(137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4);
+    const read = vi.fn(async () => bytes);
+    const readArtifact = vi.fn(async () => ({ bytes, mime: "image/png" as const }));
+    const { ask, enqueue, set } = tools([imageProfile()], [job("completed")], [], {
+      imageSources: { latestAttachments: () => [{ label: "cat.png", size: bytes.length, read }] },
+      readArtifact,
+    });
+    await call(set, {
+      prompt: "Combine the images",
+      parentAttachmentId,
+      references: [{ kind: "attachment" }],
+    });
+    expect(ask.mock.calls[0]?.[0].offer).toMatchObject({
+      references: [
+        { kind: "generated-image", label: "generated image" },
+        { kind: "attachment", label: "cat.png" },
+      ],
+    });
+    expect(readArtifact).toHaveBeenCalledOnce();
+    expect(enqueue.mock.calls).toHaveLength(1);
+    expect(enqueue.mock.calls[0]).toEqual([
+      expect.objectContaining({
+        references: Array.from({ length: 2 }, () => ({ mediaType: "image/png", bytes })),
+      }),
+    ]);
+    expect(enqueue.mock.calls[0]?.[0]).not.toHaveProperty("parentArtifactRef");
+  });
+
+  it("refuses when no reference-capable profile is ready, even if another image profile is enabled", async () => {
+    const bfl = {
+      ...imageProfile(),
+      driverKind: "bfl-image",
+      configuration: {
+        kind: "bfl-image-http",
+        modelAllowlist: ["flux-pro" as never],
+        defaultModel: "flux-pro" as never,
+      },
+    } satisfies ProviderInstance;
+    const { ask, enqueue, set } = tools([bfl]);
+    await expect(
+      call(set, { prompt: "Restyle the photo", references: [{ kind: "attachment" }] }),
+    ).resolves.toMatchObject({
+      result: { error: "No enabled image model can use reference images." },
+    });
+    expect(ask).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("does not send images if the chosen profile stops supporting references before they are read", async () => {
+    const instances = [imageProfile()];
+    const read = vi.fn(async () => Uint8Array.of(137, 80, 78, 71, 13, 10, 26, 10));
+    const { enqueue, set } = tools(instances, [], [], {
+      imageSources: { latestAttachments: () => [{ label: "cat.png", size: 8, read }] },
+      answer: (offer) => {
+        if (offer.kind !== "generate") throw new Error("Expected a generation request.");
+        instances[0] = {
+          ...imageProfile(),
+          driverKind: "bfl-image",
+          configuration: {
+            kind: "bfl-image-http",
+            modelAllowlist: [offer.suggested.modelId],
+            defaultModel: offer.suggested.modelId,
+          },
+        };
+        return { status: "generate", ...offer.suggested };
+      },
+    });
+    await expect(
+      call(set, { prompt: "Restyle the photo", references: [{ kind: "attachment" }] }),
+    ).resolves.toMatchObject({ isError: true });
+    expect(read).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
   it("is absent when no enabled image profile exists", () => {
     expect(tools([]).set).toBeUndefined();
     expect(tools([imageProfile(false)]).set).toBeUndefined();
@@ -550,6 +680,118 @@ describe("createImageAgentTools", () => {
       expect((await call(elsewhere.set, save)).isError).toBe(true);
       expect(plan.write).not.toHaveBeenCalled();
       expect(other.write).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("spend ceiling enforcement on agent image generation", () => {
+    const directories: Array<string> = [];
+    const projectId = "a3000000-0000-4000-8000-000000000092";
+
+    afterEach(() => {
+      for (const directory of directories.splice(0)) {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("still asks for consent and refuses without calling the provider when a thread or Project monetary ceiling cannot cover the chosen model", async () => {
+      const directory = mkdtempSync(join(tmpdir(), "octant-image-tool-ceiling-"));
+      directories.push(directory);
+      const connection = openSqlite(join(directory, "octant.sqlite3"));
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const runtime = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: runtime.events,
+        projections: runtime.projections,
+        clock: () => now,
+      });
+      const spendCeiling = new SpendCeilingService({
+        connection,
+        journal,
+        clock: () => now,
+        uuid: () => crypto.randomUUID(),
+        threadExists: () => true,
+        projectExists: () => true,
+      });
+      const generate = vi.fn(async () => ({
+        status: "completed" as const,
+        images: [
+          {
+            bytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47]),
+            mediaType: "image/png" as const,
+          },
+        ],
+      }));
+      const profile = imageProfile();
+      const jobs = new ImageJobService({
+        journal,
+        projection: runtime.imageJobProjection,
+        attachments: new GeneratedImageStore(directory),
+        readProviderInstance: (id) => (String(id) === String(profile.id) ? profile : undefined),
+        readImageGenerationCustomSources: () => [],
+        credentialResolver: { has: async () => true, resolve: async () => "sk-test" },
+        uuid: () => crypto.randomUUID(),
+        clock: () => now,
+        actor: { kind: "system", actorId: "00000000-0000-4000-8000-000000000002" as never },
+        createAdapter: () => ({ generate }),
+        spendCeiling,
+        resolveThreadProjectId: () => projectId,
+      });
+      const ask = vi.fn(async ({ offer }: Parameters<ImageAgentToolPort["ask"]>[0]) =>
+        offer.kind === "generate"
+          ? ({ status: "generate", ...offer.suggested } as const)
+          : ({ status: "cancelled" } as const),
+      );
+      const set = createImageAgentTools({
+        threadKind: "chat-thread",
+        scopeId,
+        port: {
+          listInstances: () => [profile],
+          readImageGenerationCustomSources: () => [],
+          enqueue: (input) => jobs.enqueue(input),
+          listJobs: (id) => jobs.listByScope(id),
+          whenTerminal: (id) => jobs.whenTerminal(id),
+          ask,
+          remembered: () => undefined,
+          forget: () => undefined,
+        },
+      });
+
+      // Thread ceiling blocks after consent without calling the provider.
+      spendCeiling.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "chat-thread", threadId: String(scopeId) },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { costBudgetUsdCents: 2 },
+        window: { kind: "lifetime" },
+      });
+      const threadOutcome = await call(set, { prompt: "a red cube" });
+      expect(ask).toHaveBeenCalledTimes(1);
+      expect(threadOutcome.isError).toBe(true);
+      expect(threadOutcome.result).toMatchObject({
+        error: expect.stringMatching(/money ceiling/i),
+      });
+
+      // Clear thread ceiling; Project ceiling still blocks without calling the provider.
+      spendCeiling.execute("local-window", {
+        kind: "clear-spend-ceiling",
+        scope: { kind: "thread", threadType: "chat-thread", threadId: String(scopeId) },
+        expectedVersion: decodeAggregateVersion(1),
+      });
+      spendCeiling.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "project", projectId: decodeProjectId(projectId) },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { costBudgetUsdCents: 2 },
+        window: { kind: "calendar", period: "day", timeZone: "UTC" },
+      });
+      const projectOutcome = await call(set, { prompt: "a red cube" });
+      expect(ask).toHaveBeenCalledTimes(2);
+      expect(projectOutcome.isError).toBe(true);
+      expect(projectOutcome.result).toMatchObject({
+        error: expect.stringMatching(/Project's money ceiling/i),
+      });
+      expect(generate).not.toHaveBeenCalled();
     });
   });
 });

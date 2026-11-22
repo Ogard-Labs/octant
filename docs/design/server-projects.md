@@ -36,6 +36,13 @@ approvals, and journal as a Project on this computer. Inference, approvals,
 every authority check, and the journal stay on this host; only the thread's
 hands are on the server.
 
+A person can also run Claude Code or Codex itself on the server, signed in
+there, with Octant's window on their own computer (designed, not built;
+[Providers running on the server](#providers-running-on-the-server)). And a
+person who wants the server to be a full Octant computer adds it as a hub
+member over SSH, without visiting it
+([Hub and spokes, decision H26](hub-and-spokes.md#decisions)).
+
 ## Setup entry
 
 Settings › Remote access begins with three explicit journeys: control an Octant
@@ -110,10 +117,10 @@ checks never change registry/configuration or journal state.
 
 ### Binding
 
-- Only a person, at a local window or a paired device, binds, renames, or
-  removes a server Project; a routine and an agent are refused (maintainer decision, 2026-11-12).
-  Not built yet: today a paired device is refused
-  `needs-local-window` too.
+- Only a person, at a local window or a device the host's own person paired,
+  binds, renames, or removes a server Project; a hub-introduced or restricted
+  device, a routine, and an agent are refused `needs-person` (maintainer
+  decision, 2026-11-12; built under [Paired devices](#paired-devices)).
 - A binding names a registered server and an absolute folder path. Before it
   is journaled, the host connects and resolves the folder on the server to its
   real path (`cd` then `pwd -P`); a folder that does not exist, is not a
@@ -221,10 +228,12 @@ checks never change registry/configuration or journal state.
   The Git, Files, and Tests panels reach it only through the server
   ([Panels](#panels)), and a thread's own worktree is made there
   ([Worktrees and pull requests](#worktrees-and-pull-requests)).
-- **Octant Harness only.** A thread there runs on the Octant Harness, whose
-  inference stays on this host and whose hands are on the server. Every other
-  runtime is refused before it launches, naming why: its own tools act on this
-  host's files. Delegation, Browser, Computer, connectors, and forks are not
+- **Octant Harness, or a provider on the server.** A thread there runs on the
+  Octant Harness, whose inference stays on this host and whose hands are on
+  the server. Built so far: every other runtime is refused before it launches,
+  naming why: its own tools act on this host's files. A provider that runs on
+  the server itself is designed, not built
+  ([Providers running on the server](#providers-running-on-the-server)). Delegation, Browser, Computer, connectors, and forks are not
   offered there, since each acts on this host. The routine tools are offered,
   since they act only on this host's routine records ([Routines](#routines)).
 - **Attached files.** A file the turn names by path rather than sends (any
@@ -236,9 +245,23 @@ checks never change registry/configuration or journal state.
   against the journaled digest, and the turn names its path there. The thread's
   file tools read that folder and write nowhere in it; another thread's do not
   read it, even through a Project folder that holds the login's home. The copy
-  is made before the turn's start is journaled, so a failed copy leaves no turn. A copy that fails refuses the turn with a sentence saying so. The
-  copies stay on the server when the thread is deleted (not built: removing
-  them). The same holds for a Work thread there
+  is made before the turn's start is journaled, so a failed copy leaves no turn.
+  A copy that fails refuses the turn with a sentence saying so. When the thread
+  is deleted or purged, or marked Leave no trace, Octant removes
+  `~/.octant/thread-attachments/<thread>/` over the Project's SSH connection,
+  refusing any unsafe thread identifier or symlink outside that folder before
+  touching the server. If the server cannot be reached, local deletion, purge,
+  or Leave no trace is never held up: a pending removal is journaled under
+  `server-attachment-cleanup` (`server-attachment-cleanup.pending@1`, retained
+  across thread purge and host restart) and retried automatically on the next
+  regular SSH connection to that exact server alias and login, retiring the
+  mark with `server-attachment-cleanup.settled@1` once removed. Read-only setup
+  probes never trigger cleanup. Removing a whole server Project deletes its
+  threads' attachment folders when the server is reachable; when the server is
+  unreachable or no longer registered, Project removal still succeeds and
+  returns a notice naming the folder left on the server
+  (`~/.octant/thread-attachments/` or the specific thread folder(s)) so the
+  person knows what to clean up. The same holds for a Work thread there
   ([Plan and Chat tool parity](../architecture.md#security-and-authority)).
 - **The same levels.** The thread's guardrail level is resolved as it is for
   any Code thread (thread, then the account default), and decides each call as
@@ -429,6 +452,48 @@ checks never change registry/configuration or journal state.
 - **Checkpoints.** A turn on a server takes no checkpoint, so restoring
   files is not offered there and Rewind to here rewinds the conversation
   only, saying why; Git on the server is the way back for files.
+
+### Providers running on the server
+
+Decided 2026-11-19 (maintainer): a person who does not want Octant installed
+on a server can still run Claude Code or Codex there, as the real CLI, with
+Octant's window on their own computer. Designed, not built.
+
+- **How it runs.** Octant starts the provider's own process on the server
+  over the Project's SSH connection, through a long-lived pipe with no
+  terminal, and speaks the provider's protocol over it exactly as it does
+  with a local process. The connection gains that pipe beside its
+  request-and-answer commands; it keeps the pinned host key, the private
+  control socket and the encoded `sh` call, and carries no secret in the
+  command line.
+- **Which providers.** Codex first, then Claude Code, whose protocols run
+  over standard input and output, and whose Octant tools travel inside that
+  protocol. OpenCode, Pi and the ACP agents reach Octant's tools over this
+  host's loopback, which would need forwarding the connection refuses, so
+  they stay refused on a server until a later decision. A provider reports
+  whether it can run on a server as a capability, and Octant refuses a launch
+  the provider does not report, naming why.
+- **Sign-in.** The provider uses its own sign-in on the server. Octant checks
+  it over SSH with the provider's own status command and never copies a
+  subscription sign-in there; the person signs in once on the server, for
+  example in the Project terminal. An API key reaches the server only when
+  the person sends it there, as [Shared sign-ins](hub-and-spokes.md#shared-sign-ins)
+  requires for another computer.
+- **Confinement.** Octant has no sandbox on the server, as above. The
+  provider's own sandbox, permission modes and plan mode apply there, Plan
+  runs in the provider's own read-only plan mode, and Strict refuses a
+  provider on a server because it needs Octant's own confinement. The
+  thread's level, approvals and journal stay on this host.
+- **Network.** The provider's requests to its model leave from the server,
+  not from this host, so this host's network limits and egress rules do not
+  cover them, and the Project's settings say so.
+- **Lifetime.** A provider process on the server ends when its pipe closes;
+  Octant records the remote process so a lost connection leaves no orphan it
+  cannot find and stop at the next connection.
+- **Files Octant reads.** Instruction files, session lists and trust records
+  the driver reads are read on the server, with the same protected-path rules
+  judged on the server's real paths. Checkpoints and forks of such a thread
+  are not offered until their own design.
 
 ### Work Projects
 
@@ -659,8 +724,100 @@ Project's connection, under the same levels, approvals, and journal.
   thread pushes to is the repository its branch is on; reading it at that
   moment needs no new record of a server's remotes on this host.
 
+## Paired devices
+
+Built (maintainer request, 2026-11-18). A device the host's own person paired
+reads the catalog and a server's load and does what a local window does with a
+server Project: bind, rename and remove one, edit and run its saved actions,
+switch a Work Project's Developer tools, run the read-only setup check, open
+the Project's own terminal, open a dev-server preview, and act on machines in
+the person's cloud account.
+
+- **Who.** A `person-paired-device` principal over its signed session. A
+  device the hub's roster introduced, an agent grant's session, a routine, an
+  agent and a caller with no session are refused `needs-person` before any
+  connection is made or event journaled; the refusal `needs-local-window` is
+  retired for a person-paired device.
+- **The actor in the records.** `server-projects.bound@2`, `renamed@2`,
+  `removed@2`, `actions-replaced@2` and `work-developer-tools-changed@2`, and
+  the `cloud-machines` events' version 2, widen `principal` from
+  `{ kind: "local-window" }` to that or
+  `{ kind: "person-paired-device", credentialGeneration }`; the device's id is
+  on the envelope actor (`remote-device`), resolved once from the
+  authenticated principal and never from the request, as Safe networks
+  records it. The device's id with its credential generation names the
+  pairing that acted, so a record survives the device re-pairing under a new
+  key without being confused with it.
+- **Journal compatibility.** Version 1 events keep decoding and are read as a
+  local window's. A local window's act keeps writing version 1; only a
+  device's act writes version 2, so a journal no device changed stays
+  readable by an older build, and an older build cannot decode a device's
+  record rather than reading it as a window's. The catalog rebuilds from both;
+  replay never connects to a server.
+- **An SSH session the device owns.** Every connection is this host's `ssh`
+  through the shared per-server control socket, as now; what changes is the
+  owner of each operation that holds one. A setup check, the Project terminal,
+  a saved-action run and a preview are owned by the device's session in place
+  of a window, and end when the device is revoked, its session ends, or it
+  sends nothing for a minute (the rule a device's local Project terminal
+  already follows). Closing a window never ends a device's operation, and a
+  device's loss never ends a window's.
+- **Prompts at the Mac.** The connection keeps `BatchMode=yes`. A server
+  whose key needs a confirmation or a touch at this computer (an agent added
+  with confirmation, a hardware key) cannot be answered from a phone; the
+  operation fails with "This server's key needs a confirmation at this
+  computer." instead of waiting, and nothing is journaled for a bind that did
+  not check its folder.
+- **Binding, renaming and removing.** The same folder check, refusals and
+  journal-first order as a window's. Removing a Project ends every operation
+  on it, a window's and a device's alike.
+- **Saved actions.** A device edits actions with the same optimistic revision,
+  and runs one after the same review on the device (server login, action
+  profile, canonical folder, branch, task policy and the absence of OS
+  confinement). The reviewed placement binds the device's id, session and
+  credential generation in place of the window; the Code task or Work binding
+  it names must be one the device reaches. Plan still refuses. Output follows
+  the existing bounded terminal transcript stream.
+- **Developer tools.** `set-server-work-developer-tools` from a device is
+  journaled as above. The terminal and saved-action buttons it reveals are the
+  device's to use while it holds that Work Project open in its own view; no
+  window binding is required of a device.
+- **Setup check.** `/api/remote-setup-check` admits a person-paired device
+  with the same strict input, the four-check limit, the twelve-second deadline
+  and the 2 KiB bound; it changes nothing and journals nothing, as for a
+  window.
+- **Previews.** A device cannot reach this host's loopback, so its preview is
+  not a local listener: the host serves it through the private listener's
+  existing relay route to the device, with a dedicated SSH stdio stream as the
+  upstream in place of a local port, under the relay's grant, budgets and
+  WebSocket rules. The preview's limits stay (eight streams, an hour, the
+  one-second sweep, `ClearAllForwardings=yes`), and its outcome is journaled
+  as `server-projects.preview-outcome@2`, naming the device as owner.
+- **Cloud machines.** Creating, binding, refreshing, suspending, resuming and
+  destroying from a device follow the same rules, the destroy confirmation
+  included: the host issues it to that device's session, and a confirmation
+  issued to one principal is refused from another.
+- Rationale: the records already say who acted, so naming the device is a
+  widening of one field; versioning it keeps an older build from crediting a
+  device's act to a window. The SSH connection is the host's, not the
+  window's, so only the ownership of what holds it needs a device form, and
+  the one-minute quiet rule is the one a device's shell already has. Serving a
+  device's preview through the relay reuses the one route the private listener
+  already upgrades, instead of exposing a loopback port.
+- Rejected: opening a second SSH connection per device (the control socket
+  shares one login per server on purpose, and the person's agent is on this
+  host either way); recording a device's act as the system's (the journal
+  must say which device bound a Project to a server); and an optional device
+  field on version 1 (an older build would read it as a window's act).
+
 ## Not built yet
 
+- A provider running on the server
+  ([Providers running on the server](#providers-running-on-the-server)): the
+  connection's pipe, Codex and then Claude Code over it, the capability, the
+  sign-in check and remote process cleanup.
+- Adding the server as a full Octant computer over SSH
+  ([Hub and spokes, decision H26](hub-and-spokes.md#decisions)).
 - Work file previews and editing, research sources, the status file and due
   dates for a Work Project on a server; its threads and person-operated Project
   terminal are built. A local Work Project shows its terminal through its
@@ -704,11 +861,11 @@ service stays out of scope
   that target and act; the target names the handle and never sees the value.
   The journal records the reference, never a value or a handle.
 - **Every act is the person's.** Creating, binding, refreshing, suspending,
-  resuming and destroying are the person's acts at a local window
-  (`/api/cloud-machines`). An agent and a routine are refused `needs-person`
-  before any target or broker is asked. The design also lets a device the
-  host's own person paired act; not built yet, it is refused
-  `needs-local-window`, as binding a server Project still is.
+  resuming and destroying are the person's acts at a local window or a device
+  the host's own person paired (`/api/cloud-machines`; built under
+  [Paired devices](#paired-devices)). A hub-introduced or restricted device, an
+  agent, and a routine are refused `needs-person` before any target or broker
+  is asked.
 - **Destroy asks once.** Destroying is irreversible and ends what the
   person's account pays for, so it needs a confirmation the host issues for
   exactly that machine (`request-cloud-machine-destroy`). The confirmation is

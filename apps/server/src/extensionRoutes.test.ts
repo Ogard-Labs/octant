@@ -6,6 +6,8 @@ import type {
   ExtensionCommandResult,
   ExtensionSnapshot,
 } from "@octant/contracts/extension-rpc";
+import type { HubGrant } from "@octant/contracts";
+import { hubActScopeFromSpokeLink } from "./hub/hubActScope";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 import { createExtensionRouteHandler, type ExtensionRouteService } from "./extensionRoutes";
 import { ExtensionApiService } from "./extensions/extensionApiService";
@@ -546,6 +548,60 @@ describe("bounded authenticated extension routes", () => {
       }),
     );
     expect(anonymous?.status).toBe(401);
+    const approved = await handler(pairedDeviceRequest("/api/extensions/tool-approvals", answer));
+    expect(approved?.status).toBe(200);
+    await expect(call).resolves.toBe(true);
+  });
+
+  it("a hub-introduced device answers a Code or Work thread's MCP prompt only in a Project the member's Act item names", async () => {
+    const approvals = new ExtensionToolApprovalService({
+      uuid: () => "44000000-0000-4000-8000-000000000010",
+      now: () => now,
+      isPairedDeviceScope: (scope) => String(scope) === pairedDeviceId,
+      threadAuthorityIsCurrent: () => true,
+    });
+    const namedProject = "44000000-0000-4000-8000-000000000012";
+    const grant: { current: HubGrant } = {
+      current: { items: ["roster", "introduce", "act"], actProjects: [] },
+    };
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: new WindowAuthorityStore(),
+      toolApprovals: approvals,
+      hubActScope: () =>
+        hubActScopeFromSpokeLink({
+          status: () => ({ membership: "member", grant: grant.current }) as never,
+        }),
+      codeOrWorkThreadProjectId: () => namedProject,
+      now: () => now,
+    });
+    const call = approvals.request({
+      windowId: pairedDeviceId as never,
+      threadId: "44000000-0000-4000-8000-000000000011",
+      projectId: namedProject,
+      extensionId,
+      packageId,
+      componentId: "server",
+      serverName: "server",
+      providerToolName: "plugin__server__read",
+      mcpToolName: "read",
+      inputJson: "{}",
+    });
+    const answer = {
+      kind: "decide",
+      approvalId: "44000000-0000-4000-8000-000000000010",
+      decision: "approved",
+    };
+
+    const unnamed = await handler(pairedDeviceRequest("/api/extensions/tool-approvals", answer));
+    expect(unnamed?.status).toBe(403);
+    expect(await unnamed?.json()).toMatchObject({
+      failure: {
+        message:
+          "This computer's Act item for its hub does not name this Project, so a device the hub introduced cannot answer approvals or questions in it here.",
+      },
+    });
+    grant.current = { items: ["roster", "introduce", "act"], actProjects: [namedProject as never] };
     const approved = await handler(pairedDeviceRequest("/api/extensions/tool-approvals", answer));
     expect(approved?.status).toBe(200);
     await expect(call).resolves.toBe(true);
@@ -1821,6 +1877,115 @@ describe("signing in to a hosted server from Settings", () => {
     expect(
       (await handler(request("/api/extensions/sign-in", { kind: "poll", ...target })))?.status,
     ).toBe(400);
+  });
+
+  it("admits POST /api/extensions/mcp-sign-in/relay only for a person-paired device and passes its binding on sign-in", async () => {
+    const attemptId = "55000000-0000-4000-8000-000000000099";
+    const relaySignIn = {
+      ...signIn,
+      begin: vi.fn(async () => ({
+        kind: "awaiting-consent" as const,
+        attemptId,
+        flow: "relay" as const,
+        relayable: true,
+        authorizationUrl: "https://auth.example/authorize?state=abc",
+        expiresAt: "2026-11-20T12:00:00.000Z",
+      })),
+      relay: vi.fn(async () => ({ kind: "signed-in" as const, issuer: "auth.example" })),
+    };
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      mcpServerSignIn: relaySignIn as never,
+      now: () => now,
+    });
+
+    // Person-paired device begins with device binding and completes via relay.
+    const begun = await handler(
+      pairedDeviceRequest("/api/extensions/sign-in", { kind: "begin", ...target }, "host-person"),
+    );
+    expect(begun?.status).toBe(200);
+    expect(relaySignIn.begin).toHaveBeenCalledWith(
+      extensionId,
+      "mcp-docs",
+      "person-paired-device",
+      expect.objectContaining({ kind: "remote-device", deviceId: pairedDeviceId }),
+      {
+        deviceId: pairedDeviceId,
+        sessionId: "55000000-0000-4000-8000-000000000002",
+        credentialGeneration: 1,
+      },
+    );
+
+    const relayBody = {
+      attemptId,
+      callbackUrl: "http://127.0.0.1:43125/oauth/callback?code=abc&state=xyz",
+    };
+    const relayed = await handler(
+      pairedDeviceRequest("/api/extensions/mcp-sign-in/relay", relayBody, "host-person"),
+    );
+    expect(relayed?.status).toBe(200);
+    expect(await relayed?.json()).toEqual({ kind: "signed-in", issuer: "auth.example" });
+    expect(relaySignIn.relay).toHaveBeenCalledWith({
+      attemptId,
+      callbackUrl: relayBody.callbackUrl,
+      principalKind: "person-paired-device",
+      device: {
+        deviceId: pairedDeviceId,
+        sessionId: "55000000-0000-4000-8000-000000000002",
+        credentialGeneration: 1,
+      },
+      actor: expect.objectContaining({ kind: "remote-device", deviceId: pairedDeviceId }),
+    });
+
+    relaySignIn.relay.mockClear();
+
+    // Hub-introduced, restricted/unproved, agent-grant, local window, and unauthenticated callers are all refused 401.
+    const agentGrantRequest = new Request("http://127.0.0.1/api/extensions/mcp-sign-in/relay", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(relayBody),
+    });
+    bindPrincipalRouteContext(agentGrantRequest, {
+      principal: {
+        kind: "remote-device",
+        hostId: "local",
+        deviceId: pairedDeviceId,
+        credentialGeneration: 1,
+        origin: "octant-agent-access",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "55000000-0000-4000-8000-000000000002",
+        admittedBy: "host-person",
+      } as never,
+      scopeId: pairedDeviceId as never,
+    });
+    for (const refusedRequest of [
+      pairedDeviceRequest("/api/extensions/mcp-sign-in/relay", relayBody, "hub-roster"),
+      pairedDeviceRequest("/api/extensions/mcp-sign-in/relay", relayBody),
+      agentGrantRequest,
+      request("/api/extensions/mcp-sign-in/relay", relayBody),
+      request("/api/extensions/mcp-sign-in/relay", relayBody, {
+        "x-octant-window-capability": "wrong",
+      }),
+    ]) {
+      expect((await handler(refusedRequest))?.status).toBe(401);
+    }
+    expect(relaySignIn.relay).not.toHaveBeenCalled();
+
+    // Malformed body or excess field returns 400 without calling the service.
+    expect(
+      (
+        await handler(
+          pairedDeviceRequest(
+            "/api/extensions/mcp-sign-in/relay",
+            { ...relayBody, verifier: "forbidden" },
+            "host-person",
+          ),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(relaySignIn.relay).not.toHaveBeenCalled();
   });
 });
 

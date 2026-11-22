@@ -1,5 +1,5 @@
 import {
-  decodeChatSubmissionId,
+  automationFollowUpTurnPrompt,
   type AggregateVersion,
   type AutomationRun,
   type ChatThreadId,
@@ -8,7 +8,7 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import { ChatServiceError } from "../chat/chatService";
-import { deterministicUuid } from "../deterministicUuid";
+import { automationChatSubmissionId } from "./automationRunIdentity";
 import type {
   AutomationChatDispatchPort,
   AutomationFirstTurnLaunchOutcome,
@@ -27,7 +27,14 @@ export interface AutomationChatService {
     };
     readonly turns: ReadonlyArray<unknown>;
   };
-  readonly execute: (command: unknown) => Promise<{ readonly kind: string }>;
+  /**
+   * `hostRun` marks a turn the host sends itself with no window, which takes
+   * Chat's host-run tools (the Canvas, bound to the thread's own Project).
+   */
+  readonly execute: (
+    command: unknown,
+    context?: { readonly hostRun: true },
+  ) => Promise<{ readonly kind: string }>;
 }
 
 export interface CreateAutomationChatDispatchPortOptions {
@@ -41,7 +48,9 @@ export interface CreateAutomationChatDispatchPortOptions {
  * a submission identity derived from the occurrence, so a retry after a crash
  * finds the turn it already sent. The thread takes the routine's provider and
  * model, not the Chat defaults. Chat has no folder, shell, or Git, so there is
- * no level to carry.
+ * no level to carry. A follow-up creates no thread: its one turn goes into the
+ * thread it was set up from, under the scheduled heading, on that thread's
+ * own model, which its fire-time check already matched.
  */
 export function createAutomationChatDispatchPort(
   options: CreateAutomationChatDispatchPortOptions,
@@ -113,9 +122,12 @@ async function startOrRecover(
       };
     }
     const { providerInstanceId, modelId } = snapshot.executionProfile;
+    const followUp = snapshot.targetPolicy === "same-thread";
     // Only a thread with no turn yet is put on the routine's model, so a
-    // retry never undoes a model the person chose after the first send.
+    // retry never undoes a model the person chose after the first send. A
+    // follow-up's thread is the person's own and keeps its model.
     if (
+      !followUp &&
       thread.turns.length === 0 &&
       (String(thread.providerInstanceId) !== String(providerInstanceId) ||
         String(thread.modelId) !== String(modelId))
@@ -136,15 +148,19 @@ async function startOrRecover(
         };
       }
     }
-    await options.chat.execute({
-      kind: "send-chat-turn",
-      threadId: input.threadId,
-      expectedVersion: thread.version,
-      prompt: snapshot.taskPrompt,
-      submissionId: decodeChatSubmissionId(
-        deterministicUuid(`automation-chat-turn:${String(input.run.occurrenceKey)}`),
-      ),
-    });
+    await options.chat.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: input.threadId,
+        expectedVersion: thread.version,
+        prompt: followUp ? automationFollowUpTurnPrompt(snapshot.taskPrompt) : snapshot.taskPrompt,
+        submissionId: automationChatSubmissionId(input.run),
+      },
+      // The run is the host's own, with no window: a routine's turn and a
+      // follow-up take the host-run tools, as a person's turn would take a
+      // window's.
+      { hostRun: true },
+    );
     return {
       kind: "accepted",
       runtimeReceipt: `chat-turn:${String(input.run.firstTurnRequestId)}`,

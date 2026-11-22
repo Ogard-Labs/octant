@@ -1,12 +1,20 @@
 #!/usr/bin/env bun
 
 import { spawn } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const mode = process.env.FAKE_CODEX_MODE ?? "ready";
 const root = process.env.FAKE_CODEX_ROOT;
 const version = process.env.FAKE_CODEX_VERSION ?? "0.144.4";
+
+function persistRolloutEnabled(): boolean {
+  if (mode === "persist-rollout") return true;
+  const codexHome = process.env.CODEX_HOME;
+  return (
+    codexHome !== undefined && codexHome !== "" && existsSync(join(codexHome, ".persist-rollout"))
+  );
+}
 
 /**
  * The account's stored threads in `sessions` mode: the person's own session in
@@ -258,25 +266,128 @@ if (process.argv.slice(2).join(" ") === "--version") {
                                   cwd: params?.cwd ?? "/tmp/octant-codex-project",
                                 }
                               : message.method === "thread/start"
-                                ? {
-                                    thread: { id: "thread-1" },
-                                    model: params?.model ?? "gpt-5.4",
-                                    modelProvider: "openai",
-                                    serviceTier: null,
-                                    cwd: params?.cwd ?? "/tmp/octant-codex-project",
-                                  }
-                                : message.method === "thread/resume"
-                                  ? {
-                                      thread: { id: params?.threadId ?? "thread-1" },
-                                      model: "gpt-5.4",
+                                ? (() => {
+                                    const threadId = "thread-1";
+                                    const model = params?.model ?? "gpt-5.4";
+                                    const cwd = params?.cwd ?? "/tmp/octant-codex-project";
+                                    if (persistRolloutEnabled()) {
+                                      const codexHome = process.env.CODEX_HOME;
+                                      if (codexHome === undefined || codexHome === "") {
+                                        return {
+                                          __rpcError: {
+                                            code: -32000,
+                                            message: "CODEX_HOME missing",
+                                          },
+                                        };
+                                      }
+                                      const sessionsDir = join(codexHome, "sessions");
+                                      mkdirSync(sessionsDir, { recursive: true });
+                                      const rolloutPath = join(
+                                        sessionsDir,
+                                        `rollout-${threadId}.jsonl`,
+                                      );
+                                      writeFileSync(
+                                        rolloutPath,
+                                        `${JSON.stringify({ threadId, model, cwd, turns: 1 })}\n`,
+                                      );
+                                      // Confirm shared startup config and archived sessions stay unwritable.
+                                      for (const protectedPath of [
+                                        join(codexHome, "config.toml"),
+                                        join(codexHome, "archived_sessions", "archived.jsonl"),
+                                      ]) {
+                                        try {
+                                          appendFileSync(protectedPath, "\n# poisoned\n");
+                                          return {
+                                            __rpcError: {
+                                              code: -32000,
+                                              message: `unexpected write succeeded: ${protectedPath}`,
+                                            },
+                                          };
+                                        } catch {
+                                          // Expected: read-only under Windows Strict.
+                                        }
+                                      }
+                                    }
+                                    return {
+                                      thread: { id: threadId },
+                                      model,
                                       modelProvider: "openai",
                                       serviceTier: null,
-                                      cwd: "/tmp/octant-codex-project",
-                                    }
+                                      cwd,
+                                    };
+                                  })()
+                                : message.method === "thread/resume"
+                                  ? (() => {
+                                      const threadId = params?.threadId ?? "thread-1";
+                                      if (persistRolloutEnabled()) {
+                                        const codexHome = process.env.CODEX_HOME;
+                                        const rolloutPath =
+                                          codexHome === undefined
+                                            ? undefined
+                                            : join(
+                                                codexHome,
+                                                "sessions",
+                                                `rollout-${threadId}.jsonl`,
+                                              );
+                                        if (rolloutPath === undefined || !existsSync(rolloutPath)) {
+                                          return {
+                                            __rpcError: {
+                                              code: -32000,
+                                              message: "no rollout found",
+                                            },
+                                          };
+                                        }
+                                        const firstLine = readFileSync(rolloutPath, "utf8")
+                                          .split("\n")
+                                          .find((entry) => entry.trim() !== "");
+                                        if (firstLine === undefined) {
+                                          return {
+                                            __rpcError: {
+                                              code: -32000,
+                                              message: "empty rollout",
+                                            },
+                                          };
+                                        }
+                                        const saved = JSON.parse(firstLine) as {
+                                          readonly threadId: string;
+                                          readonly model: string;
+                                          readonly cwd: string;
+                                        };
+                                        appendFileSync(
+                                          rolloutPath,
+                                          `${JSON.stringify({ resumed: true, threadId: saved.threadId })}\n`,
+                                        );
+                                        return {
+                                          thread: { id: saved.threadId },
+                                          model: saved.model,
+                                          modelProvider: "openai",
+                                          serviceTier: null,
+                                          cwd: saved.cwd,
+                                        };
+                                      }
+                                      return {
+                                        thread: { id: threadId },
+                                        model: "gpt-5.4",
+                                        modelProvider: "openai",
+                                        serviceTier: null,
+                                        cwd: "/tmp/octant-codex-project",
+                                      };
+                                    })()
                                   : message.method === "turn/start"
                                     ? { turn: { id: "turn-1", status: "inProgress" } }
                                     : {};
-          process.stdout.write(`${JSON.stringify({ id: message.id, result })}\n`);
+          if (
+            typeof result === "object" &&
+            result !== null &&
+            "__rpcError" in result &&
+            result.__rpcError !== undefined
+          ) {
+            process.stdout.write(
+              `${JSON.stringify({ id: message.id, error: result.__rpcError })}\n`,
+            );
+          } else {
+            process.stdout.write(`${JSON.stringify({ id: message.id, result })}\n`);
+          }
         }
       } else {
         record({ kind: "notification", method: message.method });

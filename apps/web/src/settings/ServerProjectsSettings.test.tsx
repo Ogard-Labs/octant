@@ -233,6 +233,18 @@ describe("ServerProjectsSettings", () => {
     await user.click(within(form).getByRole("button", { name: "Bind folder" }));
     expect(await screen.findByText("That folder is missing on the server.")).toBeVisible();
   });
+  it("shows the removal notice naming the remote folder when removing a Project whose server is unreachable", async () => {
+    const notice =
+      "Removed Website, but web-1 could not be reached to delete attached files left in ~/.octant/thread-attachments/thread-1/. You can remove that folder on the server when it is reachable.";
+    const { user } = setup({
+      answer: (command) =>
+        command.kind === "remove-server-project"
+          ? { kind: "server-projects-updated", view: { projects: [] }, notice }
+          : { kind: "server-projects-updated", view: { projects: [] } },
+    });
+    await user.click(await screen.findByRole("button", { name: "Remove Website" }));
+    expect(await screen.findByText(notice)).toBeVisible();
+  });
   it("reveals a server Work Project's saved actions only after its presentation switch is chosen", async () => {
     const project = { ...SITE, mode: "work" as const };
     const { user, command } = setup({
@@ -401,6 +413,7 @@ describe("ServerProjectsSettings", () => {
           view: { servers: registry, sshAgent: "available" as const },
         };
       }),
+      memberInstall: vi.fn(async () => ({ kind: "member-computers" as const, members: [] })),
     };
     const projects = {
       read: vi.fn(async () => ({ projects: [] })),
@@ -607,5 +620,86 @@ describe("machines in the person's cloud account", () => {
       kind: "resume-cloud-machine",
       machineId: MACHINE.id,
     });
+  });
+
+  it("threads the signed relayed-preview opener through ServerAccessSettings and ServerProjectsSettings to open a listening relayed preview", async () => {
+    const { createRemoteServerLiveOpener } = await import("../home/remoteServerLiveOpener");
+    const grantId = `rsg_${"d".repeat(64)}`;
+    const relayedView = {
+      projectId: String(SITE.id),
+      localPort: 0,
+      remotePort: 5173,
+      endpoint: `/api/server-proxy/${grantId}/`,
+      grantId: grantId as never,
+      status: "listening" as const,
+    };
+    const openRemoteServerPage = vi.fn(async () => ({ kind: "opened" as const }));
+    const opener = createRemoteServerLiveOpener({
+      openRemoteServerPage,
+      subscribeRemoteServerPageSigning: () => () => undefined,
+    });
+    const host = {
+      hostId: "11111111-1111-4111-8111-111111111111",
+      hostName: "Studio Mac",
+      origin: "https://studio.local:9443",
+      issueSession: vi.fn(async () => ({
+        sessionId: "proxy-1",
+        csrfToken: "csrf-1",
+        deviceId: "22222222-2222-4222-8222-222222222222",
+        hostId: "11111111-1111-4111-8111-111111111111",
+        origin: "https://studio.local:9443",
+        credentialGeneration: 1,
+        protocolVersion: 1 as const,
+        authenticationVersion: 1 as const,
+        capabilityDigest: "a".repeat(64),
+        issuedAt: "2026-11-14T12:00:00.000Z",
+        expiresAt: "2026-11-14T13:00:00.000Z",
+        idleExpiresAt: "2026-11-14T12:30:00.000Z",
+        absoluteExpiresAt: "2026-11-15T12:00:00.000Z",
+      })),
+      sign: vi.fn(async () => "sig-1"),
+    };
+    const user = userEvent.setup();
+    render(
+      <ServerAccessSettings
+        onOpenRelayedPreview={(view) =>
+          view.grantId === undefined
+            ? Promise.resolve({ kind: "refused", message: "Missing grant" })
+            : opener.openServerProjectPreview(
+                host,
+                {
+                  projectId: view.projectId,
+                  remotePort: view.remotePort,
+                  grantId: String(view.grantId),
+                },
+                "octant-browser",
+              )
+        }
+        projectNames={new Map()}
+        projects={{
+          read: async () => ({ projects: [SITE] }),
+          command: vi.fn(),
+          previewRead: async () => relayedView,
+          previewCommand: vi.fn(),
+        }}
+        servers={{
+          read: async () => ({ servers: [WEB], sshAgent: "available" as const }),
+          command: vi.fn(),
+          memberInstall: vi.fn(async () => ({ kind: "member-computers" as const, members: [] })),
+        }}
+      />,
+    );
+    const projectList = await screen.findByRole("list", { name: "Server Projects" });
+    await user.click(within(projectList).getByText("Dev server preview"));
+    expect(within(projectList).queryByRole("link", { name: "Open preview" })).toBeNull();
+    await user.click(await within(projectList).findByRole("button", { name: "Open preview" }));
+    expect(openRemoteServerPage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hostId: host.hostId,
+        listenerOrigin: host.origin,
+        grant: expect.objectContaining({ grantId, port: 5173 }),
+      }),
+    );
+    opener.dispose();
   });
 });

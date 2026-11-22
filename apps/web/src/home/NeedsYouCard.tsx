@@ -10,7 +10,7 @@ import {
   pendingRequestKey,
   waitingAskKey,
 } from "../pendingRequests/pendingRequests";
-import { WaitingAskRow } from "../pendingRequests/WaitingAskRow";
+import { OFFER_RESTART_NOTICE, WaitingAskRow } from "../pendingRequests/WaitingAskRow";
 import {
   usePendingRequestRows,
   type PendingRequestRowsSource,
@@ -36,6 +36,21 @@ export interface NeedsYouCardSource extends PendingRequestRowsSource {
   readonly onOpenAsk?: ((ask: WaitingAsk) => void) | undefined;
   /** Opens the Inbox, which holds every row the card cannot fit. */
   readonly onOpenInbox: () => void;
+  /**
+   * What the person's other computers hold for them. Each is answered on its
+   * own computer, in its thread there, so its row opens that thread and holds
+   * no answer here.
+   */
+  readonly otherComputerAsks?: ReadonlyArray<OtherComputerAsk>;
+  readonly onOpenOtherComputerAsk?: (hostId: string, threadId: string) => void;
+}
+
+export interface OtherComputerAsk {
+  readonly hostId: string;
+  readonly computer: string;
+  readonly request: PendingRequest | WaitingAsk;
+  /** True while that computer is not connected: listed, but not openable. */
+  readonly readOnly: boolean;
 }
 
 /**
@@ -67,7 +82,8 @@ export function createNeedsYouCard(source: NeedsYouCardSource): HomeListCardDefi
 function useNeedsYouListRows(source: NeedsYouCardSource): HomeListRead {
   const { onOpenThread, onOpenInbox } = source;
   const now = useMinuteNow(source.now);
-  const { rows, answer, defer, asks, answerAsk } = usePendingRequestRows(source);
+  const { rows, answer, defer, asks, answerAsk, offerLostInRestart } =
+    usePendingRequestRows(source);
   if (rows === undefined) return { status: "loading" };
   return {
     status: "ready",
@@ -123,6 +139,36 @@ function useNeedsYouListRows(source: NeedsYouCardSource): HomeListRead {
           />
         ),
       })),
+      ...(offerLostInRestart
+        ? [
+            {
+              id: "offer-restart",
+              section: "needs-you" as const,
+              glyph: "ask" as const,
+              tone: "neutral" as const,
+              label: "Offer ended",
+              title: OFFER_RESTART_NOTICE,
+              meta: [],
+            },
+          ]
+        : []),
+      ...(source.otherComputerAsks ?? []).map((ask) => {
+        const open = source.onOpenOtherComputerAsk;
+        return {
+          id: `other-computer:${ask.hostId}:${"askId" in ask.request ? `ask:${String(ask.request.askId)}` : pendingRequestKey(ask.request)}`,
+          section: "needs-you" as const,
+          glyph: "ask" as const,
+          tone: "warning" as const,
+          label: "Waiting for you",
+          title: ask.request.threadTitle,
+          meta: [ask.readOnly ? `${ask.computer} · not connected` : ask.computer],
+          trailing: "Waiting",
+          at: String(ask.request.requestedAt),
+          ...(ask.readOnly || open === undefined
+            ? {}
+            : { onOpen: () => open(ask.hostId, String(ask.request.threadId)) }),
+        };
+      }),
     ],
   };
 }

@@ -22,13 +22,24 @@ import {
   MAX_BROWSER_CAPTURES_PER_THREAD,
 } from "./browserCapture";
 import { StoredBrowserProfile } from "./browserProfiles";
+import { HomeActivityCustomization } from "./codeHomeActivity";
 import {
   CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS,
   CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_DAYS,
   CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES,
   DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS,
+  DEFAULT_FOLLOW_UP_LATENESS_LIMIT_HOURS,
+  DEFAULT_SHIELD_DENIALS_IN_A_ROW,
+  DEFAULT_SHIELD_DENIALS_PER_THREAD,
+  DEFAULT_TOOLING_COMMAND_CONFIRM_MINUTES,
+  MAX_FOLLOW_UP_LATENESS_LIMIT_HOURS_SETTING,
+  MAX_SHIELD_DENIALS_IN_A_ROW_SETTING,
+  MAX_SHIELD_DENIALS_PER_THREAD_SETTING,
+  MAX_TOOLING_COMMAND_CONFIRM_MINUTES_SETTING,
   DEFAULT_COORDINATOR_ROUNDS,
   DEFAULT_COORDINATOR_WAKES_PER_HOUR,
+  DEFAULT_SIBLING_THREAD_READS_PER_TURN,
+  DEFAULT_SIBLING_THREAD_WAITS_PER_TURN,
   DEFAULT_THREAD_MESSAGES_PER_TURN,
   DEFAULT_THREAD_WAKEUPS_WAITING,
   MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING,
@@ -39,6 +50,8 @@ import {
   MAX_COORDINATOR_WAKES_PER_HOUR,
   MAX_COORDINATORS_PER_PROJECT,
   MAX_COORDINATORS_PER_PROJECT_SETTING,
+  MAX_SIBLING_THREAD_READS_PER_TURN_SETTING,
+  MAX_SIBLING_THREAD_WAITS_PER_TURN_SETTING,
   MAX_THREAD_MESSAGES_PER_TURN_SETTING,
   MAX_THREAD_WAKEUPS_WAITING_SETTING,
 } from "./octantLimits";
@@ -48,7 +61,7 @@ import {
   MAX_RUNTIME_TURNS_PER_TURN_SETTING,
   MAX_THREAD_TOOL_STEPS_SETTING,
 } from "./threadToolSteps";
-import { AggregateVersion, UtcTimestamp } from "./events";
+import { AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { DEFAULT_PAIRED_DEVICE_LIFETIME, PairedDeviceLifetime } from "./remoteAccess";
 import { HostId, LOCAL_HOST_ID } from "./host";
 import { OctantMode } from "./modes";
@@ -320,6 +333,15 @@ export const MAX_HOME_CARDS = 32;
 export const HomeCardCustomization = Schema.Struct({
   order: Schema.Array(HomeCardId).pipe(Schema.maxItems(MAX_HOME_CARDS)),
   visibility: Schema.Array(HomeCardPreference).pipe(Schema.maxItems(MAX_HOME_CARDS)),
+  /**
+   * The activity cards' own choices — shared timeframe, source and pinned
+   * ranges. Absent on stores written before the cards shipped; readers use
+   * the domain's effective defaults rather than rewriting the record. The
+   * four cards keep the home card ids `activity-prs-merged`,
+   * `activity-issues-closed`, `activity-releases-published` and
+   * `activity-runs` inside `order`/`visibility` like any other card.
+   */
+  activity: Schema.optional(HomeActivityCustomization),
 })
   .annotations(strict)
   .pipe(
@@ -507,7 +529,7 @@ export const TranscriptTextSize = Schema.Literal("small", "medium", "large");
 export type TranscriptTextSize = typeof TranscriptTextSize.Type;
 export const TranscriptWidth = Schema.Literal("narrow", "medium", "wide");
 export type TranscriptWidth = typeof TranscriptWidth.Type;
-/** How the composer's plan-usage meters draw their bar: a smooth fill or square cells. */
+/** Retired: how the plan-usage meters drew their bar; stays so old rows decode. */
 export const UsageBarStyle = Schema.Literal("smooth", "pixelated");
 export type UsageBarStyle = typeof UsageBarStyle.Type;
 /**
@@ -611,8 +633,20 @@ export const DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES: BackgroundSessionIdl
 export const DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT: AutoCompactWindowPercent = 85;
 export {
   DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS,
+  DEFAULT_FOLLOW_UP_LATENESS_LIMIT_HOURS,
+  DEFAULT_SHIELD_DENIALS_IN_A_ROW,
+  DEFAULT_SHIELD_DENIALS_PER_THREAD,
+  DEFAULT_TOOLING_COMMAND_CONFIRM_MINUTES,
+  MAX_FOLLOW_UP_LATENESS_LIMIT_HOURS_SETTING,
+  MAX_SHIELD_DENIALS_IN_A_ROW_SETTING,
+  MAX_SHIELD_DENIALS_PER_THREAD_SETTING,
+  MAX_TOOLING_COMMAND_CONFIRM_MINUTES_SETTING,
+  DEFAULT_SIBLING_THREAD_READS_PER_TURN,
+  DEFAULT_SIBLING_THREAD_WAITS_PER_TURN,
   DEFAULT_THREAD_MESSAGES_PER_TURN,
   MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING,
+  MAX_SIBLING_THREAD_READS_PER_TURN_SETTING,
+  MAX_SIBLING_THREAD_WAITS_PER_TURN_SETTING,
   MAX_THREAD_MESSAGES_PER_TURN_SETTING,
 };
 
@@ -677,6 +711,21 @@ export const SkillFolderSettings = Schema.Struct({
 });
 export type SkillFolderSettings = typeof SkillFolderSettings.Type;
 
+/**
+ * One "Remember for this Project" answer to a Computer use first-action
+ * approval below Full access: later threads in that Project control that
+ * application without asking again until the person forgets it in Settings.
+ * Grows only through the approval decision path; a settings replacement may
+ * only forget entries.
+ */
+export const RememberedComputerUseApp = Schema.Struct({
+  projectId: ProjectId,
+  appId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  grantedBy: EventActor,
+  grantedAt: UtcTimestamp,
+}).annotations(strict);
+export type RememberedComputerUseApp = typeof RememberedComputerUseApp.Type;
+
 /** One site remembered for one stored Browser profile; see `rememberedBrowserProfileSites`. */
 export const RememberedBrowserProfileSite = Schema.Struct({
   origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
@@ -713,6 +762,16 @@ export const RememberedBrowserTransfer = Schema.Struct({
   .pipe(Schema.filter((entry) => entry.profile === undefined || entry.privatePage !== true));
 export type RememberedBrowserTransfer = typeof RememberedBrowserTransfer.Type;
 
+/** The next-message suggestion switch and the modes it covers. */
+export const NextMessageSuggestionsSetting = Schema.Struct({
+  enabled: Schema.Boolean,
+  modes: Schema.Array(OctantMode).pipe(
+    Schema.maxItems(3),
+    Schema.filter((modes) => new Set(modes).size === modes.length),
+  ),
+}).annotations({ parseOptions: { onExcessProperty: "error" as const } });
+export type NextMessageSuggestionsSetting = typeof NextMessageSuggestionsSetting.Type;
+
 export const ShellSettings = Schema.Struct({
   chatEnabled: Schema.Boolean,
   workEnabled: Schema.Boolean,
@@ -729,6 +788,11 @@ export const ShellSettings = Schema.Struct({
   defaultFolder: Schema.optional(DefaultFolder),
   /** Absent preserves streaming replies for existing installations. */
   streamReplies: Schema.optional(Schema.Boolean),
+  /**
+   * Whether a reply predicts the person's next message for the composer's Tab,
+   * and in which modes. Absent means on in every mode.
+   */
+  nextMessageSuggestions: Schema.optional(NextMessageSuggestionsSetting),
   sidebarWidth: SidebarWidth,
   contextSidebarWidth: ContextSidebarWidth,
   lastContextSurface: Schema.NullOr(ContextSurfaceId),
@@ -923,6 +987,23 @@ export const ShellSettings = Schema.Struct({
     { default: () => DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES },
   ),
   /**
+   * Whether a provider launch outside Strict leaves the provider's own
+   * telemetry (usage metrics, error reports, trace and feedback uploads) to
+   * the provider's own settings. Off, Octant sets the provider's telemetry
+   * guards as Strict does. Strict sets them whatever this says. Off by
+   * default, including for a store persisted before the setting existed:
+   * before it, every launch set the telemetry guards, and Octant sends
+   * nothing to a vendor the person did not turn on.
+   */
+  providerTelemetry: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * Whether a provider launch outside Strict lets the provider check for and
+   * install a newer version of itself. Off, the default, keeps every
+   * self-update guard set, since Octant installs and updates provider CLIs
+   * itself; Strict keeps them set whatever this says.
+   */
+  providerSelfUpdate: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
    * How many wake-ups one thread may have waiting, missed ones included. A
    * store persisted before the setting existed decodes to the former fixed 8.
    */
@@ -970,12 +1051,22 @@ export const ShellSettings = Schema.Struct({
     Schema.Int.pipe(Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_ATTEMPTS_SETTING)),
     { default: () => CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS },
   ),
-  /** Thread messages one turn may send to other threads. */
+  /** Thread messages one turn may send to other threads under Strict. */
   threadMessagesPerTurn: Schema.optionalWith(
     Schema.Int.pipe(Schema.between(1, MAX_THREAD_MESSAGES_PER_TURN_SETTING)),
     { default: () => DEFAULT_THREAD_MESSAGES_PER_TURN },
   ),
-  /** The longest one Browser wait may last, in minutes. */
+  /** Sibling-thread `read` calls one turn may make under Strict. */
+  siblingThreadReadsPerTurn: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_SIBLING_THREAD_READS_PER_TURN_SETTING)),
+    { default: () => DEFAULT_SIBLING_THREAD_READS_PER_TURN },
+  ),
+  /** Sibling-thread `wait` calls one turn may make under Strict. */
+  siblingThreadWaitsPerTurn: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_SIBLING_THREAD_WAITS_PER_TURN_SETTING)),
+    { default: () => DEFAULT_SIBLING_THREAD_WAITS_PER_TURN },
+  ),
+  /** The longest one Browser wait may last under Strict, in minutes. */
   browserWaitLimitMinutes: Schema.optionalWith(
     Schema.Int.pipe(Schema.between(1, MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING)),
     { default: () => DEFAULT_BROWSER_WAIT_LIMIT_MINUTES },
@@ -984,6 +1075,26 @@ export const ShellSettings = Schema.Struct({
   childRunWaitLimitSeconds: Schema.optionalWith(
     Schema.Int.pipe(Schema.between(1, MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING)),
     { default: () => DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS },
+  ),
+  /** Shield denials in a row after which the next call goes to the person. */
+  shieldDenialsInARow: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_SHIELD_DENIALS_IN_A_ROW_SETTING)),
+    { default: () => DEFAULT_SHIELD_DENIALS_IN_A_ROW },
+  ),
+  /** Shield denials in one thread after which every call goes to the person. */
+  shieldDenialsPerThread: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_SHIELD_DENIALS_PER_THREAD_SETTING)),
+    { default: () => DEFAULT_SHIELD_DENIALS_PER_THREAD },
+  ),
+  /** How many hours late a follow-up may still run before it is recorded missed. */
+  followUpLatenessLimitHours: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_FOLLOW_UP_LATENESS_LIMIT_HOURS_SETTING)),
+    { default: () => DEFAULT_FOLLOW_UP_LATENESS_LIMIT_HOURS },
+  ),
+  /** Minutes a shown provider command may still be run with "Run this command once". */
+  toolingCommandConfirmMinutes: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_TOOLING_COMMAND_CONFIRM_MINUTES_SETTING)),
+    { default: () => DEFAULT_TOOLING_COMMAND_CONFIRM_MINUTES },
   ),
   /**
    * "Start agent-created routines active at Full access": a routine an agent
@@ -1021,10 +1132,7 @@ export const ShellSettings = Schema.Struct({
   transcriptWidth: Schema.optionalWith(TranscriptWidth, {
     default: () => "medium" as const,
   }),
-  /**
-   * How the plan-usage bars above the composer are drawn. A store persisted
-   * before the setting shipped decodes to the smooth bar.
-   */
+  /** Retired: the plan-usage bar style, with the Inbox card (2026-11-18); stays optional so old rows decode. */
   usageBars: Schema.optionalWith(UsageBarStyle, { default: () => "smooth" as const }),
   /**
    * How much of a turn's thinking and tool calls the transcript shows open.
@@ -1219,6 +1327,15 @@ export const ShellSettings = Schema.Struct({
     Schema.Array(RememberedBrowserTransfer).pipe(Schema.maxItems(1_024)),
     { default: () => [] },
   ),
+  /**
+   * Applications the person approved with "Remember for this Project" for the
+   * bundled Computer use tool below Full access. Grows only through the
+   * approval decision path; a settings replacement may only forget entries.
+   */
+  rememberedComputerUseApps: Schema.optionalWith(
+    Schema.Array(RememberedComputerUseApp).pipe(Schema.maxItems(1_024)),
+    { default: () => [] },
+  ),
   /** Local opt-in; old grants never inherit a newly enabled native owner. */
   persistentBrowserOwner: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   /**
@@ -1311,6 +1428,8 @@ const CodeTerminalWorkspaceTab = Schema.Struct({
    * own, which stays bound to the thread's original terminal.
    */
   terminalId: Schema.optional(CodeTerminalId),
+  /** The tab runs the thread's provider's own command-line program rather than a shell. */
+  program: Schema.optional(Schema.Literal("provider")),
 }).annotations(strict);
 const CodeTestWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("code-test"),

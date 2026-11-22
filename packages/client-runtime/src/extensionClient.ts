@@ -18,6 +18,8 @@ import {
   RuntimeCompactionDefaults,
   type DiscoveredAgentToolingRequest,
   McpServerSignInView,
+  McpServerSignInRelayResult,
+  type McpServerSignInRelayRequest,
   type McpServerSignInRequest,
   McpServerConnectionListing,
   McpServerReconnectResult,
@@ -77,6 +79,8 @@ export interface ExtensionClient {
   runtimeCompactionDefaults(): Promise<RuntimeCompactionDefaults>;
   /** Sign-in state and actions for a hosted server a person added. */
   mcpServerSignIn(request: McpServerSignInRequest): Promise<McpServerSignInView>;
+  /** Finishes a relayable paired-device sign-in attempt by sending its callback address once. */
+  relayMcpServerSignIn?(request: McpServerSignInRelayRequest): Promise<McpServerSignInRelayResult>;
   /** How each installed MCP server is connecting, from what the host retained. */
   mcpServerConnections(): Promise<McpServerConnectionListing>;
   /** Drops a server's connection and failure so the next task connects fresh; a local window only. */
@@ -327,6 +331,38 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
                 new ExtensionClientFailure(
                   "unavailable",
                   "Sign-in response was not confirmed. Check the existing attempt before trying again.",
+                ),
+              );
+            }, 30_000);
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    },
+    async relayMcpServerSignIn(relay) {
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          request(
+            fetch,
+            new URL("/api/extensions/mcp-sign-in/relay", options.baseUrl).toString(),
+            {
+              method: "POST",
+              signal: controller.signal,
+              headers: { ...headers, "content-type": "application/json" },
+              body: JSON.stringify(relay),
+            },
+            decodeHostAnswer(McpServerSignInRelayResult),
+          ),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => {
+              controller.abort();
+              reject(
+                new ExtensionClientFailure(
+                  "unavailable",
+                  "Sign-in relay response was not confirmed. Check the existing attempt before trying again.",
                 ),
               );
             }, 30_000);

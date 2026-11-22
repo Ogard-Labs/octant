@@ -6,7 +6,9 @@ import {
   ActorId,
   ReplayCursor,
   decodeBindingRevisionId,
+  decodeCodeCheckoutId,
   decodeCodeTerminalId,
+  decodeCodeThreadId,
   decodeLayoutNodeId,
   decodePaneId,
   decodeEventActor,
@@ -38,6 +40,7 @@ import { rebuildProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { ProjectTerminalService } from "./projectTerminalService";
+import type { ProviderTerminalLaunch } from "../providers/providerTerminal";
 import { TerminalService } from "./terminalService";
 import { TerminalProcessPort } from "./terminalProcessPort";
 import { makeProcessConfinementLive } from "../process/seatbeltProfile";
@@ -212,10 +215,20 @@ function harness(
     readonly serverProject?: ConstructorParameters<
       typeof ProjectTerminalService
     >[0]["serverProject"];
+    readonly placeServerAction?: ConstructorParameters<
+      typeof ProjectTerminalService
+    >[0]["placeServerAction"];
     readonly personPairedDevice?: (scope: string) => boolean;
+    readonly isPersonPairedDeviceCurrent?: ConstructorParameters<
+      typeof ProjectTerminalService
+    >[0]["isPersonPairedDeviceCurrent"];
     readonly deviceQuietMs?: number;
     readonly strict?: boolean;
     readonly shell?: string;
+    readonly launchThrows?: boolean;
+    readonly providerTerminal?: ConstructorParameters<
+      typeof ProjectTerminalService
+    >[0]["providerTerminal"];
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-project-terminal-"));
@@ -231,6 +244,12 @@ function harness(
   });
   const projects = options.projects ?? new Map([[ids.project, project()]]);
   const terminals = new FakeTerminals();
+  if (options.launchThrows === true) {
+    terminals.launch = async (request: TerminalLaunchRequest) => {
+      terminals.launches.push(request);
+      throw new Error("simulated launch failure");
+    };
+  }
   let sequence = 0;
   const service = new ProjectTerminalService({
     terminals,
@@ -254,15 +273,24 @@ function harness(
     uuid: () => `91000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
     clock: () => now,
     ...(options.serverProject === undefined ? {} : { serverProject: options.serverProject }),
+    ...(options.placeServerAction === undefined
+      ? {}
+      : { placeServerAction: options.placeServerAction }),
     ...(options.personPairedDevice === undefined
       ? {}
       : {
           personPairedDevice: (scope: WindowId) =>
             options.personPairedDevice?.(String(scope)) === true,
         }),
+    ...(options.isPersonPairedDeviceCurrent === undefined
+      ? {}
+      : { isPersonPairedDeviceCurrent: options.isPersonPairedDeviceCurrent }),
     ...(options.deviceQuietMs === undefined ? {} : { deviceQuietMs: options.deviceQuietMs }),
     ...(options.strict === undefined ? {} : { strict: () => options.strict === true }),
     ...(options.shell === undefined ? {} : { shell: () => options.shell ?? "" }),
+    ...(options.providerTerminal === undefined
+      ? {}
+      : { providerTerminal: options.providerTerminal }),
   });
   const events = () =>
     journal
@@ -601,7 +629,11 @@ describe("Project terminal actions", () => {
           `cd /d "${win32.join(root, "apps/web")}" && bun run dev`,
         ],
       ] as const) {
-        const { service, terminals } = harness({ projects: withActions("apps/web"), shell });
+        const { service, terminals } = harness({
+          projects: withActions("apps/web"),
+          shell,
+          strict: false,
+        });
         await service.execute(windowId, "local-window", start());
         const result = await service.execute(windowId, "local-window", run());
         expect(result).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
@@ -618,6 +650,7 @@ describe("Project terminal actions", () => {
       const { service, terminals } = harness({
         projects: withActions("."),
         shell: "C:\\msys64\\usr\\bin\\bash.exe",
+        strict: false,
       });
       await service.execute(windowId, "local-window", start());
       const before = terminals.launches.length;
@@ -898,19 +931,70 @@ describe("Project terminals", () => {
       ]);
     });
 
-    it("keeps saved actions and worktree setup at a window", async () => {
+    it("keeps local worktree setup at a window while admitting saved actions and server shells", async () => {
       const { service, terminals } = harness({
         access: () => true,
         personPairedDevice: (scope) => scope === deviceId,
       });
+      const preparation = await service.execute(
+        deviceScope,
+        "local-window",
+        {
+          kind: "child-worktree-source",
+          projectId,
+          thread: {
+            threadId: decodeCodeThreadId("00000000-0000-4000-8000-000000000091"),
+            checkoutId: decodeCodeCheckoutId("00000000-0000-4000-8000-000000000092"),
+          },
+          action: "capture",
+        },
+        deviceActor,
+      );
+      expect(refusal(preparation)).toBe("unauthorized");
       const suggested = await service.execute(
         deviceScope,
         "local-window",
         { kind: "suggest-actions", projectId },
         deviceActor,
       );
-      expect(refusal(suggested)).toBe("unauthorized");
+      expect(suggested.kind).toBe("project-action-suggestions");
       expect(terminals.launches).toEqual([]);
+    });
+
+    it("opens a server Project terminal owned by the device and ends it on revoke or quiet without affecting local windows", async () => {
+      let deviceLive = true;
+      const login = { command: "ssh", args: ["web"], environment: {} };
+      const { service, terminals, journal } = harness({
+        projects: new Map(),
+        access: () => true,
+        serverProject: () => ({
+          mode: "code",
+          bindingRevisionId: decodeBindingRevisionId("00000000-0000-4000-8000-000000000077"),
+          login: () => login,
+        }),
+        personPairedDevice: (scope) => scope === deviceId,
+        isPersonPairedDeviceCurrent: () => deviceLive,
+        deviceQuietMs: 60_000,
+      });
+      const binding = { deviceId, sessionId: "sess-1", credentialGeneration: 2 };
+      const started = await service.execute(
+        deviceScope,
+        "local-window",
+        start(),
+        deviceActor,
+        binding,
+      );
+      expect(started).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
+      expect(terminals.launches[0]?.server).toEqual(login);
+
+      // Device revocation/session end terminates the server terminal and journals the device actor.
+      deviceLive = false;
+      await service.settleAuthorities();
+      expect(terminals.terminated).toEqual([ids.terminal]);
+      expect(actors(journal)).toEqual([
+        { name: "code.project-terminal-started@1", actor: deviceActor },
+        { name: "code.project-terminal-ended@1", actor: deviceActor },
+      ]);
     });
 
     it("ends the device's shell when the device goes quiet, and when it stops acting as the person", async () => {
@@ -942,6 +1026,386 @@ describe("Project terminals", () => {
       });
       expect(refusal(after)).toBe("authority-revoked");
       expect(revoked.terminals.terminated).toEqual([ids.terminal]);
+    });
+
+    it("refuses to launch a server saved action when the device session ends while SSH placement is pending", async () => {
+      let deviceLive = true;
+      const login = { command: "ssh", args: ["web"], environment: {} };
+      const serverRev = decodeBindingRevisionId("00000000-0000-4000-8000-000000000078");
+      const placementRevision = `sha256:${"a".repeat(64)}`;
+      const { service, terminals, journal } = harness({
+        projects: new Map(),
+        access: () => true,
+        personPairedDevice: (scope) => scope === deviceId,
+        isPersonPairedDeviceCurrent: () => deviceLive,
+        serverProject: () => ({
+          mode: "work",
+          interactiveAllowed: true,
+          bindingRevisionId: serverRev,
+          login: () => login,
+        }),
+        placeServerAction: async () => {
+          // Device signs out or renews its credential while SSH placement is in flight.
+          deviceLive = false;
+          return {
+            kind: "placed-on-server",
+            projectVersion: 1 as never,
+            bindingRevisionId: serverRev,
+            action: {
+              id: "92000000-0000-4000-8000-000000000001" as never,
+              name: "Deploy",
+              command: "make deploy",
+              directory: ".",
+            },
+            login,
+            current: () => true,
+            receipt: {
+              actionId: "92000000-0000-4000-8000-000000000001" as never,
+              name: "Deploy",
+              folder: "/srv/app",
+              server: {
+                serverId: "92000000-0000-4000-8000-000000000002" as never,
+                alias: "web",
+                user: "deploy",
+                profile: "operate",
+                placementRevision,
+                confinement: "none",
+              },
+            },
+          };
+        },
+      });
+      const binding = { deviceId, sessionId: "sess-1", credentialGeneration: 2 };
+      const result = await service.execute(
+        deviceScope,
+        "local-window",
+        {
+          kind: "start-action",
+          projectId,
+          terminalId,
+          actionId: "92000000-0000-4000-8000-000000000001" as never,
+          projectVersion: 1 as never,
+          placementRevision,
+          columns: 100,
+          rows: 30,
+        },
+        deviceActor,
+        binding,
+      );
+      expect(refusal(result)).toBe("authority-revoked");
+      expect(terminals.launches).toEqual([]);
+      expect(actors(journal)).toEqual([]);
+    });
+
+    it("keeps a device's server Code action running when settleAuthorities runs outside CodeProjectAccess.run, and ends it on device revoke", async () => {
+      const { CodeProjectAccess } = await import("../codeProjectAccess");
+      let deviceLive = true;
+      const login = { command: "ssh", args: ["web"], environment: {} };
+      const serverRev = decodeBindingRevisionId("00000000-0000-4000-8000-000000000079");
+      const placementRevision = `sha256:${"b".repeat(64)}`;
+      const codeProjectAccess = new CodeProjectAccess({
+        readWorkspace: () => undefined,
+        hasActiveCodeProject: (id) => String(id) === ids.project,
+        isWindowLive: () => false,
+        isPairedDevice: (scope) => deviceLive && String(scope) === deviceId,
+      });
+      const personPairedDevice = (scope: string) => deviceLive && scope === deviceId;
+      const standingCodeAccess = (scope: WindowId, id: ProjectId) =>
+        personPairedDevice(String(scope))
+          ? codeProjectAccess.hasActiveCodeProject(id)
+          : codeProjectAccess.canAccessProject(scope, id);
+      const { service, terminals } = harness({
+        projects: new Map(),
+        access: (scope, id) => standingCodeAccess(decodeWindowId(scope), decodeProjectId(id)),
+        personPairedDevice,
+        isPersonPairedDeviceCurrent: () => deviceLive,
+        serverProject: () => ({
+          mode: "code",
+          bindingRevisionId: serverRev,
+          login: () => login,
+        }),
+        placeServerAction: async () => ({
+          kind: "placed-on-server",
+          projectVersion: 1 as never,
+          bindingRevisionId: serverRev,
+          action: {
+            id: "92000000-0000-4000-8000-000000000001" as never,
+            name: "Build",
+            command: "make build",
+            directory: ".",
+          },
+          login,
+          current: () => standingCodeAccess(deviceScope, projectId),
+          receipt: {
+            actionId: "92000000-0000-4000-8000-000000000001" as never,
+            name: "Build",
+            folder: "/srv/app",
+            server: {
+              serverId: "92000000-0000-4000-8000-000000000002" as never,
+              alias: "web",
+              user: "deploy",
+              profile: "operate",
+              placementRevision,
+              confinement: "none",
+            },
+          },
+        }),
+      });
+      const binding = { deviceId, sessionId: "sess-1", credentialGeneration: 2 };
+      // Start the device action inside an authenticated CodeProjectAccess.run request scope.
+      const started = await codeProjectAccess.run(
+        {
+          scopeId: deviceScope,
+          principal: {
+            kind: "remote-device",
+            deviceId,
+            credentialGeneration: 2,
+            admittedBy: "host-person",
+          } as never,
+        },
+        () =>
+          service.execute(
+            deviceScope,
+            "local-window",
+            {
+              kind: "start-action",
+              projectId,
+              terminalId,
+              actionId: "92000000-0000-4000-8000-000000000001" as never,
+              projectVersion: 1 as never,
+              placementRevision,
+              columns: 100,
+              rows: 30,
+            },
+            deviceActor,
+            binding,
+          ),
+      );
+      expect(started).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
+      // Outside the request (e.g. an unrelated local window closes -> settleAuthorities),
+      // CodeProjectAccess.canAccessProject would fall back to persisted window workspaces and return false,
+      // but standing device authorization keeps the device's running action alive.
+      expect(codeProjectAccess.canAccessProject(deviceScope, projectId)).toBe(false);
+      await service.settleAuthorities();
+      expect(terminals.terminated).toEqual([]);
+      // Revoking the device terminates the server Code action.
+      deviceLive = false;
+      await service.settleAuthorities();
+      expect(terminals.terminated).toEqual([ids.terminal]);
+    });
+
+    it("journals the device actor for both successful and failed local saved action starts", async () => {
+      const actionId = "92000000-0000-4000-8000-000000000001";
+      const withAction = new Map([
+        [
+          ids.project,
+          project({
+            actions: [{ id: actionId, name: "Test", command: "bun test", directory: "." }],
+          }),
+        ],
+      ]);
+      const ok = harness({
+        projects: withAction,
+        access: () => true,
+        personPairedDevice: (scope) => scope === deviceId,
+        strict: false,
+      });
+      const started = await ok.service.execute(
+        deviceScope,
+        "local-window",
+        {
+          kind: "start-action",
+          projectId,
+          terminalId,
+          actionId: actionId as never,
+          columns: 100,
+          rows: 30,
+        },
+        deviceActor,
+        { deviceId, sessionId: "sess-1", credentialGeneration: 2 },
+      );
+      expect(started).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
+      ok.terminals.exit(ids.terminal, 0);
+      expect(actors(ok.journal)).toEqual([
+        { name: "code.project-terminal-started@1", actor: deviceActor },
+        { name: "code.project-terminal-ended@1", actor: deviceActor },
+      ]);
+
+      const failed = harness({
+        projects: withAction,
+        access: () => true,
+        personPairedDevice: (scope) => scope === deviceId,
+        strict: false,
+        launchThrows: true,
+      });
+      const refusedStart = await failed.service.execute(
+        deviceScope,
+        "local-window",
+        {
+          kind: "start-action",
+          projectId,
+          terminalId,
+          actionId: actionId as never,
+          columns: 100,
+          rows: 30,
+        },
+        deviceActor,
+        { deviceId, sessionId: "sess-1", credentialGeneration: 2 },
+      );
+      expect(refusal(refusedStart)).toBe("unavailable");
+      expect(actors(failed.journal)).toEqual([
+        { name: "code.project-terminal-started@1", actor: deviceActor },
+        { name: "code.project-terminal-ended@1", actor: deviceActor },
+      ]);
+    });
+
+    it("admits local Work task preview-action and start-action for a person-paired device without a window workspace", async () => {
+      const actionId = "92000000-0000-4000-8000-000000000001";
+      const workThreadId = "92000000-0000-4000-8000-000000000055" as never;
+      const workProject = project({
+        type: "work",
+        actions: [{ id: actionId, name: "Build", command: "make docs", directory: "." }],
+      });
+      let deviceLive = true;
+      const { service, terminals } = harness({
+        projects: new Map([[ids.project, workProject]]),
+        access: (scope) => deviceLive && scope === deviceId,
+        personPairedDevice: (scope) => deviceLive && scope === deviceId,
+        isPersonPairedDeviceCurrent: () => deviceLive,
+        strict: false,
+        resolveActionWorkThread: async (scope) =>
+          scope === deviceScope
+            ? {
+                root,
+                executionPolicy: "full-access",
+                current: () => deviceLive,
+                active: () => deviceLive,
+              }
+            : undefined,
+      });
+      const binding = { deviceId, sessionId: "sess-work", credentialGeneration: 2 };
+      const preview = await service.execute(
+        deviceScope,
+        "local-window",
+        {
+          kind: "preview-action",
+          projectId,
+          actionId: actionId as never,
+          workThreadId,
+        },
+        deviceActor,
+        binding,
+      );
+      expect(preview).toMatchObject({ kind: "project-action-preview" });
+      const started = await service.execute(
+        deviceScope,
+        "local-window",
+        {
+          kind: "start-action",
+          projectId,
+          terminalId,
+          actionId: actionId as never,
+          workThreadId,
+          columns: 100,
+          rows: 30,
+        },
+        deviceActor,
+        binding,
+      );
+      expect(started).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
+      expect(terminals.launches).toHaveLength(1);
+    });
+
+    it("refuses another active session of the same paired device from reading, typing into, resizing, or stopping the first session's terminal", async () => {
+      const { service, terminals } = harness({
+        access: () => true,
+        personPairedDevice: (scope) => scope === deviceId,
+        isPersonPairedDeviceCurrent: () => true,
+      });
+      const sessionA = { deviceId, sessionId: "sess-a", credentialGeneration: 2 };
+      const sessionB = { deviceId, sessionId: "sess-b", credentialGeneration: 2 };
+      const rotatedA = { deviceId, sessionId: "sess-a", credentialGeneration: 3 };
+
+      const started = await service.execute(
+        deviceScope,
+        "local-window",
+        start(),
+        deviceActor,
+        sessionA,
+      );
+      expect(started).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
+
+      for (const other of [sessionB, rotatedA, undefined]) {
+        expect(
+          refusal(
+            await service.execute(
+              deviceScope,
+              "local-window",
+              { kind: "attach", projectId, terminalId },
+              deviceActor,
+              other,
+            ),
+          ),
+        ).toBe("unauthorized");
+        expect(
+          refusal(
+            await service.execute(
+              deviceScope,
+              "local-window",
+              { kind: "read-output", projectId, terminalId, afterCharacters: 0 },
+              deviceActor,
+              other,
+            ),
+          ),
+        ).toBe("unauthorized");
+        expect(
+          refusal(
+            await service.execute(
+              deviceScope,
+              "local-window",
+              { kind: "write", projectId, terminalId, data: "evil\r" },
+              deviceActor,
+              other,
+            ),
+          ),
+        ).toBe("unauthorized");
+        expect(
+          refusal(
+            await service.execute(
+              deviceScope,
+              "local-window",
+              { kind: "resize", projectId, terminalId, columns: 80, rows: 24 },
+              deviceActor,
+              other,
+            ),
+          ),
+        ).toBe("unauthorized");
+        expect(
+          refusal(
+            await service.execute(
+              deviceScope,
+              "local-window",
+              { kind: "stop", projectId, terminalId },
+              deviceActor,
+              other,
+            ),
+          ),
+        ).toBe("unauthorized");
+      }
+      expect(terminals.writes).toEqual([]);
+      expect(terminals.terminated).toEqual([]);
+
+      // Session A still owns and controls its terminal.
+      expect(
+        await service.execute(
+          deviceScope,
+          "local-window",
+          { kind: "write", projectId, terminalId, data: "ok\r" },
+          deviceActor,
+          sessionA,
+        ),
+      ).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
+      expect(terminals.writes).toEqual(["ok\r"]);
     });
   });
 
@@ -1750,4 +2214,169 @@ it("starts a Work terminal in its task folder and refuses a withdrawn task witho
   } finally {
     f.connection.close();
   }
+});
+
+describe("Work task provider terminal", () => {
+  const workThreadId = "94000000-0000-4000-8000-000000000001";
+  function providerHarness(
+    options: {
+      readonly strict?: boolean;
+      readonly executionPolicy?: "approval-gated" | "full-access" | "plan";
+      readonly fullAccessSandbox?: boolean;
+    } = {},
+  ) {
+    const providerTerminal = vi.fn(
+      (_input: {
+        readonly workThreadId: string;
+        readonly shell: string;
+        readonly strict: boolean;
+      }): ProviderTerminalLaunch => ({
+        status: "resolved",
+        name: "Google Antigravity",
+        command: "exec '/opt/tools/agy'",
+        environment: { GEMINI_HOME: "/Users/person/.gemini" },
+      }),
+    );
+    const f = harness({
+      projects: new Map([[ids.project, project({ type: "work" })]]),
+      access: () => true,
+      shell: "/bin/zsh",
+      ...(options.strict === undefined ? {} : { strict: options.strict }),
+      providerTerminal,
+      resolveActionWorkThread: async () => ({
+        root: "/approved/notes",
+        executionPolicy: options.executionPolicy ?? "approval-gated",
+        ...(options.fullAccessSandbox === undefined
+          ? {}
+          : { fullAccessSandbox: options.fullAccessSandbox }),
+        current: () => true,
+        active: () => true,
+      }),
+    });
+    return { ...f, providerTerminal };
+  }
+  const providerStart = (overrides: Readonly<Record<string, unknown>> = {}) =>
+    decodeProjectTerminalCommand({ ...start(), workThreadId, program: "provider", ...overrides });
+
+  it("opens the Work task's provider program with its account environment in the task's folder", async () => {
+    const f = providerHarness();
+    try {
+      expect(await f.service.execute(windowId, "local-window", providerStart())).toMatchObject({
+        kind: "project-terminal",
+        terminal: { state: "running" },
+      });
+      // No Strict value reads as Strict, so the program gets the guarded environment.
+      expect(f.providerTerminal).toHaveBeenCalledWith({
+        workThreadId,
+        shell: "/bin/zsh",
+        strict: true,
+      });
+      expect(f.terminals.launches[0]).toMatchObject({
+        command: "exec '/opt/tools/agy'",
+        environment: { GEMINI_HOME: "/Users/person/.gemini" },
+        cwd: "/approved/notes",
+        executionPolicy: "approval-gated",
+      });
+      // Under Strict it stays confined as the task's terminals are.
+      expect(f.terminals.launches[0]).not.toHaveProperty("strict", false);
+    } finally {
+      f.connection.close();
+    }
+  });
+
+  it("journals that the terminal ran the task's provider program and tells a Zen card so, while a plain terminal records none", async () => {
+    const f = providerHarness();
+    const plain = providerHarness();
+    try {
+      await f.service.execute(windowId, "local-window", providerStart());
+      await plain.service.execute(
+        windowId,
+        "local-window",
+        decodeProjectTerminalCommand({ ...start(), workThreadId }),
+      );
+      expect(f.events()[0]).toMatchObject({
+        name: "code.project-terminal-started@1",
+        payload: { kind: "project-terminal-started", program: "provider" },
+      });
+      expect(plain.events()[0]?.payload).not.toHaveProperty("program");
+      const terminalId = decodeCodeTerminalId(ids.terminal);
+      expect(f.service.program(terminalId)).toBe("provider");
+      // The card names the program this start resolved, not the task's later one.
+      expect(f.service.programName(terminalId)).toBe("Google Antigravity");
+      expect(plain.service.program(terminalId)).toBeUndefined();
+      expect(plain.service.programName(terminalId)).toBeUndefined();
+    } finally {
+      f.connection.close();
+      plain.connection.close();
+    }
+  });
+
+  it("runs the Work provider terminal unconfined outside Strict, as the task's turns run, and confined where the task keeps its sandbox", async () => {
+    const outside = providerHarness({ strict: false });
+    const kept = providerHarness({
+      strict: false,
+      executionPolicy: "full-access",
+      fullAccessSandbox: true,
+    });
+    try {
+      await outside.service.execute(windowId, "local-window", providerStart());
+      expect(outside.terminals.launches[0]).toMatchObject({
+        command: "exec '/opt/tools/agy'",
+        strict: false,
+        // The task's own level, not the Full access a plain terminal takes outside Strict.
+        executionPolicy: "approval-gated",
+      });
+      await kept.service.execute(windowId, "local-window", providerStart());
+      expect(kept.terminals.launches[0]).toMatchObject({ command: "exec '/opt/tools/agy'" });
+      expect(kept.terminals.launches[0]).not.toHaveProperty("strict", false);
+    } finally {
+      outside.connection.close();
+      kept.connection.close();
+    }
+  });
+
+  it("refuses a provider terminal for a remote session, a Plan task, and a Project terminal with no task", async () => {
+    const f = providerHarness();
+    const plan = providerHarness({ executionPolicy: "plan" });
+    try {
+      expect(await f.service.execute(windowId, "remote-device", providerStart())).toMatchObject({
+        kind: "project-terminal-refused",
+        reason: "unauthorized",
+      });
+      expect(
+        await f.service.execute(
+          windowId,
+          "local-window",
+          decodeProjectTerminalCommand({ ...start(), program: "provider" }),
+        ),
+      ).toMatchObject({ kind: "project-terminal-refused" });
+      expect(await plan.service.execute(windowId, "local-window", providerStart())).toMatchObject({
+        kind: "project-terminal-refused",
+      });
+      expect(f.providerTerminal).not.toHaveBeenCalled();
+      expect(plan.providerTerminal).not.toHaveBeenCalled();
+      expect(f.terminals.launches).toHaveLength(0);
+      expect(plan.terminals.launches).toHaveLength(0);
+    } finally {
+      f.connection.close();
+      plan.connection.close();
+    }
+  });
+
+  it("starts nothing when the task's provider has no program to open", async () => {
+    const f = providerHarness();
+    f.providerTerminal.mockReturnValueOnce({
+      status: "refused",
+      message: "This thread's provider has no command-line program Octant can open.",
+    });
+    try {
+      expect(await f.service.execute(windowId, "local-window", providerStart())).toMatchObject({
+        kind: "project-terminal-refused",
+        reason: "unavailable",
+      });
+      expect(f.terminals.launches).toHaveLength(0);
+    } finally {
+      f.connection.close();
+    }
+  });
 });

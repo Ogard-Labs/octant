@@ -1432,6 +1432,7 @@ describe("ChatProjection", () => {
             turnId: ids.turn,
             attemptId: ids.attempt,
             toolStep: { toolCallId: "call-1", toolName: "Web search", state },
+            ...(state === "completed" ? { reasoningMs: 4_000 } : {}),
             updatedAt: at,
           }),
         ],
@@ -1453,6 +1454,33 @@ describe("ChatProjection", () => {
         }),
       ],
     });
+    // The turn's final whole-attempt snapshot restates the same totals.
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 7,
+      events: [
+        pending("chat.attempt-updated@1", {
+          kind: "attempt-updated",
+          attempt: {
+            id: ids.attempt,
+            turnId: ids.turn,
+            threadId: ids.thread,
+            providerInstanceId: ids.provider,
+            providerSessionId: ids.session,
+            modelId: "model-a",
+            contextManifestId: ids.manifest,
+            outcome: "completed",
+            responseRefs: [refA, refB],
+            citationIds: [],
+            toolSteps: [{ toolCallId: "call-1", toolName: "Web search", state: "completed" }],
+            toolStepsTruncated: true,
+            reasoningMs: 4_000,
+            createdAt: now,
+            updatedAt: "2026-07-19T12:00:06.000Z",
+          },
+        }),
+      ],
+    });
     const envelopes = store
       .replay({ afterSequence: 0, limit: 100 } as never)
       .filter(
@@ -1462,18 +1490,154 @@ describe("ChatProjection", () => {
       );
     // Applied twice, as a replay over a projection that is already ahead does.
     for (const envelope of [...envelopes, ...envelopes]) projection.apply(connection, envelope);
+    // The incremental reasoning total reaches the projection before the whole
+    // attempt does — and the replayed step rows must not drop it.
+    const midAttempt = readChatThreadView(connection, decodeChatThreadId(ids.thread))?.turns[0]
+      ?.attempts[0];
+    expect(midAttempt?.reasoningMs).toBe(4_000);
+
+    const snapshot = store
+      .replay({ afterSequence: 0, limit: 100 } as never)
+      .filter((entry) => entry.eventName === "chat.attempt-updated@1")
+      .at(-1);
+    if (snapshot === undefined) throw new Error("expected the attempt snapshot event");
+    projection.apply(connection, snapshot);
 
     const attempt = readChatThreadView(connection, decodeChatThreadId(ids.thread))?.turns[0]
       ?.attempts[0];
+    expect(attempt?.reasoningMs).toBe(4_000);
     expect(attempt?.toolSteps).toEqual([
       { toolCallId: "call-1", toolName: "Web search", state: "completed" },
     ]);
     expect(attempt?.toolStepsTruncated).toBe(true);
-    expect(attempt?.updatedAt).toBe("2026-07-19T12:00:05.000Z");
+    expect(attempt?.updatedAt).toBe("2026-07-19T12:00:06.000Z");
     expect(attempt?.responseRefs.map((reference) => reference.contentId)).toEqual([
       ids.content,
       "82000000-0000-4000-8000-000000000071",
     ]);
+    connection.close();
+  });
+
+  it("replays turn loop and stall notices onto the Chat attempt idempotently", () => {
+    const connection = openConnection();
+    const { projection } = chatRuntime();
+    const store = journal(connection);
+    const refA = { contentId: ids.content, digest: digest("a"), byteLength: 1 };
+
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 0,
+      events: [pending("chat.thread-created@1", { kind: "thread-created", thread: thread() })],
+    });
+    store.append(
+      {
+        aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+        expectedVersion: 1,
+        events: [
+          pending("chat.turn-created@1", {
+            kind: "turn-created",
+            turn: {
+              id: ids.turn,
+              threadId: ids.thread,
+              sequence: 1,
+              userMessageRef: refA,
+              attachmentIds: [],
+              attempts: [
+                {
+                  id: ids.attempt,
+                  turnId: ids.turn,
+                  threadId: ids.thread,
+                  providerInstanceId: ids.provider,
+                  providerSessionId: ids.session,
+                  modelId: "model-a",
+                  contextManifestId: ids.manifest,
+                  outcome: "streaming",
+                  responseRefs: [],
+                  citationIds: [],
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              ],
+              createdAt: now,
+            },
+          }),
+        ],
+      },
+      {
+        beforeEvents(inner) {
+          writeChatContent(inner, {
+            contentId: ids.content,
+            threadId: ids.thread,
+            role: "user",
+            body: "a",
+            digest: digest("a"),
+            byteLength: 1,
+          });
+        },
+      },
+    );
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 2,
+      events: [
+        pending("chat.turn-loop-noticed@1", {
+          kind: "turn-loop-noticed",
+          threadId: ids.thread,
+          turnId: ids.turn,
+          attemptId: ids.attempt,
+          toolName: "octant_lookup",
+          count: 6,
+          occurredAt: "2026-07-19T12:01:00.000Z",
+        }),
+      ],
+    });
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 3,
+      events: [
+        pending("chat.turn-stall-noticed@1", {
+          kind: "turn-stall-noticed",
+          threadId: ids.thread,
+          turnId: ids.turn,
+          attemptId: ids.attempt,
+          idleMs: 1_800_000,
+          occurredAt: "2026-07-19T12:31:00.000Z",
+        }),
+      ],
+    });
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 4,
+      events: [
+        pending("chat.turn-loop-stopped@1", {
+          kind: "turn-loop-stopped",
+          threadId: ids.thread,
+          turnId: ids.turn,
+          attemptId: ids.attempt,
+          toolName: "octant_lookup",
+          count: 6,
+          occurredAt: "2026-07-19T12:32:00.000Z",
+        }),
+      ],
+    });
+
+    const envelopes = store.replay({ afterSequence: 0, limit: 100 } as never);
+    projection.reset(connection);
+    for (const envelope of [...envelopes, ...envelopes]) projection.apply(connection, envelope);
+
+    const replayed = readChatThreadView(connection, decodeChatThreadId(ids.thread))?.turns[0]
+      ?.attempts[0];
+    expect(replayed?.loopNotice).toEqual({
+      kind: "turn-loop-stopped",
+      toolName: "octant_lookup",
+      count: 6,
+      occurredAt: "2026-07-19T12:32:00.000Z",
+    });
+    expect(replayed?.stallNotice).toEqual({
+      kind: "turn-stall-noticed",
+      idleMs: 1_800_000,
+      occurredAt: "2026-07-19T12:31:00.000Z",
+    });
     connection.close();
   });
 

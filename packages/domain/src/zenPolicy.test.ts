@@ -12,7 +12,6 @@ import {
   processZenCommand,
   applyTimerAction,
   reconcileScheduledTimer,
-  checkChecklistIsolation,
   resolveAccessibilityFallbacks,
   validateGeometry,
   validateSafeUrl,
@@ -234,7 +233,7 @@ describe("addElement", () => {
     ).toThrow(ZenPolicyRejected);
   });
 
-  it("refuses a Project terminal card naming a shell on some other host, and keeps its Project fixed", () => {
+  it("refuses a Project terminal card naming a shell on some other host, and keeps its Project and program fixed", () => {
     const card = {
       elementId: makeId("6a6a6a6a") as ZenElementId,
       kind: "project-terminal",
@@ -263,6 +262,13 @@ describe("addElement", () => {
         pinned.version,
         localHostId,
       ),
+    ).toThrow(ZenPolicyRejected);
+    // What the terminal runs is the owner's answer at pinning, not the client's.
+    expect(() =>
+      updateElement(pinned, { ...card, program: "provider" }, pinned.version, localHostId),
+    ).toThrow(ZenPolicyRejected);
+    expect(() =>
+      updateElement(pinned, { ...card, programName: "Gemini CLI" }, pinned.version, localHostId),
     ).toThrow(ZenPolicyRejected);
     expect(
       updateElement(
@@ -805,28 +811,6 @@ describe("recoverSpace", () => {
     expect(result.viewport).toEqual(DEFAULT_ZEN_VIEWPORT);
     expect(result.appearance).toEqual(DEFAULT_ZEN_APPEARANCE);
     expect(result.version).toBe(4);
-  });
-});
-
-describe("checkChecklistIsolation", () => {
-  it("returns true for clean space", () => {
-    expect(checkChecklistIsolation(makeSpace())).toBe(true);
-  });
-
-  it("returns true for space with checklist", () => {
-    const space = makeSpace(0, [
-      {
-        elementId: makeId("22222222") as ZenElementId,
-        kind: "checklist",
-        widgetVersion: 0 as AggregateVersion,
-        items: [{ itemId: makeId("66666666"), text: "Task 1", done: false }],
-        geometry: { x: 100, y: 100, width: 400, height: 300 },
-        zIndex: 1 as any,
-        minimized: false,
-        locked: false,
-      },
-    ]);
-    expect(checkChecklistIsolation(space)).toBe(true);
   });
 });
 

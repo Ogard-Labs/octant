@@ -34,22 +34,31 @@ import {
   type TurnStopReason,
   type TurnUsage,
   type ThreadTaskProgress,
+  type TurnLoopNotice,
+  type TurnStallNotice,
   DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
   MAX_THREAD_TASKS_PER_TURN,
   restateThreadTaskList,
   upsertThreadTaskProgress,
+  type ThreadCallTiming,
   type ThreadToolStep,
 } from "@octant/contracts";
 import {
   accumulateTurnUsage,
+  appendRepeatToolWarning,
   changedThreadToolStep,
+  decideTurnStallAction,
+  createTurnActivityTiming,
+  INITIAL_TURN_LOOP_STATE,
   isNativeHarnessDriverKind,
   markThreadToolStepOutsideContent,
   observeTurnMetrics,
+  observeTurnRuntimeEvent,
   recordThreadAppToolStep,
   recordThreadToolStep,
   startTurnMetrics,
   type ThreadToolSteps,
+  type TurnLoopOutcome,
   turnRuntimeEventBudget,
 } from "@octant/domain";
 import { answerChatTurnQuestion, transitionChatAttempt } from "@octant/domain/chat-policy";
@@ -86,6 +95,7 @@ import {
   makeStreamedOutputBudget,
   makeTurnTextParagraphs,
   MAX_TURN_STREAMED_OUTPUT_BYTES,
+  sanitizeLoopNoticeToolName,
   STREAMED_OUTPUT_BUDGET_CODE,
   STREAMED_OUTPUT_TRUNCATION_MARKER,
 } from "../providers/turnBudget";
@@ -254,6 +264,8 @@ export interface ChatTurnRunnerOptions {
 interface OpenChatQuestion {
   readonly questionnaire?: Questionnaire;
   readonly requestId: string;
+  /** The question asks for a secret; only a secret answer reaches it. */
+  readonly secret?: true;
   readonly deliver: (answer: string) => void;
   readonly answered: Promise<ChatAttempt>;
   readonly abandon: (reason: string) => void;
@@ -312,6 +324,16 @@ export interface ChatTurnRunnerInput {
   readonly persistToolStep?: (
     attempt: ChatAttempt,
     step: ThreadToolStep | undefined,
+  ) => Effect.Effect<void, ChatFailure>;
+  /** Journals a repeated-tool loop notice or Strict stop on this attempt. */
+  readonly persistLoopNotice?: (
+    attempt: ChatAttempt,
+    notice: TurnLoopNotice,
+  ) => Effect.Effect<void, ChatFailure>;
+  /** Journals a silent-turn stall notice on this attempt outside Strict. */
+  readonly persistStallNotice?: (
+    attempt: ChatAttempt,
+    notice: TurnStallNotice,
   ) => Effect.Effect<void, ChatFailure>;
   /**
    * How many tool calls the attempt keeps: the person's setting. Chat has no
@@ -396,9 +418,12 @@ export class ChatTurnRunner {
     readonly attemptId: string;
     readonly requestId: string;
     readonly answer: string;
+    /** The answer is a secret question's, held in memory only; see `ChatAttemptQuestion.secret`. */
+    readonly secret?: true;
   }): Promise<ChatAttempt | undefined> {
     const question = this.#openQuestions.get(input.attemptId);
     if (question === undefined || question.requestId !== input.requestId) return undefined;
+    if ((question.secret === true) !== (input.secret === true)) return undefined;
     if (
       question.questionnaire !== undefined &&
       validateQuestionnaireAnswer(question.questionnaire, input.answer).status === "invalid"
@@ -458,6 +483,10 @@ export class ChatTurnRunner {
       let contextTokens: number | undefined;
       let contextWindow: number | undefined;
       let reasoningTokens: number | undefined;
+      // One tracker per attempt: reasoning spans and call bounds fold from
+      // the same provider stamps the journal keeps, so live and rebuilt
+      // views show identical measurements.
+      const turnTiming = createTurnActivityTiming();
       let cacheReadInputTokens: number | undefined;
       let cacheWriteInputTokens: number | undefined;
       let providerExecutionDurationMs: number | undefined;
@@ -593,6 +622,7 @@ export class ChatTurnRunner {
       const showAppTool = (
         call: { readonly requestId: string; readonly toolName: string },
         state: "started" | "completed" | "failed",
+        timing?: ThreadCallTiming,
       ) =>
         announcesNoCall
           ? foldToolSteps((before) =>
@@ -600,9 +630,24 @@ export class ChatTurnRunner {
                 before,
                 { toolCallId: call.requestId, toolName: call.toolName, state },
                 stepLimit,
+                timing,
               ),
             )
           : Effect.void;
+      // A span-close restates the attempt's reasoning total: the small step
+      // frame carries it when the host streams those, the whole attempt
+      // otherwise. Never reasoning text — only the measured total.
+      const noteReasoningTotal = (total: number) =>
+        Effect.gen(function* () {
+          if (total === currentAttempt.reasoningMs) return;
+          currentAttempt = {
+            ...currentAttempt,
+            reasoningMs: total,
+            updatedAt: updatedAt(),
+          };
+          if (input.persistToolStep === undefined) yield* input.persistAttempt(currentAttempt);
+          else yield* input.persistToolStep(currentAttempt, undefined);
+        });
       // An earlier attempt's read that could not be marked is still in the
       // session this attempt would resume.
       if (outsideContentMarks.settleOwed(String(input.thread.id)).status === "refused") {
@@ -817,6 +862,7 @@ export class ChatTurnRunner {
               ? {}
               : { questionnaire: question.questionnaire }),
             requestId: question.requestId,
+            ...(question.secret === true ? { secret: true } : {}),
             deliver: (answer) => {
               void Effect.runPromise(Deferred.succeed(answerDeferred, answer)).catch(
                 () => undefined,
@@ -844,13 +890,15 @@ export class ChatTurnRunner {
       let openAnswerSettle: ((attempt: ChatAttempt) => void) | undefined;
       let openAnswerAbandon: ((reason: string) => void) | undefined;
 
-      const settleAnsweredAttempt = (answer: string, requestId: string) =>
+      // A secret question's answer is never recorded: the attempt keeps only
+      // that one was given.
+      const settleAnsweredAttempt = (answer: string, requestId: string, secret?: true) =>
         Effect.gen(function* () {
           currentAttempt = answerChatTurnQuestion(currentAttempt, {
             turnId: input.attempt.turnId,
             attemptId: input.attempt.id,
             requestId,
-            answer,
+            answer: secret === true ? { secret } : answer,
             answeredAt: updatedAt(),
           });
           const persisted = yield* Effect.either(input.persistAttempt(currentAttempt));
@@ -1063,16 +1111,71 @@ export class ChatTurnRunner {
             );
 
       // Chat never runs at Full access.
-      const idle = yield* makeIdleTimeout(
-        stalledTurnLimitMs({ fullAccess: false, strict: input.strict !== false }),
-        providerToolCallPauseLimitMs(),
-      );
+      const strict = input.strict !== false;
+      const idleLimitMs = stalledTurnLimitMs({ fullAccess: false, strict });
+      const stallAction = decideTurnStallAction({ strict });
+      const idle = yield* makeIdleTimeout(idleLimitMs, providerToolCallPauseLimitMs());
       const shareEventLoop = makeEventLoopShare();
+      let loopState = INITIAL_TURN_LOOP_STATE;
+      const recordLoopNotice = (loop: TurnLoopOutcome) =>
+        Effect.gen(function* () {
+          const occurredAt = updatedAt();
+          const toolName = sanitizeLoopNoticeToolName(loop.toolName);
+          const notice: TurnLoopNotice = {
+            kind: loop.kind === "stop" ? "turn-loop-stopped" : "turn-loop-noticed",
+            toolName,
+            count: loop.count,
+            occurredAt,
+          };
+          currentAttempt = { ...currentAttempt, loopNotice: notice, updatedAt: occurredAt };
+          if (input.persistLoopNotice !== undefined) {
+            yield* input.persistLoopNotice(currentAttempt, notice);
+          } else {
+            yield* input.persistAttempt(currentAttempt);
+          }
+          if (loop.kind === "stop") {
+            yield* connection
+              .interrupt(input.attempt.providerSessionId)
+              .pipe(Effect.catchAll(() => Effect.void));
+            yield* persistOutcome("interrupted", {
+              code: decodeDiagnosticFailureCode("interrupted"),
+              message: `Stopped under Strict after ${toolName} ran ${loop.count} times in a row with the same input.`,
+            });
+            terminalOutcome = "interrupted";
+            return yield* Effect.fail(
+              decodeChatFailure({
+                category: "interrupted",
+                message: `Stopped under Strict after ${toolName} ran ${loop.count} times in a row with the same input.`,
+              }),
+            );
+          }
+        });
+      const recordStallNotice = (idleMs: number) =>
+        Effect.gen(function* () {
+          const occurredAt = updatedAt();
+          const notice: TurnStallNotice = {
+            kind: "turn-stall-noticed",
+            idleMs,
+            occurredAt,
+          };
+          currentAttempt = { ...currentAttempt, stallNotice: notice, updatedAt: occurredAt };
+          if (input.persistStallNotice !== undefined) {
+            yield* input.persistStallNotice(currentAttempt, notice);
+          } else {
+            yield* input.persistAttempt(currentAttempt);
+          }
+        });
       const timeoutWatcher = yield* Effect.forkScoped(
         idle.expired.pipe(
           Effect.flatMap(() =>
             Effect.gen(function* () {
               if (terminalOutcome !== undefined) return;
+              if (stallAction === "notice") {
+                if (idleLimitMs !== null) {
+                  yield* recordStallNotice(idleLimitMs).pipe(Effect.catchAll(() => Effect.void));
+                }
+                return yield* Effect.never;
+              }
               yield* connection
                 .interrupt(input.attempt.providerSessionId)
                 .pipe(Effect.catchAll(() => Effect.void));
@@ -1114,6 +1217,21 @@ export class ChatTurnRunner {
                 if (event.kind === "liveness") return;
                 input.toolEffects?.observe(event, input.appManagedTools);
                 timing = observeTurnMetrics(timing, event);
+                const eventProvenance =
+                  event.synthesized === true ? ("synthesized" as const) : undefined;
+                const reasoningTotal = turnTiming.observeEvent({
+                  isReasoning: event.kind === "reasoning-delta",
+                  occurredAt: event.occurredAt,
+                  ...(eventProvenance === undefined ? {} : { provenance: eventProvenance }),
+                });
+                if (reasoningTotal !== undefined) yield* noteReasoningTotal(reasoningTotal);
+                if (event.kind === "tool-start") {
+                  turnTiming.callStarted({
+                    toolCallId: event.toolCallId,
+                    occurredAt: event.occurredAt,
+                    ...(eventProvenance === undefined ? {} : { provenance: eventProvenance }),
+                  });
+                }
                 input.liveTurn?.observe(event);
                 const sighting = compactions.observe(event);
                 if (sighting !== undefined) {
@@ -1211,6 +1329,13 @@ export class ChatTurnRunner {
                   );
                 }
                 input.toolCallRecords?.observe(event);
+                if (event.kind !== "tool-request") {
+                  const loopCheck = observeTurnRuntimeEvent(loopState, event, { strict });
+                  loopState = loopCheck.next;
+                  if (loopCheck.loop !== undefined) {
+                    yield* recordLoopNotice(loopCheck.loop);
+                  }
+                }
                 // Kept in the record above; never a step or part of the attempt.
                 if (event.kind === "tool-call-content") return;
                 if (streamedOutput(event) === "exceeded") {
@@ -1300,6 +1425,11 @@ export class ChatTurnRunner {
                 }
                 if (event.kind === "tool-request") {
                   if (!answeredToolRequests.answer(event.requestId)) return;
+                  const loopCheck = observeTurnRuntimeEvent(loopState, event, { strict });
+                  loopState = loopCheck.next;
+                  if (loopCheck.loop !== undefined) {
+                    yield* recordLoopNotice(loopCheck.loop);
+                  }
                   const requestSignal = connection.toolRequestSignal?.({
                     sessionId: input.attempt.providerSessionId,
                     requestId: event.requestId,
@@ -1439,7 +1569,9 @@ export class ChatTurnRunner {
                     executionSignal === undefined
                       ? toolAbort.signal
                       : AbortSignal.any([executionSignal, toolAbort.signal]);
+                  const appToolStartedAt = updatedAt();
                   yield* showAppTool(event, "started");
+                  let appToolApprovalWaitMs = 0;
                   // App-owned work suspends the stalled-turn limit, so the call
                   // gets a deadline of its own: a tool that never returns ends
                   // the turn with a named cause instead of hanging it, whatever
@@ -1453,6 +1585,9 @@ export class ChatTurnRunner {
                             inputJson: event.inputJson,
                             signal: toolSignal,
                             toolCallId: event.requestId,
+                            onApprovalWait: (waitMs) => {
+                              appToolApprovalWaitMs += waitMs;
+                            },
                           }),
                         catch: () =>
                           decodeChatFailure({
@@ -1504,8 +1639,27 @@ export class ChatTurnRunner {
                       execution.outsideContent.labels,
                     );
                   }
-                  yield* showAppTool(event, execution.isError === true ? "failed" : "completed");
-                  const resultJson = boundedToolResultJson(execution.result);
+                  // The run time is the actual execute interval minus any
+                  // person wait the recorded call measured inside it. Without
+                  // the recorded-call boundary a wait could sit inside the
+                  // interval unseen, so no bounds are offered at all.
+                  yield* showAppTool(
+                    event,
+                    execution.isError === true ? "failed" : "completed",
+                    input.toolEffects === undefined
+                      ? undefined
+                      : {
+                          startedAt: appToolStartedAt,
+                          endedAt: updatedAt(),
+                          ...(appToolApprovalWaitMs > 0
+                            ? { approvalWaitMs: appToolApprovalWaitMs }
+                            : {}),
+                        },
+                  );
+                  const toolResult = loopCheck.earlyWarning
+                    ? appendRepeatToolWarning(execution.result)
+                    : execution.result;
+                  const resultJson = boundedToolResultJson(toolResult);
                   input.toolCallRecords?.appTool({
                     toolCallId: event.requestId,
                     toolName: event.toolName,
@@ -1588,10 +1742,22 @@ export class ChatTurnRunner {
                   event.kind === "tool-success" ||
                   event.kind === "tool-failure"
                 ) {
-                  yield* foldToolSteps((before) => recordThreadToolStep(before, event, stepLimit));
+                  const callTiming =
+                    event.kind === "tool-success" || event.kind === "tool-failure"
+                      ? turnTiming.callEnded({
+                          toolCallId: event.toolCallId,
+                          occurredAt: event.occurredAt,
+                          ...(eventProvenance === undefined ? {} : { provenance: eventProvenance }),
+                        })
+                      : undefined;
+                  yield* foldToolSteps((before) =>
+                    recordThreadToolStep(before, event, stepLimit, callTiming),
+                  );
                   return;
                 }
                 if (event.kind === "waiting") {
+                  const closed = turnTiming.closeReasoningAt(event.occurredAt);
+                  if (closed !== undefined) yield* noteReasoningTotal(closed);
                   yield* persistOutcome("waiting");
                   terminalOutcome = "waiting";
                   providerEndedTurn = true;
@@ -1630,6 +1796,7 @@ export class ChatTurnRunner {
                             questionIndex: event.questionIndex,
                             questionCount: event.questionCount,
                           }),
+                      ...(event.secret === true ? { secret: true } : {}),
                     }),
                   );
                   yield* callProvider(
@@ -1639,10 +1806,16 @@ export class ChatTurnRunner {
                       answer,
                     }),
                   );
-                  yield* settleAnsweredAttempt(answer, event.requestId);
+                  yield* settleAnsweredAttempt(
+                    answer,
+                    event.requestId,
+                    event.secret === true ? true : undefined,
+                  );
                   return;
                 }
                 if (event.kind === "completed") {
+                  const closed = turnTiming.closeReasoningAt(event.occurredAt);
+                  if (closed !== undefined) yield* noteReasoningTotal(closed);
                   if (currentAttempt.outcome === "queued") {
                     yield* persistOutcome("streaming");
                   }
@@ -1677,6 +1850,8 @@ export class ChatTurnRunner {
                   return;
                 }
                 if (event.kind === "interrupted") {
+                  const closed = turnTiming.closeReasoningAt(event.occurredAt);
+                  if (closed !== undefined) yield* noteReasoningTotal(closed);
                   if (
                     !input.signal?.aborted &&
                     terminalOutcome !== "cancelled" &&
@@ -1718,6 +1893,8 @@ export class ChatTurnRunner {
                   );
                 }
                 if (event.kind === "failed") {
+                  const closed = turnTiming.closeReasoningAt(event.occurredAt);
+                  if (closed !== undefined) yield* noteReasoningTotal(closed);
                   return yield* persistProviderFailure(event.failure);
                 }
               }),

@@ -48,6 +48,7 @@ import {
   claudeMemoryWriteRefusal,
   CLAUDE_PLAN_CAPTURED_MESSAGE,
   CLAUDE_PLAN_MCP_SERVER_REFUSAL,
+  CLAUDE_IN_PLACE_PLAN_REFUSAL,
   claudeExecutionOptions,
   claudeSandboxSettings,
   claudeFileToolSecretRefusal,
@@ -61,6 +62,7 @@ import {
   claudeWithheldTools,
   CLAUDE_LEVEL_CHANGE_REFUSAL,
   CLAUDE_WAKEUP_UNAVAILABLE,
+  claudeSessionMessages,
   makeClaudeDriver,
 } from "./claudeDriver";
 import type { ClaudeResumeIdentity, ClaudeResumeIdentityPort } from "./claudeDriver";
@@ -184,7 +186,7 @@ class FakeQuery implements ClaudeQueryPort {
     Effect.succeed("backgrounded" as "backgrounded" | "not-found" | "unsupported"),
   );
   readonly forceKill = vi.fn(() => Effect.void);
-  readonly setPermissionMode = vi.fn(() => Effect.void);
+  readonly setPermissionMode = vi.fn<ClaudeQueryPort["setPermissionMode"]>(() => Effect.void);
   readonly supportedModels = vi.fn(() => Effect.succeed(this.initialization.models));
   readonly accountInfo = vi.fn<ClaudeQueryPort["accountInfo"]>(() =>
     Effect.succeed(this.initialization.account),
@@ -264,6 +266,7 @@ function harness(
     readonly platform?: NodeJS.Platform;
     readonly maxTrackedToolUses?: number;
     readonly runtimeTurnsPerTurn?: () => number;
+    readonly hostStrict?: () => boolean;
     readonly gitIdentity?: (checkoutRoot: string) => Promise<{ name?: string; email?: string }>;
     readonly makeEnvironmentScope?: (
       authentication: ClaudeAuthentication,
@@ -407,6 +410,7 @@ function harness(
       ...(options.runtimeTurnsPerTurn === undefined
         ? {}
         : { runtimeTurnsPerTurn: options.runtimeTurnsPerTurn }),
+      ...(options.hostStrict === undefined ? {} : { hostStrict: options.hostStrict }),
       ...(options.configDirectory === undefined
         ? {}
         : { configDirectory: options.configDirectory }),
@@ -1684,6 +1688,33 @@ describe("Claude execution policy", () => {
       expect(refused.opens).toHaveLength(0);
       await connection.close();
     }
+  });
+
+  it("keeps Claude's telemetry and self-update closed outside Strict for a thread that keeps its sandbox, whatever the person's provider switches say", async () => {
+    const launchedWith = async (fullAccessSandbox: boolean) => {
+      const seen: Array<ClaudeEnvironmentScopeOptions | undefined> = [];
+      const f = harness("subscription", "current-session", {
+        makeEnvironmentScope: (_selected, options) => {
+          seen.push(options);
+          return Effect.succeed({ environment: { PATH: "/usr/bin" } });
+        },
+      });
+      const acquired = await acquire(f.driver);
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "full-access",
+          fullAccessSandbox,
+          strict: false,
+          ownChannels: { telemetry: true, selfUpdate: true },
+        }),
+      );
+      await acquired.close();
+      return seen[0]?.ownChannels;
+    };
+    expect(await launchedWith(false)).toEqual({ telemetry: true, selfUpdate: true });
+    expect(await launchedWith(true)).toEqual({ telemetry: false, selfUpdate: false });
   });
 
   it("passes the gate for calls made after a cd into a subfolder and refuses a cd out of the Project", async () => {
@@ -6134,6 +6165,38 @@ describe("Claude session lifecycle", () => {
     expect(f.queries[0]?.close).toHaveBeenCalledOnce();
   });
 
+  it("allows Claude Code on Bedrock outside Strict for both probe and session start while keeping Strict refusal intact", async () => {
+    const f = harness("subscription", "current-session", {
+      hostStrict: () => false,
+    });
+    f.setOpenQuery((input) => {
+      const query = new FakeQuery("bedrock-session", undefined, input.model, {
+        ready: true,
+        apiProvider: "bedrock",
+      });
+      query.accountInfo.mockReturnValue(Effect.succeed({ ready: true, apiProvider: "bedrock" }));
+      f.queries.push(query);
+      return Effect.acquireRelease(Effect.succeed(query), (value) => value.close());
+    });
+
+    const probed = await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+    expect(probed).toMatchObject({ readiness: "ready", detectedVersion: "2.1.211" });
+
+    const acquired = await acquire(f.driver);
+    const openStart = await Effect.runPromise(
+      Effect.exit(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          strict: false,
+        }),
+      ),
+    );
+    expect(openStart._tag).toBe("Success");
+    await acquired.close();
+  });
+
   it("aborts a held identity write without allowing late post-close mutation", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);
@@ -7389,6 +7452,190 @@ describe("Claude's own plan mode as level changes", () => {
     });
     await Effect.runPromise(Scope.close(scope, Exit.void));
     await acquired.close();
+  });
+
+  async function enteredPlanInPlace(failSwitch = false) {
+    const f = harness("subscription", "current-session", {
+      planMcpServers: () => ["docs-search"],
+    });
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: "full-access",
+        levelChanges: true,
+        nativeSetup: {
+          subagents: true,
+          webTools: true,
+          skills: true,
+          toolServers: true,
+          hooks: false,
+          projectCode: false,
+        },
+      }),
+    );
+    const seen: ProviderRuntimeEvent[] = [];
+    const scope = Effect.runSync(Scope.make());
+    const events = await Effect.runPromise(Scope.extend(acquired.connection.subscribe, scope));
+    Effect.runFork(Stream.runForEach(events, (event) => Effect.sync(() => seen.push(event))));
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "fix it", attachments: [], tools: [] }),
+    );
+    const open = f.opens[0]!;
+    const query = f.queries[0]!;
+    if (failSwitch) {
+      query.setPermissionMode.mockImplementation(() =>
+        Effect.fail({ category: "protocol", message: "Claude rejected the permission update." }),
+      );
+    }
+    const signal = new AbortController().signal;
+    const call = (toolName: string, input: Readonly<Record<string, unknown>>, toolUseId: string) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName,
+        input,
+        toolUseId,
+        signal,
+      });
+    expect(await call("EnterPlanMode", {}, "level-1")).toEqual({ behavior: "ask" });
+    const decision = open.canUseTool({
+      toolName: "EnterPlanMode",
+      input: {},
+      toolUseId: "level-1",
+      signal,
+    });
+    await vi.waitFor(() =>
+      expect(seen.some((event) => event.kind === "approval-request")).toBe(true),
+    );
+    const request = seen.find((event) => event.kind === "approval-request");
+    const changed = await Effect.runPromise(
+      acquired.connection.changeLevelInPlace!({ sessionId, change: "enter-plan" }),
+    );
+    await Effect.runPromise(
+      acquired.connection.answerApproval({
+        sessionId,
+        requestId: request?.kind === "approval-request" ? request.requestId : "",
+        approved: true,
+      }),
+    );
+    return { acquired, query, call, changed, decision, scope };
+  }
+
+  it("enters Plan inside the running turn and refuses every write, command, unmarked server and subagent for the rest of it", async () => {
+    const { acquired, query, call, changed, decision, scope } = await enteredPlanInPlace();
+    try {
+      expect(changed).toEqual({ status: "applied" });
+      expect(query.setPermissionMode).toHaveBeenCalledWith("plan");
+      await expect(decision).resolves.toEqual({
+        behavior: "deny",
+        message: expect.stringContaining("in Plan now"),
+      });
+      const file = `${projectRoot}/src/a.ts`;
+      const refused: ReadonlyArray<readonly [string, Readonly<Record<string, unknown>>]> = [
+        ["Write", { file_path: file, content: "x" }],
+        ["Edit", { file_path: file, old_string: "a", new_string: "b" }],
+        ["NotebookEdit", { notebook_path: `${projectRoot}/a.ipynb`, new_source: "x" }],
+        ["Bash", { command: "ls" }],
+        ["Bash", { command: "ls ~", dangerouslyDisableSandbox: true }],
+        ["Agent", { description: "edit", prompt: "edit a.ts", subagent_type: "general-purpose" }],
+        ["Workflow", { script: "await agent('x')" }],
+      ];
+      for (const [index, [toolName, input]] of refused.entries()) {
+        await expect(call(toolName, input, `refused-${index}`)).resolves.toEqual({
+          behavior: "deny",
+          message: CLAUDE_IN_PLACE_PLAN_REFUSAL,
+        });
+      }
+      await expect(call("mcp__linear__update", { id: "1" }, "unmarked")).resolves.toEqual({
+        behavior: "deny",
+        message: CLAUDE_PLAN_MCP_SERVER_REFUSAL,
+      });
+      // What Plan holds still runs, judged at Plan rather than the Full
+      // access the session launched at: a read unasked, a marked server asked.
+      await expect(call("Read", { file_path: file }, "read")).resolves.toEqual({
+        behavior: "allow",
+      });
+      await expect(call("mcp__docs-search__query", { query: "x" }, "marked")).resolves.toEqual({
+        behavior: "ask",
+      });
+    } finally {
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      await acquired.close();
+    }
+  });
+
+  it("reports a refused plan-mode switch as failed and still holds the session to Plan", async () => {
+    const { acquired, call, changed, decision, scope } = await enteredPlanInPlace(true);
+    try {
+      expect(changed).toMatchObject({ status: "failed" });
+      await expect(decision).resolves.toEqual({
+        behavior: "deny",
+        message: expect.stringContaining("next turn runs in Plan"),
+      });
+      await expect(
+        call("Write", { file_path: `${projectRoot}/a.ts`, content: "x" }, "w"),
+      ).resolves.toEqual({
+        behavior: "deny",
+        message: CLAUDE_IN_PLACE_PLAN_REFUSAL,
+      });
+    } finally {
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      await acquired.close();
+    }
+  });
+
+  it("refuses an in-place change on a session with no running turn", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "approval-gated",
+          levelChanges: true,
+        }),
+      );
+      await expect(
+        Effect.runPromise(
+          acquired.connection.changeLevelInPlace!({ sessionId, change: "enter-plan" }),
+        ),
+      ).resolves.toMatchObject({ status: "refused" });
+      expect(f.queries[0]!.setPermissionMode).not.toHaveBeenCalled();
+    } finally {
+      await acquired.close();
+    }
+  });
+
+  it("refuses to enter Plan in place when the account directory sits inside the checkout", async () => {
+    const f = harness("subscription", "current-session", {
+      configDirectory: `${projectRoot}/.claude-accounts/work`,
+    });
+    const acquired = await acquire(f.driver, "code");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "full-access",
+          levelChanges: true,
+        }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "fix it", attachments: [], tools: [] }),
+      );
+      // Plan's task tools would write the account's task list inside the Project.
+      await expect(
+        Effect.runPromise(
+          acquired.connection.changeLevelInPlace!({ sessionId, change: "enter-plan" }),
+        ),
+      ).resolves.toMatchObject({ status: "refused" });
+      expect(f.queries[0]!.setPermissionMode).not.toHaveBeenCalled();
+    } finally {
+      await acquired.close();
+    }
   });
 
   it("withholds both plan-mode tools from a session whose host does not answer level changes", async () => {
@@ -9565,13 +9812,39 @@ describe("Claude Code's own permission modes and sandbox outside Strict", () => 
         executionPolicy: "plan",
         fullAccessSandbox: false,
         ownPermissions: false,
+        mode: "work",
+        strict: false,
+        sandboxPolicySelected: false,
       }),
     ).toBe(false);
   });
 
-  it("keeps Octant's sandbox and gate outside Strict when the session reads none of the person's Claude settings", async () => {
+  it("keeps Octant's sandbox configuration under Strict, in Chat and for a chosen sandbox policy, and drops it for Work and Code outside Strict", () => {
+    const configures = (input: {
+      readonly mode: "chat" | "work" | "code";
+      readonly strict: boolean;
+      readonly sandboxPolicySelected?: boolean;
+    }) =>
+      claudeOctantConfiguresSandbox({
+        executionPolicy: "approval-gated",
+        fullAccessSandbox: false,
+        ownPermissions: false,
+        mode: input.mode,
+        strict: input.strict,
+        sandboxPolicySelected: input.sandboxPolicySelected ?? false,
+      });
+    expect(configures({ mode: "work", strict: false })).toBe(false);
+    expect(configures({ mode: "code", strict: false })).toBe(false);
+    expect(configures({ mode: "code", strict: true })).toBe(true);
+    expect(configures({ mode: "chat", strict: false })).toBe(true);
+    expect(configures({ mode: "code", strict: false, sandboxPolicySelected: true })).toBe(true);
+  });
+
+  it("runs on Claude's permission modes and Octant's gate with no sandbox outside Strict when the session reads none of the person's Claude settings", async () => {
     // With no setup, or only subagents and web tools on, the launch reads no
-    // home settings, so the person's own sandbox and deny rules would not load.
+    // home settings, so the person's own rules do not load and Octant's gate
+    // answers every call, with no sandbox of Octant's around the commands
+    // (maintainer decision, 2026-11-21).
     for (const nativeSetup of [
       undefined,
       { ...readsHome, skills: false, subagents: true, webTools: true },
@@ -9583,10 +9856,7 @@ describe("Claude Code's own permission modes and sandbox outside Strict", () => 
         nativeSetup === undefined ? {} : { nativeSetup },
       );
       expect(session.open.ownPermissions).toBeUndefined();
-      expect(session.open.sandbox).toMatchObject({
-        enabled: true,
-        autoAllowBashIfSandboxed: false,
-      });
+      expect(session.open.sandbox).toBeUndefined();
       await Effect.runPromise(
         session.acquired.connection.send({ sessionId, prompt: "go", attachments: [], tools: [] }),
       );
@@ -9600,6 +9870,18 @@ describe("Claude Code's own permission modes and sandbox outside Strict", () => 
           signal: new AbortController().signal,
         }),
       ).resolves.toEqual({ behavior: "allow" });
+      // A command is never settled unasked: Claude's own `default` mode
+      // decides it, and its ask reaches the person through `canUseTool`.
+      await expect(
+        session.open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Bash",
+          input: { command: "touch a.ts" },
+          toolUseId: "bash",
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toEqual({ behavior: "own-rules" });
       await session.acquired.close();
     }
     expect(
@@ -9901,5 +10183,34 @@ describe("Claude artifacts outside Strict", () => {
       publishes: false,
     });
     expect(claudeArtifactCall({ type_url: "not a url" })).toEqual({ publishes: true });
+  });
+});
+
+describe("Claude native session history", () => {
+  it("imports the person's text and the agent's replies with their tool calls named, and leaves tool results and thinking out", () => {
+    expect(
+      claudeSessionMessages([
+        { type: "user", message: { role: "user", content: "Add a retry" } },
+        {
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [
+              { type: "thinking", thinking: "plan" },
+              { type: "text", text: "Adding it." },
+              { type: "tool_use", id: "t1", name: "Edit", input: {} },
+            ],
+          },
+        },
+        {
+          type: "user",
+          message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1" }] },
+        },
+        { type: "system", message: { content: "compacted" } },
+      ]),
+    ).toEqual([
+      { role: "person", text: "Add a retry" },
+      { role: "agent", text: "Adding it.", tools: ["Edit"] },
+    ]);
   });
 });

@@ -478,6 +478,10 @@ export const AddedAcpAgentConfiguration = Schema.Struct({
     Schema.Struct({
       executable: AbsoluteBinaryPath.pipe(Schema.maxLength(4_096)),
       integrity: AcpAgentInstallIntegrity,
+      /** Whether an installed package declares install scripts (e.g. npm lifecycle scripts). */
+      hasInstallScripts: Schema.optional(Schema.Boolean),
+      /** True once this install's package install scripts completed when trusted. */
+      installScriptsCompleted: Schema.optional(Schema.Boolean),
     }).annotations(strict),
   ),
   trusted: Schema.Boolean,
@@ -490,7 +494,9 @@ export const AddedAcpAgentConfiguration = Schema.Struct({
           configuration.environment === undefined &&
           (configuration.install === undefined ||
             (configuration.install.integrity === "local-command" &&
-              configuration.install.executable === configuration.source.command))
+              configuration.install.executable === configuration.source.command &&
+              configuration.install.hasInstallScripts === undefined &&
+              configuration.install.installScriptsCompleted === undefined))
         );
       }
       return configuration.install?.integrity !== "local-command";
@@ -1478,21 +1484,43 @@ export const ProviderDefaultsUpdated = Schema.Struct({ defaults: ProviderDefault
 );
 export type ProviderDefaultsUpdated = typeof ProviderDefaultsUpdated.Type;
 
-export const PROVIDER_EVENT_NAMES = [
-  "provider.instance-created@1",
-  "provider.instance-renamed@1",
-  "provider.instance-binary-changed@1",
-  "provider.instance-configuration-changed@1",
-  "provider.instance-driver-rebound@1",
-  "provider.instance-driver-quarantined@1",
-  "provider.instance-data-tags-changed@1",
-  "provider.instance-enabled-changed@1",
-  "provider.instance-native-setup-changed@1",
-  "provider.instance-own-memory-changed@1",
-  "provider.instance-removed@1",
-  "provider.defaults-updated@1",
-  "provider.catalog-updated@1",
-] as const;
+export const AcpAgentInstallScriptsFailureReason = Schema.Literal(
+  "package-manager-missing",
+  "sandbox-unavailable",
+  "script-failed",
+  "timed-out",
+  "executable-missing",
+  "invalid-install-folder",
+);
+export type AcpAgentInstallScriptsFailureReason = typeof AcpAgentInstallScriptsFailureReason.Type;
+
+export const PROVIDER_ACP_AGENT_INSTALL_SCRIPTS_RAN =
+  "provider.acp-agent-install-scripts-ran@1" as const;
+
+/**
+ * Journaled record of running an added ACP package agent's install scripts
+ * when the person clicks Trust. Actor and occurredAt live on the event
+ * envelope; `sandboxed` records whether Octant confined the run under Strict.
+ */
+export const ProviderAcpAgentInstallScriptsRan = Schema.Struct({
+  instanceId: ProviderInstanceId,
+  registryId: AcpRegistryAgentId,
+  version: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  distribution: Schema.Literal("npx", "uvx"),
+  outcome: Schema.Literal("succeeded", "failed"),
+  sandboxed: Schema.Boolean,
+  completedAt: UtcTimestamp,
+  reason: Schema.optional(AcpAgentInstallScriptsFailureReason),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (record) =>
+        (record.outcome === "succeeded" && record.reason === undefined) ||
+        (record.outcome === "failed" && record.reason !== undefined),
+    ),
+  );
+export type ProviderAcpAgentInstallScriptsRan = typeof ProviderAcpAgentInstallScriptsRan.Type;
 
 /**
  * Whether a model can read image input, as a driver-reported fact.
@@ -2221,6 +2249,10 @@ export const ProviderSlashCommand = Schema.Struct({
 export type ProviderSlashCommand = typeof ProviderSlashCommand.Type;
 export const MAX_PROVIDER_SLASH_COMMANDS = 256;
 
+/** Where a provider's own skill or plugin lives: `project` for a thread's folder, `account` (or absent) for the account. */
+export const ProviderMentionScope = Schema.Literal("account", "project");
+export type ProviderMentionScope = typeof ProviderMentionScope.Type;
+
 /**
  * One of the provider's own skills or plugins a composer's `@` menu offers,
  * as its runtime listed it: Codex's `skills/list` and `plugin/installed`.
@@ -2232,6 +2264,7 @@ export const ProviderMention = Schema.Struct({
   kind: Schema.Literal("skill", "plugin"),
   name: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9:_.-]*$/u), Schema.maxLength(128)),
   description: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+  scope: Schema.optional(ProviderMentionScope),
 }).annotations(strict);
 export type ProviderMention = typeof ProviderMention.Type;
 export const MAX_PROVIDER_MENTIONS = 256;
@@ -2999,6 +3032,12 @@ const ProviderRuntimeEventFields = {
   sequence: Schema.Int.pipe(Schema.positive()),
   correlationId: CorrelationId,
   occurredAt: UtcTimestamp,
+  /**
+   * Set when the adapter folded stored or replayed provider output into this
+   * event rather than reporting a live instant: `occurredAt` then names the
+   * batch, not the moment, so nothing downstream may time a span by it.
+   */
+  synthesized: Schema.optional(Schema.Literal(true)),
 } as const;
 
 /**
@@ -3192,6 +3231,12 @@ export const ProviderRuntimeEvent = Schema.Union(
     part: Schema.Literal("input", "output"),
     text: Schema.NonEmptyString.pipe(Schema.maxLength(MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS)),
     truncated: Schema.optional(Schema.Boolean),
+    /**
+     * Set when the adapter intentionally omitted fields from the input (such
+     * as file contents on Edit/Write/NotebookEdit), so consumers know the text
+     * is not the tool's complete arguments.
+     */
+    partial: Schema.optional(Schema.Boolean),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
@@ -3423,6 +3468,13 @@ export const ProviderRuntimeEvent = Schema.Union(
     action: Schema.NonEmptyTrimmedString,
     description: Schema.NonEmptyTrimmedString,
     /**
+     * The runtime's own identity for the call this ask gates, when it sent
+     * one (a tool_use id, a toolCall id, an item id). Forwarded to the
+     * journaled ask so the person's wait is attributed to that call alone;
+     * absent means nothing is attributed by adjacency.
+     */
+    toolCallId: Schema.optional(Schema.NonEmptyTrimmedString),
+    /**
      * The runtime asks to change the thread's level rather than to run a
      * tool: `enter-plan` to plan read-only first, `exit-plan` to leave Plan
      * and carry out `plan`. Only a session started with `levelChanges` asks
@@ -3464,6 +3516,13 @@ export const ProviderRuntimeEvent = Schema.Union(
      */
     questionIndex: Schema.optional(PositiveInt),
     questionCount: Schema.optional(PositiveInt),
+    /**
+     * The answer is a secret (a password or key): it is typed into a masked
+     * field and goes to the provider in memory only, never into a journal,
+     * evidence, log or transcript. A surface that cannot keep it out of its
+     * record never receives such a question; the driver refuses it instead.
+     */
+    secret: Schema.optional(Schema.Literal(true)),
   })
     .annotations(strict)
     .pipe(
@@ -3577,6 +3636,9 @@ export const decodeProviderInstanceRemoved = Schema.decodeUnknownSync(ProviderIn
 export const decodeProviderDefaultsUpdated = Schema.decodeUnknownSync(ProviderDefaultsUpdated);
 export const decodeProviderCatalogSnapshot = Schema.decodeUnknownSync(ProviderCatalogSnapshot);
 export const decodeProviderCatalogUpdated = Schema.decodeUnknownSync(ProviderCatalogUpdated);
+export const decodeProviderAcpAgentInstallScriptsRan = Schema.decodeUnknownSync(
+  ProviderAcpAgentInstallScriptsRan,
+);
 export const decodeProviderModelOption = Schema.decodeUnknownSync(ProviderModelOption);
 export const decodeProviderModelOptionValues = Schema.decodeUnknownSync(ProviderModelOptionValues);
 export const decodeProviderModel = Schema.decodeUnknownSync(ProviderModel);

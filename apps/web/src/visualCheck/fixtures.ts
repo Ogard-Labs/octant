@@ -6,6 +6,7 @@ import type { ProjectClient } from "@octant/client-runtime/project-client";
 import {
   decodeAgentRunCenterSummary,
   decodeCodeThreadId,
+  decodeLocalUsageHistoryResponse,
   decodeProjectId,
   decodeProviderInstance,
   decodeProviderUsageLimitsSnapshot,
@@ -13,6 +14,7 @@ import {
   decodeWorkspaceTabId,
   type AgentRunCenterSummary,
   type CodeEnvironmentObservation,
+  type LocalUsageHistoryResponse,
   type ProjectSummary,
   type UsageDashboardResponse,
   type WorkspaceTab,
@@ -533,6 +535,81 @@ export const USAGE_LEDGER = {
   queryAt: VISUAL_NOW,
   latencyStats: { measurements: [] },
 };
+
+// --- Provider usage history ------------------------------------------------
+
+/** Fixed local provider history: two providers over five days, so the chart draws lines. */
+export function localUsageHistoryFixture(): LocalUsageHistoryResponse {
+  const totalsFor = (tokens: number, sessions: number) => ({
+    inputTokens: Math.round(tokens * 0.8),
+    outputTokens: Math.round(tokens * 0.2),
+    totalTokens: tokens,
+    requestCount: sessions * 4,
+    sessionCount: sessions,
+    cacheReadInputTokens: Math.round(tokens * 0.4),
+    uncachedInputTokens: Math.round(tokens * 0.4),
+    componentCoverage: {
+      uncachedInput: { measured: sessions * 4, total: sessions * 4 },
+      cacheRead: { measured: sessions * 4, total: sessions * 4 },
+      cacheWrite: { measured: 0, total: sessions * 4 },
+      reasoning: { measured: 0, total: sessions * 4 },
+    },
+  });
+  const costFor = (usd: number) => ({
+    apiEstimateUsd: usd,
+    pricedRecordCount: 4,
+    unpricedRecordCount: 0,
+  });
+  const days = ["2026-08-12", "2026-08-13", "2026-08-14", "2026-08-15", "2026-08-16"];
+  const codex = [120_000, 340_000, 90_000, 410_000, 220_000];
+  const claude = [80_000, 150_000, 260_000, 120_000, 300_000];
+  const dayRows = (providerKey: string, tokens: ReadonlyArray<number>) =>
+    days.map((day, index) => ({
+      day,
+      providerKey,
+      totals: totalsFor(tokens[index] ?? 0, 2),
+      cost: costFor((tokens[index] ?? 0) / 100_000),
+    }));
+  const sum = (tokens: ReadonlyArray<number>) => tokens.reduce((total, value) => total + value, 0);
+  const provider = (key: string, label: string, tokens: ReadonlyArray<number>) => ({
+    key,
+    label,
+    providerKey: key,
+    totals: totalsFor(sum(tokens), 10),
+    cost: costFor(sum(tokens) / 100_000),
+  });
+  return decodeLocalUsageHistoryResponse({
+    source: "local-provider-history",
+    from: "2026-08-12T00:00:00.000Z",
+    to: VISUAL_NOW,
+    timeZone: "UTC",
+    queryAt: VISUAL_NOW,
+    totals: totalsFor(sum(codex) + sum(claude), 20),
+    cost: costFor((sum(codex) + sum(claude)) / 100_000),
+    providers: [provider("codex", "Codex", codex), provider("claude", "Claude", claude)],
+    models: [],
+    days: [...dayRows("codex", codex), ...dayRows("claude", claude)],
+    dailyTotals: days.map((day, index) => ({
+      day,
+      providerKey: "all",
+      totals: totalsFor((codex[index] ?? 0) + (claude[index] ?? 0), 4),
+      cost: costFor(((codex[index] ?? 0) + (claude[index] ?? 0)) / 100_000),
+    })),
+    coverage: [
+      {
+        sourceKind: "codex",
+        sourceInstallationId: "local-1",
+        status: "ready",
+        scannedFileCount: 10,
+        acceptedRecordCount: 40,
+        omittedRecordCount: 0,
+        truncated: false,
+        hasMore: false,
+        detail: "Local Codex sessions on this Mac.",
+      },
+    ],
+  });
+}
 
 // --- Subagent progress -----------------------------------------------------
 

@@ -7,6 +7,7 @@ import { SubagentsTray } from "../agents/ComposerSubagentsTray";
 import { TurnSubagentRows, ThreadSubagentsContext } from "../agents/threadSubagents";
 import { AgentsCenter } from "../agents/AgentsCenter";
 import { ArtifactLibraryView } from "../artifacts/ArtifactLibraryView";
+import { ArtifactDockList } from "../dockModules/ArtifactsModule";
 import { INITIAL_ARTIFACT_FILTERS } from "../artifacts/useArtifactLibrary";
 import { AutomationCenter } from "../automation/AutomationCenter";
 import { CodeWhereControl } from "../code/composer/CodeWhereControl";
@@ -32,6 +33,7 @@ import {
   CODE_PROJECT,
   CODE_TAB,
   codeProjectClient,
+  localUsageHistoryFixture,
   planUsageClient,
   threadRoutinesClient,
   threadUsageClient,
@@ -169,7 +171,7 @@ function HomeScene() {
 function RailScene() {
   const profile = { ...defaultShellSettings().userProfile, displayName: "Ada Lovelace" };
   return (
-    <PlanUsageProvider barStyle="smooth" client={planUsageClient()} instances={[CLAUDE_ACCOUNT]}>
+    <PlanUsageProvider client={planUsageClient()} instances={[CLAUDE_ACCOUNT]}>
       <div style={{ height: "100%", width: 48, display: "flex" }}>
         <SidebarRail
           account={<RailAccount onOpenNavigator={noop} onOpenSettings={noop} profile={profile} />}
@@ -300,6 +302,31 @@ const RENDERERS: ReadonlyArray<{ readonly id: string; readonly render: () => Rea
     ),
   },
   {
+    id: "settings-usage-history",
+    render: () => (
+      <SettingsView
+        initialDeepLink={{ section: "usage" }}
+        localUsageHistoryClient={{ load: async () => localUsageHistoryFixture() }}
+        nativeBoundsAvailable
+        onResetLayout={noop}
+        onResetNativeBounds={noop}
+        onSearchChange={noop}
+        onSettingsChange={noop}
+        search=""
+        settings={defaultShellSettings()}
+        sidebarVibrancySupported
+        usageClient={
+          {
+            query: async () => USAGE_LEDGER,
+            export: noop,
+            reset: noop,
+            retain: noop,
+          } as never
+        }
+      />
+    ),
+  },
+  {
     id: "agents-table",
     render: () => (
       <Pane>
@@ -322,6 +349,30 @@ const RENDERERS: ReadonlyArray<{ readonly id: string; readonly render: () => Rea
           view="list"
         />
       </Pane>
+    ),
+  },
+  {
+    id: "dock-artifacts",
+    render: () => (
+      <div className="visual-check__dock visual-check__dock--flexible">
+        <ArtifactDockList
+          entries={ARTIFACT_LISTING.entries}
+          observedAt={VISUAL_NOW}
+          onOpen={noop}
+        />
+      </div>
+    ),
+  },
+  {
+    id: "dock-artifacts-tiled",
+    render: () => (
+      <div className="visual-check__dock visual-check__dock--tiled">
+        <ArtifactDockList
+          entries={ARTIFACT_LISTING.entries}
+          observedAt={VISUAL_NOW}
+          onOpen={noop}
+        />
+      </div>
     ),
   },
   {

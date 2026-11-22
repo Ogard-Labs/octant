@@ -308,6 +308,7 @@ describe("MachineChangeFeed", () => {
         { aggregateType: "thread-follow-up-suggestions" },
         { aggregateType: "thread-message-queue" },
         { aggregateType: "todo" },
+        { aggregateType: "canvas-choice-answers" },
       ],
     });
 
@@ -315,7 +316,13 @@ describe("MachineChangeFeed", () => {
       value: {
         kind: "changed",
         sequence: 1,
-        topics: ["browser-captures", "thread-follow-ups", "thread-message-queue", "todos"],
+        topics: [
+          "browser-captures",
+          "thread-follow-ups",
+          "thread-message-queue",
+          "todos",
+          "canvas-choice-answers",
+        ],
       },
     });
     controller.abort();
@@ -403,6 +410,37 @@ describe("MachineChangeFeed", () => {
     controller.abort();
   });
 
+  it("tells the running turn's mode readers when a message is steered into that turn", async () => {
+    const feed = new MachineChangeFeed();
+    const controller = new AbortController();
+    const stream = feed.subscribe({ afterSequence: 0, signal: controller.signal });
+    feed.publishCommitted({
+      events: [
+        {
+          aggregateType: "thread-message-steering",
+          eventName: "thread.message-steered@1",
+          payload: { kind: "thread-message-steered", mode: "work" },
+        },
+      ],
+    });
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "changed", topics: ["work-navigation"] },
+    });
+    feed.publishCommitted({
+      events: [
+        {
+          aggregateType: "thread-message-steering",
+          eventName: "thread.message-steered@1",
+          payload: { kind: "thread-message-steered", mode: "code" },
+        },
+      ],
+    });
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "changed", topics: ["code-navigation"] },
+    });
+    controller.abort();
+  });
+
   it("decodes every published topic under strict framing", async () => {
     const feed = new MachineChangeFeed();
     const controller = new AbortController();
@@ -421,6 +459,7 @@ describe("MachineChangeFeed", () => {
       "thread-follow-ups",
       "thread-message-queue",
       "todos",
+      "canvas-choice-answers",
     ]);
 
     await expect(stream.next()).resolves.toMatchObject({
@@ -440,6 +479,7 @@ describe("MachineChangeFeed", () => {
           "thread-follow-ups",
           "thread-message-queue",
           "todos",
+          "canvas-choice-answers",
         ],
       },
     });

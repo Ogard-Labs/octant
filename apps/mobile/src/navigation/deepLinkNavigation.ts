@@ -2,7 +2,7 @@ import type { MobileInboxRow } from "@octant/client-runtime";
 import {
   parseMobileThreadDeepLink,
   type MobileDeepLinkTarget,
-  type MobileMovesDeepLinkTarget,
+  type MobileComputersDeepLinkTarget,
 } from "../notifications/deepLinks";
 
 /**
@@ -65,13 +65,13 @@ export function deepLinkRefusal(
 }
 
 /**
- * Where a tapped held-move notification lands: the Computers screen, whose
- * Moves waiting for you list reads what waits on every computer and so shows
- * the move whichever computer held it. A link from a computer this phone never
+ * Where a tapped held-move or new-device notification lands: the Computers
+ * screen, whose Moves waiting for you and New devices lists read every
+ * computer and so show what any computer raised. A link from a computer this phone never
  * paired still opens that screen, with the reason beside it.
  */
-export function movesLinkOpening(
-  link: MobileMovesDeepLinkTarget,
+export function computersLinkOpening(
+  link: MobileComputersDeepLinkTarget,
   pairedHostIds: ReadonlyArray<string>,
   registryUnreadable = false,
 ): { readonly route: "hosts"; readonly entryMode: "manage"; readonly notice?: string } {

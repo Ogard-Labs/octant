@@ -1,7 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
-  PROJECT_EVENT_NAMES,
   decodeBindingReceiptId,
   decodeMemoryCommand,
   decodeMemoryCommandResult,
@@ -636,38 +635,6 @@ describe("Project memory contracts", () => {
 });
 
 describe("Project and memory event payload contracts", () => {
-  it("exposes every approved versioned event tag", () => {
-    expect(PROJECT_EVENT_NAMES).toEqual([
-      "project.created@1",
-      "project.renamed@1",
-      "project.color-changed@1",
-      "project.order-changed@1",
-      "project.lifecycle-changed@1",
-      "project.binding-relinked@1",
-      "project.code-access-changed@1",
-      "project.code-permission-mode-changed@1",
-      "project.code-auto-reviewer-changed@1",
-      "project.code-new-thread-workspace-changed@1",
-      "project.code-pull-request-background-refresh-changed@1",
-      "project.provider-policy-changed@1",
-      "project.native-providers-changed@1",
-      "project.work-status-file-changed@1",
-      "project.work-developer-tools-changed@1",
-      "project.work-permission-mode-changed@1",
-      "project.work-actions-changed@1",
-      "project.brand-kit-changed@1",
-      "project.design-system-changed@1",
-      "project.code-desktop-recipe-changed@1",
-      "project.code-actions-changed@1",
-      "project.extra-folder-added@1",
-      "project.extra-folder-removed@1",
-      "memory.entry-created@1",
-      "memory.entry-superseded@1",
-      "memory.entry-retracted@1",
-      "memory.entry-transferred@1",
-    ]);
-  });
-
   it("decodes complete Project snapshots for every Project event payload", () => {
     expect(decodeProjectCreated({ project: chatProject })).toMatchObject({ project: chatProject });
     expect(decodeProjectRenamed({ project: chatProject })).toMatchObject({ project: chatProject });

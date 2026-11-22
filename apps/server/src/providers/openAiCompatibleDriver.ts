@@ -56,6 +56,7 @@ import {
 } from "./directEndpointDirectoryOAuth";
 import { sendChatCompletionsTurn, type ChatCompletionsTurnResult } from "./openAiChatCompletions";
 import {
+  forOpenCodeGoConversation,
   makeOpenAiCompatibleEndpoint,
   markCompatibleModelVerified,
   probeModels,
@@ -142,6 +143,7 @@ export interface OpenAiCompatibleDriverProfile {
 
 export interface OpenAiCompatibleDriverOptions {
   readonly instanceId: ProviderInstanceId;
+  readonly octantVersion?: string;
   readonly configuration: OpenAiCompatibleProviderConfiguration;
   readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly credentialResolver?: ProviderCredentialResolver;
@@ -498,7 +500,7 @@ async function sendCompatibleRequest(
     stream.onEvent({ kind: event.kind, text: event.text });
   };
   const shared = {
-    endpoint,
+    endpoint: forOpenCodeGoConversation(endpoint, request.sessionId),
     modelId: request.modelId,
     history,
     prompt,
@@ -649,6 +651,7 @@ function endpointFor(
 ): OpenAiCompatibleEndpoint {
   return makeOpenAiCompatibleEndpoint({
     instanceId: options.instanceId,
+    octantVersion: options.octantVersion ?? "0.0.0-dev",
     configuration: options.configuration,
     authStrategy: profile.authStrategy,
     ...(credentialResolver === undefined ? {} : { credentialResolver }),
@@ -769,6 +772,7 @@ async function probeToolCapabilityForModel(
   profile: CompatiblePlanProfile = undefined,
 ): Promise<"supported" | "unsupported"> {
   const echoTool = capabilityEchoToolDefinition();
+  const probeEndpoint = forOpenCodeGoConversation(endpoint);
   const cache = {
     get: () => options.runtimeRegistry.compatibleProtocol(options.instanceId),
     set: (_instanceId: string, protocol: CompatibleProtocol) =>
@@ -792,7 +796,7 @@ async function probeToolCapabilityForModel(
         if (protocol === "chat-completions") {
           const exit = await Effect.runPromiseExit(
             sendChatCompletionsTurn({
-              endpoint,
+              endpoint: probeEndpoint,
               modelId,
               history: [],
               prompt: "echo ready",
@@ -815,7 +819,7 @@ async function probeToolCapabilityForModel(
         let metadata: ProtocolTurnFailureMetadata | undefined;
         const exit = await Effect.runPromiseExit(
           sendResponsesTurn({
-            endpoint,
+            endpoint: probeEndpoint,
             modelId,
             history: [],
             prompt: "echo ready",

@@ -18,6 +18,7 @@ export const PROVIDER_GLYPH_COLOR_FALLBACKS: Readonly<Record<string, string>> = 
   "openai-image": "#10a37f",
   copilot: "#8957e5",
   gemini: "#5b8def",
+  antigravity: "#4285f4",
   glm: "#3859ff",
   qwen: "#615ced",
   opencode: "#7fa7c9",

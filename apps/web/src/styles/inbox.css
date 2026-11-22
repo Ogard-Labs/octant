@@ -150,14 +150,6 @@
   background: none;
 }
 
-.inbox-usage {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--oct-space-2) var(--oct-space-4);
-}
-
 /* height/min-height beat the button recipe's fixed h-9, which would clip a
    multi-line row; the anchor rows share the class so both render alike. */
 .inbox-view__row {

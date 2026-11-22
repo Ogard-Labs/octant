@@ -1,7 +1,9 @@
 import { lstat, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { desktopIdentity } from "@octant/host-runtime";
 import { describe, expect, it, vi } from "vitest";
+import { launchDesktopApplication } from "./desktopLaunch";
 import {
   desktopPeerPreflight,
   encodeLinuxLauncherRecord,
@@ -131,8 +133,6 @@ describe("the packaged desktop status preflight", () => {
 });
 
 it("launches a closed Stable once and authenticates it before opening the actual Nightly client", async () => {
-  const { desktopIdentity } = await import("@octant/host-runtime");
-  const { launchDesktopApplication } = await import("./desktopLaunch");
   const ready = { kind: "ready", protocol: 1, version: "0.1.0" };
   const native = {
     status: vi

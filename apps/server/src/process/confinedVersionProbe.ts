@@ -60,6 +60,10 @@ export interface ConfinedVersionProbeLaunch {
   readonly environment: NodeJS.ProcessEnv;
   /** Removes the scratch directory. Callers run it once the probe has exited. */
   readonly release: () => void;
+  /** Records the spawned launcher PID on a durable Windows pre-ACL lease. */
+  readonly onSpawned?: (pid: number) => void;
+  /** Runs verified post-exit cleanup for a Windows confined launch. */
+  readonly verifyCleanup?: () => Promise<void>;
 }
 
 export type ConfinedVersionProbe =
@@ -91,6 +95,7 @@ export interface PrepareConfinedVersionProbeInput {
    */
   readonly guards?: Readonly<Record<string, string>>;
   readonly confinement?: ProcessConfinementPort;
+  readonly platform?: NodeJS.Platform;
   readonly temporaryRoot?: string;
   readonly homeDirectory?: string;
 }
@@ -99,11 +104,14 @@ export function prepareConfinedVersionProbe(
   input: PrepareConfinedVersionProbeInput,
 ): ConfinedVersionProbe {
   const name = input.displayName;
+  const platform = input.platform ?? process.platform;
   let scratchDirectory: string;
   try {
-    scratchDirectory = realpathSync(
-      mkdtempSync(join(input.temporaryRoot ?? tmpdir(), "octant-version-probe-")),
-    );
+    const created = mkdtempSync(join(input.temporaryRoot ?? tmpdir(), "octant-version-probe-"));
+    scratchDirectory =
+      platform === "win32" && process.platform === "win32"
+        ? realpathSync.native(created)
+        : realpathSync(created);
   } catch {
     return {
       status: "refused",
@@ -148,7 +156,7 @@ export function prepareConfinedVersionProbe(
       networkEgress: "none",
       allowProcessExec: true,
       allowProcessFork: true,
-      allowFileReadStar: true,
+      ...(platform === "win32" ? {} : { allowFileReadStar: true }),
       readRoots,
       privateHomeAllowPaths: readRoots,
       ...(environment.PATH === undefined ? {} : { interpreterSearchPath: environment.PATH }),
@@ -161,6 +169,8 @@ export function prepareConfinedVersionProbe(
         workingDirectory: scratchDirectory,
         environment,
         release,
+        ...(launch.onSpawned === undefined ? {} : { onSpawned: launch.onSpawned }),
+        ...(launch.verifyCleanup === undefined ? {} : { verifyCleanup: launch.verifyCleanup }),
       },
     };
   } catch (error) {

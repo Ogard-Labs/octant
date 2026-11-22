@@ -48,6 +48,22 @@ const pendingApproval = {
   version: 1,
 } as const;
 
+describe("a Work question that asks for a secret", () => {
+  it("settles only as a secret answer that holds no value, and only it settles that way", () => {
+    const secretDetail = { kind: "user-input", prompt: "Credential?", options: [], secret: true };
+    const settled = (detail: object, resolution: object) => () =>
+      decodeWorkRequest({ ...pendingApproval, detail, status: "resolved", resolution, settledAt });
+    expect(settled(secretDetail, { kind: "user-input", secret: true })()).toMatchObject({
+      resolution: { kind: "user-input", secret: true },
+    });
+    expect(settled(secretDetail, { kind: "user-input", answer: "hunter2" })).toThrow();
+    expect(settled(userInputDetail, { kind: "user-input", secret: true })).toThrow();
+    expect(() =>
+      decodeWorkRequestResolution({ kind: "user-input", secret: true, answer: "hunter2" }),
+    ).toThrow();
+  });
+});
+
 describe("Work questionnaire privacy", () => {
   it("keeps structured multiple selections without admitting paths, URLs or unsafe identities", () => {
     const questionnaire = {
@@ -144,6 +160,27 @@ describe("WorkRequestDetail", () => {
         description: "Edit src/app/main.ts",
         levelChange: { to: "auto", plan },
       }),
+    ).toThrow();
+  });
+
+  it("records how an approved level change applied only on that approval", () => {
+    const resolved = {
+      ...pendingApproval,
+      detail: { ...approvalDetail, levelChange: { to: "plan" } },
+      status: "resolved",
+      resolution: { kind: "approval", approved: true },
+      settledAt,
+      version: 2,
+      levelChangeApplied: "in-place",
+    } as const;
+    expect(decodeWorkRequest(resolved)).toMatchObject({ levelChangeApplied: "in-place" });
+    // Not on an ordinary approval, a declined change, or a request still pending.
+    expect(() => decodeWorkRequest({ ...resolved, detail: approvalDetail })).toThrow();
+    expect(() =>
+      decodeWorkRequest({ ...resolved, resolution: { kind: "approval", approved: false } }),
+    ).toThrow();
+    expect(() =>
+      decodeWorkRequest({ ...pendingApproval, levelChangeApplied: "next-turn" }),
     ).toThrow();
   });
 

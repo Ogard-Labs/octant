@@ -3,6 +3,7 @@ import {
   assertNoPrincipalIdentityInPayload,
   ClientPrincipalError,
   principalActsAsHostPerson,
+  principalIsHubIntroduced,
   isAgentGrantSession,
   WINDOW_CAPABILITY_HEADER,
   resolveAuthenticatedPrincipal,
@@ -21,6 +22,7 @@ export interface PrincipalRouteContext {
   readonly principal: ClientPrincipal;
   readonly scopeId: WindowId;
   readonly abortSignal?: AbortSignal;
+  readonly sessionNow?: () => number;
 }
 
 export interface ResolvePrincipalRouteContextInput {
@@ -30,6 +32,7 @@ export interface ResolvePrincipalRouteContextInput {
   readonly body?: unknown;
   readonly principal?: ClientPrincipal;
   readonly abortSignal?: AbortSignal;
+  readonly sessionNow?: () => number;
 }
 
 const boundContexts = new WeakMap<Request, PrincipalRouteContext>();
@@ -57,6 +60,12 @@ export function boundPrincipalIsAgent(request: Request): boolean {
 export function boundPrincipalIsRestricted(request: Request): boolean {
   const principal = boundContexts.get(request)?.principal;
   return principal !== undefined && !principalActsAsHostPerson(principal);
+}
+
+/** Whether the request's bound principal is a device only the hub introduced. */
+export function boundPrincipalIsHubIntroduced(request: Request): boolean {
+  const principal = boundContexts.get(request)?.principal;
+  return principal !== undefined && principalIsHubIntroduced(principal);
 }
 
 /**
@@ -123,7 +132,7 @@ export function resolvePrincipalRouteContext(
 
   if (input.principal !== undefined) {
     assertNoPrincipalIdentityInPayload(input.request, input.body);
-    return makeContext(input.principal, input.abortSignal);
+    return makeContext(input.principal, input.abortSignal, input.sessionNow);
   }
   if (input.store === undefined || input.now === undefined) {
     throw new ClientPrincipalError("unavailable", "Authenticated route authority is unavailable.");
@@ -136,7 +145,7 @@ export function resolvePrincipalRouteContext(
     now: input.now,
     ...(input.body === undefined ? {} : { body: input.body }),
   });
-  return makeContext(principal, input.abortSignal);
+  return makeContext(principal, input.abortSignal, input.sessionNow);
 }
 
 /**
@@ -177,12 +186,14 @@ export function authenticateRouteWindowId(input: ResolvePrincipalRouteContextInp
 function makeContext(
   principal: ClientPrincipal,
   abortSignal: AbortSignal | undefined,
+  sessionNow: (() => number) | undefined,
 ): PrincipalRouteContext {
   const scopeId = principalScopeId(principal);
   return Object.freeze({
     principal,
     scopeId,
     ...(abortSignal === undefined ? {} : { abortSignal }),
+    ...(sessionNow === undefined ? {} : { sessionNow }),
   });
 }
 

@@ -17,8 +17,20 @@ import {
 import { MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING } from "@octant/contracts/browser-automation";
 import {
   DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS,
+  DEFAULT_FOLLOW_UP_LATENESS_LIMIT_HOURS,
+  DEFAULT_SHIELD_DENIALS_IN_A_ROW,
+  DEFAULT_SHIELD_DENIALS_PER_THREAD,
+  DEFAULT_TOOLING_COMMAND_CONFIRM_MINUTES,
+  MAX_FOLLOW_UP_LATENESS_LIMIT_HOURS_SETTING,
+  MAX_SHIELD_DENIALS_IN_A_ROW_SETTING,
+  MAX_SHIELD_DENIALS_PER_THREAD_SETTING,
+  MAX_TOOLING_COMMAND_CONFIRM_MINUTES_SETTING,
+  DEFAULT_SIBLING_THREAD_READS_PER_TURN,
+  DEFAULT_SIBLING_THREAD_WAITS_PER_TURN,
   DEFAULT_THREAD_MESSAGES_PER_TURN,
   MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING,
+  MAX_SIBLING_THREAD_READS_PER_TURN_SETTING,
+  MAX_SIBLING_THREAD_WAITS_PER_TURN_SETTING,
   MAX_THREAD_MESSAGES_PER_TURN_SETTING,
   type ShellSettings,
 } from "@octant/contracts/shell";
@@ -36,8 +48,14 @@ type LimitKey =
   | "pullRequestWatchDays"
   | "autoFixAttemptsPerFailure"
   | "threadMessagesPerTurn"
+  | "siblingThreadReadsPerTurn"
+  | "siblingThreadWaitsPerTurn"
   | "browserWaitLimitMinutes"
-  | "childRunWaitLimitSeconds";
+  | "childRunWaitLimitSeconds"
+  | "shieldDenialsInARow"
+  | "shieldDenialsPerThread"
+  | "followUpLatenessLimitHours"
+  | "toolingCommandConfirmMinutes";
 
 interface LimitRow {
   readonly key: LimitKey;
@@ -83,8 +101,41 @@ const SECTIONS: ReadonlyArray<{ readonly title: string; readonly rows: ReadonlyA
           key: "threadMessagesPerTurn",
           id: "thread-messages-per-turn",
           label: "Thread messages per turn",
-          description: `How many times one turn may ask another thread you mentioned. Default ${DEFAULT_THREAD_MESSAGES_PER_TURN}.`,
+          description: `Applies under Strict only. How many times one turn may ask another thread you mentioned. Default ${DEFAULT_THREAD_MESSAGES_PER_TURN}. Outside Strict there is no limit.`,
           max: MAX_THREAD_MESSAGES_PER_TURN_SETTING,
+        },
+        {
+          key: "siblingThreadReadsPerTurn",
+          id: "sibling-thread-reads-per-turn",
+          label: "Sibling thread reads per turn",
+          description: `Applies under Strict only. How many times one turn may read another open thread in the same Project. Default ${DEFAULT_SIBLING_THREAD_READS_PER_TURN}. Outside Strict there is no limit.`,
+          max: MAX_SIBLING_THREAD_READS_PER_TURN_SETTING,
+        },
+        {
+          key: "siblingThreadWaitsPerTurn",
+          id: "sibling-thread-waits-per-turn",
+          label: "Sibling thread waits per turn",
+          description: `Applies under Strict only. How many times one turn may wait on another open thread in the same Project. Default ${DEFAULT_SIBLING_THREAD_WAITS_PER_TURN}. Outside Strict there is no limit.`,
+          max: MAX_SIBLING_THREAD_WAITS_PER_TURN_SETTING,
+        },
+      ],
+    },
+    {
+      title: "Octant Shield",
+      rows: [
+        {
+          key: "shieldDenialsInARow",
+          id: "shield-denials-in-a-row",
+          label: "Denials in a row before you decide",
+          description: `After Octant Shield denies this many calls in a row in one thread, the next call comes to you. Default ${DEFAULT_SHIELD_DENIALS_IN_A_ROW}.`,
+          max: MAX_SHIELD_DENIALS_IN_A_ROW_SETTING,
+        },
+        {
+          key: "shieldDenialsPerThread",
+          id: "shield-denials-per-thread",
+          label: "Denials per thread before you decide",
+          description: `After Octant Shield denies this many calls in one thread, every later call there comes to you. Default ${DEFAULT_SHIELD_DENIALS_PER_THREAD}.`,
+          max: MAX_SHIELD_DENIALS_PER_THREAD_SETTING,
         },
       ],
     },
@@ -134,8 +185,22 @@ const SECTIONS: ReadonlyArray<{ readonly title: string; readonly rows: ReadonlyA
           id: "browser-wait-limit",
           label: "Longest Browser wait, in minutes",
           description:
-            "How long an agent's Browser may wait for a page to show something. Default 10. A Claude Code thread still ends any one tool call after eleven minutes.",
+            "Applies under Strict only. How long an agent's Browser may wait for a page to show something. Default 10. Outside Strict there is no wait limit. A Claude Code thread still ends any one tool call after eleven minutes.",
           max: MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING,
+        },
+        {
+          key: "followUpLatenessLimitHours",
+          id: "follow-up-lateness-limit",
+          label: "Latest a follow-up still runs, in hours",
+          description: `A follow-up that comes due while this computer is asleep or its thread is busy still runs up to this many hours late; after that it is recorded as missed. Default ${DEFAULT_FOLLOW_UP_LATENESS_LIMIT_HOURS}.`,
+          max: MAX_FOLLOW_UP_LATENESS_LIMIT_HOURS_SETTING,
+        },
+        {
+          key: "toolingCommandConfirmMinutes",
+          id: "tooling-command-confirm",
+          label: "Time to run a shown provider command, in minutes",
+          description: `How long Run this command once stays available after a Claude Code or Codex command is shown in Skills & Extensions. A secret held for it is deleted when the time runs out. Default ${DEFAULT_TOOLING_COMMAND_CONFIRM_MINUTES}.`,
+          max: MAX_TOOLING_COMMAND_CONFIRM_MINUTES_SETTING,
         },
         {
           key: "childRunWaitLimitSeconds",

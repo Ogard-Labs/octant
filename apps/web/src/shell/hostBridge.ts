@@ -30,6 +30,8 @@ import type {
   BrowserSurfaceRequest,
   BrowserSurfaceState,
   BrowserSurfaceTabCommand,
+  BrowserSurfaceTabIcon,
+  BrowserSurfaceTabIconsRequest,
   BundledWhatsNew,
   BundledWhatsNewAnnouncement,
   CanvasPrototypeOpenRequest,
@@ -44,6 +46,9 @@ import type {
   CodeOperationApprovalAnchor,
   ForgetPairedComputerOutcome,
   HostCapabilities,
+  KeepAwakeStatus,
+  HubWindowIntroductionOutcome,
+  HubWindowIntroductionRequest,
   LocalPluginFolderPickerResult,
   MenuBarOpenThread,
   OpenInApplicationDescriptor,
@@ -78,6 +83,8 @@ export type {
   BrowserSurfaceRequest,
   BrowserSurfaceState,
   BrowserSurfaceTabCommand,
+  BrowserSurfaceTabIcon,
+  BrowserSurfaceTabIconsRequest,
   BrowserSurfaceTabState,
   BundledWhatsNew,
   BundledWhatsNewAnnouncement,
@@ -93,6 +100,7 @@ export type {
   CodeOperationApprovalAnchor,
   ForgetPairedComputerOutcome,
   HostCapabilities,
+  KeepAwakeStatus,
   LocalPluginFolderPickerResult,
   MenuBarOpenThread,
   OpenInApplicationDescriptor,
@@ -171,6 +179,17 @@ export interface PairedComputersBridge {
     outcome: "approved" | "abandoned",
   ) => Promise<SettlePairedComputerOutcome>;
   readonly requestPairedComputer: (request: PairedComputerRequest) => Promise<PairedComputerAnswer>;
+}
+
+/**
+ * The hub's other members as this desktop window's computers. Present only in
+ * the desktop app: main asks this computer's host to have the hub list the
+ * window as a guest, and keeps the pins of the members the host names.
+ */
+export interface HubComputersBridge {
+  readonly introduceWindowToHub: (
+    request: HubWindowIntroductionRequest,
+  ) => Promise<HubWindowIntroductionOutcome>;
 }
 
 const pairedComputersByBridge = new WeakMap<OctantHostBridge, PairedComputersBridge>();
@@ -261,6 +280,7 @@ export type HubAdministrationOperation =
   | "owners-add"
   | "owners-remove"
   | "confirm-new-members"
+  | "delegation-accepting"
   | "paired-merge-unlock"
   | "owner-approval-answer-unlock"
   | "confirm-member"
@@ -272,6 +292,7 @@ export type HubAdministrationOperation =
   | "promote"
   | "wake"
   | "accept-moved-threads"
+  | "act-projects"
   | "wake-hardware-address"
   | "push"
   | "direct-push"
@@ -417,6 +438,7 @@ export interface OctantHostBridge
     EmbeddedBrowserBridge,
     Partial<RemoteAccessAdministrationBridge>,
     Partial<PairedComputersBridge>,
+    Partial<HubComputersBridge>,
     Partial<HubAdministrationBridge>,
     Partial<AgentAccessAdministrationBridge>,
     Partial<ProviderDeviceSignInBridge>,
@@ -496,6 +518,16 @@ export interface OctantHostBridge
   readonly captureBrowserSurfacePreview?: (
     request: Omit<BrowserSurfaceRequest, "bounds">,
   ) => Promise<string | undefined>;
+  /**
+   * Every tab's icon for this window's own Browser tab strip, as a delta
+   * against the revisions the window already holds. Person-only like the
+   * preview picture: the desktop host checks this window and thread own the
+   * context, and the rows never join an observation or a tool result. Absent
+   * outside the desktop app.
+   */
+  readonly readBrowserSurfaceTabIcons?: (
+    request: BrowserSurfaceTabIconsRequest,
+  ) => Promise<ReadonlyArray<BrowserSurfaceTabIcon> | undefined>;
   /** Shows an extension's popup or options page beside the Browser toolbar's extensions button. */
   readonly openBrowserExtensionPopup?: (request: {
     readonly profile:
@@ -578,6 +610,12 @@ export interface OctantHostBridge
    */
   readonly readBackgroundHost?: () => Promise<BackgroundHostState>;
   readonly changeBackgroundHost?: (change: BackgroundHostChange) => Promise<BackgroundHostState>;
+  /**
+   * Live sleep-prevention status held by the desktop main process (built from
+   * counts only, never thread titles). Absent in Nightly and on remote clients.
+   */
+  readonly subscribeKeepAwakeStatus?: (listener: (status: KeepAwakeStatus) => void) => () => void;
+  readonly refreshKeepAwakeStatus?: () => Promise<KeepAwakeStatus>;
   /**
    * Local What's new for the build on disk. Desktop-owned; never a network
    * fetch. Absent on a remote client.
@@ -743,6 +781,23 @@ export interface OctantHostBridge
   readonly reportShutdownProgress?: (
     progress: { readonly ended: number; readonly total: number } | undefined,
   ) => void;
+  /**
+   * The desktop's Files close check. A `check` asks whether this window's
+   * unsaved Files drafts allow it to close and the answer goes back through
+   * `replyFilesClose`; a `release` frees an approval the close no longer
+   * needs. Absent outside the desktop app.
+   */
+  readonly subscribeFilesCloseRequest?: (
+    listener: (request: { readonly requestId: number; readonly kind: "check" | "release" }) => void,
+  ) => () => void;
+  /**
+   * Resolves whether the desktop accepted the reply for its own request; a
+   * refused reply (`false`) never approved anything.
+   */
+  readonly replyFilesClose?: (
+    requestId: number,
+    answer: "checking" | "prompting" | "allow" | "cancel",
+  ) => Promise<boolean>;
   /** The first ⌘Q press: the window shows "press again to quit". */
   readonly subscribeQuitShortcutHint?: (listener: () => void) => () => void;
   /** Reports the person's setting: whether ⌘Q needs a second press. */

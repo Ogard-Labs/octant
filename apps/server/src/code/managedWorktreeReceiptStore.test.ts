@@ -174,6 +174,43 @@ describe("ManagedWorktreeReceiptStore", () => {
     });
   });
 
+  it("records the verified branch and head a host switch landed on, never the owned intent", async () => {
+    const directory = await dataDirectory();
+    const receipts = store(directory);
+    await receipts.create(input);
+
+    const recorded = await receipts.recordVerifiedBranch(
+      receiptId,
+      "octant/switched",
+      "b".repeat(40),
+    );
+    expect(recorded.currentBranch).toBe("octant/switched");
+    expect(recorded.currentHead).toBe("b".repeat(40));
+    // The owned branch, its deletion intent, and the minted head never move
+    // with the switch — those are the fields a discard must still match.
+    expect(recorded.branchIntent).toBe(input.branchIntent);
+    expect(recorded.refIntent).toBe(input.refIntent);
+    expect(recorded.expectedHead).toBe(input.expectedHead);
+
+    await expect(
+      new ManagedWorktreeReceiptStore({ dataDirectory: directory }).load(receiptId),
+    ).resolves.toMatchObject({
+      currentBranch: "octant/switched",
+      currentHead: "b".repeat(40),
+    });
+
+    await expect(receipts.recordVerifiedBranch(receiptId, "", "b".repeat(40))).rejects.toThrow(
+      "invalid managed worktree receipt",
+    );
+    await expect(
+      receipts.recordVerifiedBranch(
+        "99999999-0000-4000-8000-000000000099",
+        "octant/x",
+        "b".repeat(40),
+      ),
+    ).rejects.toThrow("invalid managed worktree receipt");
+  });
+
   it("finds one exact active receipt for crash recovery and fails closed on conflict", async () => {
     const directory = await dataDirectory();
     const receipts = store(directory);

@@ -31,6 +31,13 @@ export interface PreselectCreateHostRequest {
   readonly hosts: ReadonlyArray<HostIdentity>;
   readonly viewScope?: CreateHostViewScope;
   readonly lastSelectedHealthyHostId?: HostId;
+  /**
+   * The destination already selected. It is kept while the host is still
+   * registered, whatever its health: a paired computer reconnecting is still
+   * the person's choice, and switching away unmounted its start screen and
+   * lost the prompt being typed. Health only disables sending.
+   */
+  readonly selectedHostId?: HostId;
   readonly projectHostId?: HostId;
   readonly requiredCapability?: string;
 }
@@ -122,6 +129,11 @@ export function preselectCreateHost(request: PreselectCreateHostRequest): HostSe
     if (last !== undefined && isRoutableForCreate(last, request.requiredCapability)) {
       return { kind: "selected", host: last };
     }
+  }
+
+  if (request.selectedHostId !== undefined) {
+    const selected = findHost(hosts, request.selectedHostId);
+    if (selected !== undefined) return { kind: "selected", host: selected };
   }
 
   const firstHealthy = hosts.find((candidate) =>

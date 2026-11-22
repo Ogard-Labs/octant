@@ -24,6 +24,7 @@ import { threadHandoffDisclosure } from "../providers/conversationHandoff";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import { TurnActions } from "../transcript/TurnActions";
 import { TurnHeader, TurnTime, turnWorkedFor } from "../transcript/TurnHeader";
+import { TurnLoopStallNotice } from "../transcript/TurnLoopStallNotice";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
 import {
   memo,
@@ -76,6 +77,9 @@ export interface ChatTranscriptProps {
    * completed one regenerates. The server decides what the attempt allows.
    */
   readonly onRetryAttempt?: (turnId: ChatTurnId, attemptId: ChatAttemptId) => void;
+  /** Stops the running attempt from an inline loop or stall notice. */
+  readonly onStopTurn?: () => void;
+  readonly stoppingTurn?: boolean;
   /**
    * Opts the named stopped attempt into the host-owned resume at its declared
    * reset. Absent when the surface cannot schedule one.
@@ -99,6 +103,8 @@ export interface ChatTranscriptProps {
     readonly attemptId: ChatAttemptId;
     readonly requestId: string;
     readonly answer: string;
+    /** The question asks for a secret: sent as the command's `secretAnswer`, never recorded. */
+    readonly secret?: true;
   }) => void | boolean | Promise<void | boolean>;
   /** Cancels the turn a question belongs to, without answering it. */
   readonly onDismissQuestion?: (turnId: ChatTurnId, attemptId: ChatAttemptId) => void;
@@ -639,6 +645,8 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   onDismissQuestion={props.onDismissQuestion}
                   onQuoteSelection={props.onQuoteSelection}
                   onRetryAttempt={props.onRetryAttempt}
+                  onStopTurn={props.onStopTurn}
+                  stoppingTurn={props.stoppingTurn}
                   onScheduleUsageResume={props.onScheduleUsageResume}
                   onCancelUsageResume={props.onCancelUsageResume}
                   {...(props.view.thread.snooze === undefined &&
@@ -877,6 +885,8 @@ const AttemptBlock = memo(function AttemptBlock(props: {
   readonly onDismissQuestion: ChatTranscriptProps["onDismissQuestion"];
   readonly onQuoteSelection: ChatTranscriptProps["onQuoteSelection"];
   readonly onRetryAttempt: ChatTranscriptProps["onRetryAttempt"];
+  readonly onStopTurn: ChatTranscriptProps["onStopTurn"];
+  readonly stoppingTurn: ChatTranscriptProps["stoppingTurn"];
   readonly onScheduleUsageResume: ChatTranscriptProps["onScheduleUsageResume"];
   readonly onCancelUsageResume: ChatTranscriptProps["onCancelUsageResume"];
   readonly onSnoozeAtReset?: () => void;
@@ -899,7 +909,11 @@ const AttemptBlock = memo(function AttemptBlock(props: {
     responseContents.length === 0 || responseContents.some((content) => content === undefined)
       ? undefined
       : responseContents.map((content) => content!.body).join("");
-  const toolActivity = toolStepsActivity(props.attempt.toolSteps, props.attempt.toolStepsTruncated);
+  const toolActivity = toolStepsActivity(
+    props.attempt.toolSteps,
+    props.attempt.toolStepsTruncated,
+    props.attempt.reasoningMs,
+  );
   const workedFor = turnWorkedFor(
     props.attempt.outcome,
     props.attempt.createdAt,
@@ -978,6 +992,17 @@ const AttemptBlock = memo(function AttemptBlock(props: {
           {...(workedFor === undefined || workedForInFold ? {} : { workedFor })}
           startedAt={props.attempt.createdAt}
           step={runningStepTitle(toolActivity)}
+        />
+        <TurnLoopStallNotice
+          {...(props.attempt.loopNotice === undefined
+            ? {}
+            : { loopNotice: props.attempt.loopNotice })}
+          {...(props.attempt.stallNotice === undefined
+            ? {}
+            : { stallNotice: props.attempt.stallNotice })}
+          running={props.attempt.outcome === "queued" || props.attempt.outcome === "streaming"}
+          {...(props.stoppingTurn === undefined ? {} : { stopping: props.stoppingTurn })}
+          {...(props.onStopTurn === undefined ? {} : { onStop: props.onStopTurn })}
         />
         <HarnessRetryStatus
           events={
@@ -1099,6 +1124,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
                 attemptId: props.attempt.id,
                 requestId: props.attempt.pendingQuestion!.requestId,
                 answer,
+                ...(props.attempt.pendingQuestion?.secret === true ? { secret: true } : {}),
               })
             }
             onDismiss={
@@ -1114,6 +1140,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
                   questionCount: props.attempt.pendingQuestion.questionCount,
                 })}
             prompt={props.attempt.pendingQuestion.prompt}
+            secret={props.attempt.pendingQuestion.secret === true}
           />
         )}
         {(props.attempt.answeredQuestions ?? []).length === 0
@@ -1190,7 +1217,7 @@ function AssistantResponse(props: {
  * the reply grew from stays readable after the turn moves on.
  */
 function AnsweredQuestionRow(props: { readonly question: ChatAttemptAnsweredQuestion }) {
-  if (props.question.questionnaire !== undefined)
+  if (props.question.questionnaire !== undefined && props.question.answer !== undefined)
     return (
       <QuestionnaireSummary
         prompt={props.question.prompt}
@@ -1203,7 +1230,11 @@ function AnsweredQuestionRow(props: { readonly question: ChatAttemptAnsweredQues
       <CircleCheck aria-hidden="true" size={14} />
       <span className="approval-row__text">
         {props.question.prompt}
-        <span className="approval-row__detail">Answered: {props.question.answer}</span>
+        <span className="approval-row__detail">
+          {props.question.answer === undefined
+            ? "Answered with a secret, which Octant did not keep"
+            : `Answered: ${props.question.answer}`}
+        </span>
       </span>
     </div>
   );

@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { hostReadsProviderCatalogUnconfined } from "@octant/domain/guardrail-policy";
+import { codeOrWorkThreadProjectId, type HubActScopeSlot } from "../hub/hubActScope";
 import { openAdmittedSqlite, openSqlite } from "../persistence/sqlitePort";
 import { ChildWorktreeSourceService } from "../code/childWorktreeSourceService";
 import { GitObservationPort } from "../code/gitObservationPort";
@@ -17,7 +18,15 @@ import { bindGeneratedMcpSignInPolicy } from "../extensions/generatedMcpSignInPo
 import { lstatSync, realpathSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { acpRegistryAgent } from "@octant/plugin-host/acp-agents";
-import { installAcpAgent, makeAcpAgentInstallPorts } from "../providers/acpAgentInstall";
+import {
+  hasPendingAcpAgentInstallScripts,
+  installAcpAgent,
+  makeAcpAgentInstallPorts,
+  runAcpAgentInstallScripts,
+} from "../providers/acpAgentInstall";
+import { makeProcessConfinementLive } from "../process/seatbeltProfile";
+import { resolvePackagedWindowsConfineLauncher } from "../process/windowsConfinement";
+import { WindowsConfinementLeaseStore } from "../process/windowsConfinementRecovery";
 import { homedir, tmpdir } from "node:os";
 import {
   makeAccountSessionCarrier,
@@ -25,12 +34,14 @@ import {
 } from "../providers/accountSessionCarry";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
+  decodeChatThreadId,
   decodeCodeCheckoutId,
   decodeCodeRepositoryId,
   decodeCodeThreadId,
   decodeCodeWorktreeRef,
   decodeCodeWorktreeSourcePreview,
   decodeWindowId,
+  decodeWorkThreadId,
   type DiscoveryCandidate,
   type EventActor,
   LOCAL_HOST_ID,
@@ -49,10 +60,13 @@ import {
 import type { McpPlanServerProvider } from "@octant/contracts/mcp-plan-read-only";
 import type { BlockableToolProvider } from "@octant/contracts/blocked-tools";
 import { ExtensionProviderFamily } from "@octant/contracts/extensions";
-import type {
-  HarnessEndpointDriver,
-  ProviderDriver,
-  ProviderLocalUsageHistorySource,
+import {
+  collectProviderProjectFolderDiscoveryPorts,
+  type HarnessEndpointDriver,
+  type ProviderDriver,
+  type ProviderLocalUsageHistorySource,
+  type ProviderOwnChannels,
+  type ProviderProjectFolderDiscoveryPort,
 } from "@octant/provider-sdk";
 import { Effect, Schema } from "effect";
 import { admittedBundledProviderDriverKinds } from "@octant/plugin-host";
@@ -144,7 +158,14 @@ import { makePiProcessLive, type PiProcessPort } from "../providers/piProcess";
 import { createProviderRouteHandler } from "../providers/providerRoutes";
 import { ThreadNativeSetupStore } from "../providers/threadNativeSetupStore";
 import { readThreadProjectCode } from "../providers/threadProjectCode";
-import { hostProviderCliProjectTrust } from "../providers/providerCliProjectTrust";
+import {
+  createThreadProviderMentionsAccess,
+  readThreadProviderMentions,
+} from "../providers/threadProviderMentions";
+import {
+  readDeviceApprovedByPerson,
+  readDeviceRegistrations,
+} from "../persistence/remoteAccessProjection";
 import { createDiscoveryRouteHandler } from "../providers/discoveryRoutes";
 import { createProviderFromDiscoveryCandidate } from "../providers/discoveryProviderCreate";
 import { makeDiscoveryService } from "../providers/discoveryService";
@@ -168,6 +189,10 @@ import { compactionPointFor, withCompactionPoint } from "../providers/compaction
 import { withBlockedTools } from "../providers/blockedToolsDriver";
 import { BlockedToolsService } from "../providers/blockedToolsService";
 import { createBlockedToolsRouteHandler } from "../blockedToolsRoutes";
+import {
+  providerOwnChannelsFromSettings,
+  withProviderOwnChannels,
+} from "../providers/providerOwnChannels";
 import { redactProviderRuntimeSecrets } from "../providers/secretRedactingDriver";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
@@ -178,6 +203,7 @@ import {
   createLocalUsageHistorySourceForDriver,
   localUsageHistorySourceKey,
 } from "../providers/providerUsageHistorySources";
+import { BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS } from "../providers/providerFolderDiscoveryAdapters";
 import { createExtensionRouteHandler } from "../extensionRoutes";
 import { createProviderToolingRouteHandler } from "../providerToolingRoutes";
 import { createMcpPlanReadOnlyRouteHandler } from "../mcpPlanReadOnlyRoutes";
@@ -267,14 +293,19 @@ import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
 import type { WorkRequestStateWiring } from "./workRequestState";
+import type { WorkspaceWiring } from "./workspace";
 import { protectedAtLevel, secretGuardEntries } from "../process/secretGuard";
 import type { OpenCodeProtectedPaths } from "../providers/openCodeDriver";
 
 export interface ConfiguredProviderDriverOptions {
+  readonly octantVersion?: string;
   readonly openCodeProcess: OpenCodeProcessPort;
   readonly codexProcess: CodexProcessPort;
   readonly acpProcess?: AcpProcessPort;
   readonly acpHome?: (kind: AcpProviderKind, instanceId: ProviderInstance["id"]) => string;
+  readonly hasPendingAcpInstallScripts?: (
+    instance: Extract<ProviderInstance, { readonly driverKind: "acp-agent" }>,
+  ) => Promise<boolean>;
   readonly piProcess?: PiProcessPort;
   readonly piHome?: (instanceId: ProviderInstance["id"]) => string;
   readonly ohMyPiProcess?: OhMyPiProcessPort;
@@ -297,6 +328,10 @@ export interface ConfiguredProviderDriverOptions {
   readonly planMcpServers?: (provider: McpPlanServerProvider) => ReadonlyArray<string>;
   /** The tools the person blocked for a provider in Settings, read at each launch. */
   readonly blockedTools?: (provider: BlockableToolProvider) => ReadonlyArray<string>;
+  /** The person's provider telemetry and self-update switches, read at each launch. */
+  readonly providerOwnChannels?: () => ProviderOwnChannels;
+  /** Whether the host enforces Strict; read on Claude probes so Bedrock/custom routing works outside Strict. */
+  readonly hostStrict?: () => boolean;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   readonly codexInstances?: ReadonlyArray<ProviderInstance>;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
@@ -392,6 +427,7 @@ export function makeConfiguredProviderDriver(
     driver = runDirectEndpointOnNativeHarness(
       makeOpenAiCompatibleDriver({
         instanceId: instance.id,
+        ...(options.octantVersion === undefined ? {} : { octantVersion: options.octantVersion }),
         configuration: instance.configuration,
         runtimeRegistry: options.runtimeRegistry,
         ...(options.credentialResolver === undefined
@@ -462,6 +498,9 @@ export function makeConfiguredProviderDriver(
       permissionPersistence: options.permissionPersistence,
       ...(options.acpProcess === undefined ? {} : { acpProcess: options.acpProcess }),
       ...(options.acpHome === undefined ? {} : { acpHome: options.acpHome }),
+      ...(options.hasPendingAcpInstallScripts === undefined
+        ? {}
+        : { hasPendingAcpInstallScripts: options.hasPendingAcpInstallScripts }),
       ...(options.piProcess === undefined ? {} : { piProcess: options.piProcess }),
       ...(options.piHome === undefined ? {} : { piHome: options.piHome }),
       ...(options.ohMyPiProcess === undefined ? {} : { ohMyPiProcess: options.ohMyPiProcess }),
@@ -488,6 +527,7 @@ export function makeConfiguredProviderDriver(
         : { isProjectConfinedPath: options.isProjectConfinedPath }),
       ...(options.protectedPaths === undefined ? {} : { protectedPaths: options.protectedPaths }),
       ...(options.planMcpServers === undefined ? {} : { planMcpServers: options.planMcpServers }),
+      ...(options.hostStrict === undefined ? {} : { hostStrict: options.hostStrict }),
       ...(options.claudeInstances === undefined
         ? {}
         : { claudeInstances: options.claudeInstances }),
@@ -564,6 +604,12 @@ export function makeConfiguredProviderDriver(
   const blockable = blockableToolProvider(instance.driverKind);
   if (blockedTools !== undefined && blockable !== undefined) {
     driver = withBlockedTools(driver, () => blockedTools(blockable));
+  }
+  // The person's telemetry and self-update switches ride on every launch;
+  // each driver applies them only outside Strict.
+  const ownChannels = options.providerOwnChannels;
+  if (ownChannels !== undefined) {
+    driver = withProviderOwnChannels(driver, ownChannels);
   }
   // Redaction comes first, so every consumer of the stream, the usage tap
   // included, reads the redacted events.
@@ -713,17 +759,22 @@ export type ProvidersDependencies = Pick<
     | "managedWorktreeReceipts"
     | "nativeHarnessRouter"
   > &
-  Pick<HarnessStateWiring, "nativeHarnessSessions" | "serverRegistry"> &
+  Pick<HarnessStateWiring, "nativeHarnessSessions" | "serverProjectStore" | "serverRegistry"> &
   Pick<IntegrationsWiring, "githubExtensionSnapshot" | "providerRuntimeNetwork"> &
   Pick<ComputerUseWiring, "computerUseProcess"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
+  Pick<WorkspaceWiring, "spendCeilingService"> &
   Pick<
     FoundationsWiring,
     "providerRuntimeRegistry" | "workThreadProjection" | "resolveThreadStrict" | "resolveHostStrict"
-  >;
+  > & {
+    /** The member's Act item for its hub, bound by the hub side after this is built. */
+    readonly hubActScopeSlot: HubActScopeSlot;
+  };
 
 export function wireProviders(deps: ProvidersDependencies) {
   const {
+    hubActScopeSlot,
     agentRunChildWorktree,
     agentRunProcessSupervisor,
     agentRunSessionStore,
@@ -741,14 +792,14 @@ export function wireProviders(deps: ProvidersDependencies) {
     processAuthorityTime,
     providerRuntimeNetwork,
     providerRuntimeRegistry,
+    serverProjectStore,
     serverRegistry,
+    spendCeilingService,
     version,
     windowAuthorityStore,
     workThreadProjection,
     workRequestRuntime,
   } = deps;
-  // The trust a person already gave a Project's folder in Claude Code or Codex.
-  const providerCliProjectTrust = hostProviderCliProjectTrust();
   return Effect.gen(function* () {
     const codeThreadDrivers = new Map<
       string,
@@ -775,6 +826,10 @@ export function wireProviders(deps: ProvidersDependencies) {
     });
     const blockedTools = (provider: BlockableToolProvider) =>
       blockedToolsService.toolsFor(provider);
+    const providerOwnChannels = () =>
+      providerOwnChannelsFromSettings(
+        persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+      );
     // What each provider-owned session already holds outlives this process, as
     // the runtime's own history does, so a resumed session's first turn after
     // a restart is sent only what is new.
@@ -837,6 +892,14 @@ export function wireProviders(deps: ProvidersDependencies) {
         code: persistence.readCodeSettings()?.settings,
         work: workThreadProjection.settings(),
       });
+    const windowsConfinementLeases = new WindowsConfinementLeaseStore({
+      leaseDirectory: join(providerDataDirectory, "windows-confinement", "leases"),
+    });
+    if (process.platform === "win32") {
+      yield* Effect.promise(() => windowsConfinementLeases.recoverAll());
+    }
+    const packagedWindowsLauncher =
+      process.platform === "win32" ? resolvePackagedWindowsConfineLauncher() : undefined;
     const openCodeProcess =
       options.openCodeProcess ??
       makeOpenCodeProcessLive({ runtimeNetwork, serverAccess, windowsCatalogUnconfined });
@@ -847,6 +910,14 @@ export function wireProviders(deps: ProvidersDependencies) {
         runtimeNetwork,
         serverAccess,
         windowsCatalogUnconfined,
+        ...(packagedWindowsLauncher === undefined
+          ? {}
+          : {
+              windowsConfinement: {
+                launcherPath: packagedWindowsLauncher,
+                leaseStore: windowsConfinementLeases,
+              },
+            }),
       });
     const codexProcess: CodexProcessPort = {
       start: (input) =>
@@ -1387,6 +1458,9 @@ export function wireProviders(deps: ProvidersDependencies) {
         hostEnvironment: () => process.env,
         homeDirectory: homedir(),
         workingDirectory: join(providerDataDirectory, "provider-tooling"),
+        confirmMinutes: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+            .toolingCommandConfirmMinutes,
         ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
           ? {}
           : {
@@ -1458,18 +1532,28 @@ export function wireProviders(deps: ProvidersDependencies) {
           signInOrUnavailable(extensionId, componentId, (signIn) =>
             signIn.configureForServer(extensionId, componentId, registration, principalKind),
           ),
-        status: (extensionId, componentId, principalKind) =>
+        status: (extensionId, componentId, principalKind, device) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
-            signIn.status(extensionId, componentId, principalKind),
+            signIn.status(extensionId, componentId, principalKind, device),
           ),
-        begin: (extensionId, componentId, principalKind, actor) =>
+        begin: (extensionId, componentId, principalKind, actor, device) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
-            signIn.begin(extensionId, componentId, principalKind, actor),
+            signIn.begin(extensionId, componentId, principalKind, actor, device),
           ),
-        poll: (extensionId, componentId, attemptId, principalKind) =>
+        poll: (extensionId, componentId, attemptId, principalKind, device) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
-            signIn.poll(extensionId, componentId, attemptId, principalKind),
+            signIn.poll(extensionId, componentId, attemptId, principalKind, device),
           ),
+        relay: async (input) => {
+          if (mcpServerSignInHolder.current === undefined) {
+            return {
+              kind: "refused",
+              reason: "unavailable",
+              message: "Signing in needs the credential broker.",
+            };
+          }
+          return mcpServerSignInHolder.current.relay(input);
+        },
         signOut: (extensionId, componentId, principalKind, actor) =>
           signInOrUnavailable(extensionId, componentId, (signIn) =>
             signIn.signOut(extensionId, componentId, principalKind, actor),
@@ -1521,6 +1605,11 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
       toolApprovals: extensionToolApprovalService,
       toolGrants: extensionToolGrantStore,
+      hubActScope: hubActScopeSlot.current,
+      codeOrWorkThreadProjectId: codeOrWorkThreadProjectId({
+        readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+        readWorkThread: (threadId) => workThreadProjection.read(threadId),
+      }),
     });
     const preparationProcess = new RepositoryTestProcessPort({
       resourceBudget: deps.hostResourceBudget,
@@ -1947,8 +2036,19 @@ export function wireProviders(deps: ProvidersDependencies) {
       }
       await credentialResolver.delete(instanceId);
     };
+    const acpAgentRoot = (instanceId: ProviderInstanceId): string =>
+      join(providerDataDirectory, "acp-agent-installs", instanceId);
+    const hasPendingAcpInstallScripts = (
+      instance: Extract<ProviderInstance, { readonly driverKind: "acp-agent" }>,
+    ): Promise<boolean> =>
+      hasPendingAcpAgentInstallScripts({
+        configuration: instance.configuration,
+        root: acpAgentRoot(instance.id),
+      });
     const acpAgentInstallPorts = makeAcpAgentInstallPorts({
       fetchesAllowed: isMarketplaceFetchAllowed,
+      confinement: makeProcessConfinementLive(),
+      clock: () => new Date().toISOString(),
     });
     const providerService = new ProviderService({
       latestNpmVersion: createProviderLatestVersionCheck({ isAllowed: isMarketplaceFetchAllowed }),
@@ -1961,12 +2061,22 @@ export function wireProviders(deps: ProvidersDependencies) {
                 instance.configuration.source.kind === "registry"
                   ? acpRegistryAgent(instance.configuration.source.registryId)
                   : undefined,
-              root: join(providerDataDirectory, "acp-agent-installs", instance.id),
+              root: acpAgentRoot(instance.id),
             },
             acpAgentInstallPorts,
           ),
+        runInstallScripts: (instance) =>
+          runAcpAgentInstallScripts(
+            {
+              configuration: instance.configuration,
+              root: acpAgentRoot(instance.id),
+              strict: deps.resolveHostStrict(),
+            },
+            acpAgentInstallPorts,
+          ),
+        hasPendingInstallScripts: hasPendingAcpInstallScripts,
         remove: (instanceId) =>
-          rm(join(providerDataDirectory, "acp-agent-installs", instanceId), {
+          rm(acpAgentRoot(instanceId), {
             recursive: true,
             force: true,
           }),
@@ -1998,10 +2108,13 @@ export function wireProviders(deps: ProvidersDependencies) {
       driver: (instance) =>
         attachWorkRequestRuntime(
           makeConfiguredProviderDriver(instance, {
+            hostStrict: () => deps.resolveHostStrict(),
+            octantVersion: version,
             openCodeProcess,
             codexProcess,
             acpProcess,
             acpHome,
+            hasPendingAcpInstallScripts,
             piProcess,
             piHome,
             ohMyPiProcess,
@@ -2019,6 +2132,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             protectedPaths: hostProtectedPaths,
             planMcpServers,
             blockedTools,
+            providerOwnChannels,
             get claudeInstances() {
               return persistence.readProviderInstances();
             },
@@ -2093,34 +2207,6 @@ export function wireProviders(deps: ProvidersDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
-    });
-    const providerRoutes = createProviderRouteHandler({
-      threadNativeSetup: {
-        get: (threadId) => threadNativeSetupStore.get(threadId),
-        set: (request, actor) => {
-          const instance = persistence.readProviderInstance(request.providerInstanceId);
-          if (instance === undefined || !isKeyProviderDriverKind(instance.driverKind)) {
-            return "refused";
-          }
-          return threadNativeSetupStore.set(request.threadId, request.choice, actor);
-        },
-        projectCode: (request) =>
-          readThreadProjectCode(
-            {
-              readWorkThread: (threadId) => workThreadProjection.read(threadId),
-              readCodeThread: (threadId) => persistence.readCodeThread(threadId),
-              readProject: (projectId) => persistence.readProject(projectId),
-              readProviderInstance: (id) => persistence.readProviderInstance(id),
-              readProviderCliTrust: providerCliProjectTrust,
-              readStrict: (threadId) => deps.resolveThreadStrict(threadId),
-            },
-            request,
-          ),
-      },
-      service: providerService,
-      windowAuthorityStore,
-      maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
-      packagedProviderSmokeControl: options.packagedProviderSmokeControl === true,
     });
     // A cloud sign-in shares the host's terms record and sign-in journal.
     const cloudIamSignIn: CloudIamSignInDependencies | undefined =
@@ -2258,6 +2344,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       return openAdmittedSqlite(admission);
     };
     const configuredDriverOptions: ConfiguredProviderDriverOptions = {
+      octantVersion: version,
       runtimeTurnsPerTurn: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).runtimeTurnsPerTurn,
       compactionShare: (keeper) => {
@@ -2270,6 +2357,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       codexProcess,
       acpProcess,
       acpHome,
+      hasPendingAcpInstallScripts,
       piProcess,
       piHome,
       ohMyPiProcess,
@@ -2287,6 +2375,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       protectedPaths: hostProtectedPaths,
       planMcpServers,
       blockedTools,
+      providerOwnChannels,
       runtimeRegistry: providerRuntimeRegistry,
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
       onRuntimeEvent: recordProviderRuntimeUsage,
@@ -2320,6 +2409,73 @@ export function wireProviders(deps: ProvidersDependencies) {
         return persistence.readProviderInstances();
       },
     };
+    const canAccessMentionProject = createThreadProviderMentionsAccess({
+      listLiveWindowIds: () => windowAuthorityStore.listWindowIds(),
+      readWorkspace: (windowId) => persistence.readWindowWorkspace(windowId)?.workspace,
+      readProject: (projectId) => persistence.readProject(projectId),
+      readDevices: () => readDeviceRegistrations(persistence.connection),
+      approvedByPerson: (deviceId) => readDeviceApprovedByPerson(persistence.connection, deviceId),
+      isRestrictedDeviceScope,
+    });
+    const providerRoutes = createProviderRouteHandler({
+      threadNativeSetup: {
+        get: (threadId) => threadNativeSetupStore.get(threadId),
+        set: (request, actor) => {
+          const instance = persistence.readProviderInstance(request.providerInstanceId);
+          if (instance === undefined || !isKeyProviderDriverKind(instance.driverKind)) {
+            return "refused";
+          }
+          return threadNativeSetupStore.set(request.threadId, request.choice, actor);
+        },
+        projectCode: (request) =>
+          readThreadProjectCode(
+            {
+              readWorkThread: (threadId) => workThreadProjection.read(threadId),
+              readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+              readProject: (projectId) => persistence.readProject(projectId),
+              readProviderInstance: (id) => persistence.readProviderInstance(id),
+              readStrict: (threadId) => deps.resolveThreadStrict(threadId),
+            },
+            request,
+          ),
+        mentions: (windowId, request) =>
+          readThreadProviderMentions(
+            {
+              canAccessProject: canAccessMentionProject,
+              readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+              readCodeCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
+              readWorkThread: (threadId) => workThreadProjection.read(threadId),
+              readProject: (projectId) => persistence.readProject(projectId),
+              readProviderInstance: (id) => persistence.readProviderInstance(id),
+              readThreadNativeSetup: (threadId) => persistence.readThreadNativeSetup(threadId),
+              readStrict: (threadId) => deps.resolveThreadStrict(threadId),
+              isServerProject: (projectId) =>
+                serverProjectStore.project(String(projectId)) !== undefined,
+              resolveManagedWorktreePath: async (receiptId) => {
+                const receipt = await managedWorktreeReceipts.load(receiptId);
+                return receipt?.state === "ready" ? receipt.canonicalWorktreePath : undefined;
+              },
+              observedMentions: (instanceId) =>
+                providerRuntimeRegistry.observedState(instanceId)?.mentions,
+              resolveDriver: (instanceId) => {
+                const instance = persistence.readProviderInstance(instanceId);
+                if (instance === undefined || !instance.enabled) return undefined;
+                try {
+                  return makeConfiguredProviderDriver(instance, configuredDriverOptions);
+                } catch {
+                  return undefined;
+                }
+              },
+            },
+            windowId,
+            request,
+          ),
+      },
+      service: providerService,
+      windowAuthorityStore,
+      maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+      packagedProviderSmokeControl: options.packagedProviderSmokeControl === true,
+    });
     // Where a harness lead goes when its own model stays down. It builds
     // drivers from the options above, whose lead hook asks it in turn; both
     // only run once a turn is under way.
@@ -2378,6 +2534,24 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
       clock: () => new Date().toISOString(),
     });
+    const providerFolderDiscoveryPorts = (): ReadonlyArray<ProviderProjectFolderDiscoveryPort> => {
+      const contributed: ProviderProjectFolderDiscoveryPort[] = [
+        ...BUILTIN_PROVIDER_FOLDER_DISCOVERY_PORTS,
+      ];
+      for (const instance of persistence.readProviderInstances()) {
+        if (!instance.enabled) continue;
+        let driver: ProviderDriver;
+        try {
+          driver = makeConfiguredProviderDriver(instance, configuredDriverOptions);
+        } catch {
+          continue;
+        }
+        if (driver.projectFolderDiscovery !== undefined) {
+          contributed.push(driver.projectFolderDiscovery);
+        }
+      }
+      return collectProviderProjectFolderDiscoveryPorts(contributed);
+    };
     // The last reading of each instance, so the usage rings have something
     // to show before the first turn of a new run reports. Loading it asks no
     // provider anything.
@@ -2500,6 +2674,19 @@ export function wireProviders(deps: ProvidersDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      spendCeiling: spendCeilingService,
+      resolveThreadProjectId: ({ threadType, threadId }) => {
+        if (threadType === "chat-thread") {
+          const projectId = persistence.readChatThread(decodeChatThreadId(threadId))?.projectId;
+          return projectId === undefined ? undefined : String(projectId);
+        }
+        if (threadType === "code-thread") {
+          const projectId = persistence.readCodeThread(decodeCodeThreadId(threadId))?.projectId;
+          return projectId === undefined ? undefined : String(projectId);
+        }
+        const projectId = workThreadProjection.read(decodeWorkThreadId(threadId))?.projectId;
+        return projectId === undefined ? undefined : String(projectId);
+      },
     });
     yield* Effect.promise(() => imageJobService.reconcileInterruptedJobs());
     return {
@@ -2547,6 +2734,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       probeProviderForThreads,
       verifyModelToolsOnFirstUse,
       providerDataDirectory,
+      providerFolderDiscoveryPorts,
       providerOAuthRoutes,
       providerRoutes,
       providerService,

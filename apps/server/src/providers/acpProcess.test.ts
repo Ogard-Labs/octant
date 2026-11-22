@@ -20,6 +20,7 @@ import type {
 import { Effect, Either } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  acpNegotiationAccepted,
   makeAcpConfinementLive,
   makeAcpProcessLive,
   probeAcpBinary,
@@ -34,10 +35,11 @@ import {
 } from "../process/seatbeltProfile";
 import { projectCodeEntries } from "@octant/domain";
 import {
-  WINDOWS_CHAT_PROVIDER_REFUSAL,
   WINDOWS_KEPT_SANDBOX_REFUSAL,
   WINDOWS_SANDBOX_MISSING_REASON,
+  WINDOWS_STRICT_CHAT_REFUSAL,
   WINDOWS_STRICT_REFUSAL,
+  windowsStrictRuntimeRefusal,
 } from "@octant/domain/guardrail-policy";
 import { acpProviderProfiles, type AcpProviderProfile } from "./acpProfiles";
 
@@ -57,10 +59,24 @@ const copilot = acpProviderProfiles.copilot;
 const cline = acpProviderProfiles.cline;
 const qwen = acpProviderProfiles.qwen;
 const fx = acpProviderProfiles.fx;
+const antigravity = acpProviderProfiles.antigravity;
 const profiles = Object.values(acpProviderProfiles).filter(
   (profile) => profile.kind !== "opencode",
 );
-const denyDefaultProfiles = [kilo, devin, vibe, grok, goose, glm, gemini, copilot, cline, qwen, fx];
+const denyDefaultProfiles = [
+  kilo,
+  devin,
+  vibe,
+  grok,
+  goose,
+  glm,
+  gemini,
+  copilot,
+  cline,
+  qwen,
+  fx,
+  antigravity,
+];
 
 /** `--version` outputs per profile: [ready, too-old, malformed]. */
 const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, string, string]> = {
@@ -85,6 +101,7 @@ const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, strin
   cline: ["3.0.61", "3.0.60", "cline release 3.0.61 private-noise"],
   qwen: ["0.23.0", "0.22.9", "qwen-code release 0.23.0 private-noise"],
   fx: ["0.0.13", "0.0.12", "fx release 0.0.13 private-noise"],
+  antigravity: ["agy 1.5.12", "agy 1.4.5", "agy development build private-noise"],
   // An added agent has no floor, so it has no too-old release.
   "acp-agent": ["1.2.3", "1.2.3", "no version"],
 };
@@ -102,6 +119,7 @@ const readyVersions: Record<AcpProviderProfile["kind"], string> = {
   cline: "3.0.61",
   qwen: "0.23.0",
   fx: "0.0.13",
+  antigravity: "1.5.12",
   "acp-agent": "1.2.3",
 };
 
@@ -224,20 +242,29 @@ afterAll(() => {
 });
 
 describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
-  it("outside Strict passes the host's environment less Octant's variables, other providers' keys and the host names the profile withholds, and lifts only channel guards", () => {
-    const environment = sanitizeAcpEnvironment(
-      profile,
-      {
-        PATH: "/usr/bin",
-        HOME: "/Users/test",
-        HTTPS_PROXY: "http://proxy.invalid",
-        GH_TOKEN: "gh-token",
-        MISTRAL_API_KEY: "must-not-cross",
-        ANTHROPIC_API_KEY: "must-not-cross",
-        OCTANT_SECRET: "must-not-cross",
-      },
-      { managedHome: "/private/tmp/octant-acp-home", strict: false },
-    );
+  it("outside Strict passes the host's environment less Octant's variables, other providers' keys and the host names the profile withholds, and lifts only channel guards once the person turns provider telemetry on", () => {
+    const host = {
+      PATH: "/usr/bin",
+      HOME: "/Users/test",
+      HTTPS_PROXY: "http://proxy.invalid",
+      GH_TOKEN: "gh-token",
+      MISTRAL_API_KEY: "must-not-cross",
+      ANTHROPIC_API_KEY: "must-not-cross",
+      OCTANT_SECRET: "must-not-cross",
+    };
+    // Provider telemetry is off by default, so a launch whose person chose
+    // nothing keeps every guard, channel guards included.
+    expect(
+      sanitizeAcpEnvironment(profile, host, {
+        managedHome: "/private/tmp/octant-acp-home",
+        strict: false,
+      }),
+    ).toMatchObject(profile.process.guards);
+    const environment = sanitizeAcpEnvironment(profile, host, {
+      managedHome: "/private/tmp/octant-acp-home",
+      strict: false,
+      ownChannels: { telemetry: true, selfUpdate: false },
+    });
     const channels = new Set(profile.process.channelGuards ?? []);
     expect(environment).toMatchObject({
       PATH: "/usr/bin",
@@ -254,6 +281,42 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
       expect(environment.HOME).not.toBe("/Users/test");
     }
     expect(JSON.stringify(environment)).not.toContain("must-not-cross");
+  });
+
+  it("outside Strict keeps its telemetry guards when the person turned provider telemetry off and drops its self-update guards when the person lets providers update themselves", () => {
+    const environment = sanitizeAcpEnvironment(
+      profile,
+      { PATH: "/usr/bin" },
+      {
+        managedHome: "/private/tmp/octant-acp-home",
+        strict: false,
+        ownChannels: { telemetry: false, selfUpdate: true },
+      },
+    );
+    for (const name of profile.process.channelGuards ?? []) {
+      expect(environment[name]).toBe(profile.process.guards[name]);
+    }
+    for (const name of profile.process.selfUpdateGuards ?? []) {
+      expect(environment[name]).toBeUndefined();
+    }
+  });
+
+  it("under Strict keeps every telemetry and self-update guard whatever the person's switches say", () => {
+    const environment = sanitizeAcpEnvironment(
+      profile,
+      { PATH: "/usr/bin" },
+      {
+        managedHome: "/private/tmp/octant-acp-home",
+        strict: true,
+        ownChannels: { telemetry: true, selfUpdate: true },
+      },
+    );
+    for (const name of [
+      ...(profile.process.channelGuards ?? []),
+      ...(profile.process.selfUpdateGuards ?? []),
+    ]) {
+      expect(environment[name]).toBe(profile.process.guards[name]);
+    }
   });
 
   it("forces feature denial and strips inherited credentials and executable authority", () => {
@@ -309,6 +372,22 @@ describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
     const malformed = fixture(profile, "version-malformed");
     await expect(failureOf(probeAcp(profile, malformed.binaryPath))).resolves.toMatchObject({
       category: "protocol",
+    });
+  }, 15_000);
+
+  it("refuses a release listed as known to break with Octant, naming it", async () => {
+    const version = readyVersions[profile.kind];
+    const broken = { ...profile, process: { ...profile.process, brokenVersions: [version] } };
+    const ready = fixture(broken);
+    await expect(failureOf(probeAcp(broken, ready.binaryPath))).resolves.toEqual({
+      category: "incompatible",
+      reason: "runtime-incompatible",
+      message: `${profile.displayName} ${version} is known to break with Octant. Install another release.`,
+      diagnostic: {
+        stage: "version-check",
+        kind: "version-mismatch",
+        detectedVersion: version,
+      },
     });
   }, 15_000);
 
@@ -706,7 +785,7 @@ describe("ACP child-server profiles", () => {
     });
   });
 
-  it("starts an ACP agent on Windows at Full access and below it outside Strict with no sandbox, and refuses Strict, a kept sandbox and Chat by name", async () => {
+  it("starts an ACP agent on Windows at Full access, below it, and in Chat outside Strict with no sandbox, and refuses Strict and a kept sandbox by name", async () => {
     const target = fixture(kilo);
     const confinement = makeAcpConfinementLive({
       platform: "win32",
@@ -735,6 +814,7 @@ describe("ACP child-server profiles", () => {
       { executionPolicy: "full-access" },
       { executionPolicy: "approval-gated", strict: false },
       { executionPolicy: "plan", strict: false },
+      { mode: "chat", executionPolicy: "approval-gated", strict: false },
     ] as const) {
       expect(await prepare(level)).toMatchObject({
         _tag: "Right",
@@ -743,11 +823,13 @@ describe("ACP child-server profiles", () => {
     }
     for (const [level, message] of [
       [{ executionPolicy: "auto-accept-edits" }, WINDOWS_STRICT_REFUSAL],
+      [{ executionPolicy: "full-access", strict: true }, windowsStrictRuntimeRefusal("acp-agent")],
       [{ executionPolicy: "full-access", fullAccessSandbox: true }, WINDOWS_KEPT_SANDBOX_REFUSAL],
       [
-        { mode: "chat", executionPolicy: "approval-gated", strict: false },
-        WINDOWS_CHAT_PROVIDER_REFUSAL,
+        { mode: "chat", executionPolicy: "approval-gated", strict: true },
+        WINDOWS_STRICT_CHAT_REFUSAL,
       ],
+      [{ mode: "chat", executionPolicy: "approval-gated" }, WINDOWS_STRICT_CHAT_REFUSAL],
     ] as const) {
       expect(await prepare(level)).toMatchObject({
         _tag: "Left",
@@ -1039,7 +1121,13 @@ describe.each(denyDefaultProfiles)("ACP deny-default confinement ($displayName)"
     );
     expect(plan.args[1]).not.toContain(`(allow file-write* (subpath "${target.canonicalRoot}"))`);
     expect(plan.args[1]).not.toContain("(allow process-exec)");
-    expect(plan.args[1]).not.toContain("(allow process-fork)");
+    // A keychain sign-in read forks `/usr/bin/security`, the only exec its
+    // rules add; no other profile forks in Plan.
+    if (profile.process.readsLoginKeychain === true) {
+      expect(plan.args[1]).toContain("(allow process-fork)");
+    } else {
+      expect(plan.args[1]).not.toContain("(allow process-fork)");
+    }
     expect(plan.args[1]).toContain(`(allow file-read* (subpath "${target.canonicalRoot}"))`);
 
     const chat = await Effect.runPromise(
@@ -1477,6 +1565,58 @@ describe("Kimi Code host-profile extension surfaces", () => {
     expect(profileText).not.toContain(
       `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude/skills")}"))`,
     );
+  });
+
+  it("holds back none of the home or Project setup outside Strict, in Plan too, and keeps it held under Strict or with the setup turned off", async () => {
+    const target = fixture(kimi);
+    const managedHome = join(target.canonicalRoot, "managed-kimi");
+    const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
+    directories.push(hostHome);
+    const hostAuthenticationPath = join(hostHome, ".kimi-code");
+    mkdirSync(join(hostAuthenticationPath, "hooks"), { recursive: true });
+    writeFileSync(join(hostAuthenticationPath, "mcp.json"), "{}\n");
+    const canonicalHostPath = realpathSync(hostAuthenticationPath);
+    mkdirSync(join(target.canonicalRoot, ".kimi-code"));
+    // What a Plan session carries: the person's skills, no hooks, servers or Project code.
+    const planSetup = {
+      subagents: true,
+      webTools: true,
+      skills: true,
+      toolServers: false,
+      hooks: false,
+      projectCode: false,
+    } as const;
+    const deniedIn = async (input: {
+      readonly strict?: false;
+      readonly nativeSetup?: ProviderNativeSetup;
+    }) => {
+      const launch = await Effect.runPromise(
+        makeAcpConfinementLive({
+          platform: "darwin",
+          sandboxPath: target.sandboxPath,
+          temporaryDirectory: join(target.canonicalRoot, "tmp"),
+          hostAuthenticationPath: canonicalHostPath,
+        }).prepare({
+          profile: kimi,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome,
+          mode: "code",
+          executionPolicy: "plan",
+          environment: { PATH: "/usr/bin" },
+          ...input,
+        }),
+      );
+      const profileText = seatbeltProfile(launch);
+      return [
+        join(canonicalHostPath, "hooks"),
+        join(canonicalHostPath, "mcp.json"),
+        join(target.canonicalRoot, ".kimi-code"),
+      ].filter((path) => profileText.includes(`(deny file-read* (subpath "${path}"))`));
+    };
+    expect(await deniedIn({ strict: false, nativeSetup: planSetup })).toEqual([]);
+    expect(await deniedIn({ nativeSetup: planSetup })).toHaveLength(3);
+    expect(await deniedIn({ strict: false })).toHaveLength(3);
   });
 
   it.each([
@@ -1988,7 +2128,7 @@ describe("ACP probe confinement", () => {
   });
 });
 
-it("ships every ACP profile through deny-default confinement", () => {
+it("ships every ACP profile through deny-default confinement where Octant's sandbox applies", () => {
   for (const profile of Object.values(acpProviderProfiles)) {
     expect(profile.process.confinement.kind).toBe("deny-default-seatbelt");
     expect(profile.authentication.kind).toBe("provider-owned");
@@ -2243,6 +2383,237 @@ describe("Kimi Code provider-owned profile", () => {
   });
 });
 
+describe("login keychain read for Google Antigravity", () => {
+  const loginKeychain = join(realpathSync(homedir()), "Library", "Keychains", "login.keychain-db");
+
+  async function profileText(
+    profile: AcpProviderProfile,
+    mode: "chat" | "code",
+    executionPolicy: ProviderExecutionPolicy,
+  ) {
+    const target = fixture(profile);
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+      }).prepare({
+        profile,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome: join(target.canonicalRoot, "managed-home"),
+        mode,
+        executionPolicy,
+        environment: { PATH: "/usr/bin" },
+      }),
+    );
+    return seatbeltProfile(launch);
+  }
+
+  it.each([
+    ["code", "approval-gated"],
+    ["chat", "approval-gated"],
+    ["code", "plan"],
+  ] as const)(
+    "lets its %s launch at %s run security and read only the login keychain file, after every built-in denial",
+    async (mode, executionPolicy) => {
+      const lines = (await profileText(antigravity, mode, executionPolicy)).trimEnd().split("\n");
+      const allow = `(allow file-read* (literal "${loginKeychain}"))`;
+      expect(lines).toContain(allow);
+      expect(lines).toContain('(allow mach-lookup (global-name "com.apple.SecurityServer"))');
+      expect(lines.some((line) => line.includes('"/usr/bin/security"'))).toBe(true);
+      expect(lines).toContain("(allow process-fork)");
+      expect(
+        lines.filter((line) => line.includes("Keychains/") && line.startsWith("(allow")),
+      ).toEqual([allow]);
+      expect(
+        lines.some((line) => line.startsWith("(allow file-write") && line.includes("Keychains")),
+      ).toBe(false);
+    },
+  );
+
+  it.each(profiles.filter((profile) => profile.kind !== "antigravity"))(
+    "gives $displayName no login keychain read",
+    async (profile) => {
+      if (profile.refuses?.("code", "approval-gated") !== undefined) return;
+      const text = await profileText(profile, "code", "approval-gated");
+      expect(text).not.toContain("login.keychain-db");
+      expect(text).not.toContain("/usr/bin/security");
+    },
+  );
+});
+
+describe("ACP agents launch without Octant's sandbox in Work and Code outside Strict", () => {
+  async function launchFor(input: {
+    readonly mode: "chat" | "work" | "code";
+    readonly executionPolicy: ProviderExecutionPolicy;
+    readonly strict?: boolean;
+    readonly fullAccessSandbox?: boolean;
+    readonly purpose?: "probe" | "session";
+  }) {
+    const target = fixture(antigravity);
+    return Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+        hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+      }).prepare({
+        profile: antigravity,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome: join(target.canonicalRoot, "managed-home"),
+        mode: input.mode,
+        executionPolicy: input.executionPolicy,
+        ...(input.strict === undefined ? {} : { strict: input.strict }),
+        ...(input.fullAccessSandbox === undefined
+          ? {}
+          : { fullAccessSandbox: input.fullAccessSandbox }),
+        ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
+        environment: { PATH: "/usr/bin" },
+      }),
+    ).then((launch) => ({ launch, binaryPath: target.binaryPath }));
+  }
+
+  it.each([
+    ["work", "approval-gated"],
+    ["code", "approval-gated"],
+    ["code", "auto-accept-edits"],
+  ] as const)(
+    "starts %s at %s as the CLI itself, with no sandbox",
+    async (mode, executionPolicy) => {
+      const { launch, binaryPath } = await launchFor({ mode, executionPolicy, strict: false });
+      expect(launch.command).toBe(binaryPath);
+      expect(launch.args).toEqual(["acp", "--process-per-session", "--disable-telemetry"]);
+    },
+  );
+
+  it("passes its own telemetry switch only while the launch keeps telemetry closed", () => {
+    expect(
+      antigravity.process.args({
+        root: "/tmp/project",
+        managedHome: "/tmp/managed",
+        ownChannels: { telemetry: false, selfUpdate: false },
+      }),
+    ).toEqual(["acp", "--process-per-session", "--disable-telemetry"]);
+    expect(
+      antigravity.process.args({
+        root: "/tmp/project",
+        managedHome: "/tmp/managed",
+        ownChannels: { telemetry: true, selfUpdate: false },
+      }),
+    ).toEqual(["acp", "--process-per-session"]);
+  });
+
+  it.each([
+    ["under Strict", { mode: "code", executionPolicy: "approval-gated" }],
+    ["in Chat", { mode: "chat", executionPolicy: "approval-gated", strict: false }],
+    ["in Plan", { mode: "code", executionPolicy: "plan", strict: false }],
+    [
+      "at Full access that keeps the sandbox",
+      { mode: "code", executionPolicy: "full-access", strict: false, fullAccessSandbox: true },
+    ],
+    [
+      "for a readiness check",
+      { mode: "code", executionPolicy: "approval-gated", strict: false, purpose: "probe" },
+    ],
+  ] as const)("keeps the sandbox %s", async (_label, input) => {
+    const { launch, binaryPath } = await launchFor(input);
+    expect(launch.command).not.toBe(binaryPath);
+    expect(seatbeltProfile(launch)).toContain("login.keychain-db");
+  });
+
+  const ownSetup = {
+    subagents: true,
+    webTools: true,
+    skills: true,
+    toolServers: true,
+    hooks: true,
+    projectCode: true,
+  } as const;
+
+  it("runs every profile without Octant's sandbox in Code outside Strict, unless its shell never asks", async () => {
+    for (const profile of [...profiles, { ...kilo, shellWithoutRequest: true as const }]) {
+      if (profile.refuses?.("code", "approval-gated") !== undefined) continue;
+      const target = fixture(profile);
+      const launch = await Effect.runPromise(
+        makeAcpConfinementLive({
+          platform: "darwin",
+          sandboxPath: target.sandboxPath,
+          temporaryDirectory: join(target.canonicalRoot, "tmp"),
+          hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+        }).prepare({
+          profile,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome: join(target.canonicalRoot, "managed-home"),
+          mode: "code",
+          executionPolicy: "approval-gated",
+          strict: false,
+          nativeSetup: ownSetup,
+          environment: { PATH: "/usr/bin" },
+        }),
+      );
+      expect(launch.command === target.binaryPath, profile.displayName).toBe(
+        profile.shellWithoutRequest !== true,
+      );
+    }
+  });
+
+  it("keeps the sandbox and its hold-backs in Code outside Strict when the person turned Kimi Code's own setup off", async () => {
+    const target = fixture(kimi);
+    const prepare = (nativeSetup?: ProviderNativeSetup) =>
+      Effect.runPromise(
+        makeAcpConfinementLive({
+          platform: "darwin",
+          sandboxPath: target.sandboxPath,
+          temporaryDirectory: join(target.canonicalRoot, "tmp"),
+          hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+        }).prepare({
+          profile: kimi,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome: join(target.canonicalRoot, "managed-home"),
+          mode: "code",
+          executionPolicy: "approval-gated",
+          strict: false,
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
+          environment: { PATH: "/usr/bin" },
+        }),
+      );
+    expect((await prepare(ownSetup)).command).toBe(target.binaryPath);
+    const setupOff = await prepare();
+    expect(setupOff.command).not.toBe(target.binaryPath);
+    expect(seatbeltProfile(setupOff)).toContain(
+      `(deny file-read* (subpath "${join(target.canonicalRoot, ".mcp.json")}"))`,
+    );
+  });
+});
+
+describe("ACP protocol version negotiation", () => {
+  const initialized = (protocolVersion: number, name: string) => ({
+    protocolVersion,
+    agentCapabilities: {},
+    agentInfo: { name, version: "1.5.12" },
+  });
+
+  it("accepts Google Antigravity reporting protocol version 1 or 2 under any name, and no other profile reporting 2", () => {
+    expect(acpNegotiationAccepted(antigravity, initialized(1, "Antigravity ACP Server"))).toBe(
+      true,
+    );
+    expect(acpNegotiationAccepted(antigravity, initialized(2, "Antigravity ACP Server"))).toBe(
+      true,
+    );
+    expect(acpNegotiationAccepted(antigravity, initialized(3, "Antigravity ACP Server"))).toBe(
+      false,
+    );
+    // Any agent name is accepted, as the CLI renamed itself between releases.
+    expect(acpNegotiationAccepted(antigravity, initialized(2, "antigravity-acp"))).toBe(true);
+    expect(acpNegotiationAccepted(gemini, initialized(2, gemini.process.agentName))).toBe(false);
+  });
+});
+
 describe("System Keychain read for fx", () => {
   const systemKeychain = "/Library/Keychains/System.keychain";
 
@@ -2362,7 +2733,6 @@ describe("Mistral Vibe running as itself", () => {
 
     const own = sanitizeAcpEnvironment(vibe, {}, { managedHome: "/x", nativeSetup: everything });
     for (const name of [
-      "VIBE_INCLUDE_PROJECT_CONTEXT",
       "VIBE_SKILL_PATHS",
       "VIBE_DISABLED_SKILLS",
       "VIBE_MCP_SERVERS",
@@ -2500,18 +2870,32 @@ describe("ACP agents running as themselves", () => {
     for (const profile of Object.values(acpProviderProfiles)) {
       const held = profile.process.forbiddenRootEntries ?? [];
       const release = profile.process.nativeSetup;
-      if (profile.kind === "opencode") continue;
+      // Google Antigravity holds nothing of a Project back, so it has nothing to release.
+      if (profile.kind === "opencode" || profile.kind === "antigravity") continue;
       expect(release, profile.kind).toBeDefined();
       if (release === undefined) continue;
       const launch = { executionPolicy: "approval-gated" as const, mode: "code" as const };
       const named = new Set(projectCodeEntries(profile.kind).map((entry) => entry.path));
-      const beforeTrust = new Set(release(untrusted, launch).releasedRootEntries);
+      expect(release(untrusted, launch).releasedRootEntries, profile.kind).toEqual([]);
       for (const entry of held) {
         expect(release(everything, launch).releasedRootEntries, profile.kind).toContain(entry);
-        // An entry readable before trust is instruction text, never code.
-        if (beforeTrust.has(entry)) expect(entry, profile.kind).toBe("AGENTS.md");
-        else expect(named.has(entry), `${profile.kind} ${entry}`).toBe(true);
+        expect(named.has(entry), `${profile.kind} ${entry}`).toBe(true);
       }
+    }
+  });
+
+  it("leaves every agent a Project's instruction files to read with no setup at all, Strict and Plan included", () => {
+    const instructionFiles = ["AGENTS.md", "CLAUDE.md", "GEMINI.md", "QWEN.md", "AGENT.md"];
+    for (const profile of Object.values(acpProviderProfiles)) {
+      for (const entry of profile.process.forbiddenRootEntries ?? []) {
+        expect(instructionFiles, `${profile.kind} ${entry}`).not.toContain(entry);
+      }
+    }
+    // Mistral Vibe reads its Project context unless a guard turns it off; none does.
+    for (const executionPolicy of ["plan", "approval-gated"] as const) {
+      expect(
+        sanitizeAcpEnvironment(vibe, {}, { managedHome: "/x", executionPolicy, mode: "code" }),
+      ).not.toHaveProperty("VIBE_INCLUDE_PROJECT_CONTEXT");
     }
   });
 
@@ -2608,7 +2992,7 @@ describe("ACP agents running as themselves", () => {
   });
 });
 
-describe("ACP agents whose own sandbox cannot refuse other providers' sign-ins", () => {
+describe("ACP agents whose own sandbox cannot refuse other providers' sign-ins, under Strict", () => {
   const trustedProject = {
     subagents: false,
     webTools: false,
@@ -2622,7 +3006,7 @@ describe("ACP agents whose own sandbox cannot refuse other providers' sign-ins",
     ["Gemini CLI", gemini],
     ["Qwen Code", qwen],
   ] as const)(
-    "keeps %s inside Octant's profile outside Strict, so another provider's sign-in stays unreadable",
+    "keeps %s inside Octant's profile under Strict, so another provider's sign-in stays unreadable",
     async (_name, profile) => {
       const target = fixture(profile);
       const managedHome = join(target.canonicalRoot, "managed-home");
@@ -2640,7 +3024,6 @@ describe("ACP agents whose own sandbox cannot refuse other providers' sign-ins",
           managedHome,
           mode: "code",
           executionPolicy: "approval-gated",
-          strict: false,
           nativeSetup: trustedProject,
           environment: { PATH: "/usr/bin" },
         }),

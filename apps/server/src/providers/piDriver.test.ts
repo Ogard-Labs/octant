@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Exit, Scope, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { appToolHostLines } from "./appToolHostLines";
 import { makePiDriver, type PiClientPort } from "./piDriver";
 import { piToolCatalogAttestation, type PiProcessPort, type PiRpcConnection } from "./piProcess";
 import { createPiManagedToolsBridge, type PiManagedToolsBridge } from "./piManagedTools";
@@ -607,31 +608,37 @@ describe("Pi provider driver", () => {
     expect(f.active()).toBe(0);
   });
 
-  it("closes a settled Pi 1.1.0 process instead of retaining it, because warm reuse is verified only on 0.85.1", async () => {
-    const f = fixture("1.1.0");
-    try {
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const connection = yield* f.driver.acquire({
-              instanceId,
-              projectRoot: root,
-              mode: "code",
-            });
-            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-            const collected = terminal(yield* connection.subscribe);
-            yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
-            f.client.emit({ type: "agent_settled" });
-            expect((yield* Effect.promise(() => collected)).at(-1)?.kind).toBe("completed");
-            yield* connection.stop(sessionId);
-          }),
-        ),
-      );
-      expect(f.active()).toBe(0);
-    } finally {
-      await f.registry.closeAll();
-    }
-  });
+  it.each([
+    ["retains", "1.1.0", 1],
+    ["closes", "0.80.10", 0],
+  ] as const)(
+    "%s a settled Pi %s process, judged against 0.85.1, the release warm reuse was reviewed on",
+    async (_verb, version, retained) => {
+      const f = fixture(version);
+      try {
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* f.driver.acquire({
+                instanceId,
+                projectRoot: root,
+                mode: "code",
+              });
+              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+              const collected = terminal(yield* connection.subscribe);
+              yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+              f.client.emit({ type: "agent_settled" });
+              expect((yield* Effect.promise(() => collected)).at(-1)?.kind).toBe("completed");
+              yield* connection.stop(sessionId);
+            }),
+          ),
+        );
+        expect(f.active()).toBe(retained);
+      } finally {
+        await f.registry.closeAll();
+      }
+    },
+  );
 
   it.each(["authority", "catalogue", "Strict"] as const)(
     "closes an incompatible warm process before resuming the same history after a %s change",
@@ -923,7 +930,7 @@ describe("Pi provider driver", () => {
     ["0.85.1", "supported"],
     ["1.1.0", "supported"],
     ["0.80.10", "unsupported"],
-    ["1.0.4", "unsupported"],
+    ["1.0.4", "supported"],
     ["1.1.1", "supported"],
     ["1.3.0", "supported"],
     ["not-a-version", "unsupported"],
@@ -934,11 +941,12 @@ describe("Pi provider driver", () => {
     expect(result.capabilities.appManagedTools).toBe(expected);
   });
 
-  it("starts an app-managed session on a Pi release at or above the verified floor and refuses it below the verified floor", async () => {
+  it("starts an app-managed session on a Pi release at or above the earliest reviewed one and refuses it below that release", async () => {
     const tools = [{ name: "octant_browser", inputSchema: { type: "object", properties: {} } }];
     for (const [version, accepted] of [
       ["1.3.0", true],
-      ["1.0.4", false],
+      ["1.0.4", true],
+      ["0.84.9", false],
     ] as const) {
       const { driver } = fixture(version);
       const scope = await Effect.runPromise(Scope.make());
@@ -951,10 +959,26 @@ describe("Pi provider driver", () => {
         connection.start({ sessionId, modelId, executionPolicy: "approval-gated", tools }),
       );
       if (accepted) await expect(started).resolves.toBeDefined();
-      else await expect(started).rejects.toThrow(/not verified/);
+      else await expect(started).rejects.toThrow(/older than 0.85.1/);
       await Effect.runPromise(Scope.close(scope, Exit.void));
     }
   });
+
+  it.each([
+    [
+      "1.0.4",
+      "Pi 1.0.4 keeps Octant's tools, unverified: Octant reviewed them on another release.",
+    ],
+    ["0.85.1", undefined],
+    ["1.3.0", undefined],
+  ] as const)(
+    "says on the runtime card whether Pi %s keeps its tools unverified",
+    async (version, message) => {
+      const { driver } = fixture(version);
+      const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+      expect(result.message).toBe(message);
+    },
+  );
 
   it("carries a read-only app-managed tool through a Plan turn on a verified Pi release", async () => {
     const tools = [{ name: "octant_code", inputSchema: { type: "object", properties: {} } }];
@@ -997,7 +1021,7 @@ describe("Pi provider driver", () => {
           ],
         }),
       ),
-    ).rejects.toThrow(/not verified/);
+    ).rejects.toThrow(/older than 0.85.1/);
     await Effect.runPromise(Scope.close(scope, Exit.void));
   });
 
@@ -1167,8 +1191,20 @@ describe("Pi provider driver", () => {
       const bridge = starts.at(-1)?.toolBridge as { url: string; token: string } | undefined;
       expect(bridge).toBeDefined();
       const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+      const [line] = appToolHostLines([tool]);
+      if (line === undefined) throw new Error("Missing Browser guide");
       await Effect.runPromise(
-        connection.send({ sessionId, prompt: "use the browser", attachments: [], tools: [tool] }),
+        connection.send({
+          sessionId,
+          prompt: "use the browser",
+          attachments: [],
+          tools: [tool],
+          context: [{ kind: "instructions", ...line }],
+        }),
+      );
+      expect(client.request).toHaveBeenCalledWith(
+        "prompt",
+        expect.objectContaining({ message: expect.stringContaining(line.text) }),
       );
       client.emit({
         type: "tool_execution_start",
@@ -1551,6 +1587,80 @@ describe("Pi provider driver", () => {
     expect((await launched("code"))?.readOnlyFolders).toEqual([attachmentsFolder]);
     expect((await launched("chat"))?.readOnlyFolders).toBeUndefined();
   });
+
+  it.each([
+    ["the Pi process disconnects", "disconnect", false],
+    ["Pi breaks its protocol", "protocol", false],
+    ["Pi breaks its protocol after a request without usage", "protocol", true],
+  ] as const)(
+    "reports the usage a turn spent before it failed because %s, and none when a request's counts are missing",
+    async (_label, cause, missing) => {
+      const client = new FakeClient();
+      const processExit = deferredExit();
+      const processPort: PiProcessPort = {
+        start: () =>
+          Effect.acquireRelease(
+            Effect.succeed({
+              version: "0.80.10",
+              pid: 703,
+              root,
+              rpc: {} as PiRpcConnection["rpc"],
+              exited: processExit.exited,
+            }),
+            () => Effect.void,
+          ),
+      };
+      const driver = makePiDriver({
+        instanceId,
+        binaryPath: "/opt/homebrew/bin/pi",
+        piHome: "/managed/pi",
+        process: processPort,
+        runtimeRegistry: new ProviderRuntimeRegistry(),
+        clientFactory: () => client,
+        clock: () => "2026-07-18T06:00:00.000Z",
+        correlationId: () => "80000000-0000-4000-8000-000000000703",
+      });
+      const scope = await Effect.runPromise(Scope.make());
+      const connection = await Effect.runPromise(
+        driver
+          .acquire({ instanceId, projectRoot: root, mode: "code" })
+          .pipe(Effect.provideService(Scope.Scope, scope)),
+      );
+      await Effect.runPromise(
+        connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+      await Effect.runPromise(
+        connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
+      );
+      client.emit({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          usage: { input: 20, output: 5, cacheRead: 10, cacheWrite: 0, cost: { total: 0.01 } },
+        },
+      });
+      if (missing) client.emit({ type: "message_end", message: { role: "assistant" } });
+      if (cause === "disconnect") processExit.reject(new Error("disconnected"));
+      else client.emit({ type: "tool_execution_start", toolName: "read" });
+      const events = await collected;
+      if (missing) {
+        // A request that reported nothing leaves the turn's counts partial,
+        // which would understate it; the turn stays unreported instead.
+        expect(events.map((event) => event.kind)).toEqual(["failed"]);
+      } else {
+        expect(events.map((event) => event.kind)).toEqual(["usage", "failed"]);
+        expect(events[0]).toMatchObject({
+          inputTokens: 30,
+          outputTokens: 5,
+          cacheReadInputTokens: 10,
+          cacheWriteInputTokens: 0,
+          costUsd: 0.01,
+        });
+      }
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+    },
+  );
 
   it("fails an active turn exactly once when the owned Pi process disconnects", async () => {
     const client = new FakeClient();

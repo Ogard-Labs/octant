@@ -36,6 +36,8 @@ export type NativeHarnessQuestionOutcome = SettledQuestionOutcome | RefusedQuest
 interface Waiter {
   readonly threadId: string;
   readonly questionnaire?: Questionnaire;
+  /** The question asks for a secret; only a secret answer settles it. */
+  readonly secret?: true;
   readonly resolve: (outcome: SettledQuestionOutcome, actor?: EventActor) => void;
   readonly onAbort: () => void;
   readonly signal: AbortSignal | undefined;
@@ -88,6 +90,11 @@ export class NativeHarnessQuestionStore {
     readonly prompt: string;
     readonly questionnaire?: Questionnaire;
     readonly options: ReadonlyArray<string>;
+    /**
+     * A subagent's provider asks for a secret: the answer comes back to the
+     * asker in memory and the journal records only that it was given.
+     */
+    readonly secret?: true;
     readonly signal?: AbortSignal | undefined;
   }): Promise<
     | (SettledQuestionOutcome & { readonly questionId: NativeHarnessQuestionId })
@@ -111,6 +118,7 @@ export class NativeHarnessQuestionStore {
       prompt: input.prompt,
       ...(input.questionnaire === undefined ? {} : { questionnaire: input.questionnaire }),
       options: input.options,
+      ...(input.secret === true ? { secret: true } : {}),
       status: "pending",
       askedAt,
     });
@@ -126,7 +134,14 @@ export class NativeHarnessQuestionStore {
         if (waiter === undefined) return;
         this.#waiters.delete(String(questionId));
         waiter.signal?.removeEventListener("abort", waiter.onAbort);
-        this.#options.sessions.settleQuestion(input.threadId, questionId, outcome, actor);
+        // A secret answer goes back to the asker alone; the journal keeps
+        // only that the question was answered.
+        this.#options.sessions.settleQuestion(
+          input.threadId,
+          questionId,
+          input.secret === true && outcome.status === "answered" ? { status: "answered" } : outcome,
+          actor,
+        );
         try {
           this.#options.onSettled?.({ threadId: input.threadId, questionId: String(questionId) });
         } catch {
@@ -137,6 +152,7 @@ export class NativeHarnessQuestionStore {
       const waiter: Waiter = {
         threadId: input.threadId,
         ...(input.questionnaire === undefined ? {} : { questionnaire: input.questionnaire }),
+        ...(input.secret === true ? { secret: true } : {}),
         resolve: settle,
         onAbort: () => settle({ status: "cancelled" }),
         signal: input.signal,
@@ -172,13 +188,30 @@ export class NativeHarnessQuestionStore {
     answer: string,
     /** Who answered, as the route resolved it; absent means the person at this host. */
     actor?: EventActor,
+    /**
+     * The answer is a secret question's, held in memory only. A secret answer
+     * settles only a question that asked for one, and such a question takes
+     * no other answer (`invalid-answer` either way).
+     */
+    secret?: true,
   ): "answered" | "question-not-found" | "already-settled" | "invalid-answer" {
     const waiter = this.#waiters.get(questionId);
     if (waiter === undefined || waiter.threadId !== threadId) {
       const stored = this.#options.sessions
         .read(threadId)
         ?.questions.find((question) => String(question.id) === questionId);
-      if (stored?.questionnaire !== undefined && stored.status === "pending")
+      if (
+        stored !== undefined &&
+        stored.status === "pending" &&
+        (stored.secret === true) !== (secret === true)
+      )
+        return "invalid-answer";
+      // No asker waits to take a secret in memory, and the journal would
+      // never hold it, so there is nothing to answer.
+      if (
+        stored?.status === "pending" &&
+        (stored.questionnaire !== undefined || stored.secret === true)
+      )
         return "question-not-found";
       // No turn is waiting (a restart, say); the journaled question can still
       // take the answer, and that is an answer, not a refusal.
@@ -190,6 +223,7 @@ export class NativeHarnessQuestionStore {
       );
       return typeof settled === "string" ? settled : "answered";
     }
+    if ((waiter.secret === true) !== (secret === true)) return "invalid-answer";
     if (
       waiter.questionnaire !== undefined &&
       validateQuestionnaireAnswer(waiter.questionnaire, answer).status === "invalid"

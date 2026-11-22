@@ -1,6 +1,15 @@
 import type { Event } from "@opencode-ai/sdk/v2/types";
 
-type TextEvent = { readonly kind: "text-delta" | "reasoning-delta"; readonly text: string };
+type TextEvent = {
+  readonly kind: "text-delta" | "reasoning-delta";
+  readonly text: string;
+  /**
+   * Set when this delta was unfolded from a stored message or an accumulated
+   * part snapshot rather than delivered as it streamed: its stamp names the
+   * batch, not the instant the text was written, so timing ignores it.
+   */
+  readonly synthesized?: true;
+};
 type FailureEvent = {
   readonly kind: "failed";
   readonly failure: { readonly category: "protocol"; readonly message: string };
@@ -26,9 +35,13 @@ export class OpenCodeMessageParts {
       const info = event.properties.info;
       if (this.#roles.size >= 1024 && !this.#roles.has(info.id)) return this.#overflow();
       this.#roles.set(info.id, info.role);
+      // A stored message's parts arrive whole: every emitted slice is
+      // restated, not newly written.
       return [...this.#parts.values()]
         .filter((part) => part.messageId === info.id)
-        .flatMap((part) => this.#emit(part));
+        .flatMap((part) =>
+          this.#emit(part).map((emitted) => ({ ...emitted, synthesized: true as const })),
+        );
     }
     if (event.type === "message.part.updated") {
       const incoming = event.properties.part;
@@ -56,7 +69,9 @@ export class OpenCodeMessageParts {
         emitted: previous?.emitted ?? 0,
       };
       this.#parts.set(key, part);
-      return this.#emit(part);
+      // An updated part arrives as one accumulated snapshot: the slice this
+      // emits was written over time, not at the update's stamp.
+      return this.#emit(part).map((emitted) => ({ ...emitted, synthesized: true as const }));
     }
     if (event.type === "message.part.delta") {
       const incoming = event.properties;

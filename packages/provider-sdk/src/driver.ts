@@ -8,6 +8,7 @@ import type {
   ProviderInstanceId,
   ProjectId,
   ProviderAuthenticationAttempt,
+  ProviderMention,
   ProviderModelId,
   ProviderModelOptionValues,
   ProviderNativeSetup,
@@ -25,6 +26,7 @@ import type {
 import type { Effect, Scope, Stream } from "effect";
 import type { ProviderContextFactsSource, ProviderLocalUsageHistorySource } from "./contextFacts";
 import type { CloudSessionDriver } from "./cloudSessions";
+import type { ProviderProjectFolderDiscoveryPort } from "./projectFolderDiscovery";
 
 export type {
   ProviderAttachmentInput,
@@ -99,6 +101,18 @@ export interface ProviderCompactionPoint {
   readonly contextWindow: number;
 }
 
+/**
+ * The provider's own channels to its vendor that the person lets it use.
+ * `true` means Octant sets none of that family's guards on the launch, so the
+ * provider's own settings decide; `false` means Octant keeps them set.
+ */
+export interface ProviderOwnChannels {
+  /** Usage metrics, error reports, trace uploads and feedback uploads. */
+  readonly telemetry: boolean;
+  /** The provider replacing or checking for a newer version of itself. */
+  readonly selfUpdate: boolean;
+}
+
 export interface ProviderSessionStart {
   readonly sessionId: ProviderSessionId;
   readonly modelId: ProviderModelId;
@@ -130,6 +144,23 @@ export interface ProviderSessionStart {
    * never loosens one.
    */
   readonly strict?: boolean;
+  /**
+   * The session's surface asks a question that wants a secret (a password or
+   * key) masked and keeps the typed answer out of every record, for a session
+   * that is not Strict but carries no `strict` of its own (a subagent, whose
+   * parent thread is outside Strict). A session with `strict: false` asks
+   * such questions already; `strict: true` never does. Absent, a driver that
+   * can tell such a question refuses it unseen.
+   */
+  readonly asksSecretQuestions?: true;
+  /**
+   * Which of the provider's own channels to its vendor the person lets it
+   * use, from Settings › Providers & Models. Read only outside Strict: under
+   * Strict every telemetry and self-update guard stays set whatever this
+   * says. Absent outside Strict keeps the default: both stay off, every
+   * telemetry and self-update guard set.
+   */
+  readonly ownChannels?: ProviderOwnChannels;
   /**
    * Tools the person blocked for this provider in Settings, by the name its
    * runtime gives them, or `server__tool` for a tool of the provider's own
@@ -185,12 +216,23 @@ export interface ProviderSessionStart {
   readonly outlivesTurn?: boolean;
   /**
    * The host answers the runtime's own asks to change the thread's level
-   * (`approval-request` with `levelChange`): it changes the level from the
-   * next session when the person approves, and ends the turn. A driver offers
+   * (`approval-request` with `levelChange`): when the person approves it
+   * changes the level, in place through {@link ProviderConnection.changeLevelInPlace}
+   * where the driver offers that change, and otherwise from the next session,
+   * ending the turn. A driver offers
    * its runtime's plan-mode tools only to a session that carries this, and
    * never lets the runtime switch its own mode.
    */
   readonly levelChanges?: boolean;
+  /**
+   * Every approval this session's host answers holds for that one call only,
+   * as a helper run's do. A driver refuses on arrival a request it could only
+   * approve for longer (an agent offering `allow_always` with no
+   * `allow_once`), answering the runtime's reject and asking no one, since no
+   * answer the host can give would approve it. Absent, such a request is
+   * asked as usual.
+   */
+  readonly answersOncePerCall?: boolean;
 }
 
 /** One background task a session's runtime still runs, as the person may see it. */
@@ -301,6 +343,10 @@ export interface ProviderSessionResume {
   readonly fullAccessSandbox?: boolean;
   /** Same meaning as in {@link ProviderSessionStart.strict}. */
   readonly strict?: boolean;
+  /** Same meaning as in {@link ProviderSessionStart.asksSecretQuestions}. */
+  readonly asksSecretQuestions?: true;
+  /** Same meaning as in {@link ProviderSessionStart.ownChannels}. */
+  readonly ownChannels?: ProviderOwnChannels;
   /** As on {@link ProviderSessionStart}; restated on every resume. */
   readonly blockedTools?: ReadonlyArray<string>;
   /**
@@ -328,7 +374,22 @@ export interface ProviderSessionResume {
   readonly outlivesTurn?: boolean;
   /** As on {@link ProviderSessionStart}; restated on every resume. */
   readonly levelChanges?: boolean;
+  /** As on {@link ProviderSessionStart}; restated on every resume. */
+  readonly answersOncePerCall?: boolean;
 }
+
+/**
+ * How an in-place level change ended. `applied`: the runtime switched its
+ * mode inside the running turn and the driver's gate holds every later call
+ * of that session to the new level. `refused`: the driver did not try (no
+ * running turn, or a session it cannot hold to the new level). `failed`: the
+ * runtime did not accept the switch; the gate still holds the session to the
+ * new level, and the host ends the turn.
+ */
+export type ProviderInPlaceLevelChange =
+  | { readonly status: "applied" }
+  | { readonly status: "refused"; readonly reason: string }
+  | { readonly status: "failed"; readonly reason: string };
 
 export interface ProviderSessionCompactionRequest {
   readonly sessionId: ProviderSessionId;
@@ -393,6 +454,33 @@ export interface ProviderNativeSession {
 }
 
 /**
+ * One earlier message of a runtime's own session, normalized: the person's
+ * words or the agent's reply, with the tools the agent called named (a tool's
+ * name or the runtime's short title for the call), never their input or
+ * output. A message that is only tool calls has empty text.
+ */
+export interface ProviderNativeSessionMessage {
+  readonly role: "person" | "agent";
+  readonly text: string;
+  readonly tools?: ReadonlyArray<string>;
+}
+
+/**
+ * A runtime's own session's earlier conversation, oldest first, as the runtime
+ * stores it. `omitted` counts earlier messages the driver did not read (a read
+ * it bounds itself). `unsupported` means this runtime, or this release of it,
+ * keeps no history the driver can read; the host then imports none and says
+ * so rather than guessing.
+ */
+export type ProviderNativeSessionHistory =
+  | {
+      readonly status: "read";
+      readonly messages: ReadonlyArray<ProviderNativeSessionMessage>;
+      readonly omitted?: number;
+    }
+  | { readonly status: "unsupported" };
+
+/**
  * The runtime's own sessions a thread may be started from. `list` names the
  * sessions of the instance's account in one folder, newest first, leaving out
  * any an Octant thread already holds. `adopt` records that an Octant session
@@ -412,6 +500,18 @@ export interface ProviderNativeSessions {
     readonly nativeSessionId: string;
     readonly modelId: ProviderModelId;
   }) => Effect.Effect<ProviderResumeCursor, ProviderFailure>;
+  /**
+   * Reads the earlier conversation of a session this instance just adopted,
+   * so the host can journal it as the thread's imported history. Read-only:
+   * it never resumes, loads for writing, or changes the session. The host
+   * bounds what it keeps and never sends it back to the runtime, which
+   * already holds it. Absent, the runtime offers no readable history.
+   */
+  readonly history?: (input: {
+    readonly instanceId: ProviderInstanceId;
+    readonly projectRoot: string;
+    readonly nativeSessionId: string;
+  }) => Effect.Effect<ProviderNativeSessionHistory, ProviderFailure>;
   /**
    * Withdraws an adoption the host could not record (the thread changed
    * before it committed): removes the record `adopt` wrote for that Octant
@@ -481,6 +581,8 @@ export interface ProviderDriver {
   readonly contextFacts?: ProviderContextFactsSource;
   /** Optional read-only local history reader owned by the configured driver. */
   readonly localUsageHistory?: ProviderLocalUsageHistorySource;
+  /** Optional read-only first-run folder discovery owned by the provider adapter. */
+  readonly projectFolderDiscovery?: ProviderProjectFolderDiscoveryPort;
   /**
    * The name of the runtime's own tool that publishes a document to the
    * person's account with the model's provider, when a thread in this mode
@@ -497,6 +599,18 @@ export interface ProviderDriver {
   readonly probe: (
     input: ProviderProbeInput,
   ) => Effect.Effect<ProviderProbeResult, ProviderFailure, Scope.Scope>;
+  /**
+   * The provider's own skills and plugins available for a thread in one
+   * folder, for the composer's `@` menu. `nativeSetup` is what the thread's
+   * launch actually loads: a driver lists a Project's skills only when
+   * `nativeSetup?.skills === true` and omits them otherwise. Absent, the menu
+   * offers only the account-level `mentions` the driver's `probe` reported.
+   */
+  readonly listMentions?: (input: {
+    readonly instanceId: ProviderInstanceId;
+    readonly projectRoot?: string;
+    readonly nativeSetup?: ProviderNativeSetup;
+  }) => Effect.Effect<ReadonlyArray<ProviderMention>, ProviderFailure>;
   /**
    * Optional per-model tool-capability verification. Used by drivers whose
    * Connection Check is non-generating (the direct-endpoint profiles) so a
@@ -655,6 +769,20 @@ export interface ProviderConnection {
   readonly compact?: (
     input: ProviderSessionCompactionRequest,
   ) => Effect.Effect<ProviderSessionCompaction, ProviderFailure>;
+  /**
+   * Moves a session to a narrower level inside its running turn, so an
+   * approved level change need not end the turn. Present only on a connection
+   * whose runtime can switch its mode in a running session and whose gate can
+   * hold that session to the new level's rules without launching it again,
+   * though the session keeps the tools and sandbox it launched with. The only
+   * change is `enter-plan`: leaving Plan widens what a session may do, which
+   * no session can be given in place. Absent, or anything but `applied`, and
+   * the host ends the turn and launches the next one at the new level.
+   */
+  readonly changeLevelInPlace?: (input: {
+    readonly sessionId: ProviderSessionId;
+    readonly change: "enter-plan";
+  }) => Effect.Effect<ProviderInPlaceLevelChange>;
   readonly interrupt: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
   readonly stop: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
   /**

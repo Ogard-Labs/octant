@@ -1,9 +1,14 @@
 import type { PendingRequestList } from "@octant/contracts";
+import { PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE } from "@octant/contracts/pending-requests";
 import { describe, expect, it, vi } from "vitest";
 import { PendingRequestClientFailure, createPendingRequestClient } from "./pendingRequestClient";
 
 const baseUrl = "http://127.0.0.1:13773";
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const headers = {
+  accept: PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE,
+  "x-octant-window-capability": capability,
+};
 
 const list = {
   requests: [
@@ -28,7 +33,7 @@ describe("createPendingRequestClient", () => {
     await expect(client.list()).resolves.toEqual(list);
     expect(fetch).toHaveBeenCalledWith(`${baseUrl}/api/pending-requests`, {
       method: "GET",
-      headers: { "x-octant-window-capability": capability },
+      headers,
     });
   });
 
@@ -62,7 +67,7 @@ describe("createPendingRequestClient", () => {
     await expect(client.list()).resolves.toEqual(list);
     expect(fetch).toHaveBeenCalledWith("http://[::1]:13773/api/pending-requests", {
       method: "GET",
-      headers: { "x-octant-window-capability": capability },
+      headers,
     });
   });
 
@@ -92,7 +97,7 @@ describe("createPendingRequestClient", () => {
     await expect(client.list()).resolves.toEqual(withAsks);
     expect(fetch).toHaveBeenCalledWith("https://octant.example/api/pending-requests", {
       method: "GET",
-      headers: { "x-octant-window-capability": capability },
+      headers,
     });
     expect(client.defer).toBeUndefined();
   });

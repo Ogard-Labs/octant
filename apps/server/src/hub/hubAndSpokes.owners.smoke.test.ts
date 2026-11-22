@@ -1236,6 +1236,35 @@ describe("new-member alerts on a spoke", () => {
     expect(spoke.state.load().pendingDeviceRevocations).toBeUndefined();
   });
 
+  it("names a new computer's private-network address in the alert each spoke raises", async () => {
+    const { network, hub, spoke } = await startOwnerWorld();
+    const tablet = await startTablet(network);
+    await joinHub(hub, tablet, { owner: false });
+    await vi.waitFor(() => {
+      const status = spoke.spoke.status();
+      if (status.membership !== "member") throw new Error("Not a member.");
+      expect(
+        status.alerts.map((alert) => [alert.name, alert.role, alert.privateAddress]),
+      ).toContainEqual(["Tablet", "spoke", "100.101.102.106"]);
+    });
+  });
+
+  it("adds a guest phone's private address to its alert once the phone reaches the spoke", async () => {
+    const { network, hub, spoke } = await startOwnerWorld();
+    const guest = await joinGuest(hub, network, spoke, "Pocket");
+    const before = spoke.spoke.status();
+    if (before.membership !== "member") throw new Error("Not a member.");
+    // A guest names no address in the roster; the spoke learns it from the
+    // phone's own connection.
+    expect(before.alerts.find((alert) => alert.name === "Pocket")?.privateAddress).toBe(undefined);
+    expect((await guest.knock()).status).toBe("admitted");
+    const after = spoke.spoke.status();
+    if (after.membership !== "member") throw new Error("Not a member.");
+    expect(after.alerts.find((alert) => alert.name === "Pocket")?.privateAddress).toBe(
+      "100.101.102.250",
+    );
+  });
+
   it("raises an alert the hub cannot write, dismiss, or remove", async () => {
     const { network, hub, spoke, phone, authenticator } = await startOwnerWorld();
     listAsOwner(spoke, phone, authenticator);

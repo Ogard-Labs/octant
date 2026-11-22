@@ -693,6 +693,25 @@ describe("follow-up fire-time decision", () => {
       reason: "follow-up-missed",
     });
   });
+
+  it("runs a missed follow-up as late as the person's setting allows", () => {
+    const late = (now: string) =>
+      decideAutomationFollowUp({
+        projectId: "project-a",
+        providerInstanceId: "provider-a",
+        modelId: "model-a",
+        scheduledAt: utc("2026-11-01T09:00:00.000Z"),
+        now: utc(now),
+        thread,
+        latenessLimitHours: 72,
+      });
+    expect(late("2026-11-04T08:59:00.000Z")).toEqual({ kind: "ready" });
+    expect(late("2026-11-04T09:01:00.000Z")).toMatchObject({
+      reason: "follow-up-missed",
+      message:
+        "The follow-up was more than 72 hours late, so it was recorded as missed and did not run.",
+    });
+  });
 });
 
 describe("what a thread's agent may do with routines", () => {

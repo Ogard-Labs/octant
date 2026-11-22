@@ -20,8 +20,19 @@ import {
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
 import { EventActor } from "@octant/contracts/events";
 import { WorkRequestProjection } from "./workRequestProjection";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
+import { EventRegistry } from "../persistence/eventRegistry";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { ProjectionRegistry } from "../persistence/projection";
+import { openSqlite } from "../persistence/sqlitePort";
+import { WorkRequestEventStore } from "./workRequestEventStore";
 import {
   WorkRequestService,
+  type WorkApprovalNotDeliverable,
   type WorkRequestLevelChangePort,
   type WorkRequestProjectPort,
 } from "./workRequestService";
@@ -62,7 +73,7 @@ function createService(
         readonly sessionId: string;
         readonly requestId: string;
         readonly approved: boolean;
-      }) => Promise<void>;
+      }) => Promise<void | WorkApprovalNotDeliverable>;
       answerUserInput: (input: {
         readonly sessionId: string;
         readonly requestId: string;
@@ -73,6 +84,9 @@ function createService(
         readonly requestId: string;
         readonly kind: "approval" | "user-input";
       }) => Promise<void>;
+      changeLevelInPlace: (input: {
+        readonly sessionId: string;
+      }) => Promise<{ readonly status: "applied" | "refused" | "failed" }>;
     }>;
     levelChanges?: WorkRequestLevelChangePort;
     eventStore?: {
@@ -155,6 +169,44 @@ describe("WorkRequestService.record", () => {
     expect(result.request.version).toBe(1);
   });
 
+  it("settles with the journal's own ask and settle stamps for the wait a caller bills", async () => {
+    const { service } = createService();
+    const recorded = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "provider-req-1",
+      detail: approvalDetail,
+    });
+    expect(recorded.status).toBe("ok");
+    if (recorded.status !== "ok") return;
+    const heard: Array<{
+      readonly person: boolean;
+      readonly requestedAt?: string;
+      readonly settledAt?: string;
+    }> = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "provider-req-1" },
+      (settled) => heard.push(settled ?? { person: false }),
+    );
+    await service.resolve({
+      kind: "resolve-work-request",
+      requestId: recorded.request.requestId,
+      expectedVersion: recorded.request.version,
+      resolution: { kind: "approval", approved: true },
+    });
+    expect(heard).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
+    // A listener arriving after the settle reads the same recorded pair.
+    const late: typeof heard = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "provider-req-1" },
+      (settled) => late.push(settled ?? { person: false }),
+    );
+    expect(late).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
+  });
+
   it("settles listeners by provider session and callback identity", async () => {
     const { service } = createService();
     let settled = false;
@@ -191,6 +243,130 @@ describe("WorkRequestService.record", () => {
 
     expect(settled).toBe(true);
     removeListener();
+  });
+
+  it("tells a listener registering after the answer that a person settled, at the recorded instant", async () => {
+    const { service } = createService();
+    const recorded = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "call_quick",
+      detail: approvalDetail,
+    });
+    if (recorded.status !== "ok") throw new Error("setup failed");
+
+    // The person answers before the turn's settle listener ever registers —
+    // the common race between the provider event and the journal's request.
+    await service.resolve({
+      kind: "resolve-work-request",
+      requestId: recorded.request.requestId,
+      expectedVersion: recorded.request.version,
+      resolution: { kind: "approval", approved: true },
+    });
+
+    const heard: Array<{ readonly person?: boolean; readonly settledAt?: string }> = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "call_quick" },
+      (settled) => {
+        heard.push(settled ?? {});
+      },
+    );
+    expect(heard).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
+  });
+
+  it("tells a listener that an expired ask ended person-facing wait at its recorded expiry", () => {
+    const { service } = createService();
+    const recorded = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "call_expiring",
+      detail: approvalDetail,
+    });
+    if (recorded.status !== "ok") throw new Error("setup failed");
+
+    const expired = service.expire(recorded.request.requestId);
+    expect(expired.status).toBe("ok");
+
+    const heard: Array<{ readonly person?: boolean; readonly settledAt?: string }> = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "call_expiring" },
+      (settled) => {
+        heard.push(settled ?? {});
+      },
+    );
+    // The ask stood person-facing until it ran out: the wait is billed, and
+    // it ends where the journal says it ended, not when the listener asked.
+    expect(heard).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
+  });
+
+  it("tells a listener already waiting that an expiry is still person-facing wait", () => {
+    const { service } = createService();
+    const recorded = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "call_expiring_live",
+      detail: approvalDetail,
+    });
+    if (recorded.status !== "ok") throw new Error("setup failed");
+
+    const heard: Array<{ readonly person?: boolean; readonly settledAt?: string }> = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "call_expiring_live" },
+      (settled) => {
+        heard.push(settled ?? {});
+      },
+    );
+    service.expire(recorded.request.requestId);
+    expect(heard).toEqual([{ person: true, requestedAt: clockNow, settledAt: clockLater }]);
+  });
+
+  it("does not bill an automated reviewer's answer as person-facing wait", async () => {
+    const { service } = createService();
+    const recorded = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "call_reviewed",
+      detail: approvalDetail,
+    });
+    if (recorded.status !== "ok") throw new Error("setup failed");
+
+    const heard: Array<{ readonly person?: boolean; readonly settledAt?: string }> = [];
+    service.onSettled(
+      { providerSessionId: ids.session, providerCallbackId: "call_reviewed" },
+      (settled) => {
+        heard.push(settled ?? {});
+      },
+    );
+    const agent = Schema.decodeUnknownSync(EventActor)({
+      kind: "agent",
+      actorId: ids.actor,
+      providerInstanceId: ids.provider,
+      threadId: String(ids.thread),
+    });
+    await service.resolve(
+      {
+        kind: "resolve-work-request",
+        requestId: recorded.request.requestId,
+        expectedVersion: recorded.request.version,
+        resolution: { kind: "approval", approved: false },
+      },
+      undefined,
+      agent,
+    );
+
+    expect(heard).toEqual([{ person: false, requestedAt: clockNow, settledAt: clockLater }]);
   });
 
   it("keeps a credential-bearing provider callback private while delivering it exactly", async () => {
@@ -585,6 +761,98 @@ describe("WorkRequestService.resolve", () => {
     });
     expect(resolved.status).toBe("ok");
     expect(calls).toEqual([`answer:${ids.session}:provider-input-1:PDF`]);
+  });
+
+  it("hands a secret question's answer to the provider and records only that it was given", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-work-request-secret-"));
+    try {
+      const connection = openSqlite(join(directory, "events.sqlite3"));
+      applyMigrations(connection, MIGRATIONS, () => clockNow);
+      const journal = new Journal({
+        connection,
+        registry: new EventRegistry().register("work.request-recorded@1", 1, Schema.Unknown),
+        projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+        clock: () => clockNow,
+      });
+      let uuid = 0;
+      const delivered: Array<{ requestId: string; answer: string }> = [];
+      const { service, projection } = createService({
+        eventStore: new WorkRequestEventStore({
+          journal,
+          uuid: () => `00000000-0000-4000-8000-${String(++uuid).padStart(12, "0")}`,
+        }) as never,
+        providerSessions: {
+          answerUserInput: async ({ requestId, answer }) => {
+            delivered.push({ requestId, answer });
+          },
+        },
+      });
+      const record = (requestId: string, callback: string, secret: boolean) => {
+        const recorded = service.record({
+          requestId: decodeWorkRequestId(requestId),
+          projectId: ids.project,
+          threadId: ids.thread,
+          providerInstanceId: ids.provider,
+          providerSessionId: ids.session,
+          providerCallbackId: callback,
+          detail: {
+            kind: "user-input",
+            prompt: secret ? "Database credential?" : "Which host?",
+            options: [],
+            ...(secret ? { secret: true as const } : {}),
+          },
+        });
+        if (recorded.status !== "ok") throw new Error("setup failed");
+        return recorded.request;
+      };
+      const secretRequest = record("11111111-1111-4111-8111-111111111112", "ask-secret", true);
+      const plainRequest = record("11111111-1111-4111-8111-111111111113", "ask-host", false);
+      const sentinel = "hunter2-secret-sentinel";
+      const resolve = (request: WorkRequest, answer: Record<string, unknown>) =>
+        service.resolve({
+          kind: "resolve-work-request",
+          requestId: request.requestId,
+          expectedVersion: request.version,
+          ...answer,
+        } as never);
+
+      // A secret goes to no plain question, a secret question takes no answer
+      // the request would record, and the value never travels without its
+      // secret resolution or the other way round.
+      for (const [request, answer] of [
+        [
+          plainRequest,
+          { resolution: { kind: "user-input", secret: true }, secretAnswer: sentinel },
+        ],
+        [secretRequest, { resolution: { kind: "user-input", answer: sentinel } }],
+        [secretRequest, { resolution: { kind: "user-input", secret: true } }],
+        [
+          secretRequest,
+          { resolution: { kind: "user-input", answer: "db.internal" }, secretAnswer: sentinel },
+        ],
+      ] as const)
+        await expect(resolve(request, answer)).resolves.toMatchObject({
+          status: "failure",
+          failure: { code: "invalid" },
+        });
+      expect(delivered).toEqual([]);
+
+      const resolved = await resolve(secretRequest, {
+        resolution: { kind: "user-input", secret: true },
+        secretAnswer: sentinel,
+      });
+      expect(resolved).toMatchObject({
+        status: "ok",
+        request: { status: "resolved", resolution: { kind: "user-input", secret: true } },
+      });
+      expect(delivered).toEqual([{ requestId: "ask-secret", answer: sentinel }]);
+      expect(JSON.stringify([...projection.snapshot().values()])).not.toContain(sentinel);
+      connection.close();
+      for (const file of readdirSync(directory))
+        expect(readFileSync(join(directory, file)).includes(sentinel)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("validates the full questionnaire before delivery and preserves the exact durable answer", async () => {
@@ -1640,6 +1908,86 @@ describe("owner Work approval admission", () => {
   );
 });
 
+describe("an answer the agent cannot take as asked", () => {
+  it("tells the person why, keeps the request pending, and records no approval", async () => {
+    let runtime: WorkRequestRuntime | undefined;
+    const refusal =
+      "The agent only offers Always allow here. Approve it for this session, or deny it.";
+    const answerApproval = vi.fn((input: { readonly approved: boolean }) =>
+      input.approved
+        ? Effect.fail({ category: "unsupported" as const, message: refusal })
+        : Effect.void,
+    );
+    const { service, projection } = createService({
+      providerSessions: {
+        answerApproval: async (input) => {
+          if (runtime === undefined) throw new Error("Runtime unavailable.");
+          return runtime.answerApproval({
+            ...input,
+            sessionId: decodeProviderSessionId(input.sessionId),
+          });
+        },
+      },
+    });
+    runtime = new WorkRequestRuntime({ requests: service, uuid: () => String(ids.request) });
+    const input = {
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      sessionId: ids.session,
+      projectRoot: "/work",
+      connection: {
+        answerApproval,
+        answerUserInput: () => Effect.void,
+        interrupt: () => Effect.void,
+        subscribe: Effect.die("No subscription needed for the deterministic fixture."),
+      },
+    };
+    const release = runtime.register(input);
+    try {
+      await Effect.runPromise(
+        runtime.observe(
+          input,
+          decodeProviderRuntimeEvent({
+            kind: "approval-request",
+            instanceId: ids.provider,
+            sessionId: ids.session,
+            sequence: 1,
+            correlationId: ids.request,
+            occurredAt: clockNow,
+            requestId: "always-only",
+            action: "Edit",
+            description: "Edit a.txt",
+          }),
+        ),
+      );
+      const recorded = projection.lookup(ids.request)?.request;
+      if (recorded === undefined) throw new Error("Missing recorded request.");
+      const answer = (approved: boolean, expectedVersion: WorkRequest["version"]) =>
+        service.resolve({
+          kind: "resolve-work-request",
+          requestId: recorded.requestId,
+          expectedVersion,
+          resolution: { kind: "approval", approved },
+        });
+      expect(await answer(true, recorded.version)).toEqual({
+        status: "failure",
+        failure: { code: "unavailable", message: refusal },
+      });
+      const pending = projection.lookup(ids.request)?.request;
+      if (pending === undefined) throw new Error("Missing pending request.");
+      expect(pending).toMatchObject({ status: "pending" });
+      expect(pending.delivery).toBeUndefined();
+      expect(await answer(false, pending.version)).toMatchObject({
+        status: "ok",
+        request: { status: "resolved", resolution: { kind: "approval", approved: false } },
+      });
+    } finally {
+      release();
+    }
+  });
+});
+
 describe("an agent's ask to plan first or to leave Plan", () => {
   const exitPlan = {
     ...approvalDetail,
@@ -1648,7 +1996,17 @@ describe("an agent's ask to plan first or to leave Plan", () => {
     levelChange: { to: "auto-accept-edits", plan: "1. Edit src/main.ts" },
   } as const;
 
-  function recordLevelChange(service: WorkRequestService) {
+  const enterPlan = {
+    ...approvalDetail,
+    action: "EnterPlanMode",
+    description: "Claude asks to plan first.",
+    levelChange: { to: "plan" },
+  } as const;
+
+  function recordLevelChange(
+    service: WorkRequestService,
+    detail: typeof exitPlan | typeof enterPlan = exitPlan,
+  ) {
     const recorded = service.record({
       requestId: ids.request,
       projectId: ids.project,
@@ -1656,7 +2014,7 @@ describe("an agent's ask to plan first or to leave Plan", () => {
       providerInstanceId: ids.provider,
       providerSessionId: ids.session,
       providerCallbackId: "exit-plan-1",
-      detail: exitPlan,
+      detail,
     });
     if (recorded.status !== "ok") throw new Error("setup failed");
     return recorded.request;
@@ -1698,6 +2056,75 @@ describe("an agent's ask to plan first or to leave Plan", () => {
 
     expect(result.status).toBe("ok");
     expect(order).toEqual(["level:exit-plan:remote-device", "provider:true", "end-turn"]);
+  });
+
+  function inPlaceHarness(inPlace: "applied" | "refused" | "failed") {
+    const order: Array<string> = [];
+    const harness = createService({
+      providerSessions: {
+        answerApproval: async (input) => {
+          order.push(`provider:${String(input.approved)}`);
+        },
+        changeLevelInPlace: async () => {
+          order.push("in-place");
+          return { status: inPlace };
+        },
+      },
+      levelChanges: {
+        change: (input) => {
+          order.push(`level:${input.kind}`);
+          return { status: "changed" };
+        },
+        endTurn: () => order.push("end-turn"),
+        enteredPlanInPlace: () => order.push("entered-plan"),
+      },
+    });
+    return { ...harness, order };
+  }
+
+  it("enters Plan inside the running turn where the provider can hold its session to Plan", async () => {
+    const { service, order } = inPlaceHarness("applied");
+    const request = recordLevelChange(service, enterPlan);
+
+    const result = await service.resolve({
+      kind: "resolve-work-request",
+      requestId: request.requestId,
+      expectedVersion: request.version,
+      resolution: { kind: "approval", approved: true },
+    });
+
+    expect(result).toMatchObject({ status: "ok", request: { levelChangeApplied: "in-place" } });
+    expect(order).toEqual(["level:enter-plan", "in-place", "entered-plan", "provider:true"]);
+  });
+
+  it("ends the turn when the provider fails to enter Plan in place", async () => {
+    const { service, order } = inPlaceHarness("failed");
+    const request = recordLevelChange(service, enterPlan);
+
+    const result = await service.resolve({
+      kind: "resolve-work-request",
+      requestId: request.requestId,
+      expectedVersion: request.version,
+      resolution: { kind: "approval", approved: true },
+    });
+
+    expect(result).toMatchObject({ status: "ok", request: { levelChangeApplied: "next-turn" } });
+    expect(order).toEqual(["level:enter-plan", "in-place", "provider:true", "end-turn"]);
+  });
+
+  it("ends the turn on leaving Plan without trying an in-place change", async () => {
+    const { service, order } = inPlaceHarness("applied");
+    const request = recordLevelChange(service);
+
+    const result = await service.resolve({
+      kind: "resolve-work-request",
+      requestId: request.requestId,
+      expectedVersion: request.version,
+      resolution: { kind: "approval", approved: true },
+    });
+
+    expect(result).toMatchObject({ status: "ok", request: { levelChangeApplied: "next-turn" } });
+    expect(order).toEqual(["level:exit-plan", "provider:true", "end-turn"]);
   });
 
   it("leaves the ask waiting when the host cannot change the level, and tells the provider nothing", async () => {

@@ -98,7 +98,11 @@ export class CanvasTagService {
    * Admit and journal one tag command. `caller` is where the transport
    * authenticated the request from, never a field the request carries.
    */
-  change(requestInput: unknown, caller: "local-window" | "remote-device"): CanvasTagCommandResult {
+  change(
+    requestInput: unknown,
+    caller: "local-window" | "remote-device",
+    actor?: EventActor,
+  ): CanvasTagCommandResult {
     if (caller !== "local-window") {
       return denied("unauthorized", "Tags can be changed from a window on this computer only.");
     }
@@ -125,7 +129,7 @@ export class CanvasTagService {
     }
     const event = toTagEvent(admitted.event);
     try {
-      this.#append(canvasId, state, event);
+      this.#append(canvasId, state, event, actor);
     } catch (error) {
       if (error instanceof ConcurrencyConflict || error instanceof DuplicateEventIdentity) {
         return denied("stale-version", "Canvas tags changed on the host; try again.");
@@ -142,7 +146,12 @@ export class CanvasTagService {
     });
   }
 
-  #append(canvasId: CanvasId, state: CanvasTagState, event: CanvasTagEvent): void {
+  #append(
+    canvasId: CanvasId,
+    state: CanvasTagState,
+    event: CanvasTagEvent,
+    actor?: EventActor,
+  ): void {
     this.#journal.append({
       aggregate: {
         aggregateType: CANVAS_TAG_AGGREGATE_TYPE,
@@ -155,7 +164,7 @@ export class CanvasTagService {
           eventName: event.kind === "added" ? CANVAS_TAG_ADDED : CANVAS_TAG_REMOVED,
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#uuid()),
-          actor: this.#actor,
+          actor: actor ?? this.#actor,
           occurredAt: occurredAtOf(event),
           payload: event.event,
         },

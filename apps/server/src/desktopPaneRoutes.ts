@@ -28,7 +28,10 @@ const FRAME_PATH = "/api/code/desktops/frame";
 
 export interface DesktopPaneRouteDependencies {
   readonly previews?: (
-    caller: DesktopLeaseCaller & { readonly leaseId: DesktopLeaseId },
+    caller: DesktopLeaseCaller & {
+      readonly leaseId: DesktopLeaseId;
+      readonly personPairedDevice?: boolean;
+    },
     request: DesktopPreviewRequest,
   ) => Promise<DesktopPreviewAnswer>;
   readonly windowAuthorityStore: WindowAuthorityStore;
@@ -147,18 +150,21 @@ export function createDesktopPaneRouteHandler(dependencies: DesktopPaneRouteDepe
         };
         return encoded({ status: "recipe-key", ...view }, origin);
       }
+      const personPaired =
+        principal.kind === "remote-device" && principalActsAsHostPerson(principal);
       switch (paneRequest.kind) {
         case "preview-read":
         case "preview-review":
         case "preview-grant":
         case "preview-revoke":
           return encoded(
-            actor.kind !== "local-user" || dependencies.previews === undefined
+            (actor.kind !== "local-user" && !personPaired) || dependencies.previews === undefined
               ? { status: "preview-refused", reason: "not-permitted" }
               : await dependencies.previews(
                   {
                     ...callerFor(paneRequest.threadId, actor, scopeId),
                     leaseId: decodeDesktopLeaseId(paneRequest.leaseId),
+                    ...(personPaired ? { personPairedDevice: true } : {}),
                   },
                   paneRequest,
                 ),
@@ -166,13 +172,7 @@ export function createDesktopPaneRouteHandler(dependencies: DesktopPaneRouteDepe
           );
         default:
           return encoded(
-            await answer(
-              dependencies.service,
-              paneRequest,
-              actor,
-              scopeId,
-              principal.kind === "remote-device" && principalActsAsHostPerson(principal),
-            ),
+            await answer(dependencies.service, paneRequest, actor, scopeId, personPaired),
             origin,
           );
       }
@@ -195,21 +195,26 @@ async function answer(
   if (request.kind === "recipe-providers") {
     return { status: "recipe-providers", providers: leasableProvidersOf(service.destination()) };
   }
-  // The person's machines for a placement that chooses one. Only a local
-  // window sets a recipe, so the service answers only a person there.
+  // The person's machines for a placement that chooses one. The host's own
+  // person reads them, at a local window or on a device they paired.
   if (request.kind === "recipe-machines") {
     return service.recipeMachines({
       actor,
+      personPairedDevice,
       providerId: request.providerId,
       placementId: request.placementId,
     });
   }
-  // The monthly cap for billed desktops is host-wide money. The service
-  // answers only a person at a local window, so a paired device is refused
-  // here as well, and no agent has a path to it at all.
-  if (request.kind === "spend") return service.spend({ actor });
+  // The monthly cap for billed desktops is host-wide money. The host's own
+  // person reads and changes it, at a local window or on a device they paired;
+  // a hub-introduced or restricted device is refused by the service.
+  if (request.kind === "spend") return service.spend({ actor, personPairedDevice });
   if (request.kind === "set-spend-cap") {
-    return service.setSpendCap({ actor, monthlyCapUsdCents: request.monthlyCapUsdCents });
+    return service.setSpendCap({
+      actor,
+      personPairedDevice,
+      monthlyCapUsdCents: request.monthlyCapUsdCents,
+    });
   }
   // The lease settings are host-wide too, and one of them decides whether a
   // billed desktop asks. The host's own person answers and changes them, at a

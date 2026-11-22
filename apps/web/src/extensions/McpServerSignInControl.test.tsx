@@ -376,4 +376,184 @@ describe("Sign in to a hosted server", () => {
       ),
     ).toBeInTheDocument();
   });
+
+  it("shows the issuer host, user code, and verification link for a device-code sign-in and polls until signed in", async () => {
+    const user = userEvent.setup();
+    const views: McpServerSignInView[] = [
+      { kind: "signed-out" },
+      {
+        kind: "awaiting-device-code",
+        attemptId: "55000000-0000-4000-8000-000000000008",
+        issuerHost: "auth.example",
+        verificationUri: "https://auth.example/device",
+        verificationUriComplete: "https://auth.example/device?user_code=WXYZ-1234",
+        userCode: "WXYZ-1234",
+        expiresAt: "2026-11-20T12:10:00.000Z" as never,
+      },
+      { kind: "signed-in", issuer: "auth.example" },
+    ];
+    const mcpServerSignIn = vi.fn(
+      async () => views.shift() ?? { kind: "signed-in", issuer: "auth.example" },
+    );
+    render(
+      <McpServerSignInControl
+        client={{ mcpServerSignIn: mcpServerSignIn as never }}
+        componentId={componentId}
+        disabled={false}
+        extensionId={extensionId}
+        pollIntervalMs={10}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Sign in" }));
+    expect(await screen.findByText("WXYZ-1234")).toBeInTheDocument();
+    expect(screen.getByText(/Confirm this code at auth\.example/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Open verification page (https://auth.example/device)" }),
+    ).toHaveAttribute("href", "https://auth.example/device?user_code=WXYZ-1234");
+    expect(await screen.findByText("Signed in through auth.example")).toBeInTheDocument();
+  });
+
+  it("lets a paired device paste the callback address for a relayable attempt, surfaces retry feedback, and finishes sign-in", async () => {
+    const user = userEvent.setup();
+    const attemptId = "55000000-0000-4000-8000-000000000009";
+    const mcpServerSignIn = vi.fn(async (request: { kind: string }) =>
+      request.kind === "status"
+        ? { kind: "signed-out" as const }
+        : {
+            kind: "awaiting-consent" as const,
+            attemptId,
+            flow: "relay" as const,
+            relayable: true,
+            authorizationUrl: "https://auth.example/authorize?state=abc",
+            expiresAt: "2026-11-20T12:10:00.000Z" as never,
+          },
+    );
+    const relayResults = [
+      {
+        kind: "retry" as const,
+        remainingAttempts: 2 as const,
+        message: "That callback address did not match this sign-in attempt.",
+      },
+      { kind: "signed-in" as const, issuer: "auth.example" },
+    ];
+    const relayMcpServerSignIn = vi.fn(
+      async () => relayResults.shift() ?? { kind: "signed-in" as const, issuer: "auth.example" },
+    );
+    render(
+      <McpServerSignInControl
+        client={{
+          mcpServerSignIn: mcpServerSignIn as never,
+          relayMcpServerSignIn: relayMcpServerSignIn as never,
+        }}
+        componentId={componentId}
+        disabled={false}
+        extensionId={extensionId}
+        pollIntervalMs={60_000}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Sign in" }));
+    const input = await screen.findByLabelText("Callback address");
+    await user.type(input, "http://127.0.0.1:43125/oauth/callback?code=bad&state=wrong");
+    await user.click(screen.getByRole("button", { name: "Finish sign-in" }));
+    expect(
+      await screen.findByText("That callback address did not match this sign-in attempt."),
+    ).toBeInTheDocument();
+    expect(input).toHaveValue("");
+
+    await user.type(input, "http://127.0.0.1:43125/oauth/callback?code=good&state=abc");
+    await user.click(screen.getByRole("button", { name: "Finish sign-in" }));
+    expect(await screen.findByText("Signed in through auth.example")).toBeInTheDocument();
+    expect(relayMcpServerSignIn).toHaveBeenNthCalledWith(2, {
+      attemptId,
+      callbackUrl: "http://127.0.0.1:43125/oauth/callback?code=good&state=abc",
+    });
+  });
+
+  it("resumes polling after a relay retry response and after a lost relay transport error", async () => {
+    const user = userEvent.setup();
+    const attemptId = "55000000-0000-4000-8000-000000000010";
+    const awaiting: McpServerSignInView = {
+      kind: "awaiting-consent",
+      attemptId,
+      flow: "relay",
+      relayable: true,
+      authorizationUrl: "https://auth.example/authorize?state=abc",
+      expiresAt: "2026-11-20T12:10:00.000Z" as never,
+    };
+
+    // Case 1: retry response resumes polling and observes expiry.
+    let retrySubmitted = false;
+    const retrySignIn = vi.fn(async (request: { kind: string }) => {
+      if (request.kind === "status") return { kind: "signed-out" as const };
+      if (request.kind === "begin") return awaiting;
+      return retrySubmitted
+        ? {
+            kind: "refused" as const,
+            reason: "timeout" as const,
+            message: "The sign-in page was not completed in time.",
+          }
+        : awaiting;
+    });
+    const retryRelay = vi.fn(async () => {
+      retrySubmitted = true;
+      return {
+        kind: "retry" as const,
+        remainingAttempts: 2 as const,
+        message: "That callback address did not match this sign-in attempt.",
+      };
+    });
+    const first = render(
+      <McpServerSignInControl
+        client={{
+          mcpServerSignIn: retrySignIn as never,
+          relayMcpServerSignIn: retryRelay as never,
+        }}
+        componentId={componentId}
+        disabled={false}
+        extensionId={extensionId}
+        pollIntervalMs={15}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Sign in" }));
+    await user.type(
+      await screen.findByLabelText("Callback address"),
+      "http://127.0.0.1:43125/oauth/callback?code=bad&state=wrong",
+    );
+    await user.click(screen.getByRole("button", { name: "Finish sign-in" }));
+    expect(
+      await screen.findByText("The sign-in page was not completed in time."),
+    ).toBeInTheDocument();
+    first.unmount();
+
+    // Case 2: thrown/lost relay transport error resumes polling and discovers signed-in completion.
+    let lostSubmitted = false;
+    const lostSignIn = vi.fn(async (request: { kind: string }) => {
+      if (request.kind === "status") return { kind: "signed-out" as const };
+      if (request.kind === "begin") return awaiting;
+      return lostSubmitted ? { kind: "signed-in" as const, issuer: "auth.example" } : awaiting;
+    });
+    const lostRelay = vi.fn(async () => {
+      lostSubmitted = true;
+      throw new Error("connection lost");
+    });
+    render(
+      <McpServerSignInControl
+        client={{
+          mcpServerSignIn: lostSignIn as never,
+          relayMcpServerSignIn: lostRelay as never,
+        }}
+        componentId={componentId}
+        disabled={false}
+        extensionId={extensionId}
+        pollIntervalMs={15}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Sign in" }));
+    await user.type(
+      await screen.findByLabelText("Callback address"),
+      "http://127.0.0.1:43125/oauth/callback?code=good&state=abc",
+    );
+    await user.click(screen.getByRole("button", { name: "Finish sign-in" }));
+    expect(await screen.findByText("Signed in through auth.example")).toBeInTheDocument();
+  });
 });

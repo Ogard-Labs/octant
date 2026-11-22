@@ -1,5 +1,11 @@
-import { principalAuthorityKind } from "./clientPrincipal";
-import { principalActsAsHostPerson } from "./clientPrincipal";
+import {
+  isAgentGrantSession,
+  principalActsAsHostPerson,
+  principalAuthorityKind,
+  principalIsHubIntroduced,
+} from "./clientPrincipal";
+import { actsAsHostPerson, type PrincipalKind } from "@octant/domain/remote-access-policy";
+import { hubActRefusal, type HubActScopePort } from "./hub/hubActScope";
 import type { McpOAuthClientRegistration } from "@octant/contracts/host-oauth";
 import type {
   ExtensionCommand,
@@ -16,6 +22,7 @@ import {
   decodeExtensionToolGrantRequest,
   decodeDiscoveredAgentToolingRequest,
   decodeExtensionProjectPinRequest,
+  decodeMcpServerSignInRelayRequest,
   decodeMcpServerSignInRequest,
   decodeMcpServerConnectionRequest,
   decodeUserAddedMcpServerRequest,
@@ -24,10 +31,12 @@ import {
   type DiscoveredAgentToolingListing,
   type RuntimeCompactionDefaults,
   type ExtensionProjectPinListing,
+  type McpServerSignInRelayResult,
   type McpServerSignInView,
   type McpClientSetupInput,
   type UserAddedMcpServerRequest,
 } from "@octant/contracts/extension-rpc";
+import type { McpSignInDeviceBinding } from "./extensions/mcpServerSignIn";
 import { isAbsolute } from "node:path";
 import { decodeWindowId, SkillFolderPath, type EventActor } from "@octant/contracts";
 import { eventActorForPrincipal } from "./principalEventActor";
@@ -82,41 +91,51 @@ export function createExtensionRouteHandler(options: {
     prepareClient?(
       extensionId: string,
       componentId: string,
-      principalKind: "local-window" | "remote-device",
+      principalKind: PrincipalKind,
     ): Promise<McpServerSignInView>;
     saveClient?(
       extensionId: string,
       componentId: string,
       setup: McpClientSetupInput,
-      principalKind: "local-window" | "remote-device",
+      principalKind: PrincipalKind,
     ): Promise<McpServerSignInView>;
     configureClient(
       extensionId: string,
       componentId: string,
       registration: McpOAuthClientRegistration,
-      principalKind: "local-window" | "remote-device",
+      principalKind: PrincipalKind,
     ): Promise<McpServerSignInView>;
     status(
       extensionId: string,
       componentId: string,
-      principalKind: "local-window" | "remote-device",
+      principalKind: PrincipalKind,
+      device?: McpSignInDeviceBinding,
     ): Promise<McpServerSignInView>;
     begin(
       extensionId: string,
       componentId: string,
-      principalKind: "local-window" | "remote-device",
+      principalKind: PrincipalKind,
       actor?: EventActor,
+      device?: McpSignInDeviceBinding,
     ): Promise<McpServerSignInView>;
     poll(
       extensionId: string,
       componentId: string,
       attemptId: string,
-      principalKind: "local-window" | "remote-device",
+      principalKind: PrincipalKind,
+      device?: McpSignInDeviceBinding,
     ): Promise<McpServerSignInView>;
+    relay?(input: {
+      readonly attemptId: string;
+      readonly callbackUrl: string;
+      readonly principalKind: PrincipalKind;
+      readonly device?: McpSignInDeviceBinding;
+      readonly actor?: EventActor;
+    }): Promise<McpServerSignInRelayResult>;
     signOut(
       extensionId: string,
       componentId: string,
-      principalKind: "local-window" | "remote-device",
+      principalKind: PrincipalKind,
       actor?: EventActor,
     ): Promise<McpServerSignInView>;
   };
@@ -148,6 +167,10 @@ export function createExtensionRouteHandler(options: {
       decision: ExtensionToolApprovalDecision,
     ): boolean;
   };
+  /** The member's Act item for its hub, which bounds where a device only the hub introduced may answer. */
+  readonly hubActScope?: () => HubActScopePort | undefined;
+  /** The Project of a Code or Work thread; undefined for any other thread, such as a Chat thread. */
+  readonly codeOrWorkThreadProjectId?: (threadId: string) => string | undefined;
   /**
    * Remembered tool approvals, for a local window to read and take away.
    * There is deliberately no way to add one here: a grant is recorded only
@@ -285,6 +308,26 @@ export function createExtensionRouteHandler(options: {
         }
         const { kind: _kind, ...rawDecision } = body.value as Record<string, unknown>;
         const decision = decodeExtensionToolApprovalDecision(rawDecision);
+        // A device only the hub introduced answers a Code or Work thread's
+        // prompt only in a Project the member's Act item names, read at this
+        // answer. A prompt it may not answer is refused by the service anyway,
+        // and Chat is not held to the Act item.
+        if (principalIsHubIntroduced(principalContext.principal)) {
+          const prompt = options.toolApprovals
+            .list(answerer)
+            .find((listed) => String(listed.approvalId) === String(decision.approvalId));
+          const projectId =
+            prompt === undefined
+              ? undefined
+              : options.codeOrWorkThreadProjectId?.(String(prompt.threadId));
+          const refusal =
+            projectId === undefined
+              ? undefined
+              : hubActRefusal(options.hubActScope?.(), projectId, "answer");
+          if (refusal !== undefined) {
+            return response(failure("unauthorized", refusal), 403, origin);
+          }
+        }
         const accepted = options.toolApprovals.decide(answerer, decision);
         return response({ accepted }, accepted ? 200 : 409, origin);
       } catch {
@@ -527,10 +570,65 @@ export function createExtensionRouteHandler(options: {
       }
       return response(options.extensionProjectPins.list(), 200, origin);
     }
+    if (url.pathname === "/api/extensions/mcp-sign-in/relay") {
+      // One-time callback relay is admitted ONLY for a person-paired device
+      // over its signed session; hub-introduced, restricted, agent-grant, and
+      // local-window callers are refused before touching the broker.
+      if (options.mcpServerSignIn?.relay === undefined) {
+        return response(
+          failure("unavailable", "Signing in to a server is unavailable."),
+          503,
+          origin,
+        );
+      }
+      const principal = principalContext.principal;
+      if (
+        principal.kind !== "remote-device" ||
+        principal.admittedBy !== "host-person" ||
+        isAgentGrantSession(principal)
+      ) {
+        return response(
+          failure("unauthorized", "Only a person-paired device can finish a sign-in by relay."),
+          401,
+          origin,
+        );
+      }
+      const body = await readBody(request, Math.min(maximumBodySize, 8_192));
+      if (body.kind === "too-large") {
+        return response(failure("invalid", "Extension request is too large."), 413, origin);
+      }
+      let relayInput;
+      try {
+        if (body.kind !== "ok") throw new Error("invalid");
+        relayInput = decodeMcpServerSignInRelayRequest(body.value);
+      } catch {
+        return response(failure("invalid", "The sign-in relay request is invalid."), 400, origin);
+      }
+      try {
+        const result = await options.mcpServerSignIn.relay({
+          attemptId: relayInput.attemptId,
+          callbackUrl: relayInput.callbackUrl,
+          principalKind: "person-paired-device",
+          device: {
+            deviceId: String(principal.deviceId),
+            sessionId: String(principal.sessionId),
+            credentialGeneration: principal.credentialGeneration,
+          },
+          actor,
+        });
+        return response(result, 200, origin);
+      } catch {
+        return response(
+          failure("failed", "The sign-in relay could not be completed."),
+          500,
+          origin,
+        );
+      }
+    }
     if (url.pathname === "/api/extensions/sign-in") {
-      // A sign-in opens the system browser on this host and stores a grant
-      // in its broker; a paired device may read the state but never start,
-      // finish, or end one.
+      // A local window or a person-paired device starts, finishes, and ends
+      // a sign-in; any other device (hub-introduced, unproved, agent grant)
+      // may read the state only.
       if (options.mcpServerSignIn === undefined) {
         return response(
           failure("unavailable", "Signing in to a server is unavailable."),
@@ -549,15 +647,29 @@ export function createExtensionRouteHandler(options: {
       } catch {
         return response(failure("invalid", "The sign-in request is invalid."), 400, origin);
       }
-      // A device the host's own person paired is judged as a local window is.
-      const principalKind = principalActsAsHostPerson(principalContext.principal)
-        ? "local-window"
-        : "remote-device";
+      const principal = principalContext.principal;
+      const isPersonPairedDevice =
+        principal.kind === "remote-device" &&
+        principal.admittedBy === "host-person" &&
+        !isAgentGrantSession(principal);
+      const principalKind: PrincipalKind =
+        principal.kind === "local-window"
+          ? "local-window"
+          : isPersonPairedDevice
+            ? "person-paired-device"
+            : "remote-device";
+      const device: McpSignInDeviceBinding | undefined = isPersonPairedDevice
+        ? {
+            deviceId: String(principal.deviceId),
+            sessionId: String(principal.sessionId),
+            credentialGeneration: principal.credentialGeneration,
+          }
+        : undefined;
       const extensionId = String(signIn.extensionId);
       const componentId = String(signIn.componentId);
       try {
         if (signIn.kind === "prepare-client" || signIn.kind === "save-client") {
-          if (principalKind !== "local-window")
+          if (!actsAsHostPerson(principalKind))
             return response(
               failure("unauthorized", "Set up the client from the Octant window on this host."),
               401,
@@ -587,7 +699,7 @@ export function createExtensionRouteHandler(options: {
           );
         }
         if (signIn.kind === "configure-client") {
-          if (principalKind !== "local-window")
+          if (!actsAsHostPerson(principalKind))
             return response(
               failure("unauthorized", "Set up the client from the Octant window on this host."),
               401,
@@ -606,26 +718,49 @@ export function createExtensionRouteHandler(options: {
         }
         if (signIn.kind === "status") {
           return response(
-            await options.mcpServerSignIn.status(extensionId, componentId, principalKind),
+            device === undefined
+              ? await options.mcpServerSignIn.status(extensionId, componentId, principalKind)
+              : await options.mcpServerSignIn.status(
+                  extensionId,
+                  componentId,
+                  principalKind,
+                  device,
+                ),
             200,
             origin,
           );
         }
         if (signIn.kind === "begin") {
           return response(
-            await options.mcpServerSignIn.begin(extensionId, componentId, principalKind, actor),
+            device === undefined
+              ? await options.mcpServerSignIn.begin(extensionId, componentId, principalKind, actor)
+              : await options.mcpServerSignIn.begin(
+                  extensionId,
+                  componentId,
+                  principalKind,
+                  actor,
+                  device,
+                ),
             200,
             origin,
           );
         }
         if (signIn.kind === "poll") {
           return response(
-            await options.mcpServerSignIn.poll(
-              extensionId,
-              componentId,
-              signIn.attemptId,
-              principalKind,
-            ),
+            device === undefined
+              ? await options.mcpServerSignIn.poll(
+                  extensionId,
+                  componentId,
+                  signIn.attemptId,
+                  principalKind,
+                )
+              : await options.mcpServerSignIn.poll(
+                  extensionId,
+                  componentId,
+                  signIn.attemptId,
+                  principalKind,
+                  device,
+                ),
             200,
             origin,
           );
@@ -981,6 +1116,7 @@ function response(
     | DiscoveredAgentToolingListing
     | RuntimeCompactionDefaults
     | McpServerSignInView
+    | McpServerSignInRelayResult
     | McpServerConnectionListing
     | McpServerReconnectResult
     | ExtensionProjectPinListing,

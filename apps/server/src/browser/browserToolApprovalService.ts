@@ -63,6 +63,12 @@ interface BrowserToolApprovalServiceOptions {
    * treated as a paired device.
    */
   readonly isLocalWindow?: (windowId: WindowId) => boolean;
+  /**
+   * Whether a paired device scope is restricted (hub-introduced or agent grant)
+   * rather than paired by the host's own person. Absent, every non-local device
+   * scope is treated as restricted.
+   */
+  readonly isRestrictedDevice?: (windowId: WindowId) => boolean;
   /** How many extensions are enabled in a profile, to name in its prompt. */
   readonly extensionsEnabledIn?: (profile: StoredBrowserProfile) => number;
   readonly profileLabel?: (profile: StoredBrowserProfile) => Promise<string | undefined>;
@@ -315,17 +321,20 @@ export class BrowserToolApprovalService {
    * host scope.
    */
   #answerableBy(pending: PendingApproval, windowId: WindowId): boolean {
-    // A signed-in page acts as the person's account, so a paired device neither
-    // sees nor answers its approval, and an approval a paired device's turn raised
-    // waits for a window of this computer, like a routine's.
+    // A hub-introduced or restricted device neither sees nor answers a
+    // signed-in profile or script approval. A device the host's own person
+    // paired acts as the person and sees and answers profile site approvals
+    // and sign-in cards for every thread it can open.
     const signedIn = pending.view.profile !== undefined || pending.view.script !== undefined;
-    if (signedIn && this.#isPairedDevice(windowId)) return false;
+    if (signedIn && this.#isRestrictedDevice(windowId)) return false;
     if (pending.windowId === windowId) return true;
     const isHostScope = this.#options.isHostScope;
     const waitsForPerson =
       (isHostScope?.(pending.windowId) ?? false) ||
-      (signedIn && this.#isPairedDevice(pending.windowId));
-    if (!waitsForPerson || isHostScope?.(windowId) === true || this.#isPairedDevice(windowId)) {
+      pending.view.signIn !== undefined ||
+      pending.view.profile !== undefined ||
+      (signedIn && this.#isRestrictedDevice(pending.windowId));
+    if (!waitsForPerson || isHostScope?.(windowId) === true || this.#isRestrictedDevice(windowId)) {
       return false;
     }
     return this.#options.authorityIsCurrent(pending.threadId, pending.authority, windowId);
@@ -336,6 +345,13 @@ export class BrowserToolApprovalService {
     return (
       isLocalWindow !== undefined && !isLocalWindow(windowId) && isHostScope?.(windowId) !== true
     );
+  }
+
+  #isRestrictedDevice(windowId: WindowId): boolean {
+    if (this.#options.isRestrictedDevice !== undefined) {
+      return this.#options.isRestrictedDevice(windowId);
+    }
+    return this.#isPairedDevice(windowId);
   }
 
   /**
@@ -354,6 +370,11 @@ export class BrowserToolApprovalService {
   /** Whether a scope is a paired device rather than a window of this computer. */
   isPairedDevice(windowId: WindowId): boolean {
     return this.#isPairedDevice(windowId);
+  }
+
+  /** Whether a scope is a restricted (non-person-paired) remote device. */
+  isRestrictedDevice(windowId: WindowId): boolean {
+    return this.#isRestrictedDevice(windowId);
   }
 
   /** Whether a scope is the host acting alone, with no person to answer a prompt. */

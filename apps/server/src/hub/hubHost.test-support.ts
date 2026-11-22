@@ -1,3 +1,4 @@
+import type { ProjectId } from "@octant/contracts";
 import type { OwnerApprovalHost } from "./ownerApprovalHost";
 // A whole Octant host for the hub tests: its journal, its real remote gateway
 // behind a real TLS listener serving a certificate it made itself, and the hub
@@ -39,11 +40,14 @@ import {
 } from "../remote/remoteGateway";
 import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListenerCertificate";
 import { DelegatingSpokeService, type DelegatingParentPort } from "./delegatingSpokeService";
-import { createDelegationStateStore, type DelegationStatePort } from "./delegationStateStore";
+import {
+  createDelegationStateStore,
+  delegationAcceptingSwitch,
+  type DelegationStatePort,
+} from "./delegationStateStore";
 import { FailoverService } from "./failoverService";
 import { createHubLinkRouteHandler } from "./hubLinkRoutes";
 import { createHubOwnerRouteHandler } from "./hubOwnerRoutes";
-import type { OwnerBrowserControlService } from "../browser/ownerBrowserControl";
 import { TestCredentialBroker, TestPostureHost, TestThreadWakeHost } from "./hubOwner.test-support";
 import { OwnerCredentialCopyService } from "./ownerCredentialCopy";
 import { createPeerCredentialRouteHandler } from "./peerCredentialRoutes";
@@ -83,6 +87,7 @@ import {
   type ThreadMoveSourceHost,
 } from "./threadMoveService";
 import { createThreadMoveStateStore } from "./threadMoveStateStore";
+import { HUB_ACT_WITHDRAWN_REASON } from "../remoteCredentialLifecycleService";
 
 /** What a test host's services did for applied offers. */
 export interface ProvisionedByOffer {
@@ -108,6 +113,9 @@ const tailscaleFacts: RequestTransportFacts = {
   listenerTrust: "remote",
   sourceClass: "tailscale",
   sourceKey: "opaque-tailscale-source-key",
+  // Every test caller arrives from one tailnet address, which a new-device
+  // alert shows for a guest that reaches a spoke.
+  privateAddress: "100.101.102.250",
 };
 
 const NO_DELEGATION_HOST: PeerDelegationHost = {
@@ -229,6 +237,8 @@ export interface HubTestHost {
   readonly delegationRecords: HubDelegationRecordedPayload[];
   /** The delegating side of this host: what its agents' remote child runs go through. */
   readonly delegating: DelegatingSpokeService;
+  /** This host's switch for taking delegated work, as its window turns it. */
+  readonly setDelegationAccepting: (accepting: boolean) => void;
   /** This host's credential broker: the sign-ins it holds and the provider rows that take one. */
   readonly credentials: TestCredentialBroker;
   /** This host's Code postures, as the owner posture routes read and change them. */
@@ -236,6 +246,8 @@ export interface HubTestHost {
   /** This host's Code wake switches, as the owner wake routes read and change them. */
   readonly threadWakes: TestThreadWakeHost;
   readonly listener: PrivateListenerHostStatus;
+  /** Serves this host's listener at another private address, as after a network change; its devices stay. */
+  readonly moveListener: (address: string) => Promise<void>;
   /** Every request this host's listener answered, as `METHOD path`. */
   readonly requests: string[];
   /** The listener, called as a signed member would call it. */
@@ -249,7 +261,6 @@ export interface HubTestHost {
 
 export async function startHubTestHost(input: {
   readonly ownerApprovals?: OwnerApprovalHost;
-  readonly ownerBrowser?: OwnerBrowserControlService;
   readonly name: string;
   readonly address: string;
   readonly network: HubTestNetwork;
@@ -257,6 +268,11 @@ export async function startHubTestHost(input: {
   readonly listenerStatus?: Partial<PrivateListenerHostStatus>;
   /** What a delegation to this host becomes; absent, this host has no Project open for delegated work. */
   readonly delegationHost?: PeerDelegationHost;
+  /** This host's active Projects, for the list a member asks for. */
+  readonly delegationProjects?: () => ReadonlyArray<{
+    readonly projectId: ProjectId;
+    readonly name: string;
+  }>;
   /** The threads this host can send and receive in a move; absent, it holds none. */
   readonly threadMoveHosts?: {
     readonly source: ThreadMoveSourceHost;
@@ -310,7 +326,7 @@ export async function startHubTestHost(input: {
   const directory = mkdtempSync(join(tmpdir(), "octant-hub-"));
   input.cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
   const hostId = decodeStableHostId(randomUUID());
-  const origin = `https://${input.address}:8443`;
+  let origin = `https://${input.address}:8443`;
   const connection = openSqlite(join(directory, "store.sqlite3"));
   const isoNow = () => new Date().toISOString();
   applyMigrations(connection, MIGRATIONS, isoNow);
@@ -400,6 +416,11 @@ export async function startHubTestHost(input: {
       },
       deviceKeyFingerprint: (deviceId) => current.pairedDeviceKeyFingerprint(deviceId),
       deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
+      admitIntroducedDevice: (input) => current.admitIntroducedDevice(input),
+      deviceLifecycle: (deviceId, now) =>
+        deviceLifecycleAt(administration.listDevices(), deviceId, now),
+      deviceOrigin: (deviceId) =>
+        administration.listDevices().find((device) => device.deviceId === deviceId)?.origin,
     };
   };
   const hub = new HubService({
@@ -411,7 +432,6 @@ export async function startHubTestHost(input: {
     transport: input.hubTransport?.(transport) ?? transport,
     record: (change) => {
       records.push(change);
-      input.ownerBrowser?.revalidateAuthority();
     },
     now: Date.now,
   });
@@ -428,15 +448,19 @@ export async function startHubTestHost(input: {
         admitIntroducedDevice: (input) => current.admitIntroducedDevice(input),
         deviceLifecycle: (deviceId, now) =>
           deviceLifecycleAt(administration.listDevices(), deviceId, now),
+        deviceOrigin: (deviceId) =>
+          administration.listDevices().find((device) => device.deviceId === deviceId)?.origin,
         revokeDevice: (deviceId) => {
           administration.revokeDevice({ deviceId });
         },
         deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
+        endActSessions: (deviceIds) => {
+          current.endDeviceSessions(deviceIds, HUB_ACT_WITHDRAWN_REASON);
+        },
       };
     },
     record: (change) => {
       records.push(change);
-      input.ownerBrowser?.revalidateAuthority();
     },
     serverBuildVersion: "0.1.0",
     now: input.now ?? input.wakeClock ?? Date.now,
@@ -788,7 +812,6 @@ export async function startHubTestHost(input: {
   const hubOwnerRoutes = createHubOwnerRouteHandler({
     ...(input.ownerApprovals === undefined ? {} : { approvals: input.ownerApprovals }),
     approvalAnswerNeedsOwnUnlock: () => ownerApprovalAnswerUnlock.required(),
-    ...(input.ownerBrowser === undefined ? {} : { browser: input.ownerBrowser }),
     hub,
     spoke,
     unlock: ownerUnlock,
@@ -811,6 +834,8 @@ export async function startHubTestHost(input: {
       authenticate: (request) => spoke.authenticatePeer(request),
       currentPeer: (memberId) => spoke.currentPeer(memberId),
       host: input.delegationHost ?? NO_DELEGATION_HOST,
+      ...(input.delegationProjects === undefined ? {} : { projects: input.delegationProjects }),
+      load: () => "busy",
       state: delegationState,
       record: (change) => delegationRecords.push(change),
       now: Date.now,
@@ -820,13 +845,17 @@ export async function startHubTestHost(input: {
     state: delegationState,
     identity: () => identity,
     target: (memberId) => spoke.memberTarget(memberId),
+    members: () => {
+      const status = spoke.status();
+      return status.membership === "member" ? status.acceptedMemberIds : [];
+    },
     transport: input.delegatingTransport?.(transport) ?? transport,
     parent: input.parent ?? NO_PARENT,
     record: (change) => delegationRecords.push(change),
     now: Date.now,
   });
-  const hubLink = async (request: Request) =>
-    (await hubLinkRoutes(request)) ??
+  const hubLink = async (request: Request, facts?: { readonly privateAddress?: string }) =>
+    (await hubLinkRoutes(request, facts)) ??
     (await peerDelegationRoutes(request)) ??
     (await peerCredentialRoutes(request)) ??
     (await threadMoveRoutes(request)) ??
@@ -839,21 +868,28 @@ export async function startHubTestHost(input: {
     gatewayFetch = serveOptions.fetch as typeof gatewayFetch;
     return { url: new URL(origin), stop: vi.fn(async () => {}) };
   };
-  gateway = createRemoteGateway({
-    connection,
-    journal,
-    hostId,
-    displayName: input.name,
-    serverBuildVersion: "0.1.0",
-    signing: identity.signing,
-    webAssets: () => Promise.resolve(new Response("web", { status: 200 })),
-    hubLink,
-    ...(input.productDispatch === undefined ? {} : { productDispatch: input.productDispatch }),
-    serve,
-    clock: isoNow,
-    config: { listener: { hostname: input.address, port: 8443, origin, tls: certificate.tls } },
-  });
-  await gateway.start();
+  const startGateway = async (
+    hostname: string,
+    tls: typeof certificate.tls,
+  ): Promise<RemoteGateway> => {
+    const started = createRemoteGateway({
+      connection,
+      journal,
+      hostId,
+      displayName: input.name,
+      serverBuildVersion: "0.1.0",
+      signing: identity.signing,
+      webAssets: () => Promise.resolve(new Response("web", { status: 200 })),
+      hubLink,
+      ...(input.productDispatch === undefined ? {} : { productDispatch: input.productDispatch }),
+      serve,
+      clock: isoNow,
+      config: { listener: { hostname, port: 8443, origin, tls } },
+    });
+    await started.start();
+    return started;
+  };
+  gateway = await startGateway(input.address, certificate.tls);
   input.cleanups.push(() => gateway?.stop());
   const administration = gateway.localDeviceAdministration();
   if (administration === undefined) throw new Error("No local administration.");
@@ -887,6 +923,7 @@ export async function startHubTestHost(input: {
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("No listener port.");
   input.network.register(input.address, address.port);
+  const listenerPort = address.port;
   input.cleanups.push(
     () =>
       new Promise<void>((resolve) => {
@@ -942,10 +979,26 @@ export async function startHubTestHost(input: {
     delegationState,
     delegationRecords,
     delegating,
+    setDelegationAccepting: (accepting: boolean) =>
+      delegationAcceptingSwitch(delegationState).set(accepting),
     credentials,
     postures,
     threadWakes,
     listener,
+    moveListener: async (moved) => {
+      await gateway?.stop();
+      origin = `https://${moved}:8443`;
+      // The certificate is made again for the new address under the same key,
+      // so the pin the roster states stays true.
+      const renamed = createSelfMadeListenerCertificateStore({ dataDirectory: directory }).ensure(
+        moved,
+      );
+      if (renamed.status !== "ready") throw new Error(renamed.code);
+      Object.assign(listener, { hostname: moved, origin, tlsPin: renamed.tlsPin });
+      server.setSecureContext(renamed.tls);
+      gateway = await startGateway(moved, renamed.tls);
+      input.network.register(moved, listenerPort);
+    },
     requests,
     hubLink,
     signHostPayload,

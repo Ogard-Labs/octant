@@ -2767,6 +2767,134 @@ CREATE INDEX validation_evidence_authority_idx
       END;
     `,
   },
+  {
+    version: 109,
+    name: "record_code_turn_full_access_on_usage",
+    // Whether a Code turn ran at Full access, so a spend ceiling reads an
+    // unreported turn by the usage capability of the level it ran at: an ACP
+    // release newer than the reviewed one measures usage at Full access only.
+    // NULL means not recorded and reads as before. The boundary keeps every
+    // turn already journaled when this build first ran on NULL, on rebuild
+    // too: those Full access turns ran before the driver measured them, so
+    // reading them as measured would make a lifetime ceiling refuse forever.
+    sql: `
+      ALTER TABLE usage_record_projection
+        ADD COLUMN ran_at_full_access INTEGER CHECK(ran_at_full_access IN (0, 1));
+      CREATE TABLE usage_turn_level_boundary (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+        global_sequence INTEGER NOT NULL CHECK(global_sequence >= 0)
+      ) STRICT;
+      INSERT INTO usage_turn_level_boundary (singleton, global_sequence)
+        SELECT 1, COALESCE(MAX(global_sequence), 0) FROM event_journal;
+    `,
+  },
+  {
+    version: 110,
+    name: "create_code_home_activity_projection",
+    // Code Home activity history. A projection under a new name, so the first
+    // start after this migration replays the journal into it; no backfill is
+    // written here. `code_home_activity_fact` holds one durable row per
+    // delivery witness or settled run, keyed so repeated legitimate issue
+    // closure dates and distinct Project/thread witnesses keep their own
+    // rows. `code_home_activity_run` retains each run's current execution and
+    // first recorded terminal so a rerun can clear and restatements cannot
+    // move its finish time. `code_home_activity_thread` maps each mode's
+    // thread to its Project for facts whose events do not carry it.
+    sql: `
+      CREATE TABLE code_home_activity_fact (
+        kind TEXT NOT NULL CHECK(kind IN ('prs-merged', 'issues-closed', 'releases-published', 'runs')),
+        identity TEXT NOT NULL CHECK(length(trim(identity)) > 0),
+        occurred_at TEXT NOT NULL,
+        thread_id TEXT NOT NULL CHECK(length(trim(thread_id)) > 0),
+        project_id TEXT CHECK(project_id IS NULL OR length(project_id) = 36),
+        metadata_json TEXT NOT NULL CHECK(json_valid(metadata_json)),
+        PRIMARY KEY (kind, identity, occurred_at, thread_id)
+      ) STRICT;
+      CREATE INDEX code_home_activity_fact_kind_time_idx
+        ON code_home_activity_fact(kind, occurred_at);
+      CREATE TABLE code_home_activity_run (
+        source TEXT NOT NULL CHECK(source IN ('code', 'chat', 'work', 'agent-run')),
+        run_id TEXT NOT NULL CHECK(length(trim(run_id)) > 0),
+        execution TEXT NOT NULL,
+        thread_id TEXT,
+        project_id TEXT CHECK(project_id IS NULL OR length(project_id) = 36),
+        mode TEXT CHECK(mode IS NULL OR mode IN ('chat', 'work', 'code')),
+        terminal_finish TEXT CHECK(terminal_finish IS NULL OR
+          terminal_finish IN ('successful', 'failed', 'canceled')),
+        terminal_at TEXT,
+        stop_requested INTEGER NOT NULL DEFAULT 0 CHECK(stop_requested IN (0, 1)),
+        PRIMARY KEY (source, run_id)
+      ) STRICT;
+      CREATE TABLE code_home_activity_thread (
+        mode TEXT NOT NULL CHECK(mode IN ('chat', 'work', 'code')),
+        thread_id TEXT NOT NULL,
+        project_id TEXT CHECK(project_id IS NULL OR length(project_id) = 36),
+        PRIMARY KEY (mode, thread_id)
+      ) STRICT;
+    `,
+  },
+  {
+    version: 111,
+    name: "drop_code_turn_full_access_from_usage",
+    // The spend ceiling no longer reads an unreported Code turn by the level
+    // it ran at, so nothing reads the column or the boundary version 109 added
+    // for it. The column's only constraint is its own CHECK and no index,
+    // view, or trigger names it, so SQLite drops it in place; every other
+    // column of a projected row is kept, and a rebuild writes the same rows.
+    // Before it goes, the unreported turns it read below Full access (a NULL
+    // level read so too) are kept by id: the earlier rule left those turns
+    // out on an ACP release whose usage was then read at Full access only,
+    // and that release now reports usage at every level. Reading them as
+    // measured would make a lifetime ceiling refuse forever over spend no
+    // report can recover. A Code turn still open at the upgrade has no row
+    // yet; restart recovery settles it afterwards, so its id is kept too when
+    // its latest start read below Full access as the projection read it (a
+    // start at or before the boundary recorded no level). An id that never
+    // gets a row, or gets a reported one, changes nothing. The tables are not
+    // projections, so a rebuild, which writes the same ids, keeps them.
+    //
+    // OpenCode reported reasoning apart from output, and the ceiling now sums
+    // input and output only, reasoning being part of output for every runtime
+    // (the OpenCode mapper adds it in from this build on). The rows its
+    // instances wrote before, a removed instance's included, are kept by id
+    // so the ceiling still adds their reasoning; a rebuild writes them from
+    // the same journaled reports.
+    sql: `
+      CREATE TABLE usage_unreported_guarded_turn (
+        reconciliation_id TEXT PRIMARY KEY
+      ) STRICT;
+      INSERT INTO usage_unreported_guarded_turn (reconciliation_id)
+        SELECT reconciliation_id FROM usage_record_projection
+        WHERE quality = 'unavailable' AND COALESCE(ran_at_full_access, 0) = 0;
+      INSERT OR IGNORE INTO usage_unreported_guarded_turn (reconciliation_id)
+        SELECT aggregate_id FROM event_journal
+        WHERE aggregate_type = 'code-operation'
+          AND event_name = 'code.operation-event-recorded@1'
+          AND json_extract(payload_json, '$.event.kind') = 'conversation-turn-started'
+          AND aggregate_id NOT IN (SELECT reconciliation_id FROM usage_record_projection)
+        GROUP BY aggregate_id
+        HAVING MAX(global_sequence) = MAX(CASE WHEN COALESCE(
+          global_sequence > (SELECT global_sequence FROM usage_turn_level_boundary)
+            AND json_extract(payload_json, '$.event.executionPolicy') = 'full-access',
+          0) THEN NULL ELSE global_sequence END);
+      CREATE TABLE usage_reasoning_outside_output (
+        reconciliation_id TEXT PRIMARY KEY
+      ) STRICT;
+      INSERT INTO usage_reasoning_outside_output (reconciliation_id)
+        SELECT reconciliation_id FROM usage_record_projection
+        WHERE COALESCE(reasoning_tokens, 0) > 0
+          AND provider_instance_id IN (
+            SELECT instance_id FROM provider_instance_projection WHERE driver_kind = 'opencode'
+            UNION
+            SELECT aggregate_id FROM event_journal
+            WHERE aggregate_type = 'provider-instance'
+              AND event_name = 'provider.instance-created@1'
+              AND json_extract(payload_json, '$.instance.driverKind') = 'opencode'
+          );
+      ALTER TABLE usage_record_projection DROP COLUMN ran_at_full_access;
+      DROP TABLE usage_turn_level_boundary;
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

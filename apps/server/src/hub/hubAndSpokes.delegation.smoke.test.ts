@@ -13,18 +13,12 @@ import {
   ProjectId,
   UtcTimestamp,
   decodeDelegationStartCommand,
-  decodeWindowId,
   type DelegationStartCommand,
   type PeerGrant,
 } from "@octant/contracts";
 import type { DelegationProjectAuthority } from "@octant/domain";
 import { createAgentRemoteDelegation } from "./agentRemoteDelegation";
 import { EXTERNAL_CONTENT_FRAME_CLOSE } from "../context/externalContentFraming";
-import { WindowAuthorityStore } from "../windowAuthorityStore";
-import {
-  DELEGATION_ADMINISTRATION_ROUTES,
-  createDelegationAdministrationRouteHandler,
-} from "./delegationAdministrationRoutes";
 import type { DelegatingParentPort, ParentCheck } from "./delegatingSpokeService";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER, signHubLinkRequest } from "./hubLink";
 import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.test-support";
@@ -142,6 +136,7 @@ async function threeHosts(
     readonly parent?: ReturnType<typeof parentRules>;
     readonly bProductDispatch?: Parameters<typeof startHubTestHost>[0]["productDispatch"];
     readonly aTransport?: Parameters<typeof startHubTestHost>[0]["delegatingTransport"];
+    readonly bProjects?: Parameters<typeof startHubTestHost>[0]["delegationProjects"];
   } = {},
 ) {
   const network = new HubTestNetwork();
@@ -167,6 +162,7 @@ async function threeHosts(
     network,
     cleanups,
     delegationHost: child.host,
+    ...(options.bProjects === undefined ? {} : { delegationProjects: options.bProjects }),
     ...(options.bProductDispatch === undefined
       ? {}
       : { productDispatch: options.bProductDispatch }),
@@ -542,6 +538,98 @@ describe("a spoke delegating work to another spoke", () => {
     expect(child.started).toHaveLength(1);
   });
 
+  it("lists, by name, only the Projects B opened for delegated work within the grant it gave A", async () => {
+    const other = decodeProjectId("77777777-7777-4777-8777-777777777777");
+    const { a, b } = await threeHosts({
+      child: fakeChildHost({ modes: ["code"] }),
+      bProjects: () => [
+        { projectId: PROJECT, name: "Service" },
+        { projectId: other, name: "Notes" },
+      ],
+    });
+    const listed = await b.hubLink(
+      signedDelegation({
+        signer: a,
+        recipient: b,
+        path: PEER_DELEGATION_ROUTES.projects,
+        body: "{}",
+      }),
+    );
+    expect(listed?.status).toBe(200);
+    expect(await listed?.json()).toEqual({
+      projects: [{ projectId: String(PROJECT), name: "Service", modes: ["code"] }],
+      accepting: true,
+      load: "busy",
+    });
+    // A's agent reads the same list through A's own delegating service.
+    expect(await a.delegating.listTargets()).toEqual([
+      {
+        memberId: b.hostId,
+        name: "Desktop B",
+        projects: [{ projectId: String(PROJECT), name: "Service", modes: ["code"] }],
+        accepting: true,
+        load: "busy",
+      },
+    ]);
+
+    // A grant without delegation lists nothing and says why.
+    setGrantHeldBy(b, a, ({ delegation: _dropped, ...grant }) => grant as PeerGrant);
+    const refused = await b.hubLink(
+      signedDelegation({
+        signer: a,
+        recipient: b,
+        path: PEER_DELEGATION_ROUTES.projects,
+        body: "{}",
+      }),
+    );
+    expect(refused?.status).toBe(403);
+    expect(await refused?.json()).toMatchObject({ kind: "delegation-not-granted" });
+  });
+
+  it("still lists a member's Projects when one has a name longer than the listing allows", async () => {
+    const { a } = await threeHosts({
+      bProjects: () => [{ projectId: PROJECT, name: "N".repeat(300) }],
+    });
+    const [member] = await a.delegating.listTargets();
+    expect(member?.projects).toHaveLength(1);
+    expect(member?.projects[0]?.name).toHaveLength(200);
+  });
+
+  it("still lists a member's Projects when a long name is made of emoji, which count twice toward the limit", async () => {
+    const { a } = await threeHosts({
+      bProjects: () => [{ projectId: PROJECT, name: "🚀".repeat(150) }],
+    });
+    const [member] = await a.delegating.listTargets();
+    const name = member?.projects[0]?.name ?? "";
+    expect(member?.projects).toHaveLength(1);
+    expect(name.length).toBeLessThanOrEqual(200);
+    // The cut keeps whole emoji: no half of a surrogate pair before the ellipsis.
+    expect(name).toBe(`${"🚀".repeat(99)}…`);
+  });
+
+  it("refuses every new request once B's person stops accepting delegated work, and lists B as not accepting", async () => {
+    const { a, b, child } = await threeHosts({
+      bProjects: () => [{ projectId: PROJECT, name: "Service" }],
+    });
+    b.setDelegationAccepting(false);
+
+    const refused = await b.hubLink(
+      signedDelegation({ signer: a, recipient: b, body: requestBody(a) }),
+    );
+    expect(refused?.status).toBe(403);
+    expect(await refused?.json()).toMatchObject({ kind: "not-accepting" });
+    expect(child.started).toHaveLength(0);
+    expect(await a.delegating.listTargets()).toEqual([
+      { memberId: b.hostId, name: "Desktop B", projects: [], accepting: false, load: "busy" },
+    ]);
+
+    b.setDelegationAccepting(true);
+    const accepted = await b.hubLink(
+      signedDelegation({ signer: a, recipient: b, body: requestBody(a) }),
+    );
+    expect(accepted?.status).toBe(201);
+  });
+
   it("interrupts a child once its start finishes when the sender cancels mid-start, and refuses another sender", async () => {
     const child = fakeChildHost();
     const startThread = child.host.startThread;
@@ -662,6 +750,31 @@ describe("a delegation whose answer never reached the delegating spoke", () => {
       expect.objectContaining({ requestId: first.requestId, state: "running" }),
     ]);
     expect(a.delegationState.load().sent[0]).not.toHaveProperty("task");
+  });
+
+  it("still answers a retried start whose acceptance was lost after B stops accepting, so A keeps the running child", async () => {
+    const flaky = flakyCreate();
+    const { a, b, child } = await threeHosts({ aTransport: flaky.transport });
+    flaky.fault.mode = "lose-answer";
+    const first = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+    if (first.status !== "pending-acceptance") throw new Error(JSON.stringify(first));
+    flaky.fault.mode = "none";
+    b.setDelegationAccepting(false);
+
+    const retried = await a.delegating.delegate(startCommand(b), { windowId: "window-a" });
+
+    expect(retried).toMatchObject({ status: "delegated", requestId: first.requestId });
+    expect(child.started).toHaveLength(1);
+    expect(a.delegationState.load().sent).toEqual([
+      expect.objectContaining({ requestId: first.requestId, state: "running" }),
+    ]);
+    // A new task is still refused.
+    const fresh = await a.delegating.delegate(
+      startCommand(b, { task: "Draft the release notes." }),
+      { windowId: "window-a" },
+    );
+    expect(fresh).toMatchObject({ status: "refused-by-target" });
+    expect(child.started).toHaveLength(1);
   });
 
   it("gives a different task a new request id while one is pending", async () => {
@@ -1289,6 +1402,34 @@ describe("what the receiving spoke refuses", () => {
     expect(child.started).toHaveLength(0);
   });
 
+  it("says B stopped accepting, not that the grant ended, when B pauses while the start is preparing", async () => {
+    const child = fakeChildHost();
+    const startThread = child.host.startThread;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slow: PeerDelegationHost = {
+      ...child.host,
+      startThread: async (input) => {
+        await gate;
+        if (!input.admissionCurrent()) return { status: "refused", kind: "delegation-not-granted" };
+        return startThread(input);
+      },
+    };
+    const { a, b } = await threeHosts({ child: { ...child, host: slow } });
+
+    const pending = b.hubLink(signedDelegation({ signer: a, recipient: b, body: requestBody(a) }));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    b.setDelegationAccepting(false);
+    release();
+
+    const response = await pending;
+    expect(response?.status).toBe(403);
+    expect(await response?.json()).toEqual({ status: "refused", kind: "not-accepting" });
+    expect(child.started).toHaveLength(0);
+  });
+
   it("refuses a Project outside the grant and one this spoke has not opened", async () => {
     const { a, b, child } = await threeHosts();
     setGrantHeldBy(b, a, (grant) =>
@@ -1581,139 +1722,6 @@ describe("delegation memory limits", () => {
   });
 });
 
-describe("delegation administration on the delegating spoke", () => {
-  const windowId = decodeWindowId("44444444-4444-4444-8444-444444444444");
-  const capability = "A".repeat(43);
-  const secret = "desktop-secret";
-
-  const otherWindowId = decodeWindowId("55555555-5555-4555-8555-555555555555");
-  const otherCapability = `${"A".repeat(42)}E`;
-
-  /** Only the first window holds the parent thread on its Project; the second is live but holds nothing. */
-  async function setup() {
-    const hosts = await threeHosts();
-    const authority = new WindowAuthorityStore();
-    authority.register({ windowId, capability, now: Date.now() });
-    authority.register({
-      windowId: otherWindowId,
-      capability: otherCapability,
-      now: Date.now(),
-    });
-    const handle = createDelegationAdministrationRouteHandler({
-      desktopBridgeSecret: secret,
-      windowAuthorityStore: authority,
-      delegation: hosts.a.delegating,
-      authorizeParent: (input) =>
-        input.threadId === PARENT_THREAD && input.windowId === String(windowId),
-    });
-    return { ...hosts, handle };
-  }
-
-  function post(path: string, body: unknown, headers: Record<string, string> = {}) {
-    return new Request(`http://127.0.0.1${path}`, {
-      method: "POST",
-      headers: {
-        "x-octant-desktop-secret": secret,
-        "x-octant-window-capability": capability,
-        "content-type": "application/json",
-        ...headers,
-      },
-      body: JSON.stringify(body),
-    });
-  }
-
-  it("answers every route it registers and no other", async () => {
-    const { handle, b } = await setup();
-
-    for (const path of Object.values(DELEGATION_ADMINISTRATION_ROUTES)) {
-      const response = await handle(
-        post(
-          path,
-          path === DELEGATION_ADMINISTRATION_ROUTES.start
-            ? startCommand(b)
-            : { requestId: randomUUID() },
-        ),
-      );
-      expect(response, path).toBeDefined();
-    }
-    expect(await handle(post("/api/desktop/hub/delegations/other", {}))).toBeUndefined();
-  });
-
-  it("starts, reads, and cancels a remote child run for a person at a window", async () => {
-    const { handle, b, child } = await setup();
-
-    const started = await handle(post(DELEGATION_ADMINISTRATION_ROUTES.start, startCommand(b)));
-    const body = (await started?.json()) as { status: string; requestId: string };
-    expect(body.status).toBe("delegated");
-    expect(child.started).toHaveLength(1);
-
-    const read = await handle(
-      post(DELEGATION_ADMINISTRATION_ROUTES.read, { requestId: body.requestId }),
-    );
-    expect(await read?.json()).toMatchObject({ status: "in-progress", state: "running" });
-
-    const cancelled = await handle(
-      post(DELEGATION_ADMINISTRATION_ROUTES.cancel, { requestId: body.requestId }),
-    );
-    expect(await cancelled?.json()).toMatchObject({ status: "cancelled" });
-    expect(child.interrupted).toHaveLength(1);
-  });
-
-  it("refuses a window that does not hold the parent thread from reading or cancelling its child", async () => {
-    const { handle, b, child } = await setup();
-    const started = await handle(post(DELEGATION_ADMINISTRATION_ROUTES.start, startCommand(b)));
-    const { requestId } = (await started!.json()) as { requestId: string };
-    const asOtherWindow = { "x-octant-window-capability": otherCapability };
-
-    for (const path of [
-      DELEGATION_ADMINISTRATION_ROUTES.read,
-      DELEGATION_ADMINISTRATION_ROUTES.cancel,
-    ]) {
-      const response = await handle(post(path, { requestId }, asOtherWindow));
-      expect(response?.status, path).toBe(409);
-      expect(await response?.json(), path).toEqual({
-        status: "refused",
-        kind: "parent-unavailable",
-      });
-    }
-    expect(child.interrupted).toHaveLength(0);
-
-    const stillOwned = await handle(post(DELEGATION_ADMINISTRATION_ROUTES.cancel, { requestId }));
-    expect(await stillOwned?.json()).toMatchObject({ status: "cancelled" });
-    expect(child.interrupted).toHaveLength(1);
-  });
-
-  it("refuses a request without the desktop secret, a window capability, or with an Origin", async () => {
-    const { handle, b, child } = await setup();
-    const command = startCommand(b);
-
-    const noSecret = await handle(
-      post(DELEGATION_ADMINISTRATION_ROUTES.start, command, { "x-octant-desktop-secret": "wrong" }),
-    );
-    const noCapability = await handle(
-      post(DELEGATION_ADMINISTRATION_ROUTES.start, command, {
-        "x-octant-window-capability": `${"A".repeat(42)}Q`,
-      }),
-    );
-    const withOrigin = await handle(
-      post(DELEGATION_ADMINISTRATION_ROUTES.start, command, { origin: "https://example.com" }),
-    );
-    const overTheListener = await handle(
-      new Request(`https://100.101.102.105:8443${DELEGATION_ADMINISTRATION_ROUTES.start}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(command),
-      }),
-    );
-
-    expect(noSecret?.status).toBe(401);
-    expect(noCapability?.status).toBe(401);
-    expect(withOrigin?.status).toBe(401);
-    expect(overTheListener?.status).toBe(401);
-    expect(child.started).toHaveLength(0);
-  });
-});
-
 describe("an agent's helper request that names another member", () => {
   function agentPort(
     a: HubTestHost,
@@ -1758,7 +1766,16 @@ describe("an agent's helper request that names another member", () => {
     expect(parent.ingested).toHaveLength(1);
   });
 
-  it("refuses a Chat or Code parent and a Project that is not a Work Project", async () => {
+  it("sends a Code thread's helper in a Code Project as Code work, approval-gated", async () => {
+    const { a, b, child } = await threeHosts({ child: fakeChildHost({ modes: ["code"] }) });
+
+    const started = await agentPort(a, { projectType: "code" }).start(request(b, { mode: "code" }));
+
+    expect(started).toMatchObject({ status: "delegated-remote" });
+    expect(child.started[0]?.authority).toEqual({ mode: "code", posture: "approval-gated" });
+  });
+
+  it("refuses a Chat parent, and a parent whose Project is not of its own mode", async () => {
     const { a, b, child } = await threeHosts();
 
     const chat = await agentPort(a).start(request(b, { mode: "chat" }));
@@ -1825,6 +1842,16 @@ describe("an agent's helper request that names another member", () => {
     for (const refused of [fromThisHost, outsideGrant]) {
       expect(refused).toMatchObject({ status: "refused", reason: "target-refused" });
     }
+    expect(child.started).toHaveLength(0);
+  });
+
+  it("tells the agent a member paused new delegated work, not that its grant ended", async () => {
+    const { a, b, child } = await threeHosts();
+    b.setDelegationAccepting(false);
+
+    const refused = await agentPort(a).start(request(b));
+
+    expect(refused).toMatchObject({ status: "refused", reason: "target-not-accepting" });
     expect(child.started).toHaveLength(0);
   });
 

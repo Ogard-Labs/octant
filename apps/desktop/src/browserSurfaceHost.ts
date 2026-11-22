@@ -1,20 +1,27 @@
 import {
   captureBrowserFeedbackPoint,
+  navigationOriginAllowed,
+  normalizeNavigationUrl as normalizeUrl,
+  onThisComputerOrNetwork,
+  refusesPageNavigation,
   type BrowserFeedbackPointObservation,
 } from "@octant/host-runtime";
 import { createPersistentBrowserOwner, type BrowserExecutionOwner } from "./persistentBrowserOwner";
 import { BrowserPageScript, type PageScriptTarget } from "./browserPageScript";
-import { BrowserOwnerControl } from "./browserOwnerControl";
+import { BrowserPairedControl } from "./browserPairedControl";
 import {
-  OwnerBrowserTargetVersion,
-  type OwnerBrowserNativeCommand,
-  type OwnerBrowserNativeResult,
-} from "@octant/contracts/owner-browser";
+  PairedBrowserDocumentVersion,
+  type PairedBrowserInput,
+  type PairedBrowserKeyModifiers,
+  type PairedBrowserNativeCommand,
+  type PairedBrowserNativeResult,
+} from "@octant/contracts/paired-browser-control";
 import { Schema } from "effect";
 import type {
   BrowserPageScriptNativeCommand,
   BrowserPageScriptPreparation,
 } from "@octant/contracts/browser-page-script";
+import { isBrowserSurfaceFaviconDataUrl } from "@octant/contracts/browser-automation";
 import { BrowserPageEditMenu } from "./browserPageEditMenu";
 import { BrowserTextComposition, type BrowserTextSource } from "./browserTextComposition";
 import {
@@ -49,7 +56,6 @@ import {
   type HumanBrowserResult,
 } from "@octant/contracts/browser-presentation";
 import { createHash, randomUUID } from "node:crypto";
-import { isIP } from "node:net";
 import { BrowserCredentialFill } from "./browserCredentialFill";
 import type { BrowserSurfacePointSelection } from "@octant/contracts/desktop-bridge";
 import {
@@ -72,7 +78,6 @@ import {
   formatBrowserPageSnapshot,
   MAX_BROWSER_SNAPSHOT_NODES,
   MAX_BROWSER_SNAPSHOT_REFS,
-  originAllowed as sameSiteOriginAllowed,
   readBrowserPage,
   readBrowserPageTools,
   BROWSER_PAGE_TOOLS_LIST_REQUEST,
@@ -93,7 +98,6 @@ import {
   type BrowserTransferLimits,
 } from "@octant/domain";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
-import { isPrivateAddress } from "./privateAddress";
 import { DesktopDownloadHold, type DesktopDownloadItemPort } from "./browserDownloadHold";
 import {
   FAVICON_MIN_INTERVAL_MS,
@@ -113,13 +117,11 @@ import {
   type SurfaceProtocolSend,
 } from "./browserSurfaceFrames";
 import {
-  ANY_BROWSER_ORIGIN,
   DEFAULT_BROWSER_WAIT_MS,
   MAX_BROWSER_AUDIT_FINDINGS_PER_RULE,
   MAX_BROWSER_DIAGNOSTIC_ENTRIES,
   MAX_BROWSER_RECORDING_EDGE,
   MAX_BROWSER_RECORDING_MS,
-  MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING,
   MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS,
   type BrowserActionRequest,
   type BrowserContextId,
@@ -165,6 +167,25 @@ export interface BrowserSurfaceState {
   readonly control: "idle" | "user" | "agent";
   readonly tabs: ReadonlyArray<BrowserSurfaceTabState>;
   readonly activeTabId: string;
+}
+
+/** The revision of an icon the person's window already holds. */
+export interface BrowserSurfaceTabIconRef {
+  readonly tabId: string;
+  readonly revision: number;
+}
+
+/**
+ * One tab's icon as the person's own window reads it. The image crosses only
+ * the window's own IPC to its owning window's renderer: it is never part of an
+ * observation, a tool result, or anything the server or an agent can see.
+ */
+export interface BrowserSurfaceTabIcon {
+  readonly tabId: string;
+  readonly revision: number;
+  readonly active: boolean;
+  /** The changed image; absent while the page has declared none or unchanged. */
+  readonly dataUrl?: string;
 }
 
 /** What the person asked of the tab rail. */
@@ -421,16 +442,55 @@ export interface BrowserSurfaceHostOptions {
 const HIBERNATE_IDLE_MS = 5 * 60_000;
 const HIBERNATE_HOT_LIMIT = 4;
 
+/**
+ * How many remembered revisions one icon read may carry. A context's tab count
+ * is bounded by policy, so this bounds only a window that is asking about tabs
+ * it does not have — extra entries are ignored, not an error.
+ */
+const TAB_ICONS_KNOWN_LIMIT = 128;
+
 /** What a hibernated tab keeps so the page can be opened again where it was. */
 interface HibernatedTab {
   readonly tabId: string;
   readonly url: string;
   readonly title: string;
+  /**
+   * The last icon the page declared, so a sleeping tab's tile and rail still
+   * show it without reopening the page. Reading icons never wakes a context.
+   */
+  readonly favicon?: OwnedTab["favicon"];
+  readonly iconRevision: number;
+}
+
+/**
+ * The one load the host itself named on this tab: an explicit `navigate`, or
+ * the agent's `tab-open` with a target. Only its own top-level redirect chain
+ * may inherit its admission onto this computer or its network — the agent's
+ * follows any of them, the person's only the origin they typed. A renderer
+ * start or a subframe never carries it.
+ */
+interface NamedBrowserLoad {
+  readonly kind: "agent" | "person";
+  /** Exact origin of the address the host was asked to open. */
+  readonly origin: string | undefined;
+  readonly url: string;
+  started: boolean;
+  refusedUrl?: string;
 }
 
 /** One page of a context. Tabs share the context's session and its guards. */
 interface OwnedTab {
   readonly tabId: string;
+  /**
+   * The host-named load in flight on this tab, set and cleared around its
+   * `loadURL`, ended early when a renderer-started navigation is admitted or
+   * the main document commits.
+   */
+  namedLoad?: NamedBrowserLoad | undefined;
+  /** Exact local origin acquired by a committed named load in this live tab. */
+  openedLocalOrigin?: string | undefined;
+  /** Local renderer load that has not left its starting origin. */
+  pageLocalRedirectOrigin?: string | undefined;
   /**
    * The page's declared icon and the address it came from, in memory only. An
    * address already fetched is not fetched again; a failed fetch keeps the
@@ -448,6 +508,11 @@ interface OwnedTab {
   faviconFetch?: { readonly controller: AbortController; readonly startedAt: number } | undefined;
   readonly view: BrowserSurfaceViewPort;
   documentRevision: number;
+  /**
+   * Bumped from the context's own counter each time the tab's icon state
+   * changes, so the person's icon read can return only what changed.
+   */
+  iconRevision: number;
   /** Electron may remove the view getter before the WebContents destroyed callback. */
   readonly contents: BrowserSurfaceViewPort["webContents"];
   readonly contentsId: number | undefined;
@@ -505,6 +570,11 @@ interface OwnedSurface {
   tabs: OwnedTab[];
   activeTabId: string;
   /**
+   * Counter for tab icon revisions, shared across the context's tabs so one
+   * tab's change can never collide with another's.
+   */
+  nextIconRevision: number;
+  /**
    * Ordinal for the next tab this context opens.
    *
    * Monotonic rather than derived from the open tabs, so closing the second of
@@ -551,17 +621,14 @@ interface OwnedSurface {
   control: BrowserSurfaceState["control"];
   /**
    * True while a navigation the person started from the address bar loads.
-   * Its hops are the person's browsing, except onto this computer or its
-   * network; see `admitNavigation`.
+   * What it may download and what its answer may report follow this; which
+   * hops its load may follow is the tab's `namedLoad`, kept with the tab so
+   * no page-started move can borrow it.
    */
   personNavigation: boolean;
-  /** The origin the person typed, while `personNavigation` holds. */
-  personNavigationOrigin: string | undefined;
   /** Remote owner input never turns delayed page navigation into a local person's origin grant. */
   ownerNavigationRestricted: boolean;
   shellWindow: BrowserSurfaceShellWindowPort | undefined;
-  /** Last top-level navigation the allowlist guard cancelled during the current action. */
-  blockedNavigationUrl: string | undefined;
   /**
    * What the context's pages reported since the last diagnostics read. Bounded
    * on write, oldest first out, so a page that logs in a loop cannot grow this
@@ -853,6 +920,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   };
   const goneListeners = new Set<(contextId: string) => void>();
   const personInputListeners = new Set<(contextId: string) => void>();
+  const pairedControlReclaimedListeners = new Set<(contextId: string) => void>();
+  const pairedDialogsOpen = new WeakSet<BrowserSurfaceViewPort>();
   const stateChannel = options.stateChannel ?? DESKTOP_IPC_CHANNELS.browserSurfaceState;
   const persistentOwner = createPersistentBrowserOwner({
     exists: (contextId) => surfaces.has(contextId),
@@ -884,37 +953,42 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       readonly listener: SurfaceProtocolListener;
     }
   >();
-  const ownerControls = new BrowserOwnerControl({
+  const pairedControls = new BrowserPairedControl({
+    onReclaim: (contextId) => {
+      for (const listener of pairedControlReclaimedListeners) {
+        try {
+          listener(contextId);
+        } catch {
+          /* Reclaim stays recorded if one observer fails. */
+        }
+      }
+    },
     page: (command) => {
       const owned = surfaces.get(command.contextId);
       if (
         owned === undefined ||
         owned.owner.windowId !== command.owner.windowId ||
         String(owned.owner.threadId) !== String(command.owner.threadId) ||
-        options.isOwnerWindowAvailable?.(owned.owner.windowId) !== true ||
-        owned.policy.profileMode !== "isolated" ||
-        (owned.policy.profile?.kind ?? "private") !== "private" ||
-        owned.shellWindow === undefined ||
-        owned.shellWindow.isDestroyed() ||
-        owned.shellWindow.isVisible?.() !== true ||
-        owned.lastBounds === undefined ||
         owned.tabs.length === 0
       )
         return undefined;
       const view = contentsView(owned);
-      const contents = owned.tabs.find((tab) => tab.view === view)?.contents;
-      if (
-        contents === undefined ||
-        contents.isDestroyed() ||
-        contents.isLoading() ||
-        contents.insertText === undefined
-      )
-        return undefined;
+      const tab = owned.tabs.find((entry) => entry.view === view);
+      const contents = tab?.contents;
+      if (contents === undefined || contents.isDestroyed()) return undefined;
       const origin = originOf(contents.getURL());
       if (origin === undefined || !originAllowed(contents.getURL(), owned.policy.allowedOrigins))
         return undefined;
+      const actualWidth = Math.max(1, Math.round(owned.lastBounds?.width ?? 1280));
+      const actualHeight = Math.max(1, Math.round(owned.lastBounds?.height ?? 800));
+      const width = Math.min(1920, actualWidth);
+      const height = Math.min(1200, actualHeight);
       const documentRevision = scriptGenerations.get(view) ?? 0;
-      const targetVersion = Schema.decodeUnknownSync(OwnerBrowserTargetVersion)(
+      const originPolicyVersion = createHash("sha256")
+        .update(JSON.stringify(owned.policy.allowedOrigins))
+        .digest("hex")
+        .slice(0, 32);
+      const documentVersion = Schema.decodeUnknownSync(PairedBrowserDocumentVersion)(
         createHash("sha256")
           .update(
             JSON.stringify([
@@ -923,22 +997,110 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               contents.id,
               documentRevision,
               contents.getURL(),
-              owned.policy,
-              owned.lastBounds.width,
-              owned.lastBounds.height,
             ]),
           )
           .digest("hex"),
       );
+      let privateCustody = scriptHolds.has(owned);
+      if (!privateCustody) {
+        try {
+          credentialFill.observation(owned)();
+        } catch {
+          privateCustody = true;
+        }
+      }
+      const nativePromptOpen = pairedDialogsOpen.has(view);
       return {
         identity: owned,
-        target: { targetVersion, documentRevision, origin },
+        contextId: String(command.contextId),
+        target: {
+          tabId: owned.activeTabId,
+          documentVersion,
+          origin,
+          originPolicyVersion,
+          viewport: { width, height },
+          devicePixelRatio: 1,
+        },
+        inputViewport: { width: actualWidth, height: actualHeight },
         personInputs: owned.personInputs,
-        width: owned.lastBounds.width,
-        height: owned.lastBounds.height,
+        privateCustody,
+        nativePromptOpen,
         capture: () => contents.capturePage(),
         observe: () => privateObservation(owned),
-        input: async (input, width, height, canContinue) => {
+        startFileChooserInterception: (onChooser) => {
+          const client = contents.debugger;
+          if (contents.isDestroyed()) return () => undefined;
+          let attachedByUs = false;
+          if (!client.isAttached()) {
+            try {
+              client.attach("1.3");
+              agentDebuggers.add(client);
+              attachedByUs = true;
+            } catch {
+              return () => undefined;
+            }
+          }
+          const listener: SurfaceProtocolListener = (_event, method, params, sessionId) => {
+            if (method === "Page.javascriptDialogOpening") {
+              pairedDialogsOpen.add(view);
+              return;
+            }
+            if (method === "Page.javascriptDialogClosed") {
+              pairedDialogsOpen.delete(view);
+              return;
+            }
+            if (method !== "Page.fileChooserOpened") return;
+            const opened = (params ?? {}) as {
+              readonly mode?: unknown;
+              readonly backendNodeId?: unknown;
+              readonly accept?: unknown;
+            };
+            const node = opened.backendNodeId;
+            if (typeof node !== "number" || !Number.isInteger(node)) return;
+            const accept = Array.isArray(opened.accept)
+              ? opened.accept.filter((item): item is string => typeof item === "string")
+              : [];
+            onChooser({
+              accept,
+              multiple: opened.mode === "selectMultiple",
+              resolve: async (paths) => {
+                if (contents.isDestroyed() || surfaces.get(command.contextId) !== owned) {
+                  return false;
+                }
+                await client.sendCommand(
+                  "DOM.setFileInputFiles",
+                  { files: [...paths], backendNodeId: node },
+                  sessionId,
+                );
+                owned.personInputs += 1;
+                owned.control = "user";
+                return true;
+              },
+            });
+          };
+          client.on?.("message", listener);
+          void client.sendCommand("Page.enable").catch(() => undefined);
+          void client
+            .sendCommand("Page.setInterceptFileChooserDialog", { enabled: true })
+            .catch(() => undefined);
+          return () => {
+            client.removeListener?.("message", listener);
+            pairedDialogsOpen.delete(view);
+            if (!contents.isDestroyed() && !humanDebuggers.has(client) && client.isAttached()) {
+              void client
+                .sendCommand("Page.setInterceptFileChooserDialog", { enabled: false })
+                .catch(() => undefined);
+              if (
+                attachedByUs &&
+                !emulationOf(client).held &&
+                (agentDialogGuards.get(client) ?? 0) === 0
+              ) {
+                detachAgentDebugger(client);
+              }
+            }
+          };
+        },
+        input: async (events, viewportWidth, viewportHeight, canContinue) => {
           const check = privateObservation(owned);
           const current = () => {
             check();
@@ -947,76 +1109,29 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               owned.tabs.length === 0 ||
               contentsView(owned) !== view ||
               contents.isDestroyed() ||
-              (scriptGenerations.get(view) ?? 0) !== documentRevision ||
-              !ownerControls.active(owned)
+              !pairedControls.active(owned)
             )
-              throw new Error("Owner Browser target changed before input.");
+              throw new Error("Paired Browser target changed before input.");
           };
           await withDebugger(view, async (send) => {
             current();
             owned.personInputs += 1;
             for (const listener of personInputListeners) listener(String(command.contextId));
             owned.control = "user";
-            if (input.kind === "type") {
-              await contents.insertText?.(input.text);
-              return;
-            }
-            if (input.kind === "press") {
-              const key = input.key === "Space" ? " " : input.key;
-              const windowsVirtualKeyCode = {
-                Enter: 13,
-                Tab: 9,
-                Backspace: 8,
-                Delete: 46,
-                Escape: 27,
-                ArrowLeft: 37,
-                ArrowUp: 38,
-                ArrowRight: 39,
-                ArrowDown: 40,
-                Home: 36,
-                End: 35,
-                Space: 32,
-              }[input.key];
-              await send("Input.dispatchKeyEvent", {
-                type: "keyDown",
-                key,
-                code: input.key,
-                windowsVirtualKeyCode,
-              });
-              await send("Input.dispatchKeyEvent", {
-                type: "keyUp",
-                key,
-                code: input.key,
-                windowsVirtualKeyCode,
-              });
-              return;
-            }
-            const x = Math.min(width - 1, Math.max(0, Math.floor(input.x * width)));
-            const y = Math.min(height - 1, Math.max(0, Math.floor(input.y * height)));
             const cancelTouch = async () => {
               const client = contents.debugger;
               if (!contents.isDestroyed() && client.isAttached() && agentDebuggers.has(client))
                 await send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
             };
+            const toPoint = (nx: number, ny: number) => ({
+              x: Math.min(viewportWidth - 1, Math.max(0, Math.floor(nx * viewportWidth))),
+              y: Math.min(viewportHeight - 1, Math.max(0, Math.floor(ny * viewportHeight))),
+            });
             try {
-              if (input.kind === "scroll") {
-                await send("Input.synthesizeScrollGesture", {
-                  x,
-                  y,
-                  xDistance: -input.deltaX,
-                  yDistance: -input.deltaY,
-                  gestureSourceType: "touch",
-                  speed: 800,
-                });
-                if (!canContinue()) throw new Error("Owner Browser control changed during scroll.");
-              } else {
-                await send("Input.dispatchTouchEvent", {
-                  type: "touchStart",
-                  touchPoints: [{ x, y }],
-                });
+              for (const event of events) {
                 current();
-                if (!canContinue()) throw new Error("Owner Browser control changed during tap.");
-                await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+                if (!canContinue()) throw new Error("Paired Browser hold changed during input.");
+                await dispatchPairedInputEvent(send, contents, event, toPoint, canContinue);
               }
             } catch (error) {
               await cancelTouch().catch(() => undefined);
@@ -1079,7 +1194,6 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       if (
         owned === undefined ||
         scriptHolds.has(owned) ||
-        ownerControls.holdsPage(owned) ||
         owned.owner.windowId !== owner.windowId ||
         String(owned.owner.threadId) !== String(owner.threadId) ||
         !ownerAvailable(owner) ||
@@ -1112,12 +1226,12 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     if (owned.owner.kind === "execution" && !persistentOwner.admits(owned.owner))
       throw new Error("Browser execution owner is no longer available.");
     const privateCheck = privateObservation(owned);
-    const ownerCheck = ownerControls.observation(owned);
+    const pairedCheck = pairedControls.observation(owned);
     return () => {
       if (owned.owner.kind === "execution" && !persistentOwner.admits(owned.owner))
         throw new Error("Browser execution owner is no longer available.");
       privateCheck();
-      ownerCheck();
+      pairedCheck();
     };
   };
   const scriptOwnerKey = (command: BrowserPageScriptNativeCommand) =>
@@ -1205,7 +1319,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
             } catch {
               return undefined;
             }
-            if (!current() || scriptHolds.has(owned) || ownerControls.holdsPage(owned))
+            if (!current() || scriptHolds.has(owned) || pairedControls.holdsPage(owned))
               return undefined;
             const hold = {};
             scriptHolds.set(owned, hold);
@@ -1442,7 +1556,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       owned.recording === undefined &&
       owned.tabs.length > 0 &&
       !scriptHolds.has(owned) &&
-      !ownerControls.holdsPage(owned)
+      !pairedControls.holdsPage(owned)
     );
   }
 
@@ -1456,6 +1570,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       tabId: tab.tabId,
       url: tab.contents.isDestroyed() ? "" : tab.contents.getURL(),
       title: tab.contents.isDestroyed() ? "" : tab.contents.getTitle(),
+      iconRevision: tab.iconRevision,
+      ...(tab.favicon === undefined ? {} : { favicon: tab.favicon }),
     }));
     clearPointSelection(owned);
     closeEditingMenu(owned);
@@ -1465,6 +1581,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     const closing = owned.tabs;
     owned.tabs = [];
     for (const tab of closing) {
+      tab.faviconFetch?.controller.abort();
+      tab.faviconFetch = undefined;
       tab.view.setVisible(false);
       tab.releasePopups();
       forgetWebContents(tab);
@@ -1497,10 +1615,14 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     if (sleeping === undefined) return;
     owned.hibernated = undefined;
     owned.waking = (async () => {
-      const reopened = sleeping.map((row) => ({
-        row,
-        tab: openTabView(contextId, owned, row.tabId),
-      }));
+      const reopened = sleeping.map((row) => {
+        const tab = openTabView(contextId, owned, row.tabId);
+        // The icon the tab went to sleep with stands until the live page
+        // declares its own, so a reopened tile never blinks to the globe.
+        tab.favicon = row.favicon;
+        tab.iconRevision = row.iconRevision;
+        return { row, tab };
+      });
       // The address passes the same navigation guard as any other load; one
       // the policy no longer admits leaves that tab blank.
       await Promise.all(
@@ -1571,6 +1693,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     const popups = new BrowserPagePopups();
     const tab: OwnedTab = {
       documentRevision: 0,
+      iconRevision: 0,
       tabId,
       view,
       contents: view.webContents,
@@ -1626,7 +1749,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       "did-navigate-in-page",
       "page-title-updated",
     ]) {
-      view.webContents.on(event, () => {
+      view.webContents.on(event, (_event, url) => {
         if (
           event === "did-start-loading" ||
           event === "did-navigate" ||
@@ -1634,6 +1757,30 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         ) {
           tab.documentRevision += 1;
           if (owned.pointSelection?.tabId === tabId) clearPointSelection(owned);
+        }
+        // Committed: the named load this document belongs to names no further hops.
+        if (event === "did-navigate") {
+          const committed = typeof url === "string" ? originOf(url) : undefined;
+          const named = tab.namedLoad;
+          const namedHere = named?.started === true && named.origin === committed;
+          // A pending load says nothing about the document actually on screen.
+          tab.openedLocalOrigin =
+            committed !== undefined &&
+            (committed === tab.openedLocalOrigin ||
+              (namedHere && onThisComputerOrNetwork(committed)))
+              ? committed
+              : undefined;
+          tab.namedLoad = undefined;
+          tab.pageLocalRedirectOrigin = undefined;
+          // A new document gets no icon until it declares one, even when it is on
+          // the same site: keeping the previous page's image would show one
+          // site's icon for a page that never chose it.
+          tab.faviconFetch?.controller.abort();
+          tab.faviconFetch = undefined;
+          if (tab.favicon !== undefined) {
+            tab.favicon = undefined;
+            tab.iconRevision = owned.nextIconRevision++;
+          }
         }
         // A displayed frame belongs to this document, not its navigation successor.
         if (event === "did-start-loading") {
@@ -1655,6 +1802,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         tab.faviconFetch = undefined;
         if (tab.favicon !== undefined) {
           tab.favicon = undefined;
+          tab.iconRevision = owned.nextIconRevision++;
           publish(contextId, owned);
         }
         return;
@@ -1669,7 +1817,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       if (session.fetch === undefined || !originAllowed(iconUrl, owned.policy.allowedOrigins)) {
         tab.faviconFetch?.controller.abort();
         tab.faviconFetch = undefined;
-        tab.favicon = undefined;
+        if (tab.favicon !== undefined) {
+          tab.favicon = undefined;
+          tab.iconRevision = owned.nextIconRevision++;
+        }
         return;
       }
       const now = Date.now();
@@ -1682,7 +1833,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       tab.faviconFetch?.controller.abort();
       const controller = new AbortController();
       tab.faviconFetch = { controller, startedAt: now };
+      // The icon that belonged to the previous declaration is not shown while
+      // this one loads: its revision moves, and the tile falls to the globe.
       tab.favicon = { url: iconUrl, pageOrigin, dataUrl: undefined };
+      tab.iconRevision = owned.nextIconRevision++;
       void fetchFaviconDataUrl({ fetch: session.fetch.bind(session) }, iconUrl, {
         signal: controller.signal,
       }).then((dataUrl) => {
@@ -1695,28 +1849,119 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           return;
         }
         tab.favicon = { url: iconUrl, pageOrigin, dataUrl };
+        tab.iconRevision = owned.nextIconRevision++;
         publish(contextId, owned);
       });
     });
-    const guardNavigation =
+    /**
+     * Whether the committed local document's own main frame started this hop
+     * on its exact origin. A local page the host explicitly opened keeps its
+     * own links: the origin was acquired by the commit, not borrowed from a
+     * named load, so it is compared exactly — scheme, host, and port — and a
+     * move another frame started, or one with no initiator at all, is not it.
+     */
+    const continuesOpenedLocalPage = (event: unknown, target: string): boolean =>
+      tab.openedLocalOrigin !== undefined &&
+      typeof event === "object" &&
+      event !== null &&
+      "initiator" in event &&
+      event.initiator === view.webContents.mainFrame &&
+      originOf(target) === tab.openedLocalOrigin;
+    /**
+     * May this hop proceed? The shared local guard answers first for every
+     * http(s) navigation, before any allowlist or temporary grant — except
+     * the redirect chain of the one load the host itself named on this tab:
+     * the agent's named load follows its own top-level redirects (its target
+     * already passed the allowlist), and the person's follows only the
+     * origin they typed. The other exception is the committed document's
+     * own continuation: a local page the host explicitly opened lets its
+     * main frame move within its exact origin. Renderer-started moves and
+     * subframes never inherit the name, and neither does a tab the person
+     * has moved off the front.
+     */
+    const admitPageNavigation = (
+      target: string,
+      top: boolean,
+      named?: NamedBrowserLoad,
+      continuesLocalPage = false,
+    ): boolean => {
+      if (named?.kind === "person") {
+        // A typed load's local redirects depend on what the person typed,
+        // not on the ordinary page-navigation exception for a one-site context.
+        if (
+          onThisComputerOrNetwork(target) &&
+          (named.origin === undefined || originOf(target) !== named.origin)
+        ) {
+          return false;
+        }
+      } else if (
+        !continuesLocalPage &&
+        !(named?.kind === "agent" && owned.activeTabId === tab.tabId) &&
+        refusesPageNavigation(target, owned.policy.allowedOrigins)
+      ) {
+        return false;
+      }
+      return owned.ownerNavigationRestricted || pairedControls.holdsPage(owned)
+        ? originAllowed(target, owned.policy.allowedOrigins)
+        : admitNavigation(
+            owned,
+            target,
+            top ? view : undefined,
+            // Continuing a local page is not a person reaching a new site.
+            !continuesLocalPage && !scriptHolds.has(owned),
+          );
+    };
+    const refusePageNavigation = (event: unknown): void => {
+      (event as { preventDefault?: () => void }).preventDefault?.();
+    };
+    // These two events emit only for renderer-started navigations, never for
+    // the loadURL a `navigate` or `tab-open` drives.
+    const guardStartedNavigation =
       (knownMainFrame: boolean) =>
       (event: unknown, ...details: readonly unknown[]) => {
         const target = navigationUrl(event, details);
         const top = navigationMainFrame(event, details, knownMainFrame);
+        const continuesLocalPage =
+          top && typeof target === "string" && continuesOpenedLocalPage(event, target);
+        if (top) tab.pageLocalRedirectOrigin = undefined;
         if (
           typeof target === "string" &&
-          (owned.ownerNavigationRestricted || ownerControls.holdsPage(owned)
-            ? originAllowed(target, owned.policy.allowedOrigins)
-            : admitNavigation(owned, target, top ? view : undefined, !scriptHolds.has(owned)))
-        )
+          admitPageNavigation(target, top, undefined, continuesLocalPage)
+        ) {
+          // A page-started main navigation that is admitted supersedes the
+          // host-named load still in flight: its own later redirects may not
+          // borrow that load's admission.
+          if (top) tab.namedLoad = undefined;
+          if (continuesLocalPage) tab.pageLocalRedirectOrigin = tab.openedLocalOrigin;
           return;
-        (event as { preventDefault?: () => void }).preventDefault?.();
-        if (top && typeof target === "string") owned.blockedNavigationUrl = target;
+        }
+        refusePageNavigation(event);
       };
+    const guardRedirect = (event: unknown, ...details: readonly unknown[]) => {
+      const target = navigationUrl(event, details);
+      const top = navigationMainFrame(event, details, false);
+      const named =
+        top && tab.namedLoad?.started === true && !navigationHasInitiator(event)
+          ? tab.namedLoad
+          : undefined;
+      const continuesLocalPage =
+        top &&
+        named === undefined &&
+        tab.pageLocalRedirectOrigin !== undefined &&
+        typeof target === "string" &&
+        originOf(target) === tab.pageLocalRedirectOrigin &&
+        continuesOpenedLocalPage(event, target);
+      if (top && !continuesLocalPage) tab.pageLocalRedirectOrigin = undefined;
+      if (typeof target === "string" && admitPageNavigation(target, top, named, continuesLocalPage))
+        return;
+      if (named !== undefined && typeof target === "string") named.refusedUrl = target;
+      if (top) tab.pageLocalRedirectOrigin = undefined;
+      refusePageNavigation(event);
+    };
     // Electron emits will-frame-navigate for the main frame too. Redirects can be subframes.
-    view.webContents.on("will-navigate", guardNavigation(true));
-    view.webContents.on("will-redirect", guardNavigation(false));
-    view.webContents.on("will-frame-navigate", guardNavigation(false));
+    view.webContents.on("will-navigate", guardStartedNavigation(true));
+    view.webContents.on("will-redirect", guardRedirect);
+    view.webContents.on("will-frame-navigate", guardStartedNavigation(false));
     view.webContents.on("login", (event: unknown, ...details: readonly unknown[]) => {
       (event as { preventDefault?: () => void }).preventDefault?.();
       const callback = details.find((detail): detail is () => void => typeof detail === "function");
@@ -1909,7 +2154,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         }
       }
       if (isPersonInput(input)) {
-        ownerControls.reclaim(owned);
+        pairedControls.reclaim(owned);
         owned.ownerNavigationRestricted = false;
         owned.personInputs += 1;
         if (
@@ -1956,8 +2201,35 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       tab.releasePopups = watchHumanPagePopups(contextId, owned, view, popups);
     owned.tabs.push(tab);
     view.webContents.on("render-process-gone", () => forgetTab(String(contextId), owned, tab));
-    view.webContents.on("did-start-navigation", () => {
+    view.webContents.on("did-start-navigation", (event, ...details) => {
       scriptGenerations.set(view, (scriptGenerations.get(view) ?? 0) + 1);
+      if (!navigationMainFrame(event, details, false)) return;
+      if (
+        typeof event === "object" &&
+        event !== null &&
+        "isSameDocument" in event &&
+        event.isSameDocument === true
+      )
+        return;
+      // Every new main start supersedes the old redirect chain — the named
+      // load's and a continued local page's alike, whether the page, the
+      // browser UI, or an extension started it.
+      tab.pageLocalRedirectOrigin = undefined;
+      const named = tab.namedLoad;
+      if (named === undefined) return;
+      const target = navigationUrl(event, details);
+      // A pending redirect from the previous document must not spend the
+      // next load's admission before Chromium reports the named start.
+      if (
+        !named.started &&
+        typeof target === "string" &&
+        sameNamedNavigationUrl(target, named.url) &&
+        !navigationHasInitiator(event)
+      ) {
+        named.started = true;
+      } else {
+        tab.namedLoad = undefined;
+      }
     });
     view.webContents.on("destroyed", () => {
       retireScriptView(view);
@@ -1981,6 +2253,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     queueSurfaceAction(owned, async () => {
       if (surfaces.get(contextId) !== owned || owned.control === "agent") return false;
       if (owned.tabs.length >= owned.policy.maxConcurrentTabs) return false;
+      // The link came from the page, even though the person chose the menu action.
+      if (refusesPageNavigation(url, owned.policy.allowedOrigins)) return false;
       // A person's chosen link is their own browsing, as following it would be.
       owned.control = "user";
       if (!admitNavigation(owned, url)) return false;
@@ -2433,6 +2707,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     onPersonInput: (listener: (contextId: string) => void): (() => void) => {
       personInputListeners.add(listener);
       return () => personInputListeners.delete(listener);
+    },
+    onPairedControlReclaimed: (listener: (contextId: string) => void): (() => void) => {
+      pairedControlReclaimedListeners.add(listener);
+      return () => pairedControlReclaimedListeners.delete(listener);
     },
     onContextGone: (listener: (contextId: string) => void): (() => void) => {
       goneListeners.add(listener);
@@ -3019,18 +3297,23 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       });
     },
     runPageScript,
-    ownerControl: async (
-      command: OwnerBrowserNativeCommand,
+    pairedControl: async (
+      command: PairedBrowserNativeCommand,
       signal?: AbortSignal,
-    ): Promise<OwnerBrowserNativeResult> => {
+    ): Promise<PairedBrowserNativeResult> => {
       const owned = surfaces.get(command.contextId);
-      if ((command.operation === "claim" || command.operation === "input") && owned !== undefined)
+      if (
+        (command.operation === "claim" ||
+          command.operation === "input" ||
+          command.operation === "file-choice") &&
+        owned !== undefined
+      )
         return queueSurfaceAction(owned, async () => {
-          const result = await ownerControls.execute(command, signal);
+          const result = await pairedControls.execute(command, signal);
           if (result.status === "claimed") owned.ownerNavigationRestricted = true;
           return result;
         });
-      return ownerControls.execute(command, signal);
+      return pairedControls.execute(command, signal);
     },
     prepareCredentialFill: (contextId: string, owner: BrowserSurfaceOwner, origin: string) =>
       credentialFill.prepare(contextId, owner, origin),
@@ -3135,9 +3418,6 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         // computer's network, while the dialog guard below is still attaching.
         owned.control = personNavigation ? "user" : "agent";
         owned.personNavigation = personNavigation;
-        owned.personNavigationOrigin =
-          personNavigation && request.target !== undefined ? originOf(request.target) : undefined;
-        owned.blockedNavigationUrl = undefined;
         publish(contextId, owned);
         // Dialogs an earlier action answered before it failed come first.
         const dialogs: DialogReport[] = owned.unreportedDialogs.splice(0);
@@ -3152,7 +3432,6 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           // The action never began, so the `finally` below never runs: nothing
           // may be left reading the next hops as the person's.
           owned.personNavigation = false;
-          owned.personNavigationOrigin = undefined;
           owned.control = "idle";
           publish(contextId, owned);
           throw error;
@@ -3203,12 +3482,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 ) {
                   throw new Error("Navigation target origin is not in the allowlist.");
                 }
-                try {
-                  await contents.loadURL(normalizeUrl(request.target));
-                } catch (error) {
-                  if (owned.blockedNavigationUrl === undefined) throw error;
-                  throw new BrowserNavigationBlockedError(owned.blockedNavigationUrl);
-                }
+                await loadNamedBrowserUrl(
+                  activeTab(owned),
+                  request.target,
+                  personNavigation ? "person" : "agent",
+                );
                 break;
               }
               case "click":
@@ -3300,12 +3578,11 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 try {
                   checkObservation();
                   throwIfAborted(signal);
-                  await opened.view.webContents.loadURL(
-                    request.target === undefined ? "about:blank" : normalizeUrl(request.target),
-                  );
-                } catch (error) {
-                  if (owned.blockedNavigationUrl === undefined) throw error;
-                  throw new BrowserNavigationBlockedError(owned.blockedNavigationUrl);
+                  if (request.target === undefined) {
+                    await opened.view.webContents.loadURL("about:blank");
+                  } else {
+                    await loadNamedBrowserUrl(opened, request.target, "agent");
+                  }
                 } finally {
                   await releaseTabDialogs().catch(() => undefined);
                 }
@@ -3525,7 +3802,6 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           // A failed action stops holding too; its reports wait for the next answer.
           if (request.downloads === "hold") await owned.downloads.finish().catch(() => undefined);
           owned.personNavigation = false;
-          owned.personNavigationOrigin = undefined;
           owned.control = "idle";
           publish(contextId, owned);
         }
@@ -3608,6 +3884,69 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       } finally {
         owned.previewPending = false;
       }
+    },
+    /**
+     * Every tab's icon for the owning window's own tab strip, as a delta
+     * against the revisions the window already holds.
+     *
+     * Person-only like the preview picture: the read checks the window and
+     * thread own the context, and it only reads what the host already holds —
+     * it never wakes a hibernated context, never fetches an icon for the read,
+     * and its rows never join an observation or a tool result.
+     */
+    tabIcons: (
+      contextId: BrowserContextId | string,
+      owner: BrowserSurfaceOwner,
+      known: ReadonlyArray<BrowserSurfaceTabIconRef>,
+    ): ReadonlyArray<BrowserSurfaceTabIcon> => {
+      const owned = surface(contextId);
+      // Person-only in both directions: an agent's own context answers nobody,
+      // and no owner of agent kind ever reads any context's images.
+      if (
+        owned.owner.kind === "execution" ||
+        owner.kind === "execution" ||
+        owned.owner.windowId !== owner.windowId ||
+        owned.owner.threadId !== owner.threadId
+      ) {
+        throw new Error("Octant Browser tab icons do not own this context.");
+      }
+      const remembered = new Map<string, number>();
+      for (const entry of known.slice(0, TAB_ICONS_KNOWN_LIMIT)) {
+        remembered.set(entry.tabId, entry.revision);
+      }
+      const rows: BrowserSurfaceTabIcon[] = [];
+      const add = (
+        tabId: string,
+        revision: number,
+        dataUrl: string | undefined,
+        sleeping: boolean,
+      ): void => {
+        const changed = remembered.get(tabId) !== revision;
+        // An unaccepted image — a declared SVG is fetched, but person-facing
+        // surfaces take raster only — is withheld here too, so its bytes never
+        // transport; the row still rides so the revision is acknowledged once
+        // rather than resent on every poll.
+        const image =
+          changed && dataUrl !== undefined && isBrowserSurfaceFaviconDataUrl(dataUrl)
+            ? dataUrl
+            : undefined;
+        rows.push({
+          tabId,
+          revision,
+          active: tabId === owned.activeTabId,
+          ...(image === undefined ? {} : { dataUrl: image }),
+          ...(sleeping ? { sleeping } : {}),
+        });
+      };
+      // A sleeping context still names its tabs and their last icons; the
+      // read leaves it asleep rather than reopening pages to answer.
+      if (owned.hibernated !== undefined) {
+        for (const tab of owned.hibernated)
+          add(tab.tabId, tab.iconRevision, tab.favicon?.dataUrl, true);
+      } else {
+        for (const tab of owned.tabs) add(tab.tabId, tab.iconRevision, tab.favicon?.dataUrl, false);
+      }
+      return rows;
     },
     command: async (
       contextId: BrowserContextId | string,
@@ -3955,6 +4294,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       policy: input.policy,
       tabs: [],
       activeTabId: firstTabId,
+      nextIconRevision: 1,
       nextTabOrdinal: 2,
       lastBounds: undefined,
       userGrantedOrigins: [],
@@ -3964,10 +4304,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       humanInputTail: Promise.resolve(),
       control: "idle",
       personNavigation: false,
-      personNavigationOrigin: undefined,
       ownerNavigationRestricted: false,
       shellWindow: undefined,
-      blockedNavigationUrl: undefined,
       unreportedDialogs: [],
       consoleErrors: [],
       consoleWarnings: [],
@@ -3994,7 +4332,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     if (owned === undefined) return;
     clearPointSelection(owned);
     owned.lifetime.abort();
-    ownerControls.reclaim(owned);
+    pairedControls.reclaim(owned);
     credentialFill.forget(owned);
     surfaces.delete(contextId);
     void owned.textComposition.close();
@@ -4119,18 +4457,6 @@ function admitNavigation(
     originAllowed(target, temporary.origins)
   )
     return true;
-  // An address the person typed follows its redirects like any browsing, but
-  // never onto this computer or its network, whatever the page admits: a
-  // public page must not walk the person's view to an address only they can
-  // reach. A Private page admits every site, so this comes before that check;
-  // only the origin the person typed is exempt.
-  if (
-    owned.personNavigation &&
-    onThisComputerOrNetwork(target) &&
-    (owned.personNavigationOrigin === undefined ||
-      !originAllowed(target, [owned.personNavigationOrigin]))
-  )
-    return false;
   if (originAllowed(target, owned.policy.allowedOrigins)) return true;
   if (originAllowed(target, owned.userGrantedOrigins)) return true;
   // Only while the person is demonstrably driving. "idle" is nobody's action:
@@ -4161,31 +4487,6 @@ function refuseUnapprovedPage(
   const showing = contents.getURL();
   if (showing === "" || originAllowed(showing, owned.policy.allowedOrigins)) return;
   throw new Error("Octant Browser will not act on a page outside this context's allowed origins.");
-}
-
-/**
- * Whether an address names this computer or its network by its own text: an
- * IP literal outside the public ranges, localhost, a name under a suffix kept
- * for private networks, or a bare name with no dot. A public name that
- * resolves to a private address is not caught here.
- */
-export function onThisComputerOrNetwork(target: string): boolean {
-  let hostname: string;
-  try {
-    hostname = new URL(normalizeUrl(target)).hostname.toLowerCase().replace(/\.$/, "");
-  } catch {
-    return true;
-  }
-  const bare =
-    hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
-  if (isIP(bare) !== 0) return isPrivateAddress(bare);
-  return (
-    !bare.includes(".") ||
-    bare === "localhost" ||
-    [".localhost", ".local", ".internal", ".lan", ".home.arpa"].some((suffix) =>
-      bare.endsWith(suffix),
-    )
-  );
 }
 
 function originOf(target: string): string | undefined {
@@ -4263,23 +4564,47 @@ function normalizeBounds(bounds: BrowserSurfaceBounds): BrowserSurfaceBounds {
   };
 }
 
-function normalizeUrl(value: string): string {
-  const url = new URL(value.includes("://") ? value : `https://${value}`);
-  if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("Unsupported URL.");
-  return url.toString();
+function originAllowed(target: string, allowedOrigins: ReadonlyArray<string>): boolean {
+  return target === "about:blank" || navigationOriginAllowed(target, allowedOrigins);
 }
 
-function originAllowed(target: string, allowedOrigins: ReadonlyArray<string>): boolean {
-  if (target === "about:blank") return true;
+/** The load this tab is expecting is the one Chromium reports, spelling aside. */
+function sameNamedNavigationUrl(observed: string, named: string): boolean {
   try {
-    return sameSiteOriginAllowed(
-      normalizeUrl(target),
-      // The any-site entry is not an address; it passes through as it is.
-      allowedOrigins.map((entry) => (entry === ANY_BROWSER_ORIGIN ? entry : normalizeUrl(entry))),
-    );
+    return normalizeUrl(observed) === named;
   } catch {
     return false;
   }
+}
+
+async function loadNamedBrowserUrl(
+  tab: OwnedTab,
+  target: string,
+  kind: NamedBrowserLoad["kind"],
+): Promise<void> {
+  const url = normalizeUrl(target);
+  const named: NamedBrowserLoad = {
+    kind,
+    origin: originOf(url),
+    url,
+    started: false,
+  };
+  tab.view.webContents.stop();
+  tab.namedLoad = named;
+  try {
+    await tab.view.webContents.loadURL(url);
+  } catch (error) {
+    if (named.refusedUrl !== undefined) throw new BrowserNavigationBlockedError(named.refusedUrl);
+    throw error;
+  } finally {
+    if (tab.namedLoad === named) tab.namedLoad = undefined;
+  }
+}
+
+function navigationHasInitiator(event: unknown): boolean {
+  return (
+    typeof event === "object" && event !== null && "initiator" in event && event.initiator != null
+  );
 }
 
 function navigationUrl(event: unknown, details: readonly unknown[]): unknown {
@@ -5598,8 +5923,9 @@ async function guardDialogs(
 }
 
 /**
- * Check a wait's conditions until they hold or its time runs out, never more
- * than the hard limit the contract sets.
+ * Check a wait's conditions until they hold or its time runs out. Outside
+ * Strict there is no wait ceiling; Strict threads are bounded before reaching
+ * the surface host.
  */
 async function waitForConditions(
   view: BrowserSurfaceViewPort,
@@ -5608,10 +5934,7 @@ async function waitForConditions(
   signal: AbortSignal | undefined,
 ): Promise<void> {
   const conditions = browserPageConditions(waitFor);
-  const timeoutMs = Math.min(
-    waitFor.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS,
-    MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING * 60_000,
-  );
+  const timeoutMs = waitFor.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS;
   const deadline = Date.now() + timeoutMs;
   let met: ReadonlyArray<boolean> = conditions.map(() => false);
   while (true) {
@@ -5622,7 +5945,10 @@ async function waitForConditions(
       const checked = await Promise.race([
         checkConditions(view, policy, conditions),
         new Promise<undefined>((resolve) =>
-          setTimeout(() => resolve(undefined), Math.max(0, deadline - Date.now())),
+          setTimeout(
+            () => resolve(undefined),
+            Math.min(2_147_483_647, Math.max(0, deadline - Date.now())),
+          ),
         ),
       ]);
       if (checked?.mode === "check") met = checked.met;
@@ -6240,4 +6566,145 @@ function scriptPageIsClear(value: unknown): boolean {
     if (node.contentDocument !== undefined) return false;
   }
   return true;
+}
+
+const PAIRED_KEY_VIRTUAL_CODES: Readonly<Record<string, number>> = {
+  Enter: 13,
+  Tab: 9,
+  Backspace: 8,
+  Delete: 46,
+  Escape: 27,
+  ArrowLeft: 37,
+  ArrowUp: 38,
+  ArrowRight: 39,
+  ArrowDown: 40,
+  Home: 36,
+  End: 35,
+  " ": 32,
+  Space: 32,
+};
+
+function pairedKeyModifierMask(modifiers: PairedBrowserKeyModifiers | undefined): number {
+  if (modifiers === undefined) return 0;
+  return (
+    (modifiers.alt === true ? 1 : 0) |
+    (modifiers.control === true ? 2 : 0) |
+    (modifiers.meta === true ? 4 : 0) |
+    (modifiers.shift === true ? 8 : 0)
+  );
+}
+
+/**
+ * Dispatches one paired-device input event strictly through touch, scroll-gesture,
+ * key, text, and IME debugger commands — never `Input.dispatchMouseEvent`, which
+ * Electron reports through `before-mouse-event` and would reclaim the lease.
+ */
+async function dispatchPairedInputEvent(
+  send: (method: string, params?: Record<string, unknown>) => Promise<unknown>,
+  contents: BrowserSurfaceViewPort["webContents"],
+  event: PairedBrowserInput,
+  toPoint: (nx: number, ny: number) => { readonly x: number; readonly y: number },
+  canContinue: () => boolean,
+): Promise<void> {
+  if (event.kind === "text") {
+    if (contents.insertText !== undefined) {
+      await contents.insertText(event.text);
+    } else {
+      await send("Input.insertText", { text: event.text });
+    }
+    return;
+  }
+  if (event.kind === "composition") {
+    if (event.phase === "start" || event.phase === "update") {
+      const text = event.text ?? "";
+      await send("Input.imeSetComposition", {
+        text,
+        selectionStart: text.length,
+        selectionEnd: text.length,
+      });
+      return;
+    }
+    await send("Input.imeSetComposition", {
+      text: "",
+      selectionStart: 0,
+      selectionEnd: 0,
+    });
+    if (event.phase === "commit" && event.text !== undefined && event.text.length > 0) {
+      if (contents.insertText !== undefined) {
+        await contents.insertText(event.text);
+      } else {
+        await send("Input.insertText", { text: event.text });
+      }
+    }
+    return;
+  }
+  if (event.kind === "key") {
+    const key = event.key === "Space" ? " " : event.key;
+    const modifiers = pairedKeyModifierMask(event.modifiers);
+    const windowsVirtualKeyCode = PAIRED_KEY_VIRTUAL_CODES[event.key];
+    await send("Input.dispatchKeyEvent", {
+      type: event.phase === "down" ? "keyDown" : "keyUp",
+      key,
+      code: event.code,
+      ...(modifiers === 0 ? {} : { modifiers }),
+      ...(windowsVirtualKeyCode === undefined ? {} : { windowsVirtualKeyCode }),
+    });
+    return;
+  }
+  if (event.kind === "scroll") {
+    const pt = toPoint(event.x, event.y);
+    await send("Input.synthesizeScrollGesture", {
+      x: pt.x,
+      y: pt.y,
+      xDistance: -event.deltaX,
+      yDistance: -event.deltaY,
+      gestureSourceType: "touch",
+      speed: 800,
+    });
+    if (!canContinue()) throw new Error("Paired Browser hold changed during scroll.");
+    return;
+  }
+  if (event.kind === "tap") {
+    const pt = toPoint(event.x, event.y);
+    await send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [pt],
+    });
+    if (!canContinue()) throw new Error("Paired Browser hold changed during tap.");
+    await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    return;
+  }
+  if (event.kind === "long-press") {
+    const pt = toPoint(event.x, event.y);
+    const durationMs = Math.min(1_500, Math.max(300, event.durationMs ?? 500));
+    await send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [pt],
+    });
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, durationMs);
+      timer.unref?.();
+    });
+    if (!canContinue()) throw new Error("Paired Browser hold changed during long press.");
+    await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    return;
+  }
+  // drag: touchStart -> touchMove* -> touchEnd
+  const first = event.points[0];
+  if (first === undefined) return;
+  await send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [toPoint(first.x, first.y)],
+  });
+  for (let index = 1; index < event.points.length; index += 1) {
+    const point = event.points[index];
+    if (point === undefined) continue;
+    if (!canContinue()) throw new Error("Paired Browser hold changed during drag.");
+    await send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [toPoint(point.x, point.y)],
+    });
+  }
+  if (!canContinue()) throw new Error("Paired Browser hold changed before drag end.");
+  await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
 }

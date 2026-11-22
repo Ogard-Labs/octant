@@ -1,4 +1,5 @@
 import type { ChatClient } from "@octant/client-runtime/chat-client";
+import type { FinishedReceiptClient } from "@octant/client-runtime/finished-receipt-client";
 import { CodeClientFailure, type CodeClient } from "@octant/client-runtime/code-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
@@ -10,6 +11,7 @@ import {
   type CodeBoardCard,
   type CodeCheckoutId,
   type CodeConversationTurn,
+  type ThreadFinishedReceipt,
   type WorkBoardCard,
 } from "@octant/contracts";
 import { activeChatTurns } from "@octant/domain/chat-policy";
@@ -76,6 +78,11 @@ export interface ReviewSource {
     facts: ReviewFacts | undefined,
     signal: AbortSignal,
   ) => Promise<ReviewDiff | undefined>;
+  /** Work and Code: the newest host-built finished receipt for this thread, if any. */
+  readonly loadFinishedReceipt?: (
+    entry: ReviewEntry,
+    signal: AbortSignal,
+  ) => Promise<ThreadFinishedReceipt | undefined>;
 }
 
 export interface ReviewSourceClients {
@@ -83,6 +90,7 @@ export interface ReviewSourceClients {
   readonly work: Pick<WorkThreadClient, "queryBoard">;
   readonly workTurns?: Pick<WorkTurnClient, "transcript">;
   readonly chat: Pick<ChatClient, "thread">;
+  readonly finishedReceipts?: Pick<FinishedReceiptClient, "receipts">;
   readonly nextUuid?: () => string;
 }
 
@@ -395,6 +403,16 @@ export function createReviewSource(clients: ReviewSourceClients): ReviewSource {
       } catch (error) {
         if (signal.aborted) throw error;
         return { status: "unavailable", message: "The diff could not be read from the host." };
+      }
+    },
+    async loadFinishedReceipt(entry, signal) {
+      if (entry.mode === "chat" || clients.finishedReceipts === undefined) return undefined;
+      try {
+        const receipts = await clients.finishedReceipts.receipts(entry.threadId, signal);
+        return receipts.at(-1);
+      } catch (error) {
+        if (signal.aborted) throw error;
+        return undefined;
       }
     },
   };

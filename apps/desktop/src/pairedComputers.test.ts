@@ -10,6 +10,7 @@ import {
   clearRemotePageStorage,
   forgetPairedComputer,
   installPairedComputerIpcHandlers,
+  introduceWindowToHub,
   PAIRED_COMPUTER_CHANNELS,
   pairFromPairingCode,
   PairedComputerPins,
@@ -256,6 +257,9 @@ describe("pairing with another computer from its code", () => {
       },
       pins: freshPins,
       webBuildVersion: "0.1.0",
+      hubAdministration: () => {
+        throw new Error("No hub administration in this test.");
+      },
     });
 
     expect([...handlers.keys()]).toEqual([
@@ -264,6 +268,7 @@ describe("pairing with another computer from its code", () => {
       IPC_CHANNELS.pairedComputerForget,
       IPC_CHANNELS.pairedComputerSettle,
       IPC_CHANNELS.pairedComputerRequest,
+      IPC_CHANNELS.pairedComputerIntroduceToHub,
     ]);
     expect(Object.values(PAIRED_COMPUTER_CHANNELS)).toEqual([...handlers.keys()]);
     for (const channel of handlers.keys()) {
@@ -498,5 +503,72 @@ describe("forgetting a paired computer", () => {
     const storage = storagePort();
     await clearRemotePageStorage(storage, ORIGIN);
     expect(storage.clearStorageData).toHaveBeenCalledWith({ origin: ORIGIN });
+  });
+});
+
+describe("a window's introduction to its hub", () => {
+  const member = (origin: string, name: string) => ({
+    memberId: "22222222-2222-4222-8222-222222222222",
+    name,
+    origin,
+    pin: `sha256-${"A".repeat(43)}`,
+    identityKeyFingerprint: "a".repeat(64),
+  });
+  const answered = (body: unknown) => async () => ({ status: 200, body });
+
+  it("pins only the members the host names, keeps a computer paired directly, and drops a member the host stops naming", async () => {
+    const path = join(mkdtempSync(join(directory, "pins-")), "pins.json");
+    const pins = new PairedComputerPins(path);
+    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: "sha256-direct" });
+    const hubMember = "https://100.101.102.104:8443";
+
+    const outcome = await introduceWindowToHub({
+      request: { memberId: "x", devicePublicKey: "y", deviceLabel: "z" },
+      pins,
+      send: answered({
+        membership: "member",
+        introduction: "introduced",
+        hubMemberId: HOST_ID,
+        members: [member(hubMember, "Mini PC"), member(ORIGIN, "Studio Mac")],
+      }),
+    });
+
+    expect(outcome).toMatchObject({ membership: "member", introduction: "introduced" });
+    expect(pins.isThroughHub(hubMember)).toBe(true);
+    expect(pins.pinFor(hubMember)).toBe(`sha256-${"A".repeat(43)}`);
+    // The computer the person paired keeps its own pin and stays theirs.
+    expect(pins.isThroughHub(ORIGIN)).toBe(false);
+    expect(pins.pinFor(ORIGIN)).toBe("sha256-direct");
+    expect(pins.list()).toEqual([{ origin: ORIGIN, displayName: "Studio Mac" }]);
+    expect(new PairedComputerPins(path).isThroughHub(hubMember)).toBe(true);
+
+    await introduceWindowToHub({
+      request: {},
+      pins,
+      send: answered({ membership: "none" }),
+    });
+    expect(pins.pinFor(hubMember)).toBeUndefined();
+    expect(pins.pinFor(ORIGIN)).toBe("sha256-direct");
+  });
+
+  it("keeps the pins it holds when the host cannot be asked or answers something unreadable", async () => {
+    const pins = freshPins();
+    const hubMember = "https://100.101.102.104:8443";
+    pins.replaceHubMembers([
+      { origin: hubMember, displayName: "Mini PC", pin: "sha256-member", hostId: HOST_ID },
+    ]);
+
+    for (const send of [
+      async () => ({ status: 503, body: {} }),
+      answered({ membership: "member", members: "everyone" }),
+      async () => {
+        throw new Error("host down");
+      },
+    ]) {
+      expect(await introduceWindowToHub({ request: {}, pins, send })).toEqual({
+        membership: "unavailable",
+      });
+    }
+    expect(pins.pinFor(hubMember)).toBe("sha256-member");
   });
 });

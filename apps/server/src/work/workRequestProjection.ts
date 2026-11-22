@@ -1,4 +1,5 @@
 import type {
+  EventActor,
   WorkRequest,
   WorkRequestFrame,
   WorkRequestId,
@@ -13,6 +14,12 @@ export interface WorkRequestEntry {
   readonly providerCallbackId?: string;
   /** Private provider option values; never returned from WorkRequest APIs. */
   readonly providerOptionValues?: ReadonlyArray<string>;
+  /**
+   * The journaled actor kind of the settle frame, when the caller applied it
+   * with one. Replayed frames carry no actor, so a settle rebuilt from the
+   * journal alone leaves this absent rather than guessed.
+   */
+  readonly settledActorKind?: EventActor["kind"];
 }
 
 /**
@@ -28,7 +35,7 @@ export interface WorkRequestEntry {
 export class WorkRequestProjection {
   readonly #entries = new Map<WorkRequestId, WorkRequestEntry>();
 
-  apply(frame: WorkRequestFrame): void {
+  apply(frame: WorkRequestFrame, actor?: EventActor): void {
     const request = frame.request;
     const existing = this.#entries.get(request.requestId);
     // Ignore stale frames: a reconnect/duplicate subscription must never roll
@@ -40,11 +47,14 @@ export class WorkRequestProjection {
       frame.kind === "requested" ? frame.providerOptionValues : existing?.providerOptionValues;
     const providerCallbackId =
       frame.kind === "requested" ? frame.providerCallbackId : existing?.providerCallbackId;
+    const settledActorKind =
+      request.status === "pending" ? undefined : (actor?.kind ?? existing?.settledActorKind);
     this.#entries.set(request.requestId, {
       requestId: request.requestId,
       request,
       ...(providerCallbackId === undefined ? {} : { providerCallbackId }),
       ...(providerOptionValues === undefined ? {} : { providerOptionValues }),
+      ...(settledActorKind === undefined ? {} : { settledActorKind }),
     });
   }
 

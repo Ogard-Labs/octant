@@ -1,11 +1,15 @@
-import type { PermissionMode, ProviderExecutionPolicy } from "@octant/contracts/providers";
+import type {
+  PermissionMode,
+  ProviderDriverKind,
+  ProviderExecutionPolicy,
+  ProviderInstanceId,
+} from "@octant/contracts/providers";
 import {
   AUTO_UNSUPPORTED_REASON,
   fullAccessSandboxSupported,
   hostProviderTurnRefusal,
   threadAccessOf,
 } from "@octant/domain/guardrail-policy";
-import type { ProviderInstanceId } from "@octant/contracts/providers";
 import { clampTurnAccessPosture, type PickerGroup } from "@octant/domain";
 import type { AutoReview } from "./autoReview";
 import {
@@ -16,7 +20,7 @@ import {
   ShieldQuestionMark,
   type IconComponent,
 } from "../ui/icons";
-import { useContext, useEffect, useId, useState } from "react";
+import { useCallback, useContext, useEffect, useId, useRef, useState } from "react";
 import { ComposerOutsideContentMark } from "../composer/OutsideContentNotice";
 import { TaskAccessContext } from "./TaskAccessContext";
 import { useHostPlatform } from "../platform";
@@ -62,6 +66,15 @@ export function threadKeepsFullAccessSandbox(
     (candidate) => String(candidate.instance.id) === String(providerInstanceId),
   );
   return group !== undefined && fullAccessSandboxSupported(group.instance.driverKind);
+}
+
+/** The thread's provider driver kind, read from the picker's provider list. */
+export function threadProviderDriverKind(
+  groups: ReadonlyArray<PickerGroup>,
+  providerInstanceId: ProviderInstanceId,
+): ProviderDriverKind | undefined {
+  return groups.find((candidate) => String(candidate.instance.id) === String(providerInstanceId))
+    ?.instance.driverKind;
 }
 
 /** The modes in picker order, in the words the native apps use. */
@@ -155,12 +168,19 @@ export interface PermissionModePickerProps {
    * cannot, the choice stays listed but disabled, with the reason.
    */
   readonly fullAccessSandboxSupported?: boolean;
+  /** The thread's provider driver kind, used to judge Windows Strict phase 1 admission. */
+  readonly driverKind?: ProviderDriverKind | undefined;
   /**
    * Whether a running turn still holds a narrower mode than the one shown. A
    * wider mode takes effect from the next turn, so the tooltip says so rather
    * than leave a running turn's asks reading as a broken Full access.
    */
   readonly appliesFromNextMessage?: boolean;
+  /**
+   * Registers an imperative opener for this mode menu so a read-only Plan-mode
+   * pane can open the composer's mode menu without changing the mode itself.
+   */
+  readonly onRegisterOpener?: (open: (() => void) | undefined) => void;
 }
 
 /**
@@ -176,7 +196,8 @@ export const STRICT_DETAIL =
  * which has the room, keeps the list.
  */
 const STRICT_MENU_DETAIL = "Octant's own limits on top of the provider's.";
-const STRICT_WINDOWS_DETAIL = "Strict needs a sandbox Windows doesn't have yet.";
+const STRICT_WINDOWS_CODEX_DETAIL =
+  "Runs native Codex inside a Windows AppContainer and Job Object at Full access.";
 
 /** What a level below Full access runs with on Windows, said wherever it is offered. */
 export const WINDOWS_PROVIDER_APPROVALS_DETAIL =
@@ -185,7 +206,7 @@ export const WINDOWS_PROVIDER_APPROVALS_DETAIL =
 const SANDBOX_DETAIL =
   "Strict restores Octant's protection rules and required approvals. Some workflows that work in the provider's own app remain unavailable under Strict.";
 const SANDBOX_UNSUPPORTED_DETAIL =
-  "This provider can't keep the sandbox at Full access yet. Use Claude, Codex or an Octant Harness model.";
+  "This provider can't run under Strict at Full access yet. Use Claude, Codex or an Octant Harness model.";
 
 /**
  * One click from the composer to any mode. Each choice is the thread's
@@ -193,7 +214,30 @@ const SANDBOX_UNSUPPORTED_DETAIL =
  */
 export function PermissionModePicker(props: PermissionModePickerProps) {
   const idPrefix = useId();
-  const popupSide = useSideWithRoom<HTMLButtonElement>("top");
+  const {
+    side: popupMenuSide,
+    trigger: popupTrigger,
+    settle: settlePopupSide,
+  } = useSideWithRoom<HTMLButtonElement>("top");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const disabledRef = useRef(props.disabled === true);
+  disabledRef.current = props.disabled === true;
+  const openMenu = useCallback(() => {
+    if (disabledRef.current) return;
+    const trigger = popupTrigger.current;
+    if (trigger !== null) {
+      trigger.scrollIntoView?.({ block: "nearest" });
+      trigger.focus();
+    }
+    settlePopupSide(true);
+    setMenuOpen(true);
+  }, [popupTrigger, settlePopupSide]);
+  const registerOpener = props.onRegisterOpener;
+  useEffect(() => {
+    if (registerOpener === undefined) return;
+    registerOpener(openMenu);
+    return () => registerOpener(undefined);
+  }, [openMenu, registerOpener]);
   const taskAccess = useContext(TaskAccessContext);
   const [policySelected, setPolicySelected] = useState(false);
   const [inheritedStrict, setInheritedStrict] = useState<{
@@ -241,11 +285,10 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
     props.autoReview?.status === "none" ? props.autoReview.reason : AUTO_UNSUPPORTED_REASON;
   const autoFallsBack = props.value === "auto" && !autoSupported;
   const warning = useFullAccessWarning(props.warningScope ?? "machine");
-  // A host without Octant's sandbox (Windows today) runs the levels below Full
-  // access with the provider's own approvals and claims no sandbox there; it
-  // refuses only what needs Octant's sandbox (Strict below Full access, and
-  // Keep the sandbox). The picker shows those unavailable with the host's
-  // reason rather than offering a choice it refuses.
+  // On Windows outside Strict, levels below Full access run with the provider's
+  // own approvals and claim no Octant sandbox. Under canonical Strict, phase 1
+  // admits Codex at Full access (AppContainer + Job Object) and refuses every
+  // other Windows Strict provider or level by name.
   const hostPlatform = useHostPlatform();
   const effectiveStrict =
     inheritedStrict !== undefined && inheritedStrict.threadId === sandboxThreadId
@@ -265,12 +308,18 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
       platform: hostPlatform,
       access: threadAccessOf(mode),
       strict: effectiveStrict,
+      driverKind: props.driverKind,
     });
-  const sandboxHostRefusal = hostProviderTurnRefusal({
+  const strictHostRefusal = hostProviderTurnRefusal({
     platform: hostPlatform,
-    access: { executionPolicy: "full-access", fullAccessSandbox: true },
-    strict: false,
+    access: threadAccessOf(props.value),
+    strict: true,
+    driverKind: props.driverKind,
   });
+  const strictMenuDetail =
+    hostPlatform === "win32" && strictHostRefusal === undefined
+      ? STRICT_WINDOWS_CODEX_DETAIL
+      : STRICT_MENU_DETAIL;
   const withoutOctantSandbox = (mode: PermissionMode, detail: string | undefined) =>
     hostPlatform === "win32" && mode !== "full-access"
       ? `${detail === undefined ? "" : `${detail} `}${WINDOWS_PROVIDER_APPROVALS_DETAIL}`
@@ -310,11 +359,17 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
       <ComposerOutsideContentMark fullAccess={props.value === "full-access"} />
       {/* A composer popup is Octant's float, never the system's menu: each mode
           carries a line of detail that a system menu cannot show. */}
-      <OctantMenuRoot onOpenChange={popupSide.settle}>
+      <OctantMenuRoot
+        open={menuOpen}
+        onOpenChange={(next) => {
+          settlePopupSide(next);
+          setMenuOpen(next);
+        }}
+      >
         {/* An icon per mode in the composer's row; its name and tooltip state the
             mode. Only Full access adds its words, in the warning ink. */}
         <OctantMenuTrigger
-          ref={popupSide.trigger}
+          ref={popupTrigger}
           aria-label={`Mode: ${triggerLabel}`}
           aria-description={triggerDetail}
           className="code-composer-choice__trigger"
@@ -344,7 +399,7 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
           <OctantMenuPositioner
             align="start"
             collisionAvoidance={{ side: "flip", align: "shift", fallbackAxisSide: "none" }}
-            side={popupSide.side}
+            side={popupMenuSide}
           >
             <OctantMenuPopup>
               <OctantMenuRadioGroup
@@ -401,7 +456,7 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                     // because that is what a refused turn asks the person to do.
                     disabled={
                       props.disabled === true ||
-                      ((!sandboxSupported || sandboxHostRefusal !== undefined) && !effectiveStrict)
+                      ((!sandboxSupported || strictHostRefusal !== undefined) && !effectiveStrict)
                     }
                     onCheckedChange={(checked) => {
                       if (props.disabled === true) return;
@@ -411,8 +466,8 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                     <span className="flex min-w-0 flex-col">
                       <span>{legacyStrict ? "Legacy sandbox" : "Strict"}</span>
                       <span className="oct-menu-detail" id={`${idPrefix}-sandbox-note`}>
-                        {sandboxHostRefusal ??
-                          (sandboxSupported ? STRICT_MENU_DETAIL : SANDBOX_UNSUPPORTED_DETAIL)}
+                        {strictHostRefusal ??
+                          (sandboxSupported ? strictMenuDetail : SANDBOX_UNSUPPORTED_DETAIL)}
                       </span>
                     </span>
                   </OctantMenuCheckboxItem>

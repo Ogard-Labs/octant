@@ -1,9 +1,15 @@
 import { BrowserFlowRuns } from "./browser/browserFlowRuns";
 import { decodeBrowserFlow, decodeBrowserThreadId } from "@octant/contracts";
-import type { BrowserAutomationSnapshot, ToolActionAuthority, WindowId } from "@octant/contracts";
+import type {
+  BrowserAutomationSnapshot,
+  HubGrant,
+  ToolActionAuthority,
+  WindowId,
+} from "@octant/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createBrowserAutomationRouteHandler } from "./browserAutomationRoutes";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
+import { hubActScopeFromSpokeLink } from "./hub/hubActScope";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -458,6 +464,82 @@ describe("browser automation routes", () => {
     });
   });
 
+  it("a hub-introduced device answers a Code or Work thread's Browser prompt only in a Project the member's Act item names", async () => {
+    const codeApproval = "90000000-0000-4000-8000-000000000011";
+    const chatApproval = "90000000-0000-4000-8000-000000000012";
+    const approvals = {
+      list: vi.fn(
+        () =>
+          [
+            {
+              approvalId: codeApproval,
+              threadId,
+              mode: "code",
+              origin: "https://example.com",
+              requestedAt: "2026-09-09T10:00:00.000Z",
+            },
+            {
+              approvalId: chatApproval,
+              threadId,
+              mode: "chat",
+              origin: "https://example.com",
+              requestedAt: "2026-09-09T10:00:00.000Z",
+            },
+          ] as never,
+      ),
+      decide: vi.fn(() => true),
+    };
+    const namedProject = "90000000-0000-4000-8000-000000000013";
+    const grant: { current: HubGrant } = {
+      current: { items: ["roster", "introduce", "act"], actProjects: [] },
+    };
+    const approvalHandler = createBrowserAutomationRouteHandler({
+      service: service as never,
+      authority: { canAccessWindow: () => true, resolve: () => authority },
+      approvals,
+      windowAuthorityStore: store,
+      maxRequestBodySize: 64_000,
+      hubActScope: () =>
+        hubActScopeFromSpokeLink({
+          status: () => ({ membership: "member", grant: grant.current }) as never,
+        }),
+      codeOrWorkThreadProjectId: () => namedProject,
+    });
+    const decide = (approvalId: string) => {
+      const request = new Request("http://127.0.0.1/api/browser/approvals", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "decide", approvalId, decision: "approved" }),
+      });
+      bindPrincipalRouteContext(request, {
+        principal: createRemoteDevicePrincipal({
+          deviceId: "90000000-0000-4000-8000-000000000014" as never,
+          hostId: "local" as never,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "a1000000-0000-4000-8000-000000000015" as never,
+          admittedBy: "hub-roster",
+        }),
+        scopeId: windowId,
+      });
+      return approvalHandler(request);
+    };
+
+    const unnamed = await decide(codeApproval);
+    expect(unnamed?.status).toBe(403);
+    expect(await unnamed?.json()).toMatchObject({
+      message:
+        "This computer's Act item for its hub does not name this Project, so a device the hub introduced cannot answer approvals or questions in it here.",
+    });
+    // Chat is not held to the Act item.
+    expect((await decide(chatApproval))?.status).toBe(200);
+    grant.current = { items: ["roster", "introduce", "act"], actProjects: [namedProject as never] };
+    expect((await decide(codeApproval))?.status).toBe(200);
+    expect(approvals.decide).toHaveBeenCalledTimes(2);
+  });
+
   it("dispatches a strict create command under the authenticated window", async () => {
     const response = await handler(
       new Request("http://127.0.0.1/api/browser/contexts", {
@@ -577,9 +659,14 @@ describe("browser automation routes", () => {
       expect((await handler(pairedRequest(kind, "host-person")))?.status).toBe(200);
     }
     expect(service.act).toHaveBeenCalledTimes(3);
-    // A paired device's navigation is never marked as the person's own
-    // browsing: it could not act on a page that followed a redirect.
-    expect(service.act).not.toHaveBeenCalledWith(expect.objectContaining({ startedBy: "person" }));
+    // A person-paired device's navigation is the person's own browsing, as a
+    // local window's is; a hub-introduced or restricted device is refused above.
+    expect(service.act).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({ kind: "navigate" }),
+        startedBy: "person",
+      }),
+    );
   });
 
   it("marks a navigation from a window of this computer as the person's, and no other action", async () => {
@@ -1125,7 +1212,7 @@ describe("browser automation routes", () => {
     });
     await withProjects(person);
     expect(projectBrowsers.execute).toHaveBeenLastCalledWith(windowId, "local-window", command);
-    // A profile page, with the person's sign-ins, stays at a window.
+    // A device the host's own person paired opens a profile page as a window does.
     const profiled = post({ ...command, profile: "personal" });
     bindPrincipalRouteContext(profiled, {
       principal: createRemoteDevicePrincipal({
@@ -1140,9 +1227,33 @@ describe("browser automation routes", () => {
       }),
       scopeId: windowId,
     });
-    const refusedProfile = await withProjects(profiled);
-    expect(await refusedProfile?.json()).toMatchObject({ reason: "profile-unavailable" });
-    expect(projectBrowsers.execute).toHaveBeenCalledTimes(3);
+    await withProjects(profiled);
+    expect(projectBrowsers.execute).toHaveBeenLastCalledWith(windowId, "local-window", {
+      ...command,
+      profile: "personal",
+    });
+    expect(projectBrowsers.execute).toHaveBeenCalledTimes(4);
+
+    // A hub-introduced device stays held to the remote-device caller.
+    const hubProfiled = post({ ...command, profile: "personal" });
+    bindPrincipalRouteContext(hubProfiled, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: "90000000-0000-4000-8000-000000000002" as never,
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "a1000000-0000-4000-8000-000000000004" as never,
+        admittedBy: "hub-roster",
+      }),
+      scopeId: windowId,
+    });
+    await withProjects(hubProfiled);
+    expect(projectBrowsers.execute).toHaveBeenLastCalledWith(windowId, "remote-device", {
+      ...command,
+      profile: "personal",
+    });
 
     const without = await handler(post(command));
     expect(without?.status).toBe(503);
@@ -1244,6 +1355,61 @@ describe("browser automation routes", () => {
         actorId: pairedDeviceId,
         deviceId: pairedDeviceId,
       });
+
+      const personPaired = new Request("http://127.0.0.1/api/browser/profiles", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(clear),
+      });
+      bindPrincipalRouteContext(personPaired, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: pairedDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "a1000000-0000-4000-8000-000000000009" as never,
+          admittedBy: "host-person",
+        }),
+        scopeId: windowId,
+      });
+      expect((await withProfiles(personPaired))?.status).toBe(200);
+      expect(profiles.execute).toHaveBeenLastCalledWith("person-paired-device", clear, {
+        kind: "remote-device",
+        actorId: pairedDeviceId,
+        deviceId: pairedDeviceId,
+      });
+
+      // Credential-use remains local-window-only even for a person-paired device.
+      const credUse = new Request("http://127.0.0.1/api/browser/credential-use", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "list" }),
+      });
+      bindPrincipalRouteContext(credUse, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: pairedDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "a1000000-0000-4000-8000-000000000010" as never,
+          admittedBy: "host-person",
+        }),
+        scopeId: windowId,
+      });
+      const withCredentials = createBrowserAutomationRouteHandler({
+        service: service as any,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        credentialUse: { execute: vi.fn() } as never,
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+      const credResponse = await withCredentials(credUse);
+      expect(credResponse?.status).toBe(403);
+      expect(await credResponse?.json()).toMatchObject({ category: "unauthorized" });
       // A profile cannot be named by a caller that decides its own scope or store path.
       expect(
         (await withProfiles(post("profiles", { ...clear, partition: "persist:other" })))?.status,
@@ -1760,6 +1926,375 @@ describe("browser automation routes", () => {
         }),
       );
       expect(response?.status).toBe(503);
+    });
+  });
+
+  describe("paired-device remote hold, profile visibility, and flows", () => {
+    it("admits take-over, input, stream, file upload, and hand-back only for a person-paired device and refuses hub-roster or agent-grant callers", async () => {
+      const leaseId = "33333333-3333-4333-8333-333333333333";
+      const chooserId = "44444444-4444-4444-8444-444444444444";
+      const target = {
+        threadId,
+        contextId,
+        tabId: "tab-1",
+        documentVersion: "a".repeat(64),
+        profileKind: "personal" as const,
+        originPolicyVersion: "policy-v1",
+      };
+      const pairedBrowserControl = {
+        takeOver: vi.fn(async () => ({
+          status: "held" as const,
+          leaseId: leaseId as never,
+          expiresAt: "2026-11-20T12:00:00.000Z" as never,
+          target: target as never,
+        })),
+        handBackForThread: vi.fn(async () => ({ status: "released" as const })),
+        execute: vi.fn(async () => ({
+          status: "input" as const,
+          lastAcceptedSequence: 1,
+          effect: "completed" as const,
+        })),
+        openStream: vi.fn(() => ({
+          status: "stream" as const,
+          stream: new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode(`${JSON.stringify({ kind: "reclaimed-locally" })}\n`),
+              );
+              controller.close();
+            },
+          }),
+        })),
+        uploadFile: vi.fn(async () => ({ status: "released" as const })),
+      };
+      const route = createBrowserAutomationRouteHandler({
+        service: service as any,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        pairedBrowserControl: pairedBrowserControl as any,
+        resolvePairedDeviceName: () => "Henrik's iPhone",
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+
+      const bindRemote = (
+        request: Request,
+        admittedBy?: "host-person" | "hub-roster",
+        origin = "https://octant.example",
+      ) => {
+        bindPrincipalRouteContext(request, {
+          principal: createRemoteDevicePrincipal({
+            hostId: "local" as never,
+            deviceId: "90000000-0000-4000-8000-000000000001" as never,
+            credentialGeneration: 1,
+            origin,
+            protocolVersion: 1,
+            capabilityDigest: "a".repeat(64),
+            sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+            ...(admittedBy === undefined ? {} : { admittedBy }),
+          }),
+          scopeId: windowId,
+        });
+        return request;
+      };
+
+      // Hub-introduced device and agent grant are refused remote-control-not-person.
+      for (const path of [
+        "/api/browser/contexts/take-over",
+        "/api/browser/contexts/hand-back",
+        "/api/browser/remote-control/input",
+        "/api/browser/remote-control/stream",
+        "/api/browser/remote-control/file",
+      ]) {
+        const roster = bindRemote(
+          new Request(`http://127.0.0.1${path}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ threadId }),
+          }),
+          "hub-roster",
+        );
+        const rosterRes = await route(roster);
+        expect(rosterRes?.status).toBe(403);
+        expect(await rosterRes?.json()).toEqual({
+          status: "refused",
+          reason: "remote-control-not-person",
+        });
+
+        const agentGrant = bindRemote(
+          new Request(`http://127.0.0.1${path}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ threadId }),
+          }),
+          "host-person",
+          "octant-agent-access",
+        );
+        const grantRes = await route(agentGrant);
+        expect(grantRes?.status).toBe(403);
+        expect(await grantRes?.json()).toEqual({
+          status: "refused",
+          reason: "remote-control-not-person",
+        });
+      }
+
+      // Person-paired device opens a lease, streams NDJSON, sends touch input, uploads file, and hands back.
+      const takeOverReq = bindRemote(
+        new Request("http://127.0.0.1/api/browser/contexts/take-over", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ threadId }),
+        }),
+        "host-person",
+      );
+      const takeOverRes = await route(takeOverReq);
+      expect(takeOverRes?.status).toBe(200);
+      expect(await takeOverRes?.json()).toMatchObject({
+        pairedLease: { leaseId },
+      });
+
+      const streamReq = bindRemote(
+        new Request("http://127.0.0.1/api/browser/remote-control/stream", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ leaseId }),
+        }),
+        "host-person",
+      );
+      const streamRes = await route(streamReq);
+      expect(streamRes?.status).toBe(200);
+      expect(streamRes?.headers.get("content-type")).toBe("application/x-ndjson");
+      expect(await streamRes?.text()).toContain("reclaimed-locally");
+
+      const inputReq = bindRemote(
+        new Request("http://127.0.0.1/api/browser/remote-control/input", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            kind: "input",
+            leaseId,
+            sequence: 1,
+            events: [{ kind: "tap", frameId: 1, x: 0.5, y: 0.5 }],
+          }),
+        }),
+        "host-person",
+      );
+      const inputRes = await route(inputReq);
+      expect(inputRes?.status).toBe(200);
+      expect(await inputRes?.json()).toEqual({
+        status: "input",
+        lastAcceptedSequence: 1,
+        effect: "completed",
+      });
+
+      const fileReq = bindRemote(
+        new Request("http://127.0.0.1/api/browser/remote-control/file", {
+          method: "POST",
+          headers: {
+            "content-type": "application/octet-stream",
+            "x-octant-browser-lease-id": leaseId,
+            "x-octant-browser-chooser-id": chooserId,
+            "x-octant-browser-file-name": "photo.png",
+          },
+          body: new Uint8Array([1, 2, 3, 4]),
+        }),
+        "host-person",
+      );
+      const fileRes = await route(fileReq);
+      expect(fileRes?.status).toBe(200);
+      expect(pairedBrowserControl.uploadFile).toHaveBeenCalledOnce();
+
+      const handBackReq = bindRemote(
+        new Request("http://127.0.0.1/api/browser/contexts/hand-back", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ threadId, leaseId }),
+        }),
+        "host-person",
+      );
+      const handBackRes = await route(handBackReq);
+      expect(handBackRes?.status).toBe(200);
+      expect(pairedBrowserControl.handBackForThread).toHaveBeenCalledOnce();
+    });
+
+    it("lets a person-paired device see signed-in profile pages and manage profiles/flows while keeping cookie import local", async () => {
+      const profiles = {
+        execute: vi.fn(async (_caller, command) =>
+          command.kind === "import-sources"
+            ? {
+                kind: "browser-profile-refused" as const,
+                reason: "profile-not-local" as const,
+                message: "Cookie import is done on this Mac.",
+              }
+            : { kind: "browser-profiles" as const, profiles: [] },
+        ),
+      };
+      const flows = {
+        summaries: vi.fn(() => []),
+        delete: vi.fn(() => true),
+      };
+      const profileSnapshot = {
+        status: "running",
+        threadId,
+        context: {
+          contextId,
+          threadId,
+          actionId: "70000000-0000-4000-8000-000000000001",
+          correlationId: "80000000-0000-4000-8000-000000000001",
+          authority,
+          policy: {
+            profileMode: "isolated",
+            profile: { kind: "personal" },
+            allowedOrigins: ["https://account.example"],
+            credentialFieldProtection: true,
+            maxConcurrentTabs: 1,
+            sessionTimeoutMs: 300_000,
+          },
+          state: "active",
+          createdAt: "2026-10-31T12:00:00.000Z",
+        },
+        observation: {
+          contextId,
+          actionId: "70000000-0000-4000-8000-000000000001",
+          correlationId: "80000000-0000-4000-8000-000000000001",
+          authority,
+          url: "https://account.example/home",
+          title: "Account Home",
+          extractedText: "Signed in",
+          screenshotDataUrl: "data:image/jpeg;base64,AAAA",
+          observedAt: "2026-10-31T12:00:00.000Z",
+          stale: false,
+        },
+        evidence: [],
+      };
+      const route = createBrowserAutomationRouteHandler({
+        service: {
+          ...service,
+          inspectThread: vi.fn(() => profileSnapshot),
+          peekThread: vi.fn(async () => profileSnapshot),
+        } as any,
+        authority: { canAccessWindow: () => true, resolve: () => authority },
+        profiles: profiles as any,
+        flows: flows as any,
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+
+      const makeRemote = (
+        path: string,
+        body: unknown,
+        admittedBy: "host-person" | "hub-roster",
+      ) => {
+        const req = new Request(`http://127.0.0.1${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        bindPrincipalRouteContext(req, {
+          principal: createRemoteDevicePrincipal({
+            hostId: "local" as never,
+            deviceId: "90000000-0000-4000-8000-000000000001" as never,
+            credentialGeneration: 1,
+            origin: "https://octant.example",
+            protocolVersion: 1,
+            capabilityDigest: "a".repeat(64),
+            sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+            admittedBy,
+          }),
+          scopeId: windowId,
+        });
+        return req;
+      };
+
+      const personRead = await route(
+        makeRemote("/api/browser/contexts/current", { threadId }, "host-person"),
+      );
+      expect(await personRead?.json()).toMatchObject({
+        observation: { url: "https://account.example/home", title: "Account Home" },
+      });
+
+      const rosterRead = await route(
+        makeRemote("/api/browser/contexts/current", { threadId }, "hub-roster"),
+      );
+      expect(await rosterRead?.json()).toMatchObject({
+        failure: { reason: "profile-not-local" },
+      });
+
+      const personProfiles = await route(
+        makeRemote("/api/browser/profiles", { kind: "list" }, "host-person"),
+      );
+      expect(personProfiles?.status).toBe(200);
+      expect(profiles.execute).toHaveBeenCalledWith(
+        "person-paired-device",
+        { kind: "list" },
+        expect.objectContaining({ kind: "remote-device" }),
+      );
+
+      const personFlows = await route(
+        makeRemote("/api/browser/flows", { kind: "list" }, "host-person"),
+      );
+      expect(await personFlows?.json()).toEqual({ kind: "browser-flows", flows: [] });
+
+      const rosterFlows = await route(
+        makeRemote("/api/browser/flows", { kind: "list" }, "hub-roster"),
+      );
+      expect(await rosterFlows?.json()).toMatchObject({
+        kind: "browser-flows-refused",
+        reason: "not-local",
+      });
+    });
+
+    it("refuses take-over on /api/browser/remote-control/input when the thread is outside the device's Project scope", async () => {
+      const store = new WindowAuthorityStore();
+      const windowId = "10000000-0000-4000-8000-000000000001" as never;
+      const outOfScopeThread = decodeBrowserThreadId("99000000-0000-4000-8000-000000000099");
+      const execute = vi.fn();
+      const route = createBrowserAutomationRouteHandler({
+        service: {} as any,
+        authority: { canAccessWindow: () => false, resolve: () => undefined },
+        pairedBrowserControl: {
+          takeOver: vi.fn(),
+          handBack: vi.fn(),
+          execute,
+          openStream: vi.fn(),
+          uploadFile: vi.fn(),
+        } as any,
+        windowAuthorityStore: store,
+        maxRequestBodySize: 64_000,
+      });
+
+      const req = new Request("http://127.0.0.1/api/browser/remote-control/input", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "take-over",
+          target: {
+            threadId: outOfScopeThread,
+            contextId: "88000000-0000-4000-8000-000000000088",
+            tabId: "tab-1",
+            documentVersion: "a".repeat(64),
+            profileKind: "private",
+            originPolicyVersion: "v1",
+          },
+        }),
+      });
+      bindPrincipalRouteContext(req, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: "90000000-0000-4000-8000-000000000001" as never,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+          admittedBy: "host-person",
+        }),
+        scopeId: windowId,
+      });
+
+      const response = await route(req);
+      expect(response?.status).toBe(403);
+      expect(await response?.json()).toEqual({ status: "refused", reason: "authority-ended" });
+      expect(execute).not.toHaveBeenCalled();
     });
   });
 });

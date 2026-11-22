@@ -2,6 +2,7 @@ import type { ProviderCapabilities } from "@octant/contracts";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { HostPlatformContext } from "../platform";
 import { ProviderNativeSetupSetting, ProviderOwnMemorySetting } from "./ProviderNativeSetupSetting";
 
 const codex = {
@@ -27,9 +28,11 @@ describe("A provider's own memory", () => {
     expect(toggle).toBeChecked();
     expect(toggle).toHaveAccessibleDescription(/On by default/);
     expect(toggle).toHaveAccessibleDescription(
-      /stays off in Plan and in Chat, because it writes its memory in the background/,
+      /Under Strict it stays off in Plan and in Chat, because it writes its memory in the background/,
     );
-    expect(toggle).toHaveAccessibleDescription(/telemetry and self-update stay off either way/);
+    expect(toggle).toHaveAccessibleDescription(
+      /does not change Codex’s telemetry or self-update; those follow Provider channels/,
+    );
     await userEvent.click(toggle);
     expect(onChange).toHaveBeenCalledWith(false);
 
@@ -145,6 +148,37 @@ describe("Run a key provider as itself", () => {
       screen.getByRole("switch", { name: "Run Codex work as itself" }),
     ).toHaveAccessibleDescription(
       /Not available for Codex yet: its own subagents, web search and fetch, skills/,
+    );
+  });
+
+  it("says honestly on Windows that OpenCode's and an ACP agent's own permission handling applies in Chat outside Strict", () => {
+    const { unmount } = render(
+      <HostPlatformContext.Provider value="win32">
+        <ProviderNativeSetupSetting
+          disabled={false}
+          instance={{ ...codex, displayName: "OpenCode", driverKind: "opencode" }}
+          onChange={vi.fn(async () => true)}
+        />
+      </HostPlatformContext.Provider>,
+    );
+    expect(
+      screen.getByRole("switch", { name: "Run OpenCode as itself" }),
+    ).toHaveAccessibleDescription(
+      /OpenCode’s own permission rules—not Octant—keep its file and shell tools off, and its command templates and plugins run as they do in OpenCode itself/,
+    );
+    unmount();
+
+    render(
+      <HostPlatformContext.Provider value="win32">
+        <ProviderNativeSetupSetting
+          disabled={false}
+          instance={{ ...codex, displayName: "Kilo", driverKind: "kilo" }}
+          onChange={vi.fn(async () => true)}
+        />
+      </HostPlatformContext.Provider>,
+    );
+    expect(screen.getByRole("switch", { name: "Run Kilo as itself" })).toHaveAccessibleDescription(
+      /Kilo’s own permission handling—not Octant confinement—applies/,
     );
   });
 });

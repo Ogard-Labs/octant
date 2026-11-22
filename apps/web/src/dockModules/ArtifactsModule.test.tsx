@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import ArtifactsModule from "./ArtifactsModule";
@@ -69,4 +71,39 @@ it("lists nothing for a thread outside every Project", async () => {
   );
   expect(await screen.findByText("Artifacts are unavailable")).toBeVisible();
   expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it("lists the Project's artifacts in the library's table and thins its columns for a narrow dock", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Response.json(listing)),
+  );
+  const { container } = render(
+    <ArtifactsModule
+      serverUrl="http://127.0.0.1:4000"
+      subject={{ mode: "work", threadId: "t", projectId: projectId as never }}
+      windowCapability="cap"
+    />,
+  );
+  await screen.findByRole("button", { name: /Launch plan/ });
+  expect(
+    container.querySelector(".artifact-table.artifact-table--dock > .artifact-table__head"),
+  ).not.toBeNull();
+  expect(container.querySelectorAll(".artifact-table-row")).toHaveLength(1);
+
+  // jsdom draws no layout, so the columns are pinned in the stylesheet: the
+  // dock keeps the name-first columns at any width, since a dock resized past
+  // 480px would otherwise take the page's tier and squeeze the name; a narrow
+  // page drops the tags, share and edited columns at 480px, and the Export and
+  // Versions words go at 360px.
+  const css = readFileSync(resolve(import.meta.dirname, "../styles/artifacts.css"), "utf8");
+  expect(css).toMatch(
+    /^\.artifact-table--dock \.artifact-table__head,\s*\.artifact-table--dock \.artifact-table-row\s*\{\s*--artifact-columns: minmax\(0, 1fr\) auto;/m,
+  );
+  expect(css).toMatch(
+    /@container \(max-width: 480px\)[^@]*--artifact-columns: minmax\(0, 1fr\) auto;/,
+  );
+  expect(css).toMatch(
+    /@container \(max-width: 360px\)\s*\{\s*\.artifact-table-row__action\s*\{\s*display: none;/,
+  );
 });

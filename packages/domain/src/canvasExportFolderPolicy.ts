@@ -172,33 +172,6 @@ export function canvasExportPictureFileNames(
   );
 }
 
-export interface CanvasExportNameFacts {
-  readonly title: string;
-  readonly format: CanvasExportImplementedFormat;
-  /** Whether a file with this name is already in the chosen folder. */
-  readonly taken: (fileName: string) => boolean;
-  /** Whether the person approved replacing the name this document wants. */
-  readonly replacesConfirmed: boolean;
-}
-
-/**
- * The name this export will be written under, or nothing when there is no free
- * one.
- *
- * A taken name is reused only when it was confirmed: the confirmation is the
- * approval card naming that file, so approving it is the person saying "replace
- * this one". Anything else gets the next numbered copy. Returning nothing
- * rather than picking a name outside the bound keeps an unbounded folder from
- * turning one export into a long scan.
- */
-export function planCanvasExportFileName(facts: CanvasExportNameFacts): string | undefined {
-  return freeCanvasExportFileName(
-    canvasExportPlannedName(facts.title, facts.format),
-    facts.taken,
-    facts.replacesConfirmed,
-  );
-}
-
 /**
  * The same rule for a name already planned — each file of a picture set is
  * placed this way, so a set never eats a file the person kept either.

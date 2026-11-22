@@ -734,6 +734,7 @@ failed, never painted.
 | Density               | Comfortable (default), Compact                                                 | Below                                                           |
 | Interface font        | System (default), Geist, a custom stack; size 12 to 16 in steps, 14 by default | `--octant-ui-font-*`, `--oct-text-step`                         |
 | Smooth text           | On (default), off; hidden off a Mac                                            | `data-octant-font-smoothing`; grayscale smoothing only when on  |
+| Timestamp format      | Optional `12h` or `24h` in saved/imported themes (unset uses locale default)   | `data-octant-timestamp-format`; shared clock/date-time format   |
 | Transcript            | Small, Medium, Large; Narrow, Medium, Wide                                     | `--oct-transcript-font-size`; the column measure                |
 | Code, terminal        | Family, size, line height, ligatures                                           | `--octant-editor-*`, `--octant-terminal-*`                      |
 | Background            | A ground, its options, and where it shows                                      | [Home with the drawn ground](#home-with-the-drawn-ground)       |
@@ -1511,8 +1512,13 @@ the menu key, or Shift+F10 on any control of the bar). The bar is a Tab stop
 where there is something to arrange, and Enter or Space on it opens that menu. At most one 32px secondary row
 holds content (a filter, a status line) on the bar's insets, and a pane's
 content starts on the same 12px. When the controls do not fit, word switches
-fold to a named control, then actions into one More menu; status text and
-must-read cues never fold. A tool alone used to have a 36px tab row inset 8px,
+fold to a named control, then every named control — word buttons, view
+switches, icon actions and menu buttons — folds into the one More menu before
+any state the tool reports about itself does. Status text and must-read cues
+fold last, into that menu's first rows and whole, and the More button then
+carries a badge in the worst tone any folded state reports; the tool's name is
+cut after state folds, and only then may a control the tool draws itself take
+the one secondary row under the bar, which nothing else may share. A tool alone used to have a 36px tab row inset 8px,
 a 32px control row or no bar, and a tiled one a 32px bar inset 12px, so a
 second tool moved every tab and control of the first (measured 2026-11-15).
 The bottom panel's toolbar is the same bar: the same height, its tabs 28px and
@@ -1587,8 +1593,9 @@ narrowest pane's width.
   immediately before the mode control, only while the thread is below Full
   access (at Full access nothing shows; it opens the same review as the
   Environment panel's "Outside content · read N times" row). The thread's
-  Project, branch, folder, pull requests and plan usage live in the Environment
-  panel, and its info and plan proposal are items of the + menu: a full row
+  Project, branch, folder and pull requests live in the Environment panel (plan
+  usage does not: it shows in the account menu, on a start screen and in
+  Settings), and its info and plan proposal are items of the + menu: a full row
   truncated every label in a thread's column. Labels 12px meta, icons 16px,
   nothing filled at rest.
 - **The row above the box** (start screens): where the work runs, as quiet

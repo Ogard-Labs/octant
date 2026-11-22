@@ -1,8 +1,10 @@
 import { createEditorDraftStore } from "../editor/editorDraftStore";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import type {
+  CodePullRequestLineNotesSource,
   CodeReviewFindingReference,
   CoordinatorBounds,
+  CoordinatorDoneWhen,
   CoordinatorOpenWorkerLimit,
   CoordinatorStartingByProject,
   CoordinatorStartingChoice,
@@ -41,6 +43,7 @@ import {
   type CodeConversationWindow,
   type ProviderContextBreakdown,
 } from "@octant/contracts";
+import type { CodeLineNotesSendResult } from "./CodeLineNotes";
 import { prependEarlierTurns } from "@octant/domain";
 import { waitForReconnect } from "../lib/waitForReconnect";
 import {
@@ -129,6 +132,7 @@ import {
   reopenCodeThread,
   setCodeThreadCoordinator,
   setCodeThreadCoordinatorBounds,
+  setCodeThreadCoordinatorDoneWhen,
   setCodeThreadCoordinatorWake,
   setCodeThreadMessageWake,
   setCodeThreadRestartContinuation,
@@ -148,6 +152,28 @@ export type CodeThreadRestOutcome =
   | { readonly status: "refused"; readonly message: string };
 
 /**
+ * A move's answer: the rest outcome, a queued intent dropped by its own
+ * Cancel before it ever dispatched, or a queued intent whose real dispatch
+ * answer arrives later on `settled`.
+ */
+export type CodeThreadMoveOutcome =
+  | CodeThreadRestOutcome
+  | { readonly status: "cancelled" }
+  | {
+      readonly status: "deferred";
+      readonly settled: Promise<CodeThreadMoveOutcome>;
+      readonly cancel: () => void;
+    };
+
+/** One queued move intent: the thread, the destination, the turn it waits for, and its answer. */
+interface PendingThreadMove {
+  readonly threadId: CodeThreadId;
+  readonly projectId: ProjectId;
+  readonly sourceTurnStartedAt?: string | undefined;
+  readonly resolve: (outcome: CodeThreadMoveOutcome) => void;
+}
+
+/**
  * A question the running provider turn asked the user and is blocked on:
  * either a yes/no approval for a tool it wants to run, or free-form input.
  * The host mints these from the provider stream; the renderer only relays
@@ -159,7 +185,13 @@ export type CodeProviderAnswer =
       readonly approvalId: CodeApprovalId;
       readonly decision: "approved" | "denied";
     }
-  | { readonly kind: "input"; readonly requestId: string; readonly response: string };
+  | {
+      readonly kind: "input";
+      readonly requestId: string;
+      readonly response: string;
+      /** A secret question's answer, sent in the command and never put as evidence. */
+      readonly secret?: true;
+    };
 
 export interface CodeThreadNavigationItem {
   readonly checkoutChip?: {
@@ -247,6 +279,13 @@ const INHERITED_HISTORY_UNAVAILABLE_MESSAGE = "Inherited conversation history co
 
 /** The first wait after a failed catch-up, before the delay starts doubling. */
 const MIN_CODE_RECONNECT_BACKOFF_MS = 100;
+/**
+ * A client that reads thread events without waiting (a paired computer reached
+ * through a bounded request channel) reads again at the pace the phone uses:
+ * soon after a read that brought frames, slower while nothing changes.
+ */
+const POLLED_THREAD_EVENTS_ACTIVE_MS = 750;
+const POLLED_THREAD_EVENTS_IDLE_MAX_MS = 3_000;
 
 /**
  * A streamed reply commits its text and reasoning to conversation state on
@@ -1587,7 +1626,7 @@ export function useCodeController(options: CodeControllerOptions) {
                     );
                     noteActivity(operationId, event);
                     noteUsage(operationId, event);
-                    const updateReply = codeReplyMetadataUpdate(event);
+                    const updateReply = codeReplyMetadataUpdate(event, frame.occurredAt);
                     if (updateReply !== undefined) {
                       setConversation((current) =>
                         current.map((message) =>
@@ -1849,14 +1888,27 @@ export function useCodeController(options: CodeControllerOptions) {
           }
         };
 
+        let polledIdleMs = POLLED_THREAD_EVENTS_ACTIVE_MS;
+        const nextReadDelayMs = (framesRead: number): number => {
+          if (client.threadEvents !== "poll") return reconnectDelayMs;
+          if (framesRead > 0) {
+            polledIdleMs = POLLED_THREAD_EVENTS_ACTIVE_MS;
+            return POLLED_THREAD_EVENTS_ACTIVE_MS;
+          }
+          const delay = polledIdleMs;
+          polledIdleMs = Math.min(polledIdleMs * 2, POLLED_THREAD_EVENTS_IDLE_MAX_MS);
+          return delay;
+        };
         for (;;) {
           if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted) return;
           let snapshotRequired = false;
+          let framesRead = 0;
           try {
             const frames = client.subscribe(threadId, cursor, controller.signal);
             for await (const frame of frames) {
               if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
                 return;
+              framesRead += 1;
               const position = framePosition(frame, threadId, cursor);
               if (position === "gap") {
                 snapshotRequired = true;
@@ -1910,7 +1962,7 @@ export function useCodeController(options: CodeControllerOptions) {
               cursor = Number(refreshed.lastSequence);
             }
             if (!snapshotRequired) {
-              await waitForReconnect(controller.signal, reconnectDelayMs);
+              await waitForReconnect(controller.signal, nextReadDelayMs(framesRead));
               continue;
             }
           } catch {
@@ -2248,6 +2300,10 @@ export function useCodeController(options: CodeControllerOptions) {
             ? await client.execute(command)
             : await client.execute(command, signal);
         if (!mounted.current) return undefined;
+        // Update the ref immediately so a sequential command awaited right
+        // after this one (such as saving bounds and done-when in one dialog
+        // click) reads the committed thread version before React re-renders.
+        bootstrapRef.current = applyResult(bootstrapRef.current, result);
         setBootstrap((current) => applyResult(current, result));
         setActiveView((current) => withUpdatedThread(current, result));
         const currentThreadId = activeThreadId.current;
@@ -2288,6 +2344,7 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
       readonly sideChatReturns?: ReadonlyArray<SideChatDraftReturnReference>;
       readonly reviewFindingReferences?: ReadonlyArray<CodeReviewFindingReference>;
+      readonly pullRequestLineNotesSource?: CodePullRequestLineNotesSource;
       /**
        * Images this turn carries. Ids only: the host holds the bytes it
        * accepted and reads them itself, so the renderer never re-sends an
@@ -2335,6 +2392,9 @@ export function useCodeController(options: CodeControllerOptions) {
         input.reviewFindingReferences.length === 0
           ? {}
           : { reviewFindingReferences: [...input.reviewFindingReferences] }),
+        ...(input.pullRequestLineNotesSource === undefined
+          ? {}
+          : { pullRequestLineNotesSource: input.pullRequestLineNotesSource }),
         ...(input.sideChatReturns === undefined || input.sideChatReturns.length === 0
           ? {}
           : { sideChatReturns: [...input.sideChatReturns] }),
@@ -2604,10 +2664,127 @@ export function useCodeController(options: CodeControllerOptions) {
     (threadId: CodeThreadId) => restCommand(threadId, wakeCodeThread),
     [restCommand],
   );
+  /**
+   * A move the person asked to run after the source thread's current turn. The
+   * intent stays scoped to that thread and that turn — each queued request is
+   * its own record, so closing the dialog cancels only that request, a newer
+   * request resolves the one it replaces rather than leaving it open, and it
+   * is dropped if a new turn takes over. The host revalidates the real move
+   * when it dispatches with the thread's version then current.
+   */
+  const pendingMoveRef = useRef<PendingThreadMove | undefined>(undefined);
+  useEffect(() => {
+    const pending = pendingMoveRef.current;
+    if (pending === undefined || bootstrap === undefined) return;
+    const runtime = bootstrap.runtime.find(
+      (entry) => String(entry.threadId) === String(pending.threadId),
+    );
+    if (runtime !== undefined && (runtime.executing === true || runtime.awaitingInput === true)) {
+      if (
+        pending.sourceTurnStartedAt !== undefined &&
+        runtime.turnStartedAt !== undefined &&
+        runtime.turnStartedAt !== pending.sourceTurnStartedAt
+      ) {
+        pendingMoveRef.current = undefined;
+        pending.resolve({
+          status: "refused",
+          message: "The thread started another turn; move it when it is idle.",
+        });
+      }
+      return;
+    }
+    pendingMoveRef.current = undefined;
+    void restCommand(pending.threadId, (thread) => moveCodeThread(thread, pending.projectId)).then(
+      pending.resolve,
+    );
+  }, [bootstrap, restCommand]);
+  const cancelPendingMove = useCallback((pending: PendingThreadMove) => {
+    if (pendingMoveRef.current !== pending) return;
+    pendingMoveRef.current = undefined;
+    pending.resolve({ status: "cancelled" });
+  }, []);
+  const queuePendingMove = useCallback((pending: PendingThreadMove) => {
+    const replaced = pendingMoveRef.current;
+    pendingMoveRef.current = pending;
+    // A newer queued move supersedes the old one; its promise still resolves
+    // so the dialog that asked for it is never left waiting on an answer that
+    // can no longer come.
+    replaced?.resolve({ status: "cancelled" });
+  }, []);
   const moveThread = useCallback(
-    (threadId: CodeThreadId, projectId: ProjectId) =>
-      restCommand(threadId, (thread) => moveCodeThread(thread, projectId)),
-    [restCommand],
+    async (
+      threadId: CodeThreadId,
+      projectId: ProjectId,
+      options?: { readonly when?: "after-turn" | "stop-now" | undefined },
+    ): Promise<CodeThreadMoveOutcome> => {
+      const runtime = bootstrapRef.current?.runtime.find(
+        (entry) => String(entry.threadId) === String(threadId),
+      );
+      const turnRunning =
+        runtime !== undefined && (runtime.executing === true || runtime.awaitingInput === true);
+      const queueAfterTurn = (): CodeThreadMoveOutcome => {
+        let resolveSettled: (outcome: CodeThreadMoveOutcome) => void = () => undefined;
+        const settled = new Promise<CodeThreadMoveOutcome>((resolve) => {
+          resolveSettled = resolve;
+        });
+        const pending: PendingThreadMove = {
+          threadId,
+          projectId,
+          ...(runtime?.turnStartedAt === undefined
+            ? {}
+            : { sourceTurnStartedAt: runtime.turnStartedAt }),
+          resolve: resolveSettled,
+        };
+        queuePendingMove(pending);
+        return {
+          status: "deferred",
+          settled,
+          cancel: () => cancelPendingMove(pending),
+        };
+      };
+      if (options?.when === "after-turn") {
+        if (turnRunning) return queueAfterTurn();
+        return await restCommand(threadId, (thread) => moveCodeThread(thread, projectId));
+      }
+      if (options?.when === "stop-now") {
+        if (!turnRunning) {
+          return await restCommand(threadId, (thread) => moveCodeThread(thread, projectId));
+        }
+        const scopedTurn = activeTurnOperations.current.get(String(threadId));
+        if (scopedTurn === undefined) {
+          // An unscoped cancel could land on a turn that replaced the one the
+          // person meant to stop; without that turn's identity the stop is
+          // refused and the move is left for them to queue.
+          return {
+            status: "refused",
+            message:
+              "The running turn cannot be identified from this window; move the thread after it finishes instead.",
+          };
+        }
+        const thread = findCodeThread(bootstrapRef.current?.threads, threadId);
+        if (thread === undefined) {
+          return { status: "refused", message: "This thread is no longer in the list." };
+        }
+        try {
+          await client.executeOperation({
+            kind: "cancel-provider-turn",
+            operationId: decodeCodeOperationId(globalThis.crypto.randomUUID()),
+            threadId,
+            checkoutId: thread.checkoutId,
+            turnOperationId: scopedTurn.operationId,
+          });
+        } catch {
+          // The stop attempt is best-effort: the queued move still waits for
+          // the turn to settle, and the host revalidates the move itself.
+        }
+        // The move dispatches once the stopped turn has actually settled —
+        // moving while it is still draining would hit the same host refusal
+        // as moving mid-turn.
+        return queueAfterTurn();
+      }
+      return await restCommand(threadId, (thread) => moveCodeThread(thread, projectId));
+    },
+    [cancelPendingMove, client, queuePendingMove, restCommand],
   );
   // The coordinator role and both wake switches are a person's choice from a
   // local window; the host refuses the rest (a worker, a fifth coordinator)
@@ -2622,6 +2799,11 @@ export function useCodeController(options: CodeControllerOptions) {
   const setThreadCoordinatorBounds = useCallback(
     (threadId: CodeThreadId, bounds: CoordinatorBounds) =>
       restCommand(threadId, (thread) => setCodeThreadCoordinatorBounds(thread, bounds)),
+    [restCommand],
+  );
+  const setThreadCoordinatorDoneWhen = useCallback(
+    (threadId: CodeThreadId, doneWhen: CoordinatorDoneWhen | undefined) =>
+      restCommand(threadId, (thread) => setCodeThreadCoordinatorDoneWhen(thread, doneWhen)),
     [restCommand],
   );
   const setThreadMessageWake = useCallback(
@@ -2804,7 +2986,11 @@ export function useCodeController(options: CodeControllerOptions) {
        * its turn; the returned boolean also reports how that turn ended, and a
        * turn that later waits, stops or fails must not read as a refused send.
        */
-      fromOutsideComposer?: { readonly onAccepted: () => void },
+      fromOutsideComposer?: {
+        readonly onAccepted: () => void;
+        readonly onRefused?: (message: string) => void;
+        readonly pullRequestLineNotesSource?: CodePullRequestLineNotesSource;
+      },
     ): Promise<boolean> => {
       const outsideComposer = fromOutsideComposer !== undefined;
       const trimmed = prompt.trim();
@@ -2878,6 +3064,9 @@ export function useCodeController(options: CodeControllerOptions) {
           threadMentionIds,
           sideChatReturns,
           reviewFindingReferences: reviewReferences,
+          ...(fromOutsideComposer?.pullRequestLineNotesSource === undefined
+            ? {}
+            : { pullRequestLineNotesSource: fromOutsideComposer.pullRequestLineNotesSource }),
           attachmentIds: attachments.map((attachment) => attachment.attachmentId),
           fileMentionPaths,
           ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
@@ -2894,14 +3083,16 @@ export function useCodeController(options: CodeControllerOptions) {
           setTurnUsageLimit(started.failure.usageLimit);
           setLatestProviderTurnOperationId(undefined);
           restoreFailedPrompt();
+          fromOutsideComposer?.onRefused?.(started.failure.message);
           return false;
         }
         if (started.kind !== "provider-turn-state" || started.state !== "running") {
           setTurnStatus("failed");
           const refusal =
             started.kind === "provider-turn-state" ? started.failure?.message : undefined;
+          const message = refusal ?? "The provider turn could not be started.";
           setTurnError(
-            refusal ?? "The provider turn could not be started.",
+            message,
             started.kind === "provider-turn-state" && started.failure !== undefined
               ? { category: started.failure.category }
               : undefined,
@@ -2913,6 +3104,7 @@ export function useCodeController(options: CodeControllerOptions) {
             );
           }
           restoreFailedPrompt();
+          fromOutsideComposer?.onRefused?.(message);
           return false;
         }
         // The running turn's identity is what Stop names, so a Stop that lands
@@ -3054,7 +3246,7 @@ export function useCodeController(options: CodeControllerOptions) {
               }
               // The host journals the change list just before the turn settles,
               // so the reply gains its files here rather than on the next reopen.
-              const updateReply = codeReplyMetadataUpdate(event);
+              const updateReply = codeReplyMetadataUpdate(event, frame.occurredAt);
               if (updateReply !== undefined) {
                 setConversation((current) =>
                   current.map((message) =>
@@ -3173,11 +3365,117 @@ export function useCodeController(options: CodeControllerOptions) {
         setTurnStatus("failed");
         setTurnError(failure.message);
         restoreFailedPrompt();
+        fromOutsideComposer?.onRefused?.(failure.message);
         failCommand(error);
         return false;
       }
     },
     [activeView, beginProviderTurn, clearFailure, client, failCommand, turnStatus],
+  );
+
+  /**
+   * Sends line notes written on a pull request's diff to one linked Code
+   * thread as an ordinary follow-up turn. When the linked thread is open in
+   * this controller it reuses `sendFollowUp` (keeping the composer draft
+   * untouched); otherwise it dispatches directly through `beginProviderTurn`
+   * so the person does not have to leave the pull request view first.
+   */
+  const sendPullRequestLineNotes = useCallback(
+    async (
+      threadId: CodeThreadId,
+      prompt: string,
+      source: CodePullRequestLineNotesSource,
+    ): Promise<CodeLineNotesSendResult> => {
+      const text = prompt.trim();
+      if (text.length === 0) {
+        return { status: "refused", message: "Write a note first." };
+      }
+      if (
+        activeView !== undefined &&
+        String(activeView.thread.id) === String(threadId) &&
+        activeThreadId.current === activeView.thread.id
+      ) {
+        if (turnStatus === "sending" || turnStatus === "running") {
+          return {
+            status: "refused",
+            message: "Send when the current turn finishes.",
+          };
+        }
+        return new Promise((resolve) => {
+          let settled = false;
+          const accept = () => {
+            if (settled) return;
+            settled = true;
+            resolve({ status: "sent" });
+          };
+          const refuse = (message: string) => {
+            if (settled) return;
+            settled = true;
+            resolve({ status: "refused", message });
+          };
+          sendFollowUp(
+            text,
+            [],
+            [],
+            [],
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            [],
+            undefined,
+            [],
+            false,
+            undefined,
+            {
+              onAccepted: accept,
+              onRefused: refuse,
+              pullRequestLineNotesSource: source,
+            },
+          )
+            .then((sent) => {
+              if (settled) return;
+              if (sent) accept();
+              else refuse("The thread did not accept the notes; its reason shows there.");
+            })
+            .catch((error) => {
+              if (!settled) refuse(codeFailure(error).message);
+            });
+        });
+      }
+      let checkoutId = findCodeThread(bootstrapRef.current?.threads, threadId)?.checkoutId;
+      if (checkoutId === undefined) {
+        try {
+          const view = await client.thread(threadId);
+          checkoutId = view.checkout.id;
+        } catch (error) {
+          return { status: "refused", message: codeFailure(error).message };
+        }
+      }
+      try {
+        const { started } = await beginProviderTurn({
+          threadId,
+          checkoutId,
+          prompt: text,
+          pullRequestLineNotesSource: source,
+        });
+        if (started.kind === "operation-failed") {
+          return { status: "refused", message: started.failure.message };
+        }
+        if (started.kind !== "provider-turn-state" || started.state !== "running") {
+          const refusal =
+            started.kind === "provider-turn-state" ? started.failure?.message : undefined;
+          return {
+            status: "refused",
+            message: refusal ?? "The provider turn could not be started.",
+          };
+        }
+        return { status: "sent" };
+      } catch (error) {
+        return { status: "refused", message: codeFailure(error).message };
+      }
+    },
+    [activeView, beginProviderTurn, client, sendFollowUp, turnStatus],
   );
 
   const answerProviderRequest = useCallback(
@@ -3198,12 +3496,19 @@ export function useCodeController(options: CodeControllerOptions) {
                 approvalId: answer.approvalId,
                 decision: answer.decision,
               })
-            : await client.executeOperation({
-                kind: "answer-provider-input",
-                ...scope,
-                requestId: answer.requestId,
-                response: await client.putEvidence(view.thread.id, answer.response),
-              });
+            : answer.secret === true
+              ? await client.executeOperation({
+                  kind: "answer-provider-input",
+                  ...scope,
+                  requestId: answer.requestId,
+                  secretAnswer: answer.response,
+                })
+              : await client.executeOperation({
+                  kind: "answer-provider-input",
+                  ...scope,
+                  requestId: answer.requestId,
+                  response: await client.putEvidence(view.thread.id, answer.response),
+                });
         if (!mounted.current) return false;
         // A refusal can arrive as a failed or interrupted turn state rather
         // than `operation-failed`; the request stays so the person sees why.
@@ -3392,6 +3697,7 @@ export function useCodeController(options: CodeControllerOptions) {
     pinThread,
     setThreadCoordinator,
     setThreadCoordinatorBounds,
+    setThreadCoordinatorDoneWhen,
     setThreadCoordinatorWake,
     setThreadMessageWake,
     setThreadRestartContinuation,
@@ -3411,6 +3717,7 @@ export function useCodeController(options: CodeControllerOptions) {
     retry,
     conversationHistory,
     sendFollowUp,
+    sendPullRequestLineNotes,
     setPendingDraft,
     setPendingDraftCaret,
     showTurnRefusal,

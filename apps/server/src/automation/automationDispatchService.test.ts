@@ -8,7 +8,10 @@ import {
   decodeAutomationDefinition,
   decodeCodeThread,
   CodeConversationTurn,
+  decodeChatSubmissionId,
+  decodeChatThreadId,
   ReplayCursor,
+  type ChatAttemptOutcome,
   type AutomationDefinition,
   type AutomationRun,
   type UtcTimestamp,
@@ -27,7 +30,11 @@ import {
 import type { AutomationDispatchOffer } from "./automationDispatchPort";
 import { AutomationEventStore } from "./automationEventStore";
 import { AutomationProjection, hydrateAutomationProjection } from "./automationProjection";
-import { automationRunIdForOccurrence, automationCodeOperationId } from "./automationRunIdentity";
+import {
+  automationChatSubmissionId,
+  automationRunIdForOccurrence,
+  automationCodeOperationId,
+} from "./automationRunIdentity";
 import { automationCodeEvidenceFromText } from "./automationCodeDispatchPort";
 import { AutomationSchedulerService } from "./automationSchedulerService";
 import type {
@@ -777,6 +784,40 @@ describe("AutomationDispatchService", () => {
     session.connection.close();
   });
 
+  it("starts no routine run while the host drains, and starts it once the drain lifts", async () => {
+    const session = openSession();
+    const definition = codeDefinition();
+    const run = claimQueuedRun(session, definition);
+    const code = createCodePort();
+    let draining = true;
+    const dispatcher = new AutomationDispatchService({
+      store: session.store,
+      projection: session.projection,
+      code: code.port,
+      work: unavailableAutomationWorkDispatchPort(),
+      capacity: alwaysAdmit(),
+      refusesNewRuns: () => draining,
+      resolveFacts: () => matchingFacts(definition),
+      now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+      schedule: (work) => {
+        void work();
+      },
+    });
+
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(code.create).not.toHaveBeenCalled();
+    // It waits as dispatching with no thread, which the scheduler's lease
+    // recovery offers again; nothing failed it.
+    expect(session.projection.getRun(run.id)).toMatchObject({ lifecycle: "dispatching" });
+    expect(session.projection.getRun(run.id)?.dispatchIntent).toBeUndefined();
+
+    draining = false;
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(code.create).toHaveBeenCalledTimes(1);
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("running");
+    session.connection.close();
+  });
+
   it("observes the exact recorded Code turn and releases its run only on matching terminal evidence", async () => {
     const session = openSession();
     const definition = codeDefinition();
@@ -1005,6 +1046,82 @@ describe("AutomationDispatchService", () => {
     second.connection.close();
   });
 
+  it.each([
+    ["completed", "completed"],
+    ["failed", "failed"],
+    ["cancelled", "interrupted"],
+    ["interrupted", "interrupted"],
+  ] as const)(
+    "finishes a Chat run once the routine's own Chat turn settles as %s, recording %s",
+    async (outcome, lifecycle) => {
+      const session = openSession();
+      const definition = chatDefinition();
+      const run = claimQueuedRun(session, definition);
+      await new AutomationDispatchService({
+        store: session.store,
+        projection: session.projection,
+        code: createCodePort().port,
+        work: unavailableAutomationWorkDispatchPort(),
+        chat: {
+          createThread: async (input) => ({
+            kind: "created",
+            threadId: input.threadId as never,
+            createdAt: "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+          }),
+          startOrRecoverFirstTurn: async () => ({
+            kind: "accepted",
+            runtimeReceipt: `chat-turn:${String(run.firstTurnRequestId)}`,
+            acceptedAt: "2026-08-10T13:00:30.000Z" as UtcTimestamp,
+          }),
+        },
+        capacity: alwaysAdmit(),
+        resolveFacts: () => matchingFacts(definition),
+        now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+      }).dispatchNow(definition.id, run.id);
+      const threadId = decodeChatThreadId(
+        automationThreadIdForOccurrence(String(run.occurrenceKey)),
+      );
+      const thread = { id: threadId, projectId: definition.projectId };
+      type Attempts = ReadonlyArray<{ readonly outcome: ChatAttemptOutcome }>;
+      // A turn the person sent into the thread is not the routine's turn.
+      const personTurn = {
+        threadId,
+        submissionId: decodeChatSubmissionId("ab000000-0000-4000-8000-0000000000f1"),
+        attempts: [{ outcome: "completed" }] as Attempts,
+      };
+      const routineTurn = (attempts: Attempts) => ({
+        threadId,
+        submissionId: automationChatSubmissionId(run),
+        attempts,
+      });
+      let turns = [personTurn];
+      const scheduler = new AutomationSchedulerService({
+        store: session.store,
+        projection: session.projection,
+        dispatch: { offer: () => undefined },
+        now: () => "2026-08-10T13:00:40.000Z" as UtcTimestamp,
+        readChatThread: (id) => (String(id) === String(threadId) ? { thread, turns } : undefined),
+      });
+      scheduler.runPass();
+      expect(session.projection.getRun(run.id)?.lifecycle).toBe("running");
+      turns = [routineTurn([{ outcome: "streaming" }]), personTurn];
+      scheduler.runPass();
+      expect(session.projection.getRun(run.id)?.lifecycle).toBe("running");
+      turns = [routineTurn([{ outcome: "waiting" }]), personTurn];
+      scheduler.runPass();
+      expect(session.projection.getRun(run.id)?.lifecycle).toBe("waiting");
+      turns = [routineTurn([{ outcome: "failed" }, { outcome }]), personTurn];
+      scheduler.runPass();
+      expect(session.projection.getRun(run.id)?.lifecycle).toBe(lifecycle);
+      expect(session.projection.activeRun(definition.id)).toBeUndefined();
+      expect(
+        hydrateAutomationProjection({ store: session.store, projection: session.projection }),
+      ).toBe("ok");
+      expect(session.projection.getRun(run.id)?.lifecycle).toBe(lifecycle);
+      session.connection.close();
+    },
+  );
+
   it("leaves a Chat run's provider capacity to the ordinary Chat turn path", async () => {
     const session = openSession();
     const definition = chatDefinition();
@@ -1085,6 +1202,44 @@ describe("AutomationDispatchService", () => {
       );
       session.connection.close();
     }
+  });
+
+  it("holds a routine run that already has its thread while the host drains, then starts it", async () => {
+    const session = openSession();
+    const definition = codeDefinition();
+    const run = claimQueuedRun(session, definition);
+    const code = createCodePort();
+    let capacity: "waiting" | "admit" = "waiting";
+    let draining = false;
+    const dispatcher = new AutomationDispatchService({
+      store: session.store,
+      projection: session.projection,
+      code: code.port,
+      work: unavailableAutomationWorkDispatchPort(),
+      capacity: {
+        admit: (input) =>
+          capacity === "waiting"
+            ? { kind: "waiting", message: "Provider capacity exhausted." }
+            : alwaysAdmit().admit(input),
+      },
+      refusesNewRuns: () => draining,
+      resolveFacts: () => matchingFacts(definition),
+      now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+    });
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(session.projection.getRun(run.id)?.dispatchIntent).toBeDefined();
+
+    capacity = "admit";
+    draining = true;
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(code.launch).not.toHaveBeenCalled();
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("dispatching");
+
+    draining = false;
+    await dispatcher.dispatchNow(definition.id, run.id);
+    expect(code.launch).toHaveBeenCalledTimes(1);
+    expect(session.projection.getRun(run.id)?.lifecycle).toBe("running");
+    session.connection.close();
   });
 
   it("waits on provider capacity without accepting a first turn", async () => {

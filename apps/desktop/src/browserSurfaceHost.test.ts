@@ -6,7 +6,7 @@ import {
 import { EventEmitter } from "node:events";
 import { createContext, runInContext } from "node:vm";
 import { decodeBrowserPageScriptNativeCommand } from "@octant/contracts/browser-page-script";
-import { decodeOwnerBrowserNativeCommand } from "@octant/contracts/owner-browser";
+import { decodePairedBrowserNativeCommand } from "@octant/contracts/paired-browser-control";
 import { decodeHumanBrowserRequest } from "@octant/contracts/browser-presentation";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -17,6 +17,15 @@ import {
 
 const contextId = "60000000-0000-4000-8000-000000000001";
 const threadId = "10000000-0000-4000-8000-000000000001";
+
+function namedStart(port: BrowserSurfaceViewPort, url: string): void {
+  vi.mocked(port.webContents.on).mock.calls.find(([name]) => name === "did-start-navigation")?.[1]({
+    url,
+    isMainFrame: true,
+    isSameDocument: false,
+    initiator: null,
+  });
+}
 
 function view(): BrowserSurfaceViewPort {
   const listeners = new Map<string, (...args: readonly unknown[]) => void>();
@@ -198,9 +207,19 @@ async function keyboardMenuSurface(selectionStart = 0, selectionEnd = selectionS
 }
 
 describe("BrowserSurfaceHost", () => {
-  it("keeps owner frames volatile, fences earlier agent captures and lets local input reclaim the exact native page", async () => {
+  it("dispatches paired-device touch, scroll, key, text, and IME events without mouse events while letting local input reclaim", async () => {
     const created = view();
     created.webContents.insertText = vi.fn(async () => undefined);
+    const debuggerListeners: Array<
+      (event: unknown, method: string, params?: Record<string, unknown>, sessionId?: string) => void
+    > = [];
+    created.webContents.debugger.on = vi.fn((_event, listener) => {
+      debuggerListeners.push(listener);
+    });
+    created.webContents.debugger.removeListener = vi.fn((_event, listener) => {
+      const idx = debuggerListeners.indexOf(listener);
+      if (idx >= 0) debuggerListeners.splice(idx, 1);
+    });
     vi.mocked(created.webContents.debugger.sendCommand).mockImplementation(
       async (method, params) => {
         // Actual Electron emits before-mouse-event for CDP mouse dispatch too.
@@ -229,22 +248,24 @@ describe("BrowserSurfaceHost", () => {
       createView: () => created,
       isOwnerWindowAvailable: () => true,
     });
-    const id = "a7880000-0000-4000-8000-000000000002";
+    const reclaimedContexts: Array<string> = [];
+    host.onPairedControlReclaimed((ctx) => reclaimedContexts.push(ctx));
+    const leaseId = "a7880000-0000-4000-8000-000000000002";
     const run = (command: Readonly<Record<string, unknown>>) =>
-      host.ownerControl(decodeOwnerBrowserNativeCommand({ contextId, owner, ...command }));
+      host.pairedControl(decodePairedBrowserNativeCommand({ contextId, owner, ...command }));
     try {
       await host.createContext({
         contextId,
         owner,
         policy: {
           profileMode: "isolated",
+          profile: { kind: "personal" },
           allowedOrigins: ["https://example.com"],
           credentialFieldProtection: true,
           maxConcurrentTabs: 1,
           sessionTimeoutMs: 60_000,
         },
       });
-      expect(await run({ operation: "inspect" })).toEqual({ status: "refused" });
       host.attach(
         contextId,
         owner,
@@ -257,89 +278,302 @@ describe("BrowserSurfaceHost", () => {
         { x: 0, y: 0, width: 800, height: 600 },
       );
       const inspect = await run({ operation: "inspect" });
-      if (inspect.status !== "target") throw new Error("Expected visible native target");
+      if (inspect.status !== "target") throw new Error("Expected native target");
       const pending = host.peek(contextId);
-      // Attach rejection handling before the deliberately delayed capture settles.
       const withheld = expect(pending).rejects.toThrow(
-        "Owner Browser control holds agent observations",
+        "Paired Browser hold pauses agent observations",
       );
       await started.promise;
-      expect(
-        await run({
-          operation: "claim",
-          controlId: id,
-          target: inspect.target,
-          expiresAt: new Date(Date.now() + 50_000).toISOString(),
-        }),
-      ).toEqual({ status: "claimed" });
-      expect(
-        (await host.prepareCredentialFill(contextId, owner, "https://example.com")).status,
-      ).toBe("refused");
-      expect(await run({ operation: "release", controlId: id, disposition: "revoke" })).toEqual({
+      expect(await run({ operation: "claim", leaseId, target: inspect.target })).toEqual({
+        status: "claimed",
+      });
+      expect(await run({ operation: "release", leaseId, disposition: "revoke" })).toEqual({
         status: "released",
       });
       captured.resolve();
       await withheld;
       delay = false;
-      expect(
-        (
-          await run({
-            operation: "claim",
-            controlId: id,
-            target: inspect.target,
-            expiresAt: new Date(Date.now() + 50_000).toISOString(),
-          })
-        ).status,
-      ).toBe("claimed");
-      expect((await run({ operation: "frame", controlId: id, sequence: 1 })).status).toBe("frame");
+
+      expect(await run({ operation: "claim", leaseId, target: inspect.target })).toEqual({
+        status: "claimed",
+      });
+      const firstFrame = await run({ operation: "frame", leaseId });
+      if (firstFrame.status !== "frame") throw new Error("Expected paired frame");
       await expect(host.peek(contextId)).rejects.toThrow(
-        "Owner Browser control holds agent observations",
+        "Paired Browser hold pauses agent observations",
       );
+
+      // Dispatch every allowed paired input kind and prove zero mouse events are sent
+      // and the lease remains live across every dispatch.
       expect(
         await run({
           operation: "input",
-          controlId: id,
-          sequence: 2,
-          expectedFrame: 1,
-          input: { kind: "press", key: "Tab" },
+          leaseId,
+          events: [
+            { kind: "tap", frameId: firstFrame.frame.frameId, x: 0.5, y: 0.5 },
+            {
+              kind: "long-press",
+              frameId: firstFrame.frame.frameId,
+              x: 0.4,
+              y: 0.4,
+              durationMs: 300,
+            },
+            {
+              kind: "drag",
+              frameId: firstFrame.frame.frameId,
+              points: [
+                { x: 0.2, y: 0.2 },
+                { x: 0.6, y: 0.6 },
+              ],
+            },
+            {
+              kind: "scroll",
+              frameId: firstFrame.frame.frameId,
+              x: 0.5,
+              y: 0.5,
+              deltaX: 0,
+              deltaY: 120,
+            },
+            { kind: "key", phase: "down", key: "Tab", code: "Tab" },
+            { kind: "key", phase: "up", key: "Tab", code: "Tab" },
+            { kind: "text", text: "hello" },
+            { kind: "composition", phase: "start", text: "ni" },
+            { kind: "composition", phase: "update", text: "nihon" },
+            { kind: "composition", phase: "commit", text: "日本" },
+          ],
         }),
       ).toEqual({ status: "input", effect: "completed" });
-      expect(created.webContents.debugger.sendCommand).toHaveBeenCalledWith(
-        "Input.dispatchKeyEvent",
-        expect.objectContaining({ type: "keyDown", key: "Tab" }),
-      );
-      expect((await run({ operation: "frame", controlId: id, sequence: 3 })).status).toBe("frame");
-      expect(
-        await run({
-          operation: "input",
-          controlId: id,
-          sequence: 4,
-          expectedFrame: 3,
-          input: { kind: "tap", x: 0.5, y: 0.5 },
-        }),
-      ).toEqual({ status: "input", effect: "completed" });
-      expect(created.webContents.debugger.sendCommand).toHaveBeenCalledWith(
-        "Input.dispatchTouchEvent",
-        expect.objectContaining({ type: "touchStart" }),
-      );
-      expect((await run({ operation: "frame", controlId: id, sequence: 5 })).status).toBe("frame");
-      const reclaim = vi
+
+      const sentMethods = vi
+        .mocked(created.webContents.debugger.sendCommand)
+        .mock.calls.map(([method]) => method);
+      expect(sentMethods).not.toContain("Input.dispatchMouseEvent");
+      expect(sentMethods).toContain("Input.dispatchTouchEvent");
+      expect(sentMethods).toContain("Input.synthesizeScrollGesture");
+      expect(sentMethods).toContain("Input.dispatchKeyEvent");
+      expect(sentMethods).toContain("Input.imeSetComposition");
+      expect(created.webContents.insertText).toHaveBeenCalledWith("hello");
+      expect(created.webContents.insertText).toHaveBeenCalledWith("日本");
+      expect(reclaimedContexts).toEqual([]);
+
+      // Native dialog prompt withholds frames until dismissed.
+      for (const listener of debuggerListeners) {
+        listener({}, "Page.javascriptDialogOpening", { type: "alert", message: "Check" });
+      }
+      expect(await run({ operation: "frame", leaseId })).toEqual({
+        status: "withheld",
+        reason: "native-prompt",
+      });
+      for (const listener of debuggerListeners) {
+        listener({}, "Page.javascriptDialogClosed", { result: false });
+      }
+      expect((await run({ operation: "frame", leaseId })).status).toBe("frame");
+
+      // Local mouse click or key immediately reclaims the page and ends the lease.
+      const mouseReclaim = vi
         .mocked(created.webContents.on)
-        .mock.calls.find(([event]) => event === "before-input-event")?.[1];
-      reclaim?.({}, { type: "keyDown" });
+        .mock.calls.find(([event]) => event === "before-mouse-event")?.[1];
+      mouseReclaim?.({}, { type: "mouseDown" });
+      expect(reclaimedContexts).toEqual([contextId]);
       expect(
-        (
-          await run({
-            operation: "input",
-            controlId: id,
-            sequence: 6,
-            expectedFrame: 5,
-            input: { kind: "press", key: "Enter" },
-          })
-        ).status,
-      ).toBe("refused");
+        await run({
+          operation: "input",
+          leaseId,
+          events: [{ kind: "key", phase: "down", key: "Enter", code: "Enter" }],
+        }),
+      ).toEqual({ status: "refused", reason: "reclaimed-locally" });
+      expect(await run({ operation: "release", leaseId, disposition: "hand-back" })).toEqual({
+        status: "refused",
+        reason: "reclaimed-locally",
+      });
     } finally {
       captured.resolve();
+      await host.closeAll();
+    }
+  });
+
+  it("keeps frames and subsequent inputs alive after a remote file chooser selection", async () => {
+    const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const stagingDir = mkdtempSync(join(tmpdir(), "octant-desktop-chooser-"));
+    const uploadPath = join(stagingDir, "doc.txt");
+    writeFileSync(uploadPath, "hello-upload");
+    const created = view();
+    created.webContents.insertText = vi.fn(async () => undefined);
+    const debuggerListeners: Array<
+      (event: unknown, method: string, params?: Record<string, unknown>, sessionId?: string) => void
+    > = [];
+    created.webContents.debugger.on = vi.fn((_event, listener) => {
+      debuggerListeners.push(listener);
+    });
+    created.webContents.debugger.removeListener = vi.fn((_event, listener) => {
+      const idx = debuggerListeners.indexOf(listener);
+      if (idx >= 0) debuggerListeners.splice(idx, 1);
+    });
+    vi.mocked(created.webContents.capturePage).mockResolvedValue({
+      isEmpty: () => false,
+      getSize: () => ({ width: 800, height: 600 }),
+      toJPEG: () => Uint8Array.from([1, 2, 3]),
+    });
+    const owner = { windowId: "a7880000-0000-4000-8000-000000000011", threadId };
+    const leaseId = "a7880000-0000-4000-8000-000000000012";
+    const host = createBrowserSurfaceHost({
+      createView: () => created,
+      isOwnerWindowAvailable: () => true,
+    });
+    const run = (command: Readonly<Record<string, unknown>>) =>
+      host.pairedControl(decodePairedBrowserNativeCommand({ contextId, owner, ...command }));
+    try {
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 60_000,
+        },
+      });
+      host.attach(
+        contextId,
+        owner,
+        {
+          contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+          isDestroyed: () => false,
+          isVisible: () => true,
+          webContents: { send: vi.fn() },
+        },
+        { x: 0, y: 0, width: 800, height: 600 },
+      );
+      const inspect = await run({ operation: "inspect" });
+      if (inspect.status !== "target") throw new Error("Expected native target");
+      expect(await run({ operation: "claim", leaseId, target: inspect.target })).toEqual({
+        status: "claimed",
+      });
+
+      for (const listener of debuggerListeners) {
+        listener({}, "Page.fileChooserOpened", {
+          mode: "selectSingle",
+          backendNodeId: 91,
+          accept: ["text/plain"],
+        });
+      }
+      const frameWithChooser = await run({ operation: "frame", leaseId });
+      if (frameWithChooser.status !== "frame" || frameWithChooser.fileChooser === undefined) {
+        throw new Error("Expected fileChooser in paired frame");
+      }
+
+      expect(
+        await run({
+          operation: "file-choice",
+          leaseId,
+          chooserId: frameWithChooser.fileChooser.chooserId,
+          paths: [uploadPath],
+        }),
+      ).toEqual({ status: "file-chosen" });
+      expect(created.webContents.debugger.sendCommand).toHaveBeenCalledWith(
+        "DOM.setFileInputFiles",
+        { files: [uploadPath], backendNodeId: 91 },
+        undefined,
+      );
+
+      // Subsequent frames and remote inputs must keep working after file selection.
+      const nextFrame = await run({ operation: "frame", leaseId });
+      expect(nextFrame.status).toBe("frame");
+      if (nextFrame.status !== "frame") throw new Error("Expected next paired frame");
+      expect(
+        await run({
+          operation: "input",
+          leaseId,
+          events: [{ kind: "tap", frameId: nextFrame.frame.frameId, x: 0.5, y: 0.5 }],
+        }),
+      ).toEqual({ status: "input", effect: "completed" });
+    } finally {
+      await host.closeAll();
+      rmSync(stagingDir, { recursive: true, force: true });
+    }
+  });
+
+  it("maps normalized paired taps against the actual 2400x1600 native viewport while capping transmitted frames to 1920x1200", async () => {
+    const created = view();
+    const resize = vi.fn(({ width }: { readonly width: number }) => {
+      const height = Math.round((width * 1600) / 2400);
+      return {
+        isEmpty: () => false,
+        getSize: () => ({ width, height }),
+        toJPEG: () => Uint8Array.from([1, 2, 3]),
+      };
+    });
+    vi.mocked(created.webContents.capturePage).mockResolvedValue({
+      isEmpty: () => false,
+      getSize: () => ({ width: 2400, height: 1600 }),
+      resize,
+      toJPEG: () => Uint8Array.from([1, 2, 3]),
+    });
+    const owner = { windowId: "a7880000-0000-4000-8000-000000000021", threadId };
+    const leaseId = "a7880000-0000-4000-8000-000000000022";
+    const host = createBrowserSurfaceHost({
+      createView: () => created,
+      isOwnerWindowAvailable: () => true,
+    });
+    const run = (command: Readonly<Record<string, unknown>>) =>
+      host.pairedControl(decodePairedBrowserNativeCommand({ contextId, owner, ...command }));
+    try {
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 60_000,
+        },
+      });
+      host.attach(
+        contextId,
+        owner,
+        {
+          contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+          isDestroyed: () => false,
+          isVisible: () => true,
+          webContents: { send: vi.fn() },
+        },
+        { x: 0, y: 0, width: 2400, height: 1600 },
+      );
+      const inspect = await run({ operation: "inspect" });
+      if (inspect.status !== "target") throw new Error("Expected native target");
+      expect(await run({ operation: "claim", leaseId, target: inspect.target })).toEqual({
+        status: "claimed",
+      });
+      const frame = await run({ operation: "frame", leaseId });
+      if (frame.status !== "frame") throw new Error("Expected frame");
+      expect(frame.frame.viewport.width).toBeLessThanOrEqual(1920);
+      expect(frame.frame.viewport.height).toBeLessThanOrEqual(1200);
+      expect(resize).toHaveBeenCalledWith({ width: 1800 });
+
+      expect(
+        await run({
+          operation: "input",
+          leaseId,
+          events: [{ kind: "tap", frameId: frame.frame.frameId, x: 0.75, y: 0.75 }],
+        }),
+      ).toEqual({ status: "input", effect: "completed" });
+
+      const touchStart = vi
+        .mocked(created.webContents.debugger.sendCommand)
+        .mock.calls.find(
+          ([method, params]) =>
+            method === "Input.dispatchTouchEvent" &&
+            (params as { readonly type?: string })?.type === "touchStart",
+        );
+      expect(touchStart?.[1]).toMatchObject({
+        type: "touchStart",
+        touchPoints: [{ x: 1800, y: 1200 }],
+      });
+    } finally {
       await host.closeAll();
     }
   });
@@ -394,7 +628,7 @@ describe("BrowserSurfaceHost", () => {
       const created = view();
       const fetch = vi.fn(async () => ({
         ok: true,
-        headers: { get: () => "image/png" },
+        headers: { get: (): string => "image/png" },
         body: {
           getReader: () => {
             let sent = false;
@@ -459,6 +693,240 @@ describe("BrowserSurfaceHost", () => {
       try {
         expect(fetch).not.toHaveBeenCalled();
         expect((await host.peek(contextId)).faviconDataUrl).toBeUndefined();
+      } finally {
+        await host.closeAll();
+      }
+    });
+  });
+
+  describe("a window's own tab icons", () => {
+    const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+    const ICON = `data:image/png;base64,${Buffer.from(PNG).toString("base64")}`;
+    const owner = { windowId: "window-a", threadId };
+
+    function fire(created: BrowserSurfaceViewPort, event: string, icons: string[] = []): void {
+      for (const [name, listener] of vi.mocked(created.webContents.on).mock.calls)
+        if (name === event) listener({}, icons);
+    }
+
+    async function withTabs(count: number) {
+      const created: BrowserSurfaceViewPort[] = [];
+      const fetch = vi.fn(async () => ({
+        ok: true,
+        headers: { get: (): string => "image/png" },
+        body: {
+          getReader: () => {
+            let sent = false;
+            return {
+              read: async () =>
+                sent ? { done: true } : ((sent = true), { done: false, value: PNG }),
+              cancel: async () => undefined,
+            };
+          },
+        },
+      }));
+      const host = createBrowserSurfaceHost({
+        createView: () => {
+          const native = view();
+          (native.webContents.session as { fetch?: unknown }).fetch = fetch;
+          created.push(native);
+          return native;
+        },
+      });
+      await host.createContext({
+        contextId,
+        owner,
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: Math.max(count, 1),
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      for (let index = 1; index < count; index += 1) {
+        await host.tabCommand(contextId, owner, { kind: "open" });
+      }
+      return { created, fetch, host };
+    }
+
+    it("reads every tab's icon, including a tab the person has never selected", async () => {
+      const { created, host } = await withTabs(2);
+      try {
+        const first = host.tabIcons(contextId, owner, [])[0]?.tabId;
+        fire(created[0]!, "page-favicon-updated", ["https://example.com/one.png"]);
+        fire(created[1]!, "page-favicon-updated", ["https://example.com/two.png"]);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const rows = host.tabIcons(contextId, owner, []);
+        expect(rows).toHaveLength(2);
+        expect(rows.every((row) => row.dataUrl === ICON)).toBe(true);
+        expect(rows.filter((row) => row.active)).toHaveLength(1);
+        // The icon of the tab that is not in front still answers, without the
+        // person selecting it or any peek naming it.
+        expect(rows.some((row) => !row.active && row.dataUrl === ICON && row.tabId === first)).toBe(
+          true,
+        );
+      } finally {
+        await host.closeAll();
+      }
+    });
+
+    it("returns no image for an icon the window already holds and the new image after it changes", async () => {
+      const { created, host } = await withTabs(1);
+      try {
+        fire(created[0]!, "page-favicon-updated", ["https://example.com/first.png"]);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const [row] = host.tabIcons(contextId, owner, []);
+        expect(row?.dataUrl).toBe(ICON);
+        const [same] = host.tabIcons(contextId, owner, [
+          { tabId: row!.tabId, revision: row!.revision },
+        ]);
+        expect(same?.revision).toBe(row!.revision);
+        expect(same?.dataUrl).toBeUndefined();
+        // A declaration inside the minimum fetch interval is refused, so the
+        // page's new address is declared a beat later than the first fetch.
+        await new Promise((resolve) => setTimeout(resolve, 1_100));
+        fire(created[0]!, "page-favicon-updated", ["https://example.com/second.png"]);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const [changed] = host.tabIcons(contextId, owner, [
+          { tabId: row!.tabId, revision: row!.revision },
+        ]);
+        expect(changed?.revision).not.toBe(row!.revision);
+        expect(changed?.dataUrl).toBe(ICON);
+      } finally {
+        await host.closeAll();
+      }
+    });
+
+    it("clears a tab's icon on top-level navigation instead of lending it to the next page", async () => {
+      const { created, host } = await withTabs(1);
+      try {
+        fire(created[0]!, "page-favicon-updated", ["https://example.com/favicon.png"]);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const [row] = host.tabIcons(contextId, owner, []);
+        fire(created[0]!, "did-navigate");
+        const [moved] = host.tabIcons(contextId, owner, [
+          { tabId: row!.tabId, revision: row!.revision },
+        ]);
+        expect(moved?.revision).not.toBe(row!.revision);
+        expect(moved?.dataUrl).toBeUndefined();
+      } finally {
+        await host.closeAll();
+      }
+    });
+
+    it("withholds an unaccepted image's bytes but still answers the tab once", async () => {
+      const { created, fetch, host } = await withTabs(1);
+      try {
+        const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>');
+        fetch.mockResolvedValue({
+          ok: true,
+          headers: { get: () => "image/svg+xml" },
+          body: {
+            getReader: () => {
+              let sent = false;
+              return {
+                read: async () =>
+                  sent ? { done: true } : ((sent = true), { done: false, value: svg }),
+                cancel: async () => undefined,
+              };
+            },
+          },
+        });
+        fire(created[0]!, "page-favicon-updated", ["https://example.com/icon.svg"]);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const [row] = host.tabIcons(contextId, owner, []);
+        // The tab is real and its revision answers; the SVG markup itself
+        // never transports to a person-facing strip.
+        expect(row?.dataUrl).toBeUndefined();
+        expect(row?.revision).toBeGreaterThan(0);
+        // Acknowledging that revision is final: the same rejected image is
+        // not offered again on the next poll.
+        const [again] = host.tabIcons(contextId, owner, [
+          { tabId: row!.tabId, revision: row!.revision },
+        ]);
+        expect(again?.revision).toBe(row!.revision);
+        expect(again?.dataUrl).toBeUndefined();
+      } finally {
+        await host.closeAll();
+      }
+    });
+
+    it("refuses a window or thread that does not own the context", async () => {
+      const { host } = await withTabs(1);
+      try {
+        expect(() => host.tabIcons(contextId, { windowId: "window-b", threadId }, [])).toThrow();
+        expect(() =>
+          host.tabIcons(contextId, { windowId: "window-a", threadId: "other-thread" }, []),
+        ).toThrow();
+      } finally {
+        await host.closeAll();
+      }
+    });
+
+    it("refuses a hibernated context a window does not own without reopening its pages", async () => {
+      const views: BrowserSurfaceViewPort[] = [];
+      const host = createBrowserSurfaceHost({
+        hibernation: { idleMs: 0 },
+        createView: () => {
+          const native = view();
+          views.push(native);
+          return native;
+        },
+      });
+      const policy = decodeBrowserContextPolicy({
+        profileMode: "isolated",
+        profile: { kind: "personal" },
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 60_000,
+      });
+      const ready = await host.persistentOwner.configure(true);
+      if (ready.status !== "ready") throw new Error("owner missing");
+      const executionId = decodeBrowserContextId("60000000-0000-4000-8000-000000000004");
+      const binding = decodePersistentBrowserLeaseBinding({
+        ownerId: ready.ownerId,
+        grantId: contextId,
+        executionId,
+        threadId,
+        mode: "work",
+        projectId: contextId,
+        providerId: "provider",
+        modelId: "model",
+        authorityRevision: "revision",
+        profile: { kind: "personal" },
+        origins: policy.allowedOrigins,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+      const created = await host.persistentOwner.createContext(
+        executionId,
+        policy,
+        new AbortController().signal,
+        binding,
+      );
+      if (created.status !== "created") throw new Error("context not created");
+      try {
+        await host.persistentOwner.sweep();
+        expect(views).toHaveLength(1);
+        // A context nobody's window owns answers nobody's icon read, and the
+        // refusal is a lookup, not a wake: no page was reopened to refuse.
+        expect(() => host.tabIcons(executionId, { windowId: "window-a", threadId }, [])).toThrow();
+        // The execution owner itself cannot read the images either: an icon is
+        // a person-facing detail, never a hint the agent may hold.
+        expect(() =>
+          host.tabIcons(
+            executionId,
+            {
+              kind: "execution",
+              leaseId: created.leaseId,
+              ownerId: created.ownerId,
+              threadId,
+            },
+            [],
+          ),
+        ).toThrow();
+        expect(views).toHaveLength(1);
       } finally {
         await host.closeAll();
       }
@@ -1497,6 +1965,96 @@ describe("BrowserSurfaceHost", () => {
     host.closeContext(contextId);
   });
 
+  it("does not open a new tab from a local page link on a Private page", async () => {
+    let receive:
+      | ((image: {
+          getSize: () => { width: number; height: number };
+          toJPEG: () => Uint8Array;
+        }) => void)
+      | undefined;
+    const first = view();
+    const second = view();
+    const ports = [first, second];
+    const input = vi.fn((event: { readonly type: string; readonly button?: string }) => {
+      if (event.type === "mouseUp" && event.button === "right")
+        for (const [name, listener] of vi.mocked(first.webContents.on).mock.calls)
+          if (name === "context-menu")
+            listener(
+              {},
+              {
+                frame: first.webContents.mainFrame,
+                isEditable: false,
+                linkURL: "http://192.168.1.1/",
+              },
+            );
+    });
+    const createView = vi.fn(() => {
+      const port = ports.shift();
+      if (port === undefined) throw new Error("The page asked for another view");
+      return {
+        ...port,
+        human: {
+          input,
+          visible: vi.fn(),
+          bounds: vi.fn(),
+          frames: (listener: NonNullable<typeof receive>) => {
+            receive = listener;
+            return () => {};
+          },
+        },
+      };
+    });
+    const host = createBrowserSurfaceHost({
+      isEmbeddedOwner: () => true,
+      isOwnerWindowAvailable: () => true,
+      createView,
+    });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["*"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 4,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const request = (value: Readonly<Record<string, unknown>>) =>
+      decodeHumanBrowserRequest({ contextId, threadId, ...value });
+    const attached = await host.humanPresentation(request({ kind: "attach" }), "window-a");
+    if (attached.status !== "attached") throw new Error("Attachment refused");
+    const send = (value: Readonly<Record<string, unknown>>) =>
+      host.humanPresentation(
+        request({ presentationId: attached.presentationId, ...value }),
+        "window-a",
+      );
+    await send({ kind: "layout", layout: { width: 800, height: 600, visible: true } });
+    receive?.({ getSize: () => ({ width: 800, height: 600 }), toJPEG: () => new Uint8Array([1]) });
+    await send({ kind: "frame", acknowledgement: 0 });
+    for (const type of ["mouseDown", "mouseUp"])
+      expect(
+        await send({
+          kind: "input",
+          frameSequence: 1,
+          input: { type, x: 40, y: 60, button: "right", clickCount: 1 },
+        }),
+      ).toEqual({ status: "accepted" });
+    const menu = await send({ kind: "popup" });
+    if (menu.status !== "popup" || menu.popup.kind !== "context")
+      throw new Error("Expected the page's link menu");
+    expect(
+      await send({
+        kind: "popup-answer",
+        popupId: menu.popup.id,
+        answer: { kind: "context", action: "open-link" },
+      }),
+    ).toEqual({ status: "refused" });
+    expect(createView).toHaveBeenCalledOnce();
+    expect((await host.act(contextId, { kind: "tab-list" })).tabs).toHaveLength(1);
+    host.closeContext(contextId);
+  });
+
   it("refuses a composition edit when an agent action takes the surface while the edit awaits its field", async () => {
     let receive:
       | ((image: {
@@ -1934,7 +2492,8 @@ describe("BrowserSurfaceHost", () => {
       .mock.calls.find(([event]) => event === "will-redirect")?.[1];
     // Chromium cancels the load when the guard refuses the redirect, so
     // loadURL rejects with an opaque ERR_ABORTED after the guard has run.
-    vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+    vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+      namedStart(created, url);
       // A site's own www host is the same place; a different site is not.
       redirectGuard?.({
         preventDefault: vi.fn(),
@@ -2124,7 +2683,8 @@ describe("BrowserSurfaceHost", () => {
       "http://LOCALHOST./",
     ])("refuses a hop to this computer or its network (%s)", async (privateHop) => {
       const { created, host, hop } = await opened();
-      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
         // A public hop first: the refusal is for the private one, not the chain.
         expect(hop("https://moved.example.net/")).toBe(true);
         expect(hop(privateHop)).toBe(false);
@@ -2142,7 +2702,8 @@ describe("BrowserSurfaceHost", () => {
 
     it("drops the dialogs of a navigation that failed, and treats the next action's hops as nobody's", async () => {
       const { created, host, hop, alert, misbehave } = await opened();
-      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
         expect(hop("https://moved.example.net/")).toBe(true);
         alert("Words from a site nobody approved");
         misbehave("https://moved.example.net");
@@ -2266,7 +2827,8 @@ describe("BrowserSurfaceHost", () => {
         return preventDefault.mock.calls.length === 0;
       };
       const followed: boolean[] = [];
-      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
         followed.push(hop("https://moved.example.net/"), hop("http://192.168.1.1/"));
         throw new Error("ERR_ABORTED (-3) loading 'https://short.example/'");
       });
@@ -2281,7 +2843,8 @@ describe("BrowserSurfaceHost", () => {
 
       // The person typed a local address themself: its own hops are followed.
       vi.mocked(created.webContents.getURL).mockReturnValue("http://127.0.0.1:4101/next");
-      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
         expect(hop("http://127.0.0.1:4101/next")).toBe(true);
       });
       await expect(
@@ -2293,7 +2856,8 @@ describe("BrowserSurfaceHost", () => {
       ).resolves.toMatchObject({ url: "http://127.0.0.1:4101/next" });
 
       // The agent's own navigation on such a page reaches any site, a local one too.
-      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
         expect(hop("http://192.168.1.1/")).toBe(true);
       });
       vi.mocked(created.webContents.getURL).mockReturnValue("http://192.168.1.1/");
@@ -2304,7 +2868,8 @@ describe("BrowserSurfaceHost", () => {
 
     it("still refuses the same redirect when the agent asked for the navigation", async () => {
       const { created, host, hop } = await opened();
-      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
         expect(hop("https://moved.example.net/")).toBe(false);
         throw new Error("ERR_ABORTED (-3) loading 'https://short.example/'");
       });
@@ -2337,6 +2902,278 @@ describe("BrowserSurfaceHost", () => {
         title: "Example",
         dialogs: [{ type: "alert", message: "Words from the approved site" }],
       });
+    });
+  });
+
+  describe("a page-started navigation to this computer or its network", () => {
+    const policy = {
+      profileMode: "isolated" as const,
+      allowedOrigins: ["*"],
+      credentialFieldProtection: true,
+      maxConcurrentTabs: 4,
+      sessionTimeoutMs: 300_000,
+    };
+    async function opened(allowedOrigins: ReadonlyArray<string> = policy.allowedOrigins) {
+      const created = view();
+      const host = createBrowserSurfaceHost({ createView: () => created });
+      await host.createContext({
+        contextId,
+        owner: { windowId: "window-a", threadId },
+        policy: { ...policy, allowedOrigins: [...allowedOrigins] },
+      });
+      const guardOf = (port: BrowserSurfaceViewPort, event: string) =>
+        vi.mocked(port.webContents.on).mock.calls.find(([name]) => name === event)?.[1];
+      const redirectGuard = guardOf(created, "will-redirect");
+      const startGuard = guardOf(created, "will-frame-navigate");
+      /** A server redirect hop; answers whether the guard let it pass. */
+      const hop = (url: string, top = true, initiator: object | null = null): boolean => {
+        const preventDefault = vi.fn();
+        redirectGuard?.({ preventDefault, isMainFrame: top, url, initiator });
+        return preventDefault.mock.calls.length === 0;
+      };
+      /** A navigation the page itself starts; answers whether the guard let it pass. */
+      const start = (url: string, top = true, initiator: object | null = null): boolean => {
+        const preventDefault = vi.fn();
+        startGuard?.({ preventDefault, isMainFrame: top, url, initiator });
+        return preventDefault.mock.calls.length === 0;
+      };
+      /** The document Chromium reports as committed onto the tab. */
+      const commit = (url: string): void => {
+        vi.mocked(created.webContents.getURL).mockReturnValue(url);
+        guardOf(created, "did-navigate")?.({}, url);
+      };
+      return { created, host, hop, start, commit, guardOf };
+    }
+
+    it("refuses a move the page starts itself, even on a page that admits every site", async () => {
+      const { hop, start } = await opened();
+      expect(start("http://192.168.1.1/")).toBe(false);
+      expect(start("http://printer.local/", false)).toBe(false);
+      expect(hop("http://10.0.0.5/", false)).toBe(false);
+      expect(start("https://moved.example.net/")).toBe(true);
+      expect(start("https://frame.example.net/", false)).toBe(true);
+    });
+
+    it("lets only the load the host named follow a redirect onto it", async () => {
+      const { created, host, hop } = await opened();
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        expect(hop("http://192.168.1.1/")).toBe(false);
+        // Chromium may spell the named address with a capitalized host and no
+        // root slash; it still reports the start of the load the host drove.
+        namedStart(created, url.replace("short.example/", "SHORT.EXAMPLE"));
+        expect(hop("http://192.168.1.1/", true, {})).toBe(false);
+        expect(hop("http://192.168.1.1/")).toBe(true);
+        // A subframe hop in the same load is still a page-started move.
+        expect(hop("http://192.168.1.1/", false)).toBe(false);
+      });
+      await host.act(contextId, { kind: "navigate", target: "https://short.example/" });
+
+      // The name ended with the load: the same hop is a page-started move now.
+      expect(hop("http://192.168.1.1/")).toBe(false);
+    });
+
+    it("drops the named load when a page-started main navigation is admitted", async () => {
+      const { created, host, hop, start } = await opened();
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
+        expect(start("https://moved.example.net/")).toBe(true);
+        // The page's admitted move is its own: the named load's hops are spent.
+        expect(hop("http://192.168.1.1/")).toBe(false);
+      });
+      await host.act(contextId, { kind: "navigate", target: "https://short.example/" });
+    });
+
+    it("keeps local hops to the one origin a context was approved for, and no wider list", async () => {
+      const oneSite = await opened(["http://127.0.0.1:8080"]);
+      expect(oneSite.start("http://127.0.0.1:8080/admin")).toBe(true);
+      expect(oneSite.hop("http://127.0.0.1:8080/admin")).toBe(true);
+      expect(oneSite.start("http://192.168.1.1/")).toBe(false);
+
+      const twoSites = await opened(["http://127.0.0.1:8080", "https://short.example"]);
+      expect(twoSites.start("http://127.0.0.1:8080/admin")).toBe(false);
+    });
+
+    it("lets the person's typed local origin redirect to itself and no other local address", async () => {
+      const { created, host, hop } = await opened();
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
+        expect(hop("http://127.0.0.1:4101/next")).toBe(true);
+        expect(hop("http://192.168.1.1/")).toBe(false);
+        throw new Error("ERR_ABORTED (-3) loading 'http://127.0.0.1:4101/'");
+      });
+      await expect(
+        host.act(contextId, {
+          kind: "navigate",
+          target: "http://127.0.0.1:4101/",
+          startedBy: "person",
+        }),
+      ).rejects.toMatchObject({
+        name: "BrowserNavigationBlockedError",
+        url: "http://192.168.1.1/",
+      });
+    });
+
+    it("keeps a typed load's local redirect on its exact origin even in a one-site context", async () => {
+      const { created, host, hop } = await opened(["http://localhost:4101"]);
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
+        expect(hop("http://localhost:4101/next")).toBe(true);
+        // The allowlist forgives an http page's https upgrade; the person
+        // typed the http origin, so the hop is not theirs.
+        expect(hop("https://localhost:4101/next")).toBe(false);
+        throw new Error("ERR_ABORTED (-3) loading 'http://localhost:4101/'");
+      });
+      await expect(
+        host.act(contextId, {
+          kind: "navigate",
+          target: "http://localhost:4101/",
+          startedBy: "person",
+        }),
+      ).rejects.toMatchObject({
+        name: "BrowserNavigationBlockedError",
+        url: "https://localhost:4101/next",
+      });
+    });
+
+    it("lets a local document the person opened keep links and redirects on its exact origin", async () => {
+      const { created, host, hop, start, commit } = await opened();
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
+        commit(url);
+      });
+      await host.act(contextId, {
+        kind: "navigate",
+        target: "http://127.0.0.1:4101/",
+        startedBy: "person",
+      });
+      // Its own main frame may move within the exact committed origin, and a
+      // same-origin redirect of such a move stays with it.
+      expect(start("http://127.0.0.1:4101/next", true, created.webContents.mainFrame)).toBe(true);
+      expect(hop("http://127.0.0.1:4101/deeper", true, created.webContents.mainFrame)).toBe(true);
+      // Once a redirect leaves the origin, a later hop cannot return to it.
+      expect(hop("https://moved.example.net/", true, created.webContents.mainFrame)).toBe(true);
+      expect(hop("http://127.0.0.1:4101/", true, created.webContents.mainFrame)).toBe(false);
+      expect(start("http://127.0.0.1:4101/next", true, created.webContents.mainFrame)).toBe(true);
+      // A new browser-driven load supersedes an earlier renderer chain.
+      namedStart(created, "https://moved.example.net/");
+      expect(hop("http://127.0.0.1:4101/", true, created.webContents.mainFrame)).toBe(false);
+      // A different port or scheme is another origin, still a refused hop.
+      expect(start("http://127.0.0.1:4102/", true, created.webContents.mainFrame)).toBe(false);
+      expect(start("https://127.0.0.1:4101/", true, created.webContents.mainFrame)).toBe(false);
+      // A public move is still ordinary: it and its own redirects are
+      // admitted, but its chain cannot return to this computer's network.
+      expect(start("https://moved.example.net/", true, created.webContents.mainFrame)).toBe(true);
+      expect(hop("https://cdn.example.net/x", true, created.webContents.mainFrame)).toBe(true);
+      expect(hop("http://127.0.0.1:4101/", true, created.webContents.mainFrame)).toBe(false);
+      // Once a public document commits, the local continuation is gone.
+      commit("https://moved.example.net/");
+      expect(start("http://127.0.0.1:4101/", true, created.webContents.mainFrame)).toBe(false);
+    });
+
+    it("lets a local document the agent opened keep links on its exact origin only", async () => {
+      const { created, host, hop, start, commit } = await opened([
+        "http://127.0.0.1:4101",
+        "https://short.example",
+      ]);
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
+        commit(url);
+      });
+      await host.act(contextId, { kind: "navigate", target: "http://127.0.0.1:4101/" });
+      expect(start("http://127.0.0.1:4101/next", true, created.webContents.mainFrame)).toBe(true);
+      expect(hop("http://127.0.0.1:4101/deeper", true, created.webContents.mainFrame)).toBe(true);
+      expect(start("http://127.0.0.1:4102/", true, created.webContents.mainFrame)).toBe(false);
+      expect(start("https://short.example/", true, created.webContents.mainFrame)).toBe(true);
+      expect(hop("http://127.0.0.1:4101/", true, created.webContents.mainFrame)).toBe(false);
+    });
+
+    it("requires a committed explicit open and the same tab's main frame to continue a local page", async () => {
+      const unnamed = await opened();
+      vi.mocked(unnamed.created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        // A start reported but never committed acquires nothing.
+        namedStart(unnamed.created, url);
+      });
+      await unnamed.host.act(contextId, {
+        kind: "navigate",
+        target: "http://192.168.1.1/",
+        startedBy: "person",
+      });
+      expect(
+        unnamed.start("http://192.168.1.1/next", true, unnamed.created.webContents.mainFrame),
+      ).toBe(false);
+      // A commit nobody explicitly opened acquires no continuation either.
+      unnamed.commit("http://192.168.1.1/");
+      expect(
+        unnamed.start("http://192.168.1.1/next", true, unnamed.created.webContents.mainFrame),
+      ).toBe(false);
+
+      const { created, host, start, commit } = await opened();
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
+        commit(url);
+      });
+      await host.act(contextId, {
+        kind: "navigate",
+        target: "http://127.0.0.1:4101/",
+        startedBy: "person",
+      });
+      // A top-level move another frame started is not the main frame's own.
+      expect(start("http://127.0.0.1:4101/next", true, {})).toBe(false);
+      // A subframe's own move never continues the document it lives in.
+      expect(start("http://127.0.0.1:4101/next", false, created.webContents.mainFrame)).toBe(false);
+      // No initiator at all means no continuation either.
+      expect(start("http://127.0.0.1:4101/next")).toBe(false);
+      // The refused starts did not take the committed document's own rule.
+      expect(start("http://127.0.0.1:4101/next", true, created.webContents.mainFrame)).toBe(true);
+    });
+
+    it("does not treat a named public address as an explicit open of its local redirect", async () => {
+      const { created, host, hop, start, commit } = await opened();
+      const local = "http://127.0.0.1:4101/";
+      vi.mocked(created.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(created, url);
+        expect(hop(local)).toBe(true);
+        commit(local);
+      });
+      await host.act(contextId, { kind: "navigate", target: "https://short.example/" });
+      expect(start(`${local}next`, true, created.webContents.mainFrame)).toBe(false);
+    });
+
+    it("names only the tab the host loaded, not a neighbour", async () => {
+      const first = view();
+      const second = view();
+      const ports = [first, second];
+      const host = createBrowserSurfaceHost({ createView: () => ports.shift()! });
+      await host.createContext({
+        contextId,
+        owner: { windowId: "window-a", threadId },
+        policy,
+      });
+      const firstRedirect = vi
+        .mocked(first.webContents.on)
+        .mock.calls.find(([event]) => event === "will-redirect")?.[1];
+      const firstHop = (url: string): boolean => {
+        const preventDefault = vi.fn();
+        firstRedirect?.({ preventDefault, isMainFrame: true, url });
+        return preventDefault.mock.calls.length === 0;
+      };
+      vi.mocked(second.webContents.loadURL).mockImplementationOnce(async (url) => {
+        namedStart(second, url);
+        const secondRedirect = vi
+          .mocked(second.webContents.on)
+          .mock.calls.find(([event]) => event === "will-redirect")?.[1];
+        const secondHop = (url: string): boolean => {
+          const preventDefault = vi.fn();
+          secondRedirect?.({ preventDefault, isMainFrame: true, url });
+          return preventDefault.mock.calls.length === 0;
+        };
+        expect(secondHop("http://192.168.1.1/")).toBe(true);
+        expect(firstHop("http://192.168.1.1/")).toBe(false);
+        throw new Error("ERR_TIMED_OUT");
+      });
+      await expect(
+        host.act(contextId, { kind: "tab-open", target: "https://short.example/" }),
+      ).rejects.toThrow("ERR_TIMED_OUT");
     });
   });
 
@@ -4660,8 +5497,8 @@ describe("the native execution owner boundary", () => {
       ),
     ).toMatchObject({ status: "refused" });
     expect(
-      await host.ownerControl(
-        decodeOwnerBrowserNativeCommand({
+      await host.pairedControl(
+        decodePairedBrowserNativeCommand({
           operation: "inspect",
           contextId: executionId,
           owner: { windowId: contextId, threadId },

@@ -11,6 +11,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { join } from "node:path";
 import {
   AppUpdateFeed,
+  PairedDeviceAlert,
   HardwareAddress,
   HubAutoApplyKind,
   HubDirectPushEnvironment,
@@ -29,6 +30,7 @@ import {
   HubWakeSpokeTimes,
   NewMemberAlert,
   PeerGrant,
+  ProjectId,
   RosterMember,
   SignedHubRoster,
   WakeRoutineId,
@@ -56,6 +58,18 @@ export const HubMemberRecord = Schema.Struct({
   deviceId: Schema.optional(Schema.UUID),
   /** Absent for a guest, which runs no listener the hub could reach. */
   listenerOrigin: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(300))),
+  /**
+   * For a guest that is a desktop window of a member: that member (the hub's
+   * own id for a window on the hub). The guest leaves the roster with it, and
+   * a member has one such guest at a time.
+   */
+  introducedBy: Schema.optional(HubMemberId),
+  /**
+   * The paired device this hub admitted for such a guest when the window
+   * asked it directly, which the hub's own Act list bounds. Revoked when the
+   * guest leaves the roster, is replaced, or the hub role is turned off.
+   */
+  windowDeviceId: Schema.optional(Schema.UUID),
 }).annotations(strict);
 export type HubMemberRecord = typeof HubMemberRecord.Type;
 
@@ -265,6 +279,12 @@ export const HubSideState = Schema.Struct({
   /** Accept moved threads, which is on unless a window on the hub turned it off. */
   acceptMovedThreads: Schema.optional(Schema.Literal(false)),
   /**
+   * The hub's own Act list: the Projects here a member's desktop window may
+   * start threads in, answer, and stop. Set only from a window on the hub;
+   * absent or empty names none.
+   */
+  actProjects: Schema.optional(Schema.Array(ProjectId)),
+  /**
    * The members this hub removed, with the roster sequence of each removal. A
    * standby that stood in hands back its changes against a base sequence, and
    * the removals after it are what keep a member out when the other side kept it.
@@ -395,8 +415,10 @@ export type HubLinkState = typeof HubLinkState.Type;
 export const HubState = Schema.Struct({
   hub: Schema.optional(HubSideState),
   link: Schema.optional(HubLinkState),
-  /** Guest devices a dropped link could not revoke because the device pairing was not running; revoked once it is. */
+  /** Guest devices a dropped link, or the hub dropping a member window, could not revoke because the device pairing was not running; revoked once it is. */
   pendingDeviceRevocations: Schema.optional(Schema.Array(Schema.UUID)),
+  /** Devices that paired directly with this host, until a window clears each alert or the device is removed. */
+  pairedDeviceAlerts: Schema.optional(Schema.Array(PairedDeviceAlert)),
   /** A paired phone or web client's merge needs a fresh unlock on an owner device; set only from a window on this host. */
   ownerUnlockBeforePairedMerge: Schema.optional(Schema.Literal(true)),
   /** Each approval answer from an owner device needs its own fresh unlock; unset, an open session covers them. Set only from a window on this host. */

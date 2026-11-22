@@ -1,4 +1,5 @@
 import { pendingQuestionDeferrals } from "../pendingQuestionDeferrals";
+import type { HubActScopeSlot } from "../hub/hubActScope";
 import { randomUUID } from "node:crypto";
 import {
   decodeAgentRunParentThreadId,
@@ -11,7 +12,9 @@ import {
   type AgentRun,
   type AgentRunId,
   type PendingRequest,
+  type ServiceOffer,
 } from "@octant/contracts";
+import type { ClientPrincipal } from "../clientPrincipal";
 import { createWorkOverviewRouteHandler } from "../workOverviewRoutes";
 import { createDesignSystemRouteHandler } from "../designSystemRoutes";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
@@ -39,6 +42,7 @@ import {
 import { createPendingRequestRouteHandler } from "../pendingRequestRoutes";
 import { PendingRequestService, type PendingRequestReader } from "../pendingRequestService";
 import { waitingAsksFrom, type WaitingAskThread } from "../waitingAsks";
+import type { ContextWiring } from "./context";
 import type { BrowserWiring } from "./browser";
 import { createThreadSearchRouteHandler } from "../threadSearchRoutes";
 import { createWorkThreadRouteHandler } from "../workThreadRoutes";
@@ -54,7 +58,11 @@ import { listWorkTurnDecisions, workTurnDecision } from "../turnDecisions/workTu
 import { DecisionReviews, type DecisionReviewDependencies } from "../turnDecisions/decisionReviews";
 import { replyBeforeTurnDecision } from "@octant/domain/turn-decision-policy";
 import { defaultShellSettings, workProjectKeepsStatusFile } from "@octant/domain";
-import { resolveAgentRunParentThreadTitle, resolveHarnessThreadFacts } from "./agentRuns";
+import {
+  resolveAgentRunParentThreadTitle,
+  resolveHarnessThreadFacts,
+  type AgentRunsWiring,
+} from "./agentRuns";
 import {
   listLeadApprovalRequests,
   listLeadQuestionRequests,
@@ -72,6 +80,8 @@ import type { WorkWiring } from "./work";
 import type { WorkFilesWiring } from "./workFiles";
 
 export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
+  /** The member's Act item for its hub, bound by the hub side after this is built. */
+  readonly hubActScopeSlot: HubActScopeSlot;
   /** The model side of a decision's second opinion, built where the configured drivers are. */
   readonly decisionReviewModelPort: Pick<
     DecisionReviewDependencies,
@@ -88,7 +98,7 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
     AuthorityWiring,
     | "agentRunPersistence"
     | "extensionToolApprovalService"
-    | "imageGenerationOffers"
+    | "serviceOffers"
     | "routineProposalService"
     | "windowAuthorityStore"
   > &
@@ -123,10 +133,13 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
     | "workThreadServiceWithWorkflows"
   > &
   Pick<WorkFilesWiring, "workResearchProjection"> &
+  Pick<ContextWiring, "windowCanOpenThread"> &
+  Pick<AgentRunsWiring, "finishedReceipts"> &
   Pick<FoundationsWiring, "workArtifactProjection" | "workThreadProjection" | "workTurnProjection">;
 
 export function wireWorkRequests(deps: WorkRequestsDependencies) {
   const {
+    hubActScopeSlot,
     agentRunInteractions,
     agentRunPersistence,
     decisionReviewModelPort,
@@ -134,7 +147,8 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     baseRouteCodeService,
     browserToolApprovalService,
     extensionToolApprovalService,
-    imageGenerationOffers,
+    serviceOffers,
+    windowCanOpenThread,
     projectMemoryAccess,
     routineProposalService,
     chatService,
@@ -142,6 +156,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     codeTurnDecisions,
     gitObservationPort,
     goalService,
+    finishedReceipts,
     nativeHarnessApprovals,
     nativeHarnessQuestions,
     nativeHarnessSessions,
@@ -216,6 +231,11 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     service: workRequestApplication,
     windowAuthorityStore,
     maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+    hubActScope: hubActScopeSlot.current,
+    requestProjectId: (requestId) => {
+      const projectId = workRequestService.lookup(requestId)?.projectId;
+      return projectId === undefined ? undefined : String(projectId);
+    },
   });
   // Whether a window may open a Work or Code parent: the project binding, not
   // the harness session route, which also requires the thread to be the open
@@ -386,6 +406,28 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
       ? undefined
       : { mode: "code", title: code.title, projectId: String(code.projectId) };
   };
+  const serviceOffersForWindow = async (
+    windowId: WindowId,
+    principal?: ClientPrincipal,
+    imageOffersOnly = false,
+  ): Promise<ReadonlyArray<ServiceOffer>> => {
+    const waiting = serviceOffers
+      .listForWindow(windowId)
+      .filter((offer) => !imageOffersOnly || offer.kind === "generate" || offer.kind === "save");
+    if (waiting.length === 0) return [];
+    const checked = await Promise.all(
+      waiting.map(async (offer) =>
+        (await windowCanOpenThread(windowId, offer.threadKind, String(offer.scopeId), principal))
+          ? offer
+          : undefined,
+      ),
+    );
+    return checked.flatMap((offer) => {
+      if (offer === undefined) return [];
+      const live = serviceOffers.find(windowId, offer.offerId);
+      return live === undefined ? [] : [live];
+    });
+  };
   const pendingRequestService = new PendingRequestService({
     reviews: decisionReviews,
     deferrals: pendingQuestionDeferrals(persistence.journal, persistence.connection),
@@ -407,16 +449,21 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     ],
     chat: () => chatService.listPendingQuestions(),
     children: childPendingForReader,
+    offerHostRun: randomUUID(),
     // Each list is the holding service's own for this reader, so who may
     // answer an ask is decided where it always was.
-    asks: (reader) =>
+    asks: async (reader, imageOffersOnly) =>
       waitingAsksFrom(
         {
           toolApprovals: extensionToolApprovalService.list(reader),
           browserApprovals: browserToolApprovalService.list(reader.scopeId),
           memoryProposals: projectMemoryAccess.proposals.list(reader.scopeId),
           routineProposals: routineProposalService.list(reader.scopeId),
-          imageOffers: imageGenerationOffers.listForWindow(reader.scopeId),
+          serviceOffers: await serviceOffersForWindow(
+            reader.scopeId,
+            reader.principal,
+            imageOffersOnly,
+          ),
         },
         readWaitingAskThread,
       ),
@@ -426,13 +473,14 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     windowAuthorityStore,
   });
   // The menu bar's roster: needs-you is the pending-request read, plus the
-  // Code requests and subagent waits each persisted local window could
-  // already open. The menu bar's own window binds no Project. Nothing here
-  // reads a terminal's screen.
+  // Code requests, subagent waits, and waiting service offers each persisted
+  // local window could already open. The menu bar's own window binds no
+  // Project. Nothing here reads a terminal's screen.
   const fleetActivityRoutes = createFleetActivityRouteHandler({
     service: new FleetActivityService({
       readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
-      pending: (windowId) => pendingRequestService.list(windowId),
+      pending: (windowId, reader, principal) =>
+        pendingRequestService.list(windowId, reader, principal),
       boundCodeWindows: () => windowsBoundToACodeProject(persistence.readWindowWorkspaces()),
       codePending: async (windowId) => [
         ...((await codeOperationRuntime?.pendingRequests?.(windowId)) ?? []),
@@ -440,6 +488,22 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
       ],
       boundProjectWindows: () => windowsBoundToAProject(persistence.readWindowWorkspaces()),
       childPending: childPendingForWindow,
+      offerWindows: () =>
+        persistence.readWindowWorkspaces().map(({ workspace }) => workspace.windowId),
+      offerPending: async (windowId) => {
+        const offers = await serviceOffersForWindow(windowId);
+        if (offers.length === 0) return [];
+        return waitingAsksFrom(
+          {
+            toolApprovals: [],
+            browserApprovals: [],
+            memoryProposals: [],
+            routineProposals: [],
+            serviceOffers: offers,
+          },
+          readWaitingAskThread,
+        );
+      },
       chat: () =>
         chatService
           .navigation()
@@ -469,6 +533,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     windowAuthorityStore,
   });
   const workThreadRoutes = createWorkThreadRouteHandler({
+    hubActScope: hubActScopeSlot.current,
     service: {
       bootstrap: (windowId) => workThreadServiceWithWorkflows.bootstrap(windowId),
       navigation: (windowId) => workThreadServiceWithWorkflows.navigation(windowId),
@@ -533,6 +598,9 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
         });
         const board = new WorkThreadBoardService({
           threads: { list: () => boardThreads },
+          finishedReceipts: {
+            read: (threadId) => finishedReceipts.boardMark(String(threadId)),
+          },
           evidence: {
             forThread: (entry) =>
               composeWorkBoardEvidence({

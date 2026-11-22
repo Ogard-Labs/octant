@@ -62,6 +62,7 @@ export function wireWorkRequestState(deps: WorkRequestStateDependencies) {
     providerSessions: {
       answerApproval: (input) => workRequestRuntime.answerApproval(input),
       answerUserInput: (input) => workRequestRuntime.answerUserInput(input),
+      changeLevelInPlace: (input) => workRequestRuntime.changeLevelInPlace(input),
       cancel: (input) => workRequestRuntime.cancel(input),
     },
     levelChanges: {
@@ -71,6 +72,7 @@ export function wireWorkRequestState(deps: WorkRequestStateDependencies) {
           message: "Work is not ready to change the thread's level.",
         },
       endTurn: (threadId) => workLevelChangeHolder.port?.endTurn(threadId),
+      enteredPlanInPlace: (threadId) => workLevelChangeHolder.port?.enteredPlanInPlace?.(threadId),
     },
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     clock: () => new Date().toISOString(),

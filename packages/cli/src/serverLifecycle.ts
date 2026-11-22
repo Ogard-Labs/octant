@@ -43,6 +43,11 @@ export interface ServerLifecycleDependencies {
   readonly control?: HostLifecycleControl;
   readonly paths?: HostRuntimePaths;
   readonly logs?: HostLogReadOptions;
+  /**
+   * `server disable --remove-service`: after stopping and disabling, delete the
+   * login's service descriptor too, as removing Octant from a computer does.
+   */
+  readonly removeService?: boolean;
   readonly sleep?: (milliseconds: number) => Promise<void>;
   readonly signal?: AbortSignal;
   readonly stdout?: { write: (chunk: string) => unknown };
@@ -144,6 +149,7 @@ async function executeServerLifecycleCommand(input: {
     await serviceManager.disable();
     const managerBeforeStop = await serviceManager.status();
     if (managerBeforeStop.active) await serviceManager.stop();
+    if (dependencies.removeService === true) await serviceManager.uninstall();
     const manager = await serviceManager.status();
     const report = await buildReport({ policy: nextPolicy, serviceManager, manager, control });
     return writeReport(

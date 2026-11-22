@@ -1,11 +1,12 @@
 import type { CodeProjectPullRequestRow } from "@octant/contracts";
 
 /**
- * The page's ordering and narrowing of the cached rows. The rows carry the time
- * of the last update and no creation time, so the orders offered are the ones
- * the row's own age can answer.
+ * The page's ordering and narrowing of the cached rows. Newest and Oldest order
+ * by when the pull request was opened; a row without that time (a snapshot from
+ * before it was recorded, or a pull request known only from a thread) cannot be
+ * placed by it, so it goes last under both, in update order.
  */
-export type PullRequestSort = "updated" | "stalest" | "repository";
+export type PullRequestSort = "updated" | "stalest" | "newest" | "oldest" | "repository";
 export type PullRequestStateFilter = "any" | "open" | "draft";
 export type PullRequestReviewFilter = "any" | "approved" | "changes-requested" | "needs-review";
 export type PullRequestChecksFilter = "any" | "passing" | "failing" | "pending";
@@ -32,6 +33,8 @@ export const PULL_REQUEST_SORT_OPTIONS: ReadonlyArray<{
 }> = [
   { value: "updated", label: "Recently updated" },
   { value: "stalest", label: "Least recently updated" },
+  { value: "newest", label: "Newest" },
+  { value: "oldest", label: "Oldest" },
   { value: "repository", label: "Repository" },
 ];
 
@@ -91,6 +94,12 @@ export function activeFilterCount(filters: PullRequestFilters): number {
 function timeOf(row: CodeProjectPullRequestRow): number {
   const parsed = Date.parse(row.updatedAt);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function createdTimeOf(row: CodeProjectPullRequestRow): number | undefined {
+  if (row.createdAt === undefined) return undefined;
+  const parsed = Date.parse(row.createdAt);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function repositoryName(row: CodeProjectPullRequestRow): string {
@@ -165,6 +174,17 @@ export function sortPullRequests(
     timeOf(b) - timeOf(a) || b.number - a.number;
   const copy = [...rows];
   if (sort === "stalest") return copy.sort((a, b) => -newestFirst(a, b));
+  if (sort === "newest" || sort === "oldest") {
+    const direction = sort === "newest" ? -1 : 1;
+    return copy.sort((a, b) => {
+      const createdA = createdTimeOf(a);
+      const createdB = createdTimeOf(b);
+      if (createdA === undefined || createdB === undefined) {
+        return Number(createdA === undefined) - Number(createdB === undefined) || newestFirst(a, b);
+      }
+      return direction * (createdA - createdB) || newestFirst(a, b);
+    });
+  }
   if (sort === "repository") {
     return copy.sort(
       (a, b) =>

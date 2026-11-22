@@ -12,7 +12,12 @@ import type { ProviderModel } from "@octant/contracts/providers";
 import type { ProviderCapabilitySupport } from "@octant/contracts/providers";
 import type { ProviderObservedState } from "@octant/contracts/providers";
 import type { ProviderReadiness } from "@octant/contracts/providers";
-import { threadAppToolSupport, type AppToolThreadLevel } from "./browserAgentAvailability";
+import {
+  carriesThreadTools,
+  threadAppToolSupport,
+  type AppToolCapabilities,
+  type AppToolThreadLevel,
+} from "./browserAgentAvailability";
 import {
   hasVerifiedToolAuthority,
   hasWorkToolAuthority,
@@ -716,10 +721,7 @@ export function modelCanTakeDelegatedWork(
   driverKind: ProviderDriverKind,
   observed: Pick<ProviderObservedState, "readiness" | "models"> &
     Partial<Pick<ProviderObservedState, "verifiedToolModelIds">> & {
-      readonly capabilities?: Pick<
-        ProviderObservedState["capabilities"],
-        "appManagedTools" | "appManagedToolsAtFullAccess"
-      >;
+      readonly capabilities?: AppToolCapabilities;
     },
   modelId: ProviderModelId,
   level?: AppToolThreadLevel,
@@ -729,7 +731,7 @@ export function modelCanTakeDelegatedWork(
     (observed.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false) ||
     (level !== undefined &&
       observed.capabilities !== undefined &&
-      threadAppToolSupport(observed.capabilities, level) === "mixed");
+      carriesThreadTools(threadAppToolSupport(observed.capabilities, level)));
   if (!carriesTools) return false;
   if (!isNativeHarnessDriverKind(driverKind)) {
     return (

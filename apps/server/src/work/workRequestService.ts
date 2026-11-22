@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import {
   EventActor,
+  MAX_SECRET_ANSWER_LENGTH,
   UtcTimestamp,
   decodeWorkRequest,
   decodeWorkRequestId,
@@ -60,20 +61,39 @@ export interface WorkRequestEventStorePort {
       };
 }
 
+/**
+ * The runtime cannot take the answer as asked (an agent offering only an
+ * allow that would outlast this one): it heard nothing and still waits, and
+ * the message tells the person what it can take.
+ */
+export interface WorkApprovalNotDeliverable {
+  readonly status: "not-deliverable";
+  readonly message: string;
+}
+
 export interface WorkRequestProviderSessionPort {
+  /** Rejects when the session could not be reached; resolves with a refusal it can explain. */
   answerApproval(input: {
     readonly providerInstanceId: ProviderInstanceId;
     readonly sessionId: ProviderSessionId;
     readonly requestId: string;
     readonly approved: boolean;
     readonly ownerCurrent?: () => boolean;
-  }): Promise<void>;
+  }): Promise<void | WorkApprovalNotDeliverable>;
   answerUserInput(input: {
     readonly providerInstanceId: ProviderInstanceId;
     readonly sessionId: ProviderSessionId;
     readonly requestId: string;
     readonly answer: string;
   }): Promise<void>;
+  /**
+   * Moves the asking session's running turn to Plan in place; absent, or
+   * anything but `applied`, and an approved entry to Plan ends the turn.
+   */
+  changeLevelInPlace?(input: {
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly sessionId: ProviderSessionId;
+  }): Promise<{ readonly status: "applied" | "refused" | "failed" }>;
   /** End the provider-side wait before the local request is cancelled. */
   cancel(input: {
     readonly providerInstanceId: ProviderInstanceId;
@@ -85,8 +105,9 @@ export interface WorkRequestProviderSessionPort {
 
 /**
  * Carries out an approved level change: the agent's own ask to plan first or
- * to leave Plan. The thread's level changes as the person's own choice, and
- * the turn that asked ends once the provider has the answer.
+ * to leave Plan. The thread's level changes as the person's own choice. The
+ * turn that asked ends once the provider has the answer, unless it entered
+ * Plan in place, when the running turn is held to Plan from then on.
  */
 export interface WorkRequestLevelChangePort {
   change(input: {
@@ -95,6 +116,8 @@ export interface WorkRequestLevelChangePort {
     readonly actor: typeof EventActor.Type;
   }): { readonly status: "changed" } | { readonly status: "refused"; readonly message: string };
   endTurn(threadId: WorkThreadId): void;
+  /** The running turn entered Plan in place: what it may do is Plan's from now on. */
+  enteredPlanInPlace?(threadId: WorkThreadId): void;
 }
 
 export interface WorkRequestServiceOptions {
@@ -158,7 +181,16 @@ export class WorkRequestService {
   /** One process owns a pending external callback delivery at a time. */
   readonly #activeDeliveries = new Set<string>();
   readonly #interruptedSessions = new Set<string>();
-  readonly #settlementListeners = new Map<string, Set<() => void>>();
+  readonly #settlementListeners = new Map<
+    string,
+    Set<
+      (settled?: {
+        readonly person: boolean;
+        readonly requestedAt?: UtcTimestamp;
+        readonly settledAt?: UtcTimestamp;
+      }) => void
+    >
+  >();
   /**
    * The thread's posture when each pending approval in this process was
    * asked, by request id. A request restored after a restart has none, and
@@ -358,7 +390,40 @@ export class WorkRequestService {
     ) {
       return failure("stale", APPROVAL_POSTURE_CHANGED_MESSAGE);
     }
-    if (entry.request.detail.kind === "user-input" && command.resolution.kind === "user-input") {
+    // A secret answer reaches only the question that asked for one, and a
+    // secret question takes no answer the request would record. The value
+    // rides beside the resolution, so the delivery intent never holds it.
+    const secretResolution =
+      command.resolution.kind === "user-input" && "secret" in command.resolution;
+    if (secretResolution !== (command.secretAnswer !== undefined)) {
+      return failure("invalid", "A secret answer is sent with a secret resolution, and only then.");
+    }
+    if (
+      entry.request.detail.kind === "user-input" &&
+      (entry.request.detail.secret === true) !== secretResolution
+    ) {
+      return failure(
+        "invalid",
+        secretResolution
+          ? "That question does not ask for a secret."
+          : "That question asks for a secret. Answer it in its thread.",
+      );
+    }
+    if (
+      command.secretAnswer !== undefined &&
+      (command.secretAnswer.trim().length === 0 ||
+        command.secretAnswer.length > MAX_SECRET_ANSWER_LENGTH)
+    ) {
+      return failure(
+        "invalid",
+        `A secret answer is between 1 and ${String(MAX_SECRET_ANSWER_LENGTH)} characters.`,
+      );
+    }
+    if (
+      entry.request.detail.kind === "user-input" &&
+      command.resolution.kind === "user-input" &&
+      "answer" in command.resolution
+    ) {
       const questionnaire = entry.request.detail.questionnaire;
       const answer = command.resolution.answer;
       if (
@@ -413,46 +478,88 @@ export class WorkRequestService {
         answeredBy,
       );
     }
+    // Entering Plan applies inside the running turn where the session's
+    // driver can hold it to Plan, before the agent hears the answer; leaving
+    // Plan, or a driver without that change, ends the turn.
+    let levelChangeApplied: "in-place" | "next-turn" | undefined;
+    // The level moves back and the request is left as it was: a retry
+    // applies the change again and delivers it, rather than finding the
+    // thread already moved.
+    const undoLevelChange = () => {
+      if (levelChange === undefined) return;
+      this.#levelChanges?.change({
+        threadId: entry.request.threadId,
+        kind: levelChange.to === "plan" ? "exit-plan" : "enter-plan",
+        actor: answeredBy,
+      });
+    };
     try {
+      let notDeliverable: WorkApprovalNotDeliverable | undefined;
       try {
+        if (levelChange !== undefined) {
+          const inPlace =
+            levelChange.to === "plan" && this.#providerSessions.changeLevelInPlace !== undefined
+              ? await this.#providerSessions
+                  .changeLevelInPlace({
+                    providerInstanceId: prepared.request.providerInstanceId,
+                    sessionId: prepared.request.providerSessionId,
+                  })
+                  .catch(() => ({ status: "failed" as const }))
+              : undefined;
+          levelChangeApplied = inPlace?.status === "applied" ? "in-place" : "next-turn";
+          // The running turn's ceiling narrows before the agent hears yes.
+          if (levelChangeApplied === "in-place")
+            this.#levelChanges?.enteredPlanInPlace?.(entry.request.threadId);
+        }
         if (command.resolution.kind === "approval") {
-          await this.#providerSessions.answerApproval({
-            providerInstanceId: prepared.request.providerInstanceId,
-            sessionId: prepared.request.providerSessionId,
-            requestId: providerCallbackId(entry),
-            approved: command.resolution.approved,
-            ...(ownerCurrent === undefined ? {} : { ownerCurrent }),
-          });
+          notDeliverable =
+            (await this.#providerSessions.answerApproval({
+              providerInstanceId: prepared.request.providerInstanceId,
+              sessionId: prepared.request.providerSessionId,
+              requestId: providerCallbackId(entry),
+              approved: command.resolution.approved,
+              ...(ownerCurrent === undefined ? {} : { ownerCurrent }),
+            })) ?? undefined;
         } else {
           await this.#providerSessions.answerUserInput({
             providerInstanceId: prepared.request.providerInstanceId,
             sessionId: prepared.request.providerSessionId,
             requestId: providerCallbackId(entry),
-            answer: providerAnswer(entry, command.resolution.answer),
+            answer:
+              "answer" in command.resolution
+                ? providerAnswer(entry, command.resolution.answer)
+                : (command.secretAnswer ?? ""),
           });
         }
       } catch {
-        // The provider never heard the answer, so the level moves back and the
-        // request is left as it was: a retry applies the change again and
-        // delivers it, rather than finding the thread already moved.
-        if (levelChange !== undefined) {
-          this.#levelChanges?.change({
-            threadId: entry.request.threadId,
-            kind: levelChange.to === "plan" ? "exit-plan" : "enter-plan",
-            actor: answeredBy,
-          });
-        }
+        // The provider never heard the answer.
+        undoLevelChange();
         return this.#deliveryFailure(prepared.request, "resolution", answeredBy);
+      }
+      if (notDeliverable !== undefined) {
+        // Nor did it here, but it said why, and the person can act on that:
+        // the request stays pending for an answer the agent can take.
+        undoLevelChange();
+        return this.#deliveryFailure(
+          prepared.request,
+          "resolution",
+          answeredBy,
+          notDeliverable.message,
+        );
       }
       const confirmed = this.#confirmDelivery(prepared.request, answeredBy);
       if (confirmed.status !== "ok") return confirmed;
       const settled = this.#settle(
         confirmed.request,
         "resolved",
-        { resolution: command.resolution },
+        {
+          resolution: command.resolution,
+          ...(levelChangeApplied === undefined ? {} : { levelChangeApplied }),
+        },
         answeredBy,
       );
-      if (levelChange !== undefined) this.#levelChanges?.endTurn(entry.request.threadId);
+      if (levelChange !== undefined && levelChangeApplied !== "in-place")
+        this.#levelChanges?.endTurn(entry.request.threadId);
       return settled;
     } finally {
       this.#releaseActiveDelivery(prepared.request);
@@ -540,7 +647,11 @@ export class WorkRequestService {
       readonly providerSessionId: ProviderSessionId;
       readonly providerCallbackId: string;
     },
-    callback: () => void,
+    callback: (settled?: {
+      readonly person: boolean;
+      readonly requestedAt?: UtcTimestamp;
+      readonly settledAt?: UtcTimestamp;
+    }) => void,
   ): () => void {
     const key = settlementListenerKey(input.providerSessionId, input.providerCallbackId);
     const entry = this.#findByProviderSessionCallbackId(
@@ -548,10 +659,32 @@ export class WorkRequestService {
       input.providerCallbackId,
     );
     if (entry !== undefined && entry.request.status !== "pending") {
-      callback();
+      const { status } = entry.request;
+      // Interrupted and expired settles are the system's own, and the wait
+      // was person-facing until it ran out. A resolved or cancelled request
+      // settled by a person or by an automated reviewer only the actor can
+      // tell apart: when the settle was journaled without one (a replayed
+      // frame carries none), billing would be a guess, so it is omitted.
+      const person =
+        status === "interrupted" || status === "expired"
+          ? true
+          : entry.settledActorKind !== undefined && entry.settledActorKind !== "agent";
+      callback({
+        person,
+        requestedAt: entry.request.requestedAt,
+        ...(entry.request.settledAt === undefined ? {} : { settledAt: entry.request.settledAt }),
+      });
       return () => undefined;
     }
-    const listeners = this.#settlementListeners.get(key) ?? new Set<() => void>();
+    const listeners =
+      this.#settlementListeners.get(key) ??
+      new Set<
+        (settled?: {
+          readonly person: boolean;
+          readonly requestedAt?: UtcTimestamp;
+          readonly settledAt?: UtcTimestamp;
+        }) => void
+      >();
     listeners.add(callback);
     this.#settlementListeners.set(key, listeners);
     return () => {
@@ -686,7 +819,10 @@ export class WorkRequestService {
   #settle(
     current: WorkRequest,
     status: "resolved" | "cancelled" | "interrupted" | "expired",
-    extra: { resolution?: WorkRequest["resolution"] },
+    extra: {
+      resolution?: WorkRequest["resolution"];
+      levelChangeApplied?: WorkRequest["levelChangeApplied"];
+    },
     actor: typeof EventActor.Type,
   ): WorkRequestServiceResult {
     const settledAt = decodeTimestamp(this.#clock());
@@ -698,6 +834,9 @@ export class WorkRequestService {
       settledAt,
       version: nextVersion,
       ...(extra.resolution === undefined ? {} : { resolution: extra.resolution }),
+      ...(extra.levelChangeApplied === undefined
+        ? {}
+        : { levelChangeApplied: extra.levelChangeApplied }),
     });
     const frame: WorkRequestFrame = { kind: status, request: nextRequest } as WorkRequestFrame;
     try {
@@ -714,7 +853,7 @@ export class WorkRequestService {
         "Work request event journal could not be written through the authoritative flow.",
       );
     }
-    this.#projection.apply(frame);
+    this.#projection.apply(frame, actor);
     const currentEntry = this.#projection.lookup(current.requestId);
     const listenerKey =
       currentEntry === undefined
@@ -725,7 +864,13 @@ export class WorkRequestService {
           );
     const listeners = this.#settlementListeners.get(listenerKey);
     this.#settlementListeners.delete(listenerKey);
-    for (const callback of listeners ?? []) callback();
+    // The ask was person-facing the whole time it stood open: a person's
+    // answer and a person-facing wait that ran out — expiry, interrupt, a
+    // withdraw — both end person time at this settle. Only an automated
+    // reviewer's `agent` settle is not person wait.
+    const person = actor.kind !== "agent";
+    for (const callback of listeners ?? [])
+      callback({ person, requestedAt: nextRequest.requestedAt, settledAt });
     return ok(nextRequest);
   }
 
@@ -844,6 +989,8 @@ export class WorkRequestService {
     current: WorkRequest,
     action: "resolution" | "cancellation",
     actor: typeof EventActor.Type,
+    /** The provider's own reason, shown in place of the generic one. */
+    reason?: string,
   ) {
     const { delivery: _delivery, ...withoutDelivery } = current;
     const released = decodeWorkRequest({
@@ -869,7 +1016,7 @@ export class WorkRequestService {
     this.#projection.apply(frame);
     return failure(
       "unavailable",
-      `The provider session could not receive the Work request ${action}.`,
+      reason ?? `The provider session could not receive the Work request ${action}.`,
     );
   }
 
@@ -943,7 +1090,7 @@ function sameDelivery(left: WorkRequestDelivery, right: WorkRequestDelivery): bo
 
 function providerAnswer(
   entry: WorkRequestEntry,
-  answer: Extract<WorkRequestResolution, { kind: "user-input" }>["answer"],
+  answer: Extract<WorkRequestResolution, { kind: "user-input"; answer: unknown }>["answer"],
 ): string {
   if (typeof answer !== "string") return JSON.stringify(answer);
   if (entry.request.detail.kind !== "user-input") return answer;

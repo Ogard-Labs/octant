@@ -1086,4 +1086,90 @@ describe("Code managed thread creation contracts", () => {
     // recorded as the thread update and checkout observation it actually makes.
     expect(codeContracts.CODE_EVENT_NAMES).not.toContain("code.thread-checkout-rebind@1");
   });
+
+  it("decodes the closed set of coordinator done-when conditions and rejects unknown, duplicate, empty, or oversized lists", () => {
+    const valid = {
+      items: [
+        {
+          kind: "pull-request-merged",
+          repositoryOwner: "Ogard-Labs",
+          repositoryName: "octant",
+          number: 42,
+        },
+        {
+          kind: "pull-request-checks-green",
+          repositoryOwner: "Ogard-Labs",
+          repositoryName: "octant",
+          number: 42,
+        },
+        { kind: "thread-done", threadId: ids.thread },
+      ],
+    } as const;
+    expect(codeContracts.decodeCoordinatorDoneWhen(valid)).toEqual(valid);
+    expect(
+      decodeCodeThread({ ...thread, coordinator: true, coordinatorDoneWhen: valid }),
+    ).toMatchObject({ coordinatorDoneWhen: valid });
+    expect(
+      decodeCodeCommand({
+        kind: "set-code-thread-coordinator-done-when",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        doneWhen: valid,
+      }),
+    ).toMatchObject({ kind: "set-code-thread-coordinator-done-when", doneWhen: valid });
+    expect(
+      decodeCodeCommand({
+        kind: "set-code-thread-coordinator-done-when",
+        threadId: ids.thread,
+        expectedVersion: 2,
+      }),
+    ).toEqual({
+      kind: "set-code-thread-coordinator-done-when",
+      threadId: ids.thread,
+      expectedVersion: 2,
+    });
+
+    expect(() => codeContracts.decodeCoordinatorDoneWhen({ items: [] })).toThrow();
+    expect(() =>
+      codeContracts.decodeCoordinatorDoneWhen({
+        items: [{ kind: "arbitrary-shell", command: "true" }],
+      }),
+    ).toThrow();
+    expect(() =>
+      codeContracts.decodeCoordinatorDoneWhen({
+        items: [
+          {
+            kind: "pull-request-merged",
+            repositoryOwner: "Ogard-Labs",
+            repositoryName: "octant",
+            number: 42,
+          },
+          {
+            kind: "pull-request-merged",
+            repositoryOwner: "ogard-labs",
+            repositoryName: "OCTANT",
+            number: 42,
+          },
+        ],
+      }),
+    ).toThrow();
+    expect(() =>
+      codeContracts.decodeCoordinatorDoneWhen({
+        items: Array.from(
+          { length: codeContracts.MAX_COORDINATOR_DONE_WHEN_ITEMS + 1 },
+          (_, index) => ({
+            kind: "pull-request-merged",
+            repositoryOwner: "Ogard-Labs",
+            repositoryName: "octant",
+            number: index + 1,
+          }),
+        ),
+      }),
+    ).toThrow();
+    expect(() =>
+      codeContracts.decodeCoordinatorDoneWhen({
+        items: [{ kind: "thread-done", threadId: ids.thread, extra: true }],
+      }),
+    ).toThrow();
+  });
 });

@@ -173,12 +173,20 @@ describe("a window's request to a paired computer", () => {
       expect(answer.status, JSON.stringify(change)).toBe("refused");
       expect(fetchFor).not.toHaveBeenCalled();
     }
-    for (const { method, path } of PAIRED_COMPUTER_ALLOWED_REQUESTS) {
+    for (const { method, path, requiredQuery, hubMemberOnly } of PAIRED_COMPUTER_ALLOWED_REQUESTS) {
+      if (hubMemberOnly === true) continue;
+      const filled = path.replaceAll(":id", "a1b2c3d4-0000-4000-8000-000000000001");
+      const query = new URLSearchParams(requiredQuery).toString();
       const { answer } = await ask({
         ...hello,
         method,
-        path: path === "/api/remote/hello" ? `${path}?clientNonce=abc` : path,
-        ...(method === "POST" ? { body: "{}" } : {}),
+        path:
+          path === "/api/remote/hello"
+            ? `${path}?clientNonce=abc`
+            : query === ""
+              ? filled
+              : `${filled}?${query}`,
+        ...(method === "GET" ? {} : { body: "{}" }),
       });
       expect(answer.status, `${method} ${path}`).toBe("answered");
     }
@@ -200,8 +208,127 @@ describe("a window's request to a paired computer", () => {
         "POST /api/code/local-servers/commands",
         "GET /api/todos",
         "POST /api/todos/commands",
+        "GET /api/code/bootstrap",
+        "GET /api/code/navigation",
+        "GET /api/code/threads/:id",
+        "GET /api/code/threads/:id/conversation",
+        "GET /api/code/threads/:id/conversation/window",
+        "GET /api/code/threads/:id/events",
+        "GET /api/code/threads/:id/operations/:id/events",
+        "GET /api/code/threads/:id/operations/:id/evidence/:id",
+        "POST /api/code/commands",
+        "POST /api/code/evidence/batch",
+        "PUT /api/code/evidence",
+        "GET /api/projects/bootstrap",
+        "POST /api/folders/browse",
+        "POST /api/folders/select",
+        "POST /api/projects/commands",
+        "GET /api/providers/bootstrap",
+        "GET /api/pending-requests",
+        "POST /api/extensions/tool-approvals",
+        "POST /api/hub/guest",
       ],
     );
+  });
+
+  it("asks a member of this host's hub to admit the window as its guest, and never a computer paired directly", async () => {
+    const pins = pinsWith([ORIGIN]);
+    pins.replaceHubMembers([
+      { origin: OTHER_ORIGIN, displayName: "Mini PC", pin: PIN, hostId: "member-b" },
+    ]);
+    const admission = (origin: string) => ({
+      origin,
+      method: "POST",
+      path: "/api/hub/guest",
+      headers: { "content-type": "application/json", "x-octant-hub-link": "signed" },
+      body: "{}",
+    });
+
+    const toMember = await ask(admission(OTHER_ORIGIN), { pins });
+    const toPaired = await ask(admission(ORIGIN), { pins });
+
+    expect(toMember.answer).toMatchObject({ status: "answered", httpStatus: 200 });
+    expect(toMember.fetchFor).toHaveBeenCalledWith(OTHER_ORIGIN, {
+      current: { kind: "pinned", pin: PIN },
+    });
+    expect(toPaired.answer).toEqual({
+      status: "refused",
+      message: "Octant doesn't send that request to another computer.",
+    });
+    expect(toPaired.fetchFor).not.toHaveBeenCalled();
+    // The hub member is reached like a paired computer for everything else on the list.
+    const read = await ask(
+      { origin: OTHER_ORIGIN, method: "GET", path: "/api/code/navigation" },
+      { pins },
+    );
+    expect(read.answer.status).toBe("answered");
+    // A member the host no longer names is no longer reachable.
+    pins.replaceHubMembers([]);
+    expect((await ask(admission(OTHER_ORIGIN), { pins })).answer).toEqual({
+      status: "refused",
+      message: "Octant isn't paired with that computer.",
+    });
+  });
+
+  it("carries a Code thread's reads and commands to a paired computer", async () => {
+    const thread = "a1b2c3d4-0000-4000-8000-000000000001";
+    const operation = "a1b2c3d4-0000-4000-8000-000000000002";
+    const content = "a1b2c3d4-0000-4000-8000-000000000003";
+    for (const request of [
+      { method: "GET", path: "/api/code/bootstrap" },
+      { method: "GET", path: `/api/code/threads/${thread}` },
+      { method: "GET", path: `/api/code/threads/${thread}/conversation/window?limit=1` },
+      { method: "GET", path: `/api/code/threads/${thread}/events?afterSequence=4&wait=0` },
+      {
+        method: "GET",
+        path: `/api/code/threads/${thread}/operations/${operation}/events?afterCursor=0`,
+      },
+      {
+        method: "GET",
+        path: `/api/code/threads/${thread}/operations/${operation}/evidence/${content}`,
+      },
+      { method: "POST", path: "/api/code/evidence/batch", body: "{}" },
+      { method: "GET", path: "/api/pending-requests" },
+      { method: "POST", path: "/api/extensions/tool-approvals", body: "{}" },
+      { method: "POST", path: "/api/code/commands", body: "{}" },
+    ]) {
+      const { answer } = await ask({ origin: ORIGIN, ...request });
+      expect(answer.status, `${request.method} ${request.path}`).toBe("answered");
+    }
+  });
+
+  it("refuses thread events that would wait, and an id segment that is not a UUID", async () => {
+    const thread = "a1b2c3d4-0000-4000-8000-000000000001";
+    for (const path of [
+      // Without wait=0 the host holds the read open past this channel's limit.
+      `/api/code/threads/${thread}/events?afterSequence=4`,
+      `/api/code/threads/${thread}/events?afterSequence=4&wait=1`,
+      "/api/code/threads/not-a-thread",
+      `/api/code/threads/${thread.toUpperCase()}`,
+      `/api/code/threads/${thread}/extra`,
+      "/api/code/threads/../bootstrap",
+      `/api/code/threads/${thread}/operations/${thread}/evidence/not-a-content-id`,
+    ]) {
+      const { answer, fetchFor } = await ask({ origin: ORIGIN, method: "GET", path });
+      expect(answer.status, path).toBe("refused");
+      expect(fetchFor).not.toHaveBeenCalled();
+    }
+  });
+
+  it("carries a thread's first prompt with its thread header, and PUT nowhere else", async () => {
+    const thread = "a1b2c3d4-0000-4000-8000-000000000001";
+    const { answer, sent } = await ask({
+      origin: ORIGIN,
+      method: "PUT",
+      path: "/api/code/evidence",
+      headers: { "content-type": "text/plain", "x-octant-code-thread-id": thread },
+      body: "Fix the failing test",
+    });
+    expect(answer.status).toBe("answered");
+    expect(sent.mock.calls[0]?.[1]?.headers).toMatchObject({ "x-octant-code-thread-id": thread });
+
+    const elsewhere = await ask({ origin: ORIGIN, method: "PUT", path: "/api/code/commands" });
+    expect(elsewhere.answer.status).toBe("refused");
   });
 
   it("refuses a header a signed request does not carry, a foreign cookie, and a body on GET", async () => {
@@ -366,6 +493,9 @@ describe("the request channel", () => {
       pins: () => pinsWith(),
       webBuildVersion: "0.1.0",
       fetchFor,
+      hubAdministration: () => {
+        throw new Error("No hub administration in this test.");
+      },
     });
     const handler = handlers.get(PAIRED_COMPUTER_CHANNELS.request);
 

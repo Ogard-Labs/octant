@@ -1,7 +1,9 @@
-import { principalActsAsHostPerson } from "../clientPrincipal";
+import { principalActsAsHostPerson, principalIsHubIntroduced } from "../clientPrincipal";
+import { hubActRefusal, type HubActScopePort } from "../hub/hubActScope";
 import {
   type EventActor,
   decodeAnswerNativeHarnessQuestion,
+  MAX_SECRET_ANSWER_LENGTH,
   decodeDecideNativeHarnessApproval,
   decodeSteerNativeHarnessSession,
   type NativeHarnessApprovalDecisionResult,
@@ -105,10 +107,16 @@ export interface NativeHarnessSessionRouteDependencies {
     readonly threadId: string;
     readonly questionId: string;
     readonly answer: string;
+    /** A secret question's answer, held in memory only; see `NativeHarnessQuestion.secret`. */
+    readonly secret?: true;
     /** Who answered, from the authenticated request. */
     readonly actor: EventActor;
   }) => "answered" | "question-not-found" | "already-settled" | "invalid-answer";
   readonly now?: () => number;
+  /** The member's Act item for its hub, which bounds where a device only the hub introduced may answer. */
+  readonly hubActScope?: () => HubActScopePort | undefined;
+  /** The Project a Code or Work thread belongs to; undefined for a thread this host does not hold. */
+  readonly threadProjectId?: (threadId: string) => string | undefined;
 }
 
 function corsHeaders(origin: string | null): Record<string, string> {
@@ -155,6 +163,7 @@ export function createNativeHarnessSessionRouteHandler(
     let windowId: string;
     let person: ToolEgressPerson;
     let actor: EventActor;
+    let hubIntroduced: boolean;
     try {
       const context = authenticateRoutePrincipal({
         request,
@@ -176,6 +185,7 @@ export function createNativeHarnessSessionRouteHandler(
               deviceId: String(context.principal.deviceId),
             };
       actor = eventActorForPrincipal(context.principal);
+      hubIntroduced = principalIsHubIntroduced(context.principal);
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failure("Native harness session request is unauthorized.", 401, origin);
@@ -206,6 +216,18 @@ export function createNativeHarnessSessionRouteHandler(
     const questions =
       person.kind === "remote-device" ? (rawView?.questions ?? []).filter(eligibleChild) : [];
     const view = rawView;
+    // A device only the hub introduced answers a Code or Work thread's request
+    // only in a Project the member's Act item names, read at this answer; a
+    // thread the host does not hold names no Project. Chat is not held to the
+    // Act item.
+    const hubActAnswerRefusal = (): string | undefined =>
+      hubIntroduced && rawView !== undefined && rawView.session.mode !== "chat"
+        ? hubActRefusal(
+            dependencies.hubActScope?.(),
+            dependencies.threadProjectId?.(threadId),
+            "answer",
+          )
+        : undefined;
     if (
       person.kind === "remote-device" &&
       action !== "" &&
@@ -342,6 +364,8 @@ export function createNativeHarnessSessionRouteHandler(
           403,
           origin,
         );
+      const approvalActRefusal = hubActAnswerRefusal();
+      if (approvalActRefusal !== undefined) return failure(approvalActRefusal, 403, origin);
       const outcome = dependencies.decideApproval?.({
         threadId,
         approvalId: String(decision.approvalId),
@@ -419,6 +443,30 @@ export function createNativeHarnessSessionRouteHandler(
       } catch {
         return failure("Native harness question answer is invalid.", 400, origin);
       }
+      if ((answer.answer === undefined) === (answer.secretAnswer === undefined))
+        return failure(
+          "Answer a question with either its answer or its secret answer.",
+          400,
+          origin,
+        );
+      // A secret is the person's own to give: a window on this host or a
+      // device they paired answers one, never another device or an agent.
+      if (answer.secretAnswer !== undefined && person.kind === "remote-device")
+        return failure(
+          "Only you, from a window or a device you paired, can answer a secret question.",
+          403,
+          origin,
+        );
+      if (
+        answer.secretAnswer !== undefined &&
+        (answer.secretAnswer.trim().length === 0 ||
+          answer.secretAnswer.length > MAX_SECRET_ANSWER_LENGTH)
+      )
+        return failure(
+          `A secret answer is between 1 and ${String(MAX_SECRET_ANSWER_LENGTH)} characters.`,
+          400,
+          origin,
+        );
       if (
         person.kind === "remote-device" &&
         !questions.some(
@@ -430,15 +478,21 @@ export function createNativeHarnessSessionRouteHandler(
           403,
           origin,
         );
+      const questionActRefusal = hubActAnswerRefusal();
+      if (questionActRefusal !== undefined) return failure(questionActRefusal, 403, origin);
       const outcome = dependencies.answerQuestion?.({
         threadId,
         questionId: String(answer.questionId),
-        answer: answer.answer,
+        answer: answer.secretAnswer ?? answer.answer ?? "",
+        ...(answer.secretAnswer === undefined ? {} : { secret: true }),
         actor,
       });
       const settled = dependencies.store
         .read(threadId)
         ?.questions.find((question) => String(question.id) === String(answer.questionId));
+      const secretMismatch =
+        settled?.status === "pending" &&
+        (settled.secret === true) !== (answer.secretAnswer !== undefined);
       const result: NativeHarnessQuestionAnswerResult =
         outcome === "answered" && settled !== undefined
           ? { kind: "question-answered", question: settled }
@@ -452,11 +506,15 @@ export function createNativeHarnessSessionRouteHandler(
                     ? "already-settled"
                     : "question-not-found",
               message:
-                outcome === "invalid-answer"
-                  ? "The questionnaire answer is incomplete or contains invalid choices."
-                  : outcome === "already-settled"
-                    ? "That question was already answered."
-                    : "No pending question has that id on this thread.",
+                outcome === "invalid-answer" && secretMismatch
+                  ? settled.secret === true
+                    ? "That question asks for a secret. Answer it in its thread."
+                    : "That question does not ask for a secret."
+                  : outcome === "invalid-answer"
+                    ? "The questionnaire answer is incomplete or contains invalid choices."
+                    : outcome === "already-settled"
+                      ? "That question was already answered."
+                      : "No pending question has that id on this thread.",
             };
       return json(result, result.kind === "question-answered" ? 200 : 409, origin);
     }

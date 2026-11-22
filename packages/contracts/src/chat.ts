@@ -7,6 +7,12 @@ import { Questionnaire, QuestionnaireAnswerText } from "./questionnaire";
 import { SideChatSourceReceipt, SideChatDraftReturnReferences } from "./sideChatReturn";
 import { personDecides } from "./hostAnswer";
 import { HarnessRetryNotice } from "./harnessRetry";
+import {
+  TurnLoopNotice,
+  TurnLoopNoticeCount,
+  TurnLoopNoticeToolName,
+  TurnStallNotice,
+} from "./turnLoopNotice";
 import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
 import { AnyAttachmentMediaType } from "./attachmentMediaType";
@@ -157,6 +163,12 @@ export const ChatAttemptQuestion = Schema.Struct({
   options: Schema.Array(ChatQuestionOption).pipe(Schema.maxItems(8)),
   questionIndex: Schema.optional(PositiveInt),
   questionCount: Schema.optional(PositiveInt),
+  /**
+   * The provider asks for a secret: the person answers in a masked field,
+   * through `answer-chat-turn-question`'s `secretAnswer`, and the attempt
+   * records only that a secret answer was given.
+   */
+  secret: Schema.optional(Schema.Literal(true)),
 })
   .annotations(strict)
   .pipe(
@@ -176,14 +188,18 @@ export const ChatAttemptAnsweredQuestion = Schema.Struct({
   options: Schema.Array(ChatQuestionOption).pipe(Schema.maxItems(8)),
   questionIndex: Schema.optional(PositiveInt),
   questionCount: Schema.optional(PositiveInt),
-  answer: QuestionnaireAnswerText,
+  /** What the person answered; absent only on a secret question, whose value is kept nowhere. */
+  answer: Schema.optional(QuestionnaireAnswerText),
+  /** The question asked for a secret and the person gave one; its value went to the provider only. */
+  secret: Schema.optional(Schema.Literal(true)),
   answeredAt: UtcTimestamp,
 })
   .annotations(strict)
   .pipe(
     Schema.filter(
       (question) =>
-        (question.questionIndex === undefined) === (question.questionCount === undefined),
+        (question.questionIndex === undefined) === (question.questionCount === undefined) &&
+        (question.secret === true) === (question.answer === undefined),
     ),
   );
 export type ChatAttemptAnsweredQuestion = typeof ChatAttemptAnsweredQuestion.Type;
@@ -375,6 +391,12 @@ export const ChatAttempt = Schema.Struct({
   toolStepsTruncated: Schema.optional(Schema.Boolean),
   childObservations: Schema.optional(ProviderChildObservationState),
   /**
+   * The attempt's cumulative time in private reasoning, measured from the
+   * provider's own event stamps and restated as the running total. A re-read
+   * never sees reasoning text — only the number.
+   */
+  reasoningMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  /**
    * A question the provider asked mid-turn and is blocked on, journaled so the
    * transcript can show it again after a reload. Present only while the turn
    * waits for the person's answer; answering removes it.
@@ -405,6 +427,10 @@ export const ChatAttempt = Schema.Struct({
    * cancelled attempt does not keep a stale wait.
    */
   harnessRetry: Schema.optional(HarnessRetryNotice),
+  /** Repeated identical tool call notice or Strict stop recorded on this attempt. */
+  loopNotice: Schema.optional(TurnLoopNotice),
+  /** Silent-turn notice recorded outside Strict when the stalled-turn limit elapsed. */
+  stallNotice: Schema.optional(TurnStallNotice),
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
 })
@@ -877,7 +903,15 @@ export const AnswerChatTurnQuestionCommand = Schema.Struct({
   turnId: ChatTurnId,
   attemptId: ChatAttemptId,
   requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
-  answer: QuestionnaireAnswerText,
+  /** The answer to every question but a secret one. */
+  answer: Schema.optional(QuestionnaireAnswerText),
+  /**
+   * A secret question's answer (see the question's `secret`), handed to the
+   * provider in memory and never journaled. Exactly one of this and `answer`
+   * is given; the host checks that, the bound and the question, so a decode
+   * failure never prints the value.
+   */
+  secretAnswer: Schema.optional(Schema.String),
 }).annotations(strict);
 
 export const DeleteChatThreadCommand = Schema.Struct({
@@ -1379,9 +1413,46 @@ export const ChatAttemptToolStepChanged = Schema.Struct({
   attemptId: ChatAttemptId,
   toolStep: Schema.optional(ThreadToolStep),
   toolStepsTruncated: Schema.optional(Schema.Literal(true)),
+  /**
+   * The attempt's cumulative reasoning total, restated; absent when the
+   * frame carries a step change only. Never reasoning text.
+   */
+  reasoningMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   updatedAt: UtcTimestamp,
 }).annotations(strict);
 export type ChatAttemptToolStepChanged = typeof ChatAttemptToolStepChanged.Type;
+
+export const ChatTurnLoopNoticed = Schema.Struct({
+  kind: Schema.Literal("turn-loop-noticed"),
+  threadId: ChatThreadId,
+  turnId: ChatTurnId,
+  attemptId: ChatAttemptId,
+  toolName: TurnLoopNoticeToolName,
+  count: TurnLoopNoticeCount,
+  occurredAt: UtcTimestamp,
+}).annotations(strict);
+export type ChatTurnLoopNoticed = typeof ChatTurnLoopNoticed.Type;
+
+export const ChatTurnLoopStopped = Schema.Struct({
+  kind: Schema.Literal("turn-loop-stopped"),
+  threadId: ChatThreadId,
+  turnId: ChatTurnId,
+  attemptId: ChatAttemptId,
+  toolName: TurnLoopNoticeToolName,
+  count: TurnLoopNoticeCount,
+  occurredAt: UtcTimestamp,
+}).annotations(strict);
+export type ChatTurnLoopStopped = typeof ChatTurnLoopStopped.Type;
+
+export const ChatTurnStallNoticed = Schema.Struct({
+  kind: Schema.Literal("turn-stall-noticed"),
+  threadId: ChatThreadId,
+  turnId: ChatTurnId,
+  attemptId: ChatAttemptId,
+  idleMs: Schema.Int.pipe(Schema.positive()),
+  occurredAt: UtcTimestamp,
+}).annotations(strict);
+export type ChatTurnStallNoticed = typeof ChatTurnStallNoticed.Type;
 
 export const ChatTurnRouteDecided = Schema.Struct({
   kind: Schema.Literal("turn-route-decided"),
@@ -1436,6 +1507,9 @@ export const ChatPublicEvent = Schema.Union(
   ChatAttemptUpdated,
   ChatAttemptResponseAppended,
   ChatAttemptToolStepChanged,
+  ChatTurnLoopNoticed,
+  ChatTurnLoopStopped,
+  ChatTurnStallNoticed,
   ChatTurnRouteDecided,
   ChatAttachmentUpdated,
   ChatCitationRecorded,
@@ -1492,6 +1566,9 @@ export const CHAT_EVENT_NAMES = [
   "chat.attempt-updated@1",
   "chat.attempt-response-appended@1",
   "chat.attempt-tool-step@1",
+  "chat.turn-loop-noticed@1",
+  "chat.turn-loop-stopped@1",
+  "chat.turn-stall-noticed@1",
   "chat.turn-route-decided@1",
   "chat.attachment-updated@1",
   "chat.citation-recorded@1",
@@ -1553,6 +1630,9 @@ export const decodeChatAttemptUpdated = Schema.decodeUnknownSync(ChatAttemptUpda
 export const decodeChatAttemptToolStepChanged = Schema.decodeUnknownSync(
   ChatAttemptToolStepChanged,
 );
+export const decodeChatTurnLoopNoticed = Schema.decodeUnknownSync(ChatTurnLoopNoticed);
+export const decodeChatTurnLoopStopped = Schema.decodeUnknownSync(ChatTurnLoopStopped);
+export const decodeChatTurnStallNoticed = Schema.decodeUnknownSync(ChatTurnStallNoticed);
 export const decodeChatAttemptResponseAppended = Schema.decodeUnknownSync(
   ChatAttemptResponseAppended,
 );

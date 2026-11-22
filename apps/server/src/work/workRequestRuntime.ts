@@ -22,14 +22,24 @@ import type {
   ProviderConnection,
   ProviderDriver,
   ProviderAcquireInput,
+  ProviderInPlaceLevelChange,
 } from "@octant/provider-sdk/driver";
 import { Effect, Stream } from "effect";
 import type { ShieldReviewPort } from "../shield/octantShield";
-import type { WorkRequestService, WorkRequestServiceResult } from "./workRequestService";
+import type {
+  WorkApprovalNotDeliverable,
+  WorkRequestService,
+  WorkRequestServiceResult,
+} from "./workRequestService";
 
 type RequestConnection = Pick<
   ProviderConnection,
-  "subscribe" | "answerApproval" | "answerUserInput" | "interrupt" | "approvalCall"
+  | "subscribe"
+  | "answerApproval"
+  | "answerUserInput"
+  | "interrupt"
+  | "approvalCall"
+  | "changeLevelInPlace"
 >;
 
 export interface WorkRequestRuntimeOptions {
@@ -306,7 +316,7 @@ export class WorkRequestRuntime {
     readonly requestId: string;
     readonly approved: boolean;
     readonly ownerCurrent?: () => boolean;
-  }): Promise<void> {
+  }): Promise<void | WorkApprovalNotDeliverable> {
     const connection = this.#connection(input.sessionId);
     const answer = () =>
       connection.answerApproval({
@@ -315,14 +325,41 @@ export class WorkRequestRuntime {
         approved: input.approved,
         ...(input.ownerCurrent === undefined ? {} : { scope: "once" as const }),
       });
-    await this.#run(
-      input.ownerCurrent === undefined
+    return Effect.runPromise(
+      (input.ownerCurrent === undefined
         ? answer()
         : Effect.suspend(() => {
             if (!input.ownerCurrent?.())
               return Effect.die(new Error("Owner approval target changed before delivery."));
             return answer();
-          }),
+          })
+      ).pipe(
+        Effect.as(undefined),
+        // The runtime refused the answer as asked and sent nothing; its
+        // reason goes to the person. Anything else rejects as before.
+        Effect.catchIf(
+          (failure) => failure.category === "unsupported",
+          (failure): Effect.Effect<WorkApprovalNotDeliverable> =>
+            Effect.succeed({ status: "not-deliverable", message: failure.message }),
+        ),
+      ),
+    );
+  }
+
+  /**
+   * Moves the session's running turn to Plan in place, where its driver can
+   * hold the session to Plan; `applied` only when it did. A session this
+   * runtime no longer holds, or a driver without the change, is refused.
+   */
+  async changeLevelInPlace(input: {
+    readonly sessionId: ProviderSessionId;
+  }): Promise<ProviderInPlaceLevelChange> {
+    const connection = this.#connections.get(String(input.sessionId));
+    if (connection?.changeLevelInPlace === undefined) {
+      return { status: "refused", reason: "This provider cannot change the level in place." };
+    }
+    return Effect.runPromise(
+      connection.changeLevelInPlace({ sessionId: input.sessionId, change: "enter-plan" }),
     );
   }
 
@@ -398,6 +435,7 @@ export class WorkRequestRuntime {
                 ...(event.questionnaire === undefined
                   ? {}
                   : { questionnaire: sanitizedQuestionnaire(event.questionnaire) }),
+                ...(event.secret === true ? { secret: true } : {}),
               },
       });
       const result: WorkRequestServiceResult = this.#requests.record(record);

@@ -45,7 +45,6 @@ export const MAX_AUTOMATION_HISTORY_ENTRIES = 256;
 export const MAX_AUTOMATION_QUERY_LIMIT = 100;
 export const MAX_AUTOMATION_QUERY_CURSOR_LENGTH = 256;
 export const MAX_AUTOMATION_MISSED_RUN_CAP = 10_000;
-export const DEFAULT_AUTOMATION_MISSED_RUN_CAP = 128;
 export const AutomationMissedRunCap = Schema.Int.pipe(
   Schema.greaterThanOrEqualTo(1),
   Schema.lessThanOrEqualTo(MAX_AUTOMATION_MISSED_RUN_CAP),
@@ -286,9 +285,10 @@ export const AutomationMode = Schema.Literal("chat", "work", "code");
 export type AutomationMode = typeof AutomationMode.Type;
 
 /**
- * The modes whose threads have a folder, so a routine can be proposed from one
- * of their threads and a follow-up can return to one. A Chat thread has
- * neither a folder nor an Environment to propose from.
+ * The modes whose threads have a folder, so a routine that starts a new
+ * thread per run can be proposed from one of their threads. A follow-up can
+ * return to a thread of any mode, Chat included (maintainer decision,
+ * 2026-11-21), so it takes {@link AutomationMode}.
  */
 export const AutomationThreadMode = Schema.Literal("work", "code");
 export type AutomationThreadMode = typeof AutomationThreadMode.Type;
@@ -627,13 +627,12 @@ function automationDefinitionDraftMatchesPolicy(definition: AutomationDefinition
       (definition.trigger.kind !== "once" || definition.missedRunPolicy !== "run-once")) ||
     // One level choice at most: follow the Project's, or name one.
     (definition.projectLevel !== undefined && definition.runLevel !== undefined) ||
-    // Chat has no level to pick and no thread to return to, and its routine
+    // Chat has no level to pick, and its routine, a follow-up included,
     // keeps Chat's authority: no folder, shell, or Git, and no subagents.
     (definition.mode === "chat" &&
       (definition.projectLevel !== undefined ||
         definition.runLevel !== undefined ||
         definition.agentMerge !== undefined ||
-        definition.targetPolicy === "same-thread" ||
         !automationAuthorityIsChat(definition.authorityProfile.requested) ||
         !automationAuthorityIsChat(definition.authorityProfile.effective)))
   ) {
@@ -1338,7 +1337,8 @@ export type RoutineProposalId = typeof RoutineProposalId.Type;
 export const RoutineProposal = Schema.Struct({
   proposalId: RoutineProposalId,
   threadId: AutomationThreadId,
-  mode: AutomationThreadMode,
+  /** Chat only for a follow-up a person set up from a Chat thread. */
+  mode: AutomationMode,
   projectId: ProjectId,
   displayName: boundedText(MAX_AUTOMATION_DISPLAY_NAME_LENGTH),
   taskPrompt: boundedText(MAX_AUTOMATION_TASK_PROMPT_LENGTH),
@@ -1415,7 +1415,7 @@ export const AutomationFollowUpRequest = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("schedule-follow-up"),
     threadId: AutomationThreadId,
-    mode: AutomationThreadMode,
+    mode: AutomationMode,
     projectId: ProjectId,
     scheduledAt: UtcTimestamp,
     taskPrompt: boundedText(MAX_AUTOMATION_TASK_PROMPT_LENGTH),
