@@ -1161,6 +1161,8 @@ try {
   workRender.mockInput.pressEnter();
   await workRender.waitForFrame((frame) => frame.includes("Add a comment for the agent"));
   if (workAnswers.length !== 0) throw new Error("Answers were sent before the comment step.");
+  // "?" is a comment Work accepts, not the key list, while a questionnaire waits.
+  await workRender.mockInput.typeText("?");
   workRender.mockInput.pressEnter();
   await workRender.waitFor(() => workAnswers.length === 1);
   await workRender.waitForFrame((frame) => !frame.includes("Which extras?"));
@@ -1178,6 +1180,7 @@ try {
             { questionId: "format", selectedOptionIds: ["md"] },
             { questionId: "extras", selectedOptionIds: ["toc", "index"] },
           ],
+          comment: "?",
         },
       },
     })
@@ -1205,6 +1208,12 @@ try {
   for (const expected of ["Allowing moves this thread to Accept edits.", "y allow · n deny"])
     if (!frame.includes(expected))
       throw new Error(`The Plan approval at 80x24 is missing "${expected}".\n${frame}`);
+  const running = screen.run();
+  // Page Up as a terminal sends it; the mock names no PAGE_UP key.
+  for (let page = 0; page < 12; page++) approvalRender.mockInput.pressKey("\x1b[5~");
+  await approvalRender.waitForFrame((next) => next.includes("Step 1:"));
+  approvalRender.mockInput.pressCtrlC();
+  await running;
   console.log("Rendered a Plan approval's level and y/n line under a long plan at 80x24");
 } finally {
   workApprovalPending = false;

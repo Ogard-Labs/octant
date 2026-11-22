@@ -573,6 +573,14 @@ class AgentScreen {
       text.length === 0 ? undefined : (provenance ?? this.#captureComposerDraft());
   }
 
+  /** A bare "?" is a questionnaire answer or comment here, not the key list (Work accepts it). */
+  #answersWorkQuestionnaire(): boolean {
+    const request = this.#workRequest;
+    return (
+      request?.kind === "question" && request.secret !== true && request.questionnaire !== undefined
+    );
+  }
+
   #awaitsQuestionnaireComment(): boolean {
     const request = this.#workRequest;
     return (
@@ -1732,7 +1740,11 @@ class AgentScreen {
       this.#showHelp = false;
       this.#draw();
       if (text === "?" || text.length === 0) return;
-    } else if (text === "?" || text === "/help" || text === "/keys") {
+    } else if (
+      (text === "?" && !this.#answersWorkQuestionnaire()) ||
+      text === "/help" ||
+      text === "/keys"
+    ) {
       this.#showHelp = true;
       this.#pendingFollowUp = undefined;
       this.#draw();
