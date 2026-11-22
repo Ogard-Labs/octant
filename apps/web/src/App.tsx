@@ -8952,56 +8952,60 @@ function LaunchedShell(
   // Read here, where the loaded settings are known to be present: a function
   // body does not keep that narrowing.
   const loadedSettings = controller.settings;
+  // Settings' own boundary lives inside the lazy chunk, so it cannot catch
+  // that chunk failing to load; this one keeps the workspace mounted.
   const settingsContainer = (surface: "settings" | "usage", presentation: "page" | "sheet") => (
-    <Suspense
-      fallback={
-        <SurfaceLoading label={surface === "settings" ? "Opening Settings" : "Opening Usage"} />
-      }
-    >
-      <SettingsContainer
-        onOpenServerProject={(project) => {
-          controller.closeSettings();
-          void openDraftInKnownProject(project.id, project.mode ?? "code", project.name);
-        }}
-        {...(openRelayedServerProjectPreview === undefined
-          ? {}
-          : { onOpenRelayedServerProjectPreview: openRelayedServerProjectPreview })}
-        projectTerminalClient={projectTerminalClient}
-        projectActionStoragePrefix={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:server-settings`}
-        actions={actions}
-        allProjects={projectController.allProjects}
-        {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
-        backgroundImageLibrary={backgroundImageLibrary}
-        {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
-        chatController={chatController}
-        clients={launchedClients}
-        codeController={codeController}
-        controller={controller}
-        discoveryController={discoveryController}
-        githubClient={githubClient}
-        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-        {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
-        hostReservesTitlebarInset={
-          (presentation === "page" || isNarrow) && hostReservesTitlebarInset
+    <DockModuleBoundary onClose={controller.closeSettings}>
+      <Suspense
+        fallback={
+          <SurfaceLoading label={surface === "settings" ? "Opening Settings" : "Opening Usage"} />
         }
-        isNarrow={isNarrow}
-        linearClient={linearClient}
-        nativeBoundsAvailable={nativeHost !== undefined}
-        {...(pendingUsageFilter === undefined ? {} : { pendingUsageFilter })}
-        projectNamesById={projectNamesById}
-        actProjectNamesById={actProjectNamesById}
-        providerController={providerController}
-        settings={loadedSettings}
-        presentation={presentation}
-        surface={surface}
-        glassOffNote={glassOffNote(glassRefusal, props.hostBridge !== undefined)}
-        sidebarVibrancySupported={sidebarVibrancySupported}
-        themeController={themeController}
-        {...(props.typography === undefined ? {} : { typography: props.typography })}
-        workNavigation={workNavigation}
-        workSettings={workSettings}
-      />
-    </Suspense>
+      >
+        <SettingsContainer
+          onOpenServerProject={(project) => {
+            controller.closeSettings();
+            void openDraftInKnownProject(project.id, project.mode ?? "code", project.name);
+          }}
+          {...(openRelayedServerProjectPreview === undefined
+            ? {}
+            : { onOpenRelayedServerProjectPreview: openRelayedServerProjectPreview })}
+          projectTerminalClient={projectTerminalClient}
+          projectActionStoragePrefix={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:server-settings`}
+          actions={actions}
+          allProjects={projectController.allProjects}
+          {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
+          backgroundImageLibrary={backgroundImageLibrary}
+          {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
+          chatController={chatController}
+          clients={launchedClients}
+          codeController={codeController}
+          controller={controller}
+          discoveryController={discoveryController}
+          githubClient={githubClient}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
+          hostReservesTitlebarInset={
+            (presentation === "page" || isNarrow) && hostReservesTitlebarInset
+          }
+          isNarrow={isNarrow}
+          linearClient={linearClient}
+          nativeBoundsAvailable={nativeHost !== undefined}
+          {...(pendingUsageFilter === undefined ? {} : { pendingUsageFilter })}
+          projectNamesById={projectNamesById}
+          actProjectNamesById={actProjectNamesById}
+          providerController={providerController}
+          settings={loadedSettings}
+          presentation={presentation}
+          surface={surface}
+          glassOffNote={glassOffNote(glassRefusal, props.hostBridge !== undefined)}
+          sidebarVibrancySupported={sidebarVibrancySupported}
+          themeController={themeController}
+          {...(props.typography === undefined ? {} : { typography: props.typography })}
+          workNavigation={workNavigation}
+          workSettings={workSettings}
+        />
+      </Suspense>
+    </DockModuleBoundary>
   );
 
   const shell = (
@@ -9188,75 +9192,79 @@ function LaunchedShell(
             <ThreadNotesProvider services={launchedClients.threadNotesClient}>
               <div className="primary-workspace-layer">
                 {readerOpen ? (
-                  <Suspense fallback={<SurfaceLoading label="Opening page" />}>
-                    <ReaderPagesContainer
-                      actions={actions}
-                      activeMode={activeMode}
-                      {...(activeProjectId === undefined ? {} : { activeProjectId })}
-                      agentsCenterVisible={agentsCenterVisible}
-                      allProjects={projectController.allProjects}
-                      archiveOpen={archiveOpen}
-                      artifactLibraryOpen={artifactLibraryOpen}
-                      automationCenterVisible={automationCenterVisible}
-                      {...(automationCenterFocusId === undefined
-                        ? {}
-                        : { automationCenterFocusId })}
-                      automationEditorCatalog={automationEditorCatalog}
-                      availabilityByProject={projectController.availabilityByProject}
-                      boundCodeProjectId={controller.boundCodeProjectId}
-                      clients={launchedClients}
-                      codeBoardOpen={codeBoardOpen}
-                      threadBoardAvailable={threadBoardAvailable}
-                      codeBoardProjects={codeBoardProjects}
-                      codeNavigationRows={codeController.navigation}
-                      {...(codeController.bootstrap?.settings === undefined
-                        ? {}
-                        : { codeWorkerListingSettings: codeController.bootstrap.settings })}
-                      codePullRequestsOpen={codePullRequestsOpen}
-                      codeProviderGroups={codeProviderGroups}
-                      codeThreads={codeController.bootstrap?.threads}
-                      environmentNames={environmentNames}
-                      githubClient={githubClient}
-                      githubIssuesOpen={githubIssuesOpen}
-                      githubIssuesReadAvailable={githubIssuesReadAvailable}
-                      {...(githubPullRequestCapability.login === undefined
-                        ? {}
-                        : { githubViewerLogin: githubPullRequestCapability.login })}
-                      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-                      imageLibraryOpen={imageLibraryOpen}
-                      imageProfiles={imageGenerationProfiles ?? NO_IMAGE_PROFILES}
-                      inboxAttentionItems={inboxAttentionItems}
-                      inboxOpen={inboxOpen}
-                      {...(todosOpen ? { todosPage } : {})}
-                      isNarrow={isNarrow}
-                      linearClient={linearClient}
-                      linearIssuesOpen={linearIssuesOpen}
-                      linearIssuesRead={linearIssuesRead}
-                      loadAssignedGithubWork={loadAssignedGithubWork}
-                      loadAssignedLinearIssues={loadAssignedLinearIssues}
-                      navigationRevision={pendingRequestFeedRevision}
-                      needsYouAskClients={needsYouAskClients}
-                      projectNames={workingNowProjectNames}
-                      projects={projectController.projects}
-                      projectsListOpen={projectsListOpen}
-                      {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
-                      reviewEntries={reviewEntries}
-                      reviewOpen={reviewOpen}
-                      reviewSource={reviewSource}
-                      {...(selectedProjectPullRequestKey === undefined
-                        ? {}
-                        : { selectedProjectPullRequestKey })}
-                      serverUrl={props.launch.serverUrl}
-                      settings={controller.settings}
-                      windowCapability={props.projectWindowCapability}
-                      workBoardOpen={workBoardOpen}
-                      workBoardProjects={workBoardProjects}
-                      workNavigationRows={workNavigation.navigation}
-                      workProviderGroups={workProviderGroups}
-                      workThreads={workNavigation.bootstrap?.threads}
-                      workspace={controller.workspace}
-                    />
-                  </Suspense>
+                  <DockModuleBoundary>
+                    <Suspense fallback={<SurfaceLoading label="Opening page" />}>
+                      <ReaderPagesContainer
+                        actions={actions}
+                        activeMode={activeMode}
+                        {...(activeProjectId === undefined ? {} : { activeProjectId })}
+                        agentsCenterVisible={agentsCenterVisible}
+                        allProjects={projectController.allProjects}
+                        archiveOpen={archiveOpen}
+                        artifactLibraryOpen={artifactLibraryOpen}
+                        automationCenterVisible={automationCenterVisible}
+                        {...(automationCenterFocusId === undefined
+                          ? {}
+                          : { automationCenterFocusId })}
+                        automationEditorCatalog={automationEditorCatalog}
+                        availabilityByProject={projectController.availabilityByProject}
+                        boundCodeProjectId={controller.boundCodeProjectId}
+                        clients={launchedClients}
+                        codeBoardOpen={codeBoardOpen}
+                        threadBoardAvailable={threadBoardAvailable}
+                        codeBoardProjects={codeBoardProjects}
+                        codeNavigationRows={codeController.navigation}
+                        {...(codeController.bootstrap?.settings === undefined
+                          ? {}
+                          : { codeWorkerListingSettings: codeController.bootstrap.settings })}
+                        codePullRequestsOpen={codePullRequestsOpen}
+                        codeProviderGroups={codeProviderGroups}
+                        codeThreads={codeController.bootstrap?.threads}
+                        environmentNames={environmentNames}
+                        githubClient={githubClient}
+                        githubIssuesOpen={githubIssuesOpen}
+                        githubIssuesReadAvailable={githubIssuesReadAvailable}
+                        {...(githubPullRequestCapability.login === undefined
+                          ? {}
+                          : { githubViewerLogin: githubPullRequestCapability.login })}
+                        {...(props.hostBridge === undefined
+                          ? {}
+                          : { hostBridge: props.hostBridge })}
+                        imageLibraryOpen={imageLibraryOpen}
+                        imageProfiles={imageGenerationProfiles ?? NO_IMAGE_PROFILES}
+                        inboxAttentionItems={inboxAttentionItems}
+                        inboxOpen={inboxOpen}
+                        {...(todosOpen ? { todosPage } : {})}
+                        isNarrow={isNarrow}
+                        linearClient={linearClient}
+                        linearIssuesOpen={linearIssuesOpen}
+                        linearIssuesRead={linearIssuesRead}
+                        loadAssignedGithubWork={loadAssignedGithubWork}
+                        loadAssignedLinearIssues={loadAssignedLinearIssues}
+                        navigationRevision={pendingRequestFeedRevision}
+                        needsYouAskClients={needsYouAskClients}
+                        projectNames={workingNowProjectNames}
+                        projects={projectController.projects}
+                        projectsListOpen={projectsListOpen}
+                        {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
+                        reviewEntries={reviewEntries}
+                        reviewOpen={reviewOpen}
+                        reviewSource={reviewSource}
+                        {...(selectedProjectPullRequestKey === undefined
+                          ? {}
+                          : { selectedProjectPullRequestKey })}
+                        serverUrl={props.launch.serverUrl}
+                        settings={controller.settings}
+                        windowCapability={props.projectWindowCapability}
+                        workBoardOpen={workBoardOpen}
+                        workBoardProjects={workBoardProjects}
+                        workNavigationRows={workNavigation.navigation}
+                        workProviderGroups={workProviderGroups}
+                        workThreads={workNavigation.bootstrap?.threads}
+                        workspace={controller.workspace}
+                      />
+                    </Suspense>
+                  </DockModuleBoundary>
                 ) : null}
                 <ThreadPaneContainer
                   actions={actions}
