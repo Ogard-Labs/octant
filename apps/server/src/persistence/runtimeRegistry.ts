@@ -253,6 +253,9 @@ import {
   REMOTE_PUSH_MOVE_WAITING_DELIVERY_EVENT_NAMES,
   REMOTE_PUSH_DEVICE_JOINED_DELIVERY_EVENT_NAMES,
   REMOTE_PUSH_REGISTRATION_EVENT_NAMES,
+  REMOTE_PORT_FORWARD_CLOSED,
+  REMOTE_PORT_FORWARD_OPENED,
+  REMOTE_PORT_FORWARD_OPENED_V2,
   REMOTE_SERVER_GRANT_CLOSED,
   REMOTE_SERVER_GRANT_OPENED,
   RemotePushDeliveryRecordedV1,
@@ -260,6 +263,9 @@ import {
   RemotePushDeviceJoinedDeliveryRecordedV1,
   RemotePushRegistrationClearedV1,
   RemotePushRegistrationRecordedV1,
+  RemotePortForwardClosedPayload,
+  RemotePortForwardOpenedPayload,
+  RemotePortForwardOpenedPayloadV2,
   RemoteServerGrantClosedPayload,
   RemoteServerGrantOpenedPayload,
   BROWSER_EXTENSION_EVENT_NAMES,
@@ -350,9 +356,13 @@ import {
   SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES,
   SERVER_PROJECTS_EVENT_NAMES,
   SERVER_PROJECTS_EVENT_NAMES_V2,
+  SERVER_PROJECTS_PORT_FORWARD_CLOSED,
+  SERVER_PROJECTS_PORT_FORWARD_OPENED,
   SERVER_PROJECTS_PREVIEW_OUTCOME_V1,
   ServerAttachmentCleanupPendingPayload,
   ServerAttachmentCleanupSettledPayload,
+  ServerPortForwardClosedPayload,
+  ServerPortForwardOpenedPayload,
   ServerPreviewOutcomePayloadV1,
   ServerPreviewOutcomePayloadV2,
   ServerProjectActionsReplacedPayload,
@@ -816,6 +826,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     )
     .register(SERVER_PROJECTS_PREVIEW_OUTCOME_V1, 1, ServerPreviewOutcomePayloadV1)
     .register(SERVER_PROJECTS_EVENT_NAMES_V2.previewOutcome, 1, ServerPreviewOutcomePayloadV2)
+    .register(SERVER_PROJECTS_PORT_FORWARD_OPENED, 1, ServerPortForwardOpenedPayload)
+    .register(SERVER_PROJECTS_PORT_FORWARD_CLOSED, 1, ServerPortForwardClosedPayload)
     .register(
       SERVER_ATTACHMENT_CLEANUP_EVENT_NAMES.pending,
       1,
@@ -981,6 +993,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(AGENT_ACCESS_EVENT_NAMES.turnSent, 1, AgentTurnSentV1)
     .register(REMOTE_SERVER_GRANT_OPENED, 1, RemoteServerGrantOpenedPayload)
     .register(REMOTE_SERVER_GRANT_CLOSED, 1, RemoteServerGrantClosedPayload)
+    .register(REMOTE_PORT_FORWARD_OPENED, 1, RemotePortForwardOpenedPayload)
+    .register(REMOTE_PORT_FORWARD_OPENED_V2, 1, RemotePortForwardOpenedPayloadV2)
+    .register(REMOTE_PORT_FORWARD_CLOSED, 1, RemotePortForwardClosedPayload)
     .register(THREAD_CHECKPOINT_MARKED, 1, ThreadCheckpointMarked)
     .register(THREAD_CHECKPOINT_FORGOTTEN, 1, ThreadCheckpointForgotten)
     .register(THREAD_CHECKPOINT_RESTORED, 1, ThreadCheckpointRestored)

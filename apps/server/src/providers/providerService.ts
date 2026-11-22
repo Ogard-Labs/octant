@@ -130,6 +130,8 @@ import {
   acpAgentCommandRefusal,
   acpAgentEnableRefusal,
   acpRegistryAgent,
+  addedAcpAgentLimitedProfile,
+  addedAcpAgentLimitedProfileRefusal,
 } from "@octant/plugin-host/acp-agents";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { AcpAgentInstallResult, AcpAgentInstallScriptsResult } from "./acpAgentInstall";
@@ -398,6 +400,8 @@ export class ProviderService implements ProviderServiceApi {
   #addedAcpAgentSource(
     source: Extract<ProviderRegistryCommand, { readonly kind: "add-acp-agent" }>["source"],
   ): { readonly displayName: string; readonly configuration: AddedAcpAgentConfiguration } {
+    const limited = addedAcpAgentLimitedProfile(source);
+    if (limited !== undefined) throw this.#invalid(addedAcpAgentLimitedProfileRefusal(limited));
     if (source.kind === "registry") {
       const listing = acpRegistryAgent(source.registryId);
       if (listing === undefined) {
@@ -1736,6 +1740,11 @@ export class ProviderService implements ProviderServiceApi {
             eventName = "provider.instance-configuration-changed@1";
           } else {
             if (command.kind === "set-provider-enabled" && command.enabled) {
+              const limited = isAddedAcpAgentInstance(current)
+                ? addedAcpAgentLimitedProfile(current.configuration.source)
+                : undefined;
+              if (limited !== undefined)
+                throw this.#invalid(addedAcpAgentLimitedProfileRefusal(limited));
               const refusal = isAddedAcpAgentInstance(current)
                 ? acpAgentEnableRefusal(addedAcpAgentSteps(current))
                 : undefined;

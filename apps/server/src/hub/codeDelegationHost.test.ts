@@ -43,6 +43,7 @@ function codeProject(
 function fixture(
   project: CodeDelegationProjectFacts | undefined = codeProject(),
   repository: { readonly name: string | undefined } = { name: "acme/widget" },
+  helperRunRefusal: CodeDelegationServices["helperRunRefusal"] = () => undefined,
 ) {
   let next = 0;
   const createThread = vi.fn<CodeDelegationServices["createThread"]>(async () => ({
@@ -53,6 +54,7 @@ function fixture(
   const host = createCodeDelegationHost({
     readProject: () => project,
     defaultProvider: () => ({ providerInstanceId: "provider-1", modelId: "model-a" }),
+    helperRunRefusal,
     deliveryRepository: async () => repository.name,
     createThread,
     startTurn,
@@ -145,6 +147,20 @@ describe("a delegated Code thread", () => {
     ).toEqual({ status: "refused", kind: "provider-unavailable" });
     expect(unmarked.createThread).not.toHaveBeenCalled();
     expect(marked.createThread).not.toHaveBeenCalled();
+  });
+
+  it("starts no thread when the Project's first provider refuses helper runs, as Google Antigravity does", async () => {
+    const { host, createThread, startTurn } = fixture(
+      codeProject(),
+      { name: "acme/widget" },
+      (id) =>
+        id === "provider-1"
+          ? "Google doesn't support Google Antigravity as a helper agent."
+          : undefined,
+    );
+    expect(await start(host)).toEqual({ status: "refused", kind: "provider-unavailable" });
+    expect(createThread).not.toHaveBeenCalled();
+    expect(startTurn).not.toHaveBeenCalled();
   });
 
   it("refuses a pull-request outcome before creating anything when the confirmed remote names no repository", async () => {

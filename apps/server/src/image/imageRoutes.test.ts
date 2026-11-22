@@ -14,8 +14,11 @@ import {
   decodeServiceOffersResponse,
   decodeWindowId,
   MAX_PENDING_IMAGE_GENERATION_OFFERS,
+  THREAD_IMAGE_CHUNK_BYTES,
   type DeviceId,
+  type ImageArtifactId,
   type ImageJob,
+  type ImageJobId,
   type ProviderInstance,
   type RemoteSessionId,
   type ServiceOffer,
@@ -880,6 +883,406 @@ describe("image routes", () => {
         refusal: { kind: "exhausted", dimension: "monetary", scopeKind: "project" },
       });
       expect(generate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("chunked thread artifact read cache", () => {
+    const directories: Array<string> = [];
+    const nowIso = "2026-08-28T12:00:00.000Z";
+    const secondAttachmentId = "a3000000-0000-4000-8000-000000000011";
+
+    afterEach(() => {
+      for (const directory of directories.splice(0)) {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+
+    function makeMultiChunkPng(byteLength: number, fillSeed: number): Uint8Array {
+      const header = Uint8Array.from(
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+          "base64",
+        ),
+      );
+      const bytes = new Uint8Array(byteLength);
+      bytes.set(header, 0);
+      for (let index = header.length; index < byteLength; index += 1) {
+        bytes[index] = (index + fillSeed) & 0xff;
+      }
+      return bytes;
+    }
+
+    function completedJobWith(
+      artifacts: ReadonlyArray<{
+        readonly attachmentId: string;
+        readonly size: number;
+        readonly hash: string;
+        readonly mime?: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+      }>,
+      overrideJobId = jobId,
+    ): ImageJob {
+      return decodeImageJob({
+        ...queuedJob(),
+        id: overrideJobId,
+        status: "completed",
+        artifacts: artifacts.map((item) => ({
+          attachmentId: item.attachmentId,
+          size: item.size,
+          mime: item.mime ?? "image/png",
+          hash: item.hash,
+          evidence: {
+            jobId: overrideJobId,
+            profileInstanceId: profileId,
+            modelId: "gpt-image-2",
+            promptHash: "a".repeat(64),
+          },
+        })),
+      });
+    }
+
+    it("reuses verified bytes across multi-chunk thread artifact reads while serving exact slices and ranges", async () => {
+      const totalBytes = THREAD_IMAGE_CHUNK_BYTES * 2 + 123;
+      const imageBytes = makeMultiChunkPng(totalBytes, 7);
+      const job = completedJobWith([{ attachmentId, size: totalBytes, hash: "1".repeat(64) }]);
+      const readArtifact = vi.fn(async () => ({
+        bytes: imageBytes,
+        mime: "image/png" as const,
+      }));
+      const authorizeScope = vi.fn(async () => true);
+      const windowAuthorityStore = new WindowAuthorityStore();
+      windowAuthorityStore.register({ windowId: windowId as never, capability, now: nowMs });
+      let clockMs = nowMs;
+      const handler = createImageRouteHandler({
+        jobs: {
+          enqueue: vi.fn(),
+          cancel: vi.fn(),
+          get: (id: ImageJobId) => (String(id) === String(job.id) ? job : undefined),
+          listByScope: () => [job],
+          readArtifact,
+        } as unknown as ImageJobService,
+        listInstances: () => [imageProfile()],
+        readImageGenerationSettings: () => ({ customSources: [] }),
+        authorizeScope,
+        saveToProject: vi.fn(),
+        windowAuthorityStore,
+        now: () => clockMs,
+      });
+
+      try {
+        const offsets = [0, THREAD_IMAGE_CHUNK_BYTES, THREAD_IMAGE_CHUNK_BYTES * 2];
+        const received = new Uint8Array(totalBytes);
+        for (const offset of offsets) {
+          const response = await handler(
+            request(
+              `/api/image/thread-artifact?jobId=${jobId}&attachmentId=${attachmentId}&offset=${offset}`,
+            ),
+          );
+          expect(response?.status).toBe(206);
+          const end = Math.min(offset + THREAD_IMAGE_CHUNK_BYTES, totalBytes);
+          expect(response?.headers.get("content-range")).toBe(
+            `bytes ${offset}-${end - 1}/${totalBytes}`,
+          );
+          expect(response?.headers.get("content-type")).toBe("image/png");
+          const chunk = new Uint8Array(await (response ?? Response.error()).arrayBuffer());
+          expect(chunk.byteLength).toBe(end - offset);
+          received.set(chunk, offset);
+        }
+
+        expect(readArtifact).toHaveBeenCalledTimes(1);
+        // Every chunk still authorizes before and after the artifact lookup.
+        expect(authorizeScope).toHaveBeenCalledTimes(offsets.length * 2);
+        expect(Buffer.compare(received, imageBytes)).toBe(0);
+      } finally {
+        handler.close();
+      }
+    });
+
+    it("evicts the single cached entry when another attachment is read and re-reads after TTL expiry", async () => {
+      vi.useFakeTimers();
+      try {
+        const firstBytes = makeMultiChunkPng(128, 1);
+        const secondBytes = makeMultiChunkPng(160, 2);
+        const job = completedJobWith([
+          { attachmentId, size: firstBytes.byteLength, hash: "1".repeat(64) },
+          { attachmentId: secondAttachmentId, size: secondBytes.byteLength, hash: "2".repeat(64) },
+        ]);
+        const readArtifact = vi.fn(async (_jobId: ImageJobId, requestedId: ImageArtifactId) =>
+          String(requestedId) === attachmentId
+            ? { bytes: firstBytes, mime: "image/png" as const }
+            : { bytes: secondBytes, mime: "image/png" as const },
+        );
+        const windowAuthorityStore = new WindowAuthorityStore();
+        windowAuthorityStore.register({ windowId: windowId as never, capability, now: nowMs });
+        let clockMs = nowMs;
+        const handler = createImageRouteHandler({
+          jobs: {
+            enqueue: vi.fn(),
+            cancel: vi.fn(),
+            get: (id: ImageJobId) => (String(id) === String(job.id) ? job : undefined),
+            listByScope: () => [job],
+            readArtifact,
+          } as unknown as ImageJobService,
+          listInstances: () => [imageProfile()],
+          readImageGenerationSettings: () => ({ customSources: [] }),
+          authorizeScope: async () => true,
+          saveToProject: vi.fn(),
+          windowAuthorityStore,
+          now: () => clockMs,
+        });
+
+        try {
+          const readChunk = (id: string) =>
+            handler(
+              request(`/api/image/thread-artifact?jobId=${jobId}&attachmentId=${id}&offset=0`),
+            );
+
+          expect((await readChunk(attachmentId))?.status).toBe(206);
+          expect((await readChunk(attachmentId))?.status).toBe(206);
+          expect(readArtifact).toHaveBeenCalledTimes(1);
+          expect(vi.getTimerCount()).toBe(1);
+
+          // Reading a second attachment evicts the first single-entry slot.
+          expect((await readChunk(secondAttachmentId))?.status).toBe(206);
+          expect(readArtifact).toHaveBeenCalledTimes(2);
+          expect(vi.getTimerCount()).toBe(1);
+          expect((await readChunk(attachmentId))?.status).toBe(206);
+          expect(readArtifact).toHaveBeenCalledTimes(3);
+
+          // Advancing past the 30s TTL auto-clears the timer/entry and forces a fresh verified read.
+          clockMs += 30_000;
+          await vi.advanceTimersByTimeAsync(30_000);
+          expect(vi.getTimerCount()).toBe(0);
+          expect((await readChunk(attachmentId))?.status).toBe(206);
+          expect(readArtifact).toHaveBeenCalledTimes(4);
+        } finally {
+          handler.close();
+          expect(vi.getTimerCount()).toBe(0);
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("fails closed on authorization revocation, job deletion, or attachment metadata change even while bytes are cached", async () => {
+      const imageBytes = makeMultiChunkPng(128, 3);
+      let currentJob: ImageJob | undefined = completedJobWith([
+        { attachmentId, size: imageBytes.byteLength, hash: "1".repeat(64) },
+      ]);
+      const readArtifact = vi.fn(async () => ({
+        bytes: imageBytes,
+        mime: "image/png" as const,
+      }));
+      const authorizeScope = vi.fn(async () => true);
+      const windowAuthorityStore = new WindowAuthorityStore();
+      windowAuthorityStore.register({ windowId: windowId as never, capability, now: nowMs });
+      const handler = createImageRouteHandler({
+        jobs: {
+          enqueue: vi.fn(),
+          cancel: vi.fn(),
+          get: (id: ImageJobId) =>
+            currentJob !== undefined && String(id) === String(currentJob.id)
+              ? currentJob
+              : undefined,
+          listByScope: () => (currentJob === undefined ? [] : [currentJob]),
+          readArtifact,
+        } as unknown as ImageJobService,
+        listInstances: () => [imageProfile()],
+        readImageGenerationSettings: () => ({ customSources: [] }),
+        authorizeScope,
+        saveToProject: vi.fn(),
+        windowAuthorityStore,
+        now: () => nowMs,
+      });
+      const path = `/api/image/thread-artifact?jobId=${jobId}&attachmentId=${attachmentId}&offset=0`;
+
+      try {
+        // Prime the cache.
+        expect((await handler(request(path)))?.status).toBe(206);
+        expect(readArtifact).toHaveBeenCalledTimes(1);
+
+        // Revoking authorization before lookup fails closed without returning cached bytes.
+        authorizeScope.mockResolvedValueOnce(false);
+        expect((await handler(request(path)))?.status).toBe(404);
+        expect(readArtifact).toHaveBeenCalledTimes(1);
+
+        // Revoking authorization after lookup fails closed without returning cached bytes.
+        authorizeScope.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+        expect((await handler(request(path)))?.status).toBe(404);
+        expect(readArtifact).toHaveBeenCalledTimes(1);
+
+        // Changing the attachment hash invalidates the cached entry and forces a re-read.
+        currentJob = completedJobWith([
+          { attachmentId, size: imageBytes.byteLength, hash: "9".repeat(64) },
+        ]);
+        expect((await handler(request(path)))?.status).toBe(206);
+        expect(readArtifact).toHaveBeenCalledTimes(2);
+
+        // Deleting the job fails closed immediately even while bytes are cached, and evicts them.
+        const savedJob = currentJob;
+        currentJob = undefined;
+        expect((await handler(request(path)))?.status).toBe(404);
+        currentJob = savedJob;
+        expect((await handler(request(path)))?.status).toBe(206);
+        expect(readArtifact).toHaveBeenCalledTimes(3);
+      } finally {
+        handler.close();
+      }
+    });
+
+    it("reads a multi-chunk generated image from disk once through ImageJobService and clears cache on close", async () => {
+      const directory = mkdtempSync(join(tmpdir(), "octant-image-routes-cache-"));
+      directories.push(directory);
+      const connection = openSqlite(join(directory, "octant.sqlite3"));
+      applyMigrations(connection, MIGRATIONS, () => nowIso);
+      const runtime = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: runtime.events,
+        projections: runtime.projections,
+        clock: () => nowIso,
+      });
+      const totalBytes = THREAD_IMAGE_CHUNK_BYTES * 2 + 257;
+      const imageBytes = makeMultiChunkPng(totalBytes, 19);
+      const attachments = new GeneratedImageStore(directory);
+      const readSpy = vi.spyOn(attachments, "read");
+      const profile = imageProfile();
+      const jobs = new ImageJobService({
+        journal,
+        projection: runtime.imageJobProjection,
+        attachments,
+        readProviderInstance: (id) => (String(id) === String(profile.id) ? profile : undefined),
+        readImageGenerationCustomSources: () => [],
+        credentialResolver: { has: async () => true, resolve: async () => "sk-test" },
+        uuid: () => crypto.randomUUID(),
+        clock: () => nowIso,
+        actor: { kind: "system", actorId: "00000000-0000-4000-8000-000000000002" as never },
+        createAdapter: () => ({
+          generate: async () => ({
+            status: "completed" as const,
+            images: [{ bytes: imageBytes, mediaType: "image/png" as const }],
+          }),
+        }),
+      });
+      const queued = await jobs.enqueue({
+        threadKind: "chat-thread",
+        scopeId: scopeId as never,
+        profileInstanceId: profile.id,
+        modelId: "gpt-image-2" as never,
+        prompt: "wide panorama",
+      });
+      const completed = await jobs.whenTerminal(queued.id);
+      const stored = completed.artifacts[0];
+      expect(stored).toBeDefined();
+      if (stored === undefined) return;
+      readSpy.mockClear();
+
+      const windowAuthorityStore = new WindowAuthorityStore();
+      windowAuthorityStore.register({ windowId: windowId as never, capability, now: nowMs });
+      const handler = createImageRouteHandler({
+        jobs,
+        listInstances: () => [profile],
+        readImageGenerationSettings: () => ({ customSources: [] }),
+        authorizeScope: async () => true,
+        saveToProject: async () => ({ status: "refused", reason: "none" }),
+        windowAuthorityStore,
+        now: () => nowMs,
+      });
+
+      const reassembled = new Uint8Array(totalBytes);
+      for (const offset of [0, THREAD_IMAGE_CHUNK_BYTES, THREAD_IMAGE_CHUNK_BYTES * 2]) {
+        const response = await handler(
+          request(
+            `/api/image/thread-artifact?jobId=${completed.id}&attachmentId=${stored.attachmentId}&offset=${offset}`,
+          ),
+        );
+        expect(response?.status).toBe(206);
+        const chunk = new Uint8Array(await (response ?? Response.error()).arrayBuffer());
+        reassembled.set(chunk, offset);
+      }
+
+      expect(readSpy).toHaveBeenCalledTimes(1);
+      expect(Buffer.compare(reassembled, imageBytes)).toBe(0);
+
+      // Purging the scope evicts cached bytes immediately so the next read re-verifies on disk.
+      handler.evictScope(completed.scopeId);
+      const afterEvict = await handler(
+        request(
+          `/api/image/thread-artifact?jobId=${completed.id}&attachmentId=${stored.attachmentId}&offset=0`,
+        ),
+      );
+      expect(afterEvict?.status).toBe(206);
+      expect(readSpy).toHaveBeenCalledTimes(2);
+
+      // Closing the route handler drops the cached entry and prevents re-caching.
+      handler.close();
+      const afterClose = await handler(
+        request(
+          `/api/image/thread-artifact?jobId=${completed.id}&attachmentId=${stored.attachmentId}&offset=0`,
+        ),
+      );
+      expect(afterClose?.status).toBe(206);
+      expect(readSpy).toHaveBeenCalledTimes(3);
+      const secondAfterClose = await handler(
+        request(
+          `/api/image/thread-artifact?jobId=${completed.id}&attachmentId=${stored.attachmentId}&offset=0`,
+        ),
+      );
+      expect(secondAfterClose?.status).toBe(206);
+      expect(readSpy).toHaveBeenCalledTimes(4);
+    });
+
+    it("does not populate the cache when scope eviction races with an in-flight artifact read", async () => {
+      const imageBytes = makeMultiChunkPng(128, 11);
+      const job = completedJobWith([
+        { attachmentId, size: imageBytes.byteLength, hash: "3".repeat(64) },
+      ]);
+      let releaseFirstRead: (() => void) | undefined;
+      let firstReadStarted: (() => void) | undefined;
+      const started = new Promise<void>((resolve) => {
+        firstReadStarted = resolve;
+      });
+      let calls = 0;
+      const readArtifact = vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) {
+          firstReadStarted?.();
+          await new Promise<void>((resolve) => {
+            releaseFirstRead = resolve;
+          });
+        }
+        return { bytes: imageBytes, mime: "image/png" as const };
+      });
+      const windowAuthorityStore = new WindowAuthorityStore();
+      windowAuthorityStore.register({ windowId: windowId as never, capability, now: nowMs });
+      const handler = createImageRouteHandler({
+        jobs: {
+          enqueue: vi.fn(),
+          cancel: vi.fn(),
+          get: (id: ImageJobId) => (String(id) === String(job.id) ? job : undefined),
+          listByScope: () => [job],
+          readArtifact,
+        } as unknown as ImageJobService,
+        listInstances: () => [imageProfile()],
+        readImageGenerationSettings: () => ({ customSources: [] }),
+        authorizeScope: async () => true,
+        saveToProject: vi.fn(),
+        windowAuthorityStore,
+        now: () => nowMs,
+      });
+
+      try {
+        const path = `/api/image/thread-artifact?jobId=${jobId}&attachmentId=${attachmentId}&offset=0`;
+        const inFlight = handler(request(path));
+        await started;
+        handler.evictScope(job.scopeId);
+        releaseFirstRead?.();
+        expect((await inFlight)?.status).toBe(206);
+        // The raced read must not have populated the cache.
+        expect((await handler(request(path)))?.status).toBe(206);
+        expect(readArtifact).toHaveBeenCalledTimes(2);
+      } finally {
+        handler.close();
+      }
     });
   });
 });

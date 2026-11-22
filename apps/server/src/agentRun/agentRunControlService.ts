@@ -47,6 +47,12 @@ export interface AgentRunControlParentFacts {
   readonly workspaceParent: AgentRunWorkspaceParentFacts;
   readonly parentRoute: AgentRunParentRouteFacts;
   readonly codeWorkspace?: AgentRunCodeWorkspaceContext;
+  /**
+   * Why the parent thread's provider starts no helper runs, as its profile
+   * declares for its personal sign-in. Read from the thread's own provider,
+   * so a route chosen for the child never replaces it.
+   */
+  readonly helperRunRefusal?: string;
 }
 
 export interface AgentRunControlWorkspacePort {

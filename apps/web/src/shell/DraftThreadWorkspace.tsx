@@ -1152,7 +1152,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
               ? {}
               : { createFromControl: sourceSlot })}
           providerGroups={
-            onServer ? serverCodeThreadProviderGroups(props.providerGroups) : props.providerGroups
+            onServer
+              ? serverCodeThreadProviderGroups(props.providerGroups, "work")
+              : props.providerGroups
           }
           {...(props.selectedProviderInstanceId === undefined
             ? {}

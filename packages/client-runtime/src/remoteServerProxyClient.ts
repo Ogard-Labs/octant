@@ -7,10 +7,18 @@
 // holds no key: for each request a page sends, it asks this client to sign,
 // and this client signs only a request for the proxy route of a grant it was
 // given, so the channel can never sign a product request.
+//
+// A port forward rides the same session: the host opens it for a port on its
+// own loopback (one the person picked, or the one a thread's listed server
+// holds, which the host reads itself), and this client then signs only the
+// WebSocket upgrade of each connection the desktop carries for it, at the
+// forward's exact path.
 
 import {
   decodeHostAnswer,
+  RemotePortForwardResult,
   RemoteServerGrantResult,
+  type RemotePortForward,
   type RemoteServerGrant,
   type RemoteServerGrantRefusalReason,
   type RemoteServerGrantSource,
@@ -26,6 +34,7 @@ import {
 const PROXY_SESSION_COOKIE = "__Secure-octant-server-proxy-session";
 const PROXY_ROUTE_PREFIX = "/api/server-proxy/";
 const GRANTS_PATH = "/api/server-proxy/grants";
+const FORWARDS_PATH = "/api/server-proxy/forwards";
 const GRANT_ID_PATTERN = /^rsg_[0-9a-f]{64}$/;
 const SAFE_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD"]);
 const METHOD_PATTERN = /^[A-Z][A-Z0-9-]{0,15}$/;
@@ -64,6 +73,19 @@ export type RemoteServerProxyOpening =
   | {
       readonly status: "refused";
       readonly reason: RemoteServerProxyRefusalReason;
+      readonly message: string;
+    };
+
+export type RemotePortForwardOpening =
+  | { readonly status: "opened"; readonly forward: RemotePortForward }
+  | {
+      readonly status: "refused";
+      readonly reason:
+        | RemoteServerProxyRefusalReason
+        | Extract<
+            RemotePortForwardResult,
+            { readonly kind: "remote-port-forward-refused" }
+          >["reason"];
       readonly message: string;
     };
 
@@ -108,6 +130,16 @@ export interface RemoteServerProxyClient {
     signal?: AbortSignal,
   ) => Promise<RemoteServerProxyOpening>;
   /**
+   * Asks the host to forward one port on its own loopback to this device: a
+   * port the person picked, or a thread's listed server, whose port the host
+   * reads from its own listing. A computer that admitted this device through
+   * the hub forwards only the latter.
+   */
+  readonly openForward: (
+    target: number | RemoteServerGrantSource,
+    signal?: AbortSignal,
+  ) => Promise<RemotePortForwardOpening>;
+  /**
    * Registers a server-Project preview grant minted by `/api/server-project-preview`
    * under this client's proxy session so the forwarder can sign its requests.
    */
@@ -128,13 +160,23 @@ export function createRemoteServerProxyClient(
   const randomUuid = options.randomUuid ?? (() => globalThis.crypto.randomUUID());
   // A grant is bound on the host to the proxy session it was minted under, so
   // the grants this client holds are the session's and go with it.
-  let session: { readonly facts: RemoteSessionFacts; readonly grants: Set<string> } | undefined;
+  let session:
+    | {
+        readonly facts: RemoteSessionFacts;
+        readonly grants: Set<string>;
+        readonly forwards: Set<string>;
+      }
+    | undefined;
   let issuing: Promise<RemoteSessionFacts> | undefined;
 
   const refused = (
     reason: RemoteServerProxyRefusalReason,
     message: string,
-  ): RemoteServerProxyOpening => ({ status: "refused", reason, message });
+  ): Extract<RemoteServerProxyOpening, { readonly status: "refused" }> => ({
+    status: "refused",
+    reason,
+    message,
+  });
   const revoked = () =>
     refused(
       "device-revoked",
@@ -157,7 +199,7 @@ export function createRemoteServerProxyClient(
       issuing = undefined;
     });
     const facts = await issuing;
-    session ??= { facts, grants: new Set() };
+    session ??= { facts, grants: new Set(), forwards: new Set() };
     return session;
   };
 
@@ -188,12 +230,24 @@ export function createRemoteServerProxyClient(
     return headers;
   };
 
-  const openGrant = async (
-    source: RemoteServerGrantSource,
-    signal?: AbortSignal,
-  ): Promise<RemoteServerProxyOpening> => {
-    // A session the host has forgotten (idle expiry, a host restart) answers
-    // 401 once; a fresh one is minted and the request asked again, once.
+  /**
+   * Posts one signed request to a proxy route and decodes the host's answer.
+   * A session the host has forgotten (idle expiry, a host restart) answers
+   * 401 once; a fresh one is minted and the request asked again, once.
+   */
+  const askHost = async <T>(
+    path: string,
+    payload: unknown,
+    decode: (value: unknown) => T,
+    signal: AbortSignal | undefined,
+  ): Promise<
+    | {
+        readonly status: "answered";
+        readonly result: T;
+        readonly session: NonNullable<typeof session>;
+      }
+    | Extract<RemoteServerProxyOpening, { readonly status: "refused" }>
+  > => {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       let current: Awaited<ReturnType<typeof ensureSession>>;
       try {
@@ -203,18 +257,11 @@ export function createRemoteServerProxyClient(
           ? revoked()
           : unreachable();
       }
-      const body = new TextEncoder().encode(
-        JSON.stringify({ kind: "open-remote-server-grant", requestId: randomUuid(), source }),
-      );
+      const body = new TextEncoder().encode(JSON.stringify(payload));
       let response: Response;
       try {
-        const headers = await signedHeaders(
-          current.facts,
-          "POST",
-          GRANTS_PATH,
-          await sha256Hex(body),
-        );
-        response = await fetch(new URL(GRANTS_PATH, options.origin).toString(), {
+        const headers = await signedHeaders(current.facts, "POST", path, await sha256Hex(body));
+        response = await fetch(new URL(path, options.origin).toString(), {
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },
           body,
@@ -231,19 +278,53 @@ export function createRemoteServerProxyClient(
       }
       if (response.status === 429 || response.status === 503) return busy();
       if (!response.ok) return unreachable();
-      let result: RemoteServerGrantResult;
       try {
-        result = decodeHostAnswer(RemoteServerGrantResult)(await response.json());
+        return { status: "answered", result: decode(await response.json()), session: current };
       } catch {
         return unreachable();
       }
-      if (result.kind === "remote-server-grant-refused") {
-        return refused(result.refusal.reason, result.refusal.message);
-      }
-      current.grants.add(String(result.grant.grantId));
-      return { status: "opened", grant: result.grant };
     }
     return revoked();
+  };
+
+  const openGrant = async (
+    source: RemoteServerGrantSource,
+    signal?: AbortSignal,
+  ): Promise<RemoteServerProxyOpening> => {
+    const answer = await askHost(
+      GRANTS_PATH,
+      { kind: "open-remote-server-grant", requestId: randomUuid(), source },
+      decodeHostAnswer(RemoteServerGrantResult),
+      signal,
+    );
+    if (answer.status === "refused") return answer;
+    const result = answer.result;
+    if (result.kind === "remote-server-grant-refused") {
+      return refused(result.refusal.reason, result.refusal.message);
+    }
+    answer.session.grants.add(String(result.grant.grantId));
+    return { status: "opened", grant: result.grant };
+  };
+
+  const openForward = async (
+    target: number | RemoteServerGrantSource,
+    signal?: AbortSignal,
+  ): Promise<RemotePortForwardOpening> => {
+    const answer = await askHost(
+      FORWARDS_PATH,
+      typeof target === "number"
+        ? { kind: "open-remote-port-forward", requestId: randomUuid(), port: target }
+        : { kind: "open-remote-port-forward", requestId: randomUuid(), source: target },
+      decodeHostAnswer(RemotePortForwardResult),
+      signal,
+    );
+    if (answer.status === "refused") return answer;
+    const result = answer.result;
+    if (result.kind === "remote-port-forward-refused") {
+      return { status: "refused", reason: result.reason, message: result.message };
+    }
+    answer.session.forwards.add(String(result.forward.forwardId));
+    return { status: "opened", forward: result.forward };
   };
 
   const signRelayRequest = async (
@@ -253,6 +334,20 @@ export function createRemoteServerProxyClient(
       return { status: "refused", reason: "invalid-request" };
     }
     const current = session;
+    if (current?.forwards.has(request.grantId) === true) {
+      // A forward's connection is one WebSocket upgrade at its exact path.
+      const forwardPath = `${PROXY_ROUTE_PREFIX}${request.grantId}`;
+      if (
+        request.method !== "GET" ||
+        canonicalizeRemotePathQuery(request.pathQuery) !== forwardPath
+      ) {
+        return { status: "refused", reason: "outside-grant" };
+      }
+      return {
+        status: "signed",
+        headers: await signedHeaders(current.facts, "GET", forwardPath, request.bodyDigest),
+      };
+    }
     if (current === undefined || !current.grants.has(request.grantId)) {
       return { status: "refused", reason: "grant-not-held" };
     }
@@ -300,6 +395,7 @@ export function createRemoteServerProxyClient(
 
   return {
     openGrant,
+    openForward,
     adoptGrant,
     signRelayRequest,
     forget: () => {

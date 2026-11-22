@@ -888,6 +888,7 @@ describe("LocalServerService running services", () => {
     const [row] = await listedServices(service);
     expect(Object.keys(row ?? {}).sort()).toEqual(
       [
+        "forwardable",
         "framework",
         "health",
         "listenerId",
@@ -902,6 +903,18 @@ describe("LocalServerService running services", () => {
         "workingDirectory",
       ].sort(),
     );
+  });
+
+  it("marks a service forwardable only when 127.0.0.1 reaches its socket", async () => {
+    const lanOnly = { ...viteListener, pid: 7001, port: 5181, bindAddress: "192.168.1.20" };
+    const wildcard = { ...viteListener, pid: 7002, port: 5182, bindAddress: "0.0.0.0" };
+    const { service } = buildRunning({ observed: [viteListener, lanOnly, wildcard] });
+    const rows = await listedServices(service);
+    expect(rows.map((row) => [row.port, row.forwardable])).toEqual([
+      [5173, true],
+      [5181, false],
+      [5182, true],
+    ]);
   });
 
   it("answers a window with no Code Project without scanning the computer", async () => {

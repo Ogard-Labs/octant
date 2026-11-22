@@ -39,6 +39,7 @@ import type {
   LocalListenerPort,
   ObservedLocalListener,
 } from "./localListenerPort";
+import { answersOn } from "./localListenerPort";
 
 /**
  * Authoritative Code Environment "Local servers" surface.
@@ -990,6 +991,7 @@ function runningServices(
         ownership: entry.ownership === "octant-owned" ? "octant-owned" : "left-over",
         health: listener.health,
         openAvailable: listener.openAvailable,
+        forwardable: answersOn(entry.observation.bindAddress, "127.0.0.1"),
         stop: listener.stop,
         projectId: origin.projectId,
         projectName: origin.projectName,

@@ -9,7 +9,7 @@ import { createNativeHarnessComposition } from "../harness/nativeHarnessComposit
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import { ServerConnection } from "./serverConnection";
 import {
-  SERVER_RUNTIME_NOT_HARNESS,
+  SERVER_WORK_RUNTIME_NOT_HARNESS,
   serverCodeCheckout,
   serverProjectOf,
 } from "./serverProjectThreads";
@@ -251,7 +251,7 @@ describe.skipIf(!canRunThrowawaySshd)("a server Work Project's turn", () => {
     );
     expect(turn({ level: () => "full-access", harness: false }).bound).toEqual({
       status: "refused",
-      message: SERVER_RUNTIME_NOT_HARNESS,
+      message: SERVER_WORK_RUNTIME_NOT_HARNESS,
     });
   });
 });

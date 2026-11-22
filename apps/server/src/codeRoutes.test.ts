@@ -802,6 +802,23 @@ describe("Code routes", () => {
     expect(fork?.status).toBe(403);
     expect(execute).toHaveBeenCalledOnce();
 
+    // The start's checkout and remote reads are held to the same item.
+    for (const kind of ["prepare-code-project-checkout", "get-worktree-remote-facts"]) {
+      const refused = await route(from(JSON.stringify({ kind, projectId: otherProject })));
+      expect(refused?.status).toBe(403);
+      expect(await refused?.json()).toMatchObject({
+        message:
+          "This computer's Act item for its hub does not name this Project, so a device the hub introduced cannot start threads in it here.",
+      });
+      expect(
+        (await route(from(JSON.stringify({ kind, projectId: String(thread.projectId) }))))?.status,
+      ).toBe(200);
+    }
+    expect(execute).toHaveBeenCalledTimes(3);
+    execute.mockClear();
+    expect((await route(from(create(String(thread.projectId)))))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledOnce();
+
     grant.current = { items: ["roster", "introduce"], actProjects: [] };
     expect((await route(from(create(String(thread.projectId)))))?.status).toBe(403);
     // A device the member's own person paired is that person and never reads the Act item.
@@ -910,6 +927,33 @@ describe("Code routes", () => {
         expect.objectContaining({ kind: "cancel-provider-turn", threadId }),
         expect.anything(),
       );
+    });
+
+    it("a hub-introduced device sends a turn only in a Project the member's Act item names", async () => {
+      const { route, executeOperation } = fixture(actOnThisProject());
+      const turn = (target: string) =>
+        JSON.stringify({
+          kind: "start-provider-turn",
+          operationId: crypto.randomUUID(),
+          threadId: target,
+          checkoutId,
+          sessionId: "00000000-0000-4000-8000-0000000009b4",
+          prompt: {
+            contentId: "00000000-0000-4000-8000-0000000009b5",
+            digest: "d".repeat(64),
+            byteLength: 42,
+          },
+        });
+
+      expect((await route(from(turn(threadId))))?.status).toBe(200);
+      const unnamed = await route(from(turn(otherThreadId)));
+
+      expect(unnamed?.status).toBe(403);
+      expect(await unnamed?.json()).toMatchObject({
+        message:
+          "This computer's Act item for its hub does not name this Project, so a device the hub introduced cannot send turns in it here.",
+      });
+      expect(executeOperation).toHaveBeenCalledOnce();
     });
 
     it("unticking Act refuses the next approval answer and Stop", async () => {
