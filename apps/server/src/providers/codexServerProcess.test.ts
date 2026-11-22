@@ -374,7 +374,7 @@ describe.skipIf(process.platform === "win32")("Codex on a server Project's serve
     );
     // A `CODEX_HOME` holding another provider's sign-in, trailing slash or
     // not, is refused rather than exempting that sign-in.
-    for (const codexHome of ["/home/build/", "/home/build"]) {
+    for (const codexHome of ["/home/build/", "/home/build", "/"]) {
       const shared = await readCodexProtectedSignInsOnServer(
         placementWith(`Linux\n/home/build\n${codexHome}\n`),
       );

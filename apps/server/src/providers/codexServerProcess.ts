@@ -126,7 +126,9 @@ export async function readCodexProtectedSignInsOnServer(
     message: `Octant could not read the home folder of the login on ${placement.serverName}, so it cannot keep other providers' sign-ins there out of Codex's reach.`,
   } as const;
   if (serverHome === "") return unreadable;
-  const inside = (path: string, folder: string) => path === folder || path.startsWith(`${folder}/`);
+  // A folder of "/" holds every absolute path; `${folder}/` would look for "//".
+  const inside = (path: string, folder: string) =>
+    folder === "/" || path === folder || path.startsWith(`${folder}/`);
   const codexHome = posix.isAbsolute(codexHomeSetting)
     ? posix.normalize(codexHomeSetting).replace(/(?<=.)\/+$/, "")
     : posix.join(serverHome, ".codex");
