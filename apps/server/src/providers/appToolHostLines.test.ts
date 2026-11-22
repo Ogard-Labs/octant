@@ -32,6 +32,7 @@ const BROADEST = [
   "octant_github",
   "octant_look",
   "octant_memory",
+  "octant_narrate",
   "octant_offer_side_task",
   "octant_past_threads",
   "octant_propose_routine",

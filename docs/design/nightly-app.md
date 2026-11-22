@@ -1702,6 +1702,11 @@ before it is ever used as a release gate outside CI.
   Nightly is published only once an Octant build (Stable or Preview) exists
   for it to attach to; "technical preview" names the product's stage, not the
   ring.
+- **Public download.** GitHub's latest release carries the public Mac
+  download link: the newest Octant Preview until the first stable release,
+  then only stable. Nightly releases and the `feed-*` mailbox releases stay
+  prereleases and can never hold it. The promotion rules are owned by
+  [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
 ## Presentation
 

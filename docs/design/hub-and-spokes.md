@@ -657,6 +657,14 @@ otherwise.
   window is admitted on each spoke through the guest path, which adds the
   address of the connection it is admitted over to that guest's alert, so
   the alert carries its private address; the roster itself lists no address for a guest.
+  The hub, which lists the window without its person approving it, tells
+  its own connected devices too: when it gives a member's window its first
+  device, it raises the direct-pairing alert for that device, with the
+  roster's name for the window, the private address the window was admitted
+  over, its key fingerprint, and Remove, which revokes that device on the
+  hub so the window is not given another; a phone paired with the hub is
+  pushed as for a direct pairing. A device replaced after it expired or the
+  listener moved is the same window and raises no new alert.
   A device signs in only at the listener origin it was registered at, so
   when a spoke's or the hub's listener has moved, the window's next ask is
   given a new device at the current address and the old one is revoked, as
@@ -703,7 +711,8 @@ otherwise.
   with a loopback smoke: the window lists the hub labelled hub, starts,
   answers, and stops there only in a Project the hub's list names, sees the
   hub with nothing to start when none is ticked, loses its hub device when
-  the hub role is turned off, and every spoke alerts on the window.
+  the hub role is turned off, and every spoke and the hub's own devices
+  alert on the window.
 
   Rationale: the hub was first left out of a spoke window's computers because
   it had no Act item of its own to bound a device it introduced to itself.
@@ -1537,8 +1546,9 @@ the check that the new member is the person's own.
 
   Partly built: the addresses, the read route, the direct-pairing alert, the
   alerts in the paired browser, the window and the phone, and the phone push
-  with its setting. Not built: the hub telling its own window about a member
-  it added. The phone push has run only in tests; a real phone is a
+  with its setting, and the hub telling its own devices about a member's
+  window it admitted. Not built: the hub telling its own window about a
+  spoke or standby it added. The phone push has run only in tests; a real phone is a
   maintainer check.
 
 - **Confirm new members (optional).** A spoke can turn on a setting that

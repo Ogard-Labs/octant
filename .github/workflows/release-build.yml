@@ -214,6 +214,16 @@ jobs:
           fi
           echo "archive=${archive}" >> "$GITHUB_OUTPUT"
 
+      # Whichever job created the shared release, its notes say what macOS
+      # the Mac build needs, read from the built bundle.
+      - name: State the Mac build's minimum macOS in the release notes
+        if: matrix.apple_signing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          PRODUCT: ${{ inputs.product }}
+        run: scripts/note-macos-minimum.sh "v${VERSION}" "${SOURCE_DIR}/out" "${PRODUCT}"
+
       # The first-install disk image, built, signed, notarized and stapled by
       # the packaging step above. It is attached to the release for people to
       # download and is deliberately not handed to the feed job: the updater

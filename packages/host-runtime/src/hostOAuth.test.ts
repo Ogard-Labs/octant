@@ -1344,7 +1344,6 @@ describe("the MCP authorization dialect", () => {
     const store = memoryStore();
     let clock = Date.parse("2026-10-20T12:00:00.000Z");
     const runtime = createHostOAuthRuntime({ store, timeoutMs: 2_000, now: () => clock });
-    const port = 43000 + Math.floor(Math.random() * 2000);
     try {
       const begun = await handleHostOAuthBrokerRoute(
         "/v1/oauth/begin",
@@ -1364,7 +1363,6 @@ describe("the MCP authorization dialect", () => {
               scopes: ["https://www.googleapis.com/auth/drive.readonly"],
               termsId: "mcp-sign-in-terms-1",
               resource: "https://mcp.example/mcp",
-              redirectPort: port,
             },
           }),
         }),
@@ -1375,12 +1373,34 @@ describe("the MCP authorization dialect", () => {
       const attemptId = isRecord(started) ? started.attemptId : undefined;
       const authorizationUrl = isRecord(started) ? started.authorizationUrl : undefined;
       if (typeof attemptId !== "string" || typeof authorizationUrl !== "string") {
-        throw new Error("expected a PKCE attempt over the route");
+        const kind =
+          isRecord(started) && typeof started.kind === "string" ? started.kind : "unknown";
+        const reason =
+          isRecord(started) && typeof started.reason === "string" ? started.reason : undefined;
+        throw new Error(
+          reason === undefined
+            ? `expected a PKCE attempt over the route; received ${kind}`
+            : `expected a PKCE attempt over the route; received ${kind} (${reason})`,
+        );
       }
       const authorization = new URL(authorizationUrl);
-      expect(authorization.searchParams.get("redirect_uri")).toBe(
-        `http://127.0.0.1:${port}/oauth/callback`,
-      );
+      const redirectUriValue = authorization.searchParams.get("redirect_uri");
+      if (redirectUriValue === null) {
+        throw new Error("expected a callback URL in the authorization request");
+      }
+      const redirectUri = new URL(redirectUriValue);
+      expect(redirectUri.protocol).toBe("http:");
+      expect(redirectUri.hostname).toBe("127.0.0.1");
+      expect(redirectUri.port).not.toBe("");
+      const redirectPort = Number(redirectUri.port);
+      expect(Number.isInteger(redirectPort)).toBe(true);
+      expect(redirectPort).toBeGreaterThan(0);
+      expect(redirectPort).toBeLessThanOrEqual(65535);
+      expect(redirectUri.pathname).toBe("/oauth/callback");
+      expect(redirectUri.username).toBe("");
+      expect(redirectUri.password).toBe("");
+      expect(redirectUri.search).toBe("");
+      expect(redirectUri.hash).toBe("");
       expect(authorization.searchParams.get("resource")).toBe("https://mcp.example/mcp");
       await fetch(authorizationUrl);
       await waitForState(() => runtime.status(attemptId), "signed-in");

@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { ProviderExecutionPolicy } from "@octant/contracts";
+import type { ProviderExecutionPolicy, ProviderNativeSetup } from "@octant/contracts";
 import {
   WINDOWS_KEPT_SANDBOX_REFUSAL,
   WINDOWS_STRICT_CHAT_REFUSAL,
@@ -181,6 +181,7 @@ describe.runIf(process.platform === "win32" && fakeAcpAgent !== undefined)(
       readonly mode: "chat" | "code";
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly strict?: boolean;
+      readonly nativeSetup?: ProviderNativeSetup;
     }) => {
       const base = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-windows-")));
       directories.push(base);
@@ -210,9 +211,19 @@ describe.runIf(process.platform === "win32" && fakeAcpAgent !== undefined)(
     };
 
     it("starts at Full access, below it, and in Chat outside Strict with no sandbox, answers initialize, and stops its whole tree", async () => {
+      // Kilo holds a Project's own setup back, so below Full access Windows
+      // starts it only with the person's own setup on.
+      const ownSetup = {
+        subagents: true,
+        webTools: true,
+        skills: true,
+        toolServers: true,
+        hooks: true,
+        projectCode: true,
+      } as const;
       for (const level of [
         { mode: "code", executionPolicy: "full-access" },
-        { mode: "code", executionPolicy: "approval-gated", strict: false },
+        { mode: "code", executionPolicy: "approval-gated", strict: false, nativeSetup: ownSetup },
         { mode: "chat", executionPolicy: "approval-gated", strict: false },
       ] as const) {
         const started = await startAndStop(level);

@@ -88,7 +88,8 @@ function OfferCard(props: {
       const result =
         answer.decision === "generate" ||
         answer.decision === "save" ||
-        answer.decision === "transcribe"
+        answer.decision === "transcribe" ||
+        answer.decision === "narrate"
           ? await decideWithConfirmation({
               authenticator: props.authenticator ?? deviceAuthenticator,
               reason: "approve",
@@ -110,9 +111,19 @@ function OfferCard(props: {
   if (settled) return null;
   const text = { ...mobileTypography.caption, color: colors.textSecondary };
   const cancel = () => void decide({ offerId: offer.offerId, decision: "cancel" });
+  const canRemember =
+    offer.kind !== "save" &&
+    references === undefined &&
+    (offer.kind !== "narrate" || offer.canRemember !== false);
   const approve = () => {
     if (offer.kind === "transcribe")
       void decide({ offerId: offer.offerId, decision: "transcribe", rememberForThread: remember });
+    else if (offer.kind === "narrate")
+      void decide({
+        offerId: offer.offerId,
+        decision: "narrate",
+        rememberForThread: canRemember && remember,
+      });
     else if (offer.kind === "save") void decide({ offerId: offer.offerId, decision: "save" });
     else if (choice !== undefined) {
       void decide({
@@ -133,9 +144,11 @@ function OfferCard(props: {
       <Text style={[mobileTypography.body, { color: colors.textPrimary }]}>
         {offer.kind === "transcribe"
           ? "Transcribe this recording?"
-          : offer.kind === "save"
-            ? "Save this image as a new file?"
-            : "Generate this image?"}
+          : offer.kind === "narrate"
+            ? "Narrate this text to an audio file?"
+            : offer.kind === "save"
+              ? "Save this image as a new file?"
+              : "Generate this image?"}
       </Text>
       <Text style={text}>{offer.kind === "generate" ? offer.prompt : offer.relativePath}</Text>
       {offer.kind === "transcribe" ? (
@@ -143,6 +156,19 @@ function OfferCard(props: {
           {offer.sizeBytes.toLocaleString()} bytes · Sent to {offer.endpointName} ({offer.modelId}).
           Your provider may charge for transcription.
         </Text>
+      ) : offer.kind === "narrate" ? (
+        <>
+          <Text style={text}>
+            {offer.excerpt}
+            {offer.characters > offer.excerpt.length ? "…" : ""}
+          </Text>
+          <Text style={text}>
+            {offer.characters.toLocaleString()}{" "}
+            {offer.characters === 1 ? "character" : "characters"} · {offer.format} · Voice{" "}
+            {offer.voice} on {offer.endpointName} ({offer.modelId}). Saves on your computer without
+            replacing a file. Your provider may charge for synthesis.
+          </Text>
+        </>
       ) : offer.kind === "save" ? (
         <Text style={text}>
           The image saves under the thread’s folder without replacing a file.
@@ -186,7 +212,7 @@ function OfferCard(props: {
           />
         </>
       )}
-      {offer.kind !== "save" && references === undefined ? (
+      {canRemember ? (
         <View style={styles.remember}>
           <Text style={[text, styles.rememberLabel]}>{rememberLabel}</Text>
           <Switch
@@ -200,15 +226,23 @@ function OfferCard(props: {
       <ApprovalDecisionButtons
         allowDisabled={offer.kind === "generate" && choice === undefined}
         allowLabel={
-          offer.kind === "transcribe" ? "Transcribe" : offer.kind === "save" ? "Save" : "Generate"
+          offer.kind === "transcribe"
+            ? "Transcribe"
+            : offer.kind === "narrate"
+              ? "Narrate"
+              : offer.kind === "save"
+                ? "Save"
+                : "Generate"
         }
         busy={unavailable}
         denyLabel={
           offer.kind === "transcribe"
             ? "Don't transcribe"
-            : offer.kind === "save"
-              ? "Don't save"
-              : "Cancel"
+            : offer.kind === "narrate"
+              ? "Don't narrate"
+              : offer.kind === "save"
+                ? "Don't save"
+                : "Cancel"
         }
         onAllow={approve}
         onDeny={cancel}
