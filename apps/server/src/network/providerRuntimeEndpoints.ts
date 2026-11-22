@@ -101,6 +101,13 @@ export function providerRuntimeDomains(input: {
   readonly runtime: RuntimeNetworkRuntime;
   readonly profileId?: AcpProviderKind | undefined;
   readonly environment?: Readonly<Record<string, string | undefined>> | undefined;
+  /**
+   * The Google Cloud location an Agent Platform instance is configured with.
+   * Its regional endpoint (`us-central1-aiplatform.googleapis.com`) is not a
+   * subdomain of `aiplatform.googleapis.com`, so that one host is added;
+   * `global` uses the listed host itself.
+   */
+  readonly googleCloudLocation?: string | undefined;
 }): ReadonlyArray<string> {
   const listed =
     input.runtime === "acp"
@@ -108,7 +115,12 @@ export function providerRuntimeDomains(input: {
         ? []
         : ACP_ENDPOINTS[input.profileId]
       : RUNTIME_ENDPOINTS[input.runtime];
-  return [...new Set([...listed, ...configuredEndpointHosts(input.environment)])];
+  const location = input.googleCloudLocation;
+  const regional =
+    location !== undefined && location !== "global" && /^[a-z0-9][a-z0-9-]*$/u.test(location)
+      ? [`${location}-aiplatform.googleapis.com`]
+      : [];
+  return [...new Set([...listed, ...regional, ...configuredEndpointHosts(input.environment)])];
 }
 
 /**

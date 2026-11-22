@@ -1795,6 +1795,9 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
                 executionPolicy: wall,
                 loopbackPorts: input.loopbackPorts ?? [],
                 environment,
+                ...(input.googleCloud === undefined
+                  ? {}
+                  : { googleCloudLocation: input.googleCloud.location }),
               });
         const servers =
           input.purpose === "probe" || windows !== undefined
