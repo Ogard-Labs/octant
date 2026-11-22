@@ -18414,7 +18414,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
     write actions, and the local-servers commands route and the server proxy
     are outside Read only. A device's own sign-out, key rotation and
     self-revoke keep working at every level. Hub-introduced devices and agent
-    grants have no level and keep their own limits.
+    grants have no level and keep their own limits. `GET
+/api/remote/auth/device` reports a device's own `accessLevel` beside
+    `actsAsHostPerson`, for a device the host's person paired only, so a client
+    can say why a control is missing; like `actsAsHostPerson` it grants
+    nothing.
   - **Pause remote access and signing out other devices.** Pausing is a host
     setting journaled as `remote.access-pause-changed@1` with its actor. While
     it is on, the private listener refuses every paired device's session

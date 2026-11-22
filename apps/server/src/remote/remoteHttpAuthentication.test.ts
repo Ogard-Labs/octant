@@ -130,6 +130,7 @@ interface SetupOptions {
    */
   readonly skipRequiredSecureBundle?: boolean;
   readonly deviceAdmittedBy?: (deviceId: string) => "host-person" | "hub-roster";
+  readonly deviceAccessLevel?: (deviceId: string) => "full" | "approve-and-steer" | "read-only";
 }
 
 function setup(options: SetupOptions = {}) {
@@ -278,6 +279,9 @@ function setup(options: SetupOptions = {}) {
     ...(options.deviceAdmittedBy === undefined
       ? {}
       : { deviceAdmittedBy: options.deviceAdmittedBy }),
+    ...(options.deviceAccessLevel === undefined
+      ? {}
+      : { deviceAccessLevel: options.deviceAccessLevel }),
   });
   return {
     connection,
@@ -692,6 +696,38 @@ describe("remote HTTP authentication boundary", () => {
 
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ deviceId, actsAsHostPerson: expected });
+      connection.close();
+    }
+  });
+
+  it("tells a device the access level its person chose, and says none for a device the hub introduced", async () => {
+    for (const [admittedBy, level, expected] of [
+      ["host-person", "full", { actsAsHostPerson: true, accessLevel: "full" }],
+      ["host-person", "read-only", { actsAsHostPerson: false, accessLevel: "read-only" }],
+      [
+        "host-person",
+        "approve-and-steer",
+        { actsAsHostPerson: false, accessLevel: "approve-and-steer" },
+      ],
+      ["hub-roster", "read-only", { actsAsHostPerson: false }],
+    ] as const) {
+      const { auth, privateKey, connection } = setup({
+        withSelfService: true,
+        withDispatch: true,
+        deviceAdmittedBy: () => admittedBy,
+        deviceAccessLevel: () => level,
+      });
+      const { session } = await issueSessionOverHttp(auth, privateKey);
+
+      const response = await auth.handleAuthenticated(
+        productRequest(session, privateKey, { method: "GET", target: "/api/remote/auth/device" }),
+        transport,
+        ownDeviceRoute,
+      );
+
+      const body = await response.json();
+      expect(body).toMatchObject(expected);
+      if (!("accessLevel" in expected)) expect(body).not.toHaveProperty("accessLevel");
       connection.close();
     }
   });

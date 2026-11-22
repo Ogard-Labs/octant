@@ -1,4 +1,8 @@
-import { RemoteOwnDeviceMetadataV1, decodeHostAnswer } from "@octant/contracts";
+import {
+  RemoteOwnDeviceMetadataV1,
+  decodeHostAnswer,
+  type DeviceAccessLevel,
+} from "@octant/contracts";
 import { authorizePrincipalAction, classifyRemoteAction } from "@octant/domain";
 
 /**
@@ -10,6 +14,11 @@ import { authorizePrincipalAction, classifyRemoteAction } from "@octant/domain";
  */
 export interface RemoteSessionStanding {
   readonly actsAsHostPerson: boolean;
+  /**
+   * The level the host's person chose for this device, when the host says;
+   * it explains why a control is missing and grants nothing.
+   */
+  readonly accessLevel?: DeviceAccessLevel;
 }
 
 /** A session the host has not said acts as its person, and one whose host does not say. */
@@ -34,7 +43,10 @@ export async function readRemoteSessionStanding(transport: {
     });
     if (!response.ok) return RESTRICTED_REMOTE_SESSION;
     const device = decodeHostAnswer(RemoteOwnDeviceMetadataV1)(await response.json());
-    return { actsAsHostPerson: device.actsAsHostPerson === true };
+    return {
+      actsAsHostPerson: device.actsAsHostPerson === true,
+      ...(device.accessLevel === undefined ? {} : { accessLevel: device.accessLevel }),
+    };
   } catch {
     return RESTRICTED_REMOTE_SESSION;
   }
