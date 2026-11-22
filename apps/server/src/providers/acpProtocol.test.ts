@@ -760,6 +760,68 @@ describe("ACP protocol boundary", () => {
     }
   });
 
+  it("does not hold the silence clock for a finished tool call whose start the agent repeats", async () => {
+    vi.useFakeTimers();
+    try {
+      const { client, stdout } = transport({ limits: { requestTimeoutMs: 30 } });
+      const observed = failureOf(client.prompt("session-1", "read a file"));
+      const update = (fields: Readonly<Record<string, unknown>>) =>
+        stdout.write(
+          `${JSON.stringify({
+            jsonrpc: "2.0",
+            method: "session/update",
+            params: { sessionId: "session-1", update: { toolCallId: "view-1", ...fields } },
+          })}\n`,
+        );
+      update({ sessionUpdate: "tool_call", title: "View", status: "in_progress" });
+      update({ sessionUpdate: "tool_call_update", status: "completed" });
+      update({ sessionUpdate: "tool_call", title: "View" });
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      expect(await observed).toMatchObject({ kind: "timeout" });
+      await client.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a steered turn's running tool holding the clock after the earlier prompt answers", async () => {
+    vi.useFakeTimers();
+    try {
+      const { client, stdout } = transport({ limits: { requestTimeoutMs: 30 } });
+      const original = client.prompt("session-1", "run the build");
+      let settled = false;
+      const steering = failureOf(client.prompt("session-1", "and then the tests")).finally(() => {
+        settled = true;
+      });
+      const update = (fields: Readonly<Record<string, unknown>>) =>
+        stdout.write(
+          `${JSON.stringify({
+            jsonrpc: "2.0",
+            method: "session/update",
+            params: { sessionId: "session-1", update: { toolCallId: "build", ...fields } },
+          })}\n`,
+        );
+      update({ sessionUpdate: "tool_call", title: "Build", status: "in_progress" });
+      stdout.write(
+        `${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { stopReason: "cancelled" } })}\n`,
+      );
+      await expect(original).resolves.toMatchObject({ stopReason: "cancelled" });
+      // Build output that does not restate the call's status.
+      update({
+        sessionUpdate: "tool_call_update",
+        content: [{ type: "content", content: { type: "text", text: "compiling" } }],
+      });
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+      expect(settled).toBe(false);
+      update({ sessionUpdate: "tool_call_update", status: "completed" });
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      expect(await steering).toMatchObject({ kind: "timeout" });
+      await client.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("still cancels a turn that outlives its own turn budget", async () => {
     const { client } = transport({ limits: { requestTimeoutMs: 30, turnTimeoutMs: 90 } });
     const observed = failureOf(client.prompt("session-1", "never answered"));

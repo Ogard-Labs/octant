@@ -533,6 +533,22 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
    * budget; the turn ending clears its session's calls, settled or not.
    */
   const runningTools = new Map<string, Set<string>>();
+  /**
+   * Calls that already settled in the session's open turn. Antigravity repeats
+   * a finished call's start without a status, and the event mapper ignores the
+   * repeat; counting it as running again would hold the turn open forever.
+   */
+  const settledTools = new Map<string, Set<string>>();
+  /**
+   * A steered turn keeps several prompts open on one session, and an earlier
+   * prompt answering does not end it, so a session's calls are forgotten only
+   * once its last open prompt settles.
+   */
+  const forgetTools = (sessionId: string) => {
+    if ([...pending.values()].some((entry) => entry.idle?.sessionId === sessionId)) return;
+    runningTools.delete(sessionId);
+    settledTools.delete(sessionId);
+  };
   const holdsIdle = (sessionId: string) =>
     awaitingClient.size > 0 || (runningTools.get(sessionId)?.size ?? 0) > 0;
   const rearmIdle = () => {
@@ -552,9 +568,16 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
     if (![...pending.values()].some((entry) => entry.idle?.sessionId === sessionId)) return;
     const status = update.status;
     const calls = runningTools.get(sessionId) ?? new Set<string>();
+    const settled = settledTools.get(sessionId) ?? new Set<string>();
     // ACP reads a start without a status as pending.
-    if (status === "completed" || status === "failed") calls.delete(toolCallId);
-    else if (status === "pending" || status === "in_progress" || kind === "tool_call")
+    if (status === "completed" || status === "failed") {
+      calls.delete(toolCallId);
+      settled.add(toolCallId);
+      settledTools.set(sessionId, settled);
+    } else if (
+      !settled.has(toolCallId) &&
+      (status === "pending" || status === "in_progress" || kind === "tool_call")
+    )
       calls.add(toolCallId);
     if (calls.size === 0) runningTools.delete(sessionId);
     else runningTools.set(sessionId, calls);
@@ -637,6 +660,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
     }
     pending.clear();
     runningTools.clear();
+    settledTools.clear();
     for (const write of pendingWrites)
       write.reject(failure ?? new AcpFailure("closed", "ACP transport closed."));
     if (failure === undefined) resolveExited();
@@ -747,7 +771,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
     }
     pending.delete(id);
     clearTimeout(request.timeout);
-    if (request.idle !== undefined) runningTools.delete(request.idle.sessionId);
+    if (request.idle !== undefined) forgetTools(request.idle.sessionId);
     if (response.error !== undefined) {
       request.reject(
         new AcpFailure(
@@ -974,7 +998,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
       const idleSession = budget === "fixed" ? undefined : budget.idleSession;
       const expire = () => {
         pending.delete(id);
-        if (idleSession !== undefined) runningTools.delete(idleSession);
+        if (idleSession !== undefined) forgetTools(idleSession);
         reject(new AcpFailure("timeout", "ACP request timed out."));
       };
       const timeout =
@@ -995,7 +1019,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
         if (current === undefined) return;
         pending.delete(id);
         clearTimeout(current.timeout);
-        if (idleSession !== undefined) runningTools.delete(idleSession);
+        if (idleSession !== undefined) forgetTools(idleSession);
         reject(
           error instanceof AcpFailure ? error : new AcpFailure("closed", "ACP transport failed."),
         );
