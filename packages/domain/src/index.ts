@@ -234,7 +234,6 @@ export * from "./modelRoleSuggestionPolicy";
 export * from "./nativeHarnessRoutingPolicy";
 export * from "./imageDescriptionPolicy";
 export * from "./imageGenerationPricing";
-export * from "./videoGenerationPolicy";
 export * from "./nativeHarnessSessionPolicy";
 export * from "./projectProviderPolicy";
 export * from "./subscriptionOAuthCatalog";

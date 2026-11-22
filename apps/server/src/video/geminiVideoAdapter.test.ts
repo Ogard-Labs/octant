@@ -8,7 +8,7 @@ import {
   runVideoGenerationConformance,
 } from "@octant/provider-sdk/video-generation-conformance";
 import { describe, expect, it } from "vitest";
-import { geminiVideoDriver } from "./geminiVideoAdapter";
+import { geminiVideoDriver, promptWithImageRoles } from "./geminiVideoAdapter";
 
 const modelId = decodeProviderModelId("gemini-omni-1.2-flash");
 const profile = {
@@ -102,9 +102,18 @@ describe("Gemini video driver", () => {
       input: [
         { type: "image", data: "iVBORw==", mime_type: "image/png" },
         { type: "image", data: "iVBORw==", mime_type: "image/png" },
-        { type: "text", text: "Bring this drawing to life" },
+        {
+          type: "text",
+          text: "Use image 1 as the first frame of the clip. Use image 2 only as a reference for the subjects, not as a frame.\n\nBring this drawing to life",
+        },
       ],
-      response_format: { type: "video", aspect_ratio: "16:9", resolution: "720p", duration: "8s" },
+      response_format: {
+        type: "video",
+        aspect_ratio: "16:9",
+        resolution: "720p",
+        duration: "8s",
+        delivery: "uri",
+      },
       background: true,
       store: true,
     });
@@ -134,6 +143,67 @@ describe("Gemini video driver", () => {
     });
     expect(started.status).toBe("failed");
     expect(recorder.sent).toHaveLength(0);
+  });
+
+  it("tells Google which image opens the clip, which ends it, and which only guide the subjects", () => {
+    const asFrames = promptWithImageRoles("A boat", {
+      firstFrame: true,
+      lastFrame: true,
+      references: 0,
+    });
+    const asReferences = promptWithImageRoles("A boat", {
+      firstFrame: false,
+      lastFrame: false,
+      references: 2,
+    });
+    expect(asFrames).toBe(
+      "Use image 1 as the first frame of the clip. Use image 2 as the last frame of the clip.\n\nA boat",
+    );
+    expect(asReferences).toBe(
+      "Use images 1 to 2 only as references for the subjects, not as frames.\n\nA boat",
+    );
+    expect(
+      promptWithImageRoles("A boat", { firstFrame: false, lastFrame: true, references: 0 }),
+    ).toBe("Use image 1 as the last frame of the clip.\n\nA boat");
+  });
+
+  it("downloads a clip Google delivered as a file once the file is ready", async () => {
+    let fileChecks = 0;
+    const recorder = ports((request) => {
+      if (request.url.endsWith("/interactions/v1_abc")) {
+        return Response.json(
+          completedInteraction({
+            steps: [
+              {
+                type: "model_output",
+                content: [
+                  {
+                    type: "video",
+                    mime_type: "video/mp4",
+                    uri: "https://generativelanguage.googleapis.com/v1beta/files/clip-9:download?alt=media",
+                  },
+                ],
+              },
+            ],
+          }),
+        );
+      }
+      if (request.url.endsWith("/files/clip-9")) {
+        fileChecks += 1;
+        return Response.json({ state: fileChecks < 2 ? "PROCESSING" : "ACTIVE" });
+      }
+      if (request.url.endsWith("/files/clip-9:download?alt=media")) {
+        return new Response(CONFORMANCE_MP4_BYTES);
+      }
+      return new Response(null, { status: 404 });
+    });
+    const adapter = geminiVideoDriver.create({ profile, ports: recorder.ports });
+    expect((await adapter.poll("v1_abc", new AbortController().signal)).status).toBe("running");
+    expect(await adapter.poll("v1_abc", new AbortController().signal)).toMatchObject({
+      status: "completed",
+      video: { mediaType: "video/mp4" },
+    });
+    expect(recorder.sent.every((request) => request.auth.header === "x-goog-api-key")).toBe(true);
   });
 
   it("calls a completed interaction with no clip a safety refusal", async () => {

@@ -375,6 +375,13 @@ out of the chat-driver catalog: they cannot start a turn. A profile whose video
 driver plugin is disabled fails its jobs as unsupported before any provider
 call.
 
+The pure rules every driver and the host run (the default options, the check
+of a request against a model's declaration, the estimate and the settlement)
+live in the seam package itself (`@octant/provider-sdk/video-generation-policy`,
+re-exported from the seam). The seam depends only on `@octant/contracts`, so a
+third-party driver needs no other Octant package, and the host imports the same
+rules from the seam rather than keeping a second copy.
+
 ### What a driver declares
 
 A driver declares, per model it offers:

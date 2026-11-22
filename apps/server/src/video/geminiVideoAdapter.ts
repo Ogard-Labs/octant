@@ -21,6 +21,8 @@ export const GEMINI_VIDEO_API_BASE_URL = "https://generativelanguage.googleapis.
 const AUTH = { header: "x-goog-api-key" } as const;
 /** Google's own id shape; anything else is refused before it reaches a URL path. */
 const INTERACTION_ID_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
+/** A Files API id, as Google shapes it inside a clip's download URI. */
+const FILE_ID_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
 /** First-and-last-frame interpolation takes at most this many seconds (Google's Omni guide). */
 const MAX_INTERPOLATION_SECONDS = 10;
 
@@ -111,8 +113,10 @@ function usageOf(payload: unknown): VideoAdapterUsage | undefined {
   };
 }
 
-/** The base64 clip in the interaction's model output, as a GET returns it. */
-function inlineVideo(payload: unknown): string | undefined {
+/** The clip in the interaction's model output: inline base64, or a Files API download URI. */
+function outputVideo(
+  payload: unknown,
+): { readonly data: string } | { readonly uri: string } | undefined {
   const steps = jsonField(payload, "steps");
   if (!Array.isArray(steps)) return undefined;
   for (const step of steps) {
@@ -120,11 +124,44 @@ function inlineVideo(payload: unknown): string | undefined {
     const content = jsonField(step, "content");
     if (!Array.isArray(content)) continue;
     for (const part of content) {
+      if (jsonField(part, "type") !== "video") continue;
       const data = jsonField(part, "data");
-      if (jsonField(part, "type") === "video" && typeof data === "string") return data;
+      if (typeof data === "string") return { data };
+      const uri = jsonField(part, "uri");
+      if (typeof uri === "string") return { uri };
     }
   }
   return undefined;
+}
+
+/**
+ * Omni infers each image's role from the prompt, not from the order of the
+ * images (Google's Omni guide, "Tasks parameter"), so the roles the person
+ * chose are said in words before their own prompt, naming images by position.
+ */
+export function promptWithImageRoles(
+  prompt: string,
+  roles: { readonly firstFrame: boolean; readonly lastFrame: boolean; readonly references: number },
+): string {
+  const sentences: Array<string> = [];
+  let position = 1;
+  if (roles.firstFrame) {
+    sentences.push(`Use image ${position} as the first frame of the clip.`);
+    position += 1;
+  }
+  if (roles.lastFrame) {
+    sentences.push(`Use image ${position} as the last frame of the clip.`);
+    position += 1;
+  }
+  if (roles.references > 0) {
+    const last = position + roles.references - 1;
+    sentences.push(
+      roles.references === 1
+        ? `Use image ${position} only as a reference for the subjects, not as a frame.`
+        : `Use images ${position} to ${last} only as references for the subjects, not as frames.`,
+    );
+  }
+  return sentences.length === 0 ? prompt : `${sentences.join(" ")}\n\n${prompt}`;
 }
 
 async function start(
@@ -163,12 +200,25 @@ async function start(
         input:
           images.length === 0
             ? request.prompt
-            : [...images.map(imagePart), { type: "text", text: request.prompt }],
+            : [
+                ...images.map(imagePart),
+                {
+                  type: "text",
+                  text: promptWithImageRoles(request.prompt, {
+                    firstFrame: request.firstFrame !== undefined,
+                    lastFrame: request.lastFrame !== undefined,
+                    references: request.references.length,
+                  }),
+                },
+              ],
         response_format: {
           type: "video",
           aspect_ratio: request.options.aspectRatio,
           resolution: request.options.resolution,
           duration: `${request.options.durationSeconds}s`,
+          // Google asks for URI delivery for clips over 4 MB; a later GET may
+          // still answer inline, so both are read.
+          delivery: "uri",
         },
         // Background execution returns the id at once and needs a stored
         // interaction; the job service deletes it as soon as the clip is kept.
@@ -224,15 +274,24 @@ async function readInteraction(
             };
       }
       case "completed": {
-        const data = inlineVideo(payload);
-        if (data === undefined) {
+        const video = outputVideo(payload);
+        if (video === undefined) {
           return {
             status: "refused",
             safetyRefusal:
               "Google returned no clip, which usually means its safety filters blocked it.",
           };
         }
-        const bytes = Uint8Array.from(Buffer.from(data, "base64"));
+        if ("uri" in video) {
+          const downloaded = await downloadFile(ports, video.uri, signal);
+          if (downloaded.status !== "downloaded") return downloaded;
+          return {
+            status: "completed",
+            video: { bytes: downloaded.bytes, mediaType: "video/mp4" },
+            ...(usage === undefined ? {} : { usage }),
+          };
+        }
+        const bytes = Uint8Array.from(Buffer.from(video.data, "base64"));
         if (ports.sniffMediaType(bytes) !== "video/mp4") {
           return {
             status: "failed",
@@ -254,6 +313,59 @@ async function readInteraction(
   } catch (error) {
     return { status: "failed", providerFailure: asFailure(error) };
   }
+}
+
+/**
+ * Downloads a clip Google delivered as a Files API URI: the file is polled
+ * until it is ACTIVE, then fetched from its own download address, which is on
+ * Google's declared host and takes the profile's key.
+ */
+async function downloadFile(
+  ports: VideoGenerationPorts,
+  uri: string,
+  signal?: AbortSignal,
+): Promise<
+  | { readonly status: "downloaded"; readonly bytes: Uint8Array }
+  | Exclude<VideoAdapterPoll, { readonly status: "completed" }>
+> {
+  const fileId = /\/files\/([^/:?]+)/.exec(uri)?.[1];
+  if (fileId === undefined || !FILE_ID_PATTERN.test(fileId)) {
+    return {
+      status: "failed",
+      providerFailure: videoFailure("protocol", "Google returned an unusable clip address."),
+    };
+  }
+  const withSignal = signal === undefined ? {} : { signal };
+  const info = await ports.request({
+    url: `${GEMINI_VIDEO_API_BASE_URL}/files/${fileId}`,
+    method: "GET",
+    auth: AUTH,
+    ...withSignal,
+  });
+  if (!info.ok) return { status: "failed", providerFailure: classifyVideoHttpFailure(info) };
+  const state = jsonField(await readVideoJson(info), "state");
+  if (state === "PROCESSING" || state === "STATE_UNSPECIFIED") return { status: "running" };
+  if (state !== "ACTIVE") {
+    return {
+      status: "failed",
+      providerFailure: videoFailure("provider-failed", "Google could not finish this clip's file."),
+    };
+  }
+  const file = await ports.request({
+    url: `${GEMINI_VIDEO_API_BASE_URL}/files/${fileId}:download?alt=media`,
+    method: "GET",
+    auth: AUTH,
+    ...withSignal,
+  });
+  if (!file.ok) return { status: "failed", providerFailure: classifyVideoHttpFailure(file) };
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (ports.sniffMediaType(bytes) !== "video/mp4") {
+    return {
+      status: "failed",
+      providerFailure: videoFailure("protocol", "Google returned a clip that is not an MP4."),
+    };
+  }
+  return { status: "downloaded", bytes };
 }
 
 async function cancel(ports: VideoGenerationPorts, remoteId: string): Promise<VideoAdapterPoll> {

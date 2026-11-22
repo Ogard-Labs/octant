@@ -302,7 +302,11 @@ export async function runVideoGenerationConformance(
     (candidate) => String(candidate.modelId) === String(fixture.request.modelId),
   );
   if (model?.job.cancel !== "none") {
-    await contained("cancel", () => controlAdapter.cancel(controlStart.remoteId));
+    const cancelled = await contained("cancel", () => controlAdapter.cancel(controlStart.remoteId));
+    assertConformance(
+      cancelled.status !== "failed",
+      "a scripted cancel of a model that declares it can cancel failed",
+    );
   }
   if (model?.job.removal.kind === "delete") {
     const forgotten = await contained("forget", () => controlAdapter.forget(controlStart.remoteId));

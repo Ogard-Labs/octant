@@ -6,7 +6,7 @@ import type {
   VideoDriverKind,
   VideoModelCapabilities,
 } from "@octant/contracts";
-import { checkVideoClipOptions } from "@octant/domain/video-generation-policy";
+import { checkVideoClipOptions } from "./videoGenerationPolicy";
 import {
   imageFailure,
   isImageEndpointAllowed,
@@ -273,3 +273,9 @@ export { isProviderFailure } from "./imageGeneration";
 
 /** The failure a video job may record: a decodable category and message, and nothing else. */
 export { sanitizeImageFailure as sanitizeVideoFailure } from "./imageGeneration";
+
+/**
+ * The pure option, default and pricing rules every driver and the host run,
+ * kept in the seam itself so a third-party driver needs no other package.
+ */
+export * from "./videoGenerationPolicy";

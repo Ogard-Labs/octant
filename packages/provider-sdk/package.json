@@ -26,6 +26,7 @@
     "./image-generation": "./src/imageGeneration.ts",
     "./image-generation-conformance": "./src/imageGenerationConformance.ts",
     "./video-generation": "./src/videoGeneration.ts",
+    "./video-generation-policy": "./src/videoGenerationPolicy.ts",
     "./video-generation-conformance": "./src/videoGenerationConformance.ts",
     "./cloud-sessions": "./src/cloudSessions.ts",
     "./openai-cloud-session-protocol": "./src/openAiCloudSessionProtocol.ts",
@@ -41,7 +42,6 @@
   },
   "dependencies": {
     "@octant/contracts": "workspace:*",
-    "@octant/domain": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

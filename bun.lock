@@ -273,7 +273,6 @@
       "name": "@octant/provider-sdk",
       "dependencies": {
         "@octant/contracts": "workspace:*",
-        "@octant/domain": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {

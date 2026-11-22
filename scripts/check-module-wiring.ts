@@ -158,8 +158,8 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "The video seam, which the Gemini driver and the conformance harness build against before the host job service that grants its ports lands in the next layer of the same stack. Remove once the video job service imports it.",
   ],
   [
-    "packages/domain/src/videoGenerationPolicy.ts",
-    "The video option, default and pricing rules, which the video seam runs today and the host job service and card run from the next layer of the same stack. Remove once the video job service imports it.",
+    "packages/provider-sdk/src/videoGenerationPolicy.ts",
+    "The video option, default and pricing rules the seam and its drivers run today and the host job service runs from the next layer of the same stack. Remove once the video job service imports it.",
   ],
   [
     "packages/contracts/src/videoGeneration.ts",
