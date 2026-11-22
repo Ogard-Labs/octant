@@ -1,3 +1,4 @@
+import "../styles/canvas-forms.css";
 import {
   CANVAS_EXPORT_LINK_PASSWORD_MAX_CHARS,
   CANVAS_EXPORT_LINK_PASSWORD_MIN_CHARS,

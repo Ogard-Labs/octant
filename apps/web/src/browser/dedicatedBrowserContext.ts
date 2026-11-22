@@ -4,7 +4,7 @@ import {
   type BrowserContextId,
   type BrowserThreadId,
 } from "@octant/contracts/browser-automation";
-import { makeBrowserToolAction } from "./BrowserWorkspace";
+import { makeBrowserToolAction } from "./browserNavigation";
 
 export interface DedicatedBrowserOpenTarget {
   /** The one origin this context may reach. */

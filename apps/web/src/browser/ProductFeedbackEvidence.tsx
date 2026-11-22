@@ -1,3 +1,4 @@
+import "../styles/browser-feedback.css";
 import type {
   ProductFeedbackBrowserContext,
   ProductFeedbackElement,

@@ -24,7 +24,7 @@ describe("sequence and state diagrams", () => {
       <CanvasDocument
         definition={{
           ...canvasFixture,
-          blocks: [loginSequenceBlock, orderStateBlock],
+          blocks: [loginSequenceBlock(), orderStateBlock()],
         }}
       />,
     );
@@ -47,7 +47,7 @@ describe("sequence and state diagrams", () => {
         canvasId={canvasId}
         definition={{
           ...canvasFixture,
-          blocks: [loginSequenceBlock, orderStateBlock],
+          blocks: [loginSequenceBlock(), orderStateBlock()],
         }}
         load={async () => ({ kind: "ready", canvasId, sequence: 0, threads: [] })}
         send={vi.fn()}
@@ -68,7 +68,7 @@ describe("entity-relationship, swimlane, and mind map diagrams", () => {
       <CanvasDocument
         definition={{
           ...canvasFixture,
-          blocks: [orderSchemaBlock, supportFlowBlock, releaseMindmapBlock],
+          blocks: [orderSchemaBlock(), supportFlowBlock(), releaseMindmapBlock()],
         }}
       />,
     );
@@ -87,7 +87,7 @@ describe("entity-relationship, swimlane, and mind map diagrams", () => {
   });
 
   it("draws a swimlane's connections over its lane bands, where a reader can see them", () => {
-    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [supportFlowBlock] }} />);
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [supportFlowBlock()] }} />);
 
     const svg = screen.getByRole("figure", { name: /Swimlane with 3 lanes/ }).querySelector("svg");
     if (svg === null) throw new Error("The swimlane was not drawn.");
@@ -106,7 +106,7 @@ describe("entity-relationship, swimlane, and mind map diagrams", () => {
       <CanvasDocument
         definition={{
           ...canvasFixture,
-          blocks: [orderSchemaBlock, supportFlowBlock, releaseMindmapBlock],
+          blocks: [orderSchemaBlock(), supportFlowBlock(), releaseMindmapBlock()],
         }}
       />,
     );
@@ -139,7 +139,7 @@ describe("entity-relationship, swimlane, and mind map diagrams", () => {
         canvasId={canvasId}
         definition={{
           ...canvasFixture,
-          blocks: [orderSchemaBlock, supportFlowBlock, releaseMindmapBlock],
+          blocks: [orderSchemaBlock(), supportFlowBlock(), releaseMindmapBlock()],
         }}
         load={async () => ({ kind: "ready", canvasId, sequence: 0, threads: [] })}
         send={vi.fn()}

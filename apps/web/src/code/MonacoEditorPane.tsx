@@ -1,3 +1,4 @@
+import "../styles/code-editor-readonly.css";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { pathBasename } from "../lib/fileName";
 import { modelUri, registerFilesCloseEntry, type FilesCloseEntry } from "./filesCloseGuard";

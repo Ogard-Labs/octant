@@ -125,12 +125,7 @@ describe("SideChatWorkspaceTab", () => {
       />,
     );
 
-    await waitFor(() =>
-      expect(screen.getByRole("region", { name: "Chat workspace" })).toBeVisible(),
-    );
-    // The sidecar resolves after the surface mounts, so the calls are awaited
-    // rather than asserted on the same tick: a loaded runner reaches the
-    // visible region before the resolution settles.
+    // The host resolves the sidecar before React loads its Chat workspace.
     await waitFor(() => {
       expect(threadMentionClient.openSideChat).toHaveBeenCalledWith(
         expect.any(String),
@@ -138,6 +133,10 @@ describe("SideChatWorkspaceTab", () => {
       );
       expect(chatClient.thread).toHaveBeenCalledWith(sidecarThreadId);
     });
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
+    expect(await screen.findByRole("region", { name: "Chat workspace" })).toBeVisible();
   });
 
   it("says what the Side Chat can read until the first message, and never again after it", async () => {

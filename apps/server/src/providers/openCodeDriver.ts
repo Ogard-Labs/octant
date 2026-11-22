@@ -52,7 +52,7 @@ import {
   unsupportedChatCapabilities,
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
-import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
+import type { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
 import type {
   PermissionRuleset,
   PermissionV2Rule,
@@ -1401,11 +1401,17 @@ export function makeOfficialOpenCodeClient(
   projectRoot: string,
 ): OpenCodeClientPort {
   const beta = server.runtime === "beta";
-  const client = createOpencodeClient({
-    baseUrl: server.url.toString(),
-    directory: projectRoot,
-    headers: { authorization: server.authorization },
-  });
+  // Resolving the SDK's modules weighed on every start; only a session that
+  // actually talks to this server pays for it now.
+  let sdkClient: Promise<ReturnType<typeof createOpencodeClient>> | undefined;
+  const client = () =>
+    (sdkClient ??= import("@opencode-ai/sdk/v2/client").then((sdk) =>
+      sdk.createOpencodeClient({
+        baseUrl: server.url.toString(),
+        directory: projectRoot,
+        headers: { authorization: server.authorization },
+      }),
+    ));
   const betaRead = async (path: string): Promise<unknown> => {
     const response = await fetch(new URL(path, server.url).toString(), {
       headers: {
@@ -1419,10 +1425,10 @@ export function makeOfficialOpenCodeClient(
   };
   return {
     health: async () => {
-      if (!beta) return resultData(await client.global.health({ throwOnError: true }));
+      if (!beta) return resultData(await (await client()).global.health({ throwOnError: true }));
       try {
         return {
-          ...resultData(await client.v2.health.get(betaRequestOptions())),
+          ...resultData(await (await client()).v2.health.get(betaRequestOptions())),
           version: server.version ?? "unknown",
         };
       } catch (error) {
@@ -1433,29 +1439,34 @@ export function makeOfficialOpenCodeClient(
       }
     },
     providers: async () => {
-      if (!beta) return resultData(await client.provider.list({}, { throwOnError: true }));
+      if (!beta)
+        return resultData(await (await client()).provider.list({}, { throwOnError: true }));
       // The 2.x server answers 200 with an empty catalogue until it finishes
       // loading providers. A single read at readiness is the empty result.
       const deadline = Date.now() + BETA_API_TIMEOUT_MS;
-      let catalogue = await readBetaCatalogue(client);
+      let catalogue = await readBetaCatalogue(await client());
       while (catalogue.all.length === 0 && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 250));
-        catalogue = await readBetaCatalogue(client);
+        catalogue = await readBetaCatalogue(await client());
       }
       return catalogue;
     },
     subscribe: async (signal) =>
       beta
         ? adaptBetaEventStream(
-            (await client.v2.event.subscribe({ throwOnError: true, signal })).stream,
+            (await (await client()).v2.event.subscribe({ throwOnError: true, signal })).stream,
           )
-        : (await client.event.subscribe({}, { throwOnError: true, signal })).stream,
+        : (await (await client()).event.subscribe({}, { throwOnError: true, signal })).stream,
     createSession: async ({ permission, model }) => {
       if (!beta)
-        return resultData(await client.session.create({ permission }, { throwOnError: true }));
+        return resultData(
+          await (await client()).session.create({ permission }, { throwOnError: true }),
+        );
       return adaptBetaSession(
         resultData(
-          await client.v2.session.create(
+          await (
+            await client()
+          ).v2.session.create(
             {
               location: { directory: projectRoot },
               ...(model === undefined
@@ -1471,13 +1482,19 @@ export function makeOfficialOpenCodeClient(
       beta
         ? adaptBetaSession(
             resultData(
-              await client.v2.session.get({ sessionID: sessionId }, betaMutationOptions()),
+              await (
+                await client()
+              ).v2.session.get({ sessionID: sessionId }, betaMutationOptions()),
             ),
           )
-        : resultData(await client.session.get({ sessionID: sessionId }, { throwOnError: true })),
+        : resultData(
+            await (await client()).session.get({ sessionID: sessionId }, { throwOnError: true }),
+          ),
     deleteSession: async (sessionId) => {
       if (!beta) {
-        await client.session.delete(
+        await (
+          await client()
+        ).session.delete(
           { sessionID: sessionId, directory: projectRoot },
           { throwOnError: true, signal: AbortSignal.timeout(10_000) },
         );
@@ -1507,7 +1524,9 @@ export function makeOfficialOpenCodeClient(
     listSessions: async () => {
       if (!beta) {
         const listed = resultData(
-          await client.session.list(
+          await (
+            await client()
+          ).session.list(
             { directory: projectRoot, limit: OPENCODE_LISTED_SESSIONS },
             { throwOnError: true },
           ),
@@ -1535,7 +1554,7 @@ export function makeOfficialOpenCodeClient(
     messageAfter: async (sessionId, messageId) => {
       if (!beta) {
         const messages = resultData(
-          await client.session.messages({ sessionID: sessionId }, { throwOnError: true }),
+          await (await client()).session.messages({ sessionID: sessionId }, { throwOnError: true }),
         );
         const index = messages.findIndex((message) => message.info.id === messageId);
         if (index < 0) return { status: "missing" as const };
@@ -1574,13 +1593,17 @@ export function makeOfficialOpenCodeClient(
       : {
           sessionMessages: async (sessionId: string) =>
             resultData(
-              await client.session.messages({ sessionID: sessionId }, { throwOnError: true }),
+              await (
+                await client()
+              ).session.messages({ sessionID: sessionId }, { throwOnError: true }),
             ).map((message) => ({ role: message.info.role, parts: message.parts })),
         }),
     forkSession: async (sessionId, before) => {
       if (!beta)
         return resultData(
-          await client.session.fork(
+          await (
+            await client()
+          ).session.fork(
             { sessionID: sessionId, ...(before === undefined ? {} : { messageID: before }) },
             { throwOnError: true },
           ),
@@ -1605,7 +1628,9 @@ export function makeOfficialOpenCodeClient(
     },
     prompt: async ({ sessionId, providerId, modelId, prompt, attachments = [], permission }) => {
       if (beta) {
-        await client.v2.session.switchModel(
+        await (
+          await client()
+        ).v2.session.switchModel(
           { sessionID: sessionId, model: { providerID: providerId, id: modelId } },
           betaMutationOptions(),
         );
@@ -1637,11 +1662,15 @@ export function makeOfficialOpenCodeClient(
         }
         return;
       }
-      await client.session.update(
+      await (
+        await client()
+      ).session.update(
         { sessionID: sessionId, permission },
         { throwOnError: true, signal: AbortSignal.timeout(10_000) },
       );
-      await client.session.promptAsync(
+      await (
+        await client()
+      ).session.promptAsync(
         {
           sessionID: sessionId,
           model: { providerID: providerId, modelID: modelId },
@@ -1655,7 +1684,9 @@ export function makeOfficialOpenCodeClient(
         await addBetaMcpServer(server, projectRoot, name, url);
         return;
       }
-      await client.mcp.add(
+      await (
+        await client()
+      ).mcp.add(
         {
           directory: projectRoot,
           name,
@@ -1676,17 +1707,23 @@ export function makeOfficialOpenCodeClient(
         }
         return;
       }
-      await client.mcp.disconnect(
+      await (
+        await client()
+      ).mcp.disconnect(
         { name, directory: projectRoot },
         { throwOnError: true, signal: AbortSignal.timeout(10_000) },
       );
     },
     abort: async (sessionId) => {
       if (beta) {
-        await client.v2.session.interrupt({ sessionID: sessionId }, betaMutationOptions());
+        await (
+          await client()
+        ).v2.session.interrupt({ sessionID: sessionId }, betaMutationOptions());
         return;
       }
-      await client.session.abort(
+      await (
+        await client()
+      ).session.abort(
         { sessionID: sessionId },
         { throwOnError: true, signal: AbortSignal.timeout(10_000) },
       );
@@ -1719,7 +1756,9 @@ export function makeOfficialOpenCodeClient(
       ? {
           commands: () => listBetaCommands(server, projectRoot),
           command: async ({ sessionId, providerId, modelId, ...command }) => {
-            await client.v2.session.switchModel(
+            await (
+              await client()
+            ).v2.session.switchModel(
               { sessionID: sessionId, model: { providerID: providerId, id: modelId } },
               betaMutationOptions(),
             );
@@ -1752,7 +1791,9 @@ export function makeOfficialOpenCodeClient(
         }
         return;
       }
-      await client.permission.reply({ requestID: requestId, reply }, { throwOnError: true });
+      await (
+        await client()
+      ).permission.reply({ requestID: requestId, reply }, { throwOnError: true });
     },
     replyQuestion: async (sessionId, requestId, answers) => {
       if (beta) {
@@ -1782,7 +1823,9 @@ export function makeOfficialOpenCodeClient(
         }
         return;
       }
-      await client.question.reply(
+      await (
+        await client()
+      ).question.reply(
         { requestID: requestId, answers: answers.map((answer) => [answer]) },
         { throwOnError: true },
       );

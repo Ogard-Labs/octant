@@ -1,3 +1,4 @@
+import "../styles/canvas-forms.css";
 import type {
   CanvasCreateRequest,
   CanvasCreateReceipt,

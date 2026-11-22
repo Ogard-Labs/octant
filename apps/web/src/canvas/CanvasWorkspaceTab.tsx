@@ -1,3 +1,4 @@
+import "../styles/canvas-forms.css";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useDockBarControls, useDockBarPlacement } from "../shell/dockBarControls";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";

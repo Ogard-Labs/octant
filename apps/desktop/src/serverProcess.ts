@@ -3,6 +3,9 @@ export { probeLocalHost, type LocalHostProbe } from "./localHostProbe";
 import { createServer, type AddressInfo } from "node:net";
 import type { Readable, Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
+import { watch, type FSWatcher } from "node:fs";
+import { basename, dirname } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   acceptedReportedHostVersion,
   HostRuntimePathError,
@@ -393,6 +396,7 @@ interface WaitForStorageReadyOptions {
   readonly pollIntervalMs?: number;
   readonly now?: () => number;
   readonly sleep?: (milliseconds: number) => Promise<void>;
+  readonly hostInfoPath?: string;
   readonly resolveAttachedHost?: () => Promise<LocalHostProbe | undefined>;
   /** When set, a child that has exited ends the wait instead of the timeout. */
   readonly child?: ManagedChildProcess;
@@ -526,6 +530,39 @@ function closeLoopbackPort(listener: ReturnType<typeof createServer>): Promise<v
 export const DESKTOP_HOST_READY_TIMEOUT_MS = 60_000;
 
 export async function waitForStorageReady(
+  options: WaitForStorageReadyOptions,
+): Promise<LocalHostProbe | undefined> {
+  if (options.hostInfoPath === undefined) return pollStorageReady(options);
+  const receipt = basename(options.hostInfoPath);
+  const published = new AbortController();
+  let watcher: FSWatcher;
+  try {
+    watcher = watch(dirname(options.hostInfoPath), { persistent: false }, (_event, name) => {
+      if (name === receipt) published.abort();
+    });
+  } catch {
+    return pollStorageReady(options);
+  }
+  watcher.on("error", () => watcher.close());
+  // Publication wakes one ordinary health probe; the file grants no admission.
+  let consumed = false;
+  const sleep = async (ms: number) => {
+    if (consumed) return delay(ms);
+    try {
+      await delay(ms, undefined, { signal: published.signal });
+    } catch (error) {
+      if (!published.signal.aborted) throw error;
+      consumed = true;
+    }
+  };
+  try {
+    return await pollStorageReady({ ...options, sleep });
+  } finally {
+    watcher.close();
+  }
+}
+
+async function pollStorageReady(
   options: WaitForStorageReadyOptions,
 ): Promise<LocalHostProbe | undefined> {
   const fetch = options.fetch ?? globalThis.fetch;

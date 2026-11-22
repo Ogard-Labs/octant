@@ -389,9 +389,11 @@ import {
   PairedComputerPins,
 } from "./pairedComputers";
 import {
+  formatHostInteractionMark,
   hostInteractionTraceEnabled,
   isChatBootstrapRequest,
   markHostInteraction,
+  readHostInteractionMark,
 } from "./interactionTrace";
 import {
   installCanvasFrameGuards,
@@ -2287,6 +2289,9 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
       serverUrl,
       instanceId,
       timeoutMs: DESKTOP_HOST_READY_TIMEOUT_MS,
+      ...(desktopWindowsHost === undefined
+        ? { hostInfoPath: desktopPosixHostPaths().hostInfoPath }
+        : {}),
       ...(server === undefined
         ? {}
         : {
@@ -2767,6 +2772,17 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
         menuBarOpenThreads.delete(window.id);
         updateHostTray();
       });
+      // The renderer keeps its interaction marks inside its own process; the
+      // opt-in trace also writes each one to its console so the host can put
+      // renderer marks on the same stderr line stream as its own.
+      if (hostInteractionTraceEnabled()) {
+        window.webContents.on("console-message", (_event, _level, message) => {
+          const mark = readHostInteractionMark(message);
+          if (mark !== undefined) {
+            process.stderr.write(`${formatHostInteractionMark(mark)}\n`);
+          }
+        });
+      }
       window.webContents.on("did-finish-load", () => {
         window.webContents.send(IPC_CHANNELS.resolvedMaterial, resolvedMaterial);
         window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, resolvedSidebarVibrancy);

@@ -165,7 +165,7 @@ function GrowingSettings(props: {
 
 describe("ProviderSettingsView", () => {
   it("collapses the create form from its available settings width", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/provider-settings.css"), "utf8");
 
     expect(styles).toMatch(
       /\.provider-settings\s*\{[^}]*container:\s*provider-settings\s*\/\s*inline-size;/,
@@ -176,7 +176,7 @@ describe("ProviderSettingsView", () => {
   });
 
   it("lays out image-provider create fields over two columns instead of squeezing them into the shared row", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/provider-settings.css"), "utf8");
 
     for (const type of [
       "openai-image",

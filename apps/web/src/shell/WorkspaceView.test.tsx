@@ -12,7 +12,7 @@ import {
 import { decodeChatBootstrap, decodeChatThreadView } from "@octant/contracts/chat";
 import { decodeCodeBoardView } from "@octant/contracts";
 import { decodeActivityView } from "@octant/contracts/code-home-activity";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createNewTaskDrafts, NewTaskDraftsContext } from "../composer/useNewTaskPrompt";
@@ -159,6 +159,7 @@ describe("WorkspaceView welcome", () => {
         }}
       />,
     );
+    await act(() => vi.dynamicImportSettled());
     await userEvent.click(await screen.findByRole("button", { name: "Open created task" }));
     expect(onOpenCodeThread).toHaveBeenCalledWith(createdThreadId, "Code task", project.id);
   });
@@ -2371,7 +2372,7 @@ describe("WorkspaceView tab isolation", () => {
 });
 
 describe("WorkspaceView Work overview", () => {
-  it("keeps quick-start disabled until the exact Project is explicitly available", () => {
+  it("keeps quick-start disabled until the exact Project is explicitly available", async () => {
     const projectId = "00000000-0000-4000-8000-000000000901" as never;
     render(
       <WorkspaceView
@@ -2405,7 +2406,7 @@ describe("WorkspaceView Work overview", () => {
       />,
     );
 
-    const composer = screen.getByRole("region", { name: "Work quick start" });
+    const composer = await screen.findByRole("region", { name: "Work quick start" });
     expect(within(composer).getByRole("textbox", { name: "Start a new task" })).toBeDisabled();
   });
 
@@ -2443,7 +2444,7 @@ describe("WorkspaceView Work overview", () => {
       />,
     );
 
-    const composer = screen.getByRole("region", { name: "Work quick start" });
+    const composer = await screen.findByRole("region", { name: "Work quick start" });
     await user.type(
       within(composer).getByRole("textbox", { name: "Start a new task" }),
       "Prepare the brief",

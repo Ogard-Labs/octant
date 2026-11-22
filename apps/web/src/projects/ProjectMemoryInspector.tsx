@@ -1,3 +1,4 @@
+import "../styles/project-memory.css";
 import type {
   ActiveMemoryEntry,
   AgentAuthoredMemoryProvenance,

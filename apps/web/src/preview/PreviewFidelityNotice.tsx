@@ -1,3 +1,4 @@
+import "../styles/preview.css";
 import type { PreviewFidelity } from "@octant/contracts/previews";
 
 /**

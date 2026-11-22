@@ -548,7 +548,7 @@
   overflow: hidden;
 }
 
-.dock-document-tool__body {
+.preview-viewer.dock-document-tool__body {
   height: auto;
   min-height: 0;
   overflow: auto;

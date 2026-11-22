@@ -98,7 +98,12 @@ function calendarBlock(value: unknown): CanvasHeatmapCalendarBlock {
   return block;
 }
 
-export const heatmapExampleBlocks: ReadonlyArray<CanvasHeatmapBlock> =
-  heatmapExamples.map(heatmapBlock);
-export const commitsByHourBlock = matrixBlock(commitsByHourExample);
-export const testFailuresCalendarBlock = calendarBlock(testFailuresCalendarExample);
+export function heatmapExampleBlocks(): ReadonlyArray<CanvasHeatmapBlock> {
+  return heatmapExamples.map(heatmapBlock);
+}
+export function commitsByHourBlock() {
+  return matrixBlock(commitsByHourExample);
+}
+export function testFailuresCalendarBlock() {
+  return calendarBlock(testFailuresCalendarExample);
+}

@@ -1,3 +1,4 @@
+import "../styles/environment-details.css";
 import { useEffect, useMemo, useState } from "react";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";

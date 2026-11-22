@@ -6,10 +6,10 @@ import type { AutoReview } from "./autoReview";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import type { CodeOperationResult } from "@octant/contracts/code-operations";
 import type { CodeRepositoryTestDefinition } from "@octant/contracts/code-test-definitions";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deferredCodeAdapterFor } from "./codeLeafAdapters";
 import { useCodeEditorFile } from "./useCodeEditorFile";
-import { CodeWorkspace, type CodeWorkspaceProps } from "./CodeWorkspace";
+import type { CodeWorkspaceProps } from "./CodeWorkspace";
 import type { CodeEditorFileProjection } from "./MonacoEditorPane";
 import type { CodeController } from "./useCodeController";
 import type { CodeThreadControllers } from "./codeThreadControllers";
@@ -17,6 +17,7 @@ import type { OctantHostBridge } from "../shell/hostBridge";
 import { nativeCodeWorkspaceApprovals } from "./codeWorkspaceApprovals";
 import { noticeTouches, useCodeFileChangeWatch } from "./useCodeFileChangeWatch";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { AutomationClient } from "@octant/client-runtime";
@@ -31,6 +32,10 @@ import { useCodeEnvironmentController } from "../environment/useCodeEnvironmentC
 import { checkoutUnreadableReason } from "./checkoutUnreadableReason";
 
 type CodeWorkspaceTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
+
+const CodeWorkspace = lazy(() =>
+  import("./CodeWorkspace").then((module) => ({ default: module.CodeWorkspace })),
+);
 
 export default function CodeWorkspaceTab(props: {
   readonly controller: CodeController;
@@ -182,88 +187,96 @@ export default function CodeWorkspaceTab(props: {
             onPointerEnter: preloadDeferredAdapter,
           })}
     >
-      <CodeWorkspace
-        {...(props.revealOperationId === undefined
-          ? {}
-          : { revealOperationId: props.revealOperationId })}
-        {...(props.onTurnRevealed === undefined ? {} : { onTurnRevealed: props.onTurnRevealed })}
-        {...(props.appleToolchainClient === undefined
-          ? {}
-          : { appleToolchainClient: props.appleToolchainClient })}
-        {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
-        {...(props.memoryProposalClient === undefined
-          ? {}
-          : { memoryProposalClient: props.memoryProposalClient })}
-        {...(props.automationClient === undefined
-          ? {}
-          : { automationClient: props.automationClient })}
-        {...(approvals === undefined ? {} : { approvals })}
-        {...(props.coordinatorProposals === undefined
-          ? {}
-          : { coordinatorProposals: props.coordinatorProposals })}
-        {...(props.coordinatorWorkerAsks === undefined
-          ? {}
-          : { coordinatorWorkerAsks: props.coordinatorWorkerAsks })}
-        {...(props.coordinatorWorkers === undefined
-          ? {}
-          : { coordinatorWorkers: props.coordinatorWorkers })}
-        client={props.controller.client}
-        controller={props.controller}
-        {...(checkoutUnavailableReason === undefined ? {} : { checkoutUnavailableReason })}
-        {...(props.holdAccessNotice === undefined
-          ? {}
-          : { holdAccessNotice: props.holdAccessNotice })}
-        {...(props.onOpenBrowser === undefined ? {} : { onOpenBrowser: props.onOpenBrowser })}
-        {...(props.onPinTerminal === undefined ? {} : { onPinTerminal: props.onPinTerminal })}
-        {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
-        {...(props.onOpenReview === undefined ? {} : { onOpenReview: props.onOpenReview })}
-        {...(props.onOpenSurface === undefined ? {} : { onOpenSurface: props.onOpenSurface })}
-        {...(props.providerGroups === undefined ? {} : { providerGroups: props.providerGroups })}
-        {...(props.harnessAutoReviewSupported === undefined
-          ? {}
-          : { harnessAutoReviewSupported: props.harnessAutoReviewSupported })}
-        {...(props.strictDefault === undefined ? {} : { strictDefault: props.strictDefault })}
-        {...(props.autoReview === undefined ? {} : { autoReview: props.autoReview })}
-        {...(props.projectExtraFolders === undefined
-          ? {}
-          : { projectExtraFolders: props.projectExtraFolders })}
-        {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
-        {...(props.imageGenerationClient === undefined
-          ? {}
-          : { imageGenerationClient: props.imageGenerationClient })}
-        {...(props.serviceOfferClient === undefined
-          ? {}
-          : { serviceOfferClient: props.serviceOfferClient })}
-        {...(props.imageGenerationProfiles === undefined
-          ? {}
-          : { imageGenerationProfiles: props.imageGenerationProfiles })}
-        {...(props.browserAutomationClient === undefined
-          ? {}
-          : { browserAutomationClient: props.browserAutomationClient })}
-        {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
-        {...(props.onOpenImageSettings === undefined
-          ? {}
-          : { onOpenImageSettings: props.onOpenImageSettings })}
-        {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
-        {...(props.onOpenCanvas === undefined ? {} : { onOpenCanvas: props.onOpenCanvas })}
-        {...(props.onCanvasReferencesObserved === undefined
-          ? {}
-          : { onCanvasReferencesObserved: props.onCanvasReferencesObserved })}
-        {...(props.onOpenCodeThread === undefined
-          ? {}
-          : { onOpenCodeThread: props.onOpenCodeThread })}
-        {...(props.onNewThreadInProject === undefined
-          ? {}
-          : { onNewThreadInProject: props.onNewThreadInProject })}
-        {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
-        {...(props.windowCapability === undefined
-          ? {}
-          : { windowCapability: props.windowCapability })}
-        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-        onRequestFileRefresh={editorFile.refresh}
-        {...(editorFile.file === undefined && definitions === undefined ? {} : { projections })}
-        tab={props.tab}
-      />
+      <Suspense
+        fallback={
+          <OctantEmpty message="Loading workspace." state="loading" title="Loading workspace" />
+        }
+      >
+        <CodeWorkspace
+          {...(props.revealOperationId === undefined
+            ? {}
+            : { revealOperationId: props.revealOperationId })}
+          {...(props.onTurnRevealed === undefined ? {} : { onTurnRevealed: props.onTurnRevealed })}
+          {...(props.appleToolchainClient === undefined
+            ? {}
+            : { appleToolchainClient: props.appleToolchainClient })}
+          {...(props.extensionClient === undefined
+            ? {}
+            : { extensionClient: props.extensionClient })}
+          {...(props.memoryProposalClient === undefined
+            ? {}
+            : { memoryProposalClient: props.memoryProposalClient })}
+          {...(props.automationClient === undefined
+            ? {}
+            : { automationClient: props.automationClient })}
+          {...(approvals === undefined ? {} : { approvals })}
+          {...(props.coordinatorProposals === undefined
+            ? {}
+            : { coordinatorProposals: props.coordinatorProposals })}
+          {...(props.coordinatorWorkerAsks === undefined
+            ? {}
+            : { coordinatorWorkerAsks: props.coordinatorWorkerAsks })}
+          {...(props.coordinatorWorkers === undefined
+            ? {}
+            : { coordinatorWorkers: props.coordinatorWorkers })}
+          client={props.controller.client}
+          controller={props.controller}
+          {...(checkoutUnavailableReason === undefined ? {} : { checkoutUnavailableReason })}
+          {...(props.holdAccessNotice === undefined
+            ? {}
+            : { holdAccessNotice: props.holdAccessNotice })}
+          {...(props.onOpenBrowser === undefined ? {} : { onOpenBrowser: props.onOpenBrowser })}
+          {...(props.onPinTerminal === undefined ? {} : { onPinTerminal: props.onPinTerminal })}
+          {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
+          {...(props.onOpenReview === undefined ? {} : { onOpenReview: props.onOpenReview })}
+          {...(props.onOpenSurface === undefined ? {} : { onOpenSurface: props.onOpenSurface })}
+          {...(props.providerGroups === undefined ? {} : { providerGroups: props.providerGroups })}
+          {...(props.harnessAutoReviewSupported === undefined
+            ? {}
+            : { harnessAutoReviewSupported: props.harnessAutoReviewSupported })}
+          {...(props.strictDefault === undefined ? {} : { strictDefault: props.strictDefault })}
+          {...(props.autoReview === undefined ? {} : { autoReview: props.autoReview })}
+          {...(props.projectExtraFolders === undefined
+            ? {}
+            : { projectExtraFolders: props.projectExtraFolders })}
+          {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
+          {...(props.imageGenerationClient === undefined
+            ? {}
+            : { imageGenerationClient: props.imageGenerationClient })}
+          {...(props.serviceOfferClient === undefined
+            ? {}
+            : { serviceOfferClient: props.serviceOfferClient })}
+          {...(props.imageGenerationProfiles === undefined
+            ? {}
+            : { imageGenerationProfiles: props.imageGenerationProfiles })}
+          {...(props.browserAutomationClient === undefined
+            ? {}
+            : { browserAutomationClient: props.browserAutomationClient })}
+          {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
+          {...(props.onOpenImageSettings === undefined
+            ? {}
+            : { onOpenImageSettings: props.onOpenImageSettings })}
+          {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
+          {...(props.onOpenCanvas === undefined ? {} : { onOpenCanvas: props.onOpenCanvas })}
+          {...(props.onCanvasReferencesObserved === undefined
+            ? {}
+            : { onCanvasReferencesObserved: props.onCanvasReferencesObserved })}
+          {...(props.onOpenCodeThread === undefined
+            ? {}
+            : { onOpenCodeThread: props.onOpenCodeThread })}
+          {...(props.onNewThreadInProject === undefined
+            ? {}
+            : { onNewThreadInProject: props.onNewThreadInProject })}
+          {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+          {...(props.windowCapability === undefined
+            ? {}
+            : { windowCapability: props.windowCapability })}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          onRequestFileRefresh={editorFile.refresh}
+          {...(editorFile.file === undefined && definitions === undefined ? {} : { projections })}
+          tab={props.tab}
+        />
+      </Suspense>
     </div>
   );
 }

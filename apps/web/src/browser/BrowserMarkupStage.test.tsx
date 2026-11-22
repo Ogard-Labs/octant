@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserMarkupStage } from "./BrowserMarkupStage";
 import { ZenRoot } from "../zen/ZenRoot";
-import { RENDERER_OVERLAY_SELECTOR } from "./BrowserWorkspace";
+import { RENDERER_OVERLAY_SELECTOR } from "./rendererOverlaySelector";
 
 const originalImage = globalThis.Image;
 

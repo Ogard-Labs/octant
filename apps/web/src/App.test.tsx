@@ -39,6 +39,7 @@ import {
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import type { OctantHostBridge } from "./shell/hostBridge";
 import { App } from "./App";
+import { clearInteractionMarks, readInteractionMarks } from "./polling/interactionTrace";
 import {
   filesClosePromptSnapshot,
   filesCloseScope,
@@ -174,7 +175,11 @@ vi.mock("./automation/automationCenterGate", () => ({
 // first Settings query. Loading the chunk once here keeps that cost out of
 // every test's assertions; the lazy boundary still renders through Suspense.
 beforeAll(async () => {
-  await import("./shell/SettingsView");
+  await Promise.all([
+    import("./app/ReaderPagesContainer"),
+    import("./app/SettingsContainer"),
+    import("./shell/SettingsView"),
+  ]);
 });
 
 afterEach(() => {
@@ -401,6 +406,11 @@ describe("App", () => {
   });
 
   it("batches streamed Chat reply deltas so the Chat pane commits once per 50 ms beat", async () => {
+    // The fake clock measures reply commits, not the nested workspace imports.
+    await Promise.all([
+      import("./environment/ChatThreadEnvironment"),
+      import("./chat/ChatWorkspace"),
+    ]);
     vi.useFakeTimers();
     let view: ReturnType<typeof render> | undefined;
     paneBoundary.observing = true;
@@ -551,8 +561,11 @@ describe("App", () => {
         expect(paneBoundary.latest?.chatController.status).toBe("ready");
         expect(paneBoundary.latest?.codeController.status).toBe("ready");
         expect(paneBoundary.latest?.codeController.followUps.has(String(codeThreadId))).toBe(true);
-        expect(chatBoundary.latest?.controller.activeView?.lastSequence).toBe(1);
       });
+      await act(() => vi.dynamicImportSettled());
+      await vi.waitFor(() =>
+        expect(chatBoundary.latest?.controller.activeView?.lastSequence).toBe(1),
+      );
       await streamReady.promise;
 
       // Drain startup's deferred read-cursor notification before measuring
@@ -646,6 +659,11 @@ describe("App", () => {
   });
 
   it("restores the first prompt after evidence storage throws in an opened Code task", async () => {
+    await Promise.all([
+      import("./environment/CodeThreadEnvironment"),
+      import("./code/CodeWorkspaceTab"),
+      import("./code/CodeWorkspace"),
+    ]);
     const user = userEvent.setup();
     const base = codes();
     const initial = await base.bootstrap();
@@ -704,6 +722,7 @@ describe("App", () => {
       await screen.findByRole("region", { name: "Workspace pane: Open immediately" }),
     ).toBeVisible();
     await waitFor(() => expect(codeApi.putEvidence).toHaveBeenCalled());
+    await act(() => vi.dynamicImportSettled());
     await waitFor(() =>
       expect(screen.getByRole("textbox", { name: "Follow-up message" })).toHaveValue(
         "Open immediately",
@@ -1064,8 +1083,11 @@ describe("App", () => {
     const projectsDestination = screen.getByRole("button", { name: "Projects" });
     expect(projectsDestination).toBeVisible();
     await userEvent.click(projectsDestination);
-    const directory = document.querySelector<HTMLElement>(".projects-directory");
-    if (directory === null) throw new Error("Expected the Projects directory.");
+    const directory = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>(".projects-directory");
+      if (element === null) throw new Error("Expected the Projects directory.");
+      return element;
+    });
     expect(within(directory).getByRole("button", { name: /Octant, Code Project/ })).toBeVisible();
     expect(codeApi.thread).toHaveBeenCalledWith(codeThreadId, expect.any(AbortSignal));
     expect(codeApi.subscribe).toHaveBeenCalledWith(codeThreadId, 0, expect.any(AbortSignal));
@@ -1867,6 +1889,8 @@ describe("App", () => {
         />,
       );
 
+      await screen.findByRole("region", { name: "Workspace pane: Launch planning" });
+      await act(() => vi.dynamicImportSettled());
       const quickStart = await screen.findByRole("region", { name: "Chat quick start" });
       await user.click(within(quickStart).getByRole("button", { name: "Provider and model" }));
       const levels = screen.getByRole("group", { name: "Effort level" });
@@ -5899,6 +5923,51 @@ describe("App", () => {
           String(command.operation.surface.threadId) === String(codeThreadId),
       ),
     ).toBe(false);
+  });
+
+  it("does not report usable interaction while Chat is ready but the workspace is still loading", async () => {
+    const shell = deferred<ShellBootstrap>();
+    const value = workDraftShellBootstrap();
+    const chatApi = chats();
+    const shellApi = client(value);
+    shellApi.bootstrap.mockImplementation(() => shell.promise);
+    vi.stubGlobal("__OCTANT_PERF_TRACE", true);
+    clearInteractionMarks();
+    const usable = () => readInteractionMarks().filter((mark) => mark.name === "usable-painted");
+    const painted = () =>
+      new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+    const originalHitTest = Object.getOwnPropertyDescriptor(document, "elementFromPoint");
+    const hit = vi.fn((): Element => document.body);
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: hit });
+    const view = render(
+      <App
+        chatClient={chatApi}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={workProjects()}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={shellApi}
+      />,
+    );
+    try {
+      await waitFor(() => expect(chatApi.bootstrap).toHaveBeenCalled());
+      await act(painted);
+      expect(screen.getByRole("status")).toHaveTextContent("Loading Octant workspace");
+      expect(usable()).toHaveLength(0);
+      await act(async () => shell.resolve(value));
+      const composer = await screen.findByRole("textbox", { name: "First message" });
+      expect(composer).toBeEnabled();
+      vi.spyOn(composer, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 10, 80, 20));
+      await act(painted);
+      expect(usable()).toHaveLength(0);
+      hit.mockReturnValue(composer);
+      await waitFor(() => expect(usable()).toHaveLength(1));
+    } finally {
+      view.unmount();
+      if (originalHitTest) Object.defineProperty(document, "elementFromPoint", originalHitTest);
+      else Reflect.deleteProperty(document, "elementFromPoint");
+      vi.unstubAllGlobals();
+      clearInteractionMarks();
+    }
   });
 
   it("bootstraps the durable shell and exposes Projects as a first-class workspace", async () => {

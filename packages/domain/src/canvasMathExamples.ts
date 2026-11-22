@@ -65,4 +65,6 @@ function mathBlock(value: unknown): CanvasMathBlock {
   return block;
 }
 
-export const mathExampleBlocks: ReadonlyArray<CanvasMathBlock> = mathExamples.map(mathBlock);
+export function mathExampleBlocks(): ReadonlyArray<CanvasMathBlock> {
+  return mathExamples.map(mathBlock);
+}

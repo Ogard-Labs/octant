@@ -442,6 +442,30 @@ Electron preconnects the renderer's loopback origin before constructing its
 preparation instead of delaying first paint; host readiness, bridge projection,
 and window-authority registration remain required before renderer navigation.
 
+The renderer defers code and styles used only by workspaces such as Browser
+and Canvas until they open. Shared shell controls keep their styles in the
+initial load.
+
+The renderer's first load has a byte budget, recorded in
+`scripts/initial-renderer-budget.json` and enforced by `bun run renderer:check`
+in CI. The budget counts the static graph Vite loads for `index.html`: the main
+entry is at most 964,380 B (942 KiB), the initial CSS at most 665,334 B
+(650 KiB), and the initial JavaScript and CSS at most 1,337,467 B after gzip
+level 6. A change that grows any measure past its budget fails. A change that
+shrinks one lowers the recorded budget. Raising a budget is a maintainer
+decision. The gzip budget is a baseline, not a raise: by maintainer decision on
+2026-11-22 it is the measurement of the startup change as it merged, including
+its last fixes. The original 1.25 MiB target was set against an older main, and
+ordinary shared-code growth since then left it about 25 KB over, with no
+deferred surface left in the first load. The budgets are exact bytes with no
+headroom, because the same source measures identically on macOS and Linux
+with Bun 1.4.4.
+
+The sandbox restrictions notice and Settings share one poll per client and
+scope while the document is visible. A successful change publishes the host's
+snapshot immediately. An older in-flight read cannot replace it. The last
+subscriber stops polling and cancels any outstanding read.
+
 Chat navigation shares one in-flight read between timer and Machine invalidations,
 with one pending follow-up for notices received during that read. Hidden windows
 hold invalidations until visible. Reads have a ten-second deadline and are

@@ -1,3 +1,4 @@
+import "../styles/preview.css";
 import type { ReactNode } from "react";
 import type { PreviewChunk, PreviewKind } from "@octant/contracts/previews";
 import { Markdown } from "../markdown/Markdown";

@@ -1,3 +1,4 @@
+import "../styles/thread-search.css";
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   Archive,

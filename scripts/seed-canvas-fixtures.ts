@@ -142,7 +142,7 @@ function designBlock(value: unknown): CanvasDesignBlock {
 }
 
 const runningDocumentDesign = designBlock({
-  ...cartPrototypeExampleBlock,
+  ...cartPrototypeExampleBlock(),
   blockId: "cart-prototype-document",
   title: "Cart at document size",
   size: "document",
@@ -270,7 +270,7 @@ const FIXTURES: Readonly<Record<CanvasFixtureName, CanvasFixture>> = {
     prompt: "Draft the search ranking spec as a page I can read.",
     reply: "The spec is a document-size design, shown just below.",
     presentation: "inline",
-    blocks: [searchSpecExampleBlock],
+    blocks: [searchSpecExampleBlock()],
   },
   "running-design-document": {
     title: "Cart prototype (document size)",
@@ -298,7 +298,7 @@ const FIXTURES: Readonly<Record<CanvasFixtureName, CanvasFixture>> = {
     prompt: "Make the cart a phone prototype I can click through.",
     reply: "The phone prototype is ready. Expand it in the thread and press Run to start it.",
     presentation: "sidebar",
-    blocks: [cartPrototypeExampleBlock],
+    blocks: [cartPrototypeExampleBlock()],
   },
 };
 

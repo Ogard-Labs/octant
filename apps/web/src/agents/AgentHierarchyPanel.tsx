@@ -21,7 +21,7 @@ import {
   subagentRoleWord,
   subagentStatusWord,
 } from "./subagentStatus";
-import { AgentResultPreview, latestResultPacket } from "./AgentRunResults";
+import { AgentResultPreview, latestResultPacket } from "./AgentResultPreview";
 import {
   buildSubagentRows,
   groupSubagentRows,

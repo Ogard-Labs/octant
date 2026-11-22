@@ -1,3 +1,4 @@
+import "../styles/thread-plan.css";
 import type { ThreadPlanStepId, ThreadPlanStepStatus } from "@octant/contracts";
 import { Check, CheckCircle2, ListChecks, LoaderCircle } from "../ui/icons";
 import { useState } from "react";

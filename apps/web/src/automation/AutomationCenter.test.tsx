@@ -631,7 +631,8 @@ describe("AutomationCenter narrow layout, keyboard, and focus", () => {
     // 1px is the visually-hidden input idiom; anything larger must scale.
     expect(stylesheet).not.toMatch(/(?<!m(?:in|ax)-)height:\s*(?!1px)\d+px/);
     // The full-surface layer scrolls instead of clipping at high zoom.
-    expect(stylesheet).toMatch(/\.automation-center-layer\s*\{[^}]*overflow:\s*auto;/s);
+    const layerStyles = readFileSync(resolve(process.cwd(), "src/styles/surface.css"), "utf8");
+    expect(layerStyles).toMatch(/\.automation-center-layer\s*\{[^}]*overflow:\s*auto;/s);
   });
 });
 

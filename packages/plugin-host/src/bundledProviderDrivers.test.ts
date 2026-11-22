@@ -4,8 +4,8 @@ import { ProviderDriverKind } from "@octant/contracts/providers";
 import {
   admittedBundledImageDriverKinds,
   admittedBundledProviderDriverKinds,
-  BUNDLED_IMAGE_DRIVER_PLUGINS,
-  BUNDLED_PROVIDER_DRIVER_PLUGINS,
+  bundledImageDriverPlugins,
+  bundledProviderDriverPlugins,
   bundledProviderDriverCatalog,
   bundledProviderDriverComponent,
   bundledProviderDriverPlugin,
@@ -43,9 +43,11 @@ const everyDriverKind = [
 
 describe("bundled provider-driver plugins", () => {
   it("declares each in-tree vendor driver as a reviewed provider-driver component", () => {
-    expect(BUNDLED_PROVIDER_DRIVER_PLUGINS.map((plugin) => plugin.driverKind).sort()).toEqual(
-      [...everyDriverKind].sort(),
-    );
+    expect(
+      bundledProviderDriverPlugins()
+        .map((plugin) => plugin.driverKind)
+        .sort(),
+    ).toEqual([...everyDriverKind].sort());
     for (const driverKind of everyDriverKind) {
       expect(Schema.decodeUnknownSync(ProviderDriverKind)(driverKind)).toBe(driverKind);
     }
@@ -53,7 +55,7 @@ describe("bundled provider-driver plugins", () => {
     const slugs = new Set<string>();
     const digests = new Set<string>();
     const extensionIds = new Set<string>();
-    for (const plugin of BUNDLED_PROVIDER_DRIVER_PLUGINS) {
+    for (const plugin of bundledProviderDriverPlugins()) {
       const component = bundledProviderDriverComponent(plugin);
       expect(plugin.manifest.slug).toBe(plugin.driverKind);
       expect(plugin.manifest.source).toEqual({
@@ -105,7 +107,7 @@ describe("bundled provider-driver plugins", () => {
       "amazon-bedrock": ["19", "1a"],
       "acp-agent": ["1a", "1b"],
     };
-    for (const plugin of BUNDLED_PROVIDER_DRIVER_PLUGINS) {
+    for (const plugin of bundledProviderDriverPlugins()) {
       const [digestSeed, idSuffix] = seeds[plugin.driverKind as (typeof everyDriverKind)[number]];
       const hex = digestSeed.length === 1 ? digestSeed.repeat(64) : digestSeed.repeat(32);
       expect(plugin.manifest.extensionId, plugin.driverKind).toBe(
@@ -119,7 +121,7 @@ describe("bundled provider-driver plugins", () => {
 
   it("admits every bundled driver by default, fx included", () => {
     expect([...admittedBundledProviderDriverKinds()].sort()).toEqual([...everyDriverKind].sort());
-    for (const plugin of BUNDLED_PROVIDER_DRIVER_PLUGINS) {
+    for (const plugin of bundledProviderDriverPlugins()) {
       expect(isBundledProviderDriverEffective(plugin), plugin.driverKind).toBe(true);
       expect(bundledProviderDriverPlugin(plugin.driverKind)).toBe(plugin);
     }
@@ -170,7 +172,7 @@ describe("bundled provider-driver plugins", () => {
   it("lists every bundled driver in the catalog as installed and trusted, validated by the public schema", () => {
     const catalog = bundledProviderDriverCatalog();
     expect(catalog.map((listing) => listing.entry.driverKind)).toEqual(
-      BUNDLED_PROVIDER_DRIVER_PLUGINS.map((plugin) => plugin.driverKind),
+      bundledProviderDriverPlugins().map((plugin) => plugin.driverKind),
     );
     expect(catalog).toHaveLength(24);
     for (const listing of catalog) {
@@ -200,7 +202,7 @@ describe("bundled image-driver plugins", () => {
         imageDriverKinds.includes(listing.entry.driverKind),
       ),
     ).toBe(false);
-    const every = [...BUNDLED_PROVIDER_DRIVER_PLUGINS, ...BUNDLED_IMAGE_DRIVER_PLUGINS];
+    const every = [...bundledProviderDriverPlugins(), ...bundledImageDriverPlugins()];
     expect(new Set(every.map((plugin) => plugin.manifest.digest)).size).toBe(every.length);
     expect(new Set(every.map((plugin) => plugin.manifest.extensionId)).size).toBe(every.length);
   });

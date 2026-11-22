@@ -19,7 +19,7 @@ import type {
 } from "@octant/contracts/extensions";
 import { resolveExtensionActivation } from "@octant/plugin-host/activation";
 import {
-  SWITCHABLE_FIRST_PARTY_PLUGINS,
+  switchableFirstPartyPlugins,
   switchableFirstPartyPlugin,
 } from "@octant/plugin-host/first-party-plugins";
 import { Schema } from "effect";
@@ -77,7 +77,7 @@ export class BundledPluginSwitchStore {
 
   /** One installed, trusted package row per switchable bundled plugin. */
   packageStates(): ReadonlyArray<ExtensionPackageState> {
-    return SWITCHABLE_FIRST_PARTY_PLUGINS.map((manifest) =>
+    return switchableFirstPartyPlugins().map((manifest) =>
       bundledPackageState(
         manifest,
         readBundledPluginSwitch(this.#connection, String(manifest.extensionId)),

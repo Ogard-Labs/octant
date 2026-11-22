@@ -1,3 +1,4 @@
+import "../styles/chat-project-overview.css";
 import {
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,

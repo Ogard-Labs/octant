@@ -1,3 +1,4 @@
+import "../styles/thread-goal.css";
 import type { GoalLoopClient, GoalLoopProjection } from "@octant/client-runtime/goal-loop-client";
 import {
   decodeAggregateVersion,

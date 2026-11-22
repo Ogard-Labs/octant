@@ -240,12 +240,14 @@ describe("runWebCommand", () => {
   });
 
   it("uses the canonical Machine store when only the renderer is in development mode", async () => {
-    const attachOrCreateHost = vi.fn(async () => ({
-      kind: "attached" as const,
-      url: new URL("http://127.0.0.1:13773"),
-      instanceId: "instance-1",
-      version: "0.0.0-dev",
-    }));
+    const attachOrCreateHost = vi.fn(
+      async (_input: Parameters<NonNullable<WebCommandOptions["attachOrCreateHost"]>>[0]) => ({
+        kind: "attached" as const,
+        url: new URL("http://127.0.0.1:13773"),
+        instanceId: "instance-1",
+        version: "0.0.0-dev",
+      }),
+    );
     await runWebCommand(
       baseOptions({
         attachOrCreateHost,
@@ -263,13 +265,14 @@ describe("runWebCommand", () => {
 
     expect(attachOrCreateHost).toHaveBeenCalledWith(
       expect.objectContaining({
-        environment: {
+        environment: expect.objectContaining({
           OCTANT_WEB_URL: "http://127.0.0.1:5173",
           OCTANT_WEB_DIST_PATH: expect.stringMatching(/\/apps\/web\/dist$/),
           OCTANT_CODE_FILE_HELPER_PATH: "/repo/dist/octant-code-file-helper",
-        },
+        }),
       }),
     );
+    expect(attachOrCreateHost.mock.calls[0]?.[0].environment).not.toHaveProperty("OCTANT_DATA_DIR");
   });
 
   it("builds the Canvas preview page before the host starts and points the host at the web build when --dev is set", async () => {

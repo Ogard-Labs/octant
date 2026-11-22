@@ -229,8 +229,18 @@ function mindmapBlock(value: unknown): CanvasMindmapBlock {
   return block;
 }
 
-export const loginSequenceBlock = sequenceBlock(loginSequenceExample);
-export const orderStateBlock = stateBlock(orderStateExample);
-export const orderSchemaBlock = erBlock(orderSchemaExample);
-export const supportFlowBlock = swimlaneBlock(supportFlowExample);
-export const releaseMindmapBlock = mindmapBlock(releaseMindmapExample);
+export function loginSequenceBlock() {
+  return sequenceBlock(loginSequenceExample);
+}
+export function orderStateBlock() {
+  return stateBlock(orderStateExample);
+}
+export function orderSchemaBlock() {
+  return erBlock(orderSchemaExample);
+}
+export function supportFlowBlock() {
+  return swimlaneBlock(supportFlowExample);
+}
+export function releaseMindmapBlock() {
+  return mindmapBlock(releaseMindmapExample);
+}

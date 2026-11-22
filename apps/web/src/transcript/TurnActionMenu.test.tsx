@@ -103,8 +103,12 @@ describe("the turn action menu", () => {
   it("reserves the More actions control so hover and focus cannot shift the turn", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/components.css"), "utf8");
     const start = styles.indexOf(".turn-action-menu {");
-    const end = styles.indexOf("/* ── Thread Search", start);
-    const block = styles.slice(start, end);
+    const lastRule =
+      'html[data-octant-increased-contrast="true"] .turn-action-menu__more .shell-icon-button';
+    const last = styles.indexOf(lastRule, start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(last).toBeGreaterThan(start);
+    const block = styles.slice(start, styles.indexOf("}", last) + 1);
 
     expect(block).toContain("position: absolute");
     expect(block).toMatch(/\.turn-action-menu:hover \.turn-action-menu__more/);

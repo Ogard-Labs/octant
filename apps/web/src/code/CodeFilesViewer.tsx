@@ -1,3 +1,4 @@
+import "../styles/files-viewer.css";
 import type { CodeFileChangeNotice, CodeRelativePath, CodeThreadView } from "@octant/contracts";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";

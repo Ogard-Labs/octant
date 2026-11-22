@@ -13,12 +13,18 @@ import type { ZenSourceContext, ZenThreadCatalogEntry } from "@octant/contracts/
 import { buildModelPickerGroups } from "@octant/domain";
 import type { ZenLiveCardActivity } from "@octant/domain";
 import { lazy, Suspense, useCallback, useMemo, type ReactNode } from "react";
-import { ChatWorkspace } from "../chat/ChatWorkspace";
+const ChatWorkspace = lazy(() =>
+  import("../chat/ChatWorkspace").then((module) => ({ default: module.ChatWorkspace })),
+);
 import { useChatController, type ChatReadCursorStore } from "../chat/useChatController";
 import { useCodeController, type CodeReadCursorStore } from "../code/useCodeController";
 import type { ProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
-import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
+const WorkThreadWorkspace = lazy(() =>
+  import("../work/WorkThreadWorkspace").then((module) => ({
+    default: module.WorkThreadWorkspace,
+  })),
+);
 import type { ZenLiveThreadCard } from "./ZenThreadElement";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -194,14 +200,22 @@ function ZenChatCardSurface(props: {
     );
   }
   return (
-    <ChatWorkspace
-      controller={controller}
-      narrow
-      providerGroups={providerGroups}
-      {...(providerController?.snapshot === undefined
-        ? {}
-        : { providerSnapshot: providerController.snapshot })}
-    />
+    <Suspense
+      fallback={
+        <div className="zen-thread-element__unreachable">
+          <p role="status">Opening this Chat thread…</p>
+        </div>
+      }
+    >
+      <ChatWorkspace
+        controller={controller}
+        narrow
+        providerGroups={providerGroups}
+        {...(providerController?.snapshot === undefined
+          ? {}
+          : { providerSnapshot: providerController.snapshot })}
+      />
+    </Suspense>
   );
 }
 
@@ -231,16 +245,24 @@ function ZenWorkCardSurface(props: {
     [providerController],
   );
   return (
-    <WorkThreadWorkspace
-      hostId={props.hostId}
-      {...(props.mutationClient === undefined ? {} : { mutationClient: props.mutationClient })}
-      providerGroups={providerGroups}
-      {...(props.requestClient === undefined ? {} : { requestClient: props.requestClient })}
-      threadClient={props.threadClient}
-      threadId={props.threadId}
-      title={props.title}
-      {...(props.turnClient === undefined ? {} : { turnClient: props.turnClient })}
-    />
+    <Suspense
+      fallback={
+        <div className="zen-thread-element__unreachable">
+          <p role="status">Opening this Work thread…</p>
+        </div>
+      }
+    >
+      <WorkThreadWorkspace
+        hostId={props.hostId}
+        {...(props.mutationClient === undefined ? {} : { mutationClient: props.mutationClient })}
+        providerGroups={providerGroups}
+        {...(props.requestClient === undefined ? {} : { requestClient: props.requestClient })}
+        threadClient={props.threadClient}
+        threadId={props.threadId}
+        title={props.title}
+        {...(props.turnClient === undefined ? {} : { turnClient: props.turnClient })}
+      />
+    </Suspense>
   );
 }
 

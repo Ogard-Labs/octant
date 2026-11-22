@@ -26,6 +26,7 @@ import {
   openCodeBlockedToolNames,
   betaPermissionEffect,
   makeOpenCodeDriver,
+  makeOfficialOpenCodeClient,
   normalizeOpenCodeProbe,
   OpenCodeCommandNotRun,
   openCodePromptParts,
@@ -4395,6 +4396,69 @@ describe("OpenCode driver", () => {
         delta: "hello",
       },
     });
+  });
+
+  it("reads legacy session messages lazily and preserves empty and failed reads", async () => {
+    const messages = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: [
+          { info: { role: "user" }, parts: [{ type: "text", text: "Earlier message" }] },
+          { info: { role: "assistant" }, parts: [{ type: "text", text: "Reply" }] },
+        ],
+      })
+      .mockResolvedValueOnce({ data: [] });
+    const readFailure = new Error("OpenCode message read failed.");
+    messages.mockRejectedValueOnce(readFailure);
+    const createOpencodeClient = vi.fn(() => ({ session: { messages } }));
+    vi.doMock("@opencode-ai/sdk/v2/client", () => ({ createOpencodeClient }));
+
+    try {
+      const client = makeOfficialOpenCodeClient(
+        {
+          authorization: "Basic test",
+          pid: process.pid,
+          runtime: "legacy",
+          url: new URL("http://127.0.0.1:43123"),
+        },
+        "/project",
+      );
+      expect(createOpencodeClient).not.toHaveBeenCalled();
+      const sessionMessages = client.sessionMessages;
+      expect(sessionMessages).toBeDefined();
+      if (sessionMessages === undefined) throw new Error("Legacy messages should be available.");
+
+      await expect(sessionMessages("session-normal")).resolves.toEqual([
+        { role: "user", parts: [{ type: "text", text: "Earlier message" }] },
+        { role: "assistant", parts: [{ type: "text", text: "Reply" }] },
+      ]);
+      await expect(sessionMessages("session-empty")).resolves.toEqual([]);
+      await expect(sessionMessages("session-error")).rejects.toBe(readFailure);
+
+      expect(createOpencodeClient).toHaveBeenCalledTimes(1);
+      expect(createOpencodeClient).toHaveBeenCalledWith({
+        baseUrl: "http://127.0.0.1:43123/",
+        directory: "/project",
+        headers: { authorization: "Basic test" },
+      });
+      expect(messages).toHaveBeenNthCalledWith(
+        1,
+        { sessionID: "session-normal" },
+        { throwOnError: true },
+      );
+      expect(messages).toHaveBeenNthCalledWith(
+        2,
+        { sessionID: "session-empty" },
+        { throwOnError: true },
+      );
+      expect(messages).toHaveBeenNthCalledWith(
+        3,
+        { sessionID: "session-error" },
+        { throwOnError: true },
+      );
+    } finally {
+      vi.doUnmock("@opencode-ai/sdk/v2/client");
+    }
   });
 });
 

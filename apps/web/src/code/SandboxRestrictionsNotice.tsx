@@ -1,9 +1,10 @@
-import { useContext, useEffect, useState } from "react";
-import {
-  decodeSandboxRestrictionsCommand,
-  type SandboxRestrictionsSnapshot,
-} from "@octant/contracts/sandbox-policy";
+import { useContext, useState } from "react";
+import { decodeSandboxRestrictionsCommand } from "@octant/contracts/sandbox-policy";
 import { TaskAccessContext } from "./TaskAccessContext";
+import {
+  publishSandboxRestrictionsSnapshot,
+  useSandboxRestrictionsSnapshot,
+} from "./useSandboxRestrictionsSnapshot";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 
@@ -12,28 +13,12 @@ export function SandboxRestrictionsNotice() {
   const context = useContext(TaskAccessContext);
   const client = context?.sandboxRestrictionsClient;
   const threadId = context?.subject.aggregateId;
-  const [snapshot, setSnapshot] = useState<SandboxRestrictionsSnapshot>();
+  const { snapshot } = useSandboxRestrictionsSnapshot(
+    client,
+    threadId === undefined ? undefined : { kind: "session", threadId },
+  );
   const [problem, setProblem] = useState<string>();
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    setSnapshot(undefined);
-    if (client === undefined || threadId === undefined) return;
-    const controller = new AbortController();
-    const refresh = () => {
-      void client
-        .settings({ kind: "session", threadId }, controller.signal)
-        .then((value) => {
-          if (!controller.signal.aborted) setSnapshot(value);
-        })
-        .catch(() => undefined);
-    };
-    refresh();
-    const timer = setInterval(refresh, 3000);
-    return () => {
-      controller.abort();
-      clearInterval(timer);
-    };
-  }, [client, threadId]);
   const denial = snapshot?.denials[0];
   if (client === undefined || snapshot === undefined || denial === undefined) return null;
   async function answer(duration?: "session" | "project") {
@@ -54,7 +39,7 @@ export function SandboxRestrictionsNotice() {
         ),
       );
       if (result.kind === "sandbox-restrictions-refused") setProblem(result.message);
-      else setSnapshot(result);
+      else publishSandboxRestrictionsSnapshot(client, result);
     } catch {
       setProblem("The host could not save this choice. Retry from Sandbox restrictions.");
     } finally {

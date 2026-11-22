@@ -8,11 +8,8 @@ import {
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import {
-  FinishedReceiptCard,
-  FinishedReceiptInline,
-  FinishedReceiptProvider,
-} from "./FinishedReceiptCard";
+import { FinishedReceiptCard, FinishedReceiptInline } from "./FinishedReceiptCard";
+import { FinishedReceiptProvider } from "./FinishedReceiptProvider";
 
 const RECEIPT_ID = decodeFinishedReceiptId("11111111-1111-4111-8111-111111111111");
 const THREAD_ID = "22222222-2222-4222-8222-222222222222";

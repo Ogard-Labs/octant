@@ -6,7 +6,10 @@ import { describe, expect, it, vi } from "vitest";
 import { ThreadSearchOverlay } from "./ThreadSearchOverlay";
 import type { ThreadSearchThread } from "./threadSearchViewModel";
 
-const componentStyles = readFileSync(resolve(process.cwd(), "src/styles/components.css"), "utf8");
+const threadSearchStyles = readFileSync(
+  resolve(process.cwd(), "src/styles/thread-search.css"),
+  "utf8",
+);
 
 const projects = [{ id: "p1", name: "Octant" }];
 
@@ -52,10 +55,10 @@ describe("ThreadSearchOverlay", () => {
     expect(screen.getByText("Release checklist")).toBeVisible();
     // Said as the shared dialog's width, which a width of its own loses to:
     // the overlay opened at the 420px default.
-    expect(componentStyles).toMatch(
+    expect(threadSearchStyles).toMatch(
       /\.thread-search\s*\{[^}]*--octant-dialog-width:\s*520px;[^}]*max-height:/s,
     );
-    expect(componentStyles).not.toMatch(/\.thread-search\s*\{[^}]*\bwidth:\s*min\(/s);
+    expect(threadSearchStyles).not.toMatch(/\.thread-search\s*\{[^}]*\bwidth:\s*min\(/s);
   });
 
   it("searches every mode by default, names each hit's mode, marks tool output, and filters to one mode", async () => {
@@ -127,7 +130,7 @@ describe("ThreadSearchOverlay", () => {
     const { onClose } = renderOverlay({ onNewThread, onNewProject, onOpenSettings });
 
     expect(screen.getByRole("group", { name: "Quick actions" })).toBeVisible();
-    expect(componentStyles).toMatch(
+    expect(threadSearchStyles).toMatch(
       /\.thread-search__quick-actions \.thread-search__quick-action\s*\{[^}]*display:\s*flex;[^}]*justify-content:\s*flex-start;/s,
     );
     await user.click(screen.getByRole("button", { name: "New chat" }));

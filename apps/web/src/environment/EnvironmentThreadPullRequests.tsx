@@ -1,3 +1,4 @@
+import "../styles/environment-details.css";
 import { useId } from "react";
 import type {
   ThreadBoardPullRequestIdentity,

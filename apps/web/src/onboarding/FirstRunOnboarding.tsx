@@ -566,6 +566,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
               </OctantButton>
             ) : null}
             <OctantButton
+              data-launch-control="setup"
               disabled={busy || blocked || importingProjects}
               onClick={skip}
               type="button"

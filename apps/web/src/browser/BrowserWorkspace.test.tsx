@@ -19,7 +19,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { threadImageOffers } from "../composer/threadImageOffers";
-import { BrowserWorkspace, RENDERER_OVERLAY_SELECTOR } from "./BrowserWorkspace";
+import { BrowserWorkspace } from "./BrowserWorkspace";
+import { RENDERER_OVERLAY_SELECTOR } from "./rendererOverlaySelector";
 import { boundsInsideViewport } from "./useNativeBrowserSurface";
 import {
   browserTabPageOf,
@@ -307,7 +308,7 @@ describe("BrowserWorkspace", () => {
     expect(screen.getByRole("region", { name: "Browser automation" })).toBeVisible();
   });
   it("keeps compact browser chrome ahead of the live or remote page surface", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/browser-workspace.css"), "utf8");
 
     expect(styles.indexOf(".browser-workspace__chrome")).toBeGreaterThan(-1);
     expect(styles.indexOf(".browser-workspace__chrome")).toBeLessThan(
@@ -316,7 +317,7 @@ describe("BrowserWorkspace", () => {
   });
 
   it("lays the notes and the tool band under the page at their own heights, outranking the workspace's grid", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/browser-feedback.css"), "utf8");
     // The workspace's grid is declared at one class's weight in a later sheet,
     // so the notes layout needs two: while the grid won, the row's 45% cap
     // measured its own row and cut its text in half.
@@ -327,7 +328,7 @@ describe("BrowserWorkspace", () => {
     expect(styles).toMatch(
       /\.browser-workspace\.browser-workspace--feedback \{\s*display: flex;\s*flex-direction: column;/,
     );
-    const row = styles.match(/\n\.product-feedback \{([^}]*)\}/)?.[1] ?? "";
+    const row = styles.match(/(?:^|\n)\.product-feedback \{([^}]*)\}/)?.[1] ?? "";
     expect(row).toMatch(/flex:\s*0 0 auto/);
     expect(row).toMatch(/max-height:\s*min\(45%, 420px\)/);
   });
@@ -340,7 +341,7 @@ describe("BrowserWorkspace", () => {
   });
 
   it("draws the address field with the control corner and the field border, and no pill", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/browser-workspace.css"), "utf8");
     const field = styles.match(/\.browser-workspace__field \{([^}]*)\}/)?.[1] ?? "";
 
     expect(field).toMatch(/border-radius:\s*var\(--oct-radius-sm\)/);
@@ -1800,7 +1801,7 @@ describe("BrowserWorkspace", () => {
   });
 
   it("lays a Browser notice out as a quiet row with no tinted box", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/browser-workspace.css"), "utf8");
     const rule = styles.slice(styles.indexOf(".browser-workspace__message {"));
     const body = rule.slice(0, rule.indexOf("}"));
     expect(body).not.toMatch(/background|border/);

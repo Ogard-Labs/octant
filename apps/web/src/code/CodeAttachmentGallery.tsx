@@ -1,3 +1,4 @@
+import "../styles/code-thread.css";
 import type { CodeAttachmentReference, CodeThreadId } from "@octant/contracts";
 import type { CodeClient } from "@octant/client-runtime";
 import { useCallback, useEffect, useState } from "react";

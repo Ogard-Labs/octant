@@ -1,7 +1,8 @@
 import { act, render, screen, fireEvent } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReplyDetailLevel } from "@octant/contracts/shell";
-import { AssistantMessageBody, StreamRepliesContext } from "./AssistantMessageBody";
+import { AssistantMessageBody } from "./AssistantMessageBody";
+import { StreamRepliesContext } from "./streamReplies";
 import { ReplyDetailContext } from "./replyDetail";
 
 afterEach(() => vi.useRealTimers());

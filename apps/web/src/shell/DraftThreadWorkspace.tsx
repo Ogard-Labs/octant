@@ -9,7 +9,6 @@ import {
   COORDINATOR_BOUND_FIELDS,
   COORDINATOR_WORKER_LEVELS,
 } from "../projects/coordinatorChoices";
-import { CoordinatorBoundsDialog } from "../projects/CoordinatorBoundsDialog";
 import { serverCodeThreadProviderGroups } from "../code/composer/serverCodeComposer";
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import type { AutoReview } from "../code/autoReview";
@@ -96,6 +95,7 @@ import {
   X,
 } from "../ui/icons";
 import {
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -113,13 +113,14 @@ import {
 } from "../code/composer/CodeComposerAdapter";
 import { useWorktreeRemoteFacts } from "../code/composer/useWorktreeRemoteFacts";
 import { WorkComposerAdapter } from "../work/composer/WorkComposerAdapter";
-import { ProjectCreateDialog } from "../projects/ProjectCreateDialog";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import {
   ComposerProjectSelector,
   type ComposerProjectGithubSource,
   type ComposerProjectEntry,
 } from "../projects/ComposerProjectSelector";
+import { CoordinatorBoundsDialog, ProjectCreateDialog } from "./deferredSurfaces";
+import { DockModuleBoundary } from "./DockModuleBoundary";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -941,32 +942,34 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   const addFolderDialog = (
     <OctantDialogPresence>
       {addFolderOpen && props.onCreateProject !== undefined ? (
-        <ProjectCreateDialog
-          {...(props.folderBrowseClient === undefined
-            ? {}
-            : { folderBrowseClient: props.folderBrowseClient })}
-          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-          {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
-          {...(props.mode === "code" &&
-          props.githubClient !== undefined &&
-          props.githubCloneClient !== undefined &&
-          props.githubPluginEnabled !== false
-            ? {
-                github: {
-                  client: props.githubClient,
-                  cloneClient: props.githubCloneClient,
-                  hostName: githubHostName,
-                },
-              }
-            : {})}
-          mode={props.mode}
-          onClose={() => setAddFolderOpen(false)}
-          onCreate={props.onCreateProject}
-          onCreated={(projectId, _mode, name) => {
-            selectProject(projectId);
-            setSelectedProjectLabel(name);
-          }}
-        />
+        <Suspense fallback={null}>
+          <ProjectCreateDialog
+            {...(props.folderBrowseClient === undefined
+              ? {}
+              : { folderBrowseClient: props.folderBrowseClient })}
+            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+            {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
+            {...(props.mode === "code" &&
+            props.githubClient !== undefined &&
+            props.githubCloneClient !== undefined &&
+            props.githubPluginEnabled !== false
+              ? {
+                  github: {
+                    client: props.githubClient,
+                    cloneClient: props.githubCloneClient,
+                    hostName: githubHostName,
+                  },
+                }
+              : {})}
+            mode={props.mode}
+            onClose={() => setAddFolderOpen(false)}
+            onCreate={props.onCreateProject}
+            onCreated={(projectId, _mode, name) => {
+              selectProject(projectId);
+              setSelectedProjectLabel(name);
+            }}
+          />
+        </Suspense>
       ) : null}
     </OctantDialogPresence>
   );
@@ -1598,19 +1601,23 @@ function CoordinatorDraftSettings(props: {
         Change…
       </OctantButton>
       {open ? (
-        <CoordinatorBoundsDialog
-          bounds={choices.bounds}
-          onClose={() => setOpen(false)}
-          onSave={(bounds, workerLevel) => {
-            props.onChoicesChange({
-              ...(workerLevel?.level === undefined ? {} : { workerLevel: workerLevel.level }),
-              ...(Object.keys(bounds).length === 0 ? {} : { bounds }),
-            });
-            setOpen(false);
-          }}
-          title="New coordinator"
-          workerLevel={{ level: choices.workerLevel }}
-        />
+        <DockModuleBoundary onClose={() => setOpen(false)}>
+          <Suspense fallback={null}>
+            <CoordinatorBoundsDialog
+              bounds={choices.bounds}
+              onClose={() => setOpen(false)}
+              onSave={(bounds, workerLevel) => {
+                props.onChoicesChange({
+                  ...(workerLevel?.level === undefined ? {} : { workerLevel: workerLevel.level }),
+                  ...(Object.keys(bounds).length === 0 ? {} : { bounds }),
+                });
+                setOpen(false);
+              }}
+              title="New coordinator"
+              workerLevel={{ level: choices.workerLevel }}
+            />
+          </Suspense>
+        </DockModuleBoundary>
       ) : null}
     </div>
   );
