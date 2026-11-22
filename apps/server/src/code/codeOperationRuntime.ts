@@ -6770,9 +6770,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                   message: "Provider authority mismatch.",
                 });
               const keeper = this.#options.outlivingSessions;
+              // The posture is the runner's, read from the values its session
+              // start uses; it is the host's, never the driver's.
+              const { credentialPosture, ...driverInput } = acquireInput;
               return (
                 keeper === undefined
-                  ? active.driver.acquire(acquireInput)
+                  ? active.driver.acquire(driverInput)
                   : keeper.acquire(
                       codeSessionKey(active.thread.id),
                       JSON.stringify([
@@ -6781,14 +6784,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                         acquireInput.extraFolders ?? [],
                         acquireInput.permissionPersistence,
                       ]),
-                      active.driver.acquire(acquireInput),
+                      active.driver.acquire(driverInput),
                       active.sessionTerms,
-                      {
-                        strict: launchStrict,
-                        executionPolicy: active.thread.executionPolicy,
-                        fullAccessSandbox: active.thread.fullAccessSandbox === true,
-                        sandboxPolicy: acquireInput.sandboxPolicy !== undefined,
-                      },
+                      credentialPosture,
                     )
               ).pipe(
                 Effect.tap((connection) =>

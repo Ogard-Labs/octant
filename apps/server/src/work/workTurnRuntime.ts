@@ -587,6 +587,17 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         }),
       );
       const sandboxPolicy = sandboxTurn.selection;
+      // The session start's Strict value and kept sandbox, read once so the
+      // start below and the kept session's credential posture agree. Absent
+      // `strict` on the start is Strict.
+      const startStrict =
+        sandboxTurn.strict === undefined
+          ? undefined
+          : sandboxTurn.legacy === true
+            ? false
+            : sandboxTurn.strict;
+      const startFullAccessSandbox =
+        (sandboxTurn.strict ?? input.fullAccessSandbox) === true || sandboxPolicy !== undefined;
       const acquire = input.driver.acquire({
         ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }),
         instanceId: input.command.authority.providerInstanceId,
@@ -625,15 +636,10 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             acquire,
             input.sessionTerms,
             {
-              // As the session start below reads them.
-              strict:
-                input.attachmentsFolder !== undefined ||
-                !(sandboxTurn.legacy === true || sandboxTurn.strict === false),
+              strict: startStrict !== false,
               executionPolicy: workThreadAccessOf(input.access ?? DEFAULT_WORK_ACCESS)
                 .executionPolicy,
-              fullAccessSandbox:
-                (sandboxTurn.strict ?? input.fullAccessSandbox) === true ||
-                sandboxPolicy !== undefined,
+              fullAccessSandbox: startFullAccessSandbox,
               sandboxPolicy: sandboxPolicy !== undefined,
             },
           );
@@ -658,9 +664,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         }),
       );
       const options = {
-        ...(sandboxTurn.strict !== undefined
-          ? { strict: sandboxTurn.legacy === true ? false : sandboxTurn.strict }
-          : {}),
+        ...(startStrict === undefined ? {} : { strict: startStrict }),
         sessionId: input.providerSessionId,
         ...(input.modelOptionValues === undefined
           ? {}
@@ -670,9 +674,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         // still checks the root before it allows an edit, and one without a
         // reviewer of its own keeps asking at Auto.
         ...workThreadAccessOf(input.access ?? DEFAULT_WORK_ACCESS),
-        ...((sandboxTurn.strict ?? input.fullAccessSandbox) === true || sandboxPolicy !== undefined
-          ? { fullAccessSandbox: true }
-          : {}),
+        ...(startFullAccessSandbox ? { fullAccessSandbox: true } : {}),
         tools: input.appManagedTools?.definitions ?? [],
         ...(input.nativeArtifacts === true ? { nativeArtifacts: true } : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),

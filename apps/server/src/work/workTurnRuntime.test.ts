@@ -20,6 +20,8 @@ import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { RecordExternalContentIngestion } from "../context/inheritedExternalContentMark";
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { OutlivingSessions } from "../providers/outlivingSessions";
+import { launchCredentialsKey } from "../providers/providerOwnChannels";
+import { configureSandboxRestrictionsAuthority } from "../process/sandboxRuntimePolicy";
 import { heldTurnContext } from "../providers/heldTurnContext";
 import { WorkTurnRuntime, workSessionKey } from "./workTurnRuntime";
 
@@ -2425,6 +2427,56 @@ describe("WorkTurnRuntime", () => {
         await keeper.close();
       }
       expect(calls.stop).toHaveBeenCalledOnce();
+    });
+
+    it("a kept local Work session outside Strict with an attachments folder is relaunched when its provider's credential list changes", async () => {
+      // The host's sandbox authority resolves this turn outside Strict.
+      configureSandboxRestrictionsAuthority({
+        beginTurn: () => ({
+          status: "admitted",
+          turn: { strict: false, summary: "", current: () => true, end: () => undefined },
+        }),
+        validateSelection: () => true,
+        registerCleanup: () => () => undefined,
+        storageDirectory: () => undefined,
+        active: () => undefined,
+        deny: () => undefined,
+      });
+      let names = ["GH_TOKEN"];
+      const keeper = new OutlivingSessions({
+        idleLimitMs: () => null,
+        startRuntimeTurn: async () => ({ status: "busy" }),
+        launchCredentials: (_key, posture) =>
+          launchCredentialsKey(
+            { providerCredentialPassThrough: { claude: names } },
+            "claude",
+            posture,
+          ),
+      });
+      const { calls, driver } = runtimeWithTask();
+      const runtime = new WorkTurnRuntime({ timeoutMs: 5000, outlivingSessions: keeper });
+      const turn = () =>
+        runtime.run({
+          command,
+          providerSessionId: ids.session as never,
+          projectRoot: "/tmp/work-project",
+          // A local thread's turn always carries its attachments folder.
+          attachmentsFolder: "/tmp/work-project-attachments",
+          driver,
+          signal: new AbortController().signal,
+        });
+      try {
+        expect(await turn()).toMatchObject({ kind: "completed" });
+        expect(calls.start).toHaveBeenLastCalledWith(expect.objectContaining({ strict: false }));
+        names = [];
+        expect(await turn()).toMatchObject({ kind: "completed" });
+        // The kept process held GH_TOKEN; the next turn launches afresh.
+        expect(calls.acquire).toHaveBeenCalledTimes(2);
+        expect(calls.start).toHaveBeenCalledTimes(2);
+      } finally {
+        configureSandboxRestrictionsAuthority(undefined);
+        await keeper.close();
+      }
     });
 
     it("opens a turn the runtime started by itself by attaching to it, never sending the recorded prompt", async () => {

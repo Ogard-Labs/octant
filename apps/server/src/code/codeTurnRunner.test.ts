@@ -23,6 +23,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CodeTurnRunner,
   MAX_CODE_TURN_EVENT_BYTES,
+  type CodeProviderAcquireInput,
   type CodeProviderPort,
   type CodeTurnEvent,
   type CodeTurnFailure,
@@ -628,6 +629,13 @@ describe("CodeTurnRunner", () => {
         mode: "code",
         projectRoot: providerRoot ?? "/private/worktrees/exact",
         permissionPersistence: "current-session",
+        // No sandbox turn says otherwise, so the session starts Strict.
+        credentialPosture: {
+          strict: true,
+          executionPolicy: "approval-gated",
+          fullAccessSandbox: false,
+          sandboxPolicy: false,
+        },
       });
       expect(connection.start).toHaveBeenCalledWith({
         sessionId,
@@ -2484,6 +2492,55 @@ describe("CodeTurnRunner", () => {
       expect(end).toHaveBeenCalledOnce();
     } finally {
       configureSandboxRestrictionsAuthority(undefined);
+    }
+  });
+
+  it("gives the kept session's credential posture exactly the Strict value and sandbox its session starts with", async () => {
+    for (const turnStrict of [false, true, undefined]) {
+      configureSandboxRestrictionsAuthority({
+        validateSelection: () => true,
+        active: () => undefined,
+        storageDirectory: () => undefined,
+        deny: () => undefined,
+        registerCleanup: () => () => undefined,
+        beginTurn: () => ({
+          status: "admitted",
+          turn: {
+            ...(turnStrict === undefined ? {} : { strict: turnStrict }),
+            summary: "",
+            current: () => true,
+            end: () => undefined,
+          },
+        }),
+      });
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(Stream.make(event({ kind: "completed" }))),
+      });
+      const acquire = vi.fn((_input: CodeProviderAcquireInput) => Effect.succeed(connection));
+      try {
+        await Effect.runPromise(
+          Effect.scoped(
+            new CodeTurnRunner().run(
+              input({
+                thread: { ...thread(), executionPolicy: "full-access", fullAccessSandbox: true },
+                providerDriverKind: "claude",
+                provider: { acquire },
+                // The thread's own Strict value, which the sandbox turn overrides.
+                strict: true,
+              }),
+            ),
+          ),
+        );
+        const started = vi.mocked(connection.start).mock.calls[0]?.[0];
+        expect(acquire.mock.calls[0]?.[0].credentialPosture, String(turnStrict)).toEqual({
+          strict: started?.strict !== false,
+          executionPolicy: "full-access",
+          fullAccessSandbox: started?.fullAccessSandbox === true,
+          sandboxPolicy: false,
+        });
+      } finally {
+        configureSandboxRestrictionsAuthority(undefined);
+      }
     }
   });
 
