@@ -261,6 +261,56 @@ describe("resolveAuthCliCommand", () => {
   it("refuses a revocation that names no recognizable device", () => {
     expect(resolveAuthCliCommand(["revoke", "device-2"], {})).toBeUndefined();
   });
+
+  it("reads, pauses and resumes remote access", () => {
+    expect(resolveAuthCliCommand(["status"], {})).toEqual({ action: "remote-access-status" });
+    expect(resolveAuthCliCommand(["pause"], {})).toEqual({
+      action: "remote-access-pause",
+      paused: true,
+    });
+    expect(resolveAuthCliCommand(["resume"], {})).toEqual({
+      action: "remote-access-pause",
+      paused: false,
+    });
+    expect(resolveAuthCliCommand(["resume", "now"], {})).toBeUndefined();
+    expect(resolveAuthCliCommand(["pause"], { all: true })).toBeUndefined();
+  });
+});
+
+describe("pausing and resuming remote access from this computer", () => {
+  it("resumes a paused host over the local channel and says so", async () => {
+    let paused = true;
+    const test = fixture((request) => {
+      if (request.path !== "/api/desktop/remote/access-pause") {
+        return { status: 404, body: {} };
+      }
+      if (request.method === "POST") {
+        paused = (request.body as { paused: boolean }).paused;
+        return { status: 201, body: { paused } };
+      }
+      return { status: 200, body: { paused } };
+    });
+
+    expect(await test.run({ action: "remote-access-status" })).toBe(0);
+    expect(test.out.join("")).toContain("Remote access is paused");
+    expect(await test.run({ action: "remote-access-pause", paused: false })).toBe(0);
+    expect(test.sent.at(-1)).toEqual({
+      path: "/api/desktop/remote/access-pause",
+      method: "POST",
+      body: { paused: false },
+    });
+    expect(test.out.join("")).toContain("Remote access resumed");
+    expect(paused).toBe(false);
+  });
+
+  it("says the listener must be on when the host has no gateway to answer", async () => {
+    const test = fixture(() => ({
+      status: 503,
+      body: { category: "unavailable", message: "Local device administration is unavailable." },
+    }));
+    expect(await test.run({ action: "remote-access-pause", paused: false })).toBe(1);
+    expect(test.err.join("")).toContain("octant listener enable");
+  });
 });
 
 describe("runRemoteAccessCliCommand", () => {

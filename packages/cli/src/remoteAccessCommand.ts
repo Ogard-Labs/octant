@@ -30,6 +30,13 @@ export type RemoteAccessCliCommand =
   | { readonly action: "list-devices" }
   | { readonly action: "revoke-device"; readonly deviceId: string }
   | { readonly action: "revoke-all-devices" }
+  /**
+   * Remote access's pause, over this computer's own channel. A paired device
+   * may pause a host but never resume it, so on a host with no window this is
+   * how the person resumes.
+   */
+  | { readonly action: "remote-access-status" }
+  | { readonly action: "remote-access-pause"; readonly paused: boolean }
   | { readonly action: "listener-status" }
   | {
       readonly action: "listener-enable";
@@ -80,6 +87,12 @@ export function resolveAuthCliCommand(
   if (action === undefined || action === "list") {
     if (rest.length !== 0 || Object.keys(flags).length !== 0) return undefined;
     return { action: "list-devices" };
+  }
+  if (action === "status" || action === "pause" || action === "resume") {
+    if (rest.length !== 0 || Object.keys(flags).length !== 0) return undefined;
+    return action === "status"
+      ? { action: "remote-access-status" }
+      : { action: "remote-access-pause", paused: action === "pause" };
   }
   if (action !== "revoke") return undefined;
   if (Object.keys(flags).some((flag) => flag !== "all")) return undefined;
@@ -168,7 +181,54 @@ export async function runRemoteAccessCliCommand(
   ) {
     return await runPairingDecisionCommand(input, command);
   }
+  if (command.action === "remote-access-status" || command.action === "remote-access-pause") {
+    return await runRemoteAccessPauseCommand(input, command);
+  }
   return await runDeviceCommand(input, command);
+}
+
+/**
+ * Reads or changes the pause on this computer's own channel. The host keeps
+ * the pause through a restart, and answers it only while the listener's
+ * gateway runs, so a refusal for that names the step that brings it back.
+ */
+async function runRemoteAccessPauseCommand(
+  input: RunRemoteAccessCliCommandInput,
+  command: Extract<
+    RemoteAccessCliCommand,
+    { readonly action: "remote-access-status" | "remote-access-pause" }
+  >,
+): Promise<number> {
+  const response =
+    command.action === "remote-access-status"
+      ? await input.session.send({ path: "/api/desktop/remote/access-pause", method: "GET" })
+      : await input.session.send({
+          path: "/api/desktop/remote/access-pause",
+          method: "POST",
+          body: { paused: command.paused },
+        });
+  const expected = command.action === "remote-access-status" ? 200 : 201;
+  const body = response.body;
+  const paused =
+    typeof body === "object" && body !== null && "paused" in body ? body.paused : undefined;
+  if (response.status !== expected || typeof paused !== "boolean") {
+    input.stderr.write(
+      response.status === 503
+        ? "Remote access answers only while the remote listener is on. Start it with `octant listener enable`, then try again; a pause is kept until you resume it.\n"
+        : `${failureMessage(response, "Octant refused to change remote access.")}\n`,
+    );
+    return 1;
+  }
+  input.stdout.write(
+    command.action === "remote-access-status"
+      ? paused
+        ? "Remote access is paused: every paired device and outside agent is refused. Resume it with `octant auth resume`.\n"
+        : "Remote access is on.\n"
+      : paused
+        ? "Remote access paused. Every paired device and outside agent is refused until you run `octant auth resume`.\n"
+        : "Remote access resumed.\n",
+  );
+  return 0;
 }
 
 export const DEFAULT_PAIR_LISTENER_PORT = 8443;

@@ -18394,8 +18394,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
     later in Settings › Remote access › Paired devices: **Full** (the default),
     **Approve and steer**, or **Read only**. The level reuses the remote action
     catalogue rather than adding a permission system of its own: Approve and
-    steer is exactly the catalogue a hub-introduced device is held to, and Read
-    only is the catalogue's reads alone (`project.overview.read`,
+    steer is the catalogue a hub-introduced device is held to, without the
+    hub's Act item, since a device the person paired directly is not the hub's
+    (`principalIsHubIntroduced` reads the admission, not the level; its port
+    forwards reach a thread's running server only), and Read only is the
+    catalogue's reads alone, which clients show as watching only
+    (`project.overview.read`,
     `code.language.read`, `browser.observe`, `simulator.observe`,
     `terminal.read`, `preview.open-authorized`, `settings.read-non-secret`,
     `provider.list-models`, `usage.spend-ceiling.read`). The level is the
@@ -18414,8 +18418,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
     write actions, and the local-servers commands route and the server proxy
     are outside Read only. A device's own sign-out, key rotation and
     self-revoke keep working at every level. Hub-introduced devices and agent
-    grants have no level and keep their own limits. `GET
-/api/remote/auth/device` reports a device's own `accessLevel` beside
+    grants have no level and keep their own limits. The own-device answer
+    (`/api/remote/auth/device`) reports a device's own `accessLevel` beside
     `actsAsHostPerson`, for a device the host's person paired only, so a client
     can say why a control is missing; like `actsAsHostPerson` it grants
     nothing.
@@ -18427,7 +18431,14 @@ approval-gated` command that undoes it. The terminal shows no one-time
     proxy sessions, and keeps every device record, key and session row; a
     client keeps its pairing and says remote access is paused. A window turns it
     on or off; a Full device may turn it on, which takes its own access too,
-    and never off. Pausing means nothing remote reaches the host except the
+    and never off. The pause is kept through a restart, so a host with no window
+    reads and changes it from its own shell with `octant auth status`,
+    `octant auth pause` and `octant auth resume`, over the same authenticated
+    local channel `octant listener` and `octant pair` use; the listener must be
+    on for the host to answer. A pause and a level change are read again once a
+    request's body has arrived and the request is registered, so neither
+    misses an upload still in flight, and the request that made the change is
+    the only one of the asking device's left to finish its reply. Pausing means nothing remote reaches the host except the
     person's own computers, so an outside agent's key claim and MCP calls
     (`/api/agent-access/claim`, `/api/agent-access/mcp`) get the same refusal
     and its grant is kept for when access resumes. Only the hub's
