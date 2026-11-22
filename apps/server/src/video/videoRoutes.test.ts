@@ -56,6 +56,15 @@ function setup() {
           size: clip.byteLength,
         };
       },
+      streamClip: async () => ({
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(clip);
+            controller.close();
+          },
+        }),
+        size: clip.byteLength,
+      }),
     },
     authorizeScope: async () => canOpen,
     windowAuthorityStore,
@@ -64,16 +73,24 @@ function setup() {
   return { handler, stop, loseThread: () => (canOpen = false) };
 }
 
-function request(path: string, init: { method?: string; headers?: Record<string, string> } = {}) {
+function request(
+  path: string,
+  init: { method?: string; headers?: Record<string, string>; body?: string } = {},
+) {
   return new Request(`http://127.0.0.1:3100${path}`, {
     method: init.method ?? "GET",
     headers: { origin, "x-octant-window-capability": capability, ...init.headers },
+    ...(init.body === undefined ? {} : { body: init.body }),
   });
 }
 
 async function ticketUrl(handler: ReturnType<typeof setup>["handler"]): Promise<string> {
   const response = await handler(
-    request(`/api/video/jobs/${jobId}/clip-ticket`, { method: "POST" }),
+    request("/api/video/clip", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jobId }),
+    }),
   );
   if (response === undefined) throw new Error("The video routes did not answer.");
   expect(response.status).toBe(200);

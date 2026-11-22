@@ -13,7 +13,7 @@ import {
 } from "@octant/contracts";
 import { principalActsAsHostPerson, type ClientPrincipal } from "../clientPrincipal";
 import { authenticateRoutePrincipal } from "../principalRouteContext";
-import { isLoopbackHostname } from "../shellRoutes";
+import { isAllowedRendererOrigin, isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { VideoJobService } from "./videoJobService";
 
@@ -21,7 +21,7 @@ const PREFIX = "/api/video/";
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, range, x-octant-window-capability";
 const JOB_ROUTE =
-  /^jobs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/(stop|clip-ticket)$/i;
+  /^jobs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/stop$/i;
 /** Long enough to watch a clip through and seek in it; renewed by asking again. */
 export const VIDEO_CLIP_TICKET_TTL_MS = 10 * 60 * 1000;
 const MAX_TICKETS = 512;
@@ -42,7 +42,10 @@ export interface VideoRouteHandler {
 }
 
 export interface VideoRouteDependencies {
-  readonly jobs: Pick<VideoJobService, "getById" | "listByScope" | "stop" | "readClipRange">;
+  readonly jobs: Pick<
+    VideoJobService,
+    "getById" | "listByScope" | "stop" | "readClipRange" | "streamClip"
+  >;
   readonly authorizeScope: (
     windowId: WindowId,
     threadKind: VideoJobThreadKind,
@@ -114,8 +117,23 @@ export function createVideoRouteHandler(dependencies: VideoRouteDependencies): V
         headers: { ...corsHeaders(origin), "content-range": `bytes */${String(size)}` },
       });
     }
-    const start = range?.start ?? 0;
-    const end = Math.min(range?.end ?? size - 1, start + MAX_RANGE_BYTES - 1);
+    if (range === undefined) {
+      // A whole-clip fetch answers the full stream; ranged playback stays bounded.
+      const streamed = await dependencies.jobs.streamClip(job);
+      if (streamed === undefined) return failure("The clip is unavailable.", 404, origin);
+      return new Response(streamed.body, {
+        status: 200,
+        headers: {
+          ...corsHeaders(origin),
+          "content-type": "video/mp4",
+          "accept-ranges": "bytes",
+          "content-length": String(streamed.size),
+          "cache-control": "private, max-age=0, no-store",
+        },
+      });
+    }
+    const start = range.start;
+    const end = Math.min(range.end ?? size - 1, start + MAX_RANGE_BYTES - 1);
     const read = await dependencies.jobs.readClipRange(job, { start, end });
     if (read === undefined) return failure("The clip is unavailable.", 404, origin);
     const partial = range !== undefined || read.end < read.size - 1;
@@ -144,7 +162,7 @@ export function createVideoRouteHandler(dependencies: VideoRouteDependencies): V
     if (!isLoopbackHostname(url.hostname)) {
       return failure("Video API requests must use loopback.", 400, null);
     }
-    if (origin !== null && !isAllowedOrigin(origin)) {
+    if (origin !== null && !isAllowedRendererOrigin(origin)) {
       return failure("Renderer origin is not allowed.", 400, origin);
     }
     if (request.method === "OPTIONS") {
@@ -197,14 +215,31 @@ export function createVideoRouteHandler(dependencies: VideoRouteDependencies): V
       }
       const match = JOB_ROUTE.exec(route);
       if (match !== null && request.method === "POST") {
-        const action = match[2];
-        if (remote && action === "stop") return failure("Video jobs are unavailable.", 404, origin);
+        if (remote) return failure("Video jobs are unavailable.", 404, origin);
         const job = await authorizedJob(decodeVideoJobId(match[1]), windowId, principal);
         if (job === undefined) return failure("Video jobs are unavailable.", 404, origin);
-        if (action === "stop") {
-          dependencies.jobs.stop(job.id);
-          return json(decodeVideoJob(dependencies.jobs.getById(job.id) ?? job), 200, origin);
+        dependencies.jobs.stop(job.id);
+        return json(decodeVideoJob(dependencies.jobs.getById(job.id) ?? job), 200, origin);
+      }
+      // A clip ticket is its own route, not a job action, so the remote
+      // policy can admit it while Stop stays local-only.
+      if (route === "clip" && request.method === "POST") {
+        const body: unknown = await request.json().catch(() => undefined);
+        let jobId: VideoJobId | undefined;
+        try {
+          jobId =
+            typeof body === "object" &&
+            body !== null &&
+            "jobId" in body &&
+            typeof body.jobId === "string"
+              ? decodeVideoJobId(body.jobId)
+              : undefined;
+        } catch {
+          jobId = undefined;
         }
+        const job =
+          jobId === undefined ? undefined : await authorizedJob(jobId, windowId, principal);
+        if (job === undefined) return failure("Video jobs are unavailable.", 404, origin);
         if (job.status !== "completed" || job.clip === undefined) {
           return failure("The clip is not ready.", 409, origin);
         }
@@ -292,13 +327,4 @@ function corsHeaders(origin: string | null): Record<string, string> {
   };
 }
 
-function isAllowedOrigin(origin: string): boolean {
-  try {
-    const url = new URL(origin);
-    return url.protocol === "http:" || url.protocol === "https:"
-      ? url.hostname === "127.0.0.1" || url.hostname === "localhost"
-      : false;
-  } catch {
-    return false;
-  }
-}
+

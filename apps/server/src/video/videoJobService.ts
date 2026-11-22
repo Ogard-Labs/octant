@@ -347,6 +347,14 @@ export class VideoJobService {
     return this.#options.clips.readAll(job.scopeId, job.clip.clipId);
   }
 
+  /** A finished clip as a bounded stream, for a whole-clip download. */
+  async streamClip(
+    job: VideoJob,
+  ): Promise<{ readonly body: ReadableStream<Uint8Array>; readonly size: number } | undefined> {
+    if (job.status !== "completed" || job.clip === undefined) return undefined;
+    return this.#options.clips.stream(job.scopeId, job.clip.clipId);
+  }
+
   /**
    * The models a driver declares, or nothing when its discovery failed: a
    * driver may legitimately reject `models`, and a profile that cannot say

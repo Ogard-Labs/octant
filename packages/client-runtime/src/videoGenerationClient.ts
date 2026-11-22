@@ -64,8 +64,12 @@ export function createVideoGenerationClient(
     async clipUrl(jobId) {
       const ticket = await requestJson(
         options,
-        `/api/video/jobs/${String(jobId)}/clip-ticket`,
-        { method: "POST", headers },
+        "/api/video/clip",
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({ jobId: String(jobId) }),
+        },
         decodeHostAnswer(VideoClipTicketResponse),
       );
       return {

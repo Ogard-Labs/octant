@@ -43,6 +43,7 @@ const NAMES_THE_ACTOR_ELSEWHERE: Readonly<Record<string, string>> = {
   "providers/providerUsageLimitsRoutes.ts":
     "reads the limits and asks the providers again; journals nothing",
   "terminalSessionRoutes.ts": "lists and reads history; changes nothing",
+  "video/videoRoutes.ts": "authenticates and scopes each request; journals nothing",
   "remote/remoteHttpAuthentication.ts":
     "answers a device's read of its own standing; that route journals nothing",
   "terminalSessions/terminalSessionAuthority.ts": "an authority predicate; changes nothing",
