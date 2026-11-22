@@ -293,12 +293,6 @@ import {
   IMAGE_JOB_STATUS_CHANGED,
   ImageJobQueued,
   ImageJobStatusChanged,
-  VIDEO_JOB_PROVIDER_COPY_CHANGED,
-  VIDEO_JOB_QUEUED,
-  VIDEO_JOB_STATUS_CHANGED,
-  VideoJobProviderCopyChanged,
-  VideoJobQueued,
-  VideoJobStatusChanged,
   BROWSER_CAPTURE_KEPT,
   BROWSER_STEP_RECORDED,
   BrowserCaptureKept,
@@ -346,6 +340,14 @@ import {
   SHIELD_FORGE_CHANGE_EVENT_NAMES,
   ShieldForgeChangeObservedPayload,
 } from "@octant/contracts";
+import {
+  VIDEO_JOB_PROVIDER_COPY_CHANGED,
+  VIDEO_JOB_QUEUED,
+  VIDEO_JOB_STATUS_CHANGED,
+  VideoJobProviderCopyChanged,
+  VideoJobQueued,
+  VideoJobStatusChanged,
+} from "@octant/contracts/video-generation";
 import {
   MemberInstallRequestedPayload,
   MemberInstallStepRecordedPayload,

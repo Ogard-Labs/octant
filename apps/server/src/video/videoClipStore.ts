@@ -1,11 +1,8 @@
 import { createHash } from "node:crypto";
 import { mkdir, open, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  MAX_VIDEO_CLIP_BYTES,
-  type ImageGenerationScopeId,
-  type VideoClipId,
-} from "@octant/contracts";
+import { type ImageGenerationScopeId } from "@octant/contracts";
+import { MAX_VIDEO_CLIP_BYTES, type VideoClipId } from "@octant/contracts/video-generation";
 
 /** `"video/mp4"` when the bytes start with an MP4 `ftyp` box, else `undefined`. */
 export function sniffVideoClipMediaType(bytes: Uint8Array): "video/mp4" | undefined {

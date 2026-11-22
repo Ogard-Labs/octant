@@ -1,3 +1,4 @@
+import { type EventEnvelope, type ImageGenerationScopeId } from "@octant/contracts";
 import {
   VIDEO_JOB_AGGREGATE_TYPE,
   VIDEO_JOB_PROVIDER_COPY_CHANGED,
@@ -6,13 +7,11 @@ import {
   decodeVideoJobProviderCopyChanged,
   decodeVideoJobQueued,
   decodeVideoJobStatusChanged,
-  type EventEnvelope,
-  type ImageGenerationScopeId,
   type VideoJob,
   type VideoJobId,
   type VideoJobProviderCopyChanged,
   type VideoJobStatusChanged,
-} from "@octant/contracts";
+} from "@octant/contracts/video-generation";
 import type { Projection } from "../persistence/projection";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 
