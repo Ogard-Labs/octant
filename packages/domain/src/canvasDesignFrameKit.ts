@@ -788,56 +788,79 @@ function scriptComments(text: string, start: number, end: number, into: Array<[n
 }
 
 const RAW_TEXT_OPEN = /<(style|script)\b[^>]*>/iy;
-const STYLE_ATTRIBUTE = /(?:^|\s)style\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi;
+const TAG_NAME = /<[A-Za-z][^\s/>]*/y;
+const ATTRIBUTE = /[\s/]*([^\s=/>][^\s=>]*)(?:\s*=\s*("[^"]*"?|'[^']*'?|[^\s>]*))?/y;
+/** Attributes whose value a browser loads as an image. */
+const IMAGE_ATTRIBUTES = new Set(["src", "srcset", "poster", "background"]);
 
 /**
- * Where the comments are in a design's frame markup or stylesheet, read the
- * way a browser reads them: HTML comments in markup, CSS comments in a
- * stylesheet, a `<style>` element and a `style` attribute (quoted or not),
- * and script comments in a `<script>` element. A `/*` in a frame's text, or a
- * `<!--` inside CSS, is not a comment. It is a reading for finding image
- * references, not a parser: a regular expression literal in a script is read
- * as code, which can only hide a reference, never invent one.
+ * Where a browser would never draw an image reference in a design's frame
+ * markup or stylesheet: comments (HTML comments in markup; CSS comments in a
+ * stylesheet, a `<style>` element and a `style` attribute, quoted or not;
+ * script comments in a `<script>` element), and in markup also text content
+ * and the values of attributes that load no image, such as `alt`. A `/*` in
+ * a frame's text, or a `<!--` inside CSS, opens nothing. It is a reading for
+ * finding image references, not a parser: a regular expression literal in a
+ * script is read as code, which can only hide a reference, never invent one.
  */
-export function designMarkupComments(markup: string, language: "html" | "css"): CommentRanges {
+export function designMarkupInertRanges(markup: string, language: "html" | "css"): CommentRanges {
   const ranges: Array<[number, number]> = [];
   if (language === "css") {
     cssComments(markup, 0, markup.length, ranges);
     return ranges;
   }
   let index = 0;
+  let textStart = 0;
+  const endText = (at: number) => {
+    if (at > textStart) ranges.push([textStart, at]);
+  };
   while (index < markup.length) {
     if (markup.startsWith("<!--", index)) {
+      endText(index);
       const close = markup.indexOf("-->", index + 4);
       const stop = close === -1 ? markup.length : close + 3;
       ranges.push([index, stop]);
-      index = stop;
+      index = textStart = stop;
       continue;
     }
-    if (markup[index] !== "<" || !/[A-Za-z]/.test(markup[index + 1] ?? "")) {
-      index += 1;
+    TAG_NAME.lastIndex = index;
+    const name = markup[index + 1] === "/" ? null : TAG_NAME.exec(markup);
+    if (name === null) {
+      if (markup[index] === "<" && markup[index + 1] === "/") {
+        endText(index);
+        const close = markup.indexOf(">", index);
+        index = textStart = close === -1 ? markup.length : close + 1;
+      } else {
+        index += 1;
+      }
       continue;
     }
+    endText(index);
+    // The tag's attributes: an image attribute's value is live, a style
+    // value is CSS, and every other value is the author's text.
+    let cursor = index + name[0].length;
+    while (cursor < markup.length && markup[cursor] !== ">") {
+      ATTRIBUTE.lastIndex = cursor;
+      const attribute = ATTRIBUTE.exec(markup);
+      if (attribute === null || attribute[0].length === 0) {
+        cursor += 1;
+        continue;
+      }
+      const attributeName = (attribute[1] ?? "").toLowerCase();
+      const value = attribute[2];
+      if (value !== undefined) {
+        const valueStart = cursor + attribute[0].length - value.length;
+        const quoted = value.startsWith('"') || value.startsWith("'") ? 1 : 0;
+        const closed = quoted === 1 && value.length > 1 && value.endsWith(value[0] ?? "") ? 1 : 0;
+        const inner: [number, number] = [valueStart + quoted, valueStart + value.length - closed];
+        if (attributeName === "style") cssComments(markup, inner[0], inner[1], ranges);
+        else if (!IMAGE_ATTRIBUTES.has(attributeName)) ranges.push(inner);
+      }
+      cursor += attribute[0].length;
+    }
+    const tagEnd = Math.min(cursor + 1, markup.length);
     RAW_TEXT_OPEN.lastIndex = index;
     const raw = RAW_TEXT_OPEN.exec(markup);
-    // A tag: its end is the first `>` outside a quoted attribute value.
-    let tagEnd = index + 1;
-    while (tagEnd < markup.length && markup[tagEnd] !== ">") {
-      const char = markup[tagEnd];
-      tagEnd =
-        (char === '"' || char === "'") && /=\s*$/.test(markup.slice(index, tagEnd))
-          ? quotedEnd(markup, tagEnd, false)
-          : tagEnd + 1;
-    }
-    tagEnd = Math.min(tagEnd + 1, markup.length);
-    const tag = markup.slice(index, tagEnd);
-    for (const match of tag.matchAll(STYLE_ATTRIBUTE)) {
-      const value = match[1] ?? "";
-      const valueStart = index + (match.index ?? 0) + match[0].length - value.length;
-      // A quoted value's CSS is what lies between its quotes.
-      const quoted = value.startsWith('"') || value.startsWith("'") ? 1 : 0;
-      cssComments(markup, valueStart + quoted, valueStart + value.length - quoted, ranges);
-    }
     if (raw !== null) {
       const element = (raw[1] ?? "").toLowerCase();
       const closing = new RegExp(`</${element}\\s*>`, "ig");
@@ -846,18 +869,20 @@ export function designMarkupComments(markup: string, language: "html" | "css"): 
       const bodyEnd = close === null ? markup.length : close.index;
       if (element === "style") cssComments(markup, tagEnd, bodyEnd, ranges);
       else scriptComments(markup, tagEnd, bodyEnd, ranges);
-      index = bodyEnd;
+      index = textStart = bodyEnd;
       continue;
     }
-    index = tagEnd;
+    index = textStart = tagEnd;
   }
+  endText(markup.length);
   return ranges;
 }
 
 /**
  * {@link withDesignAssetAddresses} for the references a browser would draw:
- * a reference inside a comment is left as written, which loads nothing, and
- * `address` is never asked for it.
+ * a reference in a comment, in text, or in an attribute that loads no image
+ * is left as written, which loads nothing, and `address` is never asked for
+ * it.
  */
 export function withDrawnDesignAssetAddresses(
   markup: string,
@@ -865,10 +890,10 @@ export function withDrawnDesignAssetAddresses(
   address: (assetId: string) => string,
 ): string {
   if (!/octant-asset:/i.test(markup)) return markup;
-  const comments = designMarkupComments(markup, language);
+  const inert = designMarkupInertRanges(markup, language);
   return markup.replace(DESIGN_ASSET_REFERENCE, (reference: string, id: string, offset: number) =>
     !reference.startsWith("octant-asset:") ||
-    comments.some(([start, end]) => offset >= start && offset < end)
+    inert.some(([start, end]) => offset >= start && offset < end)
       ? reference
       : address(id),
   );

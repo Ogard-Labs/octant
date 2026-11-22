@@ -6,7 +6,7 @@ import {
   withDrawnDesignAssetAddresses,
 } from "./shareKit.ts";
 import type { ServiceContext } from "./context.ts";
-import { escapeHtml, shareImageAddress } from "./render.ts";
+import { escapeHtml, SharePageImages } from "./render.ts";
 import { readFrameToken, type FrameMode } from "./tokens.ts";
 
 type DesignBlock = Extract<CanvasStaticExportBlock, { readonly kind: "design" }>;
@@ -152,51 +152,6 @@ function themeStyles(): string {
   ].join("");
 }
 
-/** Room for repeated images beyond every carried image written once. */
-const FRAME_PAGE_REPEAT_BUDGET = 128 * 1024;
-
-/**
- * The address each image reference on a frame page is drawn from. Each
- * reference is written in as a whole `data:` image, so a frame that names one
- * large image a hundred times, or under a dozen asset ids, would otherwise
- * build a page of hundreds of MiB from a document within every input limit.
- * Each carried image's first reference is reserved up front, once per image
- * however many asset ids name it, so repeats early in the page cannot crowd
- * out a different image later; a repeat past the budget draws an empty image.
- */
-class FramePageImageBudget {
-  /** Asset id to the share image it draws. */
-  readonly #imageOf: ReadonlyMap<string, string>;
-  /** Share image to its `data:` address. */
-  readonly #addressOf: ReadonlyMap<string, string>;
-  readonly #drawn = new Set<string>();
-  readonly #limit: number;
-  #spent = 0;
-
-  constructor(imageOf: ReadonlyMap<string, string>, addressOf: ReadonlyMap<string, string>) {
-    this.#imageOf = imageOf;
-    this.#addressOf = addressOf;
-    const used = new Set(imageOf.values());
-    for (const [imageRef, address] of addressOf) {
-      if (used.has(imageRef)) this.#spent += address.length;
-    }
-    this.#limit = this.#spent + FRAME_PAGE_REPEAT_BUDGET;
-  }
-
-  address(assetId: string): string {
-    const imageRef = this.#imageOf.get(assetId);
-    const address = imageRef === undefined ? undefined : this.#addressOf.get(imageRef);
-    if (imageRef === undefined || address === undefined) return `octant-asset:${assetId}`;
-    if (!this.#drawn.has(imageRef)) {
-      this.#drawn.add(imageRef);
-      return address;
-    }
-    if (this.#spent + address.length > this.#limit) return "data:,";
-    this.#spent += address.length;
-    return address;
-  }
-}
-
 /**
  * The page for one design's frames, as the app draws them but without the
  * host bridge: a shared page has no host to report to. A static design gets a
@@ -208,14 +163,26 @@ export function renderDesignFramePage(
   images: ReadonlyArray<CanvasShareImage> = [],
 ): string {
   // An image the share carries is written in as a data: image, which the
-  // frame policy admits; a declared image it does not carry keeps its
-  // reference, which loads nothing.
-  const budget = new FramePageImageBudget(
-    new Map((block.assets ?? []).map((asset) => [String(asset.assetId), String(asset.imageRef)])),
-    new Map(images.map((image) => [String(image.imageRef), shareImageAddress(image)])),
+  // frame policy admits, once whole however many asset ids name it; repeats
+  // share the page's image budget.
+  const imageOf = new Map(
+    (block.assets ?? []).map((asset) => [String(asset.assetId), String(asset.imageRef)]),
   );
+  const named = new Set(imageOf.values());
+  const carried = images.filter((image) => named.has(String(image.imageRef)));
+  const carriedRefs = new Set(carried.map((image) => String(image.imageRef)));
+  const pageImages = new SharePageImages(carried);
+  // A declared image the share does not carry keeps its reference, which
+  // loads nothing; a carried one past the budget draws an empty image.
   const draw = (markup: string, language: "html" | "css") =>
-    withDrawnDesignAssetAddresses(markup, language, (assetId) => budget.address(assetId));
+    withDrawnDesignAssetAddresses(markup, language, (assetId) => {
+      const imageRef = imageOf.get(assetId);
+      if (imageRef === undefined || !carriedRefs.has(imageRef)) return `octant-asset:${assetId}`;
+      return pageImages.address(imageRef) ?? "data:,";
+    });
+  // The stylesheet is drawn first: it styles the opening frame, so its images
+  // take their copy before a frame further in the flow repeats them.
+  const styles = draw(block.styles ?? "", "css");
   const isDocument = block.size === "document";
   const themed = (block.theme ?? (isDocument ? "workspace" : "none")) === "workspace";
   const viewport = block.size === "document" ? undefined : CANVAS_DESIGN_VIEWPORT[block.size];
@@ -235,7 +202,7 @@ export function renderDesignFramePage(
     `<style>${isDocument ? DOCUMENT_FRAME_RULES : DEVICE_FRAME_RULES}</style>`,
     themed ? themeStyles() : `<style>${UNTHEMED_PAGE}</style>`,
     // A stylesheet that closes its element would let author text become markup.
-    `<style>${draw(block.styles ?? "", "css").replace(/<\/style/gi, "<\\/style")}</style>`,
+    `<style>${styles.replace(/<\/style/gi, "<\\/style")}</style>`,
     `</head><body>${frames}</body></html>`,
   ].join("");
 }

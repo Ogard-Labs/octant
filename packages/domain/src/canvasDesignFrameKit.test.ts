@@ -90,4 +90,17 @@ describe("drawn design asset references", () => {
       ),
     ).toEqual(["after-string"]);
   });
+
+  it("does not draw a reference written as text or in an attribute that loads no image", () => {
+    expect(
+      drawn(
+        [
+          '<p>Example: src="octant-asset:in-text"</p>',
+          '<img alt="Example: src=octant-asset:in-alt" src="octant-asset:shown">',
+          '<a title="url(octant-asset:in-title)" href="#home">Home</a>',
+        ].join(""),
+        "html",
+      ),
+    ).toEqual(["shown"]);
+  });
 });

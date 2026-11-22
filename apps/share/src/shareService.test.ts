@@ -20,6 +20,7 @@ import { CANVAS_PUBLIC_SHARE_MAX_DOCUMENT_BYTES, CANVAS_SHARE_SCHEMA_VERSION } f
 import { readShareConfig, type ShareConfig } from "./config.ts";
 import { startShareService, type ShareService } from "./server.ts";
 import { renderDesignFramePage } from "./frames.ts";
+import { renderBlocks, SharePageImages } from "./render.ts";
 import { ShareStore } from "./store.ts";
 import { runTakedown } from "./takedown.ts";
 
@@ -1058,5 +1059,50 @@ describe("design frame pages", () => {
     expect(commented).toContain(`<img id="live" src="data:image/png;base64,${data}"`);
     expect(commented).toContain('<!-- <img src="octant-asset:hero" alt=""> -->');
     expect(commented).toContain("/* .old { background: url(octant-asset:hero); } */");
+
+    // The stylesheet styles the opening frame, so it takes the image's copy first.
+    const styled = renderDesignFramePage(
+      design({
+        schemaVersion: 30,
+        frames: [
+          { frameId: "home", title: "Home", html: '<div class="hero">Home</div>' },
+          { frameId: "later", title: "Later", html: html.repeat(2) },
+        ],
+        styles: ".hero { background: url(octant-asset:hero); }",
+        assets: [{ assetId: "hero", imageRef: "image-1" }],
+      }) as never,
+      [image as never],
+    );
+    expect(styled).toContain(`.hero { background: url(data:image/png;base64,${data}); }`);
+  });
+
+  test("draws a shared image once in full however many blocks show it", () => {
+    const bytes = Buffer.alloc(1024 * 1024, 7);
+    bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const data = bytes.toString("base64");
+    const image = {
+      imageRef: "image-1",
+      mediaType: "image/png",
+      byteLength: bytes.byteLength,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      data,
+    } as const;
+    const blocks = Array.from({ length: 64 }, (_, index) => ({
+      blockId: `cover-${String(index)}`,
+      schemaVersion: 30,
+      kind: "image",
+      alt: `Cover ${String(index)}`,
+      imageRef: "image-1",
+    }));
+    const page = renderBlocks(blocks as never, {
+      shareId: "share",
+      frameAddress: () => "",
+      runBlockId: undefined,
+      images: new SharePageImages([image as never]),
+    });
+    expect(page).toContain(`data:image/png;base64,${data}`);
+    expect(page.length).toBeLessThan(2 * 1024 * 1024);
+    // A repeat past the page's budget reads as its description.
+    expect(page).toContain("Cover 63");
   });
 });

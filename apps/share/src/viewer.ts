@@ -5,7 +5,7 @@ import {
 } from "./shareKit.ts";
 import { readLimitedBody } from "./api.ts";
 import { isHttps, type ServiceContext } from "./context.ts";
-import { escapeHtml as e, renderBlocks } from "./render.ts";
+import { escapeHtml as e, renderBlocks, SharePageImages } from "./render.ts";
 import { isShareId, type StoredShare } from "./store.ts";
 import { mintFrameToken, mintViewGrant, viewGrantIsValid } from "./tokens.ts";
 import { VIEWER_CSS } from "./viewerStyles.ts";
@@ -150,7 +150,7 @@ function renderShare(
   );
   const body = renderBlocks(document.blocks, {
     shareId: id,
-    images: new Map((document.images ?? []).map((image) => [String(image.imageRef), image])),
+    images: new SharePageImages(document.images ?? []),
     runBlockId: runnable === undefined ? undefined : String(runnable.blockId),
     frameAddress: (blockId, mode) =>
       `${ctx.usercontentOrigin}/f/${id}/${encodeURIComponent(blockId)}?t=${mintFrameToken(
