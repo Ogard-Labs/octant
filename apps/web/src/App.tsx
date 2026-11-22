@@ -1273,9 +1273,13 @@ function LaunchedShell(
   const [draftModelId, setDraftModelId] = useState<
     import("@octant/contracts/providers").ProviderModelId | undefined
   >(() => readLastModelChoice()?.modelId);
-  // A model picked in the Work composer itself. The shared draft choice above
-  // also follows Chat and Code picks through the remembered choice, and it
-  // must not outrank the Work default from Settings.
+  const [codeDraftProviderInstanceId, setCodeDraftProviderInstanceId] = useState<
+    import("@octant/contracts/providers").ProviderInstanceId | undefined
+  >();
+  const [codeDraftModelId, setCodeDraftModelId] = useState<
+    import("@octant/contracts/providers").ProviderModelId | undefined
+  >();
+  // A model picked in each non-Chat composer must not replace Chat's choice.
   const [workComposerSelection, setWorkComposerSelection] = useState<{
     readonly providerInstanceId: import("@octant/contracts/providers").ProviderInstanceId;
     readonly modelId: import("@octant/contracts/providers").ProviderModelId;
@@ -4221,10 +4225,8 @@ function LaunchedShell(
       controller.updateSettings({ firstRunOnboarding: outcome }),
     [controller],
   );
-  // First run's model step writes to whatever a new task in that mode already
-  // starts from: Work's own default in Work settings, and the composer's
-  // remembered choice for Code (and for Work on a host without Work settings).
-  // First run keeps no copy of either.
+  // First run's model step writes to the selected mode's own default; it keeps
+  // no copy of the choice.
   const selectFirstRunModel = useCallback(
     async (mode: "work" | "code", selection: ModelPickerSelection) => {
       if (mode === "work" && workSettings.status === "ready") {
@@ -4233,10 +4235,16 @@ function LaunchedShell(
       // Without Work's settings there is no version to write against yet, so
       // the choice has not been taken rather than merely deferred.
       if (mode === "work" && workSettings.status === "loading") return false;
-      rememberModelChoice(selection);
-      return true;
+      const settings = codeController.bootstrap?.settings;
+      if (settings === undefined) return false;
+      const saved = await codeController.updateSettings({
+        defaultExecutionPolicy: settings.defaultExecutionPolicy,
+        defaultPermissionPersistence: settings.defaultPermissionPersistence,
+        defaultModel: selection,
+      });
+      return saved;
     },
-    [workSettings],
+    [workSettings, codeController],
   );
   const workDefaultModel = workSettings.settings;
   const firstRunWorkModel = useMemo(() => {
@@ -4493,12 +4501,18 @@ function LaunchedShell(
       : activeMode === "work"
         ? workProviderGroups
         : codeProviderGroups;
-  const rawDraftSelection =
+  const sharedDraftSelection =
     draftProviderInstanceId !== undefined && draftModelId !== undefined
       ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
       : undefined;
+  const codeDraftPreferredSelection =
+    codeDraftProviderInstanceId !== undefined && codeDraftModelId !== undefined
+      ? { providerInstanceId: codeDraftProviderInstanceId, modelId: codeDraftModelId }
+      : codeController.bootstrap?.settings.defaultModel;
+  const rawDraftSelection =
+    activeMode === "code" ? codeDraftPreferredSelection : sharedDraftSelection;
   const preferredChatSelection =
-    resolveDraftProviderSelection(chatProviderGroups, rawDraftSelection) ??
+    resolveDraftProviderSelection(chatProviderGroups, sharedDraftSelection) ??
     resolveDraftProviderSelection(chatProviderGroups, firstRunChatDefault) ??
     firstSelectableProviderSelection(chatProviderGroups);
   const visibleDraftSelection =
@@ -4512,6 +4526,14 @@ function LaunchedShell(
       : visibleDraftSelection?.providerInstanceId;
   const effectiveDraftModelId =
     activeMode === "work" ? workProviderChoice?.modelId : visibleDraftSelection?.modelId;
+  const setDraftProviderInstanceIdForMode: typeof setDraftProviderInstanceId = (selection) => {
+    if (activeMode === "code") setCodeDraftProviderInstanceId(selection);
+    else setDraftProviderInstanceId(selection);
+  };
+  const setDraftModelIdForMode: typeof setDraftModelId = (selection) => {
+    if (activeMode === "code") setCodeDraftModelId(selection);
+    else setDraftModelId(selection);
+  };
   const localHost = hosts.find((host) => String(host.hostId) === String(LOCAL_HOST_ID));
   const activeCodeProject =
     projectController.activeProject?.type === "code" ? projectController.activeProject : undefined;
@@ -6212,11 +6234,11 @@ function LaunchedShell(
       setDockStatesByThread,
       setDraftError,
       setDraftPermissionMode,
-      setDraftModelId,
+      setDraftModelId: setDraftModelIdForMode,
       setDraftPendingMessage,
       setDraftPermissionPersistence,
       setDraftProjectSelection,
-      setDraftProviderInstanceId,
+      setDraftProviderInstanceId: setDraftProviderInstanceIdForMode,
       setEnvironmentSelection,
       setFallbackDockState,
       setGithubIssuesOpen,
@@ -7912,10 +7934,8 @@ function LaunchedShell(
         return false;
       }
       const codeSelection = resolveDraftProviderSelection(
-        draftProviderGroups,
-        draftProviderInstanceId !== undefined && draftModelId !== undefined
-          ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
-          : undefined,
+        codeProviderGroups,
+        codeDraftPreferredSelection,
       );
       const providerInstanceId =
         codeSelection?.providerInstanceId ?? codeProviderChoices[0]?.instanceId;
@@ -8318,10 +8338,8 @@ function LaunchedShell(
           return;
         }
         const codeDraftSelection = resolveDraftProviderSelection(
-          draftProviderGroups,
-          draftProviderInstanceId !== undefined && draftModelId !== undefined
-            ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
-            : undefined,
+          codeProviderGroups,
+          codeDraftPreferredSelection,
         );
         const providerInstanceId =
           codeDraftSelection?.providerInstanceId ?? codeProviderChoices[0]?.instanceId;

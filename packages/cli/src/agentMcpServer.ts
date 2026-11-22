@@ -151,7 +151,8 @@ export const AGENT_MCP_TOOLS: ReadonlyArray<JsonObject> = [
         },
         model: {
           type: "string",
-          description: "A model id or `endpoint/model`; Octant's first harness model when absent.",
+          description:
+            "A model id or `endpoint/model`. Omit to use a usable configured default; if none is available, choose an explicit unique model.",
         },
         access: {
           type: "string",
