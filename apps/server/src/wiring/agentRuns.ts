@@ -1007,9 +1007,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         return isProjectPolicyTargetAllowed(project, providerInstanceId, modelId);
       },
       helperRunRefusal: (providerInstanceId) =>
-        personalSignInRefusals(
-          persistence.readProviderInstance(providerInstanceId)?.driverKind ?? "",
-        )?.refusesHelperRuns,
+        personalSignInRefusals(persistence.readProviderInstance(providerInstanceId))
+          ?.refusesHelperRuns,
       // `configuredDriverOptions` is declared later in this scope; the closure
       // only runs when a child starts, long after boot, so the reference is safe.
       resolveDriver: (providerInstanceId, run) => {

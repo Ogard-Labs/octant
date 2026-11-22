@@ -23,7 +23,7 @@ import type {
 } from "@octant/contracts/conversation-inputs";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
-import type { ProviderAttachmentInput } from "@octant/contracts";
+import type { ProviderAttachmentInput, ProviderInstance } from "@octant/contracts";
 import { type Questionnaire } from "@octant/contracts";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { CodeTurnReviewCaptureScheduler } from "./codeTurnReviewCaptureScheduler";
@@ -459,6 +459,14 @@ export interface CodeOperationRuntimeOptions {
   };
   readonly resolveCheckoutRoot: CodeOperationAuthorityPort["resolveCheckoutRoot"];
   readonly resolveProviderDriver: (thread: CodeThread) => Awaitable<ProviderDriver | undefined>;
+  /**
+   * The thread's provider instance, whose configured sign-in decides which
+   * personal sign-in limits bind a turn the host starts. Absent, the driver's
+   * kind alone is read, which keeps every limit the kind declares.
+   */
+  readonly readProviderInstance?: (
+    id: CodeThread["providerInstanceId"],
+  ) => ProviderInstance | undefined;
   readonly credentialResolver: CredentialResolver;
   /**
    * Mints the Browser grant a thread terminal can be started with. Its two
@@ -1530,6 +1538,12 @@ export function createCodeOperationRuntime(
     threadStrict: (thread: CodeThread) => options.resolveStrict?.(thread.id) ?? true,
     providerDriverKind: async (thread: CodeThread) =>
       (await options.resolveProviderDriver(thread))?.kind,
+    ...(options.readProviderInstance === undefined
+      ? {}
+      : {
+          providerSignIn: (thread: CodeThread) =>
+            options.readProviderInstance?.(thread.providerInstanceId),
+        }),
     ...(readRuntimeWorks === undefined
       ? {}
       : {

@@ -149,6 +149,9 @@ export function makeProviderDriver(
       ...(configuration.authentication === undefined
         ? {}
         : { authentication: configuration.authentication }),
+      ...(configuration.googleCloud === undefined
+        ? {}
+        : { googleCloud: configuration.googleCloud }),
       ...(options.credentialResolver === undefined
         ? {}
         : { credentialResolver: options.credentialResolver }),

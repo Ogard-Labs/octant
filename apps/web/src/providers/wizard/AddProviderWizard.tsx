@@ -88,6 +88,8 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [accent, setAccent] = useState<ClaudeAccountAccent | "">("");
   const [gatewayAddress, setGatewayAddress] = useState("");
+  const [googleCloudProject, setGoogleCloudProject] = useState("");
+  const [googleCloudLocation, setGoogleCloudLocation] = useState("");
   const [problem, setProblem] = useState<string | undefined>(undefined);
   const [creating, setCreating] = useState(false);
   const knownIds = useRef<ReadonlySet<string>>(new Set());
@@ -118,6 +120,7 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
   const binary = binaryEdit ?? detected ?? "";
   const hasAccount = type === "claude" || type === "codex";
   const gateway = type === "claude" && choice?.id === "gateway";
+  const agentPlatform = isAcpAgentKind(type) && choice?.id === "agent-platform";
   // A Claude profile may be added from a browser without its key or token;
   // the person then stores it on the host (Providers: Claude API-key
   // profiles on a headless host).
@@ -138,6 +141,13 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
       } catch (refusal) {
         return refusal instanceof Error ? refusal.message : "Gateway address is not valid.";
       }
+    }
+    if (
+      target === "sign-in" &&
+      agentPlatform &&
+      (googleCloudProject.trim() === "" || googleCloudLocation.trim() === "")
+    ) {
+      return "Enter the Google Cloud project and location.";
     }
     if (target === "sign-in" && choice?.needsKey === true && !claudeKeyLater) {
       if (!props.credentialManagementAvailable) {
@@ -203,6 +213,14 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
           kind: acpAgentConfigurationKind(type),
           binaryPath: binary,
           ...(authentication.acp === undefined ? {} : { authentication: authentication.acp }),
+          ...(authentication.acp === "agent-platform"
+            ? {
+                googleCloud: {
+                  project: googleCloudProject.trim(),
+                  location: googleCloudLocation.trim(),
+                },
+              }
+            : {}),
         },
         authentication.acp === "api-key" ? entered : emptyTransientCredential(entered),
       );
@@ -352,6 +370,35 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
                   : { hostGateway: props.discoverySnapshot.claudeHostGateway })}
               />
             </div>
+          ) : null}
+          {agentPlatform ? (
+            <>
+              <label className="add-provider-wizard__field">
+                <span>Google Cloud project</span>
+                <OctantInput
+                  aria-label="Google Cloud project"
+                  onChange={(event) => {
+                    setGoogleCloudProject(event.currentTarget.value);
+                    setProblem(undefined);
+                  }}
+                  spellCheck={false}
+                  value={googleCloudProject}
+                />
+              </label>
+              <label className="add-provider-wizard__field">
+                <span>Google Cloud location</span>
+                <OctantInput
+                  aria-label="Google Cloud location"
+                  onChange={(event) => {
+                    setGoogleCloudLocation(event.currentTarget.value);
+                    setProblem(undefined);
+                  }}
+                  placeholder="us-central1"
+                  spellCheck={false}
+                  value={googleCloudLocation}
+                />
+              </label>
+            </>
           ) : null}
           {/* Mounted for every step so a typed key survives Back and Next; it
               is read from the field only when the account is created. */}

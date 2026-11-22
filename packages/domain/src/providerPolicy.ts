@@ -1026,17 +1026,25 @@ export function isChangeAcpAgentConfigurationCommand(
 /**
  * Checks an ACP agent configuration against its profile: an absolute binary
  * and, when the profile lists postures, one of them; an agent whose profile
- * lists none takes no posture.
+ * lists none takes no posture, and one that declares a personal sign-in may
+ * name none, which keeps that sign-in. The Google Cloud project travels only
+ * with the Agent Platform posture, which needs it.
  */
 function normalizeAcpAgentConfiguration(
   configuration: AcpAgentConfiguration,
 ): AcpAgentConfiguration {
   const profile = acpAgentProfile(acpAgentKindOfConfiguration(configuration.kind));
   const binaryPath = normalizeBinaryPath(configuration.binaryPath);
-  const { authentication } = configuration;
+  const { authentication, googleCloud } = configuration;
   if (profile.authentication.length === 0) {
     if (authentication !== undefined) {
       reject("invalid-authentication", `${profile.name} takes no authentication setting.`);
+    }
+    return { kind: configuration.kind, binaryPath };
+  }
+  if (authentication === undefined && profile.personalSignIn !== undefined) {
+    if (googleCloud !== undefined) {
+      reject("invalid-authentication", "Only Agent Platform takes a Google Cloud project.");
     }
     return { kind: configuration.kind, binaryPath };
   }
@@ -1045,6 +1053,23 @@ function normalizeAcpAgentConfiguration(
       "invalid-authentication",
       `${profile.name} authentication must be ${profile.authentication.join(" or ")}.`,
     );
+  }
+  if (authentication === "agent-platform") {
+    if (googleCloud === undefined) {
+      return reject(
+        "invalid-authentication",
+        "Agent Platform needs a Google Cloud project and location.",
+      );
+    }
+    return {
+      kind: configuration.kind,
+      binaryPath,
+      authentication,
+      googleCloud: { project: googleCloud.project, location: googleCloud.location },
+    };
+  }
+  if (googleCloud !== undefined) {
+    reject("invalid-authentication", "Only Agent Platform takes a Google Cloud project.");
   }
   return { kind: configuration.kind, binaryPath, authentication };
 }

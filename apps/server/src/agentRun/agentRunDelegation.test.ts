@@ -271,6 +271,32 @@ describe("agentRunTargetAvailability", () => {
     ]);
   });
 
+  it("offers an Antigravity instance signed in with a Gemini API key as a helper target", () => {
+    const antigravity = runtime("80000000-0000-4000-8000-000000000025", "Antigravity", "acp");
+    const availability = agentRunTargetAvailability({
+      project: undefined,
+      instances: [
+        {
+          ...antigravity,
+          driverKind: "antigravity",
+          configuration: {
+            kind: "antigravity-acp",
+            binaryPath: "/opt/homebrew/bin/agy",
+            authentication: "api-key",
+          },
+        },
+      ] as never,
+      observedState: () => ({
+        readiness: "ready",
+        models: [model("m")],
+        capabilities: { appManagedTools: "supported" },
+      }),
+      isTargetAllowed: () => true,
+    });
+    expect(availability.targets.map((target) => target.displayName)).toEqual(["Antigravity"]);
+    expect(availability.unavailable).toEqual([]);
+  });
+
   it("offers a runtime whose Octant tools are mixed only to a child that runs at Full access", () => {
     const openCode = {
       id: "80000000-0000-4000-8000-000000000030",

@@ -186,9 +186,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
       // share, so a routine on such a provider keeps observing and each run
       // is journaled as refused with why, before any thread exists. Read from
       // the live instance, so a routine saved earlier is refused too.
-      const unattended = personalSignInRefusals(
-        facts.providerInstance?.driverKind ?? "",
-      )?.refusesUnattendedRuns;
+      const unattended = personalSignInRefusals(facts.providerInstance)?.refusesUnattendedRuns;
       if (unattended !== undefined) {
         this.#refuse(definition, run, "provider-capability-mismatch", unattended);
         return;

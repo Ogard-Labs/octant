@@ -3,10 +3,28 @@ import { Schema } from "effect";
 /**
  * How an ACP agent instance signs in. `subscription` and `provider-owned` both
  * reuse the agent's own login; `api-key` reads a key the host credential
- * broker holds for the instance.
+ * broker holds for the instance; `agent-platform` signs in to the Google Cloud
+ * project and location the instance names with the host's Application Default
+ * Credentials.
  */
-export const AcpAgentAuthentication = Schema.Literal("subscription", "provider-owned", "api-key");
+export const AcpAgentAuthentication = Schema.Literal(
+  "subscription",
+  "provider-owned",
+  "api-key",
+  "agent-platform",
+);
 export type AcpAgentAuthentication = typeof AcpAgentAuthentication.Type;
+
+/**
+ * The postures in which Octant itself passes the agent its credential (a key
+ * from the host broker, or the Cloud project to use), so Octant knows which
+ * sign-in a run uses without taking the agent's word for it. Every other
+ * posture is the agent's own login.
+ */
+const OCTANT_PASSED_POSTURES: ReadonlySet<AcpAgentAuthentication> = new Set([
+  "api-key",
+  "agent-platform",
+]);
 
 /**
  * What an agent's own personal sign-in does not cover, as its vendor draws
@@ -44,20 +62,25 @@ export interface AcpAgentProfileDescriptor {
   /**
    * Postures a configuration may name, in order; the first is the one
    * discovery registers. Empty means the agent's own login and a configuration
-   * that carries no posture at all.
+   * that carries no posture at all. A profile that declares `personalSignIn`
+   * also decodes a configuration with no posture, which is that personal
+   * sign-in: instances saved before it offered a choice carry none.
    */
   readonly authentication: ReadonlyArray<AcpAgentAuthentication>;
   /** Postures Settings offers, when that is narrower than what still decodes. */
   readonly offeredAuthentication?: ReadonlyArray<AcpAgentAuthentication>;
   /** The key's name wherever the `api-key` posture is offered. */
   readonly apiKeyLabel?: string;
+  /** What Settings calls a posture, where the generic name would mislead. */
+  readonly postureLabels?: Partial<Readonly<Record<AcpAgentAuthentication, string>>>;
   /** A sentence Settings shows beside the authentication choice. */
   readonly authenticationNote?: string;
   /** How the person signs in with the agent's own login. */
   readonly signInGuidance: string;
   /**
-   * Runs the agent's own personal sign-in does not cover. Declared only by a
-   * profile whose sole posture is that sign-in, so it binds every instance.
+   * Runs the agent's own personal sign-in does not cover. They bind every
+   * instance of the profile except one whose posture Octant passes itself (a
+   * Gemini API key, an Agent Platform project): `personalSignInRefusals`.
    */
   readonly personalSignIn?: AcpPersonalSignInRefusals;
   /** The agent's documented self-update arguments, when it has them. */
@@ -221,11 +244,20 @@ export const ACP_AGENT_PROFILES = {
     name: "Google Antigravity",
     executable: "agy",
     versionProbeArgs: ["--version"],
-    // The official CLI signs in with the person's own Google account and
-    // keeps that sign-in itself; Octant runs the unmodified binary and never
-    // reads, copies or replaces it.
-    authentication: [],
-    authenticationNote: "Uses your own Google account sign-in from the Antigravity CLI.",
+    // The default is the person's own Google sign-in, which the official CLI
+    // keeps itself; Octant runs the unmodified binary and never reads, copies
+    // or replaces it. A Gemini API key from the host broker, or an Agent
+    // Platform project with the host's Application Default Credentials, are
+    // the sign-ins Google's API and Cloud terms cover (maintainer decision,
+    // 2026-11-22).
+    authentication: ["provider-owned", "api-key", "agent-platform"],
+    apiKeyLabel: "Gemini API key",
+    postureLabels: {
+      "provider-owned": "Personal Google sign-in",
+      "agent-platform": "Agent Platform (Google Cloud project)",
+    },
+    authenticationNote:
+      "A personal Google sign-in covers only turns you send yourself. Routines, helper runs and other agents need a Gemini API key or Agent Platform.",
     signInGuidance:
       "Run agy (or agy acp --login) in your terminal and sign in with your Google account, then check the connection again.",
     // `agy` with no arguments is Google's own interactive CLI, where the
@@ -233,14 +265,15 @@ export const ACP_AGENT_PROFILES = {
     interactiveArgs: [],
     // Google supports the CLI on a personal plan for one person at their own
     // computer driving it themselves; unattended runs, use as a sub-agent of
-    // another agent loop, and other callers belong on a Gemini API key.
+    // another agent loop, and other callers belong on a Gemini API key or
+    // Agent Platform, which an instance may choose instead.
     personalSignIn: {
       refusesUnattendedRuns:
-        "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Choose a provider that uses a Gemini API key, such as Gemini CLI with an API key.",
+        "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Switch this provider to a Gemini API key or Agent Platform in Settings, or choose another provider.",
       refusesHelperRuns:
-        "Google doesn't support Google Antigravity as a helper agent, or starting helpers from it, on a personal Google sign-in. Use a provider that uses a Gemini API key, such as Gemini CLI with an API key, for helper work.",
+        "Google doesn't support Google Antigravity as a helper agent, or starting helpers from it, on a personal Google sign-in. Switch this provider to a Gemini API key or Agent Platform in Settings, or use another provider for helper work.",
       refusesOutsideAgents:
-        "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or use a provider that uses a Gemini API key.",
+        "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or switch this provider to a Gemini API key or Agent Platform in Settings.",
     },
     // 0x1b is taken: copilot's 0x11 seed normalizes to the `1b` digest.
     bundledPluginSerial: 0x1c,
@@ -262,12 +295,37 @@ export function acpAgentProfile(kind: AcpAgentKind): AcpAgentProfileDescriptor {
   return ACP_AGENT_PROFILES[kind];
 }
 
+/** What the personal sign-in check reads of any provider instance. */
+export interface ProviderSignInFacts {
+  readonly driverKind: string;
+  /** The instance's configuration; only its `authentication` field is read. */
+  readonly configuration?: object;
+}
+
 /**
- * The runs a provider's own personal sign-in does not cover, for any driver
- * kind; undefined when the kind declares none.
+ * The runs a provider instance's own personal sign-in does not cover;
+ * undefined when its kind declares none or the instance signs in with a
+ * credential Octant passes the agent itself. The check reads the sign-in the
+ * instance is configured with, which is what Octant passes at launch, never
+ * what the agent reports: Octant cannot verify which login an agent's own
+ * cached sign-in uses, so that one keeps every limit.
  */
-export function personalSignInRefusals(driverKind: string): AcpPersonalSignInRefusals | undefined {
-  return isAcpAgentKind(driverKind) ? acpAgentProfile(driverKind).personalSignIn : undefined;
+export function personalSignInRefusals(
+  instance: ProviderSignInFacts | undefined,
+): AcpPersonalSignInRefusals | undefined {
+  if (instance === undefined || !isAcpAgentKind(instance.driverKind)) return undefined;
+  const refusals = acpAgentProfile(instance.driverKind).personalSignIn;
+  if (refusals === undefined) return undefined;
+  const configuration = instance.configuration;
+  const posture =
+    configuration !== undefined && "authentication" in configuration
+      ? configuration.authentication
+      : undefined;
+  return AcpAgentAuthentication.literals.some(
+    (literal) => literal === posture && OCTANT_PASSED_POSTURES.has(literal),
+  )
+    ? undefined
+    : refusals;
 }
 
 /** Every ACP agent configuration names its kind as `<driver kind>-acp`. */

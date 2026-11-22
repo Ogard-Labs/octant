@@ -465,12 +465,10 @@ export function wireRemote(deps: RemoteDependencies) {
 
   // Peers and outside agents name a provider by its id as text, so the
   // instance is found by that text rather than by a branded lookup.
-  const providerDriverKind = (providerInstanceId: string): string =>
-    String(
-      persistence
-        .readProviderInstances()
-        .find((instance) => String(instance.id) === providerInstanceId)?.driverKind ?? "",
-    );
+  const providerInstanceNamed = (providerInstanceId: string) =>
+    persistence
+      .readProviderInstances()
+      .find((instance) => String(instance.id) === providerInstanceId);
 
   // The proxy route's grant requests run under the paired device's own scope,
   // the same remote read rule product requests are judged by.
@@ -1340,7 +1338,7 @@ export function wireRemote(deps: RemoteDependencies) {
           },
           scope: ROUTINE_HOST_SCOPE_ID,
           helperRunRefusal: (providerInstanceId) =>
-            personalSignInRefusals(providerDriverKind(providerInstanceId))?.refusesHelperRuns,
+            personalSignInRefusals(providerInstanceNamed(providerInstanceId))?.refusesHelperRuns,
           onDelegatedThreadCreated: withholdThreadFromPersonMemory,
         }),
         code: createCodeDelegationHost(
@@ -2437,7 +2435,7 @@ export function wireRemote(deps: RemoteDependencies) {
         for (const providerInstanceId of providerInstanceIds) {
           if (providerInstanceId === undefined) continue;
           const refusal = personalSignInRefusals(
-            providerDriverKind(providerInstanceId),
+            providerInstanceNamed(providerInstanceId),
           )?.refusesOutsideAgents;
           if (refusal !== undefined) return { outsideAgentRefusal: refusal };
         }

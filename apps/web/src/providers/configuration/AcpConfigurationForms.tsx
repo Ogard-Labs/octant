@@ -1,6 +1,7 @@
 import {
   acpAgentProfile,
   type AcpAgentAuthentication,
+  type AcpAgentGoogleCloud,
   type AcpAgentKind,
   type AcpAgentProviderInstance,
   type ProviderInstance,
@@ -22,22 +23,46 @@ export function offeredAcpAuthentication(
 }
 
 function postureLabel(kind: AcpAgentKind, posture: AcpAgentAuthentication): string {
-  return posture === "api-key"
-    ? (acpAgentProfile(kind).apiKeyLabel ?? "API key")
-    : "Provider CLI login (recommended)";
+  const profile = acpAgentProfile(kind);
+  const named = profile.postureLabels?.[posture];
+  if (named !== undefined) return named;
+  if (posture === "api-key") return profile.apiKeyLabel ?? "API key";
+  if (posture === "agent-platform") return "Agent Platform";
+  return "Provider CLI login (recommended)";
 }
+
+const AGENT_PLATFORM_GUIDANCE =
+  "Uses this computer's Application Default Credentials (gcloud auth application-default login) for the project and location below.";
 
 /** What a card says an ACP agent instance signs in with. */
 export function acpAuthenticationFact(instance: AcpAgentProviderInstance): string {
   const profile = acpAgentProfile(instance.driverKind);
-  switch (instance.configuration.authentication) {
+  const { authentication, googleCloud } = instance.configuration;
+  switch (authentication) {
     case "api-key":
       return profile.apiKeyLabel ?? "API key";
+    case "agent-platform":
+      return googleCloud === undefined
+        ? "Agent Platform"
+        : `Agent Platform project ${googleCloud.project} (${googleCloud.location})`;
     case "subscription":
       return `${profile.name} subscription`;
     default:
-      return `provider-owned ${profile.name} credentials`;
+      return (
+        profile.postureLabels?.["provider-owned"] ?? `provider-owned ${profile.name} credentials`
+      );
   }
+}
+
+/**
+ * The Google Cloud project and location a form names for Agent Platform,
+ * trimmed; the server checks their shape.
+ */
+export function googleCloudFromForm(data: FormData): AcpAgentGoogleCloud {
+  return {
+    project: String(data.get("googleCloudProject") ?? "").trim(),
+    location: String(data.get("googleCloudLocation") ?? "").trim(),
+  };
 }
 
 /**
@@ -81,7 +106,32 @@ export function AcpAgentCreateAuthenticationFields(props: {
           />
         </label>
       ) : null}
-      {props.authentication === "api-key" ? (
+      {props.authentication === "agent-platform" ? (
+        <>
+          <p className="provider-settings__field-guidance">{AGENT_PLATFORM_GUIDANCE}</p>
+          <label>
+            <span>Google Cloud project</span>
+            <OctantInput
+              aria-label="Google Cloud project"
+              className="settings-view__text-input window-no-drag"
+              name="googleCloudProject"
+              required
+              spellCheck={false}
+            />
+          </label>
+          <label>
+            <span>Google Cloud location</span>
+            <OctantInput
+              aria-label="Google Cloud location"
+              className="settings-view__text-input window-no-drag"
+              name="googleCloudLocation"
+              placeholder="us-central1"
+              required
+              spellCheck={false}
+            />
+          </label>
+        </>
+      ) : props.authentication === "api-key" ? (
         <label>
           <span>{postureLabel(props.kind, "api-key")}</span>
           <OctantInput
@@ -123,6 +173,18 @@ export function AcpAgentConfigurationForm(props: {
     saved !== undefined && offered.includes(saved) ? saved : offered[0],
   );
   const binaryLabel = `${profile.executable} binary path`;
+  // A profile whose personal sign-in carries limits says so beside the
+  // choice itself, whichever sign-in is chosen.
+  const personalSignInNote =
+    profile.personalSignIn === undefined ? undefined : profile.authenticationNote;
+  const authenticationDescription = [
+    personalSignInNote,
+    authentication === "provider-owned" || authentication === "subscription"
+      ? profile.signInGuidance
+      : undefined,
+  ]
+    .filter((sentence) => sentence !== undefined)
+    .join(" ");
   return (
     <form
       className={`provider-card__edit provider-card__edit--${kind}`}
@@ -130,12 +192,16 @@ export function AcpAgentConfigurationForm(props: {
       onSubmit={(event) => {
         event.preventDefault();
         const enteredCredential = transientCredential(credentialInput.current);
+        const data = new FormData(event.currentTarget);
         void props.onChange(
           props.instance.id,
           {
             kind: props.instance.configuration.kind,
-            binaryPath: String(new FormData(event.currentTarget).get("binaryPath") ?? ""),
+            binaryPath: String(data.get("binaryPath") ?? ""),
             ...(authentication === undefined ? {} : { authentication }),
+            ...(authentication === "agent-platform"
+              ? { googleCloud: googleCloudFromForm(data) }
+              : {}),
           },
           authentication === "api-key"
             ? enteredCredential
@@ -160,7 +226,7 @@ export function AcpAgentConfigurationForm(props: {
       </SettingRow>
       {offered.length > 1 && authentication !== undefined ? (
         <SettingRow
-          {...(authentication === "api-key" ? {} : { description: profile.signInGuidance })}
+          {...(authenticationDescription === "" ? {} : { description: authenticationDescription })}
           htmlFor={`provider-${props.instance.id}-authentication-control`}
           label="Authentication"
           scope="host"
@@ -186,9 +252,47 @@ export function AcpAgentConfigurationForm(props: {
           />
         </SettingRow>
       ) : null}
+      {authentication === "agent-platform" ? (
+        <>
+          <SettingRow
+            description={AGENT_PLATFORM_GUIDANCE}
+            htmlFor={`provider-${props.instance.id}-google-cloud-project-control`}
+            label="Google Cloud project"
+            scope="host"
+            settingId={`provider-${props.instance.id}-google-cloud-project`}
+          >
+            <OctantInput
+              aria-label={`Google Cloud project for ${props.instance.displayName}`}
+              className="settings-view__text-input"
+              defaultValue={props.instance.configuration.googleCloud?.project ?? ""}
+              id={`provider-${props.instance.id}-google-cloud-project-control`}
+              name="googleCloudProject"
+              required
+              spellCheck={false}
+            />
+          </SettingRow>
+          <SettingRow
+            htmlFor={`provider-${props.instance.id}-google-cloud-location-control`}
+            label="Google Cloud location"
+            scope="host"
+            settingId={`provider-${props.instance.id}-google-cloud-location`}
+          >
+            <OctantInput
+              aria-label={`Google Cloud location for ${props.instance.displayName}`}
+              className="settings-view__text-input"
+              defaultValue={props.instance.configuration.googleCloud?.location ?? ""}
+              id={`provider-${props.instance.id}-google-cloud-location-control`}
+              name="googleCloudLocation"
+              placeholder="us-central1"
+              required
+              spellCheck={false}
+            />
+          </SettingRow>
+        </>
+      ) : null}
       {authentication === "api-key" ? (
         <SettingRow
-          {...(profile.authenticationNote === undefined
+          {...(profile.authenticationNote === undefined || personalSignInNote !== undefined
             ? {}
             : { description: profile.authenticationNote })}
           htmlFor={`provider-${props.instance.id}-api-key-control`}

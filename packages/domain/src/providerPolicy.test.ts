@@ -1733,6 +1733,59 @@ describe("provider instance policy", () => {
     ).toThrow("Kilo takes no authentication setting.");
   });
 
+  it("keeps an Antigravity instance's sign-in, and the Cloud project only with Agent Platform", () => {
+    const create = (configuration: Record<string, unknown>) =>
+      acpPolicy.createAcpAgentProvider({
+        id: ids.local,
+        displayName: "Antigravity",
+        configuration: {
+          kind: "antigravity-acp",
+          binaryPath: "/opt/homebrew/bin/agy",
+          ...configuration,
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      });
+
+    // A client that names no sign-in keeps the personal Google sign-in.
+    expect(create({}).configuration).toEqual({
+      kind: "antigravity-acp",
+      binaryPath: "/opt/homebrew/bin/agy",
+    });
+    expect(create({ authentication: "api-key" }).configuration).toEqual({
+      kind: "antigravity-acp",
+      binaryPath: "/opt/homebrew/bin/agy",
+      authentication: "api-key",
+    });
+    const agentPlatform = create({
+      authentication: "agent-platform",
+      googleCloud: { project: "octant-example-1", location: "us-central1" },
+    });
+    expect(agentPlatform.configuration).toEqual({
+      kind: "antigravity-acp",
+      binaryPath: "/opt/homebrew/bin/agy",
+      authentication: "agent-platform",
+      googleCloud: { project: "octant-example-1", location: "us-central1" },
+    });
+    expect(
+      changeAcpAgentConfiguration(
+        agentPlatform,
+        { kind: "antigravity-acp", binaryPath: "/opt/homebrew/bin/agy", authentication: "api-key" },
+        updatedAt,
+      ).configuration,
+    ).not.toHaveProperty("googleCloud");
+    expect(() => create({ authentication: "agent-platform" })).toThrow(
+      "Agent Platform needs a Google Cloud project and location.",
+    );
+    expect(() =>
+      create({
+        authentication: "api-key",
+        googleCloud: { project: "octant-example-1", location: "us-central1" },
+      }),
+    ).toThrow("Only Agent Platform takes a Google Cloud project.");
+  });
+
   it("assigns a Claude-owned account directory under the home folder", () => {
     expect(assignedClaudeAccountConfigDirectory("/Users/example/", ids.local)).toBe(
       `/Users/example/.claude-accounts/${ids.local}`,

@@ -1306,6 +1306,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             environment: {},
           };
         },
+        readProviderInstance: (id) => persistence.readProviderInstance(id),
         resolveProviderDriver: (thread) => {
           const instance = persistence.readProviderInstance(thread.providerInstanceId);
           if (instance === undefined || !instance.enabled) return undefined;

@@ -63,8 +63,12 @@ const ACP_ENDPOINTS: Readonly<Record<AcpProviderKind, ReadonlyArray<string>>> = 
   cline: ["cline.bot", ...MODEL_PROVIDERS],
   qwen: ["qwen.ai", "dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com"],
   fx: MODEL_PROVIDERS,
-  // The CLI's Google sign-in, its model service and its sign-in page.
+  // The CLI's Google sign-in, its model service and its sign-in page, and
+  // the Gemini API and Agent Platform services an instance signed in with a
+  // Gemini API key or a Google Cloud project calls instead.
   antigravity: [
+    "generativelanguage.googleapis.com",
+    "aiplatform.googleapis.com",
     "cloudcode-pa.googleapis.com",
     "daily-cloudcode-pa.googleapis.com",
     "oauth2.googleapis.com",

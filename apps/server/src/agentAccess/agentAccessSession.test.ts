@@ -53,7 +53,7 @@ const otherModelThread = "30000000-0000-4000-8000-000000000006";
 const workThread = "30000000-0000-4000-8000-000000000007";
 const antigravityThread = "30000000-0000-4000-8000-000000000008";
 const ANTIGRAVITY_OUTSIDE_AGENT_REFUSAL =
-  "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or use a provider that uses a Gemini API key.";
+  "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or switch this provider to a Gemini API key or Agent Platform in Settings.";
 
 function deps() {
   const recorded: Array<{ threadId: string; mode: string }> = [];

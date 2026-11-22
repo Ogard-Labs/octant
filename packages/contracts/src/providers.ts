@@ -381,25 +381,54 @@ const AbsoluteBinaryPath = Schema.NonEmptyTrimmedString.pipe(
   Schema.filter((path) => path.startsWith("/")),
 );
 /**
+ * The Google Cloud project and location an `agent-platform` instance signs in
+ * to, as Google documents them for `GOOGLE_CLOUD_PROJECT` and
+ * `GOOGLE_CLOUD_LOCATION`: a project id (or a domain-scoped `example.com:id`)
+ * and a region such as `us-central1` or `global`. Neither is a secret; the
+ * credentials are the host's own Application Default Credentials.
+ */
+export const AcpAgentGoogleCloud = Schema.Struct({
+  project: Schema.String.pipe(
+    Schema.minLength(1),
+    Schema.maxLength(128),
+    Schema.pattern(/^[a-z0-9][a-z0-9.:-]*$/u),
+  ),
+  location: Schema.String.pipe(
+    Schema.minLength(1),
+    Schema.maxLength(64),
+    Schema.pattern(/^[a-z0-9][a-z0-9-]*$/u),
+  ),
+}).annotations(strict);
+export type AcpAgentGoogleCloud = typeof AcpAgentGoogleCloud.Type;
+
+/**
  * One configuration shape for every ACP agent: its kind, the binary it runs,
  * and, for an agent whose profile lists postures, which one it signs in with.
  * The posture must be one its profile lists, and an agent whose profile lists
- * none carries no posture field.
+ * none carries no posture field; one that declares a personal sign-in may
+ * also carry none, which is that sign-in. `googleCloud` travels with the
+ * `agent-platform` posture and with nothing else.
  */
 export const AcpAgentConfiguration = Schema.Struct({
   kind: Schema.Literal(...ACP_AGENT_KINDS.map(acpAgentConfigurationKind)),
   binaryPath: AbsoluteBinaryPath,
   authentication: Schema.optional(AcpAgentAuthentication),
+  googleCloud: Schema.optional(AcpAgentGoogleCloud),
 })
   .annotations(strict)
   .pipe(
     Schema.filter((configuration) => {
-      const postures = acpAgentProfile(
-        acpAgentKindOfConfiguration(configuration.kind),
-      ).authentication;
-      return configuration.authentication === undefined
-        ? postures.length === 0
-        : postures.includes(configuration.authentication);
+      const profile = acpAgentProfile(acpAgentKindOfConfiguration(configuration.kind));
+      const postures = profile.authentication;
+      const posture =
+        configuration.authentication === undefined
+          ? postures.length === 0 || profile.personalSignIn !== undefined
+          : postures.includes(configuration.authentication);
+      return (
+        posture &&
+        (configuration.authentication === "agent-platform") ===
+          (configuration.googleCloud !== undefined)
+      );
     }),
   );
 export type AcpAgentConfiguration = typeof AcpAgentConfiguration.Type;

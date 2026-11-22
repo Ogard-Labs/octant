@@ -18,6 +18,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type {
+  AcpAgentGoogleCloud,
   ProviderExecutionPolicy,
   ProviderFailure,
   ProviderNativeSetup,
@@ -211,6 +212,8 @@ export interface AcpProcessStartInput {
   /** A non-mutating readiness check may contact the provider without a thread. */
   readonly purpose?: "probe" | "session";
   readonly apiKey?: string;
+  /** The Google Cloud project an `agent-platform` instance signs in to. */
+  readonly googleCloud?: AcpAgentGoogleCloud;
   /** Exact loopback ports owned by app-managed ACP tool bridges for this process. */
   readonly loopbackPorts?: ReadonlyArray<number>;
   /** The person's own setup this session carries, applied through the profile's `nativeSetup`. */
@@ -1370,6 +1373,7 @@ export function sanitizeAcpEnvironment(
     readonly executionPolicy?: ProviderExecutionPolicy;
     readonly mode?: AcpSessionMode;
     readonly apiKey?: string;
+    readonly googleCloud?: AcpAgentGoogleCloud;
     readonly nativeSetup?: ProviderNativeSetup;
     /** Absent is Strict: the profile's fixed passthrough list and every guard. */
     readonly strict?: boolean;
@@ -1432,6 +1436,7 @@ export function sanitizeAcpEnvironment(
       managedHome: input.managedHome,
       executionPolicy: input.executionPolicy ?? "approval-gated",
       ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
+      ...(input.googleCloud === undefined ? {} : { googleCloud: input.googleCloud }),
     }),
     ...guards,
   };
@@ -1691,6 +1696,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           executionPolicy: input.executionPolicy,
           mode: input.mode,
           ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
+          ...(input.googleCloud === undefined ? {} : { googleCloud: input.googleCloud }),
           ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
           ...(environmentStrict ? {} : { strict: false, ownChannels }),
         });

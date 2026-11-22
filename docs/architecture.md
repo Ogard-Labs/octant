@@ -4488,7 +4488,10 @@ Chat still take no app-managed tools.
   `provider-capability-mismatch` with the profile's own sentence, before any
   thread exists, and every other turn the host starts as itself on it is refused;
   the same declaration keeps it from helper runs and outside
-  agents ([Provider runtimes: Google Antigravity](design/provider-runtimes.md#google-antigravity)).
+  agents. The check reads the instance's configured sign-in, which is what
+  Octant passes at launch, never the agent's own report: an Antigravity
+  instance configured with a Gemini API key or Agent Platform carries none of
+  these limits ([Provider runtimes: Google Antigravity](design/provider-runtimes.md#google-antigravity)).
   A routine asks first by default: a Full access profile is not eligible,
   whether or not it was remembered elsewhere (the contract refuses it on the
   snapshot and dispatch blocks it as `full-access-ineligible`), Code runs are

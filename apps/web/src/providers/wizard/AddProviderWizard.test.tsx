@@ -111,4 +111,47 @@ describe("AddProviderWizard", () => {
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByText("Vercel AI Gateway API key is required.")).toBeVisible();
   });
+
+  it("adds Google Antigravity on Agent Platform only once its project and location are named", async () => {
+    const user = userEvent.setup();
+    const onCreateAcpAgent = vi.fn(async () => true);
+    wizard({
+      onCreateAcpAgent,
+      providerTypes: ["antigravity"],
+      discoverySnapshot: {
+        hostId: "local",
+        candidates: [{ driverKind: "antigravity", binaryPath: "/opt/homebrew/bin/agy" }],
+        scannedAt: "2026-11-22T00:00:00.000Z",
+        scanDurationMs: 1,
+        status: "completed",
+      },
+    } as unknown as Partial<AddProviderWizardProps>);
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByRole("radio", { name: /Personal Google sign-in/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await user.click(screen.getByRole("radio", { name: /Agent Platform/ }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Enter the Google Cloud project and location.")).toBeVisible();
+
+    await user.type(screen.getByLabelText("Google Cloud project"), "octant-example-1");
+    await user.type(screen.getByLabelText("Google Cloud location"), "us-central1");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: /^Add / }));
+
+    expect(onCreateAcpAgent).toHaveBeenCalledTimes(1);
+    const [, configuration, credential] = onCreateAcpAgent.mock.calls[0] as unknown as [
+      string,
+      Record<string, unknown>,
+      { readonly value: string },
+    ];
+    expect(configuration).toEqual({
+      kind: "antigravity-acp",
+      binaryPath: "/opt/homebrew/bin/agy",
+      authentication: "agent-platform",
+      googleCloud: { project: "octant-example-1", location: "us-central1" },
+    });
+    expect(credential.value).toBe("");
+  });
 });

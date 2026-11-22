@@ -1401,6 +1401,7 @@ const apiKeyVariables: Partial<Record<AcpProviderProfile["kind"], string>> = {
   cline: "CLINE_API_KEY",
   qwen: "OPENAI_API_KEY",
   "mistral-vibe": "MISTRAL_API_KEY",
+  antigravity: "GEMINI_API_KEY",
 };
 
 function directoryHostAuthentication(profile: AcpProviderProfile) {

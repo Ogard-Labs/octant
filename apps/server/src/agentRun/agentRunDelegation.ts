@@ -239,9 +239,11 @@ function targetHelperRunRefusal(
         candidate.providerInstanceId === providerInstanceId &&
         candidate.reason === "helper-runs-refused",
     );
+  // The target list already judged the instance by its sign-in; this names
+  // the sentence its kind declares for that refusal.
   return target === undefined
     ? undefined
-    : personalSignInRefusals(target.driverKind)?.refusesHelperRuns;
+    : personalSignInRefusals({ driverKind: target.driverKind })?.refusesHelperRuns;
 }
 
 export function agentRunDelegationCapabilities(options: AgentRunDelegationOptions) {
@@ -620,7 +622,7 @@ export function agentRunTargetAvailability(input: AgentRunTargetAvailabilityInpu
     };
     // A provider whose own personal sign-in does not cover helper runs is
     // never a target, however ready it is.
-    if (personalSignInRefusals(instance.driverKind)?.refusesHelperRuns !== undefined) {
+    if (personalSignInRefusals(instance)?.refusesHelperRuns !== undefined) {
       unavailable.push({ ...named, reason: "helper-runs-refused" });
       continue;
     }

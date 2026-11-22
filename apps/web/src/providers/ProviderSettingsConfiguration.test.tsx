@@ -6,6 +6,7 @@ import {
   type ProviderInstance,
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import {
   AcpAgentConfigurationForm,
   HttpConfigurationForm,
@@ -216,6 +217,112 @@ describe("AcpAgentConfigurationForm", () => {
         authentication: "api-key",
       },
       expect.anything(),
+    );
+  });
+
+  function antigravityInstance(
+    configuration: Partial<AcpAgentProviderInstance["configuration"]> = {},
+  ): AcpAgentProviderInstance {
+    return {
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-0000000000a9"),
+      displayName: "Antigravity",
+      driverKind: "antigravity",
+      configuration: {
+        kind: "antigravity-acp",
+        binaryPath: "/opt/homebrew/bin/agy",
+        ...configuration,
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1 as never,
+      createdAt: "2026-07-14T10:00:00.000Z" as never,
+      updatedAt: "2026-07-14T10:00:00.000Z" as never,
+    };
+  }
+
+  it("opens an Antigravity instance saved without a sign-in on the personal Google sign-in", () => {
+    render(
+      <AcpAgentConfigurationForm
+        credentialManagementAvailable
+        disabled={false}
+        instance={antigravityInstance()}
+        onChange={vi.fn(async () => true)}
+      />,
+    );
+    expect(
+      screen.getByLabelText("Google Antigravity authentication for Antigravity"),
+    ).toHaveTextContent("Personal Google sign-in");
+    expect(screen.queryByLabelText(/Gemini API key/)).toBeNull();
+    expect(screen.queryByLabelText(/Google Cloud project/)).toBeNull();
+  });
+
+  it("switches Antigravity to a Gemini API key with a write-only key", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn(async () => true);
+    const instance = antigravityInstance();
+    render(
+      <AcpAgentConfigurationForm
+        credentialManagementAvailable
+        disabled={false}
+        instance={instance}
+        onChange={onChange}
+      />,
+    );
+
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Google Antigravity authentication for Antigravity"),
+      "Gemini API key",
+    );
+    await user.type(screen.getByLabelText("Gemini API key for Antigravity"), "gemini-key");
+    await user.click(
+      screen.getByRole("button", { name: "Save Google Antigravity settings for Antigravity" }),
+    );
+
+    expect(onChange).toHaveBeenCalledWith(
+      instance.id,
+      { kind: "antigravity-acp", binaryPath: "/opt/homebrew/bin/agy", authentication: "api-key" },
+      expect.objectContaining({ value: "gemini-key" }),
+    );
+  });
+
+  it("switches Antigravity to Agent Platform with its Google Cloud project and location", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn(async () => true);
+    const instance = antigravityInstance({ authentication: "provider-owned" });
+    render(
+      <AcpAgentConfigurationForm
+        credentialManagementAvailable
+        disabled={false}
+        instance={instance}
+        onChange={onChange}
+      />,
+    );
+
+    await chooseSelectFieldOption(
+      user,
+      screen.getByLabelText("Google Antigravity authentication for Antigravity"),
+      "Agent Platform (Google Cloud project)",
+    );
+    expect(screen.queryByLabelText(/Gemini API key/)).toBeNull();
+    await user.type(
+      screen.getByLabelText("Google Cloud project for Antigravity"),
+      "octant-example-1",
+    );
+    await user.type(screen.getByLabelText("Google Cloud location for Antigravity"), "us-central1");
+    await user.click(
+      screen.getByRole("button", { name: "Save Google Antigravity settings for Antigravity" }),
+    );
+
+    expect(onChange).toHaveBeenCalledWith(
+      instance.id,
+      {
+        kind: "antigravity-acp",
+        binaryPath: "/opt/homebrew/bin/agy",
+        authentication: "agent-platform",
+        googleCloud: { project: "octant-example-1", location: "us-central1" },
+      },
+      expect.objectContaining({ value: "" }),
     );
   });
 

@@ -19,6 +19,10 @@ import {
   decodeProviderFailure,
   decodeProviderModelId,
   decodeProviderProbeResult,
+  acpAgentProfile,
+  isAcpAgentKind,
+  type AcpAgentAuthentication,
+  type AcpAgentGoogleCloud,
   type ProviderExecutionPolicy,
   type ProviderCapabilitySupport,
   type ProviderFailure,
@@ -117,6 +121,7 @@ import {
 /** The subset of the ACP client the driver depends on (fakeable in tests). */
 export interface AcpClientPort {
   readonly authenticate: () => Promise<void>;
+  readonly authenticateWith: (methodId: string) => Promise<Readonly<Record<string, unknown>>>;
   readonly startBrowserAuthentication: () => Promise<AcpBrowserAuthenticationAttempt>;
   readonly completeBrowserAuthentication: (attemptId: string) => Promise<void>;
   readonly newSession: (
@@ -167,8 +172,10 @@ export interface AcpDriverOptions {
   readonly managedHome: string;
   readonly process: AcpProcessPort;
   readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
-  /** Instance authentication mode for profiles with delegated browser sign-in. */
-  readonly authentication?: "provider-owned" | "subscription" | "api-key";
+  /** The sign-in the instance is configured with. */
+  readonly authentication?: AcpAgentAuthentication;
+  /** The Google Cloud project an `agent-platform` instance signs in to. */
+  readonly googleCloud?: AcpAgentGoogleCloud;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly clientFactory?: (connection: AcpAgentConnection) => AcpClientPort;
   readonly managedToolsBridgeFactory?: typeof createAcpManagedToolsBridge;
@@ -820,6 +827,55 @@ function resolveApiKey(
   });
 }
 
+/** What Settings calls a posture, for a refusal that names it. */
+function signInLabel(profile: AcpProviderProfile, posture: AcpAgentAuthentication): string {
+  const descriptor = isAcpAgentKind(profile.kind) ? acpAgentProfile(profile.kind) : undefined;
+  if (posture === "api-key") return descriptor?.apiKeyLabel ?? "API key";
+  return descriptor?.postureLabels?.[posture] ?? posture;
+}
+
+/**
+ * Chooses the sign-in Octant passed the agent, on a freshly initialized
+ * process, before any session opens. The agent's own cached login could
+ * otherwise win over the credential in its environment, and Octant decides
+ * what a run may do by the sign-in it configured, so the method must be one
+ * the agent listed and the agent must accept it.
+ */
+function selectSignIn(
+  options: AcpDriverOptions,
+  client: AcpClientPort,
+  connection: AcpConnection,
+): Effect.Effect<void, ProviderFailure> {
+  const { profile, authentication } = options;
+  const method = authentication === undefined ? undefined : profile.signInMethods?.[authentication];
+  if (authentication === undefined || method === undefined) return Effect.void;
+  const name = profile.displayName;
+  const label = signInLabel(profile, authentication);
+  if (connection.initialized.authMethods?.some((offered) => offered.id === method) !== true) {
+    return Effect.fail(
+      failure(
+        "unauthenticated",
+        `${name} did not offer ${label} sign-in. Update ${name}, or choose another sign-in in Settings.`,
+        { reason: "authentication-required" },
+      ),
+    );
+  }
+  return Effect.tryPromise({
+    try: () => client.authenticateWith(method),
+    catch: (error) =>
+      error instanceof AcpFailure && error.kind === "remote"
+        ? failure(
+            "unauthenticated",
+            `${name} refused its ${label} sign-in. Check it in Settings, then retry.`,
+            { reason: "authentication-required" },
+          )
+        : providerFailure(profile, error, {
+            stage: "authentication",
+            detectedVersion: connection.version,
+          }),
+  }).pipe(Effect.asVoid);
+}
+
 function hasVerifiedFileReview(profile: AcpProviderProfile): boolean {
   return profile.kind === "mistral-vibe" && profile.fileReviewVersions?.includes("3.0.3") === true;
 }
@@ -857,6 +913,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
       executionPolicy: "approval-gated",
       purpose: "probe",
       ...(apiKey === undefined ? {} : { apiKey }),
+      ...(options.googleCloud === undefined ? {} : { googleCloud: options.googleCloud }),
       onProcessStarted: async (process) => {
         receipt = await options.runtimeRegistry.trackProcess(options.instanceId, process);
         return receipt;
@@ -865,7 +922,9 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
     if (receipt === undefined) {
       yield* trackProviderProcess(options.runtimeRegistry, options.instanceId, connection);
     }
-    return { connection, client: factories.clientFactory(connection) };
+    const client = factories.clientFactory(connection);
+    yield* selectSignIn(options, client, connection);
+    return { connection, client };
   });
 
   const validateAuthenticationInput = (instanceId: ProviderInstanceId) => {
@@ -1702,6 +1761,7 @@ function makeConnection(
               ...(strict ? {} : { strict: false }),
               ...(strict || ownChannels === undefined ? {} : { ownChannels }),
               ...(apiKey === undefined ? {} : { apiKey }),
+              ...(options.googleCloud === undefined ? {} : { googleCloud: options.googleCloud }),
               ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
               ...(nativeSetup === undefined ? {} : { nativeSetup }),
               clientCapabilities,
@@ -1722,11 +1782,17 @@ function makeConnection(
         if (receipt === undefined) {
           await options.runtimeRegistry.trackProcess(options.instanceId, processConnection);
         }
-        return {
-          scope,
-          client: factories.clientFactory(processConnection),
-          connection: processConnection,
-        };
+        const client = factories.clientFactory(processConnection);
+        const signedInExit = await Effect.runPromiseExit(
+          selectSignIn(options, client, processConnection),
+          runOptions,
+        );
+        if (Exit.isFailure(signedInExit)) {
+          throw Option.getOrElse(Cause.failureOption(signedInExit.cause), () =>
+            failure("provider-failed", `${name} sign-in failed without a typed failure.`),
+          );
+        }
+        return { scope, client, connection: processConnection };
       } catch (error) {
         await Effect.runPromise(Scope.close(scope, Exit.void));
         throw error;

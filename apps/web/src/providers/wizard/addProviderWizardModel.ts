@@ -150,12 +150,19 @@ export function wizardSignInChoices(
             detail: `Octant keeps the key in ${credentialStore} and never shows it again.`,
             needsKey: true,
           }
-        : {
-            id: posture,
-            label: "Provider CLI login",
-            detail: `You sign in with ${profile.name}'s own CLI. ${profile.signInGuidance}`,
-            needsKey: false,
-          },
+        : posture === "agent-platform"
+          ? {
+              id: posture,
+              label: profile.postureLabels?.[posture] ?? "Agent Platform",
+              detail: `${profile.name} signs in to the Google Cloud project you name with this computer's Application Default Credentials.`,
+              needsKey: false,
+            }
+          : {
+              id: posture,
+              label: profile.postureLabels?.[posture] ?? "Provider CLI login",
+              detail: `You sign in with ${profile.name}'s own CLI. ${profile.signInGuidance}`,
+              needsKey: false,
+            },
     );
     if (choices.length > 0) return choices;
     return [

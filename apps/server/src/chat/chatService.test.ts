@@ -190,7 +190,7 @@ import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 const directories: Array<string> = [];
 const now = "2026-07-19T22:10:00.000Z";
 const ANTIGRAVITY_UNATTENDED_REFUSAL =
-  "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Choose a provider that uses a Gemini API key, such as Gemini CLI with an API key.";
+  "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Switch this provider to a Gemini API key or Agent Platform in Settings, or choose another provider.";
 /**
  * Answers each question a parked turn still asks, as its person would, and
  * waits until the turn has completed, so a test leaves no turn running.
@@ -1519,7 +1519,7 @@ describe("ChatService", () => {
       failure: {
         category: "unauthorized",
         message:
-          "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or use a provider that uses a Gemini API key.",
+          "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or switch this provider to a Gemini API key or Agent Platform in Settings.",
       },
     });
     expect(service.read(created.thread.id).turns).toHaveLength(0);
@@ -7863,7 +7863,7 @@ describe("ChatService", () => {
       failure: {
         category: "unauthorized",
         message:
-          "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or use a provider that uses a Gemini API key.",
+          "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or switch this provider to a Gemini API key or Agent Platform in Settings.",
       },
     });
     expect(answered).toEqual([]);
