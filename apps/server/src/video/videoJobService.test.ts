@@ -81,6 +81,8 @@ interface Script {
   credential?: () => Promise<string>;
   forget?: () => Promise<"removed" | "failed">;
   model?: VideoModelCapabilities;
+  /** Rejects models() once, or for good, as a failed discovery read can. */
+  modelsFail?: "once" | "always";
 }
 
 function fakeDriver(script: Script) {
@@ -91,40 +93,49 @@ function fakeDriver(script: Script) {
   const driver: VideoGenerationDriver = {
     driverKind: "gemini-video",
     providerHosts: ["video.example.test"],
-    create: ({ ports }) => ({
-      models: async () => [model],
-      start: async (request) => {
-        calls.start += 1;
-        return (
-          (await script.start?.(ports, request)) ?? { status: "started", remoteId: "remote-1" }
-        );
-      },
-      poll: async (_remoteId, signal) => {
-        calls.poll += 1;
-        if (script.poll !== undefined) return script.poll(signal);
-        return (
-          script.polls?.shift() ?? {
-            status: "completed",
-            video: { bytes: CONFORMANCE_MP4_BYTES, mediaType: "video/mp4" },
-            usage: { outputTokens: 28_960 },
+    create: ({ ports }) => {
+      let modelsFailOnce = script.modelsFail === "once";
+      return {
+        models: async () => {
+          if (modelsFailOnce || script.modelsFail === "always") {
+            modelsFailOnce = false;
+            throw { category: "unavailable", message: "Discovery failed." };
           }
-        );
-      },
-      cancel: async (_remoteId, signal) => {
-        calls.cancel += 1;
-        return (await script.cancel?.(signal)) ?? { status: "cancelled" };
-      },
-      forget: async () => {
-        calls.forget += 1;
-        const outcome = (await script.forget?.()) ?? "removed";
-        return outcome === "removed"
-          ? { status: "removed" }
-          : {
-              status: "failed",
-              providerFailure: { category: "unavailable", message: "Try later." },
-            };
-      },
-    }),
+          return [model];
+        },
+        start: async (request) => {
+          calls.start += 1;
+          return (
+            (await script.start?.(ports, request)) ?? { status: "started", remoteId: "remote-1" }
+          );
+        },
+        poll: async (_remoteId, signal) => {
+          calls.poll += 1;
+          if (script.poll !== undefined) return script.poll(signal);
+          return (
+            script.polls?.shift() ?? {
+              status: "completed",
+              video: { bytes: CONFORMANCE_MP4_BYTES, mediaType: "video/mp4" },
+              usage: { outputTokens: 28_960 },
+            }
+          );
+        },
+        cancel: async (_remoteId, signal) => {
+          calls.cancel += 1;
+          return (await script.cancel?.(signal)) ?? { status: "cancelled" };
+        },
+        forget: async () => {
+          calls.forget += 1;
+          const outcome = (await script.forget?.()) ?? "removed";
+          return outcome === "removed"
+            ? { status: "removed" }
+            : {
+                status: "failed",
+                providerFailure: { category: "unavailable", message: "Try later." },
+              };
+        },
+      };
+    },
   };
   return { driver, calls };
 }
@@ -527,5 +538,22 @@ describe("video jobs", () => {
     const done = await second.service.whenTerminal(queued.id);
     expect(done?.status).toBe("completed");
     await vi.waitFor(() => expect(second.service.getById(queued.id)?.providerCopy).toBe("removed"));
+  });
+
+  it("ends a sent job as interrupted when discovery cannot describe it after a restart", async () => {
+    const first = harness({
+      polls: Array.from({ length: 50 }, () => ({ status: "running" as const })),
+    });
+    const queued = await enqueue(first.service);
+    await vi.waitFor(() => expect(first.service.getById(queued.id)?.remoteId).toBe("remote-1"));
+    first.service.close();
+
+    const second = harness({ modelsFail: "always" }, first.root);
+    await second.service.recover();
+    const done = await second.service.whenTerminal(queued.id);
+    expect(done).toMatchObject({
+      status: "failed",
+      settledCostUsdMicros: 695_040,
+    });
   });
 });

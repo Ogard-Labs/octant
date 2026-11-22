@@ -226,10 +226,27 @@ export class VideoJobService {
     for (const candidate of this.#candidateInstances()) {
       const adapter = this.#adapterFor(candidate);
       if (adapter === undefined) continue;
-      const models = await adapter.models();
-      if (models.length > 0) ready.push({ instance: candidate, models });
+      const models = await this.#modelsOf(adapter);
+      if (models !== undefined && models.length > 0) {
+        ready.push({ instance: candidate, models });
+      }
     }
     return ready;
+  }
+
+  /**
+   * The models a driver declares, or nothing when its discovery failed: a
+   * driver may legitimately reject `models`, and a profile that cannot say
+   * what it offers is not ready — never a reason to crash the caller.
+   */
+  async #modelsOf(
+    adapter: VideoGenerationAdapter,
+  ): Promise<ReadonlyArray<VideoModelCapabilities> | undefined> {
+    try {
+      return await adapter.models();
+    } catch {
+      return undefined;
+    }
   }
 
   #candidateInstances(): ReadonlyArray<ProviderInstance> {
@@ -265,9 +282,11 @@ export class VideoJobService {
     if (adapter === undefined) {
       return { status: "refused", reason: "That video provider's plugin is turned off." };
     }
-    const model = (await adapter.models()).find(
-      (candidate) => String(candidate.modelId) === String(input.modelId),
-    );
+    const models = await this.#modelsOf(adapter);
+    if (models === undefined) {
+      return { status: "refused", reason: "That video provider cannot be reached." };
+    }
+    const model = models.find((candidate) => String(candidate.modelId) === String(input.modelId));
     if (model === undefined) {
       return { status: "refused", reason: "That video profile does not offer this model." };
     }
@@ -576,7 +595,7 @@ export class VideoJobService {
       this.#finish(sending, "failed", { failure: started.providerFailure });
       return;
     }
-    const model = (await adapter.models()).find(
+    const model = (await this.#modelsOf(adapter))?.find(
       (candidate) => String(candidate.modelId) === String(job.modelId),
     );
     const recorded = this.#recordRemote(sending, started.remoteId, model);
@@ -589,7 +608,7 @@ export class VideoJobService {
     const model =
       adapter === undefined
         ? undefined
-        : (await adapter.models()).find(
+        : (await this.#modelsOf(adapter))?.find(
             (candidate) => String(candidate.modelId) === String(job.modelId),
           );
     const startedAt = Date.parse(job.startedAt ?? job.createdAt);
