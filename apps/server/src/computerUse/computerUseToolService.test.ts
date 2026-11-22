@@ -13,6 +13,7 @@ import {
   type ProjectId,
 } from "@octant/contracts";
 import { computerUseAppRemembered, defaultShellSettings } from "@octant/domain";
+import { threadStandingAnswerCovers } from "@octant/domain/untrusted-content-policy";
 import {
   decodeComputerUseOwner,
   decodeComputerControlResult,
@@ -1421,17 +1422,28 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
       ),
     );
     const transfers: Array<string> = [];
+    // Each thread's journaled answers, kept and read as the lease service does.
+    const threadAnswers = new Map<
+      string,
+      Array<{ readonly subject: string; readonly threadMarked: boolean }>
+    >();
     const sendFile = vi.fn(
       async (
-        _owner: ComputerUseOwner,
+        target: ComputerUseOwner,
         path: string,
         confirm: (request: DesktopTransferConfirmation) => Promise<"approved" | "declined">,
-        _externalContentIngested: boolean,
+        threadMarked: boolean,
         answeredForProject?: boolean,
       ): Promise<ComputerControlResult> => {
         transfers.push(path);
-        // The lease service asks nobody once the Project's answer covers it.
-        if (answeredForProject === true) return sent;
+        const answers = threadAnswers.get(String(target.threadId)) ?? [];
+        // The lease service asks nobody once the Project's or the thread's
+        // answer covers it.
+        if (
+          answeredForProject === true ||
+          threadStandingAnswerCovers(answers, "desktop-file-transfer", threadMarked)
+        )
+          return sent;
         const answer = await confirm({
           owner: { mode: "code", threadId: onDesktop.threadId },
           leaseId,
@@ -1444,9 +1456,13 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
           asks: "in-thread",
           artifact: { path, name: "notes-app", size: 9, sha256: "a".repeat(64) },
         });
-        return answer === "approved"
-          ? sent
-          : { kind: "refused", reason: "declined", message: "Declined." };
+        if (answer !== "approved")
+          return { kind: "refused", reason: "declined", message: "Declined." };
+        threadAnswers.set(String(target.threadId), [
+          ...answers,
+          { subject: "desktop-file-transfer", threadMarked },
+        ]);
+        return sent;
       },
     );
     const extend = vi.fn(
@@ -1813,6 +1829,25 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
     }
   });
 
+  it("withdraws a thread's sent-file answer once it reads outside content only under Strict", async () => {
+    const send = call({ operation: "send-file", path: "dist/notes-app" });
+    for (const strict of [true, false]) {
+      const f = desktop({ strict });
+      try {
+        await expect(f.tools().execute(send)).resolves.toEqual({ result: sent, isError: false });
+        await f.tools().execute(send);
+        expect(f.asked).toHaveLength(1);
+        f.taint();
+        await expect(f.tools().execute(send)).resolves.toEqual({ result: sent, isError: false });
+        // Under Strict the person is asked again with the mark in front of
+        // them; outside Strict the mark adds no ask.
+        expect(f.asked).toHaveLength(strict ? 2 : 1);
+      } finally {
+        await f.service.close();
+      }
+    }
+  });
+
   it("outside Strict, offers and honors a Project's sent-file answer on a thread that has read outside content", async () => {
     const sibling = decodeComputerUseOwner({
       ...onDesktop,
@@ -1829,6 +1864,7 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
         isError: false,
       });
       expect(f.asked).toHaveLength(1);
+      expect(f.sendFile.mock.calls[1]?.[3]).toBe(false);
       expect(f.sendFile.mock.calls[1]?.[4]).toBe(true);
     } finally {
       await f.service.close();
