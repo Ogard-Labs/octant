@@ -16,17 +16,6 @@ export const AcpAgentAuthentication = Schema.Literal(
 export type AcpAgentAuthentication = typeof AcpAgentAuthentication.Type;
 
 /**
- * The postures in which Octant itself passes the agent its credential (a key
- * from the host broker, or the Cloud project to use), so Octant knows which
- * sign-in a run uses without taking the agent's word for it. Every other
- * posture is the agent's own login.
- */
-const OCTANT_PASSED_POSTURES: ReadonlySet<AcpAgentAuthentication> = new Set([
-  "api-key",
-  "agent-platform",
-]);
-
-/**
  * What an agent's own personal sign-in does not cover, as its vendor draws
  * that line. Each field is the sentence a refused run shows, so the server
  * refuses by what the profile declares, never by the profile's id.
@@ -321,11 +310,10 @@ export function personalSignInRefusals(
     configuration !== undefined && "authentication" in configuration
       ? configuration.authentication
       : undefined;
-  return AcpAgentAuthentication.literals.some(
-    (literal) => literal === posture && OCTANT_PASSED_POSTURES.has(literal),
-  )
-    ? undefined
-    : refusals;
+  // Octant passes these credentials itself (a broker key, or the Cloud
+  // project to use), so it knows which sign-in a run uses without taking the
+  // agent's word for it; every other posture is the agent's own login.
+  return posture === "api-key" || posture === "agent-platform" ? undefined : refusals;
 }
 
 /** Every ACP agent configuration names its kind as `<driver kind>-acp`. */

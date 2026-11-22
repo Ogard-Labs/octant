@@ -466,9 +466,8 @@ describe("sign-in recovery advice", () => {
     expect(
       providerRefusalCopy("authentication-required", antigravity({ authentication: "api-key" })),
     ).toEqual({
-      reason: "Google Antigravity did not accept its Gemini API key.",
-      nextStep:
-        "Check the Gemini API key in this provider's settings, then check the connection again.",
+      reason: "Google Antigravity authentication is required.",
+      nextStep: "Check the API key, then check the connection again.",
     });
   });
 
@@ -482,9 +481,8 @@ describe("sign-in recovery advice", () => {
         }),
       ),
     ).toEqual({
-      reason: "Google Antigravity could not sign in to Agent Platform.",
-      nextStep:
-        "Check the Google Cloud project and location in this provider's settings, run gcloud auth application-default login on this computer, then check the connection again.",
+      reason: "Google Antigravity authentication is required.",
+      nextStep: "Check the project and location and run gcloud auth application-default login.",
     });
   });
 

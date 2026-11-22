@@ -252,30 +252,19 @@ export function providerRefusalCopy(
       nextStep: `Review the installed and supported ${label} versions, then check the connection again.`,
     };
   }
-  if (reason === "authentication-required" && isAcpAgentKind(instance.driverKind)) {
-    // A key or Cloud project Octant passes is refused by the agent itself; a
-    // CLI login would not help, so the advice points at what Octant passed.
-    const configuration: object = instance.configuration;
-    const signIn = "authentication" in configuration ? configuration.authentication : undefined;
-    if (signIn === "api-key") {
-      const key = acpAgentProfile(instance.driverKind).apiKeyLabel ?? "API key";
-      return {
-        reason: `${label} did not accept its ${key}.`,
-        nextStep: `Check the ${key} in this provider's settings, then check the connection again.`,
-      };
-    }
-    if (signIn === "agent-platform") {
-      return {
-        reason: `${label} could not sign in to Agent Platform.`,
-        nextStep:
-          "Check the Google Cloud project and location in this provider's settings, run gcloud auth application-default login on this computer, then check the connection again.",
-      };
-    }
-  }
   if (reason === "authentication-required") {
+    // A key or Cloud project Octant passes is refused by the agent itself, so
+    // a CLI login would not help: the advice names what Octant passed.
+    const signIn =
+      "authentication" in instance.configuration ? instance.configuration.authentication : "";
     return {
       reason: `${label} authentication is required.`,
-      nextStep: `Sign in to ${label} with its provider-owned login, then check the connection again.`,
+      nextStep:
+        signIn === "api-key"
+          ? "Check the API key, then check the connection again."
+          : signIn === "agent-platform"
+            ? "Check the project and location and run gcloud auth application-default login."
+            : `Sign in to ${label} with its provider-owned login, then check the connection again.`,
     };
   }
   if (reason === "driver-not-admitted" && instance.driverKind !== "outside-harness-endpoint") {

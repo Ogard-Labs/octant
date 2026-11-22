@@ -991,7 +991,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Provider sign-in method",
           scope: "host",
           keywords:
-            "provider authentication sign in login subscription oauth organization single sign-on access portal account role region google cloud project location agent platform application default credentials",
+            "provider authentication sign in login subscription oauth organization single sign-on access portal account role region",
         },
         {
           id: settingId("provider-api-key"),
