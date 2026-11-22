@@ -690,8 +690,11 @@ export function createComputerUseToolService(options: {
               ? ` This sends the file off this machine to ${provider.displayName}.`
               : " Approving also covers this thread's later files into that desktop.";
           const summary = `Send ${artifact.path.slice(0, 512)} (${artifact.size} bytes, SHA-256 ${artifact.sha256}) into ${DESKTOP_LABEL} on ${provider.displayName.slice(0, 128)} for "${options.threadTitle(owner).slice(0, 100)}"?${covers}`;
+          // A Project's answer covers only desktops on this machine, so a
+          // cloud desktop's ask never offers one it could not keep.
           const offersProject =
             request.asks === "in-thread" &&
+            provider.locality === "host-local" &&
             projectAtStart !== undefined &&
             options.rememberProjectFileTransfer !== undefined;
           const answer = await ask(

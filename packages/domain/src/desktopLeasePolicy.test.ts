@@ -337,6 +337,7 @@ describe("desktop lease policy", () => {
         initiator: "local-user",
         confirmBilledDesktops: true,
         answeredForThread: false,
+        answeredForProject: false,
       }),
     ).toEqual({ kind: "refused", reason: "plan-mode" });
     for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
@@ -347,6 +348,7 @@ describe("desktop lease policy", () => {
           initiator: "agent",
           confirmBilledDesktops: true,
           answeredForThread: false,
+          answeredForProject: false,
         }),
       ).toEqual({ kind: "ask", asks: "in-thread" });
     }
@@ -357,6 +359,7 @@ describe("desktop lease policy", () => {
         initiator: "agent",
         confirmBilledDesktops: true,
         answeredForThread: false,
+        answeredForProject: false,
       }),
     ).toEqual({ kind: "proceed" });
     expect(
@@ -366,6 +369,7 @@ describe("desktop lease policy", () => {
         initiator: "remote-device",
         confirmBilledDesktops: true,
         answeredForThread: false,
+        answeredForProject: false,
       }),
     ).toEqual({ kind: "proceed" });
     for (const initiator of ["agent", "local-user"] as const) {
@@ -376,6 +380,7 @@ describe("desktop lease policy", () => {
           initiator,
           confirmBilledDesktops: true,
           answeredForThread: false,
+          answeredForProject: false,
         }),
       ).toEqual({ kind: "ask", asks: "off-machine" });
     }
@@ -390,6 +395,7 @@ describe("desktop lease policy", () => {
           initiator: "agent",
           confirmBilledDesktops: true,
           answeredForThread: true,
+          answeredForProject: false,
         }),
       ).toEqual({ kind: "proceed" });
     }
@@ -400,6 +406,7 @@ describe("desktop lease policy", () => {
         initiator: "agent",
         confirmBilledDesktops: true,
         answeredForThread: true,
+        answeredForProject: false,
       }),
     ).toEqual({ kind: "refused", reason: "plan-mode" });
     expect(
@@ -409,8 +416,32 @@ describe("desktop lease policy", () => {
         initiator: "agent",
         confirmBilledDesktops: true,
         answeredForThread: true,
+        answeredForProject: false,
       }),
     ).toEqual({ kind: "ask", asks: "off-machine" });
+  });
+
+  it("lets a Project's answer cover an agent's transfer into a desktop on this machine and never into a cloud desktop", () => {
+    const projectAnswered = {
+      executionPolicy: "approval-gated",
+      initiator: "agent",
+      answeredForThread: false,
+      answeredForProject: true,
+    } as const;
+    expect(
+      decideDesktopArtifactTransfer({
+        ...projectAnswered,
+        locality: "host-local",
+        confirmBilledDesktops: true,
+      }),
+    ).toEqual({ kind: "proceed" });
+    expect(
+      decideDesktopArtifactTransfer({
+        ...projectAnswered,
+        locality: "cloud",
+        confirmBilledDesktops: false,
+      }),
+    ).toEqual({ kind: "ask", asks: "in-thread" });
   });
 
   it("journals a person's press, typing, key, and scroll, and not the pointer moving or letting go", () => {
@@ -516,6 +547,7 @@ describe("desktop lease policy", () => {
         executionPolicy: "full-access",
         initiator: "agent",
         answeredForThread: false,
+        answeredForProject: false,
       }),
     ).toEqual({ kind: "proceed" });
     expect(
@@ -524,6 +556,7 @@ describe("desktop lease policy", () => {
         executionPolicy: "approval-gated",
         initiator: "agent",
         answeredForThread: false,
+        answeredForProject: false,
       }),
     ).toEqual({ kind: "ask", asks: "in-thread" });
     expect(
@@ -532,6 +565,7 @@ describe("desktop lease policy", () => {
         executionPolicy: "plan",
         initiator: "local-user",
         answeredForThread: false,
+        answeredForProject: false,
       }),
     ).toEqual({ kind: "refused", reason: "plan-mode" });
   });

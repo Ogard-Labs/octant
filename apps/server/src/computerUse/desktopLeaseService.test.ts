@@ -1892,6 +1892,42 @@ describe.runIf(process.platform === "linux")("desktop artifact transfer", () => 
     expect(state.askedTransfers).toHaveLength(1);
   });
 
+  it("asks before an agent sends a file to a cloud desktop under a Project's remembered answer, with the confirmation off", async () => {
+    const cloud = createFakeDesktopProvider({
+      id: "cloud.example",
+      locality: "cloud",
+      billed: true,
+    });
+    const { service, state, checkout } = host({
+      providers: [cloud],
+      executionPolicy: "approval-gated",
+    });
+    writeFileSync(join(checkout, "app.bin"), "built app");
+    const leaseId = await acquired(service, threadA);
+    service.setLeaseSettings({ actor: person, change: { confirmBilledDesktops: false } });
+    const asked: Array<string> = [];
+
+    await expect(
+      service.transfer({
+        owner: code(threadA),
+        actor: agentOf(threadA),
+        leaseId,
+        path: "app.bin",
+        turn: {
+          executionPolicy: "approval-gated",
+          externalContentIngested: false,
+          answeredForProject: true,
+        },
+        confirm: async (request) => {
+          asked.push(request.asks);
+          return "declined";
+        },
+      }),
+    ).resolves.toEqual({ status: "refused", reason: "declined" });
+    expect(asked).toEqual(["in-thread"]);
+    expect(cloud.backend.calls()).not.toContain("deliver");
+  });
+
   it("refuses a send nobody was asked about when the person turns the confirmation back on meanwhile", async () => {
     const cloud = createFakeDesktopProvider({
       id: "cloud.example",

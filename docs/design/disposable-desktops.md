@@ -898,7 +898,10 @@ Rules this slice resolved:
   remembered answer covers later transfers from every thread in that Project,
   below Full access, into a desktop on this machine: they proceed without
   asking and record nothing for the thread, so forgetting it brings the ask
-  back. It is journaled in shell settings (`rememberedDesktopFileTransfers`,
+  back. It never covers a cloud desktop, even with "Confirm each billed
+  desktop" off, and a cloud desktop's ask does not offer it: the answer was
+  given for files that stay on this machine, and covering a cloud desktop
+  would send checkout files off it with no ask in the thread. It is journaled in shell settings (`rememberedDesktopFileTransfers`,
   with the approving local user or person-paired device and the time), lists
   under Settings › Computer use › Remembered desktop files with **Forget**,
   and a settings replacement may only forget entries. Only a person's answer

@@ -1832,9 +1832,8 @@ export function createDesktopLeaseService(
       // provider that has placements.
       locality: first.record.lease.locality,
       initiator: caller.actor.kind,
-      answeredForThread:
-        options.transferAnswers?.covers(owner, threadMarked) === true ||
-        caller.turn?.answeredForProject === true,
+      answeredForThread: options.transferAnswers?.covers(owner, threadMarked) === true,
+      answeredForProject: caller.turn?.answeredForProject === true,
       confirmBilledDesktops,
     });
     if (gate.kind === "refused") return refused(gate.reason);

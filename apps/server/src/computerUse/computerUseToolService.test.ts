@@ -1404,6 +1404,8 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
       readonly projects?: Readonly<Record<string, ProjectId>>;
       /** Whether Strict is on; absent reads as Strict, as the service does. */
       readonly strict?: boolean;
+      /** Where the bound desktop runs; absent, on this machine. */
+      readonly sendsTo?: "host-local" | "cloud";
     } = {},
   ) {
     let tainted = false;
@@ -1437,10 +1439,11 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
       ): Promise<ComputerControlResult> => {
         transfers.push(path);
         const answers = threadAnswers.get(String(target.threadId)) ?? [];
-        // The lease service asks nobody once the Project's or the thread's
-        // answer covers it.
+        // The lease service asks nobody once the Project's answer (on this
+        // machine) or the thread's answer covers it.
+        const locality = options.sendsTo ?? "host-local";
         if (
-          answeredForProject === true ||
+          (answeredForProject === true && locality === "host-local") ||
           threadStandingAnswerCovers(answers, "desktop-file-transfer", threadMarked)
         )
           return sent;
@@ -1449,8 +1452,8 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
           leaseId,
           provider: {
             providerId: decodeDesktopProviderId("host-local"),
-            displayName: "This host",
-            locality: "host-local",
+            displayName: locality === "host-local" ? "This host" : "Cloud desktops",
+            locality,
             billed: false,
           },
           asks: "in-thread",
@@ -1765,6 +1768,19 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
       expect(f.asked[0]).toBe(
         `Send dist/notes-app (9 bytes, SHA-256 ${"a".repeat(64)}) into this thread's disposable desktop on This host for "Notes app"? Approving also covers this thread's later files into that desktop.`,
       );
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("never offers to remember a file sent to a cloud desktop for the Project", async () => {
+    const f = desktop({ sendsTo: "cloud", answers: ["remember"] });
+    const send = call({ operation: "send-file", path: "dist/notes-app" });
+    try {
+      // A Project answer given anyway does not stand: the file is declined.
+      await expect(f.tools().execute(send)).resolves.toMatchObject({ isError: true });
+      expect(f.offers).toEqual([undefined]);
+      expect([...f.rememberedProjects]).toEqual([]);
     } finally {
       await f.service.close();
     }
