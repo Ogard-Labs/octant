@@ -297,4 +297,21 @@ describe.runIf(process.platform === "darwin")("icon set rendering with macOS's s
       expect(probed).toContain(`pixelHeight: ${String(spec.pixels)}`);
     }
   });
+
+  it("saves an opaque RGBA source as an iOS icon with no alpha channel", async () => {
+    const render = hostIconSetRenderer({ workDirectory: workDirectory() });
+    if (render === undefined) throw new Error(`${SIPS_PATH} is missing on this Mac.`);
+    const rendered = await render({
+      bytes: solidPng(1024, 255),
+      mime: "image/png",
+      target: "apple-ios",
+    });
+    if (rendered.status !== "rendered") throw new Error(rendered.reason);
+    const icon = rendered.files.find((file) => file.path.endsWith("AppIcon-1024.png"));
+    const path = join(workDirectory(), "icon.png");
+    writeFileSync(path, icon?.bytes ?? new Uint8Array());
+    expect(execFileSync(SIPS_PATH, ["-g", "hasAlpha", path], { encoding: "utf8" })).toContain(
+      "hasAlpha: no",
+    );
+  });
 });

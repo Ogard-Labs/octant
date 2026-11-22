@@ -2,6 +2,13 @@ import { deflateSync, inflateSync } from "node:zlib";
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
 
+/**
+ * The chunks that say how to read the RGB values: an ICC profile, gamma,
+ * chromaticities and the sRGB intent. They describe colour, not alpha, so the
+ * RGB re-encode keeps them; dropping them would change how the icon renders.
+ */
+const COLOUR_CHUNKS: ReadonlySet<string> = new Set(["iCCP", "sRGB", "gAMA", "cHRM"]);
+
 export type PngOpacity =
   | { readonly status: "opaque"; readonly png: Uint8Array }
   | { readonly status: "transparent" }
@@ -18,7 +25,7 @@ export type PngOpacity =
 export function pngWithoutAlpha(bytes: Uint8Array): PngOpacity {
   const parsed = parsePng(bytes);
   if (parsed === undefined) return { status: "unreadable" };
-  const { width, height, colorType, data } = parsed;
+  const { width, height, colorType, data, colour } = parsed;
   const channels = colorType === 6 ? 4 : 3;
   const pixels = unfilter(data, width, height, channels);
   if (pixels === undefined) return { status: "unreadable" };
@@ -45,6 +52,7 @@ export function pngWithoutAlpha(bytes: Uint8Array): PngOpacity {
     png: concat([
       Uint8Array.from(PNG_SIGNATURE),
       chunk("IHDR", header),
+      ...colour,
       chunk("IDAT", new Uint8Array(deflateSync(rgb))),
       chunk("IEND", new Uint8Array()),
     ]),
@@ -57,6 +65,8 @@ function parsePng(bytes: Uint8Array):
       readonly height: number;
       readonly colorType: 2 | 6;
       readonly data: Uint8Array;
+      /** The colour-description chunks, whole, in their original order. */
+      readonly colour: ReadonlyArray<Uint8Array>;
     }
   | undefined {
   if (!hasSignature(bytes)) return undefined;
@@ -64,6 +74,7 @@ function parsePng(bytes: Uint8Array):
   let offset = 8;
   let header: { width: number; height: number; colorType: 2 | 6 } | undefined;
   const idat: Uint8Array[] = [];
+  const colour: Uint8Array[] = [];
   while (offset + 8 <= bytes.byteLength) {
     const length = view.getUint32(offset);
     const type = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8));
@@ -79,6 +90,8 @@ function parsePng(bytes: Uint8Array):
         return undefined;
       }
       header = { width: bodyView.getUint32(0), height: bodyView.getUint32(4), colorType };
+    } else if (COLOUR_CHUNKS.has(type) && idat.length === 0) {
+      colour.push(bytes.subarray(offset, start + length + 4));
     } else if (type === "IDAT") {
       idat.push(body);
     } else if (type === "IEND") {
@@ -88,7 +101,7 @@ function parsePng(bytes: Uint8Array):
   }
   if (header === undefined || idat.length === 0) return undefined;
   try {
-    return { ...header, data: new Uint8Array(inflateSync(concat(idat))) };
+    return { ...header, colour, data: new Uint8Array(inflateSync(concat(idat))) };
   } catch {
     return undefined;
   }

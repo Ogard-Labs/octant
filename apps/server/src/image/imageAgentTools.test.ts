@@ -14,7 +14,11 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { SpendCeilingService } from "../spendCeilingService";
-import { checkNewFileUnder, saveGeneratedImageUnder } from "./generatedImageSave";
+import {
+  checkNewFileUnder,
+  removeCreatedFileUnder,
+  saveGeneratedImageUnder,
+} from "./generatedImageSave";
 import { GeneratedImageStore } from "./generatedImageStore";
 import { createImageAgentTools, IMAGE_TOOL_NAME, type ImageAgentToolPort } from "./imageAgentTools";
 import type {
@@ -709,6 +713,8 @@ describe("createImageAgentTools", () => {
             files: webIcons.map((path) => ({ path, bytes: Uint8Array.from([1, 2, 3]) })),
           })),
           check: (relativePath: string) => checkNewFileUnder({ root, relativePath }),
+          remove: (relativePath: string, size: number) =>
+            removeCreatedFileUnder({ root, relativePath, size }),
         },
       };
     }
@@ -793,7 +799,7 @@ describe("createImageAgentTools", () => {
       expect(folder.write).not.toHaveBeenCalled();
     });
 
-    it("stops writing when the thread moves to Plan between files, naming what was written", async () => {
+    it("stops when the thread moves to Plan between files and removes what it had written", async () => {
       const folder = iconSetFolder("allow");
       let level: "allow" | "refuse" = "allow";
       const write = vi.fn(async (relativePath: string, bytes: Uint8Array) => {
@@ -809,13 +815,12 @@ describe("createImageAgentTools", () => {
       expect(write).toHaveBeenCalledOnce();
       expect(outcome.isError).toBe(true);
       expect(outcome.result).toMatchObject({
-        status: "failed",
-        error: expect.stringMatching(/Plan mode/),
-        written: ["public/favicon-16.png"],
+        error: expect.stringMatching(/Plan mode.*Nothing was kept/),
       });
+      expect(readdirSync(join(folder.root, "public"))).toEqual([]);
     });
 
-    it("writes no further file once the turn is stopped", async () => {
+    it("writes no further file once the turn is stopped, and leaves the folder as it was", async () => {
       const folder = iconSetFolder("allow");
       const stop = new AbortController();
       const write = vi.fn(async (relativePath: string, bytes: Uint8Array) => {
@@ -835,9 +840,9 @@ describe("createImageAgentTools", () => {
       });
       expect(write).toHaveBeenCalledOnce();
       expect(outcome.result).toMatchObject({
-        status: "failed",
-        written: ["public/favicon-16.png"],
+        error: expect.stringMatching(/stopped.*Nothing was kept/),
       });
+      expect(existsSync(join(folder.root, "public", "favicon-16.png"))).toBe(false);
     });
 
     it("refuses an Android set where a launcher icon exists in another format", async () => {

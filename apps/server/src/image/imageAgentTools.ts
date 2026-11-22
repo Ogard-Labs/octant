@@ -121,6 +121,8 @@ export interface ImageIconSetPort {
   readonly check: (
     relativePath: string,
   ) => Promise<{ readonly status: "ok" } | { readonly status: "refused"; readonly reason: string }>;
+  /** Removes a file this call created, when the set stops part way; false when it was left. */
+  readonly remove: (relativePath: string, size: number) => Promise<boolean>;
 }
 
 /** What the tool asks the person; the binding adds the thread it asks in. */
@@ -517,7 +519,23 @@ async function executeHostIconSet(
       return { status: "refused", error: "Plan mode cannot save files." };
     }
   }
-  const written: string[] = [];
+  const written: Array<{ readonly relativePath: string; readonly size: number }> = [];
+  // A set stopped part way removes the files this call created, so the
+  // folder is left as it was: a stopped turn drops its tool result, and files
+  // nobody was shown would only block the next try at the same directory.
+  const undo = async (reason: string): Promise<MediaImageIconSetOutcome> => {
+    const kept: string[] = [];
+    for (const file of written) {
+      if (!(await iconSets.remove(file.relativePath, file.size))) kept.push(file.relativePath);
+    }
+    return kept.length === 0
+      ? { status: "refused", error: `${reason} Nothing was kept.` }
+      : {
+          status: "failed",
+          error: `${reason} These files could not be removed again.`,
+          written: kept,
+        };
+  };
   for (const file of files) {
     // Each write is awaited, so the level and the turn's Stop are read again
     // before the next one starts: a thread moved to Plan or stopped mid-set
@@ -528,29 +546,15 @@ async function executeHostIconSet(
         : save.posture() === "refuse"
           ? "Plan mode cannot save files."
           : undefined;
-    if (stopped !== undefined) {
-      return written.length === 0
-        ? { status: "refused", error: stopped }
-        : {
-            status: "failed",
-            error: `${stopped} The rest of the icon set was not written.`,
-            written,
-          };
-    }
+    if (stopped !== undefined) return await undo(stopped);
     const saved = await save.write(file.relativePath, file.bytes);
-    if (saved.status !== "saved") {
-      return {
-        status: "failed",
-        error: `${file.relativePath}: ${saved.reason}`,
-        written,
-      };
-    }
-    written.push(saved.relativePath);
+    if (saved.status !== "saved") return await undo(`${file.relativePath}: ${saved.reason}`);
+    written.push({ relativePath: saved.relativePath, size: file.bytes.byteLength });
   }
   return {
     status: "saved",
     directory: request.directory,
-    files: written,
+    files: written.map((file) => file.relativePath),
     ...(request.target === "web" ? { snippets: webIconSnippets() } : {}),
   };
 }

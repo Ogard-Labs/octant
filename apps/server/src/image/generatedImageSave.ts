@@ -252,3 +252,36 @@ export async function checkNewFileUnder(
       : `${input.relativePath}: ${checked.reason}`,
   };
 }
+
+/**
+ * Removes a file this host itself just created under `root`, for an icon set
+ * stopped part way, so the folder is left as it was rather than holding files
+ * nobody was shown. The parent is proved inside the root as for a create, and
+ * only a regular file of exactly the size written is removed, through the
+ * confined unlink that acts on the proved directory; anything else is left.
+ */
+export async function removeCreatedFileUnder(
+  input: { readonly root: string; readonly relativePath: string; readonly size: number },
+  filesystem: WorkFilesystemPort = liveWorkFilesystem,
+): Promise<boolean> {
+  try {
+    const resolution = await new WorkResolutionService(filesystem).resolveForCreate({
+      binding: {
+        canonicalRoot: input.root,
+        knownCanonicalRoot: input.root,
+        availability: "available",
+        bindingSuperseded: false,
+      },
+      relativePath: canonicalizeWorkRelativePath(input.relativePath),
+    });
+    if (resolution.status !== "resolved-for-create" || resolution.remaining.length !== 1) {
+      return false;
+    }
+    const stat = await filesystem.lstat(resolution.absolutePath);
+    if (!stat.isFile || stat.isSymbolicLink || stat.size !== input.size) return false;
+    await filesystem.unlink(resolution.absolutePath);
+    return true;
+  } catch {
+    return false;
+  }
+}

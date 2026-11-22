@@ -81,4 +81,17 @@ describe("PNG opacity", () => {
   it("calls bytes that are not a PNG it can read unreadable", () => {
     expect(pngWithoutAlpha(Uint8Array.from([1, 2, 3]))).toEqual({ status: "unreadable" });
   });
+
+  it("keeps the chunks that say how to read the colours when it drops the alpha channel", () => {
+    const source = Buffer.from(EVERY_FILTER_RGBA, "base64");
+    // gAMA 1.0 (100000), placed after IHDR as PNG requires; its CRC is not
+    // checked by the reader, so zero keeps the fixture short.
+    const gama = Buffer.from([0, 0, 0, 4, 0x67, 0x41, 0x4d, 0x41, 0, 1, 0x86, 0xa0, 0, 0, 0, 0]);
+    const tagged = Buffer.concat([source.subarray(0, 33), gama, source.subarray(33)]);
+    const result = pngWithoutAlpha(new Uint8Array(tagged));
+    if (result.status !== "opaque") throw new Error(result.status);
+    const text = Buffer.from(result.png).toString("latin1");
+    expect(text.indexOf("gAMA")).toBeGreaterThan(text.indexOf("IHDR"));
+    expect(text.indexOf("gAMA")).toBeLessThan(text.indexOf("IDAT"));
+  });
 });
