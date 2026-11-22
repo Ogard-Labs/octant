@@ -23,6 +23,7 @@ import {
   createClientHostRegistry,
   createHostFederationLifecycle,
   createHostFederationTransports,
+  createHubWindowDismissalStore,
   createHubWindowIdentityStore,
   createInMemoryClientHostRegistryStorage,
   createInMemoryDeviceKeyStore,
@@ -171,6 +172,7 @@ function desktopWindow(host: HubTestHost, network: HubTestNetwork) {
   });
   const lifecycle = createHostFederationLifecycle({ registry, transports, deviceKeyStore });
   const introductions: HubWindowGuestRequest[] = [];
+  const dismissals = createHubWindowDismissalStore(storage);
   const sync = async () => {
     const outcome = await syncHubWindowComputers({
       introduce: async (request) => {
@@ -199,6 +201,7 @@ function desktopWindow(host: HubTestHost, network: HubTestNetwork) {
       registry,
       deviceKeyStore,
       identity: createHubWindowIdentityStore(storage),
+      dismissals,
       deviceLabel: `${host.name} window`,
       removeHost: (hostId) => lifecycle.removeLocal(hostId),
       retryDelay: async () => undefined,
@@ -210,7 +213,7 @@ function desktopWindow(host: HubTestHost, network: HubTestNetwork) {
     await lifecycle.sync();
     return outcome;
   };
-  return { sync, registry, transports, lifecycle, introductions };
+  return { sync, registry, transports, lifecycle, introductions, dismissals };
 }
 
 /** A host's Code route as production builds it, over a Code service that keeps the threads it starts. */
@@ -615,6 +618,21 @@ describe("a desktop window on a hub member", () => {
     ).toBe(false);
     expect(windowDevices(b, fingerprint).map((device) => device.state)).toEqual(["revoked"]);
     expect(windowDevices(hub, fingerprint).map((device) => device.state)).toEqual(["revoked"]);
+  }, 60_000);
+
+  it("a member the person removed from the window stays off it when the roster is read again", async () => {
+    const { network, a, c } = await startWorld();
+    const desktop = desktopWindow(a, network);
+    await desktop.sync();
+    await desktop.dismissals.dismiss(c.hostId);
+    await desktop.lifecycle.removeLocal(c.hostId);
+    await desktop.sync();
+    expect(
+      (await desktop.registry.list())
+        .filter((host) => host.kind === "remote")
+        .map((host) => host.displayName)
+        .sort(),
+    ).toEqual(["Mac mini", "Studio"]);
   }, 60_000);
 
   it("a member's window lists the hub as a computer labelled hub", async () => {

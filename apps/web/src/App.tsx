@@ -2453,6 +2453,7 @@ function LaunchedShell(
           hostId: host.hostId,
           hostName: host.hostName,
           origin: host.origin,
+          credentialKeyId: credential.keyId,
           issueSession: () => connection.issueServerProxySession(),
           sign: (payload) => deviceKey.sign(payload),
           // A computer paired through Other computers is reached through the
@@ -2490,6 +2491,7 @@ function LaunchedShell(
           hostId: host.hostId,
           hostName: host.hostName,
           origin: host.origin,
+          credentialKeyId: credential.keyId,
           issueSession: () => connection.issueServerProxySession(),
           sign: (payload) => deviceKey.sign(payload),
           ...(pairedComputerFetch === undefined || !isRemotePairingOrigin(host.origin)
@@ -2545,6 +2547,7 @@ function LaunchedShell(
           hostId: host.hostId,
           hostName: host.hostName,
           origin: host.origin,
+          credentialKeyId: credential.keyId,
           issueSession: () => connection.issueServerProxySession(),
           sign: (payload) => deviceKey.sign(payload),
           ...(pairedComputerFetch === undefined || !isRemotePairingOrigin(host.origin)

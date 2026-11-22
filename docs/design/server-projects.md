@@ -988,7 +988,10 @@ command line or another login's process; under a privileged login each process
 must also be owned by the login, since `ss` shows every account's). **Preview**
 on a row starts the preview for that port, offered only when the socket answers
 on `127.0.0.1` (IPv4 loopback or a wildcard bind), where the forward connects; a
-socket bound only to `[::1]` or a LAN address is listed without it. Only a local
+socket bound only to `[::1]`, a LAN address, or an IPv6-only wildcard (which
+`ss` writes as `[::]`, keeping `*` for a dual-stack one) is listed without it.
+`lsof` writes every wildcard as `*`, so an IPv6-only one it reports keeps
+Preview. Only a local
 window reads the list, under the same rule as starting a preview; a paired
 device is not offered it and sees no local-address guidance, since its preview
 is relayed. A server with neither tool says so.

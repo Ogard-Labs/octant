@@ -622,8 +622,9 @@ otherwise.
   member's own person paired still forwards any port, an agent grant none,
   and a host in no hub forwards nothing for such a device. A desktop window
   offers Forward port on a hub member's Running services only for a server
-  in a thread; a paired computer's thread view lists no Local servers yet,
-  so it offers none there. Built (slice
+  in a thread; a paired computer's thread view lists that thread's Local
+  servers with Open in Octant and Open in browser, but offers no Forward port
+  there yet. Built (slice
   16): a desktop window on a member, or on the hub, lists the hub's other
   spokes and standbys as its computers. The window makes a device key of its
   own; its host asks the hub to list that key as a guest (the hub's own
@@ -641,7 +642,13 @@ otherwise.
   member, also when a standby removed that member and handed the removal
   back, and a newer window of the same member replaces the older one. A
   window guest the hub removed is not listed again when that window asks
-  next.
+  next. A member the person removes or revokes from the window's own
+  computer list stays off it, though the roster still lists it: the window
+  records the dismissal and its roster reads skip that member until the
+  window leaves the hub or the person pairs it directly. When the hub
+  re-admits the window under a replacement credential, previews and port
+  forwards to that host sign with the replacement, not the credential the
+  window first used there.
   A member's window is listed on the hub without a second approval, because
   the hub's person already approved that member, and every spoke still raises
   the new-member alert for it (its name, role, key fingerprint, and Remove),

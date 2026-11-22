@@ -475,8 +475,10 @@ Forwarder and signer on the device). Each row there also offers **Forward
 port**, which forwards the port as raw TCP to this computer's loopback for an
 hour (Port forwards in the same section) whether or not it answers as a web
 server, and says on the row that anything on this computer can connect; a
-server that answered only on IPv6 loopback is not offered it, since the
-forward reaches `127.0.0.1`. A row there without Open says in one line
+server whose socket `127.0.0.1` does not reach (bound only to IPv6 loopback
+or to a LAN address) is not offered it, since the forward dials `127.0.0.1`;
+the host says which rows are forwardable from the bound address it observed,
+not from the address its web probe tried. A row there without Open says in one line
 why it opens only on that computer, and a refusal shows on the row. While that
 computer is not connected, the card says it cannot check it rather than
 listing this computer's servers under its name. Stop is the

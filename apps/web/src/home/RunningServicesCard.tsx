@@ -121,10 +121,6 @@ function useRunningServicesListRows(source: RunningServicesCardSource): HomeList
  * forwards. A service that answered only on `[::1]` would not be the one
  * reached, so it is not offered.
  */
-function forwardReaches(service: RunningService): boolean {
-  return new URL(service.url).hostname !== "[::1]";
-}
-
 function RunningServiceListItem(props: {
   readonly controller: RunningServicesController;
   readonly service: RunningService;
@@ -157,7 +153,7 @@ function RunningServiceListItem(props: {
             })}
         {...(forwardPort === undefined ||
         host === undefined ||
-        !forwardReaches(service) ||
+        service.forwardable !== true ||
         (source.forwardsThreadServersOnly === true && service.thread === undefined)
           ? {}
           : { forwardPort: () => forwardPort(service) })}

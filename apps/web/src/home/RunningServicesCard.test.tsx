@@ -30,6 +30,7 @@ function service(index: number, overrides: Record<string, unknown> = {}): Runnin
     ownership: "octant-owned",
     health: "listening",
     openAvailable: true,
+    forwardable: true,
     stop: { status: "available", confirmationRequired: false },
     projectId,
     projectName: "Octant",
@@ -290,11 +291,12 @@ describe("the Running services card", () => {
       ).toBeInTheDocument();
     });
 
-    it("offers a forward for a TCP service that does not answer the web, but not for one only on IPv6 loopback", async () => {
+    it("offers a forward for a TCP service that does not answer the web, but not for one 127.0.0.1 does not reach", async () => {
       const { client } = fakeClient(() =>
         listed([
           service(1, { health: "unresponsive", openAvailable: false, framework: undefined }),
-          service(2, { url: "http://[::1]:5172/", framework: "next" }),
+          service(2, { url: "http://[::1]:5172/", framework: "next", forwardable: false }),
+          service(3, { health: "unresponsive", framework: "astro", forwardable: false }),
         ]),
       );
       renderCard(
@@ -311,6 +313,9 @@ describe("the Running services card", () => {
       ).toBeInTheDocument();
       expect(
         screen.queryByRole("button", { name: "Forward port 5172 of next to this computer" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Forward port 5173 of astro to this computer" }),
       ).not.toBeInTheDocument();
     });
 

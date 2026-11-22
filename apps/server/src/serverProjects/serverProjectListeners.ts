@@ -70,10 +70,12 @@ fi | while IFS="$tab" read -r pid cmd port host; do
 done`;
 
 /**
- * Bound addresses a connection to `127.0.0.1` reaches: IPv4 loopback, the IPv4
- * wildcard, and the IPv6 wildcard, which takes IPv4 connections unless the
- * socket is IPv6-only (Linux's default `bindv6only=0`). The tools write the
- * wildcard as `*`, `0.0.0.0`, `[::]` or (older `ss`) `::`, `ss` with an optional
+ * Bound addresses a connection to `127.0.0.1` reaches: IPv4 loopback and the
+ * wildcards the tools write as `*` or `0.0.0.0`. `ss` writes a dual-stack IPv6
+ * wildcard as `*` and keeps `[::]` (older `ss`: `::`) for a socket that is
+ * IPv6-only, which no IPv4 dial reaches, so a port held only there is listed
+ * without a Preview. `lsof` writes every wildcard as `*` and cannot tell an
+ * IPv6-only one apart; that case keeps its Preview. `ss` adds an optional
  * `%interface`.
  */
 function answersOnIpv4Loopback(host: string): boolean {
@@ -82,7 +84,7 @@ function answersOnIpv4Loopback(host: string): boolean {
     .trim()
     .replace(/%.*$/, "")
     .replace(/^\[::ffff:([0-9.]+)\]$/i, "$1");
-  return ["127.0.0.1", "0.0.0.0", "*", "[::]", "::"].includes(bare);
+  return ["127.0.0.1", "0.0.0.0", "*"].includes(bare);
 }
 
 /**

@@ -1,11 +1,14 @@
 import { decodeHubWindowComputers } from "@octant/contracts";
 import {
+  createHubWindowDismissalStore,
   createHubWindowIdentityStore,
   syncHubWindowComputers,
   type HubWindowComputersSync,
   type HubWindowIntroduction,
 } from "@octant/client-runtime/hub-window-computers";
 import type { HostFederationStack } from "./useHostFederationLifecycle";
+import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
+import type { ClientHostRegistry } from "@octant/client-runtime/host-federation-registry";
 import type { ClientHostRegistryStorage } from "@octant/client-runtime/host-federation-registry";
 import type { HubComputersBridge, PairedComputersBridge } from "../shell/hostBridge";
 import { createPairedComputerFetch } from "./pairedComputerFetch";
@@ -23,6 +26,11 @@ export async function syncHubComputersInWindow(input: {
   readonly bridge: HubComputersBridge & Pick<PairedComputersBridge, "requestPairedComputer">;
   readonly stack: HostFederationStack;
   readonly storage: ClientHostRegistryStorage;
+  /**
+   * Takes a member the roster dropped off the window. It must not be the
+   * person's own Remove, which also records a dismissal.
+   */
+  readonly removeHost?: (hostId: string) => Promise<unknown>;
 }): Promise<HubWindowComputersSync> {
   const { bridge, stack } = input;
   const channelFetch = createPairedComputerFetch(bridge);
@@ -45,8 +53,9 @@ export async function syncHubComputersInWindow(input: {
     registry: stack.registry,
     deviceKeyStore: stack.deviceKeyStore,
     identity: createHubWindowIdentityStore(input.storage),
+    dismissals: createHubWindowDismissalStore(input.storage),
     deviceLabel: WINDOW_DEVICE_LABEL,
-    removeHost: (hostId) => stack.lifecycle.removeLocal(hostId),
+    removeHost: input.removeHost ?? ((hostId) => stack.lifecycle.removeLocal(hostId)),
   });
   // A member that issued a new device gets a new session with it.
   if (outcome.status === "synced") {
@@ -54,4 +63,31 @@ export async function syncHubComputersInWindow(input: {
   }
   await stack.lifecycle.sync();
   return outcome;
+}
+
+/**
+ * The person's own Remove and Revoke of a computer the hub introduced: each
+ * also records a dismissal, so the next roster refresh does not list it again.
+ * Roster cleanup goes through the undecorated lifecycle and records nothing.
+ */
+export function withHubComputerDismissals(
+  lifecycle: HostFederationLifecycle,
+  registry: ClientHostRegistry,
+  storage: ClientHostRegistryStorage,
+): HostFederationLifecycle {
+  const dismissals = createHubWindowDismissalStore(storage);
+  const dismissIfIntroduced = async (hostId: string): Promise<void> => {
+    if ((await registry.get(hostId))?.through === "hub") await dismissals.dismiss(hostId);
+  };
+  return {
+    ...lifecycle,
+    removeLocal: async (hostId) => {
+      await dismissIfIntroduced(String(hostId));
+      return lifecycle.removeLocal(hostId);
+    },
+    revoke: async (hostId, options) => {
+      await dismissIfIntroduced(String(hostId));
+      return options === undefined ? lifecycle.revoke(hostId) : lifecycle.revoke(hostId, options);
+    },
+  };
 }

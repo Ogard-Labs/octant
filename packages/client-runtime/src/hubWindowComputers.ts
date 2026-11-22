@@ -66,6 +66,46 @@ export function createHubWindowIdentityStore(
   };
 }
 
+const DISMISSED_KEY = "octant.client.hub-window-dismissed.v1";
+
+/**
+ * Hub members the person took off this window. The roster still lists them,
+ * and each would admit the window again, so without this record a computer the
+ * person removed came back on the next refresh. A dismissal lasts until the
+ * window leaves the hub; pairing the computer directly lists it regardless.
+ */
+export interface HubWindowDismissals {
+  readonly load: () => Promise<ReadonlySet<string>>;
+  readonly dismiss: (hostId: string) => Promise<void>;
+  readonly clear: () => Promise<void>;
+}
+
+export function createHubWindowDismissalStore(
+  storage: ClientHostRegistryStorage,
+): HubWindowDismissals {
+  const load = async (): Promise<ReadonlySet<string>> => {
+    const raw = await storage.getItem(DISMISSED_KEY);
+    if (raw === null || raw.length === 0) return new Set();
+    try {
+      const value: unknown = JSON.parse(raw);
+      return new Set(
+        Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [],
+      );
+    } catch {
+      return new Set();
+    }
+  };
+  return {
+    load,
+    async dismiss(hostId) {
+      const held = await load();
+      if (held.has(hostId)) return;
+      await storage.setItem(DISMISSED_KEY, JSON.stringify([...held, hostId]));
+    },
+    clear: () => storage.setItem(DISMISSED_KEY, JSON.stringify([])),
+  };
+}
+
 /**
  * What the window's host answered: its hub's members, no hub, or
  * `unavailable` when it could not be asked, which changes nothing listed.
@@ -97,6 +137,8 @@ export interface SyncHubWindowComputersInput {
   readonly registry: ClientHostRegistry;
   readonly deviceKeyStore: RemoteDeviceKeyStore;
   readonly identity: HubWindowIdentityStore;
+  /** Members the person took off this window, which a sync does not list again. */
+  readonly dismissals?: HubWindowDismissals;
   readonly deviceLabel: string;
   /** Takes a computer off the window, with its key and whatever else the window keeps for it. */
   readonly removeHost: (hostId: string) => Promise<unknown>;
@@ -141,6 +183,7 @@ export async function syncHubWindowComputers(
   if (answer.membership === "unavailable") return { status: "unavailable" };
   const listedThroughHub = (await input.registry.list()).filter((host) => host.through === "hub");
   if (answer.membership === "none") {
+    await input.dismissals?.clear();
     for (const host of listedThroughHub) await input.removeHost(String(host.hostId));
     return { status: "not-in-hub", removed: listedThroughHub.map((host) => String(host.hostId)) };
   }
@@ -163,6 +206,7 @@ export async function syncHubWindowComputers(
     removed.push(String(host.hostId));
   }
 
+  const dismissed = (await input.dismissals?.load()) ?? new Set<string>();
   const listed: string[] = [];
   const refused: Array<{ readonly memberId: string; readonly kind: string }> = [];
   const unreachable: string[] = [];
@@ -173,6 +217,7 @@ export async function syncHubWindowComputers(
     // The person paired this computer directly: this device is that person
     // there, which a hub introduction must not narrow.
     if (registered !== undefined && registered.through !== "hub") continue;
+    if (registered === undefined && dismissed.has(hostId)) continue;
     const admission = await admitWithRetry(
       member,
       signer,

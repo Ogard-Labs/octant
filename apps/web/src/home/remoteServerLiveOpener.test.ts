@@ -162,6 +162,41 @@ describe("opening another computer's server live from this window", () => {
     expect(pageFetch).not.toHaveBeenCalled();
   });
 
+  it("signs with the replacement credential after the host re-admits this device under a new key", async () => {
+    const desktop = bridge();
+    const opener = createRemoteServerLiveOpener(desktop, async () => granted());
+    const oldKey = vi.fn(async () => "old-signature");
+    const newKey = vi.fn(async () => "new-signature");
+    const source = { surface: "running-services", listenerId: SERVICE.listenerId } as const;
+    await opener.openLive(
+      { ...HOST, credentialKeyId: "key-1", sign: oldKey },
+      source,
+      "octant-browser",
+    );
+    await opener.openLive(
+      { ...HOST, credentialKeyId: "key-2", sign: newKey },
+      source,
+      "octant-browser",
+    );
+    const signing = (await desktop.sign({
+      hostId: HOST.hostId,
+      grantId: GRANT_ID,
+      method: "GET",
+      pathQuery: `/api/server-proxy/${GRANT_ID}/`,
+      bodyDigest: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    })) as { status: string };
+    expect(signing.status).toBe("signed");
+    expect(newKey).toHaveBeenCalled();
+    const oldCalls = oldKey.mock.calls.length;
+    expect(oldCalls).toBeGreaterThan(0);
+    await opener.openLive(
+      { ...HOST, credentialKeyId: "key-2", sign: newKey },
+      source,
+      "octant-browser",
+    );
+    expect(oldKey.mock.calls.length).toBe(oldCalls);
+  });
+
   it("shows the host's refusal and asks the desktop for nothing", async () => {
     const desktop = bridge();
     const opener = createRemoteServerLiveOpener(desktop, async () =>

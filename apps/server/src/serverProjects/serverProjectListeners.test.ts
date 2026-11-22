@@ -81,7 +81,7 @@ describe("the TCP ports a server Project serves", () => {
     ]);
   });
 
-  it("offers a preview only for sockets the forward to 127.0.0.1 reaches", () => {
+  it("offers a preview only for sockets the forward to 127.0.0.1 reaches, never an IPv6-only wildcard", () => {
     expect(
       parseServerListeners(
         [
@@ -100,7 +100,7 @@ describe("the TCP ports a server Project serves", () => {
       [3000, true],
       [3001, true],
       [3002, true],
-      [3003, true],
+      [3003, false],
       [3004, true],
       [4000, false],
       [4001, false],

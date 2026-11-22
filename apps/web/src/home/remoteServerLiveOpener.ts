@@ -33,6 +33,13 @@ export interface RemoteServerLiveHost {
   readonly hostId: string;
   readonly hostName: string;
   readonly origin: string;
+  /**
+   * Which of this device's credentials for that host signs. A hub re-admits a
+   * member window under a replacement credential with the same host ID, so a
+   * client built for the old key would sign every new request with a key the
+   * host no longer knows.
+   */
+  readonly credentialKeyId?: string;
   /** Mints a proxy session with this device's key. */
   readonly issueSession: () => Promise<RemoteSessionFacts>;
   /** Signs with this device's non-extractable key for that host. */
@@ -94,25 +101,28 @@ export function createRemoteServerLiveOpener(
   bridge: RemoteServerLiveBridge,
   fetch: typeof globalThis.fetch = globalThis.fetch.bind(globalThis),
 ): RemoteServerLiveOpener {
-  const clients = new Map<string, RemoteServerProxyClient>();
+  const clients = new Map<
+    string,
+    { readonly client: RemoteServerProxyClient; readonly credentialKeyId: string | undefined }
+  >();
   const unsubscribe = bridge.subscribeRemoteServerPageSigning(async (value) => {
     const request = decodeSignRequest(value);
-    const client = request === undefined ? undefined : clients.get(request.hostId);
+    const client = request === undefined ? undefined : clients.get(request.hostId)?.client;
     if (request === undefined || client === undefined) return { status: "refused" };
     return client.signRelayRequest(request);
   });
   const clientFor = (host: RemoteServerLiveHost): RemoteServerProxyClient => {
-    let client = clients.get(host.hostId);
-    if (client === undefined) {
-      client = createRemoteServerProxyClient({
-        origin: host.origin,
-        hostName: host.hostName,
-        fetch: host.fetch ?? fetch,
-        issueSession: host.issueSession,
-        sign: host.sign,
-      });
-      clients.set(host.hostId, client);
-    }
+    const held = clients.get(host.hostId);
+    if (held !== undefined && held.credentialKeyId === host.credentialKeyId) return held.client;
+    held?.client.forget();
+    const client = createRemoteServerProxyClient({
+      origin: host.origin,
+      hostName: host.hostName,
+      fetch: host.fetch ?? fetch,
+      issueSession: host.issueSession,
+      sign: host.sign,
+    });
+    clients.set(host.hostId, { client, credentialKeyId: host.credentialKeyId });
     return client;
   };
   const openRemotePortForward = bridge.openRemotePortForward;
@@ -152,17 +162,7 @@ export function createRemoteServerLiveOpener(
         : { kind: "opened", notice: shown.notice };
     },
     openServerProjectPreview: async (host, preview, mode) => {
-      let client = clients.get(host.hostId);
-      if (client === undefined) {
-        client = createRemoteServerProxyClient({
-          origin: host.origin,
-          hostName: host.hostName,
-          fetch: host.fetch ?? fetch,
-          issueSession: host.issueSession,
-          sign: host.sign,
-        });
-        clients.set(host.hostId, client);
-      }
+      const client = clientFor(host);
       const adopted = await client.adoptGrant(preview.grantId);
       if (adopted.status === "refused") return { kind: "refused", message: adopted.message };
       const shown = await bridge.openRemoteServerPage({
@@ -184,7 +184,7 @@ export function createRemoteServerLiveOpener(
     },
     dispose: () => {
       unsubscribe();
-      for (const client of clients.values()) client.forget();
+      for (const held of clients.values()) held.client.forget();
       clients.clear();
     },
   };
