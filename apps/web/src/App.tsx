@@ -6452,8 +6452,8 @@ function LaunchedShell(
     agentsCenterOpen ||
     artifactLibraryOpen ||
     imageLibraryOpen;
-  // Names the open reader, so its failure boundary starts fresh when the
-  // sidebar switches readers: that switch never renders with none open.
+  // Names the open reader, so a failed reader boundary clears when the sidebar
+  // switches readers: that switch never renders with none open.
   const readerKey = [
     projectsListOpen,
     railPlaceholder !== undefined,
@@ -9215,7 +9215,7 @@ function LaunchedShell(
             <ThreadNotesProvider services={launchedClients.threadNotesClient}>
               <div className="primary-workspace-layer">
                 {readerOpen ? (
-                  <DockModuleBoundary key={readerKey}>
+                  <DockModuleBoundary resetKey={readerKey}>
                     <Suspense fallback={<SurfaceLoading label="Opening page" />}>
                       <ReaderPagesContainer
                         actions={actions}
