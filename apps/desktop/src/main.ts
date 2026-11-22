@@ -767,8 +767,17 @@ export function installRemoteDeviceIpcHandlers(options: {
   options.handle(IPC_CHANNELS.remotePairingRequests, (event) =>
     run(event, (service) => service.listPairingRequests()),
   );
-  options.handle(IPC_CHANNELS.remotePairingApprove, (event, ticketId) =>
-    run(event, (service) => service.approvePairingRequest(ticketId as string)),
+  options.handle(IPC_CHANNELS.remotePairingApprove, (event, ticketId, accessLevel) =>
+    run(event, (service) => service.approvePairingRequest(ticketId as string, accessLevel)),
+  );
+  options.handle(IPC_CHANNELS.remoteDeviceAccessLevel, (event, deviceId, accessLevel) =>
+    run(event, (service) => service.setDeviceAccessLevel(deviceId as string, accessLevel)),
+  );
+  options.handle(IPC_CHANNELS.remoteAccessPauseRead, (event) =>
+    run(event, (service) => service.readRemoteAccessPaused()),
+  );
+  options.handle(IPC_CHANNELS.remoteAccessPauseSet, (event, paused) =>
+    run(event, (service) => service.setRemoteAccessPaused(paused)),
   );
   options.handle(IPC_CHANNELS.remotePairingDeny, (event, ticketId, reasonCode) =>
     run(event, (service) => service.denyPairingRequest(ticketId as string, reasonCode as string)),

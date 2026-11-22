@@ -1,6 +1,7 @@
 import type { HumanBrowserRequest, HumanBrowserResult } from "./browserPresentation";
 import type { FleetActivityThread } from "./fleetActivity";
 import type { OpenInApplicationId } from "./shell";
+import type { DeviceAccessLevel } from "./remoteAccess";
 
 /**
  * The payload types of the desktop's contextBridge seam: one set of shapes the
@@ -398,6 +399,8 @@ export interface PrivateListenerEnableRequest {
 export type RemoteDeviceSourceClass = "loopback" | "lan-private" | "tailscale" | "unknown";
 export type RemotePairingTicketSourceClass = Exclude<RemoteDeviceSourceClass, "unknown">;
 export type RemoteDeviceState = "active" | "revoked" | "expired";
+/** What the person lets a device they paired do on this host. */
+export type RemoteDeviceAccessLevel = DeviceAccessLevel;
 
 export interface RemoteMintedPairingTicket {
   readonly ticketId: string;
@@ -434,6 +437,8 @@ export interface RemoteDeviceInventoryEntry {
   readonly state: RemoteDeviceState;
   readonly revokedAt?: string;
   readonly revokedReason?: string;
+  /** What the person lets an active device they paired do; absent for one the hub introduced. */
+  readonly accessLevel?: RemoteDeviceAccessLevel;
 }
 
 export interface RemoteCredentialOperationReceipt {
