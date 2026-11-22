@@ -2051,6 +2051,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "pairing length lifetime expiry expire paired device registration days year never revoke",
         },
         {
+          id: settingId("remote-access-pause"),
+          label: "Pause remote access",
+          scope: "host",
+          keywords:
+            "pause resume remote access paired devices agents refuse block stop lock panic access level full approve steer read only",
+        },
+        {
           id: settingId("hub-role"),
           label: "Act as hub",
           scope: "host",
