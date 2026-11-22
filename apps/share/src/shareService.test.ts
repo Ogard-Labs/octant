@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { CANVAS_PUBLIC_SHARE_MAX_DOCUMENT_BYTES, CANVAS_SHARE_SCHEMA_VERSION } from "./shareKit.ts";
 import { readShareConfig, type ShareConfig } from "./config.ts";
 import { startShareService, type ShareService } from "./server.ts";
+import { renderDesignFramePage } from "./frames.ts";
 import { ShareStore } from "./store.ts";
 import { runTakedown } from "./takedown.ts";
 
@@ -991,5 +992,33 @@ describe("share configuration", () => {
       expect(result.config.usercontentOrigin).toBe("http://127.0.0.1:4101");
       expect(result.config.maxTotalBytes).toBe(5 * 1024 * 1024 * 1024);
     }
+  });
+});
+
+describe("design frame pages", () => {
+  test("writes each carried image once and stops repeating it past the page budget", () => {
+    const bytes = Buffer.alloc(1024 * 1024, 7);
+    bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const data = bytes.toString("base64");
+    const image = {
+      imageRef: "image-1",
+      mediaType: "image/png",
+      byteLength: bytes.byteLength,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      data,
+    } as const;
+    // A small frame naming one 1 MiB image a hundred times.
+    const html = '<img src="octant-asset:hero" alt="">'.repeat(100);
+    const page = renderDesignFramePage(
+      design({
+        schemaVersion: 30,
+        frames: [{ frameId: "home", title: "Home", html }],
+        assets: [{ assetId: "hero", imageRef: "image-1" }],
+      }) as never,
+      [image as never],
+    );
+    expect(page).toContain(`data:image/png;base64,${data}`);
+    expect(page.length).toBeLessThan(8 * 1024 * 1024);
+    expect(page).toContain('src="data:,"');
   });
 });

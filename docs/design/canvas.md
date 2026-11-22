@@ -886,7 +886,8 @@ attachment store (`canvas-share-images`, one scope per snapshot, one file per
 digest) before it records the snapshot, adds them when an allowed reader opens
 it after checking them against the digest, drops an image whose bytes are gone
 or changed with every reference to it, and removes them when the snapshot is
-revoked or its Canvas is purged. A host that stops between keeping and
+revoked or its Canvas is purged; replaying a recorded share keeps nothing
+new, so a revoked snapshot never gets its bytes back. A host that stops between keeping and
 recording leaves only bytes no snapshot names, which the next start removes. A snapshot's prototype, run from
 its ticketed page, draws its images from the same bytes, never from a live
 read. _Rationale:_ the journal is

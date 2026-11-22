@@ -4,6 +4,7 @@
 // one file. Add a name here when the service needs more of the app.
 export { CANVAS_DESIGN_VIEWPORT } from "@octant/contracts/canvas";
 export {
+  CANVAS_SHARE_IMAGES_MAX_BYTES,
   CANVAS_SHARE_SCHEMA_VERSION,
   type CanvasShareImage,
   type CanvasStaticExportBlock,

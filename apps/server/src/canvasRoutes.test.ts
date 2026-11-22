@@ -2471,6 +2471,12 @@ describe("canvas routes", () => {
     await post("share-revoke", revokeBody());
     const kept = join(dataDirectory, "canvas-share-images");
     expect(existsSync(kept) ? readdirSync(kept) : []).toEqual([]);
+    // Replaying the original share after revoking it brings no bytes back.
+    await post("share", {
+      ...body,
+      consent: { ...body.consent, acknowledgedImages: [pixel.sha256] },
+    });
+    expect(existsSync(kept) ? readdirSync(kept) : []).toEqual([]);
     rmSync(dataDirectory, { recursive: true, force: true });
   });
 

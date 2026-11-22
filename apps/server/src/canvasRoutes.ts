@@ -1434,8 +1434,11 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         // The bytes are kept before the snapshot is recorded, so a recorded
         // snapshot never names an image that was not kept; a host that stops
         // in between leaves only unnamed bytes, which the next start removes.
+        // A replay of a recorded snapshot keeps nothing new: its bytes are
+        // already kept, or it was revoked and must not get them back.
         const shareImages = dependencies.shareImages;
-        if (shared !== undefined && images !== undefined && shareImages !== undefined) {
+        const keepsNewImages = shared !== undefined && !shared.recorded && images !== undefined;
+        if (keepsNewImages && shareImages !== undefined) {
           await shareImages.keepResolved(shared.snapshotId, images);
         }
         const result =
@@ -1451,13 +1454,13 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         // The journaled snapshot names its images by digest; it keeps only
         // those, a refused share keeps none, and a revoked one loses them.
         if (shareImages !== undefined) {
-          if (route === "share" && shared !== undefined && images !== undefined) {
+          if (route === "share" && keepsNewImages) {
             if (result.kind === "accepted") {
               await shareImages.keepOnly(
                 shared.snapshotId,
                 shareService.imagesOf(shared.snapshotId),
               );
-            } else if (!shared.recorded) {
+            } else {
               await shareImages.forget(shared.snapshotId);
             }
           } else if (route === "share-revoke" && result.kind === "accepted") {

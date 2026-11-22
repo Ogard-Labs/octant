@@ -1,5 +1,6 @@
 import {
   CANVAS_DESIGN_VIEWPORT,
+  CANVAS_SHARE_IMAGES_MAX_BYTES,
   type CanvasStaticExportBlock,
   DESIGN_FRAME_KIT,
   type CanvasShareImage,
@@ -153,6 +154,43 @@ function themeStyles(): string {
 }
 
 /**
+ * Every share image written once as base64, and room for repeats. Each
+ * reference is written in as a whole `data:` image, so a frame that names one
+ * large image a hundred times would otherwise build a page of hundreds of
+ * MiB from a document within every input limit.
+ */
+const FRAME_PAGE_IMAGE_BUDGET = Math.ceil(CANVAS_SHARE_IMAGES_MAX_BYTES / 3) * 4 + 128 * 1024;
+
+/**
+ * The address each image reference on a frame page is drawn from. Each
+ * image's first reference is reserved up front, so repeats early in the page
+ * cannot crowd out a different image later; a repeat past the budget draws an
+ * empty image.
+ */
+class FramePageImageBudget {
+  readonly #addresses: ReadonlyMap<string, string>;
+  readonly #drawn = new Set<string>();
+  #spent = 0;
+
+  constructor(addresses: ReadonlyMap<string, string>) {
+    this.#addresses = addresses;
+    for (const address of addresses.values()) this.#spent += address.length;
+  }
+
+  address(assetId: string): string {
+    const address = this.#addresses.get(assetId);
+    if (address === undefined) return `octant-asset:${assetId}`;
+    if (!this.#drawn.has(assetId)) {
+      this.#drawn.add(assetId);
+      return address;
+    }
+    if (this.#spent + address.length > FRAME_PAGE_IMAGE_BUDGET) return "data:,";
+    this.#spent += address.length;
+    return address;
+  }
+}
+
+/**
  * The page for one design's frames, as the app draws them but without the
  * host bridge: a shared page has no host to report to. A static design gets a
  * page per request that runs nothing; the response policy, not the markup,
@@ -172,11 +210,9 @@ export function renderDesignFramePage(
       return image === undefined ? [] : [[String(asset.assetId), shareImageAddress(image)]];
     }),
   );
+  const budget = new FramePageImageBudget(addresses);
   const withImages = (markup: string) =>
-    withDesignAssetAddresses(
-      markup,
-      (assetId) => addresses.get(assetId) ?? `octant-asset:${assetId}`,
-    );
+    withDesignAssetAddresses(markup, (assetId) => budget.address(assetId));
   const isDocument = block.size === "document";
   const themed = (block.theme ?? (isDocument ? "workspace" : "none")) === "workspace";
   const viewport = block.size === "document" ? undefined : CANVAS_DESIGN_VIEWPORT[block.size];

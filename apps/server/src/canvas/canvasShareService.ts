@@ -180,7 +180,11 @@ export class CanvasShareService {
    */
   /** The images a recorded snapshot names, by digest, for the host to keep their bytes. */
   imagesOf(snapshotId: string): ReadonlyArray<CanvasShareImageEntry> {
-    return this.#records.get(snapshotId)?.document.images ?? [];
+    // A revoked snapshot keeps no bytes, even when its share is replayed.
+    const record = this.#records.get(snapshotId);
+    return record === undefined || record.status === "revoked"
+      ? []
+      : (record.document.images ?? []);
   }
 
   /**
@@ -229,9 +233,7 @@ export class CanvasShareService {
 
   /** Whether a recorded snapshot names an image by this digest. */
   namesImage(snapshotId: string, sha256: string): boolean {
-    return (this.#records.get(snapshotId)?.document.images ?? []).some(
-      (image) => image.sha256 === sha256,
-    );
+    return this.imagesOf(snapshotId).some((image) => image.sha256 === sha256);
   }
 
   share(
