@@ -41,6 +41,31 @@ export function compareWithBudget(
   }));
 }
 
+/** A missing or malformed measure would silently drop that limit from the check. */
+export function readBudget(
+  value: unknown,
+):
+  | { readonly status: "read"; readonly budget: InitialRendererSizes }
+  | { readonly status: "refused"; readonly message: string } {
+  const record = typeof value === "object" && value !== null ? value : {};
+  const sizes: Partial<Record<keyof InitialRendererSizes, number>> = {};
+  for (const measure of MEASURES) {
+    const size: unknown = Reflect.get(record, measure);
+    if (typeof size !== "number" || !Number.isInteger(size) || size < 0) {
+      return { status: "refused", message: `${BUDGET_PATH} has no whole-byte ${measure}.` };
+    }
+    sizes[measure] = size;
+  }
+  return {
+    status: "read",
+    budget: {
+      mainEntryBytes: sizes.mainEntryBytes ?? 0,
+      cssBytes: sizes.cssBytes ?? 0,
+      gzipBytes: sizes.gzipBytes ?? 0,
+    },
+  };
+}
+
 // Count the static graph Vite loads for index.html. Dynamic imports, the
 // separately built Canvas preview, and non-code assets are not initial code.
 async function measure(root: string) {
@@ -126,9 +151,13 @@ async function main() {
     console.log(JSON.stringify(report, null, 2));
     return;
   }
-  const budget = JSON.parse(
-    await readFile(resolve(repository, BUDGET_PATH), "utf8"),
-  ) as InitialRendererSizes;
+  const read = readBudget(JSON.parse(await readFile(resolve(repository, BUDGET_PATH), "utf8")));
+  if (read.status === "refused") {
+    console.error(read.message);
+    process.exitCode = 1;
+    return;
+  }
+  const { budget } = read;
   const overruns = compareWithBudget(report, budget);
   for (const measure of MEASURES) {
     console.log(`${measure}: ${String(report[measure])} B (budget ${String(budget[measure])} B)`);

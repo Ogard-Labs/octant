@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareWithBudget } from "./benchmark-initial-renderer";
+import { compareWithBudget, readBudget } from "./benchmark-initial-renderer";
 
 const BUDGET = { mainEntryBytes: 1_000, cssBytes: 500, gzipBytes: 800 };
 
@@ -15,5 +15,13 @@ describe("initial renderer budget", () => {
       { measure: "cssBytes", measured: 501, budget: 500 },
       { measure: "gzipBytes", measured: 801, budget: 800 },
     ]);
+  });
+
+  it("refuses a budget file that leaves out a measure, so no limit goes unchecked", () => {
+    expect(readBudget({ mainEntryBytes: 1_000, cssBytes: 500 })).toEqual({
+      status: "refused",
+      message: "scripts/initial-renderer-budget.json has no whole-byte gzipBytes.",
+    });
+    expect(readBudget(BUDGET)).toEqual({ status: "read", budget: BUDGET });
   });
 });
