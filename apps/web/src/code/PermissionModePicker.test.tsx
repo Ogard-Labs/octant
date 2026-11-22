@@ -316,7 +316,7 @@ describe("the mode picker on a Windows host", () => {
     await userEvent.click(screen.getByRole("button", { name: /^Mode:/ }));
     const strictCheckbox = await screen.findByRole("menuitemcheckbox", { name: /^Strict/ });
     expect(strictCheckbox).not.toHaveAttribute("aria-disabled", "true");
-    expect(strictCheckbox).toHaveTextContent("Windows AppContainer and Job Object");
+    expect(strictCheckbox).toHaveTextContent("Codex's own Windows sandbox");
     await userEvent.click(strictCheckbox);
     expect(onStrictChange).toHaveBeenCalledWith(true);
 

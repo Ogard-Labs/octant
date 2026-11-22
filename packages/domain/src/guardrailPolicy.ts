@@ -265,7 +265,7 @@ export function isWindowsStrictConfinedTurn(input: {
  * Why a provider turn at `access` refuses on this host, or undefined when it
  * may start. On Windows outside Strict, every level runs with the provider's
  * own approvals and no Octant sandbox claimed. Under canonical Strict, phase 1
- * admits Full access with Codex (AppContainer + Job Object) and refuses every
+ * admits Full access with Codex (its commands in Codex's own sandbox) and refuses every
  * other provider or level by name. Legacy `fullAccessSandbox` without
  * canonical Strict is refused rather than reused or silently run unconfined.
  * Octant's own terminals and commands keep {@link hostSandboxRefusal}.
@@ -291,7 +291,7 @@ export function hostProviderTurnRefusal(input: {
  * How one provider launch runs on a Windows host, decided from that launch's
  * own mode, level, driver kind and Strict value, so no earlier launch or cached
  * read admits another. `confined` starts verified native Codex at Full access
- * inside the Windows AppContainer + Job Object sandbox; `unconfined` starts
+ * with its commands in Codex's own elevated sandbox; `unconfined` starts
  * outside Strict with no Octant sandbox (at Full access with no approvals, or
  * below it / in Chat with the provider's own rules and approvals). A launch
  * that does not say whether it is Strict is Strict outside open Full access.

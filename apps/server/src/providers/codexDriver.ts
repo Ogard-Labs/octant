@@ -2,7 +2,7 @@ import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { createHash, randomUUID } from "node:crypto";
 import { lstatSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep, win32 } from "node:path";
 import {
   CODEX_BLOCKABLE_TOOLS,
   mcpServerTool,
@@ -81,6 +81,12 @@ import {
 import { providerApprovalCall } from "./providerApprovalCall";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { isAtLeastRelease } from "./releaseVersion";
+import { secretGuardEntries } from "../process/secretGuard";
+import {
+  codexWindowsStrictProfile,
+  WINDOWS_STRICT_CODEX_SANDBOX_SETUP_REFUSAL,
+  WINDOWS_STRICT_CODEX_SANDBOX_UNSUPPORTED_REFUSAL,
+} from "./codexWindowsStrictSandbox";
 import { makeCodexNativeSessions } from "./codexNativeSessions";
 import {
   codexRunsNativeSandbox,
@@ -108,6 +114,7 @@ import {
   decodeThreadListResult,
   decodeThreadReadResult,
   decodeThreadTurnsReadResult,
+  decodeWindowsSandboxReadinessResult,
   type CodexThreadTurnsReadResult,
   decodeThreadResumeResult,
   decodeThreadStartResult,
@@ -117,6 +124,7 @@ import {
   decodeTurnStartResult,
   decodeTurnSteerResult,
   type CodexAccountReadResult,
+  type CodexWindowsSandboxReadinessResult,
   type CodexConfigReadResult,
   type CodexDynamicToolSpec,
   type CodexModelListResult,
@@ -629,6 +637,11 @@ export interface CodexApprovalResponse {
 
 export interface CodexClientPort {
   accountRead(): Promise<CodexAccountReadResult>;
+  /**
+   * Whether Codex's own Windows sandbox is set up. Optional: a client without
+   * it reads as not set up, so Windows Strict refuses rather than guessing.
+   */
+  windowsSandboxReadiness?(): Promise<CodexWindowsSandboxReadinessResult>;
   rateLimitsRead(): Promise<CodexRateLimitsReadResult>;
   modelList(cursor?: string): Promise<CodexModelListResult>;
   /** Without `cwd`, the effective config of every layer but a Project's. */
@@ -1348,7 +1361,15 @@ function request<A>(operation: () => Promise<A>): Effect.Effect<A, ProviderFailu
  */
 export type CodexSessionSandbox =
   | { readonly kind: "octant" }
-  | { readonly kind: "native"; readonly writableRoots: readonly string[] };
+  | {
+      readonly kind: "native";
+      readonly writableRoots: readonly string[];
+      /**
+       * Windows Strict at Full access: Codex's own elevated sandbox holds the
+       * level, with no approvals, in place of Octant's wall around the process.
+       */
+      readonly holdsStrict?: true;
+    };
 
 const OCTANT_SANDBOX: CodexSessionSandbox = { kind: "octant" };
 
@@ -1387,6 +1408,13 @@ export function codexExecutionSettings(
       sandbox: "workspace-write",
       approvalsReviewer,
     };
+  }
+  if (policy === "full-access" && sessionSandbox.kind === "native" && sessionSandbox.holdsStrict) {
+    // Windows Strict: Codex's own elevated sandbox is the boundary, so its
+    // commands run in the thread's folders without asking, and a command it
+    // refuses fails rather than leaving the sandbox (`never` raises no
+    // escalation).
+    return { approvalPolicy: "never", sandbox: "workspace-write", approvalsReviewer: "user" };
   }
   if (policy === "full-access") {
     // The opt-in sandbox at Full access runs the process inside Octant's
@@ -1869,6 +1897,8 @@ export function makeCodexClient(connection: CodexAppServerConnection): CodexClie
   return {
     accountRead: () =>
       rpc.request("account/read", { refreshToken: false }, decodeAccountReadResult),
+    windowsSandboxReadiness: () =>
+      rpc.request("windowsSandbox/readiness", undefined, decodeWindowsSandboxReadinessResult),
     rateLimitsRead: () =>
       rpc.request("account/rateLimits/read", undefined, decodeAccountRateLimitsReadResult),
     modelList: (cursor) =>
@@ -2299,6 +2329,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           mode,
           serverPlacement,
           sandboxPolicy !== undefined,
+          sandboxPolicy?.policy.filesystem.readWriteRoots ?? [],
           {
             instanceId: options.instanceId,
             clock,
@@ -2761,6 +2792,8 @@ function makeConnection(
   serverPlacement: ProviderServerPlacement | undefined,
   /** The thread chose a sandbox policy, which keeps Octant's profile. */
   sandboxPolicySelected: boolean,
+  /** The chosen policy's writable folders, which Windows Strict hands Codex's own sandbox. */
+  policyWritableRoots: ReadonlyArray<string>,
   factories: ConnectionFactories,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
@@ -2862,27 +2895,102 @@ function makeConnection(
       mode !== "chat" &&
       input.executionPolicy === "plan" &&
       input.strict === false;
+    const hostPlatform = options.platform ?? process.platform;
+    /** Windows Strict at Full access, which runs Codex's commands in Codex's own sandbox. */
+    const windowsStrictFullAccess = (input: {
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly strict?: boolean;
+    }) =>
+      hostPlatform === "win32" &&
+      input.executionPolicy === "full-access" &&
+      (input.strict === true || sandboxPolicySelected);
     const sessionSandbox = (input: {
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly fullAccessSandbox?: boolean;
       readonly strict?: boolean;
     }): CodexSessionSandbox =>
-      (process.platform === "win32" && input.strict !== true) ||
-      codexRunsNativeSandbox({
-        mode: mode ?? "code",
-        executionPolicy: input.executionPolicy,
-        strict: input.strict,
-        fullAccessSandbox: input.fullAccessSandbox,
-        sandboxPolicySelected,
-      }) ||
-      codexPlanRunsNativeSandbox(input)
-        ? { kind: "native", writableRoots: [projectRoot, ...extraFolders] }
-        : OCTANT_SANDBOX;
+      windowsStrictFullAccess(input)
+        ? {
+            kind: "native",
+            writableRoots: [...new Set([projectRoot, ...extraFolders, ...policyWritableRoots])],
+            holdsStrict: true,
+          }
+        : (process.platform === "win32" && input.strict !== true) ||
+            codexRunsNativeSandbox({
+              mode: mode ?? "code",
+              executionPolicy: input.executionPolicy,
+              strict: input.strict,
+              fullAccessSandbox: input.fullAccessSandbox,
+              sandboxPolicySelected,
+            }) ||
+            codexPlanRunsNativeSandbox(input)
+          ? { kind: "native", writableRoots: [projectRoot, ...extraFolders] }
+          : OCTANT_SANDBOX;
+    /**
+     * Windows Strict's profile for Codex's own sandbox: the session's folders
+     * writable and every store the secret guard protects denied.
+     */
+    const windowsStrictProfile = (launchEnvironment: NodeJS.ProcessEnv | undefined) => {
+      const sandbox = sessionSandbox({ executionPolicy: "full-access", strict: true });
+      return codexWindowsStrictProfile({
+        writableRoots: sandbox.kind === "native" ? sandbox.writableRoots : [],
+        protectedEntries: secretGuardEntries({
+          platform: "win32",
+          homeDirectory: launchEnvironment?.USERPROFILE,
+        }),
+        codexHome:
+          launchEnvironment?.CODEX_HOME ??
+          win32.join(launchEnvironment?.USERPROFILE ?? homedir(), ".codex"),
+        networkOpen: leasedNetworkOpen,
+      });
+    };
+    /**
+     * Fails a Windows Strict session before its thread starts when Codex's own
+     * sandbox cannot hold it: the sandbox's one-time setup is not done, this
+     * Codex cannot say, or the protected files cannot all be named to it.
+     * Nothing is retried without the sandbox.
+     */
+    const refuseWindowsStrictSandbox = (input: {
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly strict?: boolean;
+    }) =>
+      Effect.gen(function* () {
+        if (!windowsStrictFullAccess(input)) return;
+        const readiness = client.windowsSandboxReadiness;
+        const status =
+          readiness === undefined
+            ? undefined
+            : yield* Effect.tryPromise(() => readiness()).pipe(
+                Effect.map((result) => result.status),
+                Effect.orElseSucceed(() => undefined),
+              );
+        if (status === undefined) {
+          return yield* Effect.fail(
+            failure("incompatible", WINDOWS_STRICT_CODEX_SANDBOX_UNSUPPORTED_REFUSAL),
+          );
+        }
+        if (status !== "ready") {
+          return yield* Effect.fail(
+            failure("incompatible", WINDOWS_STRICT_CODEX_SANDBOX_SETUP_REFUSAL),
+          );
+        }
+        if (!isAtLeastRelease(version, CODEX_PERMISSION_PROFILES_RELEASE)) {
+          return yield* Effect.fail(
+            failure(
+              "incompatible",
+              `Codex ${version} cannot take the list of protected files Windows Strict hands its sandbox. Update Codex to ${CODEX_PERMISSION_PROFILES_RELEASE.join(".")} or later, or turn Strict off for this thread.`,
+            ),
+          );
+        }
+        const prepared = windowsStrictProfile(options.environment);
+        if (prepared.status === "refused") {
+          return yield* Effect.fail(failure("incompatible", prepared.reason));
+        }
+      });
     /**
      * The profile a session of this posture runs Codex's own sandbox under,
      * read once its process is leased (the network claim follows the lease).
      */
-    const hostPlatform = options.platform ?? process.platform;
     const nativeProfile = (input: {
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly fullAccessSandbox?: boolean;
@@ -2894,6 +3002,10 @@ function makeConnection(
           : options.environment;
       // This host's sign-in paths name nothing on a server; there the list
       // was resolved for the server's login when Codex started on it.
+      if (windowsStrictFullAccess(input)) {
+        const prepared = windowsStrictProfile(launchEnvironment);
+        return prepared.status === "ready" ? prepared.profile : undefined;
+      }
       const signIns =
         serverPlacement === undefined
           ? codexProtectedSignIns(
@@ -3787,15 +3899,10 @@ function makeConnection(
           Effect.gen(function* () {
             yield* ensureRuntime(codexLeasePosture(input));
             ensureSubscribed();
-            const effectiveExternalSandbox =
-              input.fullAccessSandbox === true ||
-              ((options.platform ?? process.platform) === "win32" &&
-                input.strict === true &&
-                input.executionPolicy === "full-access");
             const settings = codexExecutionSettings(
               input.executionPolicy,
               input.autoApprove,
-              effectiveExternalSandbox,
+              input.fullAccessSandbox,
               sessionSandbox(input),
             );
             const requestedOptions = input.modelOptionValues;
@@ -3820,6 +3927,7 @@ function makeConnection(
             const dynamicTools = codexDynamicTools(input.tools);
             yield* refuseStrictProjectConfig(input);
             yield* refuseServerUnprotectedSignIns(input);
+            yield* refuseWindowsStrictSandbox(input);
             const modeConfig = yield* modeThreadConfig(
               input.nativeSetup,
               input.executionPolicy,
@@ -3922,6 +4030,7 @@ function makeConnection(
             ensureSubscribed();
             yield* refuseStrictProjectConfig(input);
             yield* refuseServerUnprotectedSignIns(input);
+            yield* refuseWindowsStrictSandbox(input);
             const modeConfig = yield* modeThreadConfig(
               input.nativeSetup,
               input.executionPolicy,
@@ -4072,10 +4181,7 @@ function makeConnection(
                         codexTurnExecutionSettings(
                           state.executionPolicy,
                           state.autoApprove,
-                          state.fullAccessSandbox === true ||
-                            ((options.platform ?? process.platform) === "win32" &&
-                              state.strict === true &&
-                              state.executionPolicy === "full-access"),
+                          state.fullAccessSandbox,
                           leasedNetworkOpen,
                           state.sandbox,
                         ),
