@@ -2,7 +2,12 @@ import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { ContinuityScreenContext } from "../continuity/ContinueElsewhere";
 import { readContinuationLink } from "../continuity/continuationLink";
 import type { OctantMode } from "@octant/contracts/modes";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+
+// Loaded with the notices it shows, so the shell's first load carries none of it.
+const LazyRemoteChangeNotices = lazy(async () => ({
+  default: (await import("./RemoteChangeNotices")).RemoteChangeNotices,
+}));
 import type { RemoteSessionBridge } from "@octant/client-runtime";
 import { createConnectionSupervisor, type ConnectionStatus } from "@octant/client-runtime";
 import { useConnectionStatus } from "@octant/client-runtime/use-connection-status";
@@ -24,7 +29,6 @@ import { RemoteDeviceSelfPanel } from "./RemoteDeviceSelfPanel";
 import {
   createRemoteAgentGrantClient,
   createRemoteExtensionClient,
-  createRemoteAccessActivityClient,
   createRemoteNewDeviceAlertsClient,
   createRemotePairedDeviceAdministrationClient,
   createRemoteProductClients,
@@ -32,7 +36,6 @@ import {
   createRemoteProviderOAuth,
 } from "./remoteProductClients";
 import { NewDeviceAlerts } from "../host/NewDeviceAlerts";
-import { ChangeNotices } from "../host/ChangeNotices";
 import { RemoteHostSettings } from "./RemoteHostSettings";
 import { RemoteWorkspace } from "./RemoteWorkspace";
 import { useRemoteSession } from "./useRemoteSession";
@@ -89,10 +92,6 @@ export function RemoteShellView(props: RemoteShellViewProps) {
   );
   const newDeviceAlerts = useMemo(
     () => createRemoteNewDeviceAlertsClient(props.bridge),
-    [props.bridge],
-  );
-  const accessActivity = useMemo(
-    () => createRemoteAccessActivityClient(props.bridge),
     [props.bridge],
   );
   const providerKeys = useMemo(
@@ -202,7 +201,11 @@ export function RemoteShellView(props: RemoteShellViewProps) {
 
       <NewDeviceAlerts client={newDeviceAlerts} />
       {/* The host answers only a device paired at Full; any other shows none. */}
-      {standing.actsAsHostPerson ? <ChangeNotices client={accessActivity} /> : null}
+      {standing.actsAsHostPerson ? (
+        <Suspense fallback={null}>
+          <LazyRemoteChangeNotices bridge={props.bridge} />
+        </Suspense>
+      ) : null}
 
       <ContinuityScreenContext.Provider
         value={{

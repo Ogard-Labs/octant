@@ -1,8 +1,11 @@
 import type { NewDeviceAlertsClient } from "@octant/client-runtime/new-device-alerts-client";
 import { NewDeviceAlerts } from "./NewDeviceAlerts";
 import { AccessActivityList } from "./AccessActivityList";
-import { ChangeNotices } from "./ChangeNotices";
-import type { AccessActivityClient } from "@octant/client-runtime/access-activity-client";
+import { ChangeNotices, type ChangeNoticeLocalActions } from "./ChangeNotices";
+import {
+  createAccessActivityClient,
+  type AccessActivityPort,
+} from "@octant/client-runtime/access-activity-client";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import {
   buildPairingCode,
@@ -20,7 +23,7 @@ import {
   type DeviceAccessLevel,
   type PairedDeviceLifetime,
 } from "@octant/contracts/remote-access";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { failureMessage } from "../lib/failureMessage";
 import {
   SettingRow,
@@ -85,9 +88,11 @@ export interface RemoteAccessSettingsSectionProps {
 
 /** Settings' access activity and change notices, refreshed when the change feed moves. */
 export interface AccessActivitySettings {
-  readonly client: AccessActivityClient;
+  readonly port: AccessActivityPort;
   readonly activityRevision: number;
   readonly noticesRevision: number;
+  /** A desktop window's own controls for a notice's key Undo and revoke. */
+  readonly localActions?: ChangeNoticeLocalActions;
 }
 
 const PAIRED_DEVICE_LIFETIME_LABELS: Readonly<Record<PairedDeviceLifetime, string>> = {
@@ -165,6 +170,12 @@ export function RemoteAccessSettingsSection({
   projectNames,
 }: RemoteAccessSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
+  const accessActivityPort = accessActivity?.port;
+  const accessActivityClient = useMemo(
+    () =>
+      accessActivityPort === undefined ? undefined : createAccessActivityClient(accessActivityPort),
+    [accessActivityPort],
+  );
   const [listener, setListener] = useState<ListenerState>({ kind: "loading" });
   const [listenerMessage, setListenerMessage] = useState<string>();
   const [listenerBusy, setListenerBusy] = useState(false);
@@ -877,19 +888,24 @@ export function RemoteAccessSettingsSection({
         </SettingsSection>
       )}
 
-      {accessActivity === undefined ? null : (
+      {accessActivityClient === undefined || accessActivity === undefined ? null : (
         <SettingsSection
           description="Devices added, removed or given another level, newest first, and who did it. Changes a paired device or an agent made to a thread's level or a provider key are listed above it, with Undo."
           title="Access activity"
         >
-          <ChangeNotices
-            changeRevision={accessActivity.noticesRevision}
-            client={accessActivity.client}
-          />
-          <AccessActivityList
-            changeRevision={accessActivity.activityRevision}
-            client={accessActivity.client}
-          />
+          <div data-setting-id="access-activity">
+            <ChangeNotices
+              changeRevision={accessActivity.noticesRevision}
+              client={accessActivityClient}
+              {...(accessActivity.localActions === undefined
+                ? {}
+                : { localActions: accessActivity.localActions })}
+            />
+            <AccessActivityList
+              changeRevision={accessActivity.activityRevision}
+              client={accessActivityClient}
+            />
+          </div>
         </SettingsSection>
       )}
 

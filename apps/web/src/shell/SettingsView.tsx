@@ -1,3 +1,5 @@
+import type { ChangeNoticeLocalActions } from "../host/ChangeNotices";
+import { AgentAccessResult, decodeAgentAccessCommand, decodeHostAnswer } from "@octant/contracts";
 import type { NewDeviceAlertsClient } from "@octant/client-runtime/new-device-alerts-client";
 import type { AccessActivitySettings } from "../host/RemoteAccessSettingsSection";
 import { SandboxRestrictionsSettings } from "../settings/SandboxRestrictionsSettings";
@@ -238,7 +240,9 @@ import {
   ownerUnlockOf,
   remoteAccessAdministrationOf,
   agentAccessAdministrationOf,
+  type AgentAccessAdministrationBridge,
   type OctantHostBridge,
+  type RemoteAccessAdministrationBridge,
 } from "./hostBridge";
 import { providerSettingsViewProps } from "../providers/providerSettingsViewProps";
 import { ApplicationIdentity } from "./ApplicationIdentity";
@@ -1547,7 +1551,18 @@ function ActiveSectionContent({
             projectNames={props.actProjectNames ?? NO_PROJECT_NAMES}
             pairedDeviceLifetime={props.settings.pairedDeviceLifetime}
             newDeviceAlerts={props.newDeviceAlertsClient}
-            accessActivity={props.accessActivity}
+            accessActivity={
+              props.accessActivity === undefined
+                ? undefined
+                : {
+                    ...props.accessActivity,
+                    ...changeNoticeLocalActionsOf(
+                      props.hostBridge,
+                      administration,
+                      agentAccessAdministration,
+                    ),
+                  }
+            }
           />
           {agentAccess}
         </div>
@@ -3827,4 +3842,35 @@ function privacyThreadsFromSettings(props: SettingsViewProps): ReadonlyArray<Pri
       mode: "code" as const,
     })),
   ];
+}
+
+/**
+ * A desktop window's own key, device and grant controls for a change notice:
+ * the host takes these from a window only with the desktop bridge's secret,
+ * which the desktop adds and a renderer never holds. Absent elsewhere, where
+ * a window's notice routes refuse them.
+ */
+function changeNoticeLocalActionsOf(
+  hostBridge: OctantHostBridge | undefined,
+  administration: Pick<RemoteAccessAdministrationBridge, "revokeRemoteDevice"> | undefined,
+  agentAccess: AgentAccessAdministrationBridge | undefined,
+): { readonly localActions?: ChangeNoticeLocalActions } {
+  if (hostBridge === undefined || administration === undefined || agentAccess === undefined) {
+    return {};
+  }
+  return {
+    localActions: {
+      removeProviderApiKey: (instanceId, keyId) =>
+        hostBridge.removeProviderApiKey(instanceId, keyId),
+      revokeDevice: (deviceId) => administration.revokeRemoteDevice(deviceId),
+      endAgentGrant: async (grantId) => {
+        const answer = await agentAccess.agentAccessRequest({
+          kind: "command",
+          command: decodeAgentAccessCommand({ kind: "revoke", grantId }),
+        });
+        const result = decodeHostAnswer(AgentAccessResult)(answer.body);
+        if (result.kind === "refused") throw new Error(result.message);
+      },
+    },
+  };
 }

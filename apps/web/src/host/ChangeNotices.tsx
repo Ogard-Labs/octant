@@ -1,56 +1,27 @@
 import type { AccessActivityClient } from "@octant/client-runtime/access-activity-client";
-import type { ChangeNotice, ChangeNoticeList } from "@octant/contracts/access-activity";
-import { useCallback, useEffect, useState } from "react";
-import { PERMISSION_MODE_LABEL } from "../code/PermissionModePicker";
+import { useCallback } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
-import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
+import { describeNotice, useChangeNotices, type ChangeNoticeAction } from "./changeNoticeState";
 
-/** A fallback for a surface without the change feed; the feed refreshes it at once. */
-const REFRESH_MS = 30_000;
+/**
+ * A local window's own controls for the changes the host takes from a window
+ * only through the desktop bridge: removing a provider key, revoking a paired
+ * device, ending an agent grant. Each throws when the host refuses it. A paired
+ * device has none and acts through the notice routes.
+ */
+export interface ChangeNoticeLocalActions {
+  readonly removeProviderApiKey: (providerInstanceId: string, keyId: string) => Promise<void>;
+  readonly revokeDevice: (deviceId: string) => Promise<unknown>;
+  readonly endAgentGrant: (grantId: string) => Promise<void>;
+}
 
 export interface ChangeNoticesProps {
   readonly client: AccessActivityClient;
+  readonly localActions?: ChangeNoticeLocalActions;
   /** Advances when the host journals a raised level, a key change, or a dismissal. */
   readonly changeRevision?: number;
-}
-
-/**
- * The change notices this client may see, kept fresh by the change feed, and
- * the action that runs one. A refused read keeps what is shown: a notice must
- * not vanish because one read failed.
- */
-export function useChangeNotices(client: AccessActivityClient, changeRevision?: number) {
-  const [list, setList] = useState<ChangeNoticeList>();
-  const [busy, setBusy] = useState(false);
-  const [refusal, setRefusal] = useState<string>();
-
-  const refresh = useCallback(async () => {
-    const read = await client.readNotices();
-    if (read !== undefined) setList(read);
-  }, [client]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh, changeRevision]);
-  useEffect(() => scheduleVisibleInterval(() => void refresh(), REFRESH_MS), [refresh]);
-
-  const act = useCallback(
-    async (action: "dismiss" | "undo" | "revoke", noticeId: string) => {
-      setBusy(true);
-      setRefusal(undefined);
-      try {
-        const result = await client.act(action, noticeId);
-        if (result.status === "refused") setRefusal(result.message);
-        await refresh();
-      } finally {
-        setBusy(false);
-      }
-    },
-    [client, refresh],
-  );
-  return { notices: list?.notices ?? [], busy, refusal, act };
 }
 
 /**
@@ -60,7 +31,19 @@ export function useChangeNotices(client: AccessActivityClient, changeRevision?: 
  * which notices this client sees and whether each action may run.
  */
 export function ChangeNotices(props: ChangeNoticesProps) {
-  const { notices, busy, refusal, act } = useChangeNotices(props.client, props.changeRevision);
+  const { client, localActions } = props;
+  const runLocally = useCallback(
+    (action: ChangeNoticeAction, noticeId: string) =>
+      localActions === undefined
+        ? Promise.resolve("not-local" as const)
+        : actLocally(client, localActions, action, noticeId),
+    [client, localActions],
+  );
+  const { notices, busy, refusal, act } = useChangeNotices(
+    client,
+    props.changeRevision,
+    runLocally,
+  );
   if (notices.length === 0) return null;
 
   return (
@@ -117,15 +100,41 @@ export function ChangeNotices(props: ChangeNoticesProps) {
   );
 }
 
-/** One line naming who changed what. */
-export function describeNotice(notice: ChangeNotice): string {
-  const who = notice.actor.kind === "agent" ? `The agent ${notice.actor.name}` : notice.actor.label;
-  if (notice.kind === "thread-level-raised") {
-    const thread = notice.threadTitle === undefined ? "a thread" : `“${notice.threadTitle}”`;
-    return `${who} raised ${thread} from ${PERMISSION_MODE_LABEL[notice.from]} to ${PERMISSION_MODE_LABEL[notice.to]}`;
+/**
+ * Runs a window's key Undo or revoke through this computer's own controls,
+ * after a fresh read confirms the notice is still current, then dismisses it.
+ * Answers the refusal to show, nothing when done, or `not-local` for an
+ * action the notice routes take from a window (a thread level's Undo, Dismiss).
+ */
+async function actLocally(
+  client: AccessActivityClient,
+  local: ChangeNoticeLocalActions,
+  action: ChangeNoticeAction,
+  noticeId: string,
+): Promise<string | "not-local" | undefined> {
+  if (action === "dismiss") return "not-local";
+  const notice = (await client.readNotices())?.notices.find(
+    (candidate) => candidate.noticeId === noticeId,
+  );
+  if (notice === undefined) return "That notice is gone or was already handled.";
+  if (action === "undo" && notice.kind === "thread-level-raised") return "not-local";
+  try {
+    if (action === "undo") {
+      if (notice.kind !== "provider-key-added") {
+        return "A replaced key cannot be undone: the earlier key is not kept.";
+      }
+      if (notice.keyId === undefined) {
+        return "This provider's keys changed again since, so Undo could remove the wrong key. Check its keys in Settings.";
+      }
+      await local.removeProviderApiKey(notice.providerInstanceId, notice.keyId);
+    } else if (notice.actor.kind === "agent") {
+      await local.endAgentGrant(notice.actor.grantId);
+    } else {
+      await local.revokeDevice(notice.actor.deviceId);
+    }
+  } catch (error) {
+    return error instanceof Error && error.message !== "" ? error.message : "That did not work.";
   }
-  const provider = notice.providerName ?? "a provider";
-  return notice.kind === "provider-key-added"
-    ? `${who} added a key for ${provider}`
-    : `${who} replaced the key for ${provider}`;
+  const dismissed = await client.act("dismiss", noticeId);
+  return dismissed.status === "refused" ? dismissed.message : undefined;
 }

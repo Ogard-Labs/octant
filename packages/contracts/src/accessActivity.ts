@@ -122,6 +122,16 @@ export const ChangeNotice = Schema.Union(
     actor: ChangeNoticeActor,
     providerInstanceId: Schema.UUID,
     providerName: Schema.optional(label),
+    /**
+     * On a key added: the key's pool id, present only while Undo can still
+     * remove exactly that key. A window removes it through the desktop's own
+     * key path, so the read is what says the notice is still current.
+     */
+    keyId: Schema.optional(
+      Schema.String.pipe(
+        Schema.pattern(/^(default|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/),
+      ),
+    ),
   }).annotations(strict),
 );
 export type ChangeNotice = typeof ChangeNotice.Type;

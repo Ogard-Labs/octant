@@ -8,6 +8,10 @@ const UsageWorkspace = lazy(() =>
 const RemotePairingView = lazy(() =>
   import("../remote/RemotePairingView").then((module) => ({ default: module.RemotePairingView })),
 );
+// A change notice is rare, so its toast and client load after the window's first load.
+const LazyChangeNoticeToast = lazy(() =>
+  import("../host/ChangeNoticeToast").then((module) => ({ default: module.ChangeNoticeToast })),
+);
 const ZenSurface = lazy(() =>
   import("../zen/ZenSurface").then((module) => ({ default: module.ZenSurface })),
 );
@@ -32,6 +36,7 @@ const ZenProjectTerminalCard = lazy(() =>
 );
 
 export {
+  LazyChangeNoticeToast,
   RemotePairingView,
   UsageWorkspace,
   ZenCanvasCard,

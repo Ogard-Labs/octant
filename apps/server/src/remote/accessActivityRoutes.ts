@@ -10,6 +10,7 @@ import {
   type ChangeNoticeDismissed,
 } from "@octant/contracts/access-activity";
 import { isAgentGrantSession, principalActsAsHostPerson } from "../clientPrincipal";
+import { secretsEqual } from "../providers/providerCredentialRoutes";
 import type { Journal } from "../persistence/journal";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import { eventActorForPrincipal } from "../principalEventActor";
@@ -44,6 +45,13 @@ export interface AccessActivityRouteDependencies {
   readonly connection: SqliteConnection;
   readonly journal: Pick<Journal, "append">;
   readonly windowAuthorityStore: WindowAuthorityStore;
+  /**
+   * The desktop bridge secret. Removing a key and revoking a device or grant
+   * stand in for routes that take a window only with it, so a window's key
+   * Undo and revoke here need it too; a renderer never holds it and uses those
+   * routes through the desktop instead.
+   */
+  readonly desktopBridgeSecret: string | undefined;
   readonly names?: ChangeNoticeNames;
   /** A thread's level now, or undefined when the thread is gone. */
   readonly threadLevel: (surface: "code" | "work", threadId: string) => PermissionMode | undefined;
@@ -134,6 +142,19 @@ export function createAccessActivityRouteHandler(dependencies: AccessActivityRou
     if (record === undefined) {
       return refuse(404, "That notice is gone or was already handled.", origin);
     }
+    if (
+      viewer.deviceId === undefined &&
+      (path === CHANGE_NOTICE_ACTION_PATHS.revoke ||
+        (path === CHANGE_NOTICE_ACTION_PATHS.undo &&
+          record.notice.kind !== "thread-level-raised")) &&
+      !holdsBridgeSecret(request)
+    ) {
+      return refuse(
+        403,
+        "From a window, remove the key or revoke the device through this computer's own controls.",
+        origin,
+      );
+    }
     const outcome =
       path === CHANGE_NOTICE_ACTION_PATHS.dismiss
         ? ({ status: "done" } as const)
@@ -152,6 +173,17 @@ export function createAccessActivityRouteHandler(dependencies: AccessActivityRou
     );
     return Response.json({ status: "done" }, { headers: corsHeaders(origin) });
   };
+
+  // The same check the device administration and key routes make of a window:
+  // the secret from the owner-only runtime directory, and no browser Origin.
+  function holdsBridgeSecret(request: Request): boolean {
+    const secret = dependencies.desktopBridgeSecret;
+    return (
+      secret !== undefined &&
+      !request.headers.has("origin") &&
+      secretsEqual(secret, request.headers.get("x-octant-desktop-secret") ?? "")
+    );
+  }
 
   function admit(request: Request, url: URL, origin: string | null): Viewer | Response {
     const bound = readPrincipalRouteContext(request);

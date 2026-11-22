@@ -2656,6 +2656,7 @@ export function wireRemote(deps: RemoteDependencies) {
     connection: persistence.connection,
     journal: persistence.journal,
     windowAuthorityStore,
+    desktopBridgeSecret: options.desktopBridgeSecret,
     names: {
       threadTitle: (surface, threadId) => readThread(surface, threadId)?.title,
       providerName: (id) =>

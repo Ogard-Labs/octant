@@ -28,12 +28,14 @@ export interface AccessActivityClient {
   ) => Promise<ChangeNoticeActionResult>;
 }
 
-export function createAccessActivityClient(port: {
+export interface AccessActivityPort {
   readonly baseUrl: string;
   readonly fetch: typeof globalThis.fetch;
   /** A window's capability; a paired device sends none and its session carries it. */
   readonly windowCapability?: string;
-}): AccessActivityClient {
+}
+
+export function createAccessActivityClient(port: AccessActivityPort): AccessActivityClient {
   const capability =
     port.windowCapability === undefined || port.windowCapability === ""
       ? {}
