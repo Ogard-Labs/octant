@@ -2597,13 +2597,10 @@ export class ChatService {
     if (thread === undefined) return;
     // A pool may route the turn to any of its candidates, and routing probes
     // them all, so each is checked before a route is computed.
-    for (const providerInstanceId of [
-      thread.providerInstanceId,
-      ...(thread.multiModelPool?.candidates ?? [])
-        .filter((candidate) => candidate.hostId === LOCAL_HOST_ID)
-        .map((candidate) => candidate.providerInstanceId),
-    ])
-      this.#refuseUnattendedOn(providerInstanceId, context);
+    this.#refuseUnattendedOn(thread.providerInstanceId, context);
+    for (const candidate of thread.multiModelPool?.candidates ?? [])
+      if (candidate.hostId === LOCAL_HOST_ID)
+        this.#refuseUnattendedOn(candidate.providerInstanceId, context, "routable-only");
   }
 
   /**
@@ -2614,6 +2611,13 @@ export class ChatService {
   #refuseUnattendedOn(
     providerInstanceId: string,
     context: ChatServiceExecutionContext | undefined,
+    /**
+     * `routable-only` for a pool candidate or the fallback: routing and
+     * fallback probing skip a provider that is off, so one still named there
+     * blocks no turn. The thread's own, routed or attempt provider is always
+     * checked.
+     */
+    among: "routable-only" | "always" = "always",
   ): void {
     const unattended =
       context?.windowId === undefined ||
@@ -2624,10 +2628,8 @@ export class ChatService {
     const instance = this.#persistence.readProviderInstance(
       decodeProviderInstanceId(providerInstanceId),
     );
-    // A provider that is off runs nothing: routing and fallback probing skip
-    // it, so a pool entry or fallback that still names it blocks no turn.
-    if (instance?.enabled !== true) return;
-    const refusals = personalSignInRefusals(instance.driverKind);
+    if (among === "routable-only" && instance?.enabled !== true) return;
+    const refusals = personalSignInRefusals(instance?.driverKind ?? "");
     // The grant's own check read the thread's provider; a pool or fallback
     // can still route the agent's turn onto one that refuses outside agents.
     const refusal = unattended ? refusals?.refusesUnattendedRuns : refusals?.refusesOutsideAgents;
@@ -5675,7 +5677,7 @@ export class ChatService {
       preference !== undefined &&
       String(preference.providerInstanceId) !== String(providerInstanceId)
     )
-      this.#refuseUnattendedOn(preference.providerInstanceId, executionContext);
+      this.#refuseUnattendedOn(preference.providerInstanceId, executionContext, "routable-only");
     const candidate =
       preference === undefined ||
       String(preference.providerInstanceId) === String(providerInstanceId)

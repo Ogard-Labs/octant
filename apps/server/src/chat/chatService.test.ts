@@ -190,6 +190,39 @@ const directories: Array<string> = [];
 const now = "2026-07-19T22:10:00.000Z";
 const ANTIGRAVITY_UNATTENDED_REFUSAL =
   "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Choose a provider that uses a Gemini API key, such as Gemini CLI with an API key.";
+/**
+ * Answers each question a parked turn still asks, as its person would, and
+ * waits until the turn has completed, so a test leaves no turn running.
+ */
+async function finishParkedTurn(
+  service: { execute: ChatService["execute"]; read: ChatService["read"] },
+  threadId: ChatThreadId,
+): Promise<void> {
+  const window = decodeWindowId("84000000-0000-4000-8000-0000000000ff");
+  await until(() => {
+    const view = service.read(threadId);
+    const turn = view.turns.at(-1);
+    const attempt = turn?.attempts.at(-1);
+    const question = attempt?.pendingQuestion;
+    if (turn !== undefined && attempt !== undefined && question !== undefined)
+      void service
+        .execute(
+          {
+            kind: "answer-chat-turn-question",
+            threadId,
+            expectedVersion: view.thread.version,
+            turnId: turn.id,
+            attemptId: attempt.id,
+            requestId: question.requestId,
+            answer: question.options[0]?.label ?? "Yes",
+          },
+          { windowId: window },
+        )
+        .catch(() => undefined);
+    return attempt?.outcome === "completed";
+  });
+}
+
 const ids = {
   actor: "84000000-0000-4000-8000-000000000001",
   correlation: "84000000-0000-4000-8000-000000000002",
@@ -7725,7 +7758,7 @@ describe("ChatService", () => {
       title: "Routed and waiting",
     });
     if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-    void service.execute(
+    const sending = service.execute(
       {
         kind: "send-chat-turn",
         threadId: created.thread.id,
@@ -7743,6 +7776,10 @@ describe("ChatService", () => {
       fallbackProvider,
     );
     expect(String(created.thread.providerInstanceId)).not.toBe(fallbackProvider);
+    await finishParkedTurn(service, created.thread.id);
+    // The send settles with its turn.
+    await sending.catch(() => undefined);
+    await until(() => liveTurns.read(String(created.thread.id)) === undefined);
   });
 
   it("takes no outside agent's answer to a question from an attempt running on Google Antigravity", async () => {
@@ -7759,7 +7796,7 @@ describe("ChatService", () => {
       title: "Antigravity question",
     });
     if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-    void service.execute(
+    const sending = service.execute(
       {
         kind: "send-chat-turn",
         threadId: created.thread.id,
@@ -7799,6 +7836,14 @@ describe("ChatService", () => {
     await expect(answer({ windowId: window })).resolves.toMatchObject({
       kind: "attempt-updated",
     });
+    // The set's next question parks the turn again; stop it so nothing runs on.
+    await until(
+      () =>
+        service.read(created.thread.id).turns[0]?.attempts[0]?.pendingQuestion?.questionIndex === 2,
+    );
+    await finishParkedTurn(service, created.thread.id);
+    // The send settles with its turn.
+    await sending.catch(() => undefined);
   });
 
   it("shows and answers a provider's question set, one question at a time", async () => {
