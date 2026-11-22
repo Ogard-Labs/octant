@@ -1,4 +1,5 @@
 import { configureSandboxNetworkSnapshot } from "../process/sandboxRuntimePolicy";
+import { listServerProjectListeners } from "../serverProjects/serverProjectListeners";
 import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
 import type { HubActScopeSlot } from "../hub/hubActScope";
 import { activeSandboxPolicy, configureSandboxToolNetwork } from "../process/sandboxRuntimePolicy";
@@ -326,10 +327,26 @@ export function wireHarness(deps: HarnessDependencies) {
     pinnedKnownHosts: (server) => serverConnection.pinnedKnownHostsFile(server),
     refuses: (server) => serverConnection.refusal(server),
     record: (record, principal) => serverProjectStore.recordPreview(record, principal),
+    recordForward: (record) => serverProjectStore.recordForward(record),
   });
   const previewRoutes = createServerPreviewTunnelRoutes({
     windows: windowAuthorityStore,
     tunnels: serverPreviewTunnels,
+    listeners: async (projectId) => {
+      const project = serverProjectStore.project(projectId);
+      const address = serverProjectStore.addressOf(projectId);
+      if (project === undefined || address.kind !== "address") {
+        return {
+          status: "unavailable",
+          message: "This Project's server is no longer registered.",
+        };
+      }
+      return listServerProjectListeners({
+        connection: serverConnection,
+        server: address.server,
+        folder: project.folder,
+      });
+    },
     isPersonPairedDeviceCurrent,
   });
   // Machines in the person's own cloud account, each bound as a server

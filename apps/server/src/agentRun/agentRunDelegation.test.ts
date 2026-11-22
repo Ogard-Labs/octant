@@ -244,6 +244,33 @@ describe("agentRunTargetAvailability", () => {
     ]);
   });
 
+  it("never offers Google Antigravity as a helper target, and names why", () => {
+    const antigravity = runtime("80000000-0000-4000-8000-000000000023", "Antigravity", "acp");
+    const gemini = runtime("80000000-0000-4000-8000-000000000024", "Gemini CLI", "acp");
+    const availability = agentRunTargetAvailability({
+      project: undefined,
+      instances: [
+        { ...antigravity, driverKind: "antigravity" },
+        { ...gemini, driverKind: "gemini" },
+      ] as never,
+      observedState: () => ({
+        readiness: "ready",
+        models: [model("m")],
+        capabilities: { appManagedTools: "supported" },
+      }),
+      isTargetAllowed: () => true,
+    });
+    expect(availability.targets.map((target) => target.displayName)).toEqual(["Gemini CLI"]);
+    expect(availability.unavailable).toEqual([
+      {
+        providerInstanceId: antigravity.id,
+        displayName: "Antigravity",
+        driverKind: "antigravity",
+        reason: "helper-runs-refused",
+      },
+    ]);
+  });
+
   it("offers a runtime whose Octant tools are mixed only to a child that runs at Full access", () => {
     const openCode = {
       id: "80000000-0000-4000-8000-000000000030",

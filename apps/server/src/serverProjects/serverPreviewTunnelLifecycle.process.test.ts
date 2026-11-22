@@ -53,8 +53,11 @@ vi.mock("node:net", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:net")>();
   return {
     ...actual,
-    createServer: (connection: (socket: Socket) => void) => {
-      const listener = actual.createServer(connection);
+    createServer: (
+      options: { readonly allowHalfOpen?: boolean },
+      connection: (socket: Socket) => void,
+    ) => {
+      const listener = actual.createServer(options, connection);
       const listen = listener.listen.bind(listener);
       Object.assign(listener, {
         listen(port: number, host: string, ready: () => void) {
@@ -169,6 +172,42 @@ async function lost(tunnels: ServerPreviewTunnels, port: number) {
 }
 
 describe.skipIf(process.platform === "win32")("owned preview cleanup receipts", () => {
+  it("settles and journals a stopped forward while a reply still drains after SSH exited", async () => {
+    const records: Array<{ readonly event: string; readonly reason?: string }> = [];
+    const tunnels = new ServerPreviewTunnels({
+      now: () => Date.now(),
+      address: () => ({ server: { alias: "web", user: "deploy" }, identity: "binding" }),
+      ownerCurrent: () => true,
+      agentSocket: () => undefined,
+      record: () => true,
+      recordForward: (record) => {
+        records.push(record);
+        return true;
+      },
+    });
+    owned.push(tunnels);
+    const started = await tunnels.startForward("site", "person", 5173);
+    if (started.kind !== "forward") throw new Error("forward refused");
+    // A half-open client keeps the accepted socket open after SSH exits, as one
+    // still reading a long reply does.
+    const client = connect({
+      port: started.view.localPort,
+      host: "127.0.0.1",
+      allowHalfOpen: true,
+    });
+    client.on("error", () => undefined);
+    const [data] = await once(client, "data");
+    expect(String(data)).toBe("ready");
+    const latest = native.children.at(-1);
+    if (latest === undefined) throw new Error("missing owned process");
+    latest.child.kill("SIGUSR1");
+    await latest.closed;
+    const stopped = await tunnels.stopForward("site", "person");
+    expect(stopped.kind).toBe("forward");
+    expect(records.at(-1)).toMatchObject({ event: "closed", reason: "stopped" });
+    client.destroy();
+  });
+
   it("waits for the same stopped cleanup when shutdown races a delayed child close", async () => {
     const { tunnels } = fixture();
     const view = await opened(tunnels);

@@ -4456,7 +4456,13 @@ Chat still take no app-managed tools.
   Work turn cannot withhold them and a routine never runs above its snapshot.
   The catalog offers an approval-gated Work-compatible profile with that same
   filesystem, shell, and Git authority; it needs no additional Code-only
-  profile. A routine asks first by default: a Full access profile is not eligible,
+  profile. A provider whose profile declares that its personal sign-in does
+  not cover unattended runs (Google Antigravity) blocks at dispatch as
+  `provider-capability-mismatch` with the profile's own sentence, before any
+  thread exists, and every other turn the host starts as itself on it is refused;
+  the same declaration keeps it from helper runs and outside
+  agents ([Provider runtimes: Google Antigravity](design/provider-runtimes.md#google-antigravity)).
+  A routine asks first by default: a Full access profile is not eligible,
   whether or not it was remembered elsewhere (the contract refuses it on the
   snapshot and dispatch blocks it as `full-access-ineligible`), Code runs are
   created approval-gated, and a Work run's unattended first turn runs
@@ -16827,12 +16833,14 @@ approval-gated` command that undoes it. The terminal shows no one-time
   sign-in is never among them: a native sandbox that cannot refuse those
   keeps Octant's profile.
 
-  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                                                                                                  | OS egress below Full access                          | Plan's read-only enforced by                                                                                                                                                                                                               |
-  | ------------------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped under Strict; Work and Code outside Strict unwrapped on the provider's own approvals                                       | `proxied` on macOS; `allow` on Linux; none unwrapped | Octant sandbox: no root write, no exec or fork                                                                                                                                                                                             |
-  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; under Strict the runtime's own sandbox, project root only; outside Strict no Octant-configured sandbox in Work and Code | `allow` on Plan; commands `proxied` on macOS         | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder; on macOS exec only zsh and listed read-only tools, which get no network and write only the launch temporary directory |
-  | Codex app-server (`codexProcess.ts`)                                      | Wrapped                         | Wrapped under Strict; outside Strict unwrapped in Codex's own workspace-write sandbox                                              | `proxied` on macOS; `allow` on Linux                 | Octant sandbox: root read-only; writes only the account home (not its configuration) and a private temporary directory; Codex's own sandbox set to external                                                                                |
-  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Account-read wrapper            | Account-read wrapper                                                                                                               | No network                                           | No turn runs; only its isolated account and private temporary state are available                                                                                                                                                          |
+  | Runtime (module)                                                          | Plan                                                                        | Approval-gated, auto-accept-edits                                                                                                  | OS egress below Full access                          | Plan's read-only enforced by                                                                                                                                                                                                               |
+  | ------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                                                                     | Wrapped under Strict; Work and Code outside Strict unwrapped on the provider's own approvals                                       | `proxied` on macOS; `allow` on Linux; none unwrapped | Octant sandbox: no root write, no exec or fork                                                                                                                                                                                             |
+  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here                                             | Unwrapped; under Strict the runtime's own sandbox, project root only; outside Strict no Octant-configured sandbox in Work and Code | `allow` on Plan; commands `proxied` on macOS         | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder; on macOS exec only zsh and listed read-only tools, which get no network and write only the launch temporary directory |
+  | Codex app-server (`codexProcess.ts`)                                      | Wrapped                                                                     | Wrapped under Strict; outside Strict unwrapped in Codex's own workspace-write sandbox                                              | `proxied` on macOS; `allow` on Linux                 | Octant sandbox: root read-only; writes only the account home (not its configuration) and a private temporary directory; Codex's own sandbox set to external                                                                                |
+  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Account-read wrapper                                                        | Account-read wrapper                                                                                                               | No network                                           | No turn runs; only its isolated account and private temporary state are available                                                                                                                                                          |
+  | Codex on a server Project's server (`codexServerProcess.ts`)              | Codex's own read-only sandbox on the server; Strict refuses it              | Codex's own workspace-write sandbox on the server; Strict refuses it                                                               | The server's own network; nothing of this host's     | Spawns nothing on this host; Octant claims no sandbox on the server                                                                                                                                                                        |
+  | Claude Code on a server Project's server (`claudeServerProcess.ts`)       | Claude Code's own plan mode on the server, with no shell; Strict refuses it | Claude Code's own permission modes and sandbox settings on the server; Strict refuses it                                           | The server's own network; nothing of this host's     | Spawns nothing on this host; Octant claims no sandbox on the server                                                                                                                                                                        |
 
   Wherever a row names the root or the checkout, a Project's extra folders
   get the same rule ([Projects with several folders](#projects-with-several-folders)).
@@ -17503,6 +17511,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   | `modelSwitch`                 | `supported`                                                                                                                        | `supported`                                                                                                                                                                                                                                   | `supported`; the resume names the thread's current model on every prompt                                                                                | `absent`; same                                                                                    | `absent`; same                                                                                                                                      | `absent`; Octant replays history, so the model may change                               | `absent`; Octant replays history, so the model may change                                                 | `absent`; Octant replays history, so the model may change                                    | `absent`                              |
   | `sessionRollback`             | `supported`; a rewind continues a copy of its session cut at the kept turn's anchor, or a text handoff when it has none            | `supported`; from Codex 0.143.0, a rewind continues a copy of its session cut at the kept turn's anchor (`thread/fork` with `lastTurnId`), or a text handoff on older releases, another folder or mode, without an anchor, or on copy failure | `supported`; same as Claude Code, through its own fork route                                                                                            | `supported`; same, a copy of the session file                                                     | `absent`; a rewind starts a fresh session with a text handoff                                                                                       | `supported`; a rewind continues a copy of the transcript cut back at the last kept turn | `supported`; same                                                                                         | `supported`; same                                                                            | `absent`; same                        |
   | `forceStop`                   | `supported`                                                                                                                        | `unsupported`; one process serves every thread                                                                                                                                                                                                | `unsupported`; one process serves every thread                                                                                                          | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `serverPlacement`             | `supported`; its SDK process runs on a server Project's server over SSH                                                            | `supported`; its app-server runs on a server Project's server over SSH                                                                                                                                                                        | `absent`; its Octant tools reach this host's loopback                                                                                                   | `absent`; its Octant tools reach this host's loopback                                             | `absent`; their Octant tools reach this host's loopback                                                                                             | `absent`                                                                                | `absent`; a server Project runs the Octant Harness itself, its hands on the server                        | `absent`                                                                                     | `absent`                              |
   | `sessionCompaction.chat`      | `supported`; `unavailable` when the install lacks `/compact`                                                                       | `supported`; `unavailable` before Codex 0.162.1                                                                                                                                                                                               | `unavailable`; `supported` from 2.2.0                                                                                                                   | `absent`                                                                                          | `absent`                                                                                                                                            | `unsupported`; Octant summarizes                                                        | `unsupported`; Octant summarizes                                                                          | `unsupported`; Octant summarizes                                                             | `absent`                              |
   | `sessionCompaction.work`      | as Chat                                                                                                                            | as Chat                                                                                                                                                                                                                                       | as Chat                                                                                                                                                 | `absent`                                                                                          | `absent`                                                                                                                                            | `unsupported`; Octant summarizes                                                        | `unsupported`; Octant summarizes                                                                          | `unsupported`; Octant summarizes                                                             | `absent`                              |
   | `sessionCompaction.code`      | as Chat                                                                                                                            | as Chat                                                                                                                                                                                                                                       | as Chat                                                                                                                                                 | `absent`                                                                                          | `absent`                                                                                                                                            | `supported`; Octant Harness compacts its own transcript                                 | `supported`; Octant Harness compacts its own transcript                                                   | `supported`; Octant Harness compacts its own transcript                                      | `absent`                              |
@@ -18809,6 +18818,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
       `/api/remote/auth/server-proxy-session`, `/api/remote/auth/sign-out`,
       `/api/remote/auth/rotate-key`, `/api/remote/auth/revoke-self`;
       `GET /api/remote/auth/device`; `POST /api/server-proxy/grants`;
+      `POST /api/server-proxy/forwards`;
       `GET /api/host/resources`; `POST /api/code/local-servers/commands`;
       `GET /api/todos` and `POST /api/todos/commands`; and the Code routes a
       window needs to start a thread on that computer and follow it there:
@@ -18833,8 +18843,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
       seconds), the pace the phone follows a thread at (maintainer request,
       2026-11-19; [Hub and spokes: the hub coordinates](design/hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work)).
       Anything else, including the relay under
-      `/api/server-proxy/<grant>/`, which the desktop's forwarder drives with
-      its own signing, is refused. A request carries only the headers a signed
+      `/api/server-proxy/<grant>/` and a forward's connections at
+      `/api/server-proxy/<forward>`, which the desktop's forwarder and forward
+      listener drive with their own signing, is refused. A request carries only the headers a signed
       request has (`accept`, `content-type`, `cookie` naming only the
       computer's Octant session cookies, `origin` equal to the computer's
       origin, `sec-fetch-site: same-origin`, `x-octant-device-proof`,
@@ -19886,6 +19897,73 @@ approval-gated` command that undoes it. The terminal shows no one-time
     session's end closes it from the host, and closing the host's pages or
     stopping the forwarder closes it here. Any other answer reaches the page as
     the request's failure status, and no frame is sent.
+  - **Port forwards.** A paired device may forward one port on the host's
+    loopback to its own computer as raw TCP, for tools that are not a browser
+    (a database client, a debugger), under the same proxy session.
+    `POST /api/server-proxy/forwards` names either a port or a thread's listed
+    server, as a grant names it (a thread's Local servers row, or a Running
+    services row), never both. The host reads who the device is from its own
+    record, never from the session. A device the host's own person paired may
+    name any port. A device only the hub introduced must name a server
+    (`source-required` otherwise), and the Act item grants it a forward only
+    for a running server of a thread in a Project the item names (maintainer
+    decision, 2026-11-21): the host checks the item for the thread's Project
+    (from its own record of the thread; `outside-act` otherwise, and on a host
+    in no hub), then re-observes the server exactly as a grant request is
+    observed (thread readable, listener listed for it, Octant-owned, in that
+    thread's own worktree, answering, and opening under the thread's Open
+    rule; the same refusal reasons, and `unavailable` when it could not look),
+    and forwards the port it saw that server hold, never one the client sent;
+    a server it saw answering only on `[::1]` is refused `not-found`, since
+    the forward connects to `127.0.0.1`, where another service may hold the
+    same port.
+    An agent grant is refused `not-the-person`. A forward of a thread's server
+    is checked again at every connection: the Act item for that Project, and
+    that the thread's server still holds the port; failing either closes the
+    forward (`outside-act` or `server-gone`) and refuses the connection, while
+    a host that could not look refuses only the connection (503). A forward
+    `rpf_<64 hex>` lasts an hour; a device holds four and a host sixteen
+    (`forward-limit`). Each connection is a signed `GET` WebSocket upgrade at
+    `/api/server-proxy/<forward id>`, carrying binary messages only (a text
+    message closes it with 1003), at most eight per forward (503 past that), and
+    the host bridges it to `127.0.0.1:<port>`; an open connection counts as use
+    of its proxy session, as a relayed socket does. A connection holding more
+    than 8 MiB unsent toward a port that is not reading ends with 1009, so a
+    stalled service cannot grow the host's memory. A forward closes when it expires,
+    when its proxy session ends (a revoke, rotation, sign-out, or disabled
+    listener ends that), and when the host stops; closing it ends its
+    connections with 1008. Opening (actor: the device) and closing (actor: the
+    host) are journaled as `remote-server.forward-opened@1` and
+    `remote-server.forward-closed@1` with the forward, device, and port, never
+    an address or what travels; a forward of a thread's server opens as
+    `remote-server.forward-opened@2`, which also names the thread and its
+    Project. A starting host records closed (`host-stopped`) every forward the
+    journal still shows open, of either version. A forward is cut before its
+    closing is journaled, and a journal that refuses that record stops neither
+    the cut nor the closing of the session's or device's other forwards; the
+    next start records it closed. On the device
+    only the desktop app forwards: its main process listens on `127.0.0.1`
+    alone, on the host's port number when it is free and another free port
+    otherwise, asks the window that opened the forward to sign each
+    connection's upgrade (that window signs only a `GET` at the forward's exact
+    path), and reaches the host through the listener trust rule. The listener
+    closes when the forward expires, when that window closes, when the
+    computer is forgotten, and when the host says the forward or its proxy
+    session has ended: a 404 for a connection's upgrade, or three refusals in
+    a row other than busy (503 or 429), since one 401 may be a stale proof. Anything on the device that can open a loopback
+    connection reaches the forward, including a guarded tool command with a
+    `localServices` grant, a Full access turn, and any process outside
+    Octant's sandbox; the row that forwarded it says so (maintainer decision,
+    2026-11-20). An SSH server with no Octant (a server Project) forwards the
+    same way from a window on this computer alone: each connection is its own
+    `ssh -W 127.0.0.1:<port>` stdio stream, at most eight at once, under the
+    dev-server preview's checks, the listener is on this computer's
+    `127.0.0.1` alone, the forward ends after an hour, at stop and at restart,
+    and its opening and closing are journaled as
+    `server-projects.port-forward-opened@1` and
+    `server-projects.port-forward-closed@1` with the Project and ports, never
+    the server's address. Every device is refused, and the row states the same
+    loopback sentence ([Server Projects: port forwards](design/server-projects.md#person-operated-port-forwards)).
 - **Host-driven provider sign-in.** A local principal may start a descriptor-driven
   PKCE or device-code sign-in. The host, not a provider child and not the
   renderer, owns the loopback redirect, the device poll, and refresh. State and

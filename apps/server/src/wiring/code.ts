@@ -1,3 +1,4 @@
+import type { HubActScopeSlot } from "../hub/hubActScope";
 import { createXcodeDerivedData } from "../apple/xcodeDerivedData";
 import { scanHostWorktrees } from "../code/hostWorktreeDiscovery";
 import { removeHostWorktree } from "../code/hostWorktreeRemoval";
@@ -655,6 +656,8 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
   > & {
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
+    /** The member's Act item, which bounds the Code Projects a hub-introduced device reads. */
+    readonly hubActScopeSlot: HubActScopeSlot;
   };
 
 export function wireCode(deps: CodeDependencies) {
@@ -894,6 +897,7 @@ export function wireCode(deps: CodeDependencies) {
       memoryProposals: deps.projectMemoryAccess.proposals,
       providerFolderScan,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+      hubActScope: deps.hubActScopeSlot.current,
     });
     const agentProfileService = new AgentProfileService({
       persistence,

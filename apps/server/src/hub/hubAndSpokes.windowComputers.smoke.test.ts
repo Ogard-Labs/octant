@@ -23,6 +23,7 @@ import {
   createClientHostRegistry,
   createHostFederationLifecycle,
   createHostFederationTransports,
+  createHubWindowDismissalStore,
   createHubWindowIdentityStore,
   createInMemoryClientHostRegistryStorage,
   createInMemoryDeviceKeyStore,
@@ -171,6 +172,7 @@ function desktopWindow(host: HubTestHost, network: HubTestNetwork) {
   });
   const lifecycle = createHostFederationLifecycle({ registry, transports, deviceKeyStore });
   const introductions: HubWindowGuestRequest[] = [];
+  const dismissals = createHubWindowDismissalStore(storage);
   const sync = async () => {
     const outcome = await syncHubWindowComputers({
       introduce: async (request) => {
@@ -199,6 +201,7 @@ function desktopWindow(host: HubTestHost, network: HubTestNetwork) {
       registry,
       deviceKeyStore,
       identity: createHubWindowIdentityStore(storage),
+      dismissals,
       deviceLabel: `${host.name} window`,
       removeHost: (hostId) => lifecycle.removeLocal(hostId),
       retryDelay: async () => undefined,
@@ -210,7 +213,7 @@ function desktopWindow(host: HubTestHost, network: HubTestNetwork) {
     await lifecycle.sync();
     return outcome;
   };
-  return { sync, registry, transports, lifecycle, introductions };
+  return { sync, registry, transports, lifecycle, introductions, dismissals };
 }
 
 /** A host's Code route as production builds it, over a Code service that keeps the threads it starts. */
@@ -228,7 +231,10 @@ function memberCodeRoutes(member: { current?: HubTestHost }) {
       },
       // B's two threads: this file's in the named Project, the other outside it.
       read: async (_window: unknown, threadId: string) => ({
-        thread: threadId === OTHER_THREAD ? { ...thread, projectId: OTHER_PROJECT } : thread,
+        // A thread this host started is read as it was created.
+        thread:
+          started.find((entry) => (entry as { id?: string }).id === threadId) ??
+          (threadId === OTHER_THREAD ? { ...thread, projectId: OTHER_PROJECT } : thread),
         checkout: { checkoutId: thread.checkoutId },
         lastSequence: 0,
       }),
@@ -478,12 +484,42 @@ describe("a desktop window on a hub member", () => {
     const desktop = desktopWindow(a, network);
     await desktop.sync();
     const onStudio = await readySession(desktop, b);
+    const prepare = (projectId: string) =>
+      onStudio.authenticatedFetch({
+        method: "POST",
+        path: "/api/code/commands",
+        body: JSON.stringify({ kind: "prepare-code-project-checkout", projectId }),
+      });
 
+    // The start's first step, preparing the checkout, is held to the Act item too.
+    expect((await prepare(ACT_PROJECT)).status).toBe(200);
+    expect((await prepare(OTHER_PROJECT)).status).toBe(403);
+    const created = createIn(ACT_PROJECT);
+    const createdThreadId = (JSON.parse(created) as { thread: { id: string } }).thread.id;
     const named = await onStudio.authenticatedFetch({
       method: "POST",
       path: "/api/code/commands",
-      body: createIn(ACT_PROJECT),
+      body: created,
     });
+    // Its first message is a turn in that thread, sent in the named Project.
+    const firstTurn = await onStudio.authenticatedFetch({
+      method: "POST",
+      path: "/api/code/commands",
+      body: JSON.stringify({
+        kind: "start-provider-turn",
+        operationId: crypto.randomUUID(),
+        threadId: createdThreadId,
+        checkoutId: thread.checkoutId,
+        sessionId: "00000000-0000-4000-8000-0000000009a6",
+        prompt: {
+          contentId: "00000000-0000-4000-8000-0000000009a7",
+          digest: "d".repeat(64),
+          byteLength: 42,
+        },
+      }),
+    });
+    expect(firstTurn.status, await firstTurn.clone().text()).toBe(200);
+    expect(bCode.operated).toEqual([{ kind: "start-provider-turn", threadId: createdThreadId }]);
     const unnamed = await onStudio.authenticatedFetch({
       method: "POST",
       path: "/api/code/commands",
@@ -615,6 +651,21 @@ describe("a desktop window on a hub member", () => {
     ).toBe(false);
     expect(windowDevices(b, fingerprint).map((device) => device.state)).toEqual(["revoked"]);
     expect(windowDevices(hub, fingerprint).map((device) => device.state)).toEqual(["revoked"]);
+  }, 60_000);
+
+  it("a member the person removed from the window stays off it when the roster is read again", async () => {
+    const { network, a, c } = await startWorld();
+    const desktop = desktopWindow(a, network);
+    await desktop.sync();
+    await desktop.dismissals.dismiss(c.hostId);
+    await desktop.lifecycle.removeLocal(c.hostId);
+    await desktop.sync();
+    expect(
+      (await desktop.registry.list())
+        .filter((host) => host.kind === "remote")
+        .map((host) => host.displayName)
+        .sort(),
+    ).toEqual(["Mac mini", "Studio"]);
   }, 60_000);
 
   it("a member's window lists the hub as a computer labelled hub", async () => {

@@ -516,6 +516,30 @@ describe("Claude Agent SDK port", () => {
     expect(refused.invocation).toBeUndefined();
   });
 
+  test("starts a server session below Full access with no command sandbox, and refuses one asking for it", async () => {
+    const { sandbox: _sandbox, ...withoutSandbox } = openInput;
+    const serverPlacement = {
+      serverName: "devbox",
+      start: () => ({ status: "unreachable" as const, message: "Not reached." }),
+      run: async () => ({ status: "unreachable" as const, message: "Not reached." }),
+    };
+    const harness = makeHarness([safeRuntimeInitialization]);
+    await expect(
+      Effect.runPromise(
+        Effect.scoped(harness.port.openQuery({ ...withoutSandbox, serverPlacement })),
+      ),
+    ).resolves.toBeDefined();
+    expect(harness.invocation?.options).not.toHaveProperty("sandbox");
+
+    const refused = makeHarness([safeRuntimeInitialization]);
+    expect(
+      await failureOf(Effect.scoped(refused.port.openQuery({ ...openInput, serverPlacement }))),
+    ).toEqual({
+      category: "invalid-configuration",
+      message: "Claude sandbox configuration is invalid.",
+    });
+  });
+
   test("sends the sandbox's network to the session's egress proxy port and nothing else", async () => {
     const harness = makeHarness();
     const proxied = {

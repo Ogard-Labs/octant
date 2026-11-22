@@ -28,6 +28,7 @@ import { isLoopbackHostname } from "./shellRoutes";
 import { eventActorForPrincipal } from "./principalEventActor";
 import {
   authenticateRouteWindowId,
+  boundPrincipalIsAgent,
   boundPrincipalIsRestricted,
   authenticateRoutePrincipal,
   readPrincipalRouteContext,
@@ -430,6 +431,7 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
             // The person: a window on this host or a device they paired. Any
             // other device session is refused a secret answer by the service.
             initiator: boundPrincipalIsRestricted(request) ? "agent" : "user",
+            ...(boundPrincipalIsAgent(request) ? { fromOutsideAgent: true } : {}),
             // Only a turn may describe images; other commands carry no check.
             ...(command.kind === "send-chat-turn" ||
             command.kind === "retry-chat-turn" ||

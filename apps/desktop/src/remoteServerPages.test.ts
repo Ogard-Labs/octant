@@ -20,6 +20,7 @@ import {
   recordForwarderPort,
   sendThroughListener,
   upgradeThroughListener,
+  validateRemotePortForwardOpenRequest,
   validateRemoteServerPageOpenRequest,
   type RemoteServerPageRecord,
   type RemoteServerPages,
@@ -719,5 +720,38 @@ describe("the transport to a paired host's listener", () => {
         async () => ({ status: "refused", reason: "pin-mismatch" }),
       ),
     ).rejects.toThrow("This isn't the computer you paired with");
+  });
+});
+
+describe("a port forward from another computer", () => {
+  const forwardRequest = (listenerOrigin = LISTENER) =>
+    validateRemotePortForwardOpenRequest({
+      hostId: HOST_ID,
+      listenerOrigin,
+      forward: { forwardId: `rpf_${"cd".repeat(32)}`, port: 1, expiresAt: Date.now() + 60_000 },
+    });
+
+  it("refuses a forward to a computer the desktop holds no pin for, and listens on nothing", async () => {
+    const { pages } = await harness();
+    expect(await pages.openForward(7, forwardRequest("https://10.0.0.9:8443"))).toEqual({
+      kind: "refused",
+      message: "Octant isn't paired with that computer.",
+    });
+  });
+
+  it("stops listening on this computer's loopback once the window that signs for it closes", async () => {
+    const { pages } = await harness();
+    const opened = await pages.openForward(7, forwardRequest());
+    if (opened.kind !== "listening") throw new Error(opened.message);
+    pages.windowClosed(7);
+    const refused = await new Promise<boolean>((resolve) => {
+      const socket = connectTcp(opened.port, "127.0.0.1");
+      socket.on("error", () => resolve(true));
+      socket.on("connect", () => {
+        socket.destroy();
+        resolve(false);
+      });
+    });
+    expect(refused).toBe(true);
   });
 });

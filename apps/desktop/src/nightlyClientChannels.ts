@@ -167,6 +167,7 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   remoteServerPageSign: "octant-only",
   remoteServerPageSigned: "octant-only",
   remoteServerPageForgetHost: "octant-only",
+  remotePortForwardOpen: "octant-only",
 } as const satisfies Readonly<Record<ChannelKey, NightlyChannelClass>>;
 
 const CLASS_BY_CHANNEL: ReadonlyMap<string, NightlyChannelClass> = new Map(

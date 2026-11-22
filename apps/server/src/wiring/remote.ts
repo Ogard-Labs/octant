@@ -1,4 +1,5 @@
 import { ownerApprovalContext } from "../hub/ownerApprovalFile";
+import { RemotePortForwardService } from "../remote/remotePortForwardService";
 import { createOwnerApprovalHost } from "../hub/ownerApprovalHost";
 import { createOwnerApprovalJournal } from "../hub/ownerApprovalJournal";
 import type { WorkRequestStateWiring } from "./workRequestState";
@@ -34,6 +35,7 @@ import {
   HubMemberId,
   ThreadRetentionThreadId,
   decodeCodeCommand,
+  personalSignInRefusals,
   type HostRestartRecovery,
   type MovedThreadReference,
 } from "@octant/contracts";
@@ -127,6 +129,7 @@ import {
 } from "../agentAccess/agentGrantRoutes";
 import { createAgentAccessListenerRouteHandler } from "../agentAccess/agentAccessRoutes";
 import {
+  chatTurnProviders,
   createAgentSession,
   type AgentSessionDependencies,
 } from "../agentAccess/agentAccessSession";
@@ -451,6 +454,15 @@ export function wireRemote(deps: RemoteDependencies) {
     workTurnService,
   } = deps;
 
+  // Peers and outside agents name a provider by its id as text, so the
+  // instance is found by that text rather than by a branded lookup.
+  const providerDriverKind = (providerInstanceId: string): string =>
+    String(
+      persistence
+        .readProviderInstances()
+        .find((instance) => String(instance.id) === providerInstanceId)?.driverKind ?? "",
+    );
+
   // The proxy route's grant requests run under the paired device's own scope,
   // the same remote read rule product requests are judged by.
   const remoteServerGrantGatewayPort: RemoteServerGrantGatewayPort = {
@@ -471,6 +483,20 @@ export function wireRemote(deps: RemoteDependencies) {
           scopeId: context.scopeId,
           request: input.grantRequest,
           stillAuthorized: input.stillAuthorized,
+          signal: input.signal,
+        }),
+      );
+    },
+    observeThreadServer: (input) => {
+      const context = resolvePrincipalRouteContext({
+        request: input.request,
+        principal: input.principal,
+        abortSignal: input.signal,
+      });
+      return codeProjectAccess.run(context, () =>
+        remoteServerGrants.observeThreadServer({
+          scopeId: context.scopeId,
+          source: input.source,
           signal: input.signal,
         }),
       );
@@ -539,6 +565,29 @@ export function wireRemote(deps: RemoteDependencies) {
   // so a disabled-by-default server never touches host-identity key material.
   // The controller is always constructed so the packaged host controls reach a
   // real lifecycle authority instead of a 503 from an undefined controller.
+  // Ports a paired device reaches on this computer's loopback as raw TCP: any
+  // port for a device its own person paired, a thread's running server in a
+  // Project the Act item names for one the hub introduced. They live in
+  // memory, bound to a proxy session, so a starting host records closed
+  // whatever a past run left open.
+  const remotePortForwards = new RemotePortForwardService({
+    journal: persistence.journal,
+    hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+    now: Date.now,
+    hubActScope: hubActScopeSlot.current,
+    threadProjectId: (threadId) => {
+      const projectId = persistence.readCodeThread(threadId)?.projectId;
+      return projectId === undefined ? undefined : String(projectId);
+    },
+  });
+  try {
+    remotePortForwards.closeLeftOpen();
+  } catch {
+    console.warn("Octant could not record that a past run's port forwards ended.");
+  }
+  setInterval(() => remotePortForwards.sweep(), 60_000).unref();
   const injectedRemoteListenerServices = options.remoteListener?.services;
   const resolveRemoteGatewayServices = (): Omit<RemoteGatewayServices, "config" | "serve"> => {
     if (injectedRemoteListenerServices !== undefined) return injectedRemoteListenerServices;
@@ -585,6 +634,7 @@ export function wireRemote(deps: RemoteDependencies) {
       },
       pushTokenStore: pushNotificationTokenStore,
       remoteServerGrants: remoteServerGrantGatewayPort,
+      remotePortForwards,
     };
   };
   // The private gateway is rebuilt on every enable, so the newest generation
@@ -652,6 +702,7 @@ export function wireRemote(deps: RemoteDependencies) {
               return webOrigin === undefined ? [] : [webOrigin];
             })),
         remoteServerGrants: services.remoteServerGrants ?? remoteServerGrantGatewayPort,
+        remotePortForwards: services.remotePortForwards ?? remotePortForwards,
         agentAccess: (request, facts) => agentAccessListenerRoutes(request, facts),
         serve: options.remoteServe ?? serve,
         config,
@@ -1275,6 +1326,8 @@ export function wireRemote(deps: RemoteDependencies) {
               workTurnService.cancelFirstTurn(scope, command),
           },
           scope: ROUTINE_HOST_SCOPE_ID,
+          helperRunRefusal: (providerInstanceId) =>
+            personalSignInRefusals(providerDriverKind(providerInstanceId))?.refusesHelperRuns,
           onDelegatedThreadCreated: withholdThreadFromPersonMemory,
         }),
         code: createCodeDelegationHost(
@@ -2364,9 +2417,50 @@ export function wireRemote(deps: RemoteDependencies) {
       return work === undefined ? undefined : { projectId: String(work.projectId) };
     },
     threadAccess: (threadId) => {
+      // The running turn's provider is read as well as the thread's own: a
+      // Chat turn a pool or fallback moved takes an answer on that provider.
+      const live = deps.liveTurns.connection(threadId)?.providerInstanceId;
+      const refusalOf = (...providerInstanceIds: ReadonlyArray<string | undefined>) => {
+        for (const providerInstanceId of providerInstanceIds) {
+          if (providerInstanceId === undefined) continue;
+          const refusal = personalSignInRefusals(
+            providerDriverKind(providerInstanceId),
+          )?.refusesOutsideAgents;
+          if (refusal !== undefined) return { outsideAgentRefusal: refusal };
+        }
+        return {};
+      };
       try {
         const chat = persistence.readChatThread(decodeChatThreadId(threadId));
-        if (chat !== undefined) return { kind: "chat", modelId: String(chat.modelId) };
+        if (chat !== undefined) {
+          const fallback =
+            persistence.readChatSettings()?.settings.providerFallback?.providerInstanceId;
+          return {
+            kind: "chat",
+            modelId: String(chat.modelId),
+            ...refusalOf(
+              ...chatTurnProviders({
+                selected: String(chat.providerInstanceId),
+                ...(live === undefined ? {} : { live: String(live) }),
+                ...(chat.multiModelPool === undefined
+                  ? {}
+                  : {
+                      pool: chat.multiModelPool.candidates.map((candidate) => ({
+                        hostId: String(candidate.hostId),
+                        providerInstanceId: String(candidate.providerInstanceId),
+                      })),
+                    }),
+                ...(fallback === undefined ? {} : { fallback: String(fallback) }),
+                isEnabled: (providerInstanceId) =>
+                  persistence
+                    .readProviderInstances()
+                    .some(
+                      (instance) => String(instance.id) === providerInstanceId && instance.enabled,
+                    ),
+              }),
+            ),
+          };
+        }
       } catch {
         // Not a Chat thread id; try the other modes.
       }
@@ -2379,6 +2473,10 @@ export function wireRemote(deps: RemoteDependencies) {
             executionPolicy: code.executionPolicy,
             autoApprove: code.autoApprove === true,
             fullAccessSandbox: code.fullAccessSandbox === true,
+            ...refusalOf(
+              String(code.providerInstanceId),
+              live === undefined ? undefined : String(live),
+            ),
           };
         }
       } catch {
@@ -2392,6 +2490,10 @@ export function wireRemote(deps: RemoteDependencies) {
             modelId: String(work.modelId),
             access: work.access,
             fullAccessSandbox: work.fullAccessSandbox === true,
+            ...refusalOf(
+              String(work.providerInstanceId),
+              live === undefined ? undefined : String(live),
+            ),
           };
     },
     markOutsideContent: (threadId, grant) => {

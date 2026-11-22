@@ -197,6 +197,8 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
     connection: serverConnection,
   });
   serverProjectStore.load();
+  // No forward outlives the run that opened it.
+  serverProjectStore.closeForwardsLeftOpen();
   const serverAttachmentCleanup = new ServerAttachmentCleanup({
     journal: persistence.journal,
     personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },

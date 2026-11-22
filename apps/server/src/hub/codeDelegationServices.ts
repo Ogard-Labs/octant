@@ -10,6 +10,7 @@ import {
   decodeCodeOperationId,
   decodeCodeThreadId,
   decodeProviderSessionId,
+  personalSignInRefusals,
   type Project,
   type ProjectId,
   type ProviderCatalogSnapshot,
@@ -43,6 +44,14 @@ export function createCodeDelegationServices(input: {
   const { scope, code } = input;
   return {
     readProject: (projectId) => input.readProject(projectId),
+    helperRunRefusal: (providerInstanceId) =>
+      personalSignInRefusals(
+        String(
+          input
+            .readProviderInstances()
+            .find((instance) => String(instance.id) === providerInstanceId)?.driverKind ?? "",
+        ),
+      )?.refusesHelperRuns,
     defaultProvider: (projectId) => {
       const project = input.readProject(projectId);
       if (project === undefined || project.type === "chat") return undefined;

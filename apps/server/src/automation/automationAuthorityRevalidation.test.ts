@@ -191,6 +191,26 @@ describe("revalidateAutomationAuthority", () => {
     void definition;
   });
 
+  it("keeps an Antigravity routine's sources watched, leaving its runs to be refused at dispatch", () => {
+    const definition = automationDefinitionFixture();
+    const run = automationRunForDefinition(definition);
+    // Source polling and file arming read the same revalidation; refusing
+    // here would stop them silently, with no run to say why.
+    expect(
+      revalidateAutomationAuthority({
+        definition,
+        run,
+        facts: facts({
+          providerInstance: {
+            id: AUTOMATION_TEST_IDS.providerInstance,
+            enabled: true,
+            driverKind: "antigravity",
+          } as never,
+        }),
+      }),
+    ).toEqual({ kind: "ok" });
+  });
+
   it("digests the task prompt stably", () => {
     expect(automationPromptDigest("Summarize the Project's open work.")).toEqual(
       automationPromptDigest("Summarize the Project's open work."),

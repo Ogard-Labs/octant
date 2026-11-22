@@ -1,4 +1,5 @@
 import { OwnerApprovalId } from "@octant/contracts/owner-approvals";
+import type { ProviderServerPlacement } from "@octant/provider-sdk/driver";
 import { strictKeptForLaunch } from "../strictResolution";
 import { sanitizeLoopNoticeToolName, type StalledTurnScope } from "../providers/turnBudget";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
@@ -794,8 +795,11 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly windowId: WindowId;
     readonly secrets: ReadonlyArray<string>;
+    readonly placesOnServer: boolean;
+    readonly strict: boolean;
   }) =>
     | { readonly status: "bound"; readonly tools: AppManagedToolSet }
+    | { readonly status: "placed"; readonly placement: ProviderServerPlacement }
     | { readonly status: "refused"; readonly message: string }
     | undefined;
   readonly spendCeiling?: {
@@ -1769,6 +1773,10 @@ export function createCodeOperationRuntime(
   const compactableSession = (threadId: CodeThreadId) => {
     const thread = options.persistence.readCodeThread(threadId);
     if (thread === undefined || thread.lifecycle !== "active") return undefined;
+    // Compaction opens its own runtime here, which a server thread's session
+    // cannot run on, so the action is not offered for one.
+    if (options.persistence.readCodeCheckout(thread.checkoutId)?.kind === "remote-root")
+      return undefined;
     const recovered = events.providerSessionForThread(thread.id, NO_OPERATION);
     if (recovered.status !== "ok") return undefined;
     const session = recovered.session;
@@ -3298,6 +3306,11 @@ interface ActiveTurn {
    * this host's checkout tools joins them.
    */
   readonly serverTools?: AppManagedToolSet;
+  /**
+   * A server Project's turn whose runtime runs on the server itself: its own
+   * tools act there, and only the sets that touch this host's records join it.
+   */
+  readonly serverPlacement?: ProviderServerPlacement;
   readonly extensionSelections?: ReadonlyArray<
     import("@octant/contracts/extensions").ExtensionSelection
   >;
@@ -4262,17 +4275,23 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // no refusal after this point leaves them behind. The provider is
     // checked here too: only the Octant Harness runs on a server.
     let serverTools: AppManagedToolSet | undefined;
+    let serverPlacement: ProviderServerPlacement | undefined;
     if (remoteThread) {
       const bound = this.#options.serverCodeTurn?.({
         thread: input.thread,
         windowId: input.windowId,
         secrets,
+        placesOnServer:
+          this.#options.resolveProviderCapabilities?.(input.thread)?.serverPlacement ===
+          "supported",
+        strict: this.#options.resolveStrict?.(input.thread.id) ?? true,
       });
       if (bound === undefined || bound.status === "refused") {
         await input.extensionTools?.close?.().catch(() => undefined);
         return failStart(bound?.message ?? REMOTE_FOLDER_UNSUPPORTED);
       }
-      serverTools = bound.tools;
+      if (bound.status === "bound") serverTools = bound.tools;
+      else serverPlacement = bound.placement;
       // Extensions' tools act on this host; the server tool set is the turn's whole set.
       await input.extensionTools?.close?.().catch(() => undefined);
     }
@@ -4393,15 +4412,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           : {}),
       ...(forkMerges.records.length === 0 ? {} : { pendingForkMerges: forkMerges.records }),
       ...(computerUseDestination === undefined ? {} : { computerUseDestination }),
-      ...(input.extensionTools === undefined || serverTools !== undefined
+      ...(input.extensionTools === undefined || remoteThread
         ? {}
         : { extensionTools: input.extensionTools }),
       // A server thread's runtime runs on its server, where this host's
       // attachments folder is not.
-      ...(input.attachmentsFolder === undefined || serverTools !== undefined
+      ...(input.attachmentsFolder === undefined || remoteThread
         ? {}
         : { attachmentsFolder: input.attachmentsFolder }),
       ...(serverTools === undefined ? {} : { serverTools }),
+      ...(serverPlacement === undefined ? {} : { serverPlacement }),
       ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
         ? {}
         : { extensionSelections: command.extensionSelections }),
@@ -6099,10 +6119,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     ) {
       return undefined;
     }
-    if (active.serverTools !== undefined) {
+    if (active.serverTools !== undefined || active.serverPlacement !== undefined) {
       // The server tools and the few sets that touch only this host's
       // records: every other set reads or acts on a folder or a device of
-      // this host. The runner closes them when the turn ends.
+      // this host. The runner closes them when the turn ends. A runtime on
+      // the server brings its own tools there, so only the latter join it.
       const tools = combineAppManagedToolSets(
         active.serverTools,
         this.#options.serverTurnTools?.({
@@ -6676,6 +6697,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(active.attachmentsFolder === undefined
             ? {}
             : { attachmentsFolder: active.attachmentsFolder }),
+          ...(active.serverPlacement === undefined
+            ? {}
+            : { serverPlacement: active.serverPlacement }),
           prompt,
           ...(delivery.context.length === 0 ? {} : { context: delivery.context }),
           contextAccount,
@@ -6797,7 +6821,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             Effect.promise(async () => {
               // A server folder is no folder of this host, so no local Git
               // process may observe a path that only names it.
-              if (active.serverTools !== undefined) {
+              if (active.serverTools !== undefined || active.serverPlacement !== undefined) {
                 return {
                   status: "not-confirmed" as const,
                   summary: "The checkout is on a server; this host does not observe it.",
@@ -7403,6 +7427,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return (
       this.#active.get(String(active.thread.id)) === active &&
       active.serverTools === undefined &&
+      active.serverPlacement === undefined &&
       thread?.lifecycle === "active" &&
       thread.checkoutId === active.thread.checkoutId &&
       thread.projectId === active.thread.projectId &&

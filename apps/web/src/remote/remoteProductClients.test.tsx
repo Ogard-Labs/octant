@@ -33,4 +33,15 @@ describe("remote product clients", () => {
     expect(read?.searchParams.get("afterSequence")).toBe("4");
     expect(clients.code.threadEvents).toBe("poll");
   });
+
+  it("offers a paired browser a server Project's preview but no port forward onto the host's loopback", () => {
+    const bridge = createRemoteSessionBridge({
+      fetch: vi.fn(),
+      deviceKeyStore: createDefaultDeviceKeyStore(),
+    });
+    const { serverProjects } = createRemoteProductClients(bridge);
+    expect(serverProjects?.previewCommand).toBeTypeOf("function");
+    expect(serverProjects).not.toHaveProperty("forwardCommand");
+    expect(serverProjects).not.toHaveProperty("forwardRead");
+  });
 });
