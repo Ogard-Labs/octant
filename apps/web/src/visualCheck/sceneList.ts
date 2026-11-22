@@ -12,6 +12,18 @@ export interface SceneMeta {
 }
 
 export const SCENE_LIST: ReadonlyArray<SceneMeta> = [
+  { id: "qa-remote-access", narrow: true },
+  { id: "qa-remote-access-paused", narrow: true },
+  { id: "qa-paired-devices", narrow: true },
+  {
+    id: "qa-paired-devices-confirm",
+    narrow: true,
+    open: "div.flex.flex-wrap.items-center.gap-1 > button:nth-last-child(2)",
+  },
+  { id: "qa-device-self-read-only", narrow: true },
+  { id: "qa-device-self-full", narrow: true },
+];
+export const ORIGINAL_SCENE_LIST: ReadonlyArray<SceneMeta> = [
   { id: "home" },
   { id: "code-side-panel", narrow: true },
   { id: "settings-appearance" },
