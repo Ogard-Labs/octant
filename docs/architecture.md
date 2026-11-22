@@ -18184,9 +18184,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   lease on the background native owner. It is
   revalidated before effects and observations; it owns its context and receives
   no parent authority or transfer permission. See [delegated sessions](design/browser-profiles.md#delegated-sessions).
-  Not built yet: today a paired device sees only that a signed-in page exists.
+  A hub-introduced or restricted device sees only that a signed-in page exists.
   The person signs out of a profile (closing its pages and removing its storage)
-  at a local window or, not built yet, a paired device, and the host journals
+  at a local window or a device they paired, and the host journals
   that it happened without naming a site or
   a cookie. The person may also import another browser's cookies into one
   profile, only by picking a browser and profile in Settings: the host reads a
