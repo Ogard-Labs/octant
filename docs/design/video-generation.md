@@ -295,7 +295,10 @@ which the person sets, like any turn.
   - the profile and the provider's opaque job id, kept from the start until
     the provider confirms its copy is removed (or, for a model that cannot
     remove it, until the job ends), so a `forget` retried after a restart
-    reaches the right profile's key;
+    reaches the right profile's key. That cleanup record (profile, driver
+    kind and job id, no prompt or bytes) is kept by the host apart from the
+    thread, so deleting the thread before the provider confirms removal
+    leaves the retry in place.
   - the artifact reference (hash, size, duration, resolution).
 
   It never holds video bytes, prompt text or a provider download URL, as for
@@ -447,8 +450,12 @@ Gemini Omni Flash, for example, declares 3–15 s; 360p, 720p, 1080p and 4K;
 16:9 and 9:16; audio `always`; up to six reference images; a per-token price;
 and `cancel: "running"`, `removal: delete`, with a resume window of 55 days.
 xAI would declare `cancel: "none"`, which puts the Stop line on the card.
-A model priced `per-clip` is offered only at the durations and resolutions it
-has a rate for, so the card never multiplies a flat fee by seconds.
+A model priced `per-clip` is offered only at the combinations of duration,
+resolution and audio it has a rate for, so the card never multiplies a flat
+fee by seconds. Its default is a whole combination that has a rate, the one
+nearest the declared defaults, not each field chosen on its own. The card and
+a call that skips the card use the same lookup. A call whose combination has
+no rate is refused before anything is reserved or sent.
 
 Bundled drivers state prices from the provider's own published pages, checked
 when the driver is built or updated. An aggregator driver (fal) reads each
