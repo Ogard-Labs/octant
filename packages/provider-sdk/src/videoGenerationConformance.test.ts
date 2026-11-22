@@ -42,7 +42,7 @@ const asFailure = (error: unknown) =>
 /** A task-polling provider written only against the seam. */
 function taskDriver(options: { readonly checkFirst: boolean }): VideoGenerationDriver {
   return {
-    driverKind: "runway-video",
+    driverKind: "gemini-video",
     providerHosts: ["video.example.test"],
     create: ({ ports }) => ({
       models: async () => [capabilities],
