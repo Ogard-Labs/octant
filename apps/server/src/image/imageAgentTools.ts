@@ -465,14 +465,24 @@ async function executeHostIconSet(
   });
   if (rendered.status === "refused") return { status: "refused", error: rendered.reason };
   if (request.signal?.aborted) return { status: "not-saved" };
+  // "." is the folder itself, for a site served from it.
+  const under = (path: string) =>
+    request.directory === "." ? path : `${request.directory}/${path}`;
   const files = rendered.files.map((file) => ({
-    relativePath: `${request.directory}/${file.path}`,
+    relativePath: under(file.path),
     bytes: file.bytes,
+    conflicts: (file.conflicts ?? []).map(under),
   }));
   const checkAll = async (): Promise<string | undefined> => {
     for (const file of files) {
       const checked = await iconSets.check(file.relativePath);
       if (checked.status === "refused") return `${checked.reason} Nothing was written.`;
+      for (const conflict of file.conflicts) {
+        const clear = await iconSets.check(conflict);
+        if (clear.status === "refused") {
+          return `${clear.reason} It would be the same resource as ${file.relativePath}. Nothing was written.`;
+        }
+      }
     }
     return undefined;
   };
@@ -509,6 +519,24 @@ async function executeHostIconSet(
   }
   const written: string[] = [];
   for (const file of files) {
+    // Each write is awaited, so the level and the turn's Stop are read again
+    // before the next one starts: a thread moved to Plan or stopped mid-set
+    // writes no further file.
+    const stopped =
+      request.signal?.aborted === true
+        ? "The turn was stopped."
+        : save.posture() === "refuse"
+          ? "Plan mode cannot save files."
+          : undefined;
+    if (stopped !== undefined) {
+      return written.length === 0
+        ? { status: "refused", error: stopped }
+        : {
+            status: "failed",
+            error: `${stopped} The rest of the icon set was not written.`,
+            written,
+          };
+    }
     const saved = await save.write(file.relativePath, file.bytes);
     if (saved.status !== "saved") {
       return {

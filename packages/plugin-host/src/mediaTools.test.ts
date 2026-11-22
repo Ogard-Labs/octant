@@ -529,5 +529,7 @@ describe("public media tool host bridge and built-in plugins", () => {
     expect(iconSet).toHaveBeenCalledWith(
       expect.objectContaining({ attachmentId, target: "web", directory: "public" }),
     );
+    await run({ ...request, directory: "./" });
+    expect(iconSet).toHaveBeenLastCalledWith(expect.objectContaining({ directory: "." }));
   });
 });

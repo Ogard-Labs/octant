@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { MediaIconSetTarget } from "@octant/plugin-api/media-tools";
 import { checkNewFileUnder } from "./generatedImageSave";
+import { pngWithoutAlpha } from "./pngOpacity";
 
 /**
  * macOS's own image tool. Icon sets are resized by it rather than by a bundled
@@ -19,6 +20,23 @@ export interface IconSetFileSpec {
   /** Relative to the icon set's directory. */
   readonly path: string;
   readonly pixels: number;
+  /**
+   * Other files, relative to the same directory, that must not exist either.
+   * Android names a resource by folder and base name, not extension, so an
+   * existing `ic_launcher.webp` beside a new `ic_launcher.png` fails the
+   * project's resource merge even though neither file is overwritten.
+   */
+  readonly conflicts?: ReadonlyArray<string>;
+}
+
+const ANDROID_LAUNCHER_ALTERNATES = ["webp", "jpg", "jpeg", "gif", "xml"] as const;
+
+function androidLauncher(folder: string, pixels: number): IconSetFileSpec {
+  return {
+    path: `${folder}/ic_launcher.png`,
+    pixels,
+    conflicts: ANDROID_LAUNCHER_ALTERNATES.map((extension) => `${folder}/ic_launcher.${extension}`),
+  };
 }
 
 const APPLE_SET = "AppIcon.appiconset";
@@ -43,11 +61,11 @@ export const ICON_SET_SPECS: Readonly<Record<MediaIconSetTarget, ReadonlyArray<I
       { path: `${APPLE_SET}/icon_512x512@2x.png`, pixels: 1024 },
     ],
     android: [
-      { path: "mipmap-mdpi/ic_launcher.png", pixels: 48 },
-      { path: "mipmap-hdpi/ic_launcher.png", pixels: 72 },
-      { path: "mipmap-xhdpi/ic_launcher.png", pixels: 96 },
-      { path: "mipmap-xxhdpi/ic_launcher.png", pixels: 144 },
-      { path: "mipmap-xxxhdpi/ic_launcher.png", pixels: 192 },
+      androidLauncher("mipmap-mdpi", 48),
+      androidLauncher("mipmap-hdpi", 72),
+      androidLauncher("mipmap-xhdpi", 96),
+      androidLauncher("mipmap-xxhdpi", 144),
+      androidLauncher("mipmap-xxxhdpi", 192),
       { path: "playstore-icon.png", pixels: 512 },
     ],
     web: [
@@ -107,6 +125,8 @@ export interface IconSetFile {
   /** Relative to the icon set's directory. */
   readonly path: string;
   readonly bytes: Uint8Array;
+  /** Files that must not exist beside it; see `IconSetFileSpec.conflicts`. */
+  readonly conflicts?: ReadonlyArray<string>;
 }
 
 export type IconSetRenderOutcome =
@@ -126,8 +146,9 @@ const SOURCE_EXTENSION: Readonly<Record<string, string>> = {
 /**
  * Resizes one finished image into every file a target needs, in a private
  * temporary directory that is always removed. The source is checked first:
- * square, at least 1024 pixels, and opaque for iOS, since App Store Connect
- * rejects a transparent iOS icon. Each output is read back and its PNG header
+ * square and at least 1024 pixels. For iOS, App Store Connect rejects an icon
+ * with an alpha channel, so a source that shows any transparency is refused
+ * and an opaque one is saved without its alpha channel. Each output is read back and its PNG header
  * checked against the size it was asked for, so a file `sips` got wrong is
  * refused rather than saved.
  */
@@ -139,20 +160,13 @@ export async function renderIconSet(input: {
   readonly workDirectory: string;
   readonly run: SipsRun;
 }): Promise<IconSetRenderOutcome> {
-  await mkdir(input.workDirectory, { recursive: true, mode: 0o700 });
-  const scratch = await mkdtemp(join(input.workDirectory, "icon-set-"));
+  let scratch: string | undefined;
   try {
+    await mkdir(input.workDirectory, { recursive: true, mode: 0o700 });
+    scratch = await mkdtemp(join(input.workDirectory, "icon-set-"));
     const source = join(scratch, `source.${SOURCE_EXTENSION[input.mime] ?? "png"}`);
     await writeFile(source, input.bytes, { mode: 0o600 });
-    const probed = await input.run([
-      "-g",
-      "pixelWidth",
-      "-g",
-      "pixelHeight",
-      "-g",
-      "hasAlpha",
-      source,
-    ]);
+    const probed = await input.run(["-g", "pixelWidth", "-g", "pixelHeight", source]);
     const width = Number(sipsProperty(probed.stdout, "pixelWidth"));
     const height = Number(sipsProperty(probed.stdout, "pixelHeight"));
     if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0) {
@@ -170,12 +184,6 @@ export async function renderIconSet(input: {
         reason: `Icon sets need an image at least 1024×1024; this one is ${String(width)}×${String(height)}.`,
       };
     }
-    if (input.target === "apple-ios" && sipsProperty(probed.stdout, "hasAlpha") === "yes") {
-      return {
-        status: "refused",
-        reason: "iOS app icons must not be transparent; generate one with an opaque background.",
-      };
-    }
     const files: IconSetFile[] = [];
     // Each size is rendered once and reused, since several paths share one.
     const rendered = new Map<number, Uint8Array>();
@@ -190,9 +198,27 @@ export async function renderIconSet(input: {
         if (dimensions?.width !== spec.pixels || dimensions.height !== spec.pixels) {
           return { status: "refused", reason: `The ${size}-pixel icon could not be made.` };
         }
+        if (input.target === "apple-ios") {
+          const opacity = pngWithoutAlpha(bytes);
+          if (opacity.status === "transparent") {
+            return {
+              status: "refused",
+              reason:
+                "iOS app icons must not be transparent; generate one with an opaque background.",
+            };
+          }
+          if (opacity.status === "unreadable") {
+            return { status: "refused", reason: "The icon's transparency could not be checked." };
+          }
+          bytes = opacity.png;
+        }
         rendered.set(spec.pixels, bytes);
       }
-      files.push({ path: spec.path, bytes });
+      files.push({
+        path: spec.path,
+        bytes,
+        ...(spec.conflicts === undefined ? {} : { conflicts: spec.conflicts }),
+      });
     }
     const contents = iconSetContentsJson(input.target);
     if (contents !== undefined) {
@@ -202,7 +228,9 @@ export async function renderIconSet(input: {
   } catch {
     return { status: "refused", reason: "The image could not be resized." };
   } finally {
-    await rm(scratch, { recursive: true, force: true });
+    // A failed cleanup leaves a private temporary directory behind; it must
+    // not turn a finished render into an exception.
+    if (scratch !== undefined) await rm(scratch, { recursive: true, force: true }).catch(() => {});
   }
 }
 

@@ -39,18 +39,65 @@ function pngHeader(width: number, height: number): Uint8Array {
   return bytes;
 }
 
+/** A valid PNG of one colour: RGB, or RGBA with every pixel at `alpha`. */
+function solidPng(size: number, alpha?: number): Uint8Array {
+  const channels = alpha === undefined ? 3 : 4;
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc = (bytes: Uint8Array) => {
+    let c = 0xffffffff;
+    for (const byte of bytes) c = (crcTable[(c ^ byte) & 0xff] ?? 0) ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type: string, data: Uint8Array) => {
+    const out = new Uint8Array(12 + data.byteLength);
+    const view = new DataView(out.buffer);
+    view.setUint32(0, data.byteLength);
+    out.set(new TextEncoder().encode(type), 4);
+    out.set(data, 8);
+    view.setUint32(8 + data.byteLength, crc(out.subarray(4, 8 + data.byteLength)));
+    return out;
+  };
+  const header = new Uint8Array(13);
+  const headerView = new DataView(header.buffer);
+  headerView.setUint32(0, size);
+  headerView.setUint32(4, size);
+  header.set([8, alpha === undefined ? 2 : 6, 0, 0, 0], 8);
+  const row = new Uint8Array(1 + size * channels);
+  const pixel = alpha === undefined ? [30, 120, 200] : [30, 120, 200, alpha];
+  for (let x = 0; x < size; x += 1) row.set(pixel, 1 + x * channels);
+  const raw = new Uint8Array(row.byteLength * size);
+  for (let y = 0; y < size; y += 1) raw.set(row, y * row.byteLength);
+  const parts = [
+    Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", header),
+    chunk("IDAT", new Uint8Array(deflateSync(raw))),
+    chunk("IEND", new Uint8Array()),
+  ];
+  const png = new Uint8Array(parts.reduce((total, part) => total + part.byteLength, 0));
+  let offset = 0;
+  for (const part of parts) {
+    png.set(part, offset);
+    offset += part.byteLength;
+  }
+  return png;
+}
+
 /** Stands in for `sips`: answers the probe and writes a PNG of the asked size for each resize. */
-function fakeSips(source: { width: number; height: number; alpha: boolean }) {
+function fakeSips(source: { width: number; height: number; alpha?: number }) {
   const calls: Array<ReadonlyArray<string>> = [];
   const run: SipsRun = async (args) => {
     calls.push(args);
     if (args[0] === "-g") {
       return {
-        stdout: `${String(args.at(-1))}\n  pixelWidth: ${String(source.width)}\n  pixelHeight: ${String(source.height)}\n  hasAlpha: ${source.alpha ? "yes" : "no"}\n`,
+        stdout: `${String(args.at(-1))}\n  pixelWidth: ${String(source.width)}\n  pixelHeight: ${String(source.height)}\n`,
       };
     }
     const size = Number(args[args.indexOf("-z") + 1]);
-    writeFileSync(String(args[args.indexOf("--out") + 1]), pngHeader(size, size));
+    writeFileSync(String(args[args.indexOf("--out") + 1]), solidPng(size, source.alpha));
     return { stdout: "" };
   };
   return { run, calls };
@@ -60,7 +107,7 @@ const targets: ReadonlyArray<MediaIconSetTarget> = ["apple-ios", "apple-macos", 
 
 describe("icon set rendering", () => {
   it.each(targets)("makes exactly the files %s needs at their pixel sizes", async (target) => {
-    const sips = fakeSips({ width: 1024, height: 1024, alpha: false });
+    const sips = fakeSips({ width: 1024, height: 1024 });
     const rendered = await renderIconSet({
       bytes: Uint8Array.from([1]),
       mime: "image/png",
@@ -79,7 +126,7 @@ describe("icon set rendering", () => {
   });
 
   it("writes an asset catalog listing every macOS size and scale", async () => {
-    const sips = fakeSips({ width: 1024, height: 1024, alpha: true });
+    const sips = fakeSips({ width: 1024, height: 1024, alpha: 255 });
     const rendered = await renderIconSet({
       bytes: Uint8Array.from([1]),
       mime: "image/png",
@@ -105,8 +152,8 @@ describe("icon set rendering", () => {
     expect(sips.calls.filter((args) => args.includes("-z"))).toHaveLength(7);
   });
 
-  it("writes the single universal iOS icon Xcode 14 accepts", async () => {
-    const sips = fakeSips({ width: 2048, height: 2048, alpha: false });
+  it("writes the single universal iOS icon Xcode 14 accepts, without an alpha channel", async () => {
+    const sips = fakeSips({ width: 2048, height: 2048, alpha: 255 });
     const rendered = await renderIconSet({
       bytes: Uint8Array.from([1]),
       mime: "image/jpeg",
@@ -122,12 +169,16 @@ describe("icon set rendering", () => {
       ],
       info: { author: "xcode", version: 1 },
     });
+    // The source stored an alpha channel with every pixel opaque, as image
+    // models often do; App Store Connect refuses any alpha channel at all.
+    const icon = rendered.files.find((file) => file.path.endsWith("AppIcon-1024.png"));
+    expect(icon?.bytes[25]).toBe(2);
+    expect(pngDimensions(icon?.bytes ?? new Uint8Array())).toEqual({ width: 1024, height: 1024 });
   });
 
   it.each([
-    [{ width: 1024, height: 768, alpha: false }, "web", /square/],
-    [{ width: 512, height: 512, alpha: false }, "web", /at least 1024/],
-    [{ width: 1024, height: 1024, alpha: true }, "apple-ios", /must not be transparent/],
+    [{ width: 1024, height: 768 }, "web", /square/],
+    [{ width: 512, height: 512 }, "web", /at least 1024/],
   ] as const)("refuses a source of %o for %s", async (source, target, reason) => {
     const sips = fakeSips(source);
     const directory = workDirectory();
@@ -141,6 +192,43 @@ describe("icon set rendering", () => {
     expect(rendered).toEqual({ status: "refused", reason: expect.stringMatching(reason) });
     expect(sips.calls.some((args) => args.includes("-z"))).toBe(false);
     expect(readdirSync(directory)).toEqual([]);
+  });
+
+  it("refuses an iOS icon that shows any transparency", async () => {
+    const directory = workDirectory();
+    const rendered = await renderIconSet({
+      bytes: Uint8Array.from([1]),
+      mime: "image/png",
+      target: "apple-ios",
+      workDirectory: directory,
+      run: fakeSips({ width: 1024, height: 1024, alpha: 128 }).run,
+    });
+    expect(rendered).toEqual({
+      status: "refused",
+      reason: expect.stringMatching(/must not be transparent/),
+    });
+    expect(readdirSync(directory)).toEqual([]);
+  });
+
+  it("returns a refusal rather than throwing when its temporary directory cannot be made", async () => {
+    const parent = workDirectory();
+    const blocked = join(parent, "not-a-directory");
+    writeFileSync(blocked, "a file where the work directory should be");
+    const rendered = await renderIconSet({
+      bytes: Uint8Array.from([1]),
+      mime: "image/png",
+      target: "web",
+      workDirectory: blocked,
+      run: fakeSips({ width: 1024, height: 1024 }).run,
+    });
+    expect(rendered).toEqual({ status: "refused", reason: "The image could not be resized." });
+  });
+
+  it("lists the other launcher formats Android would treat as the same resource", () => {
+    const launcher = ICON_SET_SPECS.android.find(
+      (spec) => spec.path === "mipmap-hdpi/ic_launcher.png",
+    );
+    expect(launcher?.conflicts).toContain("mipmap-hdpi/ic_launcher.webp");
   });
 
   it("removes its temporary files when resizing fails", async () => {
@@ -190,51 +278,6 @@ describe("icon set rendering", () => {
     ).toBeTypeOf("function");
   });
 });
-
-/** A valid opaque RGB PNG of one colour, for the real `sips` run. */
-function solidPng(size: number): Uint8Array {
-  const crcTable = Array.from({ length: 256 }, (_, n) => {
-    let c = n;
-    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    return c >>> 0;
-  });
-  const crc = (bytes: Uint8Array) => {
-    let c = 0xffffffff;
-    for (const byte of bytes) c = (crcTable[(c ^ byte) & 0xff] ?? 0) ^ (c >>> 8);
-    return (c ^ 0xffffffff) >>> 0;
-  };
-  const chunk = (type: string, data: Uint8Array) => {
-    const out = new Uint8Array(12 + data.byteLength);
-    const view = new DataView(out.buffer);
-    view.setUint32(0, data.byteLength);
-    out.set(new TextEncoder().encode(type), 4);
-    out.set(data, 8);
-    view.setUint32(8 + data.byteLength, crc(out.subarray(4, 8 + data.byteLength)));
-    return out;
-  };
-  const header = new Uint8Array(13);
-  const headerView = new DataView(header.buffer);
-  headerView.setUint32(0, size);
-  headerView.setUint32(4, size);
-  header.set([8, 2, 0, 0, 0], 8);
-  const row = new Uint8Array(1 + size * 3);
-  for (let x = 0; x < size; x += 1) row.set([30, 120, 200], 1 + x * 3);
-  const raw = new Uint8Array(row.byteLength * size);
-  for (let y = 0; y < size; y += 1) raw.set(row, y * row.byteLength);
-  const parts = [
-    Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk("IHDR", header),
-    chunk("IDAT", new Uint8Array(deflateSync(raw))),
-    chunk("IEND", new Uint8Array()),
-  ];
-  const png = new Uint8Array(parts.reduce((total, part) => total + part.byteLength, 0));
-  let offset = 0;
-  for (const part of parts) {
-    png.set(part, offset);
-    offset += part.byteLength;
-  }
-  return png;
-}
 
 describe.runIf(process.platform === "darwin")("icon set rendering with macOS's sips", () => {
   it.each(targets)("makes every %s icon at its size", async (target) => {

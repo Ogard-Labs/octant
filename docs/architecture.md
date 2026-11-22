@@ -8002,12 +8002,19 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   resizes it (an argument array, never a shell, in a private temporary
   directory that is always removed), so Octant adds no image library; a host
   without `sips` is not offered the operation at all, and a portable resizer
-  is a follow-up. The source must be square and at least 1024 pixels, and
-  opaque for iOS. Every target path is checked for create (inside the folder,
-  not existing) before anything is written, again after the card, and each
-  write is still an exclusive create, so one refused path writes nothing. The
-  level decides as for one save, the card naming the directory and the file
-  count; a client that cannot show the count is not shown the card. For web
+  is a follow-up. The source must be square and at least 1024 pixels. For
+  iOS it must show no transparency, since App Store Connect rejects an icon
+  with an alpha channel; an image whose alpha channel is opaque everywhere, as
+  image models often write, is saved without it. Every target path is checked
+  for create (inside the folder, not existing) before anything is written,
+  again after the card, and each write is still an exclusive create, so one
+  refused path writes nothing; for Android an existing launcher icon in
+  another format (`ic_launcher.webp` beside a new `ic_launcher.png`) is
+  refused too, since Android treats both as one resource. The level and the
+  turn's Stop are read again before each file, so a set stopped part way
+  names the files it wrote. The level decides as for one save, the card naming
+  the directory (`.` is the folder itself) and the file count; a client that
+  cannot show the count is not shown the card. For web
   the result carries the `<link>` tags and the manifest `icons` snippet for
   the agent to place: Octant edits no HTML or manifest file.
   Generation can also take up to four reference images, including a combined

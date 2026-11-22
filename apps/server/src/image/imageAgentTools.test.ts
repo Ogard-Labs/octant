@@ -793,6 +793,83 @@ describe("createImageAgentTools", () => {
       expect(folder.write).not.toHaveBeenCalled();
     });
 
+    it("stops writing when the thread moves to Plan between files, naming what was written", async () => {
+      const folder = iconSetFolder("allow");
+      let level: "allow" | "refuse" = "allow";
+      const write = vi.fn(async (relativePath: string, bytes: Uint8Array) => {
+        const saved = await folder.write(relativePath, bytes);
+        level = "refuse";
+        return saved;
+      });
+      const { set } = tools([imageProfile()], [job("completed")], [], {
+        ...folder,
+        save: { posture: () => level, write },
+      });
+      const outcome = await call(set, iconSet);
+      expect(write).toHaveBeenCalledOnce();
+      expect(outcome.isError).toBe(true);
+      expect(outcome.result).toMatchObject({
+        status: "failed",
+        error: expect.stringMatching(/Plan mode/),
+        written: ["public/favicon-16.png"],
+      });
+    });
+
+    it("writes no further file once the turn is stopped", async () => {
+      const folder = iconSetFolder("allow");
+      const stop = new AbortController();
+      const write = vi.fn(async (relativePath: string, bytes: Uint8Array) => {
+        const saved = await folder.write(relativePath, bytes);
+        stop.abort();
+        return saved;
+      });
+      const { set } = tools([imageProfile()], [job("completed")], [], {
+        ...folder,
+        save: { posture: () => "allow", write },
+      });
+      if (set === undefined) throw new Error("The image tool was not offered.");
+      const outcome = await set.execute({
+        name: IMAGE_TOOL_NAME,
+        inputJson: JSON.stringify(iconSet),
+        signal: stop.signal,
+      });
+      expect(write).toHaveBeenCalledOnce();
+      expect(outcome.result).toMatchObject({
+        status: "failed",
+        written: ["public/favicon-16.png"],
+      });
+    });
+
+    it("refuses an Android set where a launcher icon exists in another format", async () => {
+      const folder = iconSetFolder("allow");
+      folder.iconSets.render.mockResolvedValueOnce({
+        status: "rendered",
+        files: [
+          {
+            path: "mipmap-hdpi/ic_launcher.png",
+            bytes: Uint8Array.from([1]),
+            conflicts: ["mipmap-hdpi/ic_launcher.webp"],
+          },
+        ],
+      } as never);
+      mkdirSync(join(folder.root, "res", "mipmap-hdpi"), { recursive: true });
+      writeFileSync(join(folder.root, "res", "mipmap-hdpi", "ic_launcher.webp"), "existing");
+      const { set } = tools([imageProfile()], [job("completed")], [], folder);
+      const outcome = await call(set, { ...iconSet, target: "android", directory: "res" });
+      expect(outcome.result).toMatchObject({
+        error: expect.stringContaining("res/mipmap-hdpi/ic_launcher.webp already exists"),
+      });
+      expect(folder.write).not.toHaveBeenCalled();
+    });
+
+    it("saves into the folder itself when the directory is .", async () => {
+      const folder = iconSetFolder("allow");
+      const { set } = tools([imageProfile()], [job("completed")], [], folder);
+      const outcome = await call(set, { ...iconSet, directory: "." });
+      expect(outcome.result).toMatchObject({ status: "saved", files: webIcons });
+      expect(existsSync(join(folder.root, "favicon-16.png"))).toBe(true);
+    });
+
     it("is not offered where the host cannot resize images", async () => {
       const folder = iconSetFolder("allow");
       const { set } = tools([imageProfile()], [job("completed")], [], { save: folder.save });

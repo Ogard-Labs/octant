@@ -139,7 +139,7 @@ const IMAGE_DESCRIPTION =
  * told about an operation it cannot use.
  */
 const ICON_SET_DESCRIPTION =
-  " Operation icon-set with an attachmentId from this thread, a target (apple-ios, apple-macos, android, or web), and a directory relative to the folder you work in (for example App/Assets.xcassets, app/src/main/res, or public) resizes that image into every size the target needs, with the Xcode Contents.json where it applies; use it for an app icon or favicons instead of resizing by hand. The image must be square and at least 1024 pixels, and opaque for apple-ios. It writes only new files: if any of them already exists nothing is written. Plan refuses it, and at Ask first the person confirms the directory. For web the result includes the <link> tags and manifest icons to place yourself.";
+  " Operation icon-set with an attachmentId from this thread, a target (apple-ios, apple-macos, android, or web), and a directory relative to the folder you work in (for example App/Assets.xcassets, app/src/main/res, public, or . for the folder itself) resizes that image into every size the target needs, with the Xcode Contents.json where it applies; use it for an app icon or favicons instead of resizing by hand. The image must be square and at least 1024 pixels, and must show no transparency for apple-ios. It writes only new files: if any of them already exists nothing is written. Plan refuses it, and at Ask first the person confirms the directory. For web the result includes the <link> tags and manifest icons to place yourself.";
 
 const IMAGE_INPUT_SCHEMA = {
   type: "object",
@@ -629,7 +629,9 @@ function parseImageToolInput(
     if (directory.length > MAX_ICON_SET_DIRECTORY_CHARACTERS) {
       return { error: "The icon set directory is too long." };
     }
-    const canonical = canonicalizeRelativeReferencePath(directory.trim().replace(/\/+$/u, ""));
+    const destination = directory.trim().replace(/\/+$/u, "");
+    // "." names the folder itself, for a site whose root page lives there.
+    const canonical = destination === "." ? "." : canonicalizeRelativeReferencePath(destination);
     if (canonical === undefined) {
       return { error: "The icon set directory must be inside this thread's folder." };
     }
