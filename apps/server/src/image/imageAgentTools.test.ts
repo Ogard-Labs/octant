@@ -16,8 +16,10 @@ import { openSqlite } from "../persistence/sqlitePort";
 import { SpendCeilingService } from "../spendCeilingService";
 import {
   checkNewFileUnder,
+  createdFileReceiptUnder,
   removeCreatedFileUnder,
   saveGeneratedImageUnder,
+  type CreatedFileReceipt,
 } from "./generatedImageSave";
 import { GeneratedImageStore } from "./generatedImageStore";
 import { createImageAgentTools, IMAGE_TOOL_NAME, type ImageAgentToolPort } from "./imageAgentTools";
@@ -713,8 +715,9 @@ describe("createImageAgentTools", () => {
             files: webIcons.map((path) => ({ path, bytes: Uint8Array.from([1, 2, 3]) })),
           })),
           check: (relativePath: string) => checkNewFileUnder({ root, relativePath }),
-          remove: (relativePath: string, size: number) =>
-            removeCreatedFileUnder({ root, relativePath, size }),
+          receipt: (relativePath: string) => createdFileReceiptUnder({ root, relativePath }),
+          remove: (relativePath: string, receipt: CreatedFileReceipt) =>
+            removeCreatedFileUnder({ root, relativePath, receipt }),
         },
       };
     }
@@ -841,6 +844,52 @@ describe("createImageAgentTools", () => {
       expect(write).toHaveBeenCalledOnce();
       expect(outcome.result).toMatchObject({
         error: expect.stringMatching(/stopped.*Nothing was kept/),
+      });
+      expect(existsSync(join(folder.root, "public", "favicon-16.png"))).toBe(false);
+    });
+
+    it("keeps a written icon someone replaced before the set stopped, and names it", async () => {
+      const folder = iconSetFolder("allow");
+      // The level is read before each write. Once the first favicon exists,
+      // a person's editor swaps it for its own file of the same size, and
+      // the thread moves to Plan.
+      const posture = (): "allow" | "refuse" => {
+        const target = join(folder.root, "public", "favicon-16.png");
+        if (!existsSync(target)) return "allow";
+        rmSync(target);
+        writeFileSync(target, Uint8Array.from([9, 9, 9]));
+        return "refuse";
+      };
+      const { set } = tools([imageProfile()], [job("completed")], [], {
+        ...folder,
+        save: { posture, write: folder.write },
+      });
+      const outcome = await call(set, iconSet);
+      expect(outcome.result).toMatchObject({
+        status: "failed",
+        written: ["public/favicon-16.png"],
+      });
+      expect(existsSync(join(folder.root, "public", "favicon-16.png"))).toBe(true);
+    });
+
+    it("names a file a failed write may have left part written instead of claiming nothing was kept", async () => {
+      const folder = iconSetFolder("allow");
+      let calls = 0;
+      const write = vi.fn(async (relativePath: string, bytes: Uint8Array) => {
+        calls += 1;
+        return calls === 2
+          ? { status: "failed" as const, reason: "The disk is full." }
+          : folder.write(relativePath, bytes);
+      });
+      const { set } = tools([imageProfile()], [job("completed")], [], {
+        ...folder,
+        save: { posture: () => "allow", write },
+      });
+      const outcome = await call(set, iconSet);
+      expect(outcome.result).toMatchObject({
+        status: "failed",
+        error: expect.stringMatching(/may be incomplete/),
+        written: ["public/favicon-32.png"],
       });
       expect(existsSync(join(folder.root, "public", "favicon-16.png"))).toBe(false);
     });

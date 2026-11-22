@@ -254,32 +254,87 @@ export async function checkNewFileUnder(
 }
 
 /**
+ * What an icon set records about each file right after writing it: where it
+ * is and which object it is. Any edit changes the change time, and a
+ * replacement changes the inode, so rollback can tell its own output from a
+ * file someone touched since.
+ */
+export interface CreatedFileReceipt {
+  readonly device: string;
+  readonly inode: string;
+  readonly size: number;
+  readonly changedAt: bigint;
+}
+
+async function existingFileUnder(
+  input: { readonly root: string; readonly relativePath: string },
+  filesystem: WorkFilesystemPort,
+): Promise<{ readonly absolutePath: string; readonly receipt: CreatedFileReceipt } | undefined> {
+  const resolution = await new WorkResolutionService(filesystem).resolveForCreate({
+    binding: {
+      canonicalRoot: input.root,
+      knownCanonicalRoot: input.root,
+      availability: "available",
+      bindingSuperseded: false,
+    },
+    relativePath: canonicalizeWorkRelativePath(input.relativePath),
+  });
+  if (resolution.status !== "resolved-for-create" || resolution.remaining.length !== 1) {
+    return undefined;
+  }
+  const stat = await filesystem.lstat(resolution.absolutePath);
+  if (!stat.isFile || stat.isSymbolicLink || stat.changedAt === undefined) return undefined;
+  return {
+    absolutePath: resolution.absolutePath,
+    receipt: {
+      device: stat.device,
+      inode: stat.inode,
+      size: stat.size,
+      changedAt: stat.changedAt,
+    },
+  };
+}
+
+/** The receipt of a file just written under `root`; undefined when it cannot be proved. */
+export async function createdFileReceiptUnder(
+  input: { readonly root: string; readonly relativePath: string },
+  filesystem: WorkFilesystemPort = liveWorkFilesystem,
+): Promise<CreatedFileReceipt | undefined> {
+  try {
+    return (await existingFileUnder(input, filesystem))?.receipt;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Removes a file this host itself just created under `root`, for an icon set
  * stopped part way, so the folder is left as it was rather than holding files
  * nobody was shown. The parent is proved inside the root as for a create, and
- * only a regular file of exactly the size written is removed, through the
- * confined unlink that acts on the proved directory; anything else is left.
+ * only the very object the receipt names (same device, inode, size and change
+ * time) is removed, through the confined unlink that acts on the proved
+ * directory; a file edited or replaced since is left alone.
  */
 export async function removeCreatedFileUnder(
-  input: { readonly root: string; readonly relativePath: string; readonly size: number },
+  input: {
+    readonly root: string;
+    readonly relativePath: string;
+    readonly receipt: CreatedFileReceipt;
+  },
   filesystem: WorkFilesystemPort = liveWorkFilesystem,
 ): Promise<boolean> {
   try {
-    const resolution = await new WorkResolutionService(filesystem).resolveForCreate({
-      binding: {
-        canonicalRoot: input.root,
-        knownCanonicalRoot: input.root,
-        availability: "available",
-        bindingSuperseded: false,
-      },
-      relativePath: canonicalizeWorkRelativePath(input.relativePath),
-    });
-    if (resolution.status !== "resolved-for-create" || resolution.remaining.length !== 1) {
+    const found = await existingFileUnder(input, filesystem);
+    if (
+      found === undefined ||
+      found.receipt.device !== input.receipt.device ||
+      found.receipt.inode !== input.receipt.inode ||
+      found.receipt.size !== input.receipt.size ||
+      found.receipt.changedAt !== input.receipt.changedAt
+    ) {
       return false;
     }
-    const stat = await filesystem.lstat(resolution.absolutePath);
-    if (!stat.isFile || stat.isSymbolicLink || stat.size !== input.size) return false;
-    await filesystem.unlink(resolution.absolutePath);
+    await filesystem.unlink(found.absolutePath);
     return true;
   } catch {
     return false;

@@ -39,6 +39,7 @@ import type {
   ImageGenerationOfferOutcome,
   ImageGenerationOfferService,
 } from "./imageGenerationOfferService";
+import type { CreatedFileReceipt } from "./generatedImageSave";
 import { webIconSnippets, type IconSetRenderOutcome } from "./iconSetRenderer";
 import type { EnqueueImageJobInput, ImageJobService } from "./imageJobService";
 import type { KeptImageGenerationChoices } from "./keptImageGenerationChoices";
@@ -121,8 +122,13 @@ export interface ImageIconSetPort {
   readonly check: (
     relativePath: string,
   ) => Promise<{ readonly status: "ok" } | { readonly status: "refused"; readonly reason: string }>;
-  /** Removes a file this call created, when the set stops part way; false when it was left. */
-  readonly remove: (relativePath: string, size: number) => Promise<boolean>;
+  /** Which object a file this call just wrote is; undefined when it cannot be proved. */
+  readonly receipt: (relativePath: string) => Promise<CreatedFileReceipt | undefined>;
+  /**
+   * Removes a file this call created, when the set stops part way, only while
+   * it is still the object its receipt names; false when it was left.
+   */
+  readonly remove: (relativePath: string, receipt: CreatedFileReceipt) => Promise<boolean>;
 }
 
 /** What the tool asks the person; the binding adds the thread it asks in. */
@@ -519,20 +525,34 @@ async function executeHostIconSet(
       return { status: "refused", error: "Plan mode cannot save files." };
     }
   }
-  const written: Array<{ readonly relativePath: string; readonly size: number }> = [];
+  const written: Array<{
+    readonly relativePath: string;
+    readonly receipt: CreatedFileReceipt | undefined;
+  }> = [];
   // A set stopped part way removes the files this call created, so the
   // folder is left as it was: a stopped turn drops its tool result, and files
-  // nobody was shown would only block the next try at the same directory.
-  const undo = async (reason: string): Promise<MediaImageIconSetOutcome> => {
+  // nobody was shown would only block the next try at the same directory. A
+  // file is removed only while it is still the object written; one edited or
+  // replaced since, or one whose identity could not be proved, is kept and
+  // named.
+  const undo = async (reason: string, incomplete?: string): Promise<MediaImageIconSetOutcome> => {
     const kept: string[] = [];
     for (const file of written) {
-      if (!(await iconSets.remove(file.relativePath, file.size))) kept.push(file.relativePath);
+      const removed =
+        file.receipt !== undefined && (await iconSets.remove(file.relativePath, file.receipt));
+      if (!removed) kept.push(file.relativePath);
     }
+    // A failed write can leave a partly written file; it is never removed,
+    // since this call cannot prove it created it, but it is named.
+    if (incomplete !== undefined) kept.push(incomplete);
     return kept.length === 0
       ? { status: "refused", error: `${reason} Nothing was kept.` }
       : {
           status: "failed",
-          error: `${reason} These files could not be removed again.`,
+          error:
+            incomplete === undefined
+              ? `${reason} These files were left in place.`
+              : `${reason} These files were left in place; the last may be incomplete.`,
           written: kept,
         };
   };
@@ -548,8 +568,13 @@ async function executeHostIconSet(
           : undefined;
     if (stopped !== undefined) return await undo(stopped);
     const saved = await save.write(file.relativePath, file.bytes);
-    if (saved.status !== "saved") return await undo(`${file.relativePath}: ${saved.reason}`);
-    written.push({ relativePath: saved.relativePath, size: file.bytes.byteLength });
+    if (saved.status !== "saved") {
+      return await undo(`${file.relativePath}: ${saved.reason}`, file.relativePath);
+    }
+    written.push({
+      relativePath: saved.relativePath,
+      receipt: await iconSets.receipt(saved.relativePath),
+    });
   }
   return {
     status: "saved",

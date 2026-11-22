@@ -8012,7 +8012,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   another format (`ic_launcher.webp` beside a new `ic_launcher.png`) is
   refused too, since Android treats both as one resource. The level and the
   turn's Stop are read again before each file, and a set stopped part way
-  removes the files it had written, so the folder is left as it was. The level decides as for one save, the card naming
+  removes the files it had written, so the folder is left as it was. It
+  removes only a file that is still the object it wrote (same device, inode,
+  size and change time), so one a person edited or replaced meanwhile is kept
+  and named, as is a file a failed write may have left part written. The level decides as for one save, the card naming
   the directory (`.` is the folder itself) and the file count; a client that
   cannot show the count is not shown the card. For web
   the result carries the `<link>` tags and the manifest `icons` snippet for

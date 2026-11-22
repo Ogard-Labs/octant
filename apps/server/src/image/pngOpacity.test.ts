@@ -82,16 +82,30 @@ describe("PNG opacity", () => {
     expect(pngWithoutAlpha(Uint8Array.from([1, 2, 3]))).toEqual({ status: "unreadable" });
   });
 
-  it("keeps the chunks that say how to read the colours when it drops the alpha channel", () => {
+  it("keeps the chunks that say how to read the colours, byte for byte, when it drops the alpha channel", () => {
     const source = Buffer.from(EVERY_FILTER_RGBA, "base64");
-    // gAMA 1.0 (100000), placed after IHDR as PNG requires; its CRC is not
-    // checked by the reader, so zero keeps the fixture short.
-    const gama = Buffer.from([0, 0, 0, 4, 0x67, 0x41, 0x4d, 0x41, 0, 1, 0x86, 0xa0, 0, 0, 0, 0]);
+    // A valid gAMA chunk for gamma 1.0 (100000), placed after IHDR as PNG requires.
+    const body = Buffer.from([0x67, 0x41, 0x4d, 0x41, 0, 1, 0x86, 0xa0]);
+    const gama = Buffer.alloc(12 + 4);
+    gama.writeUInt32BE(4, 0);
+    body.copy(gama, 4);
+    gama.writeUInt32BE(crc32(body), 12);
     const tagged = Buffer.concat([source.subarray(0, 33), gama, source.subarray(33)]);
     const result = pngWithoutAlpha(new Uint8Array(tagged));
     if (result.status !== "opaque") throw new Error(result.status);
-    const text = Buffer.from(result.png).toString("latin1");
-    expect(text.indexOf("gAMA")).toBeGreaterThan(text.indexOf("IHDR"));
-    expect(text.indexOf("gAMA")).toBeLessThan(text.indexOf("IDAT"));
+    const out = Buffer.from(result.png);
+    // The same 16 bytes, CRC included, straight after the RGB IHDR.
+    expect(out.subarray(33, 49).equals(gama)).toBe(true);
+    expect(out[25]).toBe(2);
   });
 });
+
+/** The PNG chunk CRC (CRC-32 over the type and data). */
+function crc32(bytes: Uint8Array): number {
+  let c = 0xffffffff;
+  for (const byte of bytes) {
+    c ^= byte;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  }
+  return (c ^ 0xffffffff) >>> 0;
+}
