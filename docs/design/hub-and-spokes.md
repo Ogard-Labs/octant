@@ -81,12 +81,15 @@ view of the provider's own app, never against a real provider sign-in. After thi
 added the same day and is designed, not built. Slices 13 to 20, starting a
 coding session on any member from one window, the hub as the front door, Code
 delegation, adding a computer over SSH, telling every connected device of a
-new one, and placement advice, were added on 2026-11-19; slices 13 and 15 are
-built for directly paired computers, slice 16 is partly built (the Act item
-bounds where a hub-introduced device starts threads, unticking Act ends such
-a device's sessions, and a desktop window on a member lists the hub and the
-other spokes as its computers, the hub bounding it by its own Act list), slice
-18 is built for a hub, and the rest are designed, not built
+new one, and placement advice, were added on 2026-11-19; slices 13, 14 and
+15 are built for directly paired computers, slice 16 is partly built (the
+Act item bounds where a hub-introduced device starts threads, unticking Act
+ends such a device's sessions, and a desktop window on a member lists the
+hub and the other spokes as its computers, the hub bounding it by its own
+Act list), slice 17 (Code delegation) and slice 19 (new-device alerts) are
+partly built, slice 20 (placement advice) is built except showing the level
+beside the roster, slice 18 is built for a hub, and the rest are designed,
+not built
 ([The hub coordinates](#the-hub-coordinates-each-member-runs-its-own-work)).
 What remains of slices 1 to 10 is
 the maintainer's: the live checks the slices name (a real Wake-on-LAN wake, a
@@ -1585,8 +1588,27 @@ Rationale: delegation as a remote child run reuses the existing subagent rule
 path, so B never needs a new authority model. The result coming back as data
 keeps a compromised spoke from steering another spoke's agent.
 
-**Code delegation** ([decision H25](#decisions); designed, not built). Today
-only a Work Project takes delegated work, because a Code thread needs a
+**Code delegation** ([decision H25](#decisions); partly built: the Project
+mark is built, as a `project.code-delegated-code-changed@1` event the
+host's person sets from the Project overview and a device the hub
+introduced is refused; the receiving Code thread, the listing route, a
+Code parent sending Code work, Stop reaching the remote child, and the
+refusal to move a delegated Code thread are built; the three-host smoke
+for a Code delegation and a real-provider run are not yet exercised). A
+delegated Code thread runs on the first turned-on provider in the person's
+provider order, at the first model in that provider's catalog order the
+Project's provider policy allows (whitelist and EU/ZDR tags alike), as the
+composer preselects, and a request naming a provider profile is refused.
+Its branch is
+`octant/delegated/<slug>-<request id>`, made from the marked remote and base
+branch. A pull-request outcome names its base as the `owner/repository` the
+marked remote points at; when that remote names no GitHub repository the
+request is refused before any thread is made; any other outcome keeps the Project's own identity as its base. The sender's grant and the
+Project's mark are checked again immediately before the provider turn
+starts. The delegating member reads the thread's state, and on completion
+is told the changes are on the thread's own branch on this computer; the
+thread's text stays here. A Code Project takes delegated work only once
+marked, because a Code thread needs a
 managed worktree and a delivery target a person confirmed. B offers Code for a
 Code Project only after its person marks that Project as accepting delegated
 Code work, which records the delivery target they confirmed (the remote, base
@@ -1596,7 +1618,12 @@ at most (Full access only under the owner rule above), and marked as having
 read outside content from its first turn, because its task is a peer's text.
 A's agent lists the members that take delegated work and the Projects each
 accepts through a read-only route B filters by its peer grant, with titles
-and no paths. Cancelling the parent cancels the remote Code child as it does a
+and no paths. B bounds the listing it sends (names cut to 200 characters,
+at most 500 Projects, within the route's reply budget) so one long name
+cannot make the asker drop the member. The names are another member's
+text: A marks the asking thread as having read outside content before its
+agent sees them, frames them as data, and withholds the listing when that
+mark cannot be recorded. Cancelling the parent cancels the remote Code child as it does a
 Work child, and a delegated Code thread cannot move, as a delegated Work
 thread cannot.
 
@@ -3250,9 +3277,9 @@ maintainer's hardware, or names the maintainer gate.
      receives it. A request asking for more than the clamp allows is refused with
      the posture it could have had, never run narrower.
    - A remote child has the parent's mode and no more than the parent's posture.
-   - Only Work Projects take delegated work. A Code Project reports no delegable
-     mode, because a Code thread needs a managed worktree and a delivery target a
-     person confirmed. Work asks first and has no read-only posture, so a plan-only
+   - In this slice only Work Projects took delegated work; Code delegation
+     ([above](#spoke-to-spoke-discovery-and-delegation)) later added Code Projects
+     their person marked, with a confirmed delivery target. Work asks first and has no read-only posture, so a plan-only
      request is refused; a named provider profile is refused, and the thread runs on
      the default model the Work settings name.
    - Artifact references are empty: a Work turn reports the paths it changed, not
@@ -3270,9 +3297,10 @@ maintainer's hardware, or names the maintainer gate.
      check, the peer-grant clamp, `peer:A` on B, approvals on B, the framed and
      tainting result, and the cancel on a stopped turn are one set of rules. The
      request takes a task only: a model, `after`, or the parent's conversation is
-     refused. The posture is always Work's approval-gated, clamped by the parent
-     and the grant, never chosen by the agent. Only a Work thread in a Work Project
-     may name a member; a Chat or Code parent, a Project that is not a Work Project,
+     refused. The posture is always approval-gated, clamped by the parent
+     and the grant, never chosen by the agent. Only a Work thread in a Work Project,
+     or (since Code delegation) a Code thread in a Code Project, may name a member;
+     a Chat parent, a Project whose type differs from the parent's mode,
      Work turned off, no hub membership, an unknown member, a paused parent, and a
      member that refuses (no grant for this host, or a grant that does not cover the
      request) each answer as a refusal value, and the target's own words are not
@@ -4075,7 +4103,8 @@ sheets; a real machine and a published listing are maintainer gates.
     approvals are answered within the Act item, and Stop reaches it.
     Verification: server tests and a three-host loopback smoke.
 17. **Code delegation.** The Project mark, the receiving Code host, the
-    member and Project list route, cancel and move as above. Acceptance: B
+    member and Project list route, cancel and move as above. Built, with server tests; the three-host smoke and a real
+    provider run are not yet exercised. Acceptance: B
     refuses Code into an unmarked Project; a delegated Code thread is
     approval-gated, on its own branch, marked as outside content, and its
     approvals cannot be answered from A or the hub. Verification: server
@@ -4093,7 +4122,14 @@ sheets; a real machine and a published listing are maintainer gates.
     client-runtime tests and a three-host loopback smoke.
 20. **Placement advice.** Each member reports a load level that changes
     only after it holds, beside the roster, and a member can stop accepting
-    delegated work with one switch. Verification: server tests.
+    delegated work with one switch. Verification: server tests. Built: the
+    level (light, busy, heavy) comes from memory pressure and live turns and
+    changes after holding two minutes; the hub's status read and the
+    member's Project list carry it with whether the member accepts
+    delegated work, and the switch is in the hub settings (and Settings
+    search). The switch refuses new request ids only, including a start
+    still preparing; a retry of a start whose acceptance was lost gets its
+    original answer. Not built yet: showing the level beside the roster.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

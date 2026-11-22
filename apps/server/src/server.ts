@@ -980,6 +980,7 @@ export function startOctantServer(
       coordinatorWakes,
       codeThreadWakeupPort,
       routeCodeService,
+      onCodeTurnCancelled,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
       transcriptionForTurn,
@@ -2096,6 +2097,8 @@ export function startOctantServer(
       hostDrain,
       shieldServerStore,
       serverConnection,
+      routeCodeService,
+      onCodeTurnCancelled,
       resolveThreadStrict,
       restartRecovery,
       agentGrantRouteSlot,

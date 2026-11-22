@@ -1375,6 +1375,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
             message: "This host cannot start helpers on other members.",
           }
         : remoteDelegationHolder.port.start(input),
+    listTargets: async () => (await remoteDelegationHolder.port?.listTargets?.()) ?? [],
   };
   // Every turn's `octant_agents` tool set binds to the calling thread: the
   // delegation and the cancellation authority it petitions are the same ones
@@ -1517,6 +1518,21 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
           run,
           randomUUID,
         ),
+      recordPeerListingIngestion: () => {
+        try {
+          return (
+            externalContentIngestionStore.record({
+              threadId: input.parentThreadId,
+              provenance: { origin: "tool-result", sourceLabel: "peer-project-listing" },
+              contentReference: `peer-project-listing-${randomUUID()}`,
+              correlationId: randomUUID(),
+              authorized: true,
+            }).kind !== "refused"
+          );
+        } catch {
+          return false;
+        }
+      },
       uuid: randomUUID,
     });
   };

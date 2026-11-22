@@ -29,6 +29,7 @@ const secret = "desktop-secret";
 async function setup(
   listenerStatus?: Parameters<typeof startHubTestHost>[0]["listenerStatus"],
   network = new HubTestNetwork(),
+  delegationAccepting?: { read: () => boolean; set: (accepting: boolean) => void },
 ) {
   const host = await startHubTestHost({
     name: "Mac mini",
@@ -44,6 +45,7 @@ async function setup(
     windowAuthorityStore: authority,
     hub: host.hub,
     spoke: host.spoke,
+    ...(delegationAccepting === undefined ? {} : { delegationAccepting }),
     pairedMergeUnlock: host.pairedMergeUnlock,
     ownerApprovalAnswerUnlock: host.ownerApprovalAnswerUnlock,
     failover: host.failover,
@@ -103,6 +105,47 @@ describe("hub administration over the loopback channel", () => {
     }
     expect(await handle(post("/api/desktop/hub/members"))).toBeUndefined();
     expect(await handle(post("/api/desktop/private-listener/enable"))).toBeUndefined();
+  });
+
+  it("lets a window stop and resume taking delegated work, and reads the switch in the status", async () => {
+    let accepting = true;
+    const { handle } = await setup(undefined, new HubTestNetwork(), {
+      read: () => accepting,
+      set: (value) => {
+        accepting = value;
+      },
+    });
+    const status = async () =>
+      (await (
+        await handle(
+          new Request(`http://127.0.0.1${HUB_ADMINISTRATION_ROUTES.status}`, {
+            headers: {
+              "x-octant-desktop-secret": secret,
+              "x-octant-window-capability": capability,
+            },
+          }),
+        )
+      )?.json()) as { delegation?: { accepting: boolean } };
+
+    expect((await status()).delegation).toEqual({ accepting: true });
+    const off = await handle(
+      post(HUB_ADMINISTRATION_ROUTES.delegationAccepting, { accepting: false }),
+    );
+    expect(off?.status).toBe(200);
+    expect(accepting).toBe(false);
+    expect((await status()).delegation).toEqual({ accepting: false });
+    // The window channel's secret is what admits it; without it nothing changes.
+    const unsigned = await handle(
+      post(
+        HUB_ADMINISTRATION_ROUTES.delegationAccepting,
+        { accepting: true },
+        {
+          "x-octant-desktop-secret": "wrong",
+        },
+      ),
+    );
+    expect(unsigned?.status).not.toBe(200);
+    expect(accepting).toBe(false);
   });
 
   it("turns the Tailscale certificate on only for a window that sends the acknowledgement", async () => {
