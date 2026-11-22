@@ -1,3 +1,4 @@
+import type { NewDeviceAlertsClient } from "@octant/client-runtime/new-device-alerts-client";
 import { SandboxRestrictionsSettings } from "../settings/SandboxRestrictionsSettings";
 import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-restrictions-client";
 import type { SandboxSettingsScope } from "../settings/SandboxRestrictionsSettings";
@@ -299,6 +300,8 @@ export interface SettingsViewProps {
   >;
   /** Settings › Permissions › Protected files; absent where the host publishes no list. */
   readonly protectedFilesClient?: ProtectedFilesClient;
+  /** The host's new-device alerts, read and cleared from this window. */
+  readonly newDeviceAlertsClient?: NewDeviceAlertsClient;
   readonly blockedToolsClient?: BlockedToolsClient;
   readonly sandboxRestrictionsClient?: SandboxRestrictionsClient;
   readonly sandboxInitialScope?:
@@ -347,6 +350,8 @@ export interface SettingsViewProps {
   readonly extensionClient?: ExtensionClient;
   /** Project names by Project id, to head the remembered tool approvals. */
   readonly projectNames?: ReadonlyMap<string, string>;
+  /** The Code and Work Projects by id, which the hub grant's Act item can name. */
+  readonly actProjectNames?: ReadonlyMap<string, string>;
   readonly pickLocalPluginFolder?: () => Promise<
     Readonly<{ receiptId: string; displayName: string }> | undefined
   >;
@@ -1535,7 +1540,9 @@ function ActiveSectionContent({
             }
             ownerUnlock={ownerUnlockOf(props.hostBridge)}
             pairedComputers={pairedComputersOf(props.hostBridge)}
+            projectNames={props.actProjectNames ?? NO_PROJECT_NAMES}
             pairedDeviceLifetime={props.settings.pairedDeviceLifetime}
+            newDeviceAlerts={props.newDeviceAlertsClient}
           />
           {agentAccess}
         </div>

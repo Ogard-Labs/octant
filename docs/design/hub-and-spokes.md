@@ -78,7 +78,20 @@ view of the provider's own app, never against a real provider sign-in. After thi
 [messaging between members](#messaging-between-members), was added on
 2026-11-07 and is designed, not built. Slice 12,
 [moving a thread to another member](#moving-a-thread-to-another-member), was
-added the same day and is designed, not built. What remains of slices 1 to 10 is
+added the same day and is designed, not built. Slices 13 to 20, starting a
+coding session on any member from one window, the hub as the front door, Code
+delegation, adding a computer over SSH, telling every connected device of a
+new one, and placement advice, were added on 2026-11-19; slices 13, 14 and
+15 are built for directly paired computers, slice 16 is partly built (the
+Act item bounds where a hub-introduced device starts threads, unticking Act
+ends such a device's sessions, and a desktop window on a member lists the
+hub and the other spokes as its computers, the hub bounding it by its own
+Act list), slice 17 (Code delegation) and slice 19 (new-device alerts) are
+partly built, slice 20 (placement advice) is built except showing the level
+beside the roster, slice 18 is built for a hub, and the rest are designed,
+not built
+([The hub coordinates](#the-hub-coordinates-each-member-runs-its-own-work)).
+What remains of slices 1 to 10 is
 the maintainer's: the live checks the slices name (a real Wake-on-LAN wake, a
 delivery to a real phone, a phone, passkey, and Touch ID run, a failover on a
 real network, a browser against a real hub, a real Claude or Codex sign-in on a
@@ -122,7 +135,12 @@ in a browser at its Tailscale name. After that:
    first owner exists; and
 8. before shutting down or restarting a computer, the person can move its
    threads to another member and carry on there, and a Code thread that cannot
-   move hands over through its branch.
+   move hands over through its branch; and
+9. from any member's window, a phone, or a browser that joined the hub, the
+   person starts a coding session on whichever member they choose, in a
+   Project on that member, and follows, steers and manages it from there, and
+   an agent on one member hands Code work to another as it hands Work today
+   ([The hub coordinates](#the-hub-coordinates-each-member-runs-its-own-work)).
 
 **Not in scope:** members that are not the person's own devices (teams, shared
 machines, other people's computers), cloud machines Octant provisions, and
@@ -489,6 +507,192 @@ Rationale: making the hub an ordinary host with a role, rather than a separate
 product or service, keeps one server, one listener, one pairing protocol, and
 one update path. A phone as a guest rather than a plain paired device lets it
 follow failover and reach every spoke after joining once.
+
+### The hub coordinates; each member runs its own work
+
+Decided 2026-11-19 ([decision H24](#decisions)): a person starts and manages a
+coding session on whichever of their computers they choose, from any window,
+phone or browser connected through Octant. The hub coordinates the members;
+it does not own their work. Designed, not built, except where a line says
+otherwise.
+
+- **What stays on each member.** The member that runs a thread is its
+  authority, as [Settled by existing specifications](#settled-by-existing-specifications)
+  states: its journal, its files and checkouts, its provider sign-ins and
+  credentials, its sandbox and approval rules, and the final say on risky
+  actions. A hub that goes away loses no member its work, and two computers
+  can pair directly with no hub and get everything below except what only the
+  hub provides.
+- **The hub is the front door.** A device that joins the hub, or a member's
+  window, learns every member through the signed roster and its
+  introductions, so the person pairs once with the hub instead of with each
+  computer. The device then talks to each member directly over the private
+  network, as [decision H15](#decisions) settles for a browser; the hub never
+  carries a session's traffic, because a hub that relayed every turn would be
+  the one box whose compromise reaches every machine.
+- **The hub is the directory.** Members, their roles and addresses, which
+  member is online or asleep, and what each accepts (delegation, moves,
+  messages, and its load, [slice 20](#delivery-plan)) come from the roster and
+  the live data beside it.
+- **The hub owns the shared services.** A service a specification places on
+  the hub runs there for every member: the roster and failover, the update
+  mirror and other provisioning, the wake service, push, and the shared
+  stores other specifications give it (artifact replicas, the to-do list's
+  host). A service a specification keeps per host, such as person memory
+  today, stays per host until its own specification moves it.
+- **Starting a session on any member.** The new-task composer's computer
+  picker lists every member the window can reach. A thread is created on the
+  chosen member, under that member's rules, in one of its Projects, with its
+  providers, models, and defaults, and its live turn, Needs you, and
+  approvals reach the window from that member. Choosing or binding a folder
+  there uses that member's own folder check, for a device the member admits
+  as its person. Until the window can route a create, a create aimed at
+  another computer is refused with a reason and never runs on this one, as
+  [Hosts never trust each other](../architecture.md#security-and-authority)
+  requires. Built for a computer the window paired directly (slice 13): when
+  the Code start screen's picker names it and its session is ready, the pane
+  shows that computer's own Code start screen and threads, the paired
+  browser's Code surface over that computer's session, and an open thread is
+  followed by short reads through the desktop's paired-computer channel. A
+  thread started there takes the same create a local start screen sends (a
+  dedicated worktree when that is the Project's default, else the current
+  checkout) and the first model the Project's provider policy allows. The
+  chosen computer stays chosen while its session reconnects, with sending
+  held until it is ready; opening a draft from one of this computer's
+  Projects (its row, New coordinator) chooses this computer. A
+  spoke the hub introduced is built the same way in slice 16 (below), and
+  choosing a folder there and making it a Code Project is built for a device
+  its own person paired (slice 14); image attachments there are not built yet.
+  The window also lists every directly paired computer's active Code threads
+  under "On your other computers" in the Code sidebar, and what those
+  computers hold for the person in the Code start screen's Needs you card,
+  each read over that computer's session every 15 seconds while the window
+  is visible (slice 15). A row opens its thread in that computer's Code start
+  screen, where it is answered; a computer that stops answering keeps its
+  last rows, marked not connected and not openable, and the Environments
+  filter decides which computers are listed.
+- **What a hub-introduced device may do.** A device the member's own person
+  paired acts as that person there. A device that only the hub introduced acts
+  within the member's **Act** hub-grant item: the Projects it names, and
+  there three things: starting threads (Code included), answering their
+  approvals and questions, and Stop (maintainer decision, 2026-11-20); never
+  more than the member's own level allows. Approvals stay on the member, as
+  [What the hub may do on a spoke](#what-the-hub-may-do-on-a-spoke) says.
+  Built for starting threads (slice 16): while a host is a hub member, a
+  device only the hub introduced starts a Code or Work thread there only in
+  a Project the member's Act item names, read at each start, so unticking
+  Act or a Project refuses the next one with a sentence; a Code or Work fork from
+  such a device is refused, because its Project is its source's and the
+  route does not read it. The hub settings name those Projects under Act,
+  offering only Code and Work Projects because Chat starts never read Act;
+  `octant hub grant` keeps the Projects already named and cannot name new
+  ones, so a headless member names them from a window. A
+  host in no hub keeps its own rules for such a device. Unticking Act also
+  ends every open session of the devices the hub introduced on that member
+  (maintainer decision, 2026-11-20); they stay paired, so a new session opens
+  under the rules then in force and its next start is refused. Built for
+  answering and Stop: while a host is a hub member, such a device answers a
+  Code or Work thread's approval or question, and stops its turn, only when
+  the thread's Project is one the member's Act item names, read at each
+  request; unticking Act or the Project refuses the next answer or Stop with
+  a sentence that names what was refused. This holds on every route that
+  answers or stops: a Code thread's approval and question answers and its
+  Stop and Stop now, a Work request's answer or dismissal and a Work turn's
+  Stop, a harness thread's approval and question cards, and the MCP tool and
+  Browser prompts of a Code or Work thread. A thread the route cannot find
+  names no Project and is refused. A local window, a device the member's own
+  person paired, an agent grant's session, and a host in no hub keep their
+  own rules and never read the Act item. A refusal of an answer or a Stop
+  says which action was refused (maintainer decision, 2026-11-21). Built: on a
+  member and on the hub, each refusal (unticked Act, a member out of its hub,
+  a Project the Act item or the hub's list does not name) names the action it
+  refused. Built (slice
+  16): a desktop window on a member, or on the hub, lists the hub's other
+  spokes and standbys as its computers. The window makes a device key of its
+  own; its host asks the hub to list that key as a guest (the hub's own
+  window, or a spoke's signed request naming its own window), named for the
+  member whose window it is; and the window then asks each member, directly
+  over the private network, to admit it, as a phone that joined does. Each
+  member issues its own device and session, so no credential is shared
+  between members, and the hub carries none of that traffic. The member
+  holds the window to its Act item because the hub, not its person,
+  introduced it. The desktop pins each member from the roster its own host
+  names, never from the window, and a computer the person paired directly
+  stays theirs. A member the roster drops leaves the window's list at its
+  next read (on opening and every five minutes), and its device there is
+  revoked with the roster; a member's window leaves the roster with that
+  member, also when a standby removed that member and handed the removal
+  back, and a newer window of the same member replaces the older one. A
+  window guest the hub removed is not listed again when that window asks
+  next.
+  A member's window is listed on the hub without a second approval, because
+  the hub's person already approved that member, and every spoke still raises
+  the new-member alert for it (its name, role, key fingerprint, and Remove),
+  as for any member a roster adds (maintainer decision, 2026-11-21). The
+  window is admitted on each spoke through the guest path, which adds the
+  address of the connection it is admitted over to that guest's alert, so
+  the alert carries its private address; the roster itself lists no address for a guest.
+  A device signs in only at the listener origin it was registered at, so
+  when a spoke's or the hub's listener has moved, the window's next ask is
+  given a new device at the current address and the old one is revoked, as
+  for an expired device; a device the person revoked stays refused.
+  Not built yet: a turn sent into an existing thread, and Chat threads, held
+  to the Act item.
+
+  **The hub as one of a member window's computers** (maintainer decision,
+  2026-11-21). A spoke's or standby's window also lists the hub, marked
+  **hub** and Through the hub; the hub's own window does not list itself. The
+  window asks the hub for a device directly, as it asks each spoke, and the
+  hub admits only a window guest a spoke or standby asked it to list (the
+  roster lists it with the key it presents, and the request is signed with
+  that key); the hub's own window, a phone, and every other guest keep their
+  own rules. The device carries no person's approval on the hub, so the hub
+  holds it to its own **Act list**: the Projects on the hub its person ticks
+  under **Projects a member's window may work in** in Hub settings on the
+  hub, the same checklist a member's Act item shows. Such a window starts
+  threads, answers approvals and questions, and stops turns on the hub only
+  in a Project that list names, read at each request exactly as a member
+  reads its Act item, so taking a Project off refuses the next request with a
+  sentence naming the action. With none ticked, the hub is still listed and
+  nothing can be started there. Every route that holds a hub-introduced device
+  to a member's Act item holds it to the hub's list on the hub. The list is
+  changed only from a window on the hub, journaled with its principal (never
+  the Projects), and kept when the hub role is turned off and on again. The
+  window's device on the hub leaves with its roster entry, with the member it
+  belongs to, when a newer window of that member replaces it, and when the
+  hub role is turned off, since no list bounds it then; a device the
+  person revoked stays revoked across turning the role off and on, so the
+  window is not given a new one. A standby promoted to hub keeps the
+  roster's window guests without knowing whose each is, so the member whose
+  window asks again names it there. A revocation the device pairing cannot
+  take yet waits on the pending list, as a spoke's does. The hub carries only that window's own session with the hub. Built,
+  with a loopback smoke: the window lists the hub labelled hub, starts,
+  answers, and stops there only in a Project the hub's list names, sees the
+  hub with nothing to start when none is ticked, loses its hub device when
+  the hub role is turned off, and every spoke alerts on the window.
+
+  Rationale: the hub was first left out of a spoke window's computers because
+  it had no Act item of its own to bound a device it introduced to itself.
+  The hub's own Act list gives it one, read the same way, so the hub is held
+  to exactly what its person ticks and never more than a member would allow.
+
+  Rationale: a spoke asks the hub to list its own window without the hub's
+  person approving it again, because the hub's person already approved that
+  member, the window is that member's person at that member, and every
+  member that admits it still holds it to its own Introduce and Act items;
+  the alternative, a join code per window, would ask the person to pair each
+  window with the hub by hand, which is what the front door removes.
+
+- **A computer without Octant.** A server the person reaches only over SSH
+  is a [server Project](server-projects.md), not a member. Adding a computer
+  as a member over SSH, without visiting it, is [decision H26](#decisions).
+
+Rationale: Octant's authority, journal and credentials are per host, and a
+coding session needs the files on the machine that runs it, so putting the
+threads on the hub would rewrite replay, credentials and approvals and stop
+every member when the hub is down. A coordinator that is the front door,
+directory and owner of shared services gives one place to connect without
+that cost.
 
 ### Joining: a member adds only the hub
 
@@ -1261,7 +1465,48 @@ the check that the new member is the person's own.
 - **Alerts.** Every spoke, and every owner device, shows an alert when a new
   member is accepted: its name, role, and key fingerprint, with **Remove** one
   tap away. The alert comes from each spoke itself, not from the hub, so a
-  hub that adds a member cannot hide it.
+  hub that adds a member cannot hide it. Decided 2026-11-19
+  ([decision H27](#decisions)): every device connected to the hub or to the
+  host is told, not only spokes and owner devices. That covers the hub, every
+  spoke, guests (phones and browsers) and each host's paired devices, whether
+  the new device joined the hub (by code or over SSH) or paired with a host.
+  The alert names the new device and its IP address on the private network,
+  keeps the role and key fingerprint, and reaches a phone as a push
+  notification when that phone turned push on; push is off by default, so
+  every connected device also shows the alert in its own window or app while
+  connected, and a device that was offline sees it when it next connects.
+  Settled the same day:
+  - The address lives in the alert alone. A spoke takes a member's from its
+    roster entry; a guest names none there, so the spoke adds the address of
+    the connection the guest is admitted over. A host takes a directly paired
+    device's from the connection it claimed its ticket over, never from the
+    claim itself. Only a LAN or Tailscale address is kept; a public or
+    loopback one, or a hostname, never is. The journal records that an alert
+    was raised or cleared (`new-member-alerted`, and
+    `remote.device-alert-changed@1` for a direct pairing), never an address
+    or a name.
+  - Every device connected to a host reads its alerts on
+    `GET /api/new-device-alerts`: a window, a device the person paired and a
+    hub guest; an agent grant is no device and is refused. **Remove** stays
+    with a window on the host and an owner device with an unlock; any other
+    device is told where to go. A window can also dismiss a direct pairing's
+    alert, and a device that loses its standing takes its alert with it.
+  - The phone push is a new sealed "device joined" kind with its own phone
+    setting, on by default once push itself is on; turning it off leaves the
+    in-app alert. Every
+    phone paired with the host hears of a direct pairing and of a member the
+    spoke's own roster comparison added, except the new device itself, at
+    high urgency; the receipt (`remote.push-device-joined-delivery-recorded@1`)
+    names the alert, never the device or its address. A phone from before
+    the setting is told. The notification opens the phone's Computers screen,
+    whose New devices list reads every paired computer's alerts.
+
+  Partly built: the addresses, the read route, the direct-pairing alert, the
+  alerts in the paired browser, the window and the phone, and the phone push
+  with its setting. Not built: the hub telling its own window about a member
+  it added. The phone push has run only in tests; a real phone is a
+  maintainer check.
+
 - **Confirm new members (optional).** A spoke can turn on a setting that
   holds each new member at status-only until the person confirms it, after
   comparing a short code shown on the new device. They confirm either in that
@@ -1342,6 +1587,45 @@ Rationale: delegation as a remote child run reuses the existing subagent rule
 (equal or narrower, clamped server-side) and the existing paired-principal
 path, so B never needs a new authority model. The result coming back as data
 keeps a compromised spoke from steering another spoke's agent.
+
+**Code delegation** ([decision H25](#decisions); partly built: the Project
+mark is built, as a `project.code-delegated-code-changed@1` event the
+host's person sets from the Project overview and a device the hub
+introduced is refused; the receiving Code thread, the listing route, a
+Code parent sending Code work, Stop reaching the remote child, and the
+refusal to move a delegated Code thread are built; the three-host smoke
+for a Code delegation and a real-provider run are not yet exercised). A
+delegated Code thread runs on the first turned-on provider in the person's
+provider order, at the first model in that provider's catalog order the
+Project's provider policy allows (whitelist and EU/ZDR tags alike), as the
+composer preselects, and a request naming a provider profile is refused.
+Its branch is
+`octant/delegated/<slug>-<request id>`, made from the marked remote and base
+branch. A pull-request outcome names its base as the `owner/repository` the
+marked remote points at; when that remote names no GitHub repository the
+request is refused before any thread is made; any other outcome keeps the Project's own identity as its base. The sender's grant and the
+Project's mark are checked again immediately before the provider turn
+starts. The delegating member reads the thread's state, and on completion
+is told the changes are on the thread's own branch on this computer; the
+thread's text stays here. A Code Project takes delegated work only once
+marked, because a Code thread needs a
+managed worktree and a delivery target a person confirmed. B offers Code for a
+Code Project only after its person marks that Project as accepting delegated
+Code work, which records the delivery target they confirmed (the remote, base
+branch and outcome). A delegated Code thread is a managed thread on a branch
+named from the request id, the way a routine names its branch, approval-gated
+at most (Full access only under the owner rule above), and marked as having
+read outside content from its first turn, because its task is a peer's text.
+A's agent lists the members that take delegated work and the Projects each
+accepts through a read-only route B filters by its peer grant, with titles
+and no paths. B bounds the listing it sends (names cut to 200 characters,
+at most 500 Projects, within the route's reply budget) so one long name
+cannot make the asker drop the member. The names are another member's
+text: A marks the asking thread as having read outside content before its
+agent sees them, frames them as data, and withholds the listing when that
+mark cannot be recorded. Cancelling the parent cancels the remote Code child as it does a
+Work child, and a delegated Code thread cannot move, as a delegated Work
+thread cannot.
 
 ### Messaging between members
 
@@ -2716,17 +3000,17 @@ reads each spoke directly.
 
 ## Threat model
 
-| Party                                                             | Can                                                                                                                                                                                                                                                                                                                 | Cannot, and why                                                                                                                                                                                                                                         |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A compromised hub                                                 | Use every hub grant each spoke gave it; add a fake member to the roster, which spokes accept as a full member unless they turned on Confirm new members, and which every spoke alerts on; drop or delay wakes and push; read roster metadata                                                                        | Approve on a spoke itself, hide a new-member alert, read a spoke's credentials, add an owner to any host's owner list, change a hub or peer grant, loosen a sandbox, read sealed push content, or act on a spoke that never granted Act                 |
-| A compromised standby                                             | While standing in, what a compromised hub can, limited to the spokes whose grant covers the standby                                                                                                                                                                                                                 | Stand in while members still reach the hub, change the standby order, promote itself, or anything a compromised hub cannot                                                                                                                              |
-| A compromised spoke                                               | Use the peer grants other spokes gave it; send bad results back to a delegating spoke; post text into the threads other members tagged Reachable, which arrives framed and tainting and can wake an idle tagged thread within the wake bounds, spending that spoke's provider usage; claim to be standing in as hub | Exceed those grants; answer approvals on another spoke; make another spoke's agent follow its output as instructions; stand in unless it is a named standby in the hub-signed roster; move a thread onto another member without an owner's fresh unlock |
-| A stolen owner device                                             | What an ordinary member can, until removed or revoked                                                                                                                                                                                                                                                               | Use owner powers without the person's face, finger, passcode, or passkey                                                                                                                                                                                |
-| A stolen or compromised device a host's own person paired with it | Everything a local window on that host can, Full access included, until its session expires or the device is revoked, each action journaled with the device as its actor (maintainer decision, 2026-11-12)                                                                                                          | Read a stored credential back, act on a host it never paired with beyond the grant that host gave, or outlive session expiry and revocation                                                                                                             |
-| A lost or stolen phone                                            | What each spoke allows that guest, until revoked                                                                                                                                                                                                                                                                    | Run agents, receive delegated work, or outlive Remove on the hub and revocation on each spoke                                                                                                                                                           |
-| A spoke's agent                                                   | Ask its own host to delegate within its thread's authority; from a tagged thread, message other members' tagged threads                                                                                                                                                                                             | Choose the peer grant, tag a thread, start more than the bounded wake turns on a tagged receiver, approve on the receiver, widen authority, carry a credential                                                                                          |
-| Someone on the private net                                        | Reach members' listeners, as today, and send Wake-on-LAN packets, as anyone on that LAN already can                                                                                                                                                                                                                 | Pass device authentication; make a spoke run anything: a wake starts no routine the spoke did not define                                                                                                                                                |
-| Someone who can push to a repository                              | Push a branch whose tip carries an `Octant-Handover` trailer, which a member lists under Handovers                                                                                                                                                                                                                  | Make its note more than outside content, or start a turn: only a person continues a handover                                                                                                                                                            |
+| Party                                                             | Can                                                                                                                                                                                                                                                                                                                                         | Cannot, and why                                                                                                                                                                                                                                         |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A compromised hub                                                 | Use every hub grant each spoke gave it; add a fake member to the roster, which spokes accept as a full member unless they turned on Confirm new members, and which every spoke alerts on; drop or delay wakes and push; read roster metadata; list a fake member window, which may act on the hub itself only within the hub's own Act list | Approve on a spoke itself, hide a new-member alert, read a spoke's credentials, add an owner to any host's owner list, change a hub or peer grant, loosen a sandbox, read sealed push content, or act on a spoke that never granted Act                 |
+| A compromised standby                                             | While standing in, what a compromised hub can, limited to the spokes whose grant covers the standby                                                                                                                                                                                                                                         | Stand in while members still reach the hub, change the standby order, promote itself, or anything a compromised hub cannot                                                                                                                              |
+| A compromised spoke                                               | Use the peer grants other spokes gave it; send bad results back to a delegating spoke; post text into the threads other members tagged Reachable, which arrives framed and tainting and can wake an idle tagged thread within the wake bounds, spending that spoke's provider usage; claim to be standing in as hub                         | Exceed those grants; answer approvals on another spoke; make another spoke's agent follow its output as instructions; stand in unless it is a named standby in the hub-signed roster; move a thread onto another member without an owner's fresh unlock |
+| A stolen owner device                                             | What an ordinary member can, until removed or revoked                                                                                                                                                                                                                                                                                       | Use owner powers without the person's face, finger, passcode, or passkey                                                                                                                                                                                |
+| A stolen or compromised device a host's own person paired with it | Everything a local window on that host can, Full access included, until its session expires or the device is revoked, each action journaled with the device as its actor (maintainer decision, 2026-11-12)                                                                                                                                  | Read a stored credential back, act on a host it never paired with beyond the grant that host gave, or outlive session expiry and revocation                                                                                                             |
+| A lost or stolen phone                                            | What each spoke allows that guest, until revoked                                                                                                                                                                                                                                                                                            | Run agents, receive delegated work, or outlive Remove on the hub and revocation on each spoke                                                                                                                                                           |
+| A spoke's agent                                                   | Ask its own host to delegate within its thread's authority; from a tagged thread, message other members' tagged threads                                                                                                                                                                                                                     | Choose the peer grant, tag a thread, start more than the bounded wake turns on a tagged receiver, approve on the receiver, widen authority, carry a credential                                                                                          |
+| Someone on the private net                                        | Reach members' listeners, as today, and send Wake-on-LAN packets, as anyone on that LAN already can                                                                                                                                                                                                                                         | Pass device authentication; make a spoke run anything: a wake starts no routine the spoke did not define                                                                                                                                                |
+| Someone who can push to a repository                              | Push a branch whose tip carries an `Octant-Handover` trailer, which a member lists under Handovers                                                                                                                                                                                                                                          | Make its note more than outside content, or start a turn: only a person continues a handover                                                                                                                                                            |
 
 The biggest risk is the hub as introducer: whoever controls the hub can tell a
 spoke that an attacker's key belongs to another member, and with full
@@ -2750,30 +3034,33 @@ after the person proves presence.
 The maintainer settled these on 2026-10-28. Where the maintainer left the
 choice to the design, the design's recommendation was taken.
 
-| ID  | Question                                                                    | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| --- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| H2  | Does a spoke accept new roster members automatically?                       | Yes, as full members: delegation into every Project up to Code approval-gated, and for a guest paired-device authority. Every spoke and owner device alerts on each new member; an optional per-spoke setting holds new members until an owner confirms them. The spoke's person can narrow or revoke any member                                                                                                                                                                 |
-| H3  | When a member leaves or is removed, are its peer grants dropped?            | Dropped on leave and on a removal seen in a newer roster; kept while the hub is merely unreachable                                                                                                                                                                                                                                                                                                                                                                               |
-| H4  | One hub per spoke, or several?                                              | One active hub. A standby takes over the roster and coordination only while the hub is down                                                                                                                                                                                                                                                                                                                                                                                      |
-| H5  | May the hub's provisioning offers apply on a spoke without asking?          | Per kind (update channel, untrusted plugin install, profile without secrets), off by default; a routine always asks                                                                                                                                                                                                                                                                                                                                                              |
-| H6  | Can a subscription sign-in held by a provider's own app be copied?          | Never; these tokens refresh, so a copy and its source would log each other out, and the provider's terms are unchecked. Each machine signs in itself, and the hub can ask a spoke to start that sign-in (hub-started sign-in); the person finishes it on the spoke. API keys copy already                                                                                                                                                                                        |
-| H7  | Which push path does the hub support first?                                 | Forward to the push gateway from Mobile maturity, or, off by default, send directly from the hub with the person's own Apple and Firebase credentials for a phone app they built ([Building the phone app yourself](mobile-maturity.md#building-the-phone-app-yourself))                                                                                                                                                                                                         |
-| H8  | Where do the hub's services live?                                           | In the Octant server (`apps/server`). The roster and failover are on with the hub role; the wake service and push sender are each off until turned on                                                                                                                                                                                                                                                                                                                            |
-| H10 | May a standby add or remove members while standing in?                      | Yes; the hub takes the changes back on return, and removal wins                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| H11 | How is a standby promoted to hub for good?                                  | A local action on the standby; spokes whose grant covers the standby follow it, and the rest confirm the new hub locally                                                                                                                                                                                                                                                                                                                                                         |
-| H12 | How long without the hub before members fail over?                          | A setting on the hub, carried in the roster, default five minutes                                                                                                                                                                                                                                                                                                                                                                                                                |
-| H13 | Does the hub keep running when the desktop app quits, and after a restart?  | Yes, on macOS, Linux, and Windows: the hub runs as a boot service under the person's account (a launch daemon, a lingering systemd user service, a Windows service) and starts unattended after a restart, power cut, or update. The desktop app connects to it                                                                                                                                                                                                                  |
-| H18 | Where does the hub keep its own keys so it can serve before anyone logs in? | The same way on every platform: a file in the Octant data folder readable only by the person's account, on an encrypted disk (FileVault, LUKS, or BitLocker); setup warns when the disk is not encrypted                                                                                                                                                                                                                                                                         |
-| H14 | Does a host fetch its own Tailscale certificate for the web app?            | Yes, on the hub and on each spoke a browser reaches directly, through the local Tailscale daemon, off until the person turns it on after the certificate-transparency note                                                                                                                                                                                                                                                                                                       |
-| H15 | How does a browser guest reach a spoke?                                     | Directly: each spoke serves its own web app at its own Tailscale name, and the hub's web app links to it, so the hub never sees spoke traffic                                                                                                                                                                                                                                                                                                                                    |
-| H16 | Do spokes honor owner devices by default?                                   | Yes: ticked at join, clearly labeled, and untickable                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| H17 | How long does one unlock last?                                              | One Face ID, Touch ID, passcode, or passkey check covers five minutes of the hub's owner administration; credential copy, owner changes and a thread move's ticket need their own. A device paired with a host needs no unlock there for Full access, merge or approval answers (maintainer decision, 2026-11-12; built; for an owner device on a host that knows it only through the roster, Full access and merge need their own unlock and approval answers ride the session) |
-| H19 | Which thread moves are in scope?                                            | Planned moves only. A computer that dies without warning hands nothing over; a continuously updated copy on another member is not designed                                                                                                                                                                                                                                                                                                                                       |
-| H20 | What authorizes a move on the destination?                                  | An owner device's own fresh unlock for every move, and the destination's Move in peer-grant item, which is in the full-member grant. The moved thread is the person's own thread there                                                                                                                                                                                                                                                                                           |
-| H21 | What happens to the source's copy?                                          | It is erased through the ordinary thread purge once the destination commits, and its tombstone points to the destination                                                                                                                                                                                                                                                                                                                                                         |
-| H22 | Is a move limited in size?                                                  | No. Attachments, original inputs, captures, owned Canvases, and a Code thread's whole branch and uncommitted work travel whatever their size; ignored files never do                                                                                                                                                                                                                                                                                                             |
-| H23 | What happens when a move cannot finish?                                     | There is no file export. A Code thread hands over: everything is committed to its branch with a generated note, pushed when there is a remote, and continued from that branch on another computer. Chat and Work threads stay where they are, and every failed move shows an explicit error with its reason                                                                                                                                                                      |
-| H26 | May a computer be added as a member over SSH without visiting it?           | Yes, as an option: the person's window, or a device they paired, runs the signed headless installer over SSH after the person confirms, as a user service with no sudo, then the computer joins with a join code passed in the same session. The same confirmation approves that one join, bound to the comparison code read over SSH. The request and each step are journaled with the actor. Updates drain, swap and roll back after a failed handshake (2026-11-19)           |
+| ID  | Question                                                                    | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| --- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| H2  | Does a spoke accept new roster members automatically?                       | Yes, as full members: delegation into every Project up to Code approval-gated, and for a guest paired-device authority. Every spoke and owner device alerts on each new member; an optional per-spoke setting holds new members until an owner confirms them. The spoke's person can narrow or revoke any member                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| H3  | When a member leaves or is removed, are its peer grants dropped?            | Dropped on leave and on a removal seen in a newer roster; kept while the hub is merely unreachable                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| H4  | One hub per spoke, or several?                                              | One active hub. A standby takes over the roster and coordination only while the hub is down                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| H5  | May the hub's provisioning offers apply on a spoke without asking?          | Per kind (update channel, untrusted plugin install, profile without secrets), off by default; a routine always asks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| H6  | Can a subscription sign-in held by a provider's own app be copied?          | Never; these tokens refresh, so a copy and its source would log each other out, and the provider's terms are unchecked. Each machine signs in itself, and the hub can ask a spoke to start that sign-in (hub-started sign-in); the person finishes it on the spoke. API keys copy already                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| H7  | Which push path does the hub support first?                                 | Forward to the push gateway from Mobile maturity, or, off by default, send directly from the hub with the person's own Apple and Firebase credentials for a phone app they built ([Building the phone app yourself](mobile-maturity.md#building-the-phone-app-yourself))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| H8  | Where do the hub's services live?                                           | In the Octant server (`apps/server`). The roster and failover are on with the hub role; the wake service and push sender are each off until turned on                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| H10 | May a standby add or remove members while standing in?                      | Yes; the hub takes the changes back on return, and removal wins                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| H11 | How is a standby promoted to hub for good?                                  | A local action on the standby; spokes whose grant covers the standby follow it, and the rest confirm the new hub locally                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| H12 | How long without the hub before members fail over?                          | A setting on the hub, carried in the roster, default five minutes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| H13 | Does the hub keep running when the desktop app quits, and after a restart?  | Yes, on macOS, Linux, and Windows: the hub runs as a boot service under the person's account (a launch daemon, a lingering systemd user service, a Windows service) and starts unattended after a restart, power cut, or update. The desktop app connects to it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| H18 | Where does the hub keep its own keys so it can serve before anyone logs in? | The same way on every platform: a file in the Octant data folder readable only by the person's account, on an encrypted disk (FileVault, LUKS, or BitLocker); setup warns when the disk is not encrypted                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| H24 | What does the hub own, and where do sessions run?                           | The hub coordinates: it is the front door (pair once, reach every member), the directory, and the owner of the shared services a specification places on it. Every member keeps running and authorizing its own threads; the hub carries no session traffic. Two computers can pair directly with no hub (2026-11-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| H25 | May a member take delegated Code work?                                      | Yes, into a Code Project its person marked as accepting delegated Code work with a confirmed delivery target; approval-gated at most, on a branch named from the request, marked as outside content (2026-11-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| H26 | May a computer be added as a member over SSH without visiting it?           | Yes, as an option: the person's window, or a device the host's person paired directly, runs the signed headless installer over SSH after the person confirms, as a user service with no sudo, then the computer joins with a join code passed in the same session. The SSH login is the person on that machine, so only the spoke joins. The install dialog's confirmation also approves that one join in advance; the comparison code exists only once the installed computer's listener runs and the join opens, so the window then reads it from the computer over the pinned SSH connection and completes the join only if it matches the hub's, refusing it otherwise without asking again. The headless build carries its own runtime, Octant never runs sudo, and the install is journaled. Updates drain, swap and roll back after a failed handshake (2026-11-19) |
+| H27 | Who is told when a new device joins or pairs?                               | Every device connected to the hub or the host: the hub, spokes, guests and paired devices, each with the new device's name and private-network IP address, key fingerprint and role, Remove one tap away, and a push notification on phones (2026-11-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| H14 | Does a host fetch its own Tailscale certificate for the web app?            | Yes, on the hub and on each spoke a browser reaches directly, through the local Tailscale daemon, off until the person turns it on after the certificate-transparency note                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| H15 | How does a browser guest reach a spoke?                                     | Directly: each spoke serves its own web app at its own Tailscale name, and the hub's web app links to it, so the hub never sees spoke traffic                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| H16 | Do spokes honor owner devices by default?                                   | Yes: ticked at join, clearly labeled, and untickable                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| H17 | How long does one unlock last?                                              | One Face ID, Touch ID, passcode, or passkey check covers five minutes of the hub's owner administration; credential copy, owner changes and a thread move's ticket need their own. A device paired with a host needs no unlock there for Full access, merge or approval answers (maintainer decision, 2026-11-12; built; for an owner device on a host that knows it only through the roster, Full access and merge need their own unlock and approval answers ride the session)                                                                                                                                                                                                                                                                                                                                                                                           |
+| H19 | Which thread moves are in scope?                                            | Planned moves only. A computer that dies without warning hands nothing over; a continuously updated copy on another member is not designed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| H20 | What authorizes a move on the destination?                                  | An owner device's own fresh unlock for every move, and the destination's Move in peer-grant item, which is in the full-member grant. The moved thread is the person's own thread there                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| H21 | What happens to the source's copy?                                          | It is erased through the ordinary thread purge once the destination commits, and its tombstone points to the destination                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| H22 | Is a move limited in size?                                                  | No. Attachments, original inputs, captures, owned Canvases, and a Code thread's whole branch and uncommitted work travel whatever their size; ignored files never do                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| H23 | What happens when a move cannot finish?                                     | There is no file export. A Code thread hands over: everything is committed to its branch with a generated note, pushed when there is a remote, and continued from that branch on another computer. Chat and Work threads stay where they are, and every failed move shows an explicit error with its reason                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 On 2026-11-19 the maintainer settled H26 and its terms: the release workflows
 sign and publish the headless builds, which carry their own Bun; Octant never
@@ -2797,6 +3084,16 @@ moves only, every move owner-signed (the person is the same on every member),
 the source erased once the destination commits, no size limit, and a handover
 through the thread's branch instead of an offline file path; see
 [Moving a thread to another member](#moving-a-thread-to-another-member).
+
+On 2026-11-19 the maintainer asked that a person start coding sessions on
+whichever connected computer they choose and manage it fully from other
+devices, and settled H24 to H26: the hub coordinates and each member runs its
+own work, members take delegated Code work, and a computer can join over SSH;
+later that day H27, that every connected device is told when a new device
+joins or pairs, with its name and IP address.
+A server without Octant stays reachable over SSH as a
+[server Project](server-projects.md), which the same day gained running a
+provider on the server.
 
 Earlier on 2026-10-28 the maintainer settled that a standby hub exists (was
 H1), and that no member acts as a relay or introducer except the hub and a
@@ -2980,9 +3277,9 @@ maintainer's hardware, or names the maintainer gate.
      receives it. A request asking for more than the clamp allows is refused with
      the posture it could have had, never run narrower.
    - A remote child has the parent's mode and no more than the parent's posture.
-   - Only Work Projects take delegated work. A Code Project reports no delegable
-     mode, because a Code thread needs a managed worktree and a delivery target a
-     person confirmed. Work asks first and has no read-only posture, so a plan-only
+   - In this slice only Work Projects took delegated work; Code delegation
+     ([above](#spoke-to-spoke-discovery-and-delegation)) later added Code Projects
+     their person marked, with a confirmed delivery target. Work asks first and has no read-only posture, so a plan-only
      request is refused; a named provider profile is refused, and the thread runs on
      the default model the Work settings name.
    - Artifact references are empty: a Work turn reports the paths it changed, not
@@ -3000,9 +3297,10 @@ maintainer's hardware, or names the maintainer gate.
      check, the peer-grant clamp, `peer:A` on B, approvals on B, the framed and
      tainting result, and the cancel on a stopped turn are one set of rules. The
      request takes a task only: a model, `after`, or the parent's conversation is
-     refused. The posture is always Work's approval-gated, clamped by the parent
-     and the grant, never chosen by the agent. Only a Work thread in a Work Project
-     may name a member; a Chat or Code parent, a Project that is not a Work Project,
+     refused. The posture is always approval-gated, clamped by the parent
+     and the grant, never chosen by the agent. Only a Work thread in a Work Project,
+     or (since Code delegation) a Code thread in a Code Project, may name a member;
+     a Chat parent, a Project whose type differs from the parent's mode,
      Work turned off, no hub membership, an unknown member, a paused parent, and a
      member that refuses (no grant for this host, or a grant that does not cover the
      request) each answer as a refusal value, and the target's own words are not
@@ -3749,6 +4047,89 @@ Verification: server tests against a stand-in `ssh` that runs the remote
 command in `sh` with a stand-in signed build, a stand-in hello and a
 stand-in release host serving a signed listing, and component tests of the
 sheets; a real machine and a published listing are maintainer gates.
+
+13. **Start a coding session on a paired computer from one window.** Built for a
+    computer paired directly: the Code start screen shows that computer's Code
+    surface over its session, the desktop's paired-computer channel carries
+    the Code routes, and thread events are read without waiting (`wait=0`). A
+    Code
+    client per host on the client runtime's routing to the owning host, the
+    desktop's paired-computer channel carrying the Code commands, reads and
+    stream, and the composer reading that host's Projects, providers, models
+    and defaults. Acceptance: a thread started with another computer chosen
+    is created there, never here; its turn streams, its approvals and Needs
+    you reach the window, and Stop reaches it; the window's own refusal is
+    lifted per action only as routing lands. Verification: client-runtime
+    and web tests and a two-host loopback smoke with fake providers.
+14. **Choose or bind a folder on another computer.** That host's folder
+    browse and one-use receipt for a device it admits as its person, and its
+    Project bind. Acceptance: a device the host's person paired binds a
+    folder there; a hub-introduced or restricted device is refused.
+    Verification: server route and permission tests. Built (2026-11-20):
+    the private listener forwards `/api/folders/browse` and `/select` as
+    routes for a device the host's own person paired, the route answers that
+    device in its own scope (so its candidates and receipt are its own) and
+    refuses a hub-introduced device and an agent grant, and the Code start
+    form in a paired browser or a desktop window's paired computer offers
+    **New Project from a folder…** on that computer.
+15. **One window shows every computer's work.** Built for computers paired
+    directly: the merged reads carry each reachable host's active Code
+    threads and Needs you, stale and read-only when a host is unreachable,
+    and a row opens its thread on that computer. A hub-introduced member's
+    rows follow with slice 16. Verification: client-runtime tests and web
+    component tests.
+16. **The hub as front door.** A device that joins the hub gets every
+    member through introductions and reaches each directly; the Act item is
+    enforced on each member. Partly built: the Act item bounds where a
+    hub-introduced device starts Code and Work threads, with server route
+    and domain tests, and the hub settings name its Projects; unticking Act
+    ends such a device's open sessions on that member; and a desktop window
+    on a member or the hub adds the hub's spokes to its computers, each
+    reached directly with a device that member issued. A loopback smoke with
+    a hub and three spokes in one process, each a real gateway behind its own
+    TLS listener, runs the window's client runtime against them: the window
+    lists the other spokes, starts a Code thread on one in a Project its Act
+    item names through that spoke's real Code route and product dispatch and
+    is refused in another, the spoke's list shows it, unticking Act ends the
+    window's session there and refuses its next start, and a removed member
+    leaves the list. Approvals and Stop are held to the Act item. The hub is
+    one of a spoke window's computers, labelled hub, holding the window to
+    its own Act list, which Hub settings on the hub name; the smoke starts,
+    answers, and stops on the hub only in a Project that list names. Not
+    built: a turn sent into an existing thread, and Chat threads, held to the
+    Act item. Acceptance: a hub-introduced device starts a Code thread only
+    in a Project the Act item names; removing the item refuses the next
+    create; from a phone and from a browser, that thread's turn streams, its
+    approvals are answered within the Act item, and Stop reaches it.
+    Verification: server tests and a three-host loopback smoke.
+17. **Code delegation.** The Project mark, the receiving Code host, the
+    member and Project list route, cancel and move as above. Built, with server tests; the three-host smoke and a real
+    provider run are not yet exercised. Acceptance: B
+    refuses Code into an unmarked Project; a delegated Code thread is
+    approval-gated, on its own branch, marked as outside content, and its
+    approvals cannot be answered from A or the hub. Verification: server
+    tests and a three-host loopback smoke with fake providers; a real run is
+    a maintainer gate.
+18. **Add a computer over SSH.** [Decision H26](#decisions); built for a
+    hub, with what is not built, as slice 18 above.
+19. **Every connected device hears of a new one.** [Decision H27](#decisions):
+    the hub, spokes, guests and each host's paired devices are told when a
+    device joins the hub (by code or over SSH) or pairs with a host, with its
+    name, private-network IP address, role, key fingerprint and Remove.
+    Acceptance: with push off, a connected phone, browser and window each
+    show the alert, and an offline device shows it on reconnect; with push
+    on, the phone also gets a push notification. Verification: server and
+    client-runtime tests and a three-host loopback smoke.
+20. **Placement advice.** Each member reports a load level that changes
+    only after it holds, beside the roster, and a member can stop accepting
+    delegated work with one switch. Verification: server tests. Built: the
+    level (light, busy, heavy) comes from memory pressure and live turns and
+    changes after holding two minutes; the hub's status read and the
+    member's Project list carry it with whether the member accepts
+    delegated work, and the switch is in the hub settings (and Settings
+    search). The switch refuses new request ids only, including a start
+    still preparing; a retry of a start whose acceptance was lost gets its
+    original answer. Not built yet: showing the level beside the roster.
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

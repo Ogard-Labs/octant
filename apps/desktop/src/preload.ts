@@ -68,6 +68,8 @@ import type {
   PairedComputerAnswer,
   PairedComputerOutcome,
   PairedComputerRequest,
+  HubWindowIntroductionOutcome,
+  HubWindowIntroductionRequest,
   PrivateListenerControlFailureCode,
   PrivateListenerEnableRequest,
   PrivateListenerPublicStatus,
@@ -512,6 +514,14 @@ export interface OctantHostBridge {
   readonly requestPairedComputer?: (
     request: PairedComputerRequest,
   ) => Promise<PairedComputerAnswer>;
+  /**
+   * Asks this computer's host to have its hub list this window as a guest, and
+   * returns the members the window may then reach directly. Main records those
+   * members' pins from the host's own answer; the window names none.
+   */
+  readonly introduceWindowToHub?: (
+    request: HubWindowIntroductionRequest,
+  ) => Promise<HubWindowIntroductionOutcome>;
   /**
    * Shows a server of another paired computer, which that computer granted,
    * in Octant's browser or the default browser. The main process checks the
@@ -1665,6 +1675,14 @@ export function createHostBridge(
                 pairedComputerRequestOf(request),
               ),
             ),
+          introduceWindowToHub: async (request: HubWindowIntroductionRequest) =>
+            decodeHubWindowIntroductionOutcome(
+              await ipc.invoke(IPC_CHANNELS.pairedComputerIntroduceToHub, {
+                memberId: request.memberId,
+                devicePublicKey: request.devicePublicKey,
+                deviceLabel: request.deviceLabel,
+              }),
+            ),
         }),
   });
 }
@@ -1689,6 +1707,7 @@ export const OCTANT_ONLY_BRIDGE_MEMBERS: ReadonlySet<string> = new Set([
   "forgetPairedComputer",
   "settlePairedComputer",
   "requestPairedComputer",
+  "introduceWindowToHub",
   "openRemoteServerPage",
   "forgetRemoteServerPages",
   "subscribeRemoteServerPageSigning",
@@ -1801,6 +1820,51 @@ function pairedComputerRequestOf(request: PairedComputerRequest): PairedComputer
     ...(headers === undefined ? {} : { headers: { ...headers } }),
     ...(body === undefined ? {} : { body }),
   };
+}
+
+function decodeHubWindowIntroductionOutcome(value: unknown): HubWindowIntroductionOutcome {
+  if (typeof value === "object" && value !== null) {
+    const outcome = value as Record<string, unknown>;
+    if (outcome.membership === "none" || outcome.membership === "unavailable") {
+      return Object.freeze({ membership: outcome.membership });
+    }
+    const { introduction, hubMemberId, members } = outcome;
+    if (
+      outcome.membership === "member" &&
+      (introduction === "introduced" ||
+        introduction === "unchanged" ||
+        introduction === "refused" ||
+        introduction === "hub-unreachable") &&
+      typeof hubMemberId === "string" &&
+      Array.isArray(members)
+    ) {
+      return Object.freeze({
+        membership: "member",
+        introduction,
+        hubMemberId,
+        members: Object.freeze(
+          members.map((entry: unknown) => {
+            const member = (typeof entry === "object" && entry !== null ? entry : {}) as Record<
+              string,
+              unknown
+            >;
+            const { memberId, name, origin, pin, identityKeyFingerprint } = member;
+            if (
+              typeof memberId !== "string" ||
+              typeof name !== "string" ||
+              typeof origin !== "string" ||
+              typeof pin !== "string" ||
+              typeof identityKeyFingerprint !== "string"
+            ) {
+              throw new Error("Octant returned an invalid hub member.");
+            }
+            return Object.freeze({ memberId, name, origin, pin, identityKeyFingerprint });
+          }),
+        ),
+      });
+    }
+  }
+  throw new Error("Octant returned an invalid hub answer.");
 }
 
 function decodePairedComputerAnswer(value: unknown): PairedComputerAnswer {

@@ -6,8 +6,8 @@
 //
 // Code is not carried here. A Code thread needs a managed worktree and a
 // delivery target a person confirmed, and a peer's request cannot stand in for
-// that person, so a Code Project reports no delegable mode and the request is
-// refused.
+// that person, so Code goes to the Code delegation host, and only into a
+// Project its person marked with that target.
 
 import { randomUUID } from "node:crypto";
 import {

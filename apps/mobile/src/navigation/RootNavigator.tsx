@@ -38,15 +38,16 @@ import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { useTheme } from "../../design-system";
 import { useMobileHardwareBack } from "./useMobileHardwareBack";
 import { mobileThreadReturnRouteForDeepLink } from "./navigationState";
-import { deepLinkRefusal, movesLinkOpening } from "./deepLinkNavigation";
-import type { MobileMovesDeepLinkTarget } from "../notifications/deepLinks";
+import { deepLinkRefusal, computersLinkOpening } from "./deepLinkNavigation";
+import { NewDevicesPanel } from "../hosts/NewDevicesPanel";
+import type { MobileComputersDeepLinkTarget } from "../notifications/deepLinks";
 
 export interface RootNavigatorProps {
   readonly activeRoute: MobileRouteId;
   readonly onSelectRoute: (route: MobileRouteId) => void;
   readonly pendingDeepLinkRow?: MobileInboxRow | undefined;
   /** A tapped notification that a move waits for this phone. */
-  readonly pendingMovesLink?: MobileMovesDeepLinkTarget | undefined;
+  readonly pendingComputersLink?: MobileComputersDeepLinkTarget | undefined;
   readonly onDeepLinkConsumed?: (() => void) | undefined;
 }
 
@@ -56,6 +57,8 @@ function HostsBody(props: {
   readonly onPaired: () => void;
   /** Why a link the person followed was not opened, if it was not. */
   readonly notice?: string | undefined;
+  /** Counts the new-device links followed here, so the list reads again on each. */
+  readonly newDevicesRefreshKey: number;
 }) {
   const { colors } = useTheme();
   const {
@@ -71,10 +74,16 @@ function HostsBody(props: {
     hub,
     guestHubStore,
     transportForHost,
+    transports,
     placementHostId,
     setPlacementHostId,
   } = useMobileSession();
   const offlineDemo = environment.kind === "mock" && environment.offlineDemo;
+  const pairedHostIds = useMemo(() => hosts.map((host) => host.hostId), [hosts]);
+  const computerName = useCallback(
+    (hostId: string) => hosts.find((host) => host.hostId === hostId)?.label ?? "A paired computer",
+    [hosts],
+  );
   const [notAccepted, setNotAccepted] = useState<ReadonlyArray<GuestSpokeRefusal>>([]);
   useEffect(() => {
     // The computers on a joined hub that refused this phone are listed beside the hosts.
@@ -263,6 +272,14 @@ function HostsBody(props: {
                   unlockKey={unlockKey}
                 />
               )}
+              {offlineDemo ? null : (
+                <NewDevicesPanel
+                  computerName={computerName}
+                  hostIds={pairedHostIds}
+                  refreshKey={props.newDevicesRefreshKey}
+                  transports={transports}
+                />
+              )}
               {offlineDemo || unlockKey === undefined ? null : (
                 <OwnerAlertsPanel
                   deviceKeyStore={deviceKeyStore}
@@ -432,6 +449,7 @@ export function RootNavigator(props: RootNavigatorProps) {
   );
   const [agentListView, setAgentListView] = useState<AgentListView>("all");
   const [deepLinkNotice, setDeepLinkNotice] = useState<string | undefined>();
+  const [newDevicesRefreshKey, setNewDevicesRefreshKey] = useState(0);
   const {
     environment,
     setInboxHostFilter,
@@ -491,21 +509,22 @@ export function RootNavigator(props: RootNavigatorProps) {
   ]);
 
   useEffect(() => {
-    if (props.pendingMovesLink === undefined) return;
+    if (props.pendingComputersLink === undefined) return;
     // As for a thread link, the paired list must be read before a computer
     // can be called unpaired.
     if (!hostsLoaded) return;
-    const opening = movesLinkOpening(
-      props.pendingMovesLink,
+    const opening = computersLinkOpening(
+      props.pendingComputersLink,
       hosts.map((host) => host.hostId),
       hostsError !== undefined,
     );
     setDeepLinkNotice(opening.notice);
     setHostEntryMode(opening.entryMode);
+    setNewDevicesRefreshKey((count) => count + 1);
     props.onSelectRoute(opening.route);
     props.onDeepLinkConsumed?.();
   }, [
-    props.pendingMovesLink,
+    props.pendingComputersLink,
     props.onDeepLinkConsumed,
     props.onSelectRoute,
     hosts,
@@ -602,6 +621,7 @@ export function RootNavigator(props: RootNavigatorProps) {
           onBack={() => props.onSelectRoute("home")}
           onPaired={() => props.onSelectRoute("home")}
           notice={deepLinkNotice}
+          newDevicesRefreshKey={newDevicesRefreshKey}
         />
       ) : null}
       {activeTab === undefined ? null : (

@@ -2348,8 +2348,12 @@ A Code Project may be bound to a folder on one of the person's registered
 servers over SSH (maintainer decision, 2026-10-31, replacing the 2026-10-29
 removal; [Server Projects](design/server-projects.md) owns the detail).
 Inference, approvals, every authority check, and the journal stay on this
-host; a thread's files, shell, Git, and terminals are on the server. Server
-Projects are a catalog of their own, never the local Project catalog, so no
+host; a thread's files, shell, Git, and terminals are on the server. A person
+may instead run Claude Code or Codex itself on the server, signed in there, so
+its model requests leave from the server while approvals, authority checks and
+the journal stay on this host (maintainer decision, 2026-11-19; designed, not
+built; [Server Projects: Providers running on the server](design/server-projects.md#providers-running-on-the-server)).
+Server Projects are a catalog of their own, never the local Project catalog, so no
 service that reads a local Project's folder can be handed a server path.
 Octant connects with this host's own `ssh`, the person's SSH config, and their
 agent: keys stay with the host, nothing is forwarded, an unknown host key is
@@ -18808,15 +18812,39 @@ approval-gated` command that undoes it. The terminal shows no one-time
       `/api/remote/auth/server-proxy-session`, `/api/remote/auth/sign-out`,
       `/api/remote/auth/rotate-key`, `/api/remote/auth/revoke-self`;
       `GET /api/remote/auth/device`; `POST /api/server-proxy/grants`;
-      `GET /api/host/resources`; `POST /api/code/local-servers/commands`.
+      `GET /api/host/resources`; `POST /api/code/local-servers/commands`;
+      `GET /api/todos` and `POST /api/todos/commands`; and the Code routes a
+      window needs to start a thread on that computer and follow it there:
+      `GET /api/code/bootstrap`, `/api/code/navigation`,
+      `/api/code/threads/:id`, `.../conversation`, `.../conversation/window`,
+      `.../operations/:id/events`, `.../operations/:id/evidence/:id`, and
+      `.../events` only with `wait=0`;
+      `POST /api/code/commands` and `/api/code/evidence/batch`;
+      `PUT /api/code/evidence`;
+      `GET /api/projects/bootstrap`, `/api/providers/bootstrap` and
+      `/api/pending-requests`; `POST /api/extensions/tool-approvals`, so a
+      thread's MCP tool approval that Needs you opens there can be answered
+      (the computer answers only its own person's device); `POST /api/folders/browse`,
+      `/api/folders/select` and `/api/projects/commands`, so the window can
+      choose a folder on that computer and make it a Code Project there; and,
+      only to a member of this host's hub (below), `POST /api/hub/guest`. An
+      `:id` segment matches only a lowercase UUID.
+      Thread events are carried only with `wait=0` because without it the
+      computer holds the read open until the next change, past this channel's
+      time limit; with it the computer answers once it has caught up, and the
+      window reads again on a timer (750 ms after frames, backing off to 3
+      seconds), the pace the phone follows a thread at (maintainer request,
+      2026-11-19; [Hub and spokes: the hub coordinates](design/hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work)).
       Anything else, including the relay under
       `/api/server-proxy/<grant>/`, which the desktop's forwarder drives with
       its own signing, is refused. A request carries only the headers a signed
       request has (`accept`, `content-type`, `cookie` naming only the
       computer's Octant session cookies, `origin` equal to the computer's
       origin, `sec-fetch-site: same-origin`, `x-octant-device-proof`,
-      `x-octant-csrf`, `x-octant-command-id`); any other header refuses the
-      request. A body is text or bytes, at most 8 MiB, and not on `GET`. A
+      `x-octant-csrf`, `x-octant-command-id`, `x-octant-code-thread-id`
+      for a thread's first prompt, and `x-octant-hub-link` for a guest
+      admission the window signs with its guest key); any other header refuses
+      the request. A body is text or bytes, at most 8 MiB, and not on `GET`. A
       redirect is returned and never followed. A reply's cookies and any header
       whose name reads as a credential (`authorization`, `credential`,
       `secret`, `token`, `key`) are removed, a reply over 16 MiB or slower than
@@ -18839,6 +18867,30 @@ approval-gated` command that undoes it. The terminal shows no one-time
       computer keeps listing the device until it is revoked there. The shared
       helper `clearRemotePageStorage` stays the one way a remote page's data is
       cleared.
+      When this host is a hub member or the hub, the window also lists the
+      hub and its other members as computers, as a guest of the hub
+      ([Hub and spokes: what a hub-introduced device may do](design/hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work)).
+      Through `octant:paired-computers:introduce-to-hub` the window hands main
+      only its own guest public key, the member id it chose, and a label; main
+      sends them to the host's loopback hub route under that window's
+      capability, and the host answers with the hub, spokes and standbys of
+      the roster it holds other than itself, each with a private origin and
+      the listener pin the roster names, the hub marked `role: hub`. Main
+      replaces its hub members'
+      pins whole with those, marked as through the hub, never over a computer
+      paired directly, and never from anything the window names; a member the
+      host stops naming is no longer reachable. The window then asks each
+      member directly, over this same channel, to admit its guest key
+      (`POST /api/hub/guest`, carried only to such a member), records the
+      device that member issued with that member's pin and identity key
+      fingerprint, and opens a session there as for any paired computer. The
+      hub admits on `POST /api/hub/guest` only a window guest a spoke or
+      standby asked it to list, and holds that device to the hub's own Act
+      list as each member holds it to its Act item; the session is between
+      the window and the hub alone. The registry marks such a host
+      `through: hub` (and the hub `role: hub`, which Settings shows as
+      "hub"), and the window takes it off when the host stops naming it or
+      the member refuses the window.
     - **Phone.** The pairing screen reads a code from the app's own QR
       scanner or its paste field; typing the origin and ticket stays for a
       listener with a pasted certificate. Once a claim is pending the
@@ -19665,7 +19717,15 @@ approval-gated` command that undoes it. The terminal shows no one-time
   holds it to the pinned key, since the window's page policy reaches loopback
   only; see Desktop pairing above), and opens its servers only live (below),
   never as one of its own Browser tabs; while that computer is not connected
-  the card reads nothing and says so, never this computer's rows.
+  the card reads nothing and says so, never this computer's rows. A thread on
+  a paired computer that the window follows (the Code start screen for that
+  computer) lists the thread's own servers that computer can open (one
+  Octant started, in the thread's own worktree; any other row says why it
+  opens only there), and opens one the same way, live in Octant's own window or the default browser,
+  through a grant for that thread's listing (`local-servers` source), so the
+  host re-observes the row and the thread's authority there decides
+  (maintainer decision, 2026-11-20: a remote page stays out of this window's
+  Browser tabs, which belong to threads on this computer).
 - **Proxy sessions and server grants.** A paired device asks for a grant to
   open one dev server from its own computer, under a proxy session that is
   separate from its product session. The rules in force:
@@ -21072,7 +21132,12 @@ documents its authority, privacy, and release boundaries):
   runs their wake and push services, including a self-hosted wake service
   ([Hub and spokes](design/hub-and-spokes.md#wake-service)). A person can
   move a thread from one member to another before a planned shutdown
-  ([moving a thread](design/hub-and-spokes.md#moving-a-thread-to-another-member)). An
+  ([moving a thread](design/hub-and-spokes.md#moving-a-thread-to-another-member)),
+  and start and manage a coding session on whichever member they choose from
+  any window, phone or browser connected through the hub, while each member
+  keeps running and authorizing its own work and the hub carries no session
+  traffic (maintainer decision, 2026-11-19; designed, not built;
+  [The hub coordinates](design/hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work)). An
   Octant-operated wake service is not in scope.
 - Connectors (MCP servers added by hand, imported from other tools on this Mac,
   signed in to, or chosen from the bundled catalog): user-added packages

@@ -91,6 +91,7 @@ import {
   localHostDisplayName,
   readPairingFragment,
   type AgentProfileClient,
+  type RemoteSessionBridge,
   type AutomationClient,
   type OwnerUnlockNotGiven,
 } from "@octant/client-runtime";
@@ -172,6 +173,7 @@ import type {
   CodeProjectPullRequestRow,
   LocalServerOpenTarget,
   RunningService,
+  RemoteServerGrantSource,
   ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
 import {
@@ -619,6 +621,12 @@ import {
 } from "./host/useHostFederationLifecycle";
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
 import { createPairedComputerFetch } from "./host/pairedComputerFetch";
+import { PairedComputerCodeSurface } from "./host/PairedComputerCodeSurface";
+import { usePairedComputerReads } from "./host/usePairedComputerReads";
+import {
+  isPairedComputerAsk,
+  isPairedComputerThread,
+} from "@octant/client-runtime/paired-computer-reads";
 import { NeedsYouProvider, OctantCommandProvider } from "./palette/CommandRegistry";
 import {
   buildOctantCommands,
@@ -2307,6 +2315,10 @@ function LaunchedShell(
     () => readLastSelectedHealthyHostId(),
   );
   const [createHostId, setCreateHostId] = useState<HostId>(() => defaultCreateHostId());
+  // Whether the destination is only the one a host filter named, not the
+  // person's pick: clearing the filter must not keep an offline computer the
+  // person never chose.
+  const createHostFromFilter = useRef(false);
   // The Create Project dialog's GitHub tab rides the same host-scoped GitHub
   // clients the composer's "New Project from GitHub repository" uses. Disabled
   // GitHub contributes no tab, exactly as it contributes no composer row.
@@ -2398,14 +2410,27 @@ function LaunchedShell(
         : createPairedComputerFetch({ requestPairedComputer }),
     [requestPairedComputer],
   );
-  const openRunningServiceLive = useMemo(() => {
-    const host = runningServicesRemoteHost;
+  // Opens one server another computer lists, in Octant's own window or the
+  // default browser: the start screen's Running services row, or a row of a
+  // thread on that computer. The host grants it again each time, and this
+  // device's key proves who asked.
+  const openPairedComputerServer = useMemo(() => {
     const opener = remoteServerLiveOpener;
     const registry = federation?.registry;
     const deviceKeyStore = federation?.deviceKeyStore;
-    if (host === undefined || host.status !== "ready" || opener === undefined) return undefined;
-    if (registry === undefined || deviceKeyStore === undefined) return undefined;
-    return async (service: RunningService, mode: RemoteOpenMode): Promise<RemoteOpenOutcome> => {
+    if (opener === undefined || registry === undefined || deviceKeyStore === undefined) {
+      return undefined;
+    }
+    return async (
+      host: {
+        readonly hostId: string;
+        readonly hostName: string;
+        readonly origin: string;
+        readonly bridge: RemoteSessionBridge;
+      },
+      source: RemoteServerGrantSource,
+      mode: RemoteOpenMode,
+    ): Promise<RemoteOpenOutcome> => {
       const credential = (await registry.get(host.hostId))?.credential;
       const connection = host.bridge.connection();
       if (credential === undefined || connection === undefined) {
@@ -2429,11 +2454,23 @@ function LaunchedShell(
             ? {}
             : { fetch: pairedComputerFetch }),
         },
-        service,
+        source,
         mode,
       );
     };
-  }, [runningServicesRemoteHost, remoteServerLiveOpener, federation, pairedComputerFetch]);
+  }, [remoteServerLiveOpener, federation, pairedComputerFetch]);
+  const openRunningServiceLive = useMemo(() => {
+    const host = runningServicesRemoteHost;
+    if (host === undefined || host.status !== "ready" || openPairedComputerServer === undefined) {
+      return undefined;
+    }
+    return (service: RunningService, mode: RemoteOpenMode) =>
+      openPairedComputerServer(
+        host,
+        { surface: "running-services", listenerId: service.listenerId },
+        mode,
+      );
+  }, [runningServicesRemoteHost, openPairedComputerServer]);
   const openRelayedServerProjectPreview = useMemo(() => {
     const host = runningServicesRemoteHost;
     const opener = remoteServerLiveOpener;
@@ -2480,38 +2517,158 @@ function LaunchedShell(
   }, [runningServicesRemoteHost, remoteServerLiveOpener, federation, pairedComputerFetch]);
   useEffect(() => {
     if (hosts.length === 0) return;
-    const result = preselectCreateHost({
-      hosts,
-      viewScope: createHostViewScope,
-      ...(lastSelectedHealthyHostId === undefined ? {} : { lastSelectedHealthyHostId }),
+    // Read from the current selection rather than a dependency, so choosing a
+    // host does not itself rerun this preselection.
+    const filtered = createHostViewScope.kind === "host-filter";
+    const keptFromFilter = createHostFromFilter.current && !filtered;
+    createHostFromFilter.current = filtered;
+    setCreateHostId((selectedHostId) => {
+      const picked = keptFromFilter ? undefined : selectedHostId;
+      const result = preselectCreateHost({
+        hosts,
+        viewScope: createHostViewScope,
+        ...(picked === undefined ? {} : { selectedHostId: picked }),
+        ...(lastSelectedHealthyHostId === undefined ? {} : { lastSelectedHealthyHostId }),
+      });
+      if (result.kind === "selected") return result.host.hostId;
+      // Host-filter views still name the filtered host so the selector can show
+      // it disabled; create submit refuses until that host is routable.
+      return createHostViewScope.kind === "host-filter"
+        ? createHostViewScope.hostId
+        : selectedHostId;
     });
-    if (result.kind === "selected") {
-      setCreateHostId(result.host.hostId);
-      return;
-    }
-    // Host-filter views still name the filtered host so the selector can show
-    // it disabled; create submit refuses until that host is routable.
-    if (createHostViewScope.kind === "host-filter") {
-      setCreateHostId(createHostViewScope.hostId);
-    }
   }, [createHostViewScope, hosts, lastSelectedHealthyHostId]);
   function handleSelectCreateHost(hostId: HostId) {
+    createHostFromFilter.current = false;
     setCreateHostId(hostId);
     const host = hosts.find((candidate) => candidate.hostId === hostId);
     if (host === undefined) return;
     const remembered = rememberHealthyCreateHost(host);
     if (remembered !== undefined) setLastSelectedHealthyHostId(remembered);
   }
+  // When the Code picker names a paired computer whose session is ready, the
+  // start screen is that computer's own: its Projects, models and threads over
+  // its session. A computer that has not been ready keeps the local draft,
+  // whose create refuses it with a reason. Once the surface has opened it stays
+  // mounted while the same session reconnects, so the open thread and an unsent
+  // prompt survive; the surface itself holds mutations until it is ready again.
+  const pairedComputerCodeSlot =
+    String(createHostId) === String(LOCAL_HOST_ID)
+      ? undefined
+      : hostFederationTransports?.get(createHostId);
+  const pairedComputerSlotBridge =
+    pairedComputerCodeSlot?.kind === "remote" ? pairedComputerCodeSlot.bridge : undefined;
+  const pairedComputerSlotReady =
+    pairedComputerCodeSlot?.kind === "remote" && pairedComputerCodeSlot.state.kind === "ready";
+  const [pairedComputerOpenedBridge, setPairedComputerOpenedBridge] =
+    useState<typeof pairedComputerSlotBridge>(undefined);
+  useEffect(() => {
+    if (pairedComputerSlotReady && pairedComputerSlotBridge !== undefined) {
+      setPairedComputerOpenedBridge(pairedComputerSlotBridge);
+    }
+  }, [pairedComputerSlotBridge, pairedComputerSlotReady]);
+  const pairedComputerCodeBridge =
+    pairedComputerSlotBridge !== undefined &&
+    (pairedComputerSlotReady || pairedComputerSlotBridge === pairedComputerOpenedBridge)
+      ? pairedComputerSlotBridge
+      : undefined;
+  // Every paired computer's Code threads and asks, listed in this window and
+  // each opened on its own computer through that computer's start screen.
+  const pairedComputerReads = usePairedComputerReads({
+    transports: hostFederationTransports,
+    cache: federation?.cache,
+  });
+  const pairedComputerThreads = useMemo(
+    () => pairedComputerReads.filter(isPairedComputerThread),
+    [pairedComputerReads],
+  );
+  const pairedComputerAsks = useMemo(
+    () => pairedComputerReads.filter(isPairedComputerAsk),
+    [pairedComputerReads],
+  );
+  // The start screen and sidebar keep their inputs' identity between renders,
+  // so they get one opener that always calls the latest one.
+  const openPairedComputerThreadRef = useRef(openPairedComputerThread);
+  openPairedComputerThreadRef.current = openPairedComputerThread;
+  const openPairedComputerThreadLatest = useCallback(
+    (hostId: string, threadId: string) => openPairedComputerThreadRef.current(hostId, threadId),
+    [],
+  );
+  const otherComputerAsks = useMemo(
+    () =>
+      pairedComputerAsks.map((item) => ({
+        hostId: String(item.ref.hostId),
+        computer: item.hostDisplayName,
+        request: item.payload.request,
+        readOnly: item.readOnly,
+      })),
+    [pairedComputerAsks],
+  );
+  const [pairedThreadToOpen, setPairedThreadToOpen] = useState<
+    | { readonly hostId: string; readonly threadId: CodeThreadId; readonly request: number }
+    | undefined
+  >(undefined);
+  const pairedThreadToOpenHere =
+    pairedThreadToOpen !== undefined && pairedThreadToOpen.hostId === String(createHostId)
+      ? pairedThreadToOpen
+      : undefined;
+  // A thread's servers on that computer open through a grant for that thread's
+  // listing, in Octant's own window or the default browser.
+  const pairedComputerOrigin =
+    pairedComputerCodeSlot?.kind === "remote" ? pairedComputerCodeSlot.origin : undefined;
+  const pairedComputerName =
+    pairedComputerCodeSlot?.kind === "remote" ? pairedComputerCodeSlot.displayName : undefined;
+  const pairedComputerServerOpener =
+    openPairedComputerServer === undefined ||
+    pairedComputerCodeBridge === undefined ||
+    pairedComputerOrigin === undefined ||
+    pairedComputerName === undefined
+      ? undefined
+      : (source: RemoteServerGrantSource, mode: RemoteOpenMode) =>
+          openPairedComputerServer(
+            {
+              hostId: String(createHostId),
+              hostName: pairedComputerName,
+              origin: pairedComputerOrigin,
+              bridge: pairedComputerCodeBridge,
+            },
+            source,
+            mode,
+          );
+  const renderPairedComputerCodeStart =
+    pairedComputerCodeBridge === undefined
+      ? undefined
+      : () => (
+          <PairedComputerCodeSurface
+            key={String(createHostId)}
+            bridge={pairedComputerCodeBridge}
+            hosts={hosts}
+            selectedHostId={createHostId}
+            onSelectHost={handleSelectCreateHost}
+            viewScope={createHostViewScope}
+            {...(pairedThreadToOpenHere === undefined
+              ? {}
+              : {
+                  initialThreadId: pairedThreadToOpenHere.threadId,
+                  initialThreadRequest: pairedThreadToOpenHere.request,
+                })}
+            {...(pairedComputerServerOpener === undefined
+              ? {}
+              : { openServer: pairedComputerServerOpener })}
+          />
+        );
   function refuseUnlessCreatableDestination(input: {
     readonly action: string;
     readonly requiredCapability?: string;
     readonly projectHostId?: HostId;
+    readonly onlyThisHost?: boolean;
     readonly onRefuse: (reason: string) => void;
   }): HostId | undefined {
     const decision = assertCreateDestinationFromHosts({
       hosts,
       createHostId,
       action: input.action,
+      ...(input.onlyThisHost === undefined ? {} : { onlyThisHost: input.onlyThisHost }),
       ...(input.projectHostId === undefined ? {} : { projectHostId: input.projectHostId }),
       ...(input.requiredCapability === undefined
         ? {}
@@ -5572,6 +5729,17 @@ function LaunchedShell(
       new Map(projectController.allProjects.map((project) => [String(project.id), project.name])),
     [projectController.allProjects],
   );
+  // Only Code and Work Projects: Act governs thread starts there, and a Chat
+  // Project offered under Act would be a setting nothing reads.
+  const actProjectNamesById = useMemo(
+    () =>
+      new Map(
+        projectController.allProjects
+          .filter((project) => project.type !== "chat")
+          .map((project) => [String(project.id), project.name]),
+      ),
+    [projectController.allProjects],
+  );
   const projectIconIds = useMemo(
     () => projectController.allProjects.map((project) => String(project.id)),
     [projectController.allProjects],
@@ -5993,6 +6161,7 @@ function LaunchedShell(
       setProjectActions: projectController.setActions,
       setProjectWorkStatusFile: projectController.setWorkStatusFile,
       setProjectOwnToolchain: projectController.setCodeOwnToolchain,
+      setProjectDelegatedCode: projectController.setCodeDelegatedCode,
       setProjectWorkDeveloperTools: projectController.setWorkDeveloperTools,
       setProjectsListOpen,
       setRailPlaceholder,
@@ -6089,6 +6258,8 @@ function LaunchedShell(
     needsYouCoordinatorTitles,
     needsYouThreadProviders,
     needsYouAskClients,
+    otherComputerAsks,
+    onOpenOtherComputerAsk: openPairedComputerThreadLatest,
     now: snoozeClockNow.getTime(),
     onOpenExternal: rootLinkActions.openExternal,
     openRunningServiceLive,
@@ -7009,6 +7180,11 @@ function LaunchedShell(
     // overview on screen for a frame before the draft replaced it, which read
     // as an old page flashing past every time a task was started from a row.
     closeWorkspaceReaders();
+    // A draft opened from one of this computer's Projects (its row, New
+    // coordinator, a just-created Project) is aimed at this computer. With a
+    // paired computer left selected in the picker, the draft showed that
+    // computer's start screen instead, and the coordinator intent was lost.
+    if (String(createHostId) !== String(LOCAL_HOST_ID)) handleSelectCreateHost(LOCAL_HOST_ID);
     // The branch-start intent belongs to exactly this draft: keyed to the
     // Project it was opened for and cleared for every other way a draft
     // opens, so a later same-Project draft does not inherit it.
@@ -7024,6 +7200,22 @@ function LaunchedShell(
   // The global New thread action starts a clean draft. Project-scoped actions
   // still call `openDraftInProject`, but a failed folder must never become the
   // sticky default for every later draft opened from the sidebar.
+  // A thread listed from another computer opens in that computer's Code start
+  // screen, the same surface the picker shows, so every act on it goes to that
+  // computer over its session and none is aimed at this one.
+  // It opens an existing thread, not a new task, so it leaves the unsent Code
+  // draft as it is: resetting it here erased a typed prompt and attachments.
+  function openPairedComputerThread(hostId: string, threadId: string) {
+    handleSelectCreateHost(decodeHostId(hostId));
+    setPairedThreadToOpen((previous) => ({
+      hostId,
+      threadId: decodeCodeThreadId(threadId),
+      request: (previous?.request ?? 0) + 1,
+    }));
+    closeWorkspaceReaders();
+    void controller.openDraftThread("code");
+  }
+
   function openDraftInActiveProject(mode: "work" | "code") {
     closeWorkspaceReaders();
     setDraftStartFrom(undefined);
@@ -7546,6 +7738,7 @@ function LaunchedShell(
       const destinationHostId = refuseUnlessCreatableDestination({
         action: "create-code-thread",
         requiredCapability: "code",
+        onlyThisHost: true,
         onRefuse: (reason) => setDraftError(reason),
       });
       if (destinationHostId === undefined) return false;
@@ -7969,10 +8162,10 @@ function LaunchedShell(
         const destinationHostId = refuseUnlessCreatableDestination({
           action: "create-code-thread",
           requiredCapability: "code",
+          onlyThisHost: true,
           onRefuse: (reason) => setDraftError(reason),
         });
         if (destinationHostId === undefined) return false;
-        void destinationHostId;
         const resolution = resolveDraftProject({
           draftProjectId,
           candidates: projectController.projects,
@@ -8630,6 +8823,7 @@ function LaunchedShell(
       nativeBoundsAvailable={nativeHost !== undefined}
       {...(pendingUsageFilter === undefined ? {} : { pendingUsageFilter })}
       projectNamesById={projectNamesById}
+      actProjectNamesById={actProjectNamesById}
       providerController={providerController}
       settings={loadedSettings}
       presentation={presentation}
@@ -8759,6 +8953,12 @@ function LaunchedShell(
               codeStatus={codeController.status}
               contextHealthByProject={contextHealthByProject}
               environmentSelection={environmentSelection}
+              {...(hostFederationTransports === undefined
+                ? {}
+                : {
+                    pairedComputerThreads,
+                    onOpenPairedComputerThread: openPairedComputerThreadLatest,
+                  })}
               federatedHostStates={federatedHostStates}
               githubIssuesReadAvailable={githubIssuesReadAvailable}
               {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
@@ -8916,6 +9116,9 @@ function LaunchedShell(
                   crossContextOffer={controller.crossContextOffer}
                   createHostId={createHostId}
                   createHostViewScope={createHostViewScope}
+                  {...(renderPairedComputerCodeStart === undefined
+                    ? {}
+                    : { renderPairedComputerCodeStart })}
                   dockOpen={dockOpen}
                   {...(dockSurface === undefined
                     ? {}
@@ -9100,6 +9303,7 @@ function LaunchedShell(
             const destinationHostId = refuseUnlessCreatableDestination({
               action: "create-project",
               requiredCapability: mode,
+              onlyThisHost: true,
               onRefuse: (reason) => setDraftError(reason),
             });
             if (destinationHostId === undefined) {

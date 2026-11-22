@@ -23,6 +23,10 @@ import {
 } from "@octant/client-runtime/image-generation-client";
 import { createCanvasClient, type CanvasClient } from "@octant/client-runtime/canvas-client";
 import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
+import {
+  createFolderBrowseClient,
+  type FolderBrowseClient,
+} from "@octant/client-runtime/folder-browse-client";
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
 import {
   createProjectBrowserClient,
@@ -70,6 +74,10 @@ import {
   createReplyDetailClient,
   type ReplyDetailClient,
 } from "@octant/client-runtime/reply-detail-client";
+import {
+  createNewDeviceAlertsClient,
+  type NewDeviceAlertsClient,
+} from "@octant/client-runtime/new-device-alerts-client";
 import { createBrowserHostRegistryStorage } from "../host/browserHostRegistryStorage";
 import { browserOwnerMergeUnlock, createBrowserGuestStore } from "../host/browserHubGuest";
 import { platformPasskeys } from "../host/ownerPasskey";
@@ -84,6 +92,8 @@ export interface RemoteProductClients {
   readonly canvas: CanvasClient;
   readonly code: CodeClient;
   readonly project: ProjectClient;
+  /** The host's folders, for a new Project there; the host admits only its own person. */
+  readonly folderBrowse: FolderBrowseClient;
   readonly provider: ProviderClient;
   readonly workThread: WorkThreadClient;
   readonly workTurn: WorkTurnClient;
@@ -130,6 +140,16 @@ export function createRemoteExtensionClient(
     fetch: createRemoteProductFetch({ bridge }),
     windowCapability: NO_WINDOW_CAPABILITY,
     session,
+  });
+}
+
+/** The host's new-device alerts over the session, which every connected device reads. */
+export function createRemoteNewDeviceAlertsClient(
+  bridge: RemoteSessionBridge,
+): NewDeviceAlertsClient {
+  return createNewDeviceAlertsClient({
+    baseUrl: REMOTE_CLIENT_BASE_URL,
+    fetch: createRemoteProductFetch({ bridge }),
   });
 }
 
@@ -221,6 +241,7 @@ export function createRemoteProductClients(bridge: RemoteSessionBridge): RemoteP
       }),
     }),
     project: createProjectClient(port),
+    folderBrowse: createFolderBrowseClient(port),
     provider: createProviderClient(port),
     workThread: createWorkThreadClient(port),
     workTurn: createWorkTurnClient(port),

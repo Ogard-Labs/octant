@@ -264,6 +264,32 @@ describe.each(phones)("opening a sealed notification in $name", ({ opener, runs 
     }
   });
 
+  it.skipIf(!runs)("opens a new device on the phone's list of new devices", () => {
+    const keys = newPhoneKeys();
+    const deviceJoined = {
+      kind: "device-joined",
+      hostId,
+      title: "New device: Ada's laptop",
+      body: "192.168.1.20 · paired with Studio Mac",
+    };
+    const open = opener();
+    expect(open({ keys, ...seal({ keys, content: deviceJoined }) })).toEqual({
+      status: "opened",
+      title: "New device: Ada's laptop",
+      body: "192.168.1.20 · paired with Studio Mac",
+      deepLink: `octant://hosts/${hostId}/new-devices`,
+    });
+    // A new device names no thread, so one that does is not one the host sealed.
+    for (const change of [
+      { threadId },
+      { mode: "code" },
+      { hostId: "55555555-5555-4555-8555-555555555555" },
+    ]) {
+      const sealed = seal({ keys, content: { ...deviceJoined, ...change } });
+      expect(open({ keys, ...sealed }).status, JSON.stringify(change)).toBe("placeholder");
+    }
+  });
+
   it.skipIf(!runs)("links without a mode when the host names none", () => {
     const keys = newPhoneKeys();
     const { mode: _mode, ...withoutMode } = goodContent;

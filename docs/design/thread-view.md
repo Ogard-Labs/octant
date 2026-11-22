@@ -536,6 +536,16 @@ keeps its ordinary meaning. Settings › General › Composer turns this off
 everywhere or per mode ([Settings](settings.md)); off, the composer says
 "Reply…" and Tab offers nothing, while the suggestion cards stay.
 
+A start-screen composer in a window that reaches more than one computer shows
+a computer picker. The thread is made on the computer it names, in one of that
+computer's Projects, with its providers, models and defaults, and never on
+this one in its place (maintainer decision, 2026-11-19). Built for a
+computer the window paired directly: the pane shows that computer's own Code
+start screen and threads, with the picker kept on top. Until the window can
+route a create for any other computer, one aimed there is refused with a
+sentence;
+[Hub and spokes: the hub coordinates](hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work)).
+
 Attachment and model controls sit on the left; access, context usage and send
 stay together at the right edge even when the controls wrap. Menus use compact
 interface text, and model choices stay in a bounded scrollable popup.

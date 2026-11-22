@@ -333,6 +333,27 @@ export type CodeProjectPullRequestBackgroundRefresh =
 export const CodeProjectAgentMerge = Schema.Literal("enabled", "disabled");
 export type CodeProjectAgentMerge = typeof CodeProjectAgentMerge.Type;
 /**
+ * A Code Project's mark that it takes delegated Code work from other members
+ * of the hub, with the delivery target its person confirmed: the remote and
+ * base branch a delegated thread's own branch starts from, and the outcome it
+ * aims at. Absent, the Project takes none. Only the host's own person sets it
+ * (hub and spokes, Code delegation). The outcome kinds are the Code delivery
+ * outcomes, written here because the Code contracts import this module.
+ */
+export const CodeProjectDelegatedCode = Schema.Struct({
+  remoteName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+  baseBranch: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+  outcomeKind: Schema.Literal(
+    "investigation-result",
+    "local-implementation",
+    "opened-pr",
+    "merged-pr",
+  ),
+  confirmedAt: UtcTimestamp,
+}).annotations(strict);
+export type CodeProjectDelegatedCode = typeof CodeProjectDelegatedCode.Type;
+export const decodeCodeProjectDelegatedCode = Schema.decodeUnknownSync(CodeProjectDelegatedCode);
+/**
  * Whether a Code agent below Full access may post a comment or a review reply
  * on the pull request its thread owns without the per-post approval. Absent
  * means disabled: each post asks. Full access never asks, whatever this says.
@@ -478,6 +499,7 @@ export const CodeProject = Schema.Struct({
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
   agentMerge: Schema.optional(CodeProjectAgentMerge),
+  delegatedCode: Schema.optional(CodeProjectDelegatedCode),
   ownToolchain: Schema.optional(CodeProjectOwnToolchain),
   agentPullRequestComments: Schema.optional(CodeProjectAgentPullRequestComments),
   agentDefaultBranchPush: Schema.optional(CodeProjectAgentDefaultBranchPush),
@@ -546,6 +568,7 @@ const CodeProjectSummary = Schema.Struct({
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
   pullRequestBackgroundRefresh: Schema.optional(CodeProjectPullRequestBackgroundRefresh),
   agentMerge: Schema.optional(CodeProjectAgentMerge),
+  delegatedCode: Schema.optional(CodeProjectDelegatedCode),
   ownToolchain: Schema.optional(CodeProjectOwnToolchain),
   agentPullRequestComments: Schema.optional(CodeProjectAgentPullRequestComments),
   agentDefaultBranchPush: Schema.optional(CodeProjectAgentDefaultBranchPush),
@@ -822,6 +845,12 @@ export const ProjectCommand = Schema.Union(
     agentMerge: CodeProjectAgentMerge,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("change-code-project-delegated-code"),
+    ...ProjectCommandFields,
+    /** Absent takes the mark off: the Project takes no delegated Code work. */
+    delegatedCode: Schema.optional(CodeProjectDelegatedCode),
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("change-code-project-own-toolchain"),
     ...ProjectCommandFields,
     ownToolchain: CodeProjectOwnToolchain,
@@ -980,6 +1009,10 @@ export const ProjectCommandResult = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("code-project-agent-merge-changed"),
+    project: CodeProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("code-project-delegated-code-changed"),
     project: CodeProject,
   }).annotations(strict),
   Schema.Struct({
@@ -1262,6 +1295,11 @@ export const CodeProjectPullRequestBackgroundRefreshChanged = Schema.Struct({
 export type CodeProjectPullRequestBackgroundRefreshChanged =
   typeof CodeProjectPullRequestBackgroundRefreshChanged.Type;
 /** Journaled once per change so the standing permission survives a restart and shows who set it. */
+/** Journaled once per change so a Project's mark for delegated Code work survives a restart and shows who set it. */
+export const CodeProjectDelegatedCodeChanged = Schema.Struct({
+  project: CodeProject,
+}).annotations(strict);
+export type CodeProjectDelegatedCodeChanged = typeof CodeProjectDelegatedCodeChanged.Type;
 export const CodeProjectAgentMergeChanged = Schema.Struct({ project: CodeProject }).annotations(
   strict,
 );
@@ -1404,6 +1442,9 @@ export const decodeCodeProjectPullRequestBackgroundRefreshChanged = Schema.decod
 );
 export const decodeCodeProjectAgentMergeChanged = Schema.decodeUnknownSync(
   CodeProjectAgentMergeChanged,
+);
+export const decodeCodeProjectDelegatedCodeChanged = Schema.decodeUnknownSync(
+  CodeProjectDelegatedCodeChanged,
 );
 export const decodeCodeProjectOwnToolchainChanged = Schema.decodeUnknownSync(
   CodeProjectOwnToolchainChanged,

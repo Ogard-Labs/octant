@@ -1,6 +1,6 @@
 // What a member asks of this spoke to delegate work to it, on the private
 // listener outside any paired device's session: start a remote child run, read
-// its state, and cancel it. Every request is signed with the sender's identity
+// its state, cancel it, and list the Projects it may ask. Every request is signed with the sender's identity
 // key (see hubLink) and resolves to the `peer` principal, held to the peer grant
 // this spoke gave that member. No route here answers an approval, marks a
 // thread Done, or carries a credential.
@@ -13,6 +13,7 @@ export const PEER_DELEGATION_ROUTES = {
   create: "/api/hub/peer/delegations",
   status: "/api/hub/peer/delegations/status",
   cancel: "/api/hub/peer/delegations/cancel",
+  projects: "/api/hub/peer/delegations/projects",
 } as const;
 
 type RouteValue = (typeof PEER_DELEGATION_ROUTES)[keyof typeof PEER_DELEGATION_ROUTES];
@@ -99,6 +100,19 @@ export function createPeerDelegationRouteHandler(
       return receipt.status === "read"
         ? Response.json(receipt.delegation, { headers: NO_STORE })
         : refusedWith(receipt);
+    }
+    if (route === PEER_DELEGATION_ROUTES.projects) {
+      const listed = options.delegation.listProjects(signed);
+      return listed.status === "listed"
+        ? Response.json(
+            {
+              projects: listed.projects,
+              accepting: listed.accepting,
+              ...(listed.load === undefined ? {} : { load: listed.load }),
+            },
+            { headers: NO_STORE },
+          )
+        : refusedWith(listed);
     }
     const receipt = await options.delegation.cancel(signed);
     return receipt.status === "refused"

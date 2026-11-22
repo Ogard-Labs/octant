@@ -160,6 +160,7 @@ export interface RequestTransportFacts {
   readonly listenerTrust: "loopback" | "remote";
   readonly sourceClass: "loopback" | "lan-private" | "tailscale" | "unknown";
   readonly sourceKey: string;
+  readonly privateAddress?: string;
 }
 
 export interface RemoteVerifiedRequestFacts {

@@ -108,3 +108,33 @@ export const decodeDelegationReference = Schema.decodeUnknownSync(DelegationRefe
 export const decodeDelegationStatus = Schema.decodeUnknownSync(DelegationStatus);
 export const decodeDelegationCancelAnswer = Schema.decodeUnknownSync(DelegationCancelAnswer);
 export const decodeDelegationStartCommand = Schema.decodeUnknownSync(DelegationStartCommand);
+
+/**
+ * The Projects a member may delegate to on another member, as that member
+ * lists them: open for delegated work there and inside the grant it gave the
+ * asker. Names only, never a path.
+ */
+export const DelegationProjectListing = Schema.Struct({
+  projects: Schema.Array(
+    Schema.Struct({
+      projectId: ProjectId,
+      name: Schema.String.pipe(Schema.maxLength(200)),
+      modes: Schema.Array(PeerDelegationMode).pipe(Schema.minItems(1)),
+    }),
+  ).pipe(Schema.maxItems(500)),
+  /** False once the member's person stopped accepting delegated work; it then lists no Projects. */
+  accepting: Schema.optional(Schema.Boolean),
+  /** How busy the member is, changed only once a new level has held, for placing work. */
+  load: Schema.optional(Schema.Literal("light", "busy", "heavy")),
+});
+export type DelegationProjectListing = typeof DelegationProjectListing.Type;
+export const decodeDelegationProjectListing = Schema.decodeUnknownSync(DelegationProjectListing);
+
+/** A window's switch for whether this member takes delegated work from other members. */
+export const DelegationAcceptingRequest = Schema.Struct({ accepting: Schema.Boolean }).annotations(
+  strict,
+);
+export type DelegationAcceptingRequest = typeof DelegationAcceptingRequest.Type;
+export const decodeDelegationAcceptingRequest = Schema.decodeUnknownSync(
+  DelegationAcceptingRequest,
+);

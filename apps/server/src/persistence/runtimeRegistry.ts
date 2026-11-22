@@ -81,6 +81,7 @@ import {
   CodeProjectAutoReviewerChanged,
   CodeProjectAgentDefaultBranchPushChanged,
   CodeProjectAgentMergeChanged,
+  CodeProjectDelegatedCodeChanged,
   CodeProjectOwnToolchainChanged,
   CodeProjectAgentPullRequestCommentsChanged,
   CodeProjectPullRequestBackgroundRefreshChanged,
@@ -250,11 +251,13 @@ import {
   HubMembershipChangedPayload,
   REMOTE_PUSH_DELIVERY_EVENT_NAMES,
   REMOTE_PUSH_MOVE_WAITING_DELIVERY_EVENT_NAMES,
+  REMOTE_PUSH_DEVICE_JOINED_DELIVERY_EVENT_NAMES,
   REMOTE_PUSH_REGISTRATION_EVENT_NAMES,
   REMOTE_SERVER_GRANT_CLOSED,
   REMOTE_SERVER_GRANT_OPENED,
   RemotePushDeliveryRecordedV1,
   RemotePushMoveWaitingDeliveryRecordedV1,
+  RemotePushDeviceJoinedDeliveryRecordedV1,
   RemotePushRegistrationClearedV1,
   RemotePushRegistrationRecordedV1,
   RemoteServerGrantClosedPayload,
@@ -413,6 +416,7 @@ import {
   RemoteSessionInvalidatedV1,
   HostIdentityInitializedV1,
   SecurityAuditRecordedV1,
+  DeviceAlertChangedV1,
 } from "@octant/contracts/remote-access";
 import { Schema } from "effect";
 import { AggregateHeadsProjection } from "./aggregateHeadsProjection";
@@ -605,6 +609,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       CodeProjectPullRequestBackgroundRefreshChanged,
     )
     .register("project.code-agent-merge-changed@1", 1, CodeProjectAgentMergeChanged)
+    .register("project.code-delegated-code-changed@1", 1, CodeProjectDelegatedCodeChanged)
     .register("project.code-own-toolchain-changed@1", 1, CodeProjectOwnToolchainChanged)
     .register(
       "project.code-agent-pull-request-comments-changed@1",
@@ -928,6 +933,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(REMOTE_ACCESS_EVENT_NAMES.sessionInvalidated, 1, RemoteSessionInvalidatedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.commandReceiptRecorded, 1, RemoteCommandReceiptRecordedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.securityAuditRecorded, 1, SecurityAuditRecordedV1)
+    .register(REMOTE_ACCESS_EVENT_NAMES.deviceAlertChanged, 1, DeviceAlertChangedV1)
     .register(REMOTE_PUSH_REGISTRATION_EVENT_NAMES.recorded, 1, RemotePushRegistrationRecordedV1)
     .register(REMOTE_PUSH_REGISTRATION_EVENT_NAMES.cleared, 1, RemotePushRegistrationClearedV1)
     .register(REMOTE_PUSH_DELIVERY_EVENT_NAMES.recorded, 1, RemotePushDeliveryRecordedV1)
@@ -935,6 +941,11 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       REMOTE_PUSH_MOVE_WAITING_DELIVERY_EVENT_NAMES.recorded,
       1,
       RemotePushMoveWaitingDeliveryRecordedV1,
+    )
+    .register(
+      REMOTE_PUSH_DEVICE_JOINED_DELIVERY_EVENT_NAMES.recorded,
+      1,
+      RemotePushDeviceJoinedDeliveryRecordedV1,
     )
     .register(PRODUCT_FEEDBACK_CAPTURED, 1, ProductFeedbackCaptured)
     .register(PRODUCT_FEEDBACK_DISCARDED, 1, ProductFeedbackDiscarded)

@@ -13,6 +13,8 @@ import {
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { createRemoteDevicePrincipal, resolveLocalWindowPrincipal } from "./clientPrincipal";
+import type { HubGrant } from "@octant/contracts";
+import { hubActScopeFromSpokeLink } from "./hub/hubActScope";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityStore, WINDOW_AUTHORITY_TTL_MS } from "./windowAuthorityStore";
 import {
@@ -736,6 +738,234 @@ describe("Code routes", () => {
 
     expect((await route(fromDevice(create())))?.status).toBe(200);
     expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("lets a hub-introduced device start a Code thread only in a Project the member's Act item names, and refuses the next once Act is unticked", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-created" }));
+    const grant: { current: HubGrant } = {
+      current: { items: ["roster", "introduce", "act"], actProjects: [thread.projectId] },
+    };
+    const route = routeFixture({
+      execute,
+      hubActScope: hubActScopeFromSpokeLink({
+        status: () => ({ membership: "member", grant: grant.current }) as never,
+      }),
+    });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000960";
+    const create = (projectId: string) =>
+      JSON.stringify({
+        kind: "create-code-thread",
+        thread: { ...thread, projectId, executionPolicy: "approval-gated" },
+      });
+    const from = (body: string, admittedBy?: "host-person") => {
+      const remote = request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000961" as never,
+          admittedBy: admittedBy ?? "hub-roster",
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    const otherProject = "30000000-0000-4000-8000-0000000000aa";
+
+    expect((await route(from(create(String(thread.projectId)))))?.status).toBe(200);
+    const unnamed = await route(from(create(otherProject)));
+    expect(unnamed?.status).toBe(403);
+    expect(await unnamed?.json()).toMatchObject({
+      message:
+        "This computer's Act item for its hub does not name this Project, so a device the hub introduced cannot start threads in it here.",
+    });
+    // A fork's Project is its source's, which the route does not read.
+    const fork = await route(
+      from(
+        JSON.stringify({
+          kind: "fork-code-thread",
+          threadId: "21000000-0000-4000-8000-0000000000aa",
+          sourceThreadId: threadId,
+          throughOperationId: "22000000-0000-4000-8000-0000000000aa",
+          title: "A fork",
+        }),
+      ),
+    );
+    expect(fork?.status).toBe(403);
+    expect(execute).toHaveBeenCalledOnce();
+
+    grant.current = { items: ["roster", "introduce"], actProjects: [] };
+    expect((await route(from(create(String(thread.projectId)))))?.status).toBe(403);
+    // A device the member's own person paired is that person and never reads the Act item.
+    expect((await route(from(create(otherProject), "host-person")))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  describe("answering and Stop from a hub-introduced device", () => {
+    const otherProjectId = "30000000-0000-4000-8000-0000000000bb";
+    const otherThreadId = "00000000-0000-4000-8000-0000000009b2";
+    const remoteDeviceId = "00000000-0000-4000-8000-0000000009b0";
+    // Each thread lives in its own Project: this file's thread in the named one.
+    const read = vi.fn((_windowId: unknown, id: unknown) => ({
+      thread: String(id) === otherThreadId ? { ...thread, projectId: otherProjectId } : thread,
+      checkout,
+      lastSequence: 0,
+    }));
+    const fixture = (grant: { current: HubGrant }) => {
+      const executeOperation = vi.fn(async (_windowId, command) => ({
+        kind: "operation-accepted",
+        operationId: command.operationId,
+      }));
+      const route = routeFixture({
+        read,
+        executeOperation,
+        hubActScope: hubActScopeFromSpokeLink({
+          status: () => ({ membership: "member", grant: grant.current }) as never,
+        }),
+      });
+      return { route, executeOperation };
+    };
+    const approve = (target: string) =>
+      JSON.stringify({
+        kind: "answer-provider-approval",
+        operationId: crypto.randomUUID(),
+        threadId: target,
+        checkoutId,
+        approvalId: "00000000-0000-4000-8000-0000000009b3",
+        decision: "approved",
+      });
+    const stop = (target: string) =>
+      JSON.stringify({
+        kind: "cancel-provider-turn",
+        operationId: crypto.randomUUID(),
+        threadId: target,
+        checkoutId,
+      });
+    const from = (body: string, admittedBy: "host-person" | "hub-roster" = "hub-roster") => {
+      const remote = request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-0000000009b1" as never,
+          admittedBy,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    const actOnThisProject = (): { current: HubGrant } => ({
+      current: { items: ["roster", "introduce", "act"], actProjects: [thread.projectId] },
+    });
+
+    it("a hub-introduced device answers an approval only in a Project the member's Act item names", async () => {
+      const { route, executeOperation } = fixture(actOnThisProject());
+
+      expect((await route(from(approve(threadId))))?.status).toBe(200);
+      const unnamed = await route(from(approve(otherThreadId)));
+
+      expect(unnamed?.status).toBe(403);
+      expect(await unnamed?.json()).toMatchObject({
+        message:
+          "This computer's Act item for its hub does not name this Project, so a device the hub introduced cannot answer approvals or questions in it here.",
+      });
+      expect(executeOperation).toHaveBeenCalledOnce();
+      expect(executeOperation).toHaveBeenCalledWith(
+        remoteDeviceId,
+        expect.objectContaining({ kind: "answer-provider-approval", threadId }),
+        expect.anything(),
+      );
+    });
+
+    it("a hub-introduced device stops a turn only in a Project the member's Act item names", async () => {
+      const { route, executeOperation } = fixture(actOnThisProject());
+
+      expect((await route(from(stop(threadId))))?.status).toBe(200);
+      const unnamed = await route(from(stop(otherThreadId)));
+
+      expect(unnamed?.status).toBe(403);
+      expect(await unnamed?.json()).toMatchObject({
+        message:
+          "This computer's Act item for its hub does not name this Project, so a device the hub introduced cannot stop turns in it here.",
+      });
+      expect(executeOperation).toHaveBeenCalledOnce();
+      expect(executeOperation).toHaveBeenCalledWith(
+        remoteDeviceId,
+        expect.objectContaining({ kind: "cancel-provider-turn", threadId }),
+        expect.anything(),
+      );
+    });
+
+    it("unticking Act refuses the next approval answer and Stop", async () => {
+      const grant = actOnThisProject();
+      const { route, executeOperation } = fixture(grant);
+      expect((await route(from(approve(threadId))))?.status).toBe(200);
+
+      grant.current = { items: ["roster", "introduce"], actProjects: [] };
+      const answered = await route(from(approve(threadId)));
+      const stopped = await route(from(stop(threadId)));
+
+      expect(answered?.status).toBe(403);
+      expect(await answered?.json()).toMatchObject({
+        message:
+          "This computer has not ticked Act for its hub, so a device the hub introduced cannot answer approvals or questions here.",
+      });
+      expect(stopped?.status).toBe(403);
+      expect(await stopped?.json()).toMatchObject({
+        message:
+          "This computer has not ticked Act for its hub, so a device the hub introduced cannot stop turns here.",
+      });
+      expect(executeOperation).toHaveBeenCalledOnce();
+    });
+
+    it("a device the member's own person paired answers and stops anywhere, as before", async () => {
+      const grant = actOnThisProject();
+      grant.current = { items: ["roster", "introduce"], actProjects: [] };
+      const { route, executeOperation } = fixture(grant);
+
+      expect((await route(from(approve(otherThreadId), "host-person")))?.status).toBe(200);
+      expect((await route(from(stop(otherThreadId), "host-person")))?.status).toBe(200);
+      // A local window never reads the Act item either.
+      const local = request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: stop(otherThreadId),
+      });
+      expect((await route(local))?.status).toBe(200);
+      expect(executeOperation).toHaveBeenCalledTimes(3);
+    });
+
+    it("leaves a hub-introduced device to its own rules on a host in no hub", async () => {
+      const executeOperation = vi.fn(async (_windowId, command) => ({
+        kind: "operation-accepted",
+        operationId: command.operationId,
+      }));
+      const route = routeFixture({
+        read,
+        executeOperation,
+        hubActScope: hubActScopeFromSpokeLink({ status: () => ({ membership: "none" }) as never }),
+      });
+
+      expect((await route(from(approve(otherThreadId))))?.status).toBe(200);
+      expect((await route(from(stop(otherThreadId))))?.status).toBe(200);
+      expect(executeOperation).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("refuses the per-run Full access flag from any caller but a window on this host", async () => {
@@ -1671,6 +1901,33 @@ describe("Code routes", () => {
       lines.every((line) => Buffer.byteLength(`${line}\n`) <= MAX_CODE_NDJSON_LINE_BYTES),
     ).toBe(true);
     expect(subscribe).toHaveBeenCalledWith(windowId, threadId, 41, expect.any(AbortSignal));
+  });
+
+  it("answers thread events at once with wait=0 instead of waiting for the next change", async () => {
+    const subscribe = vi.fn(async function* () {
+      yield { ...frame, sequence: 42 } as CodeEventFrame;
+    });
+    const route = routeFixture({ subscribe });
+
+    const response = await route(
+      request(`/api/code/threads/${threadId}/events?afterSequence=41&wait=0`),
+    );
+
+    expect(response?.status).toBe(200);
+    expect((await response?.text())?.trim().split("\n")).toHaveLength(1);
+    // No signal tells the service to stop once caught up rather than park on
+    // the next change, which a paired computer's bounded channel cannot hold.
+    expect(subscribe).toHaveBeenCalledWith(windowId, threadId, 41, undefined);
+  });
+
+  it("refuses a thread events wait other than 0 and any other extra query", async () => {
+    const route = routeFixture({ subscribe: vi.fn(async function* () {}) });
+
+    for (const query of ["afterSequence=41&wait=1", "afterSequence=41&wait=0&x=1"]) {
+      expect((await route(request(`/api/code/threads/${threadId}/events?${query}`)))?.status).toBe(
+        400,
+      );
+    }
   });
 
   it("replays strict operation frames through the authenticated thread scope", async () => {
@@ -3611,7 +3868,7 @@ function routeFixture(
   for (const extra of extraWindows) {
     store.register({ windowId: extra.windowId, capability: extra.capability, now: 0 });
   }
-  const { pairedMergeUnlock, ...serviceOverrides } = overrides;
+  const { pairedMergeUnlock, hubActScope, ...serviceOverrides } = overrides;
   const service = {
     bootstrap: vi.fn(async () => ({ settings: settings(), threads: [], checkouts: [] })),
     navigation: vi.fn(async () => ({ threads: [], activity: [], runtime: [] })),
@@ -3630,6 +3887,7 @@ function routeFixture(
     service: service as never,
     windowAuthorityStore: store,
     now: authority?.now ?? (() => 1),
+    ...(hubActScope === undefined ? {} : { hubActScope: () => hubActScope as never }),
     ...(pairedMergeUnlock === undefined
       ? {}
       : { pairedMergeUnlock: () => pairedMergeUnlock as never }),

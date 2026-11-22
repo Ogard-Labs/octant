@@ -10,9 +10,14 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
+  decodeDelegationAcceptingRequest,
   decodeConfirmNewMembersRequest,
   decodeHubAcceptNewHubRequest,
+  decodeHubActProjectsRequest,
+  HubMemberId,
   decodeHubGrant,
+  decodeHubWindowGuestRequest,
+  type HubWindowComputers,
   decodeHubMemberReference,
   decodeHubPromoteRequest,
   decodeHubAutoApplyRequest,
@@ -39,11 +44,13 @@ import {
   decodeOwnerApprovalAnswerUnlockRequest,
   type AuditActingPrincipal,
 } from "@octant/contracts";
+import { Schema } from "effect";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { DirectPushService } from "./directPushService";
 import type { FailoverService } from "./failoverService";
 import type { HubService } from "./hubService";
+import { windowComputersFrom } from "./memberOrigin";
 import type { PairedMergeUnlockService } from "./pairedMergeUnlock";
 import type { OwnerApprovalAnswerUnlock } from "./ownerApprovalAnswerUnlock";
 import type { ProvisionService } from "./provisionService";
@@ -59,6 +66,7 @@ import type { WakeService } from "./wakeService";
 
 const DEFAULT_BODY_LIMIT = 64 * 1_024;
 const WINDOW_PRINCIPAL: AuditActingPrincipal = { kind: "local-window" };
+const decodeHubMemberId = Schema.decodeUnknownSync(HubMemberId);
 
 export const HUB_ADMINISTRATION_ROUTES = {
   status: "/api/desktop/hub/status",
@@ -69,11 +77,19 @@ export const HUB_ADMINISTRATION_ROUTES = {
   join: "/api/desktop/hub/join",
   joinFinish: "/api/desktop/hub/join/finish",
   grant: "/api/desktop/hub/grant",
+  /**
+   * This host's desktop window asks to be listed as a guest of the hub (by the
+   * hub itself, or through this spoke's signed request), and reads the members
+   * it may then reach directly.
+   */
+  windowGuest: "/api/desktop/hub/window-guest",
   leave: "/api/desktop/hub/leave",
   /** A window adds owner devices to this host's owner list: the hub's, or a spoke's after the person confirmed them by name and fingerprint. */
   ownersAdd: "/api/desktop/hub/owners/add",
   ownersRemove: "/api/desktop/hub/owners/remove",
   confirmNewMembers: "/api/desktop/hub/confirm-new-members",
+  /** Whether this member takes delegated work from other members: a window turns it on or off. */
+  delegationAccepting: "/api/desktop/hub/delegation-accepting",
   /** Whether a paired phone or web client's merge needs an owner unlock: only a window on this host turns it on or off. */
   pairedMergeUnlock: "/api/desktop/hub/paired-merge-unlock",
   ownerApprovalAnswerUnlock: "/api/desktop/hub/owner-approval-answer-unlock",
@@ -96,6 +112,8 @@ export const HUB_ADMINISTRATION_ROUTES = {
   wake: "/api/desktop/hub/wake",
   /** Accept moved threads: only a window on the hub turns it on or off. */
   acceptMovedThreads: "/api/desktop/hub/accept-moved-threads",
+  /** A window on the hub names the Projects here a member's desktop window may act in. */
+  actProjects: "/api/desktop/hub/act-projects",
   /** A spoke's own window enters or clears this computer's hardware address. */
   wakeHardwareAddress: "/api/desktop/hub/wake/hardware-address",
   /** The hub's push switch: only a window on the hub turns it on or off. */
@@ -129,6 +147,11 @@ export interface HubAdministrationRouteOptions {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly hub: HubService;
   readonly spoke: SpokeLinkService;
+  /** This member's switch for taking delegated work; absent where delegation is not composed. */
+  readonly delegationAccepting?: {
+    readonly read: () => boolean;
+    readonly set: (accepting: boolean) => void;
+  };
   readonly pairedMergeUnlock: PairedMergeUnlockService;
   readonly ownerApprovalAnswerUnlock: OwnerApprovalAnswerUnlock;
   readonly failover: FailoverService;
@@ -188,8 +211,12 @@ export function createHubAdministrationRouteHandler(
           owners: options.hub.listOwners(),
           ownerCandidates: options.hub.ownerCandidates(),
           acceptMovedThreads: options.hub.acceptsMovedThreads(),
+          actProjects: options.hub.ownActProjects() ?? [],
         },
         spoke: options.spoke.status(),
+        ...(options.delegationAccepting === undefined
+          ? {}
+          : { delegation: { accepting: options.delegationAccepting.read() } }),
         failover: options.failover.status(),
         wake: { hub: options.wake.status(), spoke: options.spokeWake.status() },
         push: { hub: options.push.status(), spoke: { handing: options.spokePush.granted() } },
@@ -286,6 +313,12 @@ export function createHubAdministrationRouteHandler(
           const value = decodeConfirmNewMembersRequest(parseJson(request, body.text));
           return outcome(options.spoke.setConfirmNewMembers(value.enabled, WINDOW_PRINCIPAL));
         }
+        case HUB_ADMINISTRATION_ROUTES.delegationAccepting: {
+          if (options.delegationAccepting === undefined) return failure("invalid", 404);
+          const value = decodeDelegationAcceptingRequest(parseJson(request, body.text));
+          options.delegationAccepting.set(value.accepting);
+          return outcome({ status: "changed" });
+        }
         case HUB_ADMINISTRATION_ROUTES.confirmMember: {
           const value = decodeOwnerMemberRequest(parseJson(request, body.text));
           return outcome(
@@ -304,6 +337,30 @@ export function createHubAdministrationRouteHandler(
           return outcome(
             options.spoke.setGrant(decodeHubGrant(parseJson(request, body.text)), WINDOW_PRINCIPAL),
           );
+        }
+        case HUB_ADMINISTRATION_ROUTES.windowGuest: {
+          const asked = decodeHubWindowGuestRequest(parseJson(request, body.text));
+          if (!options.hub.status().enabled) {
+            return Response.json(await options.spoke.introduceWindow(asked), {
+              headers: { "cache-control": "no-store" },
+            });
+          }
+          const hubMemberId = options.hub.hubMemberId();
+          const introduced = await options.hub.introduceWindowGuest(
+            { ...asked, introducedBy: hubMemberId },
+            WINDOW_PRINCIPAL,
+          );
+          const roster = options.hub.status().roster;
+          const answer: HubWindowComputers = {
+            membership: "member",
+            introduction: introduced.status,
+            hubMemberId: decodeHubMemberId(hubMemberId),
+            members:
+              roster === undefined
+                ? []
+                : windowComputersFrom({ roster, selfMemberId: hubMemberId }),
+          };
+          return Response.json(answer, { headers: { "cache-control": "no-store" } });
         }
         case HUB_ADMINISTRATION_ROUTES.leave: {
           requireNoBody(body.text);
@@ -341,6 +398,10 @@ export function createHubAdministrationRouteHandler(
         case HUB_ADMINISTRATION_ROUTES.acceptMovedThreads: {
           const value = decodeHubAcceptMovedThreadsRequest(parseJson(request, body.text));
           return outcome(options.hub.setAcceptMovedThreads(value.enabled, WINDOW_PRINCIPAL));
+        }
+        case HUB_ADMINISTRATION_ROUTES.actProjects: {
+          const value = decodeHubActProjectsRequest(parseJson(request, body.text));
+          return outcome(options.hub.setActProjects(value.actProjects, WINDOW_PRINCIPAL));
         }
         case HUB_ADMINISTRATION_ROUTES.push: {
           const value = decodeHubPushSwitchRequest(parseJson(request, body.text));

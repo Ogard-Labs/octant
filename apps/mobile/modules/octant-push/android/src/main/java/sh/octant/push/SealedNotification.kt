@@ -15,6 +15,8 @@ data class OpenedNotification(
   val title: String,
   val body: String,
   val deepLink: String,
+  /** The new-device alert a device-joined notice is for; absent for a thread. */
+  val alertId: String? = null,
 )
 
 object SealedNotificationOpener {
@@ -68,6 +70,13 @@ object SealedNotificationOpener {
         // you list, which reads the threads from the computer itself.
         if (threadId != null || mode != null) return null
         "octant://hosts/$hostId/moves"
+      } else if (kind == "device-joined") {
+        // A new device names no thread: it opens the phone's list of new
+        // devices, which reads each computer's alerts itself.
+        if (threadId != null || mode != null) return null
+        val alertId = content["alertId"]
+        if (alertId != null && !isLinkSegment(alertId)) return null
+        "octant://hosts/$hostId/new-devices"
       } else {
         if (kind !in kinds || threadId == null || !isLinkSegment(threadId)) return null
         if (mode != null && mode !in modes) return null
@@ -79,7 +88,8 @@ object SealedNotificationOpener {
     if (title.isEmpty()) return null
     if (title.toByteArray(Charsets.UTF_8).size > TITLE_MAXIMUM_BYTES) return null
     if (body.toByteArray(Charsets.UTF_8).size > BODY_MAXIMUM_BYTES) return null
-    return OpenedNotification(hostId, title, body, deepLink)
+    val alertId = if (kind == "device-joined") content["alertId"] else null
+    return OpenedNotification(hostId, title, body, deepLink, alertId)
   }
 
   /** A host or thread id goes into a link, so it holds only characters a path segment needs. */

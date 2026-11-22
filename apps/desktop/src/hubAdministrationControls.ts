@@ -12,7 +12,9 @@
 
 import {
   decodeConfirmNewMembersRequest,
+  decodeDelegationAcceptingRequest,
   decodeHubAcceptMovedThreadsRequest,
+  decodeHubActProjectsRequest,
   decodeHubGrant,
   decodeHubAutoApplyRequest,
   decodeHubDirectPushCredentialRemoveRequest,
@@ -31,6 +33,7 @@ import {
   decodeHubStandbyOrderRequest,
   decodeHubWakeHardwareAddressRequest,
   decodeHubWakeSwitchRequest,
+  decodeHubWindowGuestRequest,
   decodeOwnerAdditionRequest,
   decodeOwnerAlertRequest,
   decodeOwnerMemberRequest,
@@ -110,6 +113,13 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     bodyOptional: true,
   },
   grant: { method: "POST", path: "/api/desktop/hub/grant", decodeBody: decodeHubGrant },
+  // The window's own guest key and label; main records the pins of the members
+  // the host names in its answer (see pairedComputers).
+  "window-guest": {
+    method: "POST",
+    path: "/api/desktop/hub/window-guest",
+    decodeBody: decodeHubWindowGuestRequest,
+  },
   leave: { method: "POST", path: "/api/desktop/hub/leave" },
   "owners-add": {
     method: "POST",
@@ -125,6 +135,11 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/confirm-new-members",
     decodeBody: decodeConfirmNewMembersRequest,
+  },
+  "delegation-accepting": {
+    method: "POST",
+    path: "/api/desktop/hub/delegation-accepting",
+    decodeBody: decodeDelegationAcceptingRequest,
   },
   "paired-merge-unlock": {
     method: "POST",
@@ -177,6 +192,12 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/accept-moved-threads",
     decodeBody: decodeHubAcceptMovedThreadsRequest,
+  },
+  // The hub's own Act list: the Projects there a member's window may work in.
+  "act-projects": {
+    method: "POST",
+    path: "/api/desktop/hub/act-projects",
+    decodeBody: decodeHubActProjectsRequest,
   },
   "wake-hardware-address": {
     method: "POST",

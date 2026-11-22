@@ -121,6 +121,7 @@ import { wireRemote } from "./wiring/remote";
 import { createAgentGrantRouteSlot } from "./agentAccess/agentGrantRoutes";
 import { createPairedDeviceRouteSlot } from "./remote/pairedDeviceRouteSlot";
 import { createThreadMoveHolds } from "./hub/threadMoveHolds";
+import { createHubActScopeSlot } from "./hub/hubActScope";
 import { createThreadMoveStateStore, heldThreadsOf } from "./hub/threadMoveStateStore";
 import { wireReplica } from "./wiring/replica";
 
@@ -259,6 +260,10 @@ export function startOctantServer(
       resolveProjectStrict,
       resolveHostStrict,
     } = wireFoundations({ latencyStats, options, persistence });
+    // The member's Act item, which bounds what a device only the hub
+    // introduced may do in a Project here. The routes that read it are built
+    // before the hub side, which binds it once its spoke link exists.
+    const hubActScopeSlot = createHubActScopeSlot();
     const {
       agentRunParentAuthority,
       agentRunRequestOwner,
@@ -606,6 +611,7 @@ export function startOctantServer(
       skillDiscoveryService,
       providerAvailabilityMarks,
     } = yield* wireProviders({
+      hubActScopeSlot,
       resolveThreadStrict,
       resolveHostStrict,
       hostResourceBudget,
@@ -689,6 +695,7 @@ export function startOctantServer(
       observeTurnEnded,
       threadWork,
     } = wireHarness({
+      hubActScopeSlot,
       resolveThreadStrict,
       providerAvailabilityMarks,
       isProjectPolicyTargetAllowed,
@@ -973,6 +980,7 @@ export function startOctantServer(
       coordinatorWakes,
       codeThreadWakeupPort,
       routeCodeService,
+      onCodeTurnCancelled,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
       transcriptionForTurn,
@@ -1126,6 +1134,7 @@ export function startOctantServer(
       remoteServerGrants,
     } = yield* wireCodeTooling({
       configuredDriverOptions,
+      hubActScopeSlot,
       providerRuntimeNetwork,
       resolveThreadStrict,
       resolveProjectStrict,
@@ -1400,6 +1409,7 @@ export function startOctantServer(
     });
     const { navigatorAssistantRoutes, workTurnRoutes, zenBackgroundRoutes, zenRoutes, zenService } =
       wireZen({
+        hubActScopeSlot,
         contributeChatTools,
         chatService,
         githubExtensionSnapshot,
@@ -1425,6 +1435,7 @@ export function startOctantServer(
       windowCanOpenThread,
       flowRuns,
     } = wireContext({
+      hubActScopeSlot,
       onWindowRevoked,
       browserCredentialUseService,
       browserSessionGrants,
@@ -1603,6 +1614,7 @@ export function startOctantServer(
       threadSearchRoutes,
       workThreadRoutes,
     } = wireWorkRequests({
+      hubActScopeSlot,
       agentRunInteractions,
       browserToolApprovalService,
       extensionToolApprovalService,
@@ -2069,6 +2081,7 @@ export function startOctantServer(
       supportBundleRoutes,
       threadMoveAdministrationRoutes,
       hubAdministrationRoutes,
+      newDeviceAlertRoutes,
       localDeviceAdministrationRoutes,
       memberInstallRoutes,
       agentAccessAdministrationRoutes,
@@ -2084,6 +2097,8 @@ export function startOctantServer(
       hostDrain,
       shieldServerStore,
       serverConnection,
+      routeCodeService,
+      onCodeTurnCancelled,
       resolveThreadStrict,
       restartRecovery,
       agentGrantRouteSlot,
@@ -2129,6 +2144,7 @@ export function startOctantServer(
       codeAttachments,
       hubPushHandoffSlot,
       pairedMergeUnlockSlot,
+      hubActScopeSlot,
       pushGatewaySetting,
       codeProjectAccess,
       credentialBroker,
@@ -2276,6 +2292,7 @@ export function startOctantServer(
               return (
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await hubAdministrationRoutes(request)) ??
+                (await newDeviceAlertRoutes(request)) ??
                 (await threadMoveAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
                 (await secretStoresRoutes(request)) ??

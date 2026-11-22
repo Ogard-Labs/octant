@@ -24,6 +24,9 @@ import { mergeThreadRowActions } from "../projects/mergeThreadRowActions";
 import { ProjectSidebarSection } from "../projects/ProjectSidebarSection";
 import { useServerCodeProjects } from "../projects/serverProjectEntries";
 import { ServerProjectsSidebarGroup } from "../projects/ServerProjectsSidebarGroup";
+import { PairedComputersSidebarGroup } from "../projects/PairedComputersSidebarGroup";
+import type { FederatedReadItem } from "@octant/client-runtime/host-federation-merged-reads";
+import type { PairedComputerThreadPayload } from "@octant/client-runtime/paired-computer-reads";
 import type { ThreadRowActions } from "../projects/ThreadRowMenu";
 import type { useProjectController } from "../projects/useProjectController";
 import {
@@ -157,6 +160,9 @@ export interface SidebarContainerProps {
   readonly codeStatus: string;
   readonly contextHealthByProject: ReadonlyMap<ProjectId, ContextHealth>;
   readonly environmentSelection: EnvironmentSelection;
+  /** Code threads on the person's other computers, each opened there. */
+  readonly pairedComputerThreads?: ReadonlyArray<FederatedReadItem<PairedComputerThreadPayload>>;
+  readonly onOpenPairedComputerThread?: (hostId: string, threadId: string) => void;
   readonly federatedHostStates: NonNullable<ShellSidebarProps["environments"]>["hostStates"];
   readonly githubIssuesReadAvailable: boolean;
   readonly hostBridge?: OctantHostBridge;
@@ -228,6 +234,8 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     codeStatus,
     contextHealthByProject,
     environmentSelection,
+    pairedComputerThreads,
+    onOpenPairedComputerThread,
     federatedHostStates,
     githubIssuesReadAvailable,
     hostBridge,
@@ -971,6 +979,15 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
                     onSelectThread={selectCodeThread}
                     projects={serverCodeProjects}
                     threads={codeSidebarThreads.map(withProviderMark)}
+                  />
+                ) : null}
+                {activeMode === "code" &&
+                pairedComputerThreads !== undefined &&
+                onOpenPairedComputerThread !== undefined ? (
+                  <PairedComputersSidebarGroup
+                    onOpenThread={onOpenPairedComputerThread}
+                    selection={environmentSelection}
+                    threads={pairedComputerThreads}
                   />
                 ) : null}
                 {activeMode === "work" && workStatus === "ready" ? (

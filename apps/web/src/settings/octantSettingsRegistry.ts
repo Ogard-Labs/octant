@@ -2107,6 +2107,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "hub confirm new members alert owner devices status-only fingerprint remove dismiss",
         },
         {
+          id: settingId("hub-delegation-accepting"),
+          label: "Take delegated work from other members",
+          scope: "host",
+          keywords:
+            "hub delegated work delegation take accept stop pause other members requests running carries on",
+        },
+        {
           id: settingId("hub-push-sender"),
           label: "Push sender",
           scope: "host",

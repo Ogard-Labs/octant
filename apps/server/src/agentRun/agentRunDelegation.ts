@@ -100,6 +100,25 @@ export interface RemoteDelegationPort {
     readonly targetProjectId: string;
     readonly task: string;
   }) => Promise<AgentRunDelegationResult>;
+  /**
+   * The members this host may delegate to and each one's Projects, as each
+   * member lists them under the grant it gave this host: names and ids only.
+   */
+  readonly listTargets?: () => Promise<
+    ReadonlyArray<{
+      readonly memberId: string;
+      readonly name: string;
+      readonly projects: ReadonlyArray<{
+        readonly projectId: string;
+        readonly name: string;
+        readonly modes: ReadonlyArray<"work" | "code">;
+      }>;
+      /** False when that member stopped accepting delegated work. */
+      readonly accepting?: boolean;
+      /** How busy that member is: light, busy or heavy. */
+      readonly load?: "light" | "busy" | "heavy";
+    }>
+  >;
 }
 
 export interface AgentRunDelegationRouting {
@@ -212,9 +231,10 @@ export function agentRunDelegationCapabilities(options: AgentRunDelegationOption
     },
     dependencies: true,
     parentContext: options.admission.parentContext !== undefined,
-    // Reported by what this thread can do, so a Chat or Code thread never offers it.
+    // Reported by what this thread can do: a Work thread sends Work and a Code
+    // thread sends Code; a Chat thread never offers it.
     remoteDelegation:
-      options.remote !== undefined && options.mode === "work"
+      options.remote !== undefined && (options.mode === "work" || options.mode === "code")
         ? ("target-member" as const)
         : ("unavailable" as const),
     targets: options.listTargets(),
