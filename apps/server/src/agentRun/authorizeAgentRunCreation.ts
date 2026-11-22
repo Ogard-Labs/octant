@@ -3,11 +3,13 @@ import {
   decodeCodeThreadId,
   decodeWorkThreadId,
   DEFAULT_WORK_ACCESS,
+  decodeProviderInstanceId,
   personalSignInRefusals,
   type AgentRun,
   type AgentRunAuthority,
   type AgentRunParentThreadId,
   type CodeThread,
+  type ProviderInstanceId,
   type WindowId,
   type WorkAccess,
   type WorkThread,
@@ -142,10 +144,34 @@ export function authorizeAgentRunCreation(
 ): AgentRunControlParentFacts | undefined {
   const parent = authorizeParentThread(input);
   if (parent === undefined) return undefined;
-  const refusal = personalSignInRefusals(
-    input.persistence.readProviderInstance(parent.parentRoute.providerInstanceId)?.driverKind ?? "",
-  )?.refusesHelperRuns;
+  const refusalOf = (providerInstanceId: ProviderInstanceId) =>
+    personalSignInRefusals(
+      input.persistence.readProviderInstance(providerInstanceId)?.driverKind ?? "",
+    )?.refusesHelperRuns;
+  // A Chat turn may run on another provider than the thread's own, which a
+  // model pool or the Chat provider fallback chose; the agent asking for a
+  // helper is the one on the newest attempt, so its provider is read too.
+  const routed =
+    parent.parentMode === "chat" ? latestChatAttemptProvider(input.persistence, parent) : undefined;
+  const refusal =
+    refusalOf(parent.parentRoute.providerInstanceId) ??
+    (routed === undefined ? undefined : refusalOf(routed));
   return refusal === undefined ? parent : { ...parent, helperRunRefusal: refusal };
+}
+
+function latestChatAttemptProvider(
+  persistence: Pick<PersistenceService, "readChatThreadView">,
+  parent: AgentRunControlParentFacts,
+): ProviderInstanceId | undefined {
+  try {
+    const view = persistence.readChatThreadView(
+      decodeChatThreadId(String(parent.workspaceParent.threadId)),
+    );
+    const attempt = view?.turns.at(-1)?.attempts.at(-1);
+    return attempt === undefined ? undefined : decodeProviderInstanceId(attempt.providerInstanceId);
+  } catch {
+    return undefined;
+  }
 }
 
 function authorizeParentThread(

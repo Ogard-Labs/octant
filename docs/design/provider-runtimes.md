@@ -3017,8 +3017,11 @@ that declaration, never by the profile id:
   on another provider, and a retry or resume runs on its attempt's provider,
   so every Chat send, retry, resume and child-result delivery is checked
   again on its resolved provider when it is prepared, before its turn or
-  attempt is journaled. A person's own send routed there by a pool or
-  fallback they set up still runs. Work and Code have no pool or provider
+  attempt is journaled. A turn the person sends themselves that their own
+  pool or fallback routes onto Antigravity still runs (maintainer decision,
+  2026-11-21); an outside agent's send routed there is refused with the
+  outside-agent sentence, since its grant checked only the thread's own
+  provider. Work and Code have no pool or provider
   fallback: a turn runs on the thread's own provider, and a coordinator's
   continue-on-fallback move changes that provider before it starts its host
   turn, which admission then refuses. A helper's resolved provider (its role
@@ -3030,10 +3033,15 @@ that declaration, never by the profile id:
   explicit target, a role slot and a follow-up on it are refused, and a child
   that would start or resume on it is refused at launch. A thread running on
   Antigravity starts no helper on any provider, here or on another hub member,
-  and the person's retry or resume of an earlier child is refused too (its
+  including a Chat thread whose running turn a pool or fallback moved onto
+  Antigravity (its newest attempt's provider is read as well as the
+  thread's), and the person's retry or resume of an earlier child is refused too (its
   capabilities report delegation blocked as `helper-runs-refused`). A hub
   member whose Work default is Antigravity refuses a peer's delegated task as
-  `provider-unavailable`. The message: "Google doesn't support Google
+  `provider-unavailable`, and so does a member taking delegated Code work
+  whose first provider for the Project is Antigravity, before any thread or
+  worktree exists (both are a turn another agent started, which no person on
+  that member sent). The message: "Google doesn't support Google
   Antigravity as a helper agent, or starting helpers from it, on a personal
   Google sign-in. Use a provider that uses a Gemini API key, such as Gemini
   CLI with an API key, for helper work." The CLI's own built-in subagents
@@ -3050,6 +3058,10 @@ that declaration, never by the profile id:
   other people's computers are out of scope), so a paired phone, browser or
   owner device driving a thread is the same person at their own host, and a
   hub-introduced device acts only as an owner device after a fresh unlock.
+  A Code thread a person starts and follows on a directly paired computer
+  from their own window reaches that computer as a device they paired, so its
+  turns are their own interactive use; a turn that computer's host starts on
+  it by itself runs under the host's own scope and is refused as above.
   Agent grants are the one non-person caller that sends turns, and they are
   refused above.
 - **No copy without the limits.** An added ACP agent that is Antigravity

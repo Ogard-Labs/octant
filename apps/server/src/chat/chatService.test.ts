@@ -1474,7 +1474,19 @@ describe("ChatService", () => {
       failure: { category: "unauthorized", message: ANTIGRAVITY_UNATTENDED_REFUSAL },
     });
     expect(service.read(created.thread.id).turns).toHaveLength(0);
+    // An outside agent's send carries its grant's scope as a window, yet is
+    // never the person: its grant checked only the thread's own provider.
+    await expect(send({ windowId: window, fromOutsideAgent: true })).rejects.toMatchObject({
+      failure: {
+        category: "unauthorized",
+        message:
+          "Google doesn't support another agent driving Google Antigravity on a personal Google sign-in. Continue this thread yourself in Octant, or use a provider that uses a Gemini API key.",
+      },
+    });
+    expect(service.read(created.thread.id).turns).toHaveLength(0);
 
+    // The person's own send their fallback routes there runs (maintainer
+    // decision, 2026-11-21).
     await expect(send({ windowId: window })).resolves.toMatchObject({ kind: "turn-created" });
     expect(service.read(created.thread.id).turns[0]?.attempts[0]?.providerInstanceId).toBe(
       fallbackProvider,

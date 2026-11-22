@@ -677,6 +677,12 @@ export interface ChatServiceExecutionContext {
    * question that asks for a secret; absent, a secret answer is refused.
    */
   readonly initiator?: "user" | "agent";
+  /**
+   * An outside agent's grant sent this, through the ordinary route: its
+   * grant's scope stands in as the window, so the window alone cannot say
+   * it is not the person. Set only by the route; absent, it is not one.
+   */
+  readonly fromOutsideAgent?: boolean;
   /** One-hop coordination calls cannot expose the coordination tool again. */
   readonly coordinationDepth?: number;
   /**
@@ -2605,11 +2611,14 @@ export class ChatService {
       isRoutineHostScope(context.windowId) ||
       (context.coordinationDepth ?? 0) > 0 ||
       context.limitRecovery === true;
-    if (!unattended) return;
-    const refusal = personalSignInRefusals(
+    if (!unattended && context?.fromOutsideAgent !== true) return;
+    const refusals = personalSignInRefusals(
       this.#persistence.readProviderInstance(decodeProviderInstanceId(providerInstanceId))
         ?.driverKind ?? "",
-    )?.refusesUnattendedRuns;
+    );
+    // The grant's own check read the thread's provider; a pool or fallback
+    // can still route the agent's turn onto one that refuses outside agents.
+    const refusal = unattended ? refusals?.refusesUnattendedRuns : refusals?.refusesOutsideAgents;
     if (refusal !== undefined)
       throw new ChatServiceError({ category: "unauthorized", message: refusal });
   }
