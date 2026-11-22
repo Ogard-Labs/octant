@@ -113,5 +113,15 @@ describe("drawn design asset references", () => {
         "html",
       ),
     ).toEqual(["on-click"]);
+    // The browser decodes a handler's character references before running it.
+    expect(
+      drawn(
+        [
+          `<button onclick="this.title = &quot;https://example.com&quot;; this.style.backgroundImage = 'url(octant-asset:after-string)'">A</button>`,
+          `<button onclick="this.title = &quot;It's ready&quot;; /* url(octant-asset:in-comment) */">B</button>`,
+        ].join(""),
+        "html",
+      ),
+    ).toEqual(["after-string"]);
   });
 });

@@ -789,6 +789,55 @@ function scriptComments(text: string, start: number, end: number, into: Array<[n
 
 // The element name ends at a tag delimiter: `<script-preview>` is a custom
 // element whose children are HTML, not a script.
+const CHARACTER_REFERENCE = /&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|(quot|apos|amp|lt|gt));/y;
+const NAMED_CHARACTERS: Readonly<Record<string, string>> = {
+  quot: '"',
+  apos: "'",
+  amp: "&",
+  lt: "<",
+  gt: ">",
+};
+
+/**
+ * Comments in an inline event handler's value from `start` to `end`. A
+ * browser decodes the value's character references before compiling it, so
+ * `&quot;` opens a string there; the comments are read in the decoded script
+ * and mapped back to the markup.
+ */
+function handlerComments(text: string, start: number, end: number, into: Array<[number, number]>) {
+  let decoded = "";
+  const offsets: number[] = [];
+  let index = start;
+  while (index < end) {
+    CHARACTER_REFERENCE.lastIndex = index;
+    const reference = text[index] === "&" ? CHARACTER_REFERENCE.exec(text) : null;
+    if (reference !== null && reference.index + reference[0].length <= end) {
+      const code =
+        reference[1] !== undefined
+          ? Number(reference[1])
+          : reference[2] !== undefined
+            ? Number.parseInt(reference[2], 16)
+            : undefined;
+      decoded +=
+        code === undefined
+          ? (NAMED_CHARACTERS[reference[3] ?? ""] ?? "")
+          : code <= 0x10ffff
+            ? String.fromCodePoint(code)
+            : "\ufffd";
+      while (offsets.length < decoded.length) offsets.push(index);
+      index += reference[0].length;
+    } else {
+      decoded += text[index] ?? "";
+      offsets.push(index);
+      index += 1;
+    }
+  }
+  offsets.push(end);
+  const local: Array<[number, number]> = [];
+  scriptComments(decoded, 0, decoded.length, local);
+  for (const [from, to] of local) into.push([offsets[from] ?? end, offsets[to] ?? end]);
+}
+
 const RAW_TEXT_OPEN = /<(style|script)(?=[\t\n\f\r />])[^>]*>/iy;
 const TAG_NAME = /<[A-Za-z][^\s/>]*/y;
 const ATTRIBUTE = /[\s/]*([^\s=/>][^\s=>]*)(?:\s*=\s*("[^"]*"?|'[^']*'?|[^\s>]*))?/y;
@@ -857,8 +906,10 @@ export function designMarkupInertRanges(markup: string, language: "html" | "css"
         const closed = quoted === 1 && value.length > 1 && value.endsWith(value[0] ?? "") ? 1 : 0;
         const inner: [number, number] = [valueStart + quoted, valueStart + value.length - closed];
         if (attributeName === "style") cssComments(markup, inner[0], inner[1], ranges);
-        // An inline event handler is script a running design runs.
-        else if (attributeName.startsWith("on")) scriptComments(markup, inner[0], inner[1], ranges);
+        // An inline event handler is script a running design runs, once the
+        // browser has decoded its character references.
+        else if (attributeName.startsWith("on"))
+          handlerComments(markup, inner[0], inner[1], ranges);
         else if (!IMAGE_ATTRIBUTES.has(attributeName)) ranges.push(inner);
       }
       cursor += attribute[0].length;
