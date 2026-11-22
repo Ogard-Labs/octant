@@ -1,3 +1,4 @@
+import { personProtectsPath } from "../process/secretGuard";
 import { trackSandboxChild } from "../process/sandboxRuntimePolicy";
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -832,12 +833,19 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         // nothing else there; Strict and a sandbox the thread keeps withhold
         // it, so the launch is refused by name rather than failing as not
         // signed in (maintainer decision, 2026-11-22).
-        const credentialFiles =
+        // A protection the person added over the file still wins: then nothing
+        // is granted, and the CLI fails to sign in as it would on its own.
+        const credentialCandidates =
           input.agentPlatformSignIn === true
             ? fileForms(
                 options.applicationDefaultCredentialsPath ?? applicationDefaultCredentialsPath(),
               )
             : [];
+        const credentialFiles = credentialCandidates.some((path) =>
+          personProtectsPath(path, platform),
+        )
+          ? []
+          : credentialCandidates;
         if (
           input.agentPlatformSignIn === true &&
           input.purpose !== "probe" &&

@@ -690,6 +690,16 @@ export function buildBubblewrapLaunch(
   // Project) are covered like any read denial. A protected file outside every
   // bound root is already absent from the capsule.
   const listedGuardEntries = secretGuardEntries({ platform: "linux" });
+  // A single-file grant lifts only the built-in denial for that file: the
+  // person's own protections are judged with the granted files in reach, and
+  // whatever they cover stays denied.
+  const personDenied = new Set(
+    secretGuardLinuxPaths({
+      entries: listedGuardEntries.filter((entry) => entry.ruleId === "added"),
+      ownAccountPaths: [],
+      withinRoots: [...guardedReadFiles],
+    }),
+  );
   for (const path of secretGuardLinuxPaths({
     entries:
       input.protectedFiles === "provider-sign-ins"
@@ -707,8 +717,12 @@ export function buildBubblewrapLaunch(
       ...(input.additionalWriteRoots ?? []),
     ],
   })) {
-    if (guardedReadFiles.has(path)) continue;
+    if (guardedReadFiles.has(path) && !personDenied.has(path)) continue;
     bindAdditionalDenyPath(path, "read");
+  }
+  for (const path of personDenied) {
+    if ([...guardedReadFiles].some((file) => file === path || file.startsWith(`${path}/`)))
+      bindAdditionalDenyPath(path, "read");
   }
 
   let hostServiceFilter: string | undefined;

@@ -43,6 +43,8 @@ import {
   WINDOWS_STRICT_REFUSAL,
   windowsStrictRuntimeRefusal,
 } from "@octant/domain/guardrail-policy";
+import { NO_PROTECTED_FILES_CHANGES } from "@octant/domain/secret-guard-policy";
+import { applyProtectedFilesChoice } from "../process/secretGuard";
 import { acpProviderProfiles, type AcpProviderProfile } from "./acpProfiles";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeAcpAgent.py", import.meta.url));
@@ -2687,6 +2689,7 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
     readonly fullAccessSandbox?: boolean;
     readonly agentPlatformSignIn?: boolean;
     readonly octantSignIn?: boolean;
+    readonly protect?: "file" | "folder";
   }) {
     const target = fixture(antigravity);
     const gcloud = join(target.canonicalRoot, "home", ".config", "gcloud");
@@ -2694,6 +2697,12 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
     const credentials = join(gcloud, "application_default_credentials.json");
     writeFileSync(credentials, "{}", { mode: 0o600 });
     writeFileSync(join(gcloud, "credentials.db"), "", { mode: 0o600 });
+    if (input.protect !== undefined) {
+      applyProtectedFilesChoice({
+        added: [input.protect === "file" ? credentials : gcloud],
+        removed: [],
+      });
+    }
     const result = await Effect.runPromise(
       Effect.either(
         makeAcpConfinementLive({
@@ -2784,6 +2793,45 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
     expect(Either.isLeft(kept.result) && kept.result.left.message).toContain(
       "inside the sandbox this thread keeps",
     );
+  });
+
+  it("a protected file the person added still denies the Agent Platform credentials read on Linux", async () => {
+    for (const covering of ["file", "folder"] as const) {
+      const linux = await prepared({
+        platform: "linux",
+        strict: false,
+        agentPlatformSignIn: true,
+        protect: covering,
+      });
+      try {
+        if (Either.isLeft(linux.result)) throw new Error(linux.result.left.message);
+        const args = linux.result.right.args;
+        const readable = args.some(
+          (arg, index) =>
+            (arg === "--ro-bind" || arg === "--bind") && args[index + 1] === linux.credentials,
+        );
+        expect(readable, covering).toBe(false);
+      } finally {
+        applyProtectedFilesChoice(NO_PROTECTED_FILES_CHANGES);
+      }
+    }
+  });
+
+  it("a protected file the person added still denies the Agent Platform credentials read on macOS", async () => {
+    const { result, credentials } = await prepared({
+      strict: false,
+      agentPlatformSignIn: true,
+      protect: "folder",
+    });
+    try {
+      if (Either.isLeft(result)) throw new Error(result.left.message);
+      // The person's own protection wins: the one-file grant is not made.
+      expect(seatbeltProfile(result.right)).not.toContain(
+        `(allow file-read* (literal "${credentials}"))`,
+      );
+    } finally {
+      applyProtectedFilesChoice(NO_PROTECTED_FILES_CHANGES);
+    }
   });
 
   it("a personal-sign-in or API-key launch gets no gcloud read", async () => {
