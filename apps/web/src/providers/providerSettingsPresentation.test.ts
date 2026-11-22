@@ -4,6 +4,7 @@ import {
   driverLabel,
   incompatibleReadinessFacts,
   providerProcessFailureSummary,
+  providerRefusalCopy,
   providerRefusalGuidance,
   providerRowReadinessLabel,
   ownReviewerLabel,
@@ -440,5 +441,54 @@ describe("windowsChatBoundaryLabel", () => {
     expect(windowsChatBoundaryLabel("claude", "win32")).toBeUndefined();
     expect(windowsChatBoundaryLabel("codex", "win32")).toBeUndefined();
     expect(windowsChatBoundaryLabel("pi", "win32")).toBeUndefined();
+  });
+});
+
+describe("sign-in recovery advice", () => {
+  const antigravity = (configuration: Record<string, unknown>) =>
+    decodeProviderInstance({
+      id: "80000000-0000-4000-8000-0000000000a9",
+      displayName: "Antigravity",
+      driverKind: "antigravity",
+      configuration: {
+        kind: "antigravity-acp",
+        binaryPath: "/opt/homebrew/bin/agy",
+        ...configuration,
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-11-22T10:00:00.000Z",
+      updatedAt: "2026-11-22T10:00:00.000Z",
+    });
+
+  it("sends a refused Gemini API key back to the key, not to a CLI login", () => {
+    expect(
+      providerRefusalCopy("authentication-required", antigravity({ authentication: "api-key" })),
+    ).toEqual({
+      reason: "Google Antigravity authentication is required.",
+      nextStep: "Check the API key, then check the connection again.",
+    });
+  });
+
+  it("sends a refused Agent Platform sign-in to its project and Application Default Credentials", () => {
+    expect(
+      providerRefusalCopy(
+        "authentication-required",
+        antigravity({
+          authentication: "agent-platform",
+          googleCloud: { project: "octant-example-1", location: "us-central1" },
+        }),
+      ),
+    ).toEqual({
+      reason: "Google Antigravity authentication is required.",
+      nextStep: "Check the project and location and run gcloud auth application-default login.",
+    });
+  });
+
+  it("keeps the CLI login advice for the personal sign-in", () => {
+    expect(providerRefusalCopy("authentication-required", antigravity({})).nextStep).toBe(
+      "Sign in to Google Antigravity with its provider-owned login, then check the connection again.",
+    );
   });
 });

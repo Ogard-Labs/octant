@@ -99,6 +99,8 @@ export interface ProviderRuntimeNetworkStartInput {
   readonly loopbackPorts?: ReadonlyArray<number>;
   /** The launch's environment, read for the base URLs the person configured. */
   readonly environment?: Readonly<Record<string, string | undefined>>;
+  /** An Agent Platform instance's configured location, whose regional host it reaches. */
+  readonly googleCloudLocation?: string;
   /** The thread runs at Auto, so an unlisted host may go to the reviewer before it is refused. */
   readonly autoReview?: boolean;
   /** The provider session the launch serves, which names its thread to the reviewer. */
@@ -344,6 +346,7 @@ export class ProviderRuntimeNetwork implements ProviderRuntimeNetworkPort {
       runtime: input.runtime,
       profileId: input.profileId,
       environment: input.environment,
+      googleCloudLocation: input.googleCloudLocation,
     });
     const loopbackPorts = input.loopbackPorts ?? [];
     const reviewerAllowed: Array<{ readonly host: string; readonly port: number }> = [];

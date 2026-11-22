@@ -279,6 +279,7 @@ class ConformanceClient implements AcpClientPort {
   }
 
   authenticate = async () => undefined;
+  authenticateWith = async () => ({});
   startBrowserAuthentication = async () => ({
     attemptId: "attempt",
     signInUrl: "https://auth.example/attempt",

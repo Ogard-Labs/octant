@@ -4488,7 +4488,10 @@ Chat still take no app-managed tools.
   `provider-capability-mismatch` with the profile's own sentence, before any
   thread exists, and every other turn the host starts as itself on it is refused;
   the same declaration keeps it from helper runs and outside
-  agents ([Provider runtimes: Google Antigravity](design/provider-runtimes.md#google-antigravity)).
+  agents. The check reads the instance's configured sign-in, which is what
+  Octant passes at launch, never the agent's own report: an Antigravity
+  instance configured with a Gemini API key or Agent Platform carries none of
+  these limits ([Provider runtimes: Google Antigravity](design/provider-runtimes.md#google-antigravity)).
   A routine asks first by default: a Full access profile is not eligible,
   whether or not it was remembered elsewhere (the contract refuses it on the
   snapshot and dispatch blocks it as `full-access-ineligible`), Code runs are
@@ -17405,7 +17408,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
   launch on an API key takes none of it. Google Antigravity's ACP launch
   takes the same four when it is sandboxed, to read its own keychain sign-in
   (maintainer decision, 2026-11-20), but commands the agent runs in-process
-  share that launch's sandbox, so they may run `security` too. In Work and
+  share that launch's sandbox, so they may run `security` too. An
+  Antigravity instance signed in to Agent Platform may also read exactly one
+  protected file when sandboxed, the Application Default Credentials file
+  `~/.config/gcloud/application_default_credentials.json`, outside Strict and
+  in its readiness check only; Strict refuses that launch by name (maintainer
+  decision, 2026-11-22). In Work and
   Code outside Strict it starts with no sandbox at all, as Windows starts ACP
   agents below Full access; see
   [Provider runtimes: Google Antigravity](design/provider-runtimes.md#google-antigravity).

@@ -966,6 +966,80 @@ describe("AutomationDispatchService", () => {
     session.connection.close();
   });
 
+  it("an Antigravity instance signed in with a Gemini API key may run a routine", async () => {
+    for (const configuration of [
+      { kind: "antigravity-acp", binaryPath: "/opt/homebrew/bin/agy", authentication: "api-key" },
+      {
+        kind: "antigravity-acp",
+        binaryPath: "/opt/homebrew/bin/agy",
+        authentication: "agent-platform",
+        googleCloud: { project: "octant-example-1", location: "us-central1" },
+      },
+    ]) {
+      const session = openSession();
+      const definition = codeDefinition();
+      const run = claimQueuedRun(session, definition);
+      const code = createCodePort();
+      const dispatcher = new AutomationDispatchService({
+        store: session.store,
+        projection: session.projection,
+        code: code.port,
+        work: unavailableAutomationWorkDispatchPort(),
+        capacity: alwaysAdmit(),
+        resolveFacts: () => ({
+          ...matchingFacts(definition),
+          providerInstance: {
+            id: AUTOMATION_TEST_IDS.providerInstance,
+            enabled: true,
+            driverKind: "antigravity",
+            configuration,
+          } as never,
+        }),
+        now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+      });
+
+      await dispatcher.dispatchNow(definition.id, run.id);
+
+      expect(code.create, configuration.authentication).toHaveBeenCalledOnce();
+      expect(session.projection.getRun(run.id)?.failure).toBeUndefined();
+      session.connection.close();
+    }
+  });
+
+  it("an Antigravity instance on personal sign-in still refuses a routine", async () => {
+    const session = openSession();
+    const definition = codeDefinition();
+    const run = claimQueuedRun(session, definition);
+    const code = createCodePort();
+    const dispatcher = new AutomationDispatchService({
+      store: session.store,
+      projection: session.projection,
+      code: code.port,
+      work: unavailableAutomationWorkDispatchPort(),
+      capacity: alwaysAdmit(),
+      resolveFacts: () => ({
+        ...matchingFacts(definition),
+        providerInstance: {
+          id: AUTOMATION_TEST_IDS.providerInstance,
+          enabled: true,
+          driverKind: "antigravity",
+          configuration: {
+            kind: "antigravity-acp",
+            binaryPath: "/opt/homebrew/bin/agy",
+            authentication: "provider-owned",
+          },
+        } as never,
+      }),
+      now: () => "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+    });
+
+    await dispatcher.dispatchNow(definition.id, run.id);
+
+    expect(code.create).not.toHaveBeenCalled();
+    expect(session.projection.getRun(run.id)?.failure?.reason).toBe("provider-capability-mismatch");
+    session.connection.close();
+  });
+
   it("capability-gates Work when the first-turn runtime port is unavailable", async () => {
     const session = openSession();
     const definition = workDefinition();

@@ -60,6 +60,7 @@ class FakeClient implements AcpClientPort {
   readonly reject = vi.fn(async () => undefined);
   readonly closeSession = vi.fn(async () => undefined);
   readonly authenticate = vi.fn(async () => undefined);
+  readonly authenticateWith = vi.fn(async (_methodId: string) => ({}));
   readonly startBrowserAuthentication = vi.fn(async () => ({
     attemptId: "provider-attempt-1",
     signInUrl: "https://auth.mistral.example/attempt",
@@ -211,9 +212,14 @@ function fixture(
   overrides: Partial<
     Pick<
       AcpDriverOptions,
-      "authentication" | "managedToolsBridgeFactory" | "permissionPersistence" | "process"
+      | "authentication"
+      | "googleCloud"
+      | "managedToolsBridgeFactory"
+      | "permissionPersistence"
+      | "process"
     >
   > & {
+    readonly authMethods?: ReadonlyArray<{ readonly id: string }>;
     readonly mcpHttp?: boolean;
     readonly nativeResume?: boolean;
     readonly runtimeVersion?: string;
@@ -239,7 +245,7 @@ function fixture(
         },
         ...(overrides.mcpHttp === true ? { mcpCapabilities: { http: true } } : {}),
       },
-      authMethods: [{ id: "provider-auth" }],
+      authMethods: overrides.authMethods ?? [{ id: "provider-auth" }],
       agentInfo: { name: profile.process.agentName, version: "0.0.0-dev" },
     },
     acp: {} as AcpConnection["acp"],
@@ -283,7 +289,15 @@ function fixture(
       let id = 0;
       return () => `request-${++id}`;
     })(),
-    ...overrides,
+    ...(overrides.authentication === undefined ? {} : { authentication: overrides.authentication }),
+    ...(overrides.googleCloud === undefined ? {} : { googleCloud: overrides.googleCloud }),
+    ...(overrides.managedToolsBridgeFactory === undefined
+      ? {}
+      : { managedToolsBridgeFactory: overrides.managedToolsBridgeFactory }),
+    ...(overrides.permissionPersistence === undefined
+      ? {}
+      : { permissionPersistence: overrides.permissionPersistence }),
+    ...(overrides.process === undefined ? {} : { process: overrides.process }),
   });
   return {
     driver,
@@ -3617,6 +3631,106 @@ describe("ACP provider driver profile quirks", () => {
     ]);
     expect(result).toMatchObject({ credentialStatus: "stored" });
     expect(JSON.stringify(result)).not.toContain("secret-provider-key");
+  });
+
+  describe("Google Antigravity's sign-in choice", () => {
+    const antigravity = acpProviderProfiles.antigravity;
+    const agyAuthMethods = [
+      { id: "oauth-personal" },
+      { id: "oauth-business" },
+      { id: "gemini-api-key" },
+      { id: "agent-platform" },
+    ];
+
+    it("the API key reaches agy acp as GEMINI_API_KEY, chosen as its sign-in, and never appears in what Octant records", async () => {
+      const { driver, client, starts, registry } = fixture(antigravity, {
+        authentication: "api-key",
+        authMethods: agyAuthMethods,
+        runtimeVersion: "1.5.12",
+      });
+      const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+
+      expect(starts[0]).toMatchObject({ apiKey: "secret-provider-key" });
+      const environment = sanitizeAcpEnvironment(
+        antigravity,
+        {},
+        { managedHome, apiKey: "secret-provider-key" },
+      );
+      expect(environment.GEMINI_API_KEY).toBe("secret-provider-key");
+      expect(environment).not.toHaveProperty("GOOGLE_CLOUD_PROJECT");
+      expect(client.authenticateWith).toHaveBeenCalledExactlyOnceWith("gemini-api-key");
+      expect(client.authenticateWith.mock.invocationCallOrder[0]).toBeLessThan(
+        client.newSession.mock.invocationCallOrder[0] ?? 0,
+      );
+      expect(result).toMatchObject({ credentialStatus: "stored" });
+      expect(JSON.stringify(result)).not.toContain("secret-provider-key");
+      expect(JSON.stringify(registry.observedState(instanceId))).not.toContain(
+        "secret-provider-key",
+      );
+    });
+
+    it("passes an Agent Platform project and location and chooses that sign-in for every launch", async () => {
+      const googleCloud = { project: "octant-example-1", location: "us-central1" };
+      const { driver, client, starts, credentialResolver } = fixture(antigravity, {
+        authentication: "agent-platform",
+        googleCloud,
+        authMethods: agyAuthMethods,
+        runtimeVersion: "1.5.12",
+      });
+      await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          }),
+        ),
+      );
+
+      expect(credentialResolver.resolve).not.toHaveBeenCalled();
+      expect(starts).toHaveLength(2);
+      for (const start of starts) {
+        expect(start).toMatchObject({ googleCloud });
+        expect(start).not.toHaveProperty("apiKey");
+      }
+      expect(sanitizeAcpEnvironment(antigravity, {}, { managedHome, googleCloud })).toMatchObject({
+        GOOGLE_CLOUD_PROJECT: "octant-example-1",
+        GOOGLE_CLOUD_LOCATION: "us-central1",
+      });
+      expect(client.authenticateWith.mock.calls).toEqual([["agent-platform"], ["agent-platform"]]);
+    });
+
+    it("refuses as not signed in when agy does not offer the chosen sign-in", async () => {
+      const { driver, client } = fixture(antigravity, {
+        authentication: "api-key",
+        authMethods: [{ id: "oauth-personal" }],
+        runtimeVersion: "1.5.12",
+      });
+      const failure = await Effect.runPromise(
+        Effect.flip(Effect.scoped(driver.probe({ instanceId }))),
+      );
+      expect(failure).toMatchObject({
+        category: "unauthenticated",
+        message:
+          "Google Antigravity did not offer Gemini API key sign-in. Update Google Antigravity, or choose another sign-in in Settings.",
+      });
+      expect(client.authenticateWith).not.toHaveBeenCalled();
+      expect(client.newSession).not.toHaveBeenCalled();
+    });
+
+    it("leaves a personal Google sign-in to the CLI's own cached login", async () => {
+      for (const authentication of ["provider-owned", undefined] as const) {
+        const { driver, client, starts } = fixture(antigravity, {
+          ...(authentication === undefined ? {} : { authentication }),
+          authMethods: agyAuthMethods,
+          runtimeVersion: "1.5.12",
+        });
+        await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+        expect(client.authenticateWith).not.toHaveBeenCalled();
+        expect(starts[0]).not.toHaveProperty("apiKey");
+        expect(starts[0]).not.toHaveProperty("googleCloud");
+      }
+    });
   });
 
   it("does not consult the credential broker for subscription or provider-owned authentication", async () => {

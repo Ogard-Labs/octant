@@ -13597,6 +13597,7 @@ function runtimeFixture(options: {
   readThreadExternalContentTaint?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["readThreadExternalContentTaint"];
+  readProviderInstance?: Parameters<typeof createCodeOperationRuntime>[0]["readProviderInstance"];
   threads?: Parameters<typeof createCodeOperationRuntime>[0]["threads"];
   contributedTools?: Parameters<typeof createCodeOperationRuntime>[0]["contributedTools"];
   serverCodeTurn?: Parameters<typeof createCodeOperationRuntime>[0]["serverCodeTurn"];
@@ -14051,6 +14052,9 @@ function runtimeFixture(options: {
     ...(options.resolveProviderCapabilities === undefined
       ? {}
       : { resolveProviderCapabilities: options.resolveProviderCapabilities }),
+    ...(options.readProviderInstance === undefined
+      ? {}
+      : { readProviderInstance: options.readProviderInstance }),
     ...(options.readThreadExternalContentTaint === undefined
       ? {}
       : { readThreadExternalContentTaint: options.readThreadExternalContentTaint }),
@@ -19567,6 +19571,33 @@ describe("continuing a Code turn a restart cut off", () => {
     }
   });
 
+  it("starts a turn the host begins on an Antigravity instance signed in with a Gemini API key", async () => {
+    const antigravity = provider();
+    const host = runtimeFixture({
+      provider: {
+        ...providerDriver(antigravity.connection),
+        kind: "antigravity",
+      } as ProviderDriver,
+      readProviderInstance: () =>
+        ({
+          driverKind: "antigravity",
+          configuration: {
+            kind: "antigravity-acp",
+            binaryPath: "/opt/homebrew/bin/agy",
+            authentication: "api-key",
+          },
+        }) as never,
+    });
+    try {
+      await expect(host.runtime.execute(ROUTINE_HOST_SCOPE_ID, start(73))).resolves.toMatchObject({
+        kind: "provider-turn-state",
+        state: "running",
+      });
+    } finally {
+      host.close();
+    }
+  });
+
   it("starts no turn the host begins as itself on Google Antigravity, and takes the person's own", async () => {
     const antigravity = provider();
     const host = runtimeFixture({
@@ -19584,7 +19615,7 @@ describe("continuing a Code turn a restart cut off", () => {
         failure: {
           category: "unauthorized",
           message:
-            "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Choose a provider that uses a Gemini API key, such as Gemini CLI with an API key.",
+            "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Switch this provider to a Gemini API key or Agent Platform in Settings, or choose another provider.",
         },
       });
       expect(antigravity.connection.send).not.toHaveBeenCalled();

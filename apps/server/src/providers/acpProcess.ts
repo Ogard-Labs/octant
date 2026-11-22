@@ -1,3 +1,4 @@
+import { personProtectsPath } from "../process/secretGuard";
 import { trackSandboxChild } from "../process/sandboxRuntimePolicy";
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -18,6 +19,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type {
+  AcpAgentGoogleCloud,
   ProviderExecutionPolicy,
   ProviderFailure,
   ProviderNativeSetup,
@@ -158,6 +160,19 @@ export interface AcpConfinementInput {
   readonly servers?: ProviderServerAccess;
   /** The person's own setup this session carries; absent keeps every deny. */
   readonly nativeSetup?: ProviderNativeSetup;
+  /**
+   * The launch signs in with a credential Octant passes itself (an API key or
+   * a Cloud project), so a profile's missing data directory is created rather
+   * than refused as a missing personal sign-in.
+   */
+  readonly octantSignIn?: boolean;
+  /**
+   * The launch signs in to Agent Platform with the host's Application Default
+   * Credentials. A sandboxed launch outside Strict, and a readiness check,
+   * may then read that one file (maintainer decision, 2026-11-22); Strict and
+   * a sandbox the thread keeps refuse the launch by name.
+   */
+  readonly agentPlatformSignIn?: boolean;
 }
 
 export interface AcpConfinementPort {
@@ -211,6 +226,8 @@ export interface AcpProcessStartInput {
   /** A non-mutating readiness check may contact the provider without a thread. */
   readonly purpose?: "probe" | "session";
   readonly apiKey?: string;
+  /** The Google Cloud project an `agent-platform` instance signs in to. */
+  readonly googleCloud?: AcpAgentGoogleCloud;
   /** Exact loopback ports owned by app-managed ACP tool bridges for this process. */
   readonly loopbackPorts?: ReadonlyArray<number>;
   /** The person's own setup this session carries, applied through the profile's `nativeSetup`. */
@@ -315,6 +332,27 @@ export interface AcpConfinementOptions {
   readonly temporaryDirectory?: string;
   /** Overrides the profile's provider-owned authentication path (tests). */
   readonly hostAuthenticationPath?: string;
+  /** Overrides where gcloud keeps Application Default Credentials (tests). */
+  readonly applicationDefaultCredentialsPath?: string;
+}
+
+/**
+ * Where `gcloud auth application-default login` writes the credentials an
+ * Agent Platform sign-in reads. Octant's provider launches do not honour
+ * `CLOUDSDK_CONFIG` anywhere else, so neither does this grant.
+ */
+function applicationDefaultCredentialsPath(): string {
+  return join(homedir(), ".config", "gcloud", "application_default_credentials.json");
+}
+
+/** The literal and resolved forms of one file, for rules that match either. */
+function fileForms(path: string): ReadonlyArray<string> {
+  try {
+    const resolved = realpathSync(path);
+    return resolved === path ? [path] : [path, resolved];
+  } catch {
+    return [path];
+  }
 }
 
 export interface AcpProbeOptions {
@@ -477,6 +515,7 @@ function prepareHostAuthentication(
   managedHome: string,
   overridePath: string | undefined,
   releasedEntries: ReadonlySet<string> = new Set(),
+  octantSignIn = false,
 ): Effect.Effect<HostAuthenticationPaths, ProviderFailure> {
   const hostAuthentication = profile.process.hostAuthentication;
   if (hostAuthentication === undefined)
@@ -484,17 +523,25 @@ function prepareHostAuthentication(
   const path = overridePath ?? hostAuthentication.defaultPath;
   const label = `${profile.displayName} provider data directory`;
   if (hostAuthentication.kind === "directory") {
+    // A missing directory means no personal sign-in was ever made. A launch
+    // on a key or Cloud project Octant passes needs none, and the CLI would
+    // create its own data directory there on first run, so Octant creates it
+    // (owner-only) instead of asking for a login the run will not use: a
+    // fresh host otherwise refused a Gemini API key it held (review finding,
+    // 2026-11-22).
     const directory =
-      overridePath === undefined
-        ? canonicalExistingDirectory(path, label).pipe(
-            Effect.mapError(() =>
-              failure(
-                "unauthenticated",
-                `${profile.displayName} provider-owned authentication is unavailable. ${hostAuthentication.loginHint}`,
+      overridePath !== undefined
+        ? canonicalManagedDirectory(path, label)
+        : octantSignIn && !existsSync(path)
+          ? canonicalManagedDirectory(path, label)
+          : canonicalExistingDirectory(path, label).pipe(
+              Effect.mapError(() =>
+                failure(
+                  "unauthenticated",
+                  `${profile.displayName} provider-owned authentication is unavailable. ${hostAuthentication.loginHint}`,
+                ),
               ),
-            ),
-          )
-        : canonicalManagedDirectory(path, label);
+            );
     return directory.pipe(
       Effect.map((canonical) => ({
         readPaths: [canonical],
@@ -701,6 +748,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             mode: input.mode,
             ...(input.strict === false ? { strict: false } : {}),
           }).hostEntries,
+          input.octantSignIn === true,
         );
         const hostReadPaths = yield* canonicalExistingReadPaths(profile);
         yield* writeManagedFiles(profile, {
@@ -778,6 +826,44 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             environment: { ...input.environment, ...hostAuthentication.environment },
           };
         }
+        // Agent Platform reads the host's Application Default Credentials,
+        // which sit under the protected `~/.config/gcloud`. Outside Strict,
+        // where the AWS profile is readable too, and in a readiness check,
+        // which must reach Ready, the launch may read that one file and
+        // nothing else there; Strict and a sandbox the thread keeps withhold
+        // it, so the launch is refused by name rather than failing as not
+        // signed in (maintainer decision, 2026-11-22).
+        // A protection the person added over the file still wins: then nothing
+        // is granted, and the CLI fails to sign in as it would on its own.
+        const credentialCandidates =
+          input.agentPlatformSignIn === true
+            ? fileForms(
+                options.applicationDefaultCredentialsPath ?? applicationDefaultCredentialsPath(),
+              )
+            : [];
+        const credentialFiles = credentialCandidates.some((path) =>
+          personProtectsPath(path, platform),
+        )
+          ? []
+          : credentialCandidates;
+        if (
+          input.agentPlatformSignIn === true &&
+          input.purpose !== "probe" &&
+          !(
+            input.strict === false &&
+            input.fullAccessSandbox !== true &&
+            input.sandboxPolicy === undefined
+          )
+        ) {
+          return yield* Effect.fail(
+            failure(
+              "unauthorized",
+              input.strict === false
+                ? `${name} can't sign in to Agent Platform inside the sandbox this thread keeps, because it doesn't let it read your Application Default Credentials. Run without the sandbox, or switch this provider to a Gemini API key.`
+                : `${name} can't sign in to Agent Platform under Strict, because Strict doesn't let it read your Application Default Credentials. Turn Strict off for this thread, or switch this provider to a Gemini API key.`,
+            ),
+          );
+        }
         const binaryDirectory = dirname(realpathSync(input.binaryPath));
         const binaryRuntimeDirectory = dirname(binaryDirectory);
         const configuredBinaryDirectory = dirname(input.binaryPath);
@@ -835,6 +921,7 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             ? [seatbeltAllowLiteralReadRule(SYSTEM_KEYCHAIN_PATH)]
             : []),
           ...(readsLoginKeychain ? loginKeychainSeatbeltRules() : []),
+          ...(platform === "darwin" ? credentialFiles.map(seatbeltAllowLiteralReadRule) : []),
         ];
         const launch = yield* Effect.try({
           try: () =>
@@ -882,6 +969,9 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 profile.process.requiresChildServer === true ||
                 readsLoginKeychain,
               additionalWriteRoots: [managedHome, ...hostAuthentication.writePaths],
+              ...(platform === "linux" && credentialFiles.length > 0
+                ? { guardedReadFiles: credentialFiles }
+                : {}),
               additionalDenyReadPaths: confinedDenyPaths,
               additionalDenyWritePaths: confinedDenyPaths,
               allowFileReadStar: true,
@@ -1370,6 +1460,7 @@ export function sanitizeAcpEnvironment(
     readonly executionPolicy?: ProviderExecutionPolicy;
     readonly mode?: AcpSessionMode;
     readonly apiKey?: string;
+    readonly googleCloud?: AcpAgentGoogleCloud;
     readonly nativeSetup?: ProviderNativeSetup;
     /** Absent is Strict: the profile's fixed passthrough list and every guard. */
     readonly strict?: boolean;
@@ -1432,6 +1523,7 @@ export function sanitizeAcpEnvironment(
       managedHome: input.managedHome,
       executionPolicy: input.executionPolicy ?? "approval-gated",
       ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
+      ...(input.googleCloud === undefined ? {} : { googleCloud: input.googleCloud }),
     }),
     ...guards,
   };
@@ -1691,6 +1783,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           executionPolicy: input.executionPolicy,
           mode: input.mode,
           ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
+          ...(input.googleCloud === undefined ? {} : { googleCloud: input.googleCloud }),
           ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
           ...(environmentStrict ? {} : { strict: false, ownChannels }),
         });
@@ -1710,6 +1803,9 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
                 executionPolicy: wall,
                 loopbackPorts: input.loopbackPorts ?? [],
                 environment,
+                ...(input.googleCloud === undefined
+                  ? {}
+                  : { googleCloudLocation: input.googleCloud.location }),
               });
         const servers =
           input.purpose === "probe" || windows !== undefined
@@ -1739,6 +1835,10 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           ...(input.strict === false ? { strict: false } : {}),
           ownChannels,
           ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
+          ...(input.apiKey === undefined && input.googleCloud === undefined
+            ? {}
+            : { octantSignIn: true }),
+          ...(input.googleCloud === undefined ? {} : { agentPlatformSignIn: true }),
           environment,
           ...(input.loopbackPorts === undefined ? {} : { loopbackPorts: input.loopbackPorts }),
           ...(network === undefined ? {} : { network }),

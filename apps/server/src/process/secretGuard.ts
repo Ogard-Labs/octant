@@ -314,6 +314,23 @@ const WINDOWS_UNSPELLED_HOME =
  * since only its caller knows what it is relative to. Octant Shield asks this
  * to flag and judge a call; it never allows anything.
  */
+/**
+ * Whether a path the person added in Settings › Permissions › Protected files
+ * covers this file, itself or through a folder above it. A grant that lifts a
+ * built-in denial for one file (Agent Platform's credentials) never lifts the
+ * person's own.
+ */
+export function personProtectsPath(path: string, platform: NodeJS.Platform): boolean {
+  return secretGuardEntries({ platform }).some((entry) => {
+    if (entry.ruleId !== "added") return false;
+    if (entry.kind === "path") return path === entry.path || path.startsWith(`${entry.path}/`);
+    if (!path.startsWith(`${entry.directory}/`)) return false;
+    const segments = path.slice(entry.directory.length + 1).split("/");
+    const pattern = new RegExp(`^(?:${entry.name})$`, "u");
+    return segments.slice(0, entry.depth + 1).some((segment) => pattern.test(segment));
+  });
+}
+
 export function isProtectedSecretPath(
   path: string,
   options: {

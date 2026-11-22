@@ -58,7 +58,9 @@ function signInFor(instance: ProviderInstance): {
       guidance:
         "authentication" in configuration && configuration.authentication === "api-key"
           ? "This account signs in with the API key you gave. Check the connection."
-          : profile.signInGuidance,
+          : "authentication" in configuration && configuration.authentication === "agent-platform"
+            ? "This account signs in to its Google Cloud project with this computer's Application Default Credentials. Check the connection."
+            : profile.signInGuidance,
     };
   }
   return {

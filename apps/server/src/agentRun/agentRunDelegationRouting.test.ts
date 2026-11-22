@@ -41,7 +41,7 @@ const routeChild = decodeNativeHarnessSlotCandidate({
 });
 const dependencyId = "00000000-0000-4000-8000-000000000061";
 const ANTIGRAVITY_HELPER_REFUSAL =
-  "Google doesn't support Google Antigravity as a helper agent, or starting helpers from it, on a personal Google sign-in. Use a provider that uses a Gemini API key, such as Gemini CLI with an API key, for helper work.";
+  "Google doesn't support Google Antigravity as a helper agent, or starting helpers from it, on a personal Google sign-in. Switch this provider to a Gemini API key or Agent Platform in Settings, or use another provider for helper work.";
 const allowedAuthority: AgentRunAuthority = {
   filesystem: false,
   shell: false,

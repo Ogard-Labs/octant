@@ -63,8 +63,12 @@ const ACP_ENDPOINTS: Readonly<Record<AcpProviderKind, ReadonlyArray<string>>> = 
   cline: ["cline.bot", ...MODEL_PROVIDERS],
   qwen: ["qwen.ai", "dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com"],
   fx: MODEL_PROVIDERS,
-  // The CLI's Google sign-in, its model service and its sign-in page.
+  // The CLI's Google sign-in, its model service and its sign-in page, and
+  // the Gemini API and Agent Platform services an instance signed in with a
+  // Gemini API key or a Google Cloud project calls instead.
   antigravity: [
+    "generativelanguage.googleapis.com",
+    "aiplatform.googleapis.com",
     "cloudcode-pa.googleapis.com",
     "daily-cloudcode-pa.googleapis.com",
     "oauth2.googleapis.com",
@@ -97,6 +101,13 @@ export function providerRuntimeDomains(input: {
   readonly runtime: RuntimeNetworkRuntime;
   readonly profileId?: AcpProviderKind | undefined;
   readonly environment?: Readonly<Record<string, string | undefined>> | undefined;
+  /**
+   * The Google Cloud location an Agent Platform instance is configured with.
+   * Its regional endpoint (`us-central1-aiplatform.googleapis.com`) is not a
+   * subdomain of `aiplatform.googleapis.com`, so that one host is added;
+   * `global` uses the listed host itself.
+   */
+  readonly googleCloudLocation?: string | undefined;
 }): ReadonlyArray<string> {
   const listed =
     input.runtime === "acp"
@@ -104,7 +115,12 @@ export function providerRuntimeDomains(input: {
         ? []
         : ACP_ENDPOINTS[input.profileId]
       : RUNTIME_ENDPOINTS[input.runtime];
-  return [...new Set([...listed, ...configuredEndpointHosts(input.environment)])];
+  const location = input.googleCloudLocation;
+  const regional =
+    location !== undefined && location !== "global" && /^[a-z0-9][a-z0-9-]*$/u.test(location)
+      ? [`${location}-aiplatform.googleapis.com`]
+      : [];
+  return [...new Set([...listed, ...regional, ...configuredEndpointHosts(input.environment)])];
 }
 
 /**

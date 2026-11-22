@@ -1585,7 +1585,7 @@ export class WorkTurnService {
     // has no person driving it, which some providers' personal sign-in does
     // not cover. A person's own send carries their window, never this scope.
     const unattended = isRoutineHostScope(authenticatedWindowId)
-      ? personalSignInRefusals(providerInstance?.driverKind ?? "")?.refusesUnattendedRuns
+      ? personalSignInRefusals(providerInstance)?.refusesUnattendedRuns
       : undefined;
     if (unattended !== undefined) throw this.#failure("unauthorized", unattended);
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);

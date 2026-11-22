@@ -8,8 +8,11 @@ import {
   decodeProjectId,
   decodeProviderInstanceId,
   decodeProviderModelId,
+  acpAgentProfile,
+  isAcpAgentKind,
   personalSignInRefusals,
   ProviderFailureCategory,
+  type ProviderSignInFacts,
   type AgentRun,
   type AgentRunRole,
   type AgentRunControlRequest,
@@ -67,6 +70,30 @@ export interface AgentsToolUnavailableTarget {
   readonly displayName: string;
   readonly driverKind: string;
   readonly reason: "not-ready" | "tools-unsupported" | "project-policy" | "helper-runs-refused";
+  /** The sentence a refused helper run on it shows, when its sign-in names one. */
+  readonly message?: string;
+}
+
+/**
+ * Why a helper never runs on this provider instance, or undefined. A personal
+ * sign-in keeps the runs its vendor does not cover. An Agent Platform sign-in
+ * reads the host's Application Default Credentials, which only a launch
+ * outside Strict may read (maintainer decision, 2026-11-22), and a helper
+ * child always launches under Strict: nothing hands it the parent's Strict
+ * setting, so Check connection's Ready does not mean a child could sign in.
+ */
+export function helperRunRefusalOf(instance: ProviderSignInFacts | undefined): string | undefined {
+  const personal = personalSignInRefusals(instance)?.refusesHelperRuns;
+  if (personal !== undefined || instance === undefined) return personal;
+  const configuration = instance.configuration;
+  if (
+    !isAcpAgentKind(instance.driverKind) ||
+    configuration === undefined ||
+    !("authentication" in configuration) ||
+    configuration.authentication !== "agent-platform"
+  )
+    return undefined;
+  return `${acpAgentProfile(instance.driverKind).name} can't run as a helper on Agent Platform: helpers launch under Strict, which doesn't let it read your Application Default Credentials. Use a Gemini API key account for helper work.`;
 }
 
 export interface AgentRunDelegationInput {
@@ -239,9 +266,12 @@ function targetHelperRunRefusal(
         candidate.providerInstanceId === providerInstanceId &&
         candidate.reason === "helper-runs-refused",
     );
+  // The target list already judged the instance by its sign-in and names
+  // the sentence for an Agent Platform one; otherwise the kind declares it.
   return target === undefined
     ? undefined
-    : personalSignInRefusals(target.driverKind)?.refusesHelperRuns;
+    : (target.message ??
+        personalSignInRefusals({ driverKind: target.driverKind })?.refusesHelperRuns);
 }
 
 export function agentRunDelegationCapabilities(options: AgentRunDelegationOptions) {
@@ -587,7 +617,8 @@ export interface AgentRunTargetAvailabilityInput {
   /** The level the child would run at, when known; see `modelCanTakeDelegatedWork`. */
   readonly level?: Parameters<typeof modelCanTakeDelegatedWork>[3];
   readonly instances: ReadonlyArray<
-    Pick<ProviderInstance, "id" | "enabled" | "displayName" | "driverKind">
+    Pick<ProviderInstance, "id" | "enabled" | "displayName" | "driverKind"> &
+      Partial<Pick<ProviderInstance, "configuration">>
   >;
   readonly observedState: (
     instanceId: ProviderInstance["id"],
@@ -618,10 +649,16 @@ export function agentRunTargetAvailability(input: AgentRunTargetAvailabilityInpu
       displayName: instance.displayName,
       driverKind: String(instance.driverKind),
     };
-    // A provider whose own personal sign-in does not cover helper runs is
-    // never a target, however ready it is.
-    if (personalSignInRefusals(instance.driverKind)?.refusesHelperRuns !== undefined) {
+    // A provider whose personal sign-in does not cover helper runs, or whose
+    // sign-in a helper's Strict launch cannot read, is never a target,
+    // however ready it is.
+    if (personalSignInRefusals(instance)?.refusesHelperRuns !== undefined) {
       unavailable.push({ ...named, reason: "helper-runs-refused" });
+      continue;
+    }
+    const helperRefusal = helperRunRefusalOf(instance);
+    if (helperRefusal !== undefined) {
+      unavailable.push({ ...named, reason: "helper-runs-refused", message: helperRefusal });
       continue;
     }
     const observed = input.observedState(instance.id);

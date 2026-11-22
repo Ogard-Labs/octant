@@ -253,9 +253,18 @@ export function providerRefusalCopy(
     };
   }
   if (reason === "authentication-required") {
+    // A key or Cloud project Octant passes is refused by the agent itself, so
+    // a CLI login would not help: the advice names what Octant passed.
+    const signIn =
+      "authentication" in instance.configuration ? instance.configuration.authentication : "";
     return {
       reason: `${label} authentication is required.`,
-      nextStep: `Sign in to ${label} with its provider-owned login, then check the connection again.`,
+      nextStep:
+        signIn === "api-key"
+          ? "Check the API key, then check the connection again."
+          : signIn === "agent-platform"
+            ? "Check the project and location and run gcloud auth application-default login."
+            : `Sign in to ${label} with its provider-owned login, then check the connection again.`,
     };
   }
   if (reason === "driver-not-admitted" && instance.driverKind !== "outside-harness-endpoint") {

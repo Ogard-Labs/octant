@@ -25,6 +25,7 @@ import { driverLabel } from "../providerSettingsPresentation";
 import type { ProviderSettingsViewProps } from "../ProviderSettingsView";
 import {
   AcpAgentCreateAuthenticationFields,
+  googleCloudFromForm,
   offeredAcpAuthentication,
 } from "./AcpConfigurationForms";
 import { ClaudeAccountSettingsFields, CodexAccountSettingsFields } from "./ClaudeAccountFields";
@@ -301,6 +302,9 @@ export function ProviderCreateForm(
                     ...(acpAuthentication === undefined
                       ? {}
                       : { authentication: acpAuthentication }),
+                    ...(acpAuthentication === "agent-platform"
+                      ? { googleCloud: googleCloudFromForm(data) }
+                      : {}),
                   },
                   acpAuthentication === "api-key"
                     ? enteredCredential

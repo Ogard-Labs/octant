@@ -2976,7 +2976,48 @@ It stays inside Google's terms. Official sources, read 2026-11-20 and again
   or signed by your administrator".
 
 Octant is the ACP client the guide describes and does nothing outside it: it
-never reads, copies or replays the CLI's OAuth credentials. One knob is not
+never reads, copies or replays the CLI's OAuth credentials.
+
+**Sign-in choice** (maintainer decision, 2026-11-22). Each `antigravity`
+instance names how it signs in, in its provider Settings (Authentication) and
+in Add provider:
+
+- **Personal Google sign-in** (`provider-owned`), the default and the only
+  behavior before this choice existed; an instance saved without a sign-in
+  reads as this one. Octant passes nothing and calls no `authenticate`: the
+  CLI uses the sign-in it cached from an interactive `agy` session.
+- **Gemini API key** (`api-key`). The key is stored like every provider key
+  (the host credential broker, the macOS Keychain on desktop), is resolved
+  only when a process starts, and reaches `agy acp` as `GEMINI_API_KEY` in
+  its environment, the variable the ACP guide names for the
+  `gemini-api-key` method. It never enters a command, the journal, the
+  observed state or the instance record.
+- **Agent Platform** (`agent-platform`, formerly Vertex AI). The instance
+  records a Google Cloud project and location (`googleCloud`, neither of
+  them secret), passed as `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`,
+  the variables the guide names for the `agent-platform` method; the
+  credentials are the host's own Application Default Credentials, which
+  Octant neither reads nor stores.
+
+For the last two, Octant also selects the method on every launch, readiness
+checks included: after `initialize`, it sends ACP `authenticate` with
+`gemini-api-key` or `agent-platform`, the method ids the guide lists, before
+any session opens, because the guide says `agy acp` otherwise reuses the
+cached sign-in and the environment alone would not decide which login a run
+uses. A launch whose `initialize` does not list that method, or whose
+`authenticate` the CLI refuses, fails as not signed in and opens no session
+(`signInMethods` in the runtime profile). A launch on either needs no prior
+personal sign-in: where `~/.gemini` does not exist yet, Octant creates it
+owner-only, as the CLI would on its first run, instead of refusing the launch
+as not signed in; an existing folder is used as it is. Business sign-in
+(`oauth-business`) is not offered: like the personal sign-in it is a browser
+login the CLI caches, so Octant could not tell the two apart.
+
+Rationale: Google's Antigravity terms forbid third-party software using the
+consumer OAuth sign-in, while API-key and Agent Platform access is governed
+by Google's API and Cloud terms, which make no such exception. Which sign-in
+a run uses is read from what the instance is configured with, which is what
+Octant itself passes at launch, never from what the agent reports. One knob is not
 in Google's documentation: `AGY_CLI_DISABLE_AUTO_UPDATE=1` (absent from the
 ACP guide, the CLI reference, settings, install, troubleshooting and
 changelog pages read 2026-11-21, which document other `AGY_CLI_*`
@@ -3005,7 +3046,8 @@ table), each with the sentence a refused run shows, and the server refuses by
 that declaration, never by the profile id:
 
 - **Routines and every other turn no person sent** (`refusesUnattendedRuns`).
-  Every Automation dispatch on an `antigravity` instance (scheduled,
+  Every Automation dispatch on an `antigravity` instance on the personal
+  sign-in (scheduled,
   triggered, Run now, a follow-up, and a Chat follow-up proposal, which runs
   through the same dispatch) is refused by the dispatcher as
   `provider-capability-mismatch`, after its authority revalidation and before
@@ -3033,8 +3075,8 @@ that declaration, never by the profile id:
   linked threads one prompt creates, a side task's send) carries the person's
   window and counts as their own send. Each refusal shows: "Google doesn't
   support unattended runs of Google Antigravity on a personal Google sign-in,
-  so Octant did not start this run. Choose a provider that uses a Gemini API
-  key, such as Gemini CLI with an API key."
+  so Octant did not start this run. Switch this provider to a Gemini API key
+  or Agent Platform in Settings, or choose another provider."
 - **The provider a turn resolves to.** The check reads the provider a turn
   would actually run on, not only the thread's own. In Chat a model pool or
   the Chat provider fallback can route a turn onto Antigravity from a thread
@@ -3056,8 +3098,9 @@ that declaration, never by the profile id:
   slot, its fallback or its pool route, as `effectiveAgentRunExecutionTarget`
   reads the routing receipt) is the one checked when the child starts or
   resumes.
-- **Helper runs** (`refusesHelperRuns`). Antigravity is never a helper
-  target: the target list names it unavailable as `helper-runs-refused`, so an
+- **Helper runs** (`refusesHelperRuns`). Antigravity on the personal sign-in
+  is never a helper target (for the other sign-ins see "Which sign-ins they
+  bind", below): the target list names it unavailable as `helper-runs-refused`, so an
   explicit target, a role slot and a follow-up on it are refused, and a child
   that would start or resume on it is refused at launch. A thread running on
   Antigravity starts no helper on any provider, here or on another hub member,
@@ -3073,15 +3116,17 @@ that declaration, never by the profile id:
   worktree exists (both are a turn another agent started, which no person on
   that member sent). The message: "Google doesn't support Google
   Antigravity as a helper agent, or starting helpers from it, on a personal
-  Google sign-in. Use a provider that uses a Gemini API key, such as Gemini
-  CLI with an API key, for helper work." The CLI's own built-in subagents
+  Google sign-in. Switch this provider to a Gemini API key or Agent Platform
+  in Settings, or use another provider for helper work." The CLI's own
+  built-in subagents
   inside `agy` are unaffected, and the driver keeps its helper-run handling
   (`answersOncePerCall`, below) as a fallback that still fails closed.
 - **Outside agents** (`refusesOutsideAgents`). An agent grant's session (an
   outside agent, which is never the person) may not send a prompt or an answer
   to a thread on Antigravity: "Google doesn't support another agent driving
   Google Antigravity on a personal Google sign-in. Continue this thread
-  yourself in Octant, or use a provider that uses a Gemini API key." The
+  yourself in Octant, or switch this provider to a Gemini API key or Agent
+  Platform in Settings." The
   grant's check reads every provider the turn could run on (the thread's
   own and its running turn's; for Chat also each of this host's pool
   candidates and the Chat provider fallback) and refuses before the thread
@@ -3118,13 +3163,30 @@ that declaration, never by the profile id:
   finds that pointer: Settings' registry picker shows that sentence for it in
   place of the install line, offers no Add, and starts on the first entry that
   can be added.
-- **Every sign-in.** The limits bind every `antigravity` instance whatever
-  sign-in the CLI has cached: Octant cannot verify which method the cached
-  credentials use, and the profile offers no posture of its own. A Gemini API
-  key, Gemini Enterprise or Agent Platform sign-in is governed by the
-  organization's terms rather than the consumer line, so lifting the limits
-  for those is a possible follow-up once a verifiable signal of the sign-in
-  method exists.
+- **Which sign-ins they bind.** The limits bind every `antigravity` instance
+  on the personal Google sign-in, whatever login the CLI has cached: Octant
+  cannot verify which method cached credentials use, so a Gemini Enterprise
+  browser sign-in stays limited too. They are lifted, everywhere above
+  (routines and every other turn no person sent, helper runs in both
+  directions, outside agents, and a Chat pool or fallback that routes such a
+  turn), only for an instance configured with a Gemini API key or Agent
+  Platform, whose credential Octant passes and selects itself
+  (`personalSignInRefusals` reads the instance's configured sign-in). The
+  check reads the instance as each turn is admitted, so switching an
+  instance back to the personal sign-in refuses its next unattended run.
+  As a helper target, the outcome by sign-in is:
+  - **Gemini API key:** an ordinary target.
+  - **Agent Platform:** not a target. A helper child always launches under
+    Strict, since nothing passes it the parent's Strict setting, and under
+    Strict it cannot read the Application Default Credentials (below). So
+    the target list names it unavailable as `helper-runs-refused`, with the
+    sentence "Google Antigravity can't run as a helper on Agent Platform:
+    helpers launch under Strict, which doesn't let it read your Application
+    Default Credentials. Use a Gemini API key account for helper work."
+    A child that would start or resume on it is refused with that sentence
+    (`helperRunRefusalOf`). This holds even though its Check connection
+    reads the file and reports Ready.
+  - **A thread on either sign-in:** may start helpers on other providers.
 
 - **No sandbox in Work and Code outside Strict.** There the CLI starts as the
   person's own terminal would start it, at every level: no Octant sandbox, no
@@ -3148,11 +3210,42 @@ that declaration, never by the profile id:
   sandbox. Under Strict, Network limits still reach only Google's sign-in and
   model hosts (`cloudcode-pa.googleapis.com`,
   `daily-cloudcode-pa.googleapis.com`, `oauth2.googleapis.com`,
-  `www.googleapis.com`, `accounts.google.com`, `antigravity.google`).
-- **Sign-in.** The person runs `agy` in a terminal and signs in with their
-  own Google account; Octant reuses that sign-in as the CLI reads it, in the
-  person's own threads only (turns no person sent, helper runs and outside agents are
-  refused, above). On macOS the CLI keeps it in the login
+  `www.googleapis.com`, `accounts.google.com`, `antigravity.google`), and the
+  Gemini API and Agent Platform services an API-key or Agent Platform
+  instance calls instead (`generativelanguage.googleapis.com`,
+  `aiplatform.googleapis.com`, each with its subdomains, and for Agent
+  Platform the one regional host of its configured location, such as
+  `us-central1-aiplatform.googleapis.com`).
+- **Strict and credentials.** Strict does for Antigravity's credentials what
+  it did before the sign-in choice: the launch keeps the narrow keychain read
+  for the personal sign-in and gains no other credential read. A Gemini API
+  key reaches the CLI in its environment, so it works in every launch.
+- **Agent Platform's one file** (maintainer decision, 2026-11-22: "Allow one
+  file, outside Strict"). Agent Platform signs in with the host's Application
+  Default Credentials, which `gcloud auth application-default login` writes
+  to `~/.config/gcloud/application_default_credentials.json`, under a
+  built-in protected path. Where the CLI starts unconfined (Work and Code
+  outside Strict, Full access, Windows) it reads the file as on its own. A
+  sandboxed launch of an Agent Platform instance may read exactly that file,
+  by its literal and resolved path, and nothing else in `~/.config/gcloud`,
+  never with a write: outside Strict (Chat and Plan, as the AWS profile is
+  readable there, but not inside a sandbox the thread keeps or one the person
+  chose) and in its readiness check, which otherwise runs Strict-shaped, so
+  **Check connection** can reach Ready on macOS and Linux. On macOS the grant
+  is a literal read rule placed after the built-in secret-file denials and
+  before the paths the person protects, which still win; on Linux the file
+  alone is bound read-only (`guardedReadFiles`). Under Strict, and inside a
+  sandbox the thread keeps, the launch is refused before `agy` starts:
+  "Google Antigravity can't sign in to Agent Platform under Strict, because
+  Strict doesn't let it read your Application Default Credentials. Turn
+  Strict off for this thread, or switch this provider to a Gemini API key."
+  Only the default location is granted, since Octant's provider launches
+  honour `CLOUDSDK_CONFIG` nowhere else, and the personal sign-in and Gemini
+  API key get no gcloud read. Nothing records the file's contents.
+- **Personal sign-in.** On the personal Google sign-in, the person runs `agy`
+  in a terminal and signs in with their own Google account; Octant reuses
+  that sign-in as the CLI reads it, in the person's own threads only (turns
+  no person sent, helper runs and outside agents are refused, above). On macOS the CLI keeps it in the login
   keychain and reads it by running `/usr/bin/security`. Unconfined, that read
   needs nothing from Octant. A sandboxed launch sets `readsLoginKeychain`: the
   grant Claude Code's runtime measured as the least that reads a keychain

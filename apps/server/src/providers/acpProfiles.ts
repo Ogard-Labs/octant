@@ -16,6 +16,8 @@ import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type {
+  AcpAgentAuthentication,
+  AcpAgentGoogleCloud,
   AcpAgentKind,
   ProviderModel,
   ProviderDriverKind,
@@ -143,6 +145,8 @@ export interface AcpProcessProfile {
     readonly managedHome: string;
     readonly executionPolicy: ProviderExecutionPolicy;
     readonly apiKey?: string;
+    /** The Google Cloud project an `agent-platform` instance signs in to. */
+    readonly googleCloud?: AcpAgentGoogleCloud;
   }) => Readonly<Record<string, string>>;
   readonly args: (input: {
     readonly root: string;
@@ -392,6 +396,13 @@ export interface AcpProviderProfile {
    * the agent. The level's tool rules decide what a command does.
    */
   readonly listedCommandsOnly?: true;
+  /**
+   * The ACP `authenticate` method each posture Octant passes itself selects,
+   * called after `initialize` on every launch: the agent's `initialize` must
+   * list it, or the launch is refused as not signed in. A posture with no
+   * entry calls nothing and leaves the agent's own cached login in charge.
+   */
+  readonly signInMethods?: Partial<Readonly<Record<AcpAgentAuthentication, string>>>;
   /** Provider-owned CLI login, with delegated browser auth reserved for legacy profiles. */
   readonly authentication:
     | { readonly kind: "provider-owned" }
@@ -1826,12 +1837,18 @@ const kimiProfile: AcpProviderProfile = {
  * explicit sandbox and a Full access thread that keeps the sandbox still
  * start inside Octant's sandbox.
  *
- * It signs in with the person's own Google account and keeps that sign-in in
- * the macOS login keychain, so the launch keeps the real HOME, and a
- * sandboxed launch gets the narrow keychain read Claude Code's runtime has
- * (`readsLoginKeychain`). Octant sends no spoofed client identity, no faked
- * environment to move the sign-in, and calls none of Google's internal
- * endpoints: the CLI talks to Google itself.
+ * By default it signs in with the person's own Google account and keeps that
+ * sign-in in the macOS login keychain, so the launch keeps the real HOME, and
+ * a sandboxed launch gets the narrow keychain read Claude Code's runtime has
+ * (`readsLoginKeychain`). An instance may instead sign in with a Gemini API
+ * key (`GEMINI_API_KEY`) or Agent Platform (`GOOGLE_CLOUD_PROJECT` and
+ * `GOOGLE_CLOUD_LOCATION` with the host's Application Default Credentials),
+ * the variables Google's ACP guide names for its `gemini-api-key` and
+ * `agent-platform` methods; Octant then selects that method with ACP
+ * `authenticate`, so the CLI's cached personal sign-in is not what the run
+ * uses (maintainer decision, 2026-11-22). Octant sends no spoofed client
+ * identity, no faked environment to move the sign-in, and calls none of
+ * Google's internal endpoints: the CLI talks to Google itself.
  *
  * Its modes are `default`, `auto_edit`, `yolo` and, for some accounts, `auto`.
  * The CLI refuses `auto_edit` and `yolo` from an ACP client (observed by other
@@ -1871,6 +1888,7 @@ const antigravityProfile: AcpProviderProfile = {
   // `initialize` advertises `list` and `resume` but no `close`.
   closesSessions: false,
   authenticateOnProbe: false,
+  signInMethods: { "api-key": "gemini-api-key", "agent-platform": "agent-platform" },
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
     "Google Antigravity is not signed in. Run agy (or agy acp --login) in your terminal and sign in with your Google account, then retry.",
@@ -1893,7 +1911,15 @@ const antigravityProfile: AcpProviderProfile = {
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     selfUpdateGuards: ["AGY_CLI_DISABLE_AUTO_UPDATE"],
     guards: { NO_COLOR: "1", AGY_CLI_DISABLE_AUTO_UPDATE: "1" },
-    environment: () => ({}),
+    environment: ({ apiKey, googleCloud }) => ({
+      ...(apiKey === undefined ? {} : { GEMINI_API_KEY: apiKey }),
+      ...(googleCloud === undefined
+        ? {}
+        : {
+            GOOGLE_CLOUD_PROJECT: googleCloud.project,
+            GOOGLE_CLOUD_LOCATION: googleCloud.location,
+          }),
+    }),
     // Google's ACP guide: `--process-per-session` serves each session from an
     // isolated worker and is required for HTTP MCP servers the client
     // configures, which is how Octant offers its tools; `--disable-telemetry`

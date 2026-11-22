@@ -2629,7 +2629,7 @@ export class ChatService {
       decodeProviderInstanceId(providerInstanceId),
     );
     if (among === "routable-only" && instance?.enabled !== true) return;
-    const refusals = personalSignInRefusals(instance?.driverKind ?? "");
+    const refusals = personalSignInRefusals(instance);
     // The grant's own check read the thread's provider; a pool or fallback
     // can still route the agent's turn onto one that refuses outside agents.
     const refusal = unattended ? refusals?.refusesUnattendedRuns : refusals?.refusesOutsideAgents;
@@ -4892,8 +4892,9 @@ export class ChatService {
     // which a pool or fallback chose, so that is read too.
     if (context?.fromOutsideAgent === true) {
       const refusal = personalSignInRefusals(
-        this.#persistence.readProviderInstance(decodeProviderInstanceId(attempt.providerInstanceId))
-          ?.driverKind ?? "",
+        this.#persistence.readProviderInstance(
+          decodeProviderInstanceId(attempt.providerInstanceId),
+        ),
       )?.refusesOutsideAgents;
       if (refusal !== undefined)
         throw new ChatServiceError({ category: "unauthorized", message: refusal });

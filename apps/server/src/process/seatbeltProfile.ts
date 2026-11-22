@@ -237,6 +237,12 @@ export interface ProcessConfinementPrepareInput {
   readonly networkEgress: OsNetworkEgress;
   readonly additionalWriteRoots?: ReadonlyArray<string>;
   readonly readRoots?: ReadonlyArray<string>;
+  /**
+   * Linux only: single files the capsule binds read-only although the secret
+   * guard lists them, never their folder and never a write. macOS callers
+   * grant the same with a literal read rule after the guard's denials.
+   */
+  readonly guardedReadFiles?: ReadonlyArray<string>;
   /** PATH-style string used to resolve `#!/usr/bin/env` interpreters for this launch. */
   readonly interpreterSearchPath?: string;
   readonly allowProcessExec?: boolean;

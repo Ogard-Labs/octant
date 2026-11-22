@@ -6,6 +6,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -42,6 +43,8 @@ import {
   WINDOWS_STRICT_REFUSAL,
   windowsStrictRuntimeRefusal,
 } from "@octant/domain/guardrail-policy";
+import { NO_PROTECTED_FILES_CHANGES } from "@octant/domain/secret-guard-policy";
+import { applyProtectedFilesChoice } from "../process/secretGuard";
 import { acpProviderProfiles, type AcpProviderProfile } from "./acpProfiles";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeAcpAgent.py", import.meta.url));
@@ -1391,6 +1394,56 @@ describe("Kilo provider-owned data directory", () => {
   });
 });
 
+describe("Google Antigravity's data directory on a sign-in Octant passes", () => {
+  it("creates the missing data directory for a Gemini API key or Agent Platform launch instead of asking for a personal sign-in", async () => {
+    for (const signIn of [{ octantSignIn: true }, {}] as const) {
+      const target = fixture(antigravity);
+      const dataDirectory = join(target.canonicalRoot, "absent-gemini-home");
+      const prepared = await Effect.runPromise(
+        Effect.either(
+          makeAcpConfinementLive({
+            platform: "darwin",
+            sandboxPath: target.sandboxPath,
+            temporaryDirectory: join(target.canonicalRoot, "tmp"),
+          }).prepare({
+            profile: {
+              ...antigravity,
+              process: {
+                ...antigravity.process,
+                hostAuthentication: {
+                  ...directoryHostAuthentication(antigravity),
+                  defaultPath: dataDirectory,
+                },
+              },
+            },
+            binaryPath: target.binaryPath,
+            root: target.canonicalRoot,
+            managedHome: join(target.canonicalRoot, "managed-home"),
+            mode: "code",
+            executionPolicy: "approval-gated",
+            environment: {},
+            ...signIn,
+          }),
+        ),
+      );
+      if ("octantSignIn" in signIn) {
+        expect(Either.isRight(prepared)).toBe(true);
+        expect(existsSync(dataDirectory)).toBe(true);
+        expect(statSync(dataDirectory).mode & 0o777).toBe(0o700);
+      } else {
+        // The personal sign-in still needs the CLI's own login first.
+        expect(prepared).toEqual(
+          Either.left({
+            category: "unauthenticated",
+            message: `Google Antigravity provider-owned authentication is unavailable. ${directoryHostAuthentication(antigravity).loginHint}`,
+          }),
+        );
+        expect(existsSync(dataDirectory)).toBe(false);
+      }
+    }
+  });
+});
+
 const directoryHostProfiles = Object.values(acpProviderProfiles).filter(
   (profile) => profile.process.hostAuthentication?.kind === "directory",
 );
@@ -1401,6 +1454,7 @@ const apiKeyVariables: Partial<Record<AcpProviderProfile["kind"], string>> = {
   cline: "CLINE_API_KEY",
   qwen: "OPENAI_API_KEY",
   "mistral-vibe": "MISTRAL_API_KEY",
+  antigravity: "GEMINI_API_KEY",
 };
 
 function directoryHostAuthentication(profile: AcpProviderProfile) {
@@ -2624,6 +2678,171 @@ describe("login keychain read for Google Antigravity", () => {
       expect(text).not.toContain("/usr/bin/security");
     },
   );
+});
+
+describe("Google Antigravity's Agent Platform credentials file", () => {
+  async function prepared(input: {
+    readonly platform?: "darwin" | "linux";
+    readonly mode?: "chat" | "code";
+    readonly strict?: boolean;
+    readonly purpose?: "probe" | "session";
+    readonly fullAccessSandbox?: boolean;
+    readonly agentPlatformSignIn?: boolean;
+    readonly octantSignIn?: boolean;
+    readonly protect?: "file" | "folder";
+  }) {
+    const target = fixture(antigravity);
+    const gcloud = join(target.canonicalRoot, "home", ".config", "gcloud");
+    mkdirSync(gcloud, { recursive: true });
+    const credentials = join(gcloud, "application_default_credentials.json");
+    writeFileSync(credentials, "{}", { mode: 0o600 });
+    writeFileSync(join(gcloud, "credentials.db"), "", { mode: 0o600 });
+    if (input.protect !== undefined) {
+      applyProtectedFilesChoice({
+        added: [input.protect === "file" ? credentials : gcloud],
+        removed: [],
+      });
+    }
+    const result = await Effect.runPromise(
+      Effect.either(
+        makeAcpConfinementLive({
+          platform: input.platform ?? "darwin",
+          sandboxPath: input.platform === "linux" ? target.bwrapPath : target.sandboxPath,
+          temporaryDirectory: join(target.canonicalRoot, "tmp"),
+          hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+          applicationDefaultCredentialsPath: credentials,
+        }).prepare({
+          profile: antigravity,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome: join(target.canonicalRoot, "managed-home"),
+          mode: input.mode ?? "chat",
+          executionPolicy: "approval-gated",
+          ...(input.strict === undefined ? {} : { strict: input.strict }),
+          ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
+          ...(input.fullAccessSandbox === undefined
+            ? {}
+            : { fullAccessSandbox: input.fullAccessSandbox }),
+          ...(input.agentPlatformSignIn === true ? { agentPlatformSignIn: true } : {}),
+          ...(input.octantSignIn === true ? { octantSignIn: true } : {}),
+          environment: { PATH: "/usr/bin" },
+        }),
+      ),
+    );
+    return { result, credentials, gcloud };
+  }
+  const gcloudAllows = (text: string) =>
+    text.split("\n").filter((line) => line.startsWith("(allow") && line.includes(".config/gcloud"));
+
+  it("an Agent Platform launch outside Strict may read only the Application Default Credentials file", async () => {
+    for (const mode of ["chat", "code"] as const) {
+      const { result, credentials } = await prepared({
+        mode,
+        strict: false,
+        agentPlatformSignIn: true,
+      });
+      if (Either.isLeft(result)) throw new Error(result.left.message);
+      // Code outside Strict starts unconfined and needs no grant at all.
+      if (mode === "code") {
+        expect(result.right.args).not.toContain(credentials);
+        continue;
+      }
+      expect(gcloudAllows(seatbeltProfile(result.right))).toEqual([
+        `(allow file-read* (literal "${credentials}"))`,
+      ]);
+    }
+    const linux = await prepared({ platform: "linux", strict: false, agentPlatformSignIn: true });
+    if (Either.isLeft(linux.result)) throw new Error(linux.result.left.message);
+    const args = linux.result.right.args;
+    const bound = args.flatMap((arg, index) =>
+      arg === "--ro-bind" && String(args[index + 1]).includes(".config/gcloud")
+        ? [String(args[index + 1])]
+        : [],
+    );
+    expect(bound).toEqual([linux.credentials]);
+    expect(args.some((arg) => arg.startsWith(linux.gcloud) && arg !== linux.credentials)).toBe(
+      false,
+    );
+  });
+
+  it("Check connection for an Agent Platform instance reads that one file, so it can reach Ready", async () => {
+    const { result, credentials } = await prepared({ purpose: "probe", agentPlatformSignIn: true });
+    if (Either.isLeft(result)) throw new Error(result.left.message);
+    expect(gcloudAllows(seatbeltProfile(result.right))).toEqual([
+      `(allow file-read* (literal "${credentials}"))`,
+    ]);
+  });
+
+  it("an Agent Platform launch under Strict is still refused, by name", async () => {
+    for (const mode of ["chat", "code"] as const) {
+      const { result } = await prepared({ mode, agentPlatformSignIn: true });
+      expect(result).toEqual(
+        Either.left({
+          category: "unauthorized",
+          message:
+            "Google Antigravity can't sign in to Agent Platform under Strict, because Strict doesn't let it read your Application Default Credentials. Turn Strict off for this thread, or switch this provider to a Gemini API key.",
+        }),
+      );
+    }
+    const kept = await prepared({
+      mode: "code",
+      strict: false,
+      fullAccessSandbox: true,
+      agentPlatformSignIn: true,
+    });
+    expect(Either.isLeft(kept.result) && kept.result.left.message).toContain(
+      "inside the sandbox this thread keeps",
+    );
+  });
+
+  it("a protected file the person added still denies the Agent Platform credentials read on Linux", async () => {
+    for (const covering of ["file", "folder"] as const) {
+      const linux = await prepared({
+        platform: "linux",
+        strict: false,
+        agentPlatformSignIn: true,
+        protect: covering,
+      });
+      try {
+        if (Either.isLeft(linux.result)) throw new Error(linux.result.left.message);
+        const args = linux.result.right.args;
+        const readable = args.some(
+          (arg, index) =>
+            (arg === "--ro-bind" || arg === "--bind") && args[index + 1] === linux.credentials,
+        );
+        expect(readable, covering).toBe(false);
+      } finally {
+        applyProtectedFilesChoice(NO_PROTECTED_FILES_CHANGES);
+      }
+    }
+  });
+
+  it("a protected file the person added still denies the Agent Platform credentials read on macOS", async () => {
+    const { result, credentials } = await prepared({
+      strict: false,
+      agentPlatformSignIn: true,
+      protect: "folder",
+    });
+    try {
+      if (Either.isLeft(result)) throw new Error(result.left.message);
+      // The person's own protection wins: the one-file grant is not made.
+      expect(seatbeltProfile(result.right)).not.toContain(
+        `(allow file-read* (literal "${credentials}"))`,
+      );
+    } finally {
+      applyProtectedFilesChoice(NO_PROTECTED_FILES_CHANGES);
+    }
+  });
+
+  it("a personal-sign-in or API-key launch gets no gcloud read", async () => {
+    for (const signIn of [{}, { octantSignIn: true }] as const) {
+      for (const launch of [{ strict: false }, { purpose: "probe" as const }]) {
+        const { result } = await prepared({ ...launch, ...signIn });
+        if (Either.isLeft(result)) throw new Error(result.left.message);
+        expect(gcloudAllows(seatbeltProfile(result.right))).toEqual([]);
+      }
+    }
+  });
 });
 
 describe("ACP agents launch without Octant's sandbox in Work and Code outside Strict", () => {

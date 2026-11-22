@@ -156,7 +156,7 @@ export function authorizeAgentRunCreation(
     input.liveTurnProvider?.(String(parent.workspaceParent.threadId)) ??
     parent.parentRoute.providerInstanceId;
   const refusal = personalSignInRefusals(
-    input.persistence.readProviderInstance(provider)?.driverKind ?? "",
+    input.persistence.readProviderInstance(provider),
   )?.refusesHelperRuns;
   return refusal === undefined ? parent : { ...parent, helperRunRefusal: refusal };
 }

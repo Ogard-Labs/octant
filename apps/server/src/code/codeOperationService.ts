@@ -37,6 +37,7 @@ import {
   type CodeTurnReviewPreview,
   type CodeTurnReviewCapture,
   personalSignInRefusals,
+  type ProviderSignInFacts,
 } from "@octant/contracts";
 import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "../chat/sideChatReturn";
 import type { GitService } from "./gitService";
@@ -1323,6 +1324,14 @@ export interface CodeOperationServiceOptions {
   readonly providerDriverKind?: (
     thread: CodeThread,
   ) => ProviderDriverKind | undefined | Promise<ProviderDriverKind | undefined>;
+  /**
+   * A thread's provider instance as its personal sign-in check reads it: its
+   * kind and the sign-in it is configured with. Absent, the check reads the
+   * driver kind alone, which keeps every limit the kind declares.
+   */
+  readonly providerSignIn?: (
+    thread: CodeThread,
+  ) => ProviderSignInFacts | undefined | Promise<ProviderSignInFacts | undefined>;
   /** Host platform override for tests; defaults to `process.platform`. */
   readonly platform?: NodeJS.Platform;
   /**
@@ -6829,9 +6838,11 @@ export class CodeOperationService {
     // result) has no person driving it, which some providers' personal
     // sign-in does not cover. A person's own send carries their window.
     if (isRoutineHostScope(windowId)) {
-      const unattended = personalSignInRefusals(
-        String((await this.#options.providerDriverKind?.(thread)) ?? ""),
-      )?.refusesUnattendedRuns;
+      const signIn =
+        this.#options.providerSignIn === undefined
+          ? { driverKind: String((await this.#options.providerDriverKind?.(thread)) ?? "") }
+          : await this.#options.providerSignIn(thread);
+      const unattended = personalSignInRefusals(signIn)?.refusesUnattendedRuns;
       if (unattended !== undefined)
         return this.#failed(command.operationId, "unauthorized", unattended, "refused");
     }

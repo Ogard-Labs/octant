@@ -3017,6 +3017,16 @@ describe("ProviderService", () => {
       binaryPath: "/Users/example/.local/bin/qwen",
       updatedBinaryPath: "/opt/homebrew/bin/qwen",
     },
+    {
+      label: "Google Antigravity",
+      driverKind: "antigravity",
+      createKind: "create-antigravity-provider",
+      changeKind: "change-antigravity-configuration",
+      configurationKind: "antigravity-acp",
+      displayName: "Antigravity",
+      binaryPath: "/Users/example/.local/bin/agy",
+      updatedBinaryPath: "/opt/homebrew/bin/agy",
+    },
   ] as const)(
     "creates, replays, and reconfigures $label without rewriting selected authentication",
     async ({
@@ -3095,6 +3105,47 @@ describe("ProviderService", () => {
       }
     },
   );
+
+  it("journals an Antigravity instance's Agent Platform project but never a key or credential", async () => {
+    const fixture = serviceFixture();
+    const configuration = {
+      kind: "antigravity-acp",
+      binaryPath: "/Users/example/.local/bin/agy",
+      authentication: "agent-platform",
+      googleCloud: { project: "octant-example-1", location: "us-central1" },
+    } as const;
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "create-antigravity-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "Antigravity",
+        configuration,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-created", instance: { configuration } });
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-antigravity-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: {
+          kind: "antigravity-acp",
+          binaryPath: "/Users/example/.local/bin/agy",
+          authentication: "api-key",
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "provider-updated",
+      instance: { configuration: { authentication: "api-key" } },
+    });
+    expect(fixture.runtime.observedState(instanceId)).toEqual(
+      expect.objectContaining({ credentialStatus: "missing" }),
+    );
+    expect(JSON.stringify(fixture.append.mock.calls)).toContain("octant-example-1");
+    expect(JSON.stringify(fixture.append.mock.calls)).not.toMatch(
+      /apiKey|GEMINI_API_KEY|oauthToken|credential|rawAcp/,
+    );
+  });
 
   it.each([
     {

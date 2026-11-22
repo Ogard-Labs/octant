@@ -1314,6 +1314,73 @@ describe("provider registry contracts", () => {
     ).toMatchObject({ kind: "create-gemini-provider" });
   });
 
+  it("decodes an Antigravity instance on each sign-in, and Agent Platform only with its project and location", () => {
+    const antigravity = {
+      id: ids.instance,
+      displayName: "Antigravity",
+      driverKind: "antigravity",
+      configuration: { kind: "antigravity-acp", binaryPath: "/opt/homebrew/bin/agy" },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    } as const;
+    const signedIn = (configuration: Record<string, unknown>) => ({
+      ...antigravity,
+      configuration: { ...antigravity.configuration, ...configuration },
+    });
+
+    // An instance saved before the choice existed carries no sign-in: the
+    // person's own Google sign-in, which is still the default.
+    expect(decodeProviderInstance(antigravity)).toEqual(antigravity);
+    for (const authentication of ["provider-owned", "api-key"]) {
+      expect(decodeProviderInstance(signedIn({ authentication }))).toEqual(
+        signedIn({ authentication }),
+      );
+    }
+    const agentPlatform = signedIn({
+      authentication: "agent-platform",
+      googleCloud: { project: "octant-example-1", location: "us-central1" },
+    });
+    expect(decodeProviderInstance(agentPlatform)).toEqual(agentPlatform);
+    expect(decodeProviderInstanceConfigurationChanged({ instance: agentPlatform })).toEqual({
+      instance: agentPlatform,
+    });
+
+    expect(() => decodeProviderInstance(signedIn({ authentication: "agent-platform" }))).toThrow();
+    expect(() =>
+      decodeProviderInstance(
+        signedIn({
+          authentication: "api-key",
+          googleCloud: { project: "octant-example-1", location: "us-central1" },
+        }),
+      ),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance(
+        signedIn({
+          authentication: "agent-platform",
+          googleCloud: { project: "octant example\n", location: "us-central1" },
+        }),
+      ),
+    ).toThrow();
+    expect(() => decodeProviderInstance(signedIn({ authentication: "subscription" }))).toThrow();
+    // No other agent takes a Google Cloud project.
+    expect(() =>
+      decodeProviderInstance({
+        ...antigravity,
+        driverKind: "gemini",
+        configuration: {
+          kind: "gemini-acp",
+          binaryPath: "/opt/homebrew/bin/gemini",
+          authentication: "agent-platform",
+          googleCloud: { project: "octant-example-1", location: "us-central1" },
+        },
+      }),
+    ).toThrow();
+  });
+
   it("decodes only strict non-secret Copilot instances, events, and commands", () => {
     const copilot = {
       id: ids.instance,

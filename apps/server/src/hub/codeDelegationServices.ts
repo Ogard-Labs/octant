@@ -46,11 +46,9 @@ export function createCodeDelegationServices(input: {
     readProject: (projectId) => input.readProject(projectId),
     helperRunRefusal: (providerInstanceId) =>
       personalSignInRefusals(
-        String(
-          input
-            .readProviderInstances()
-            .find((instance) => String(instance.id) === providerInstanceId)?.driverKind ?? "",
-        ),
+        input
+          .readProviderInstances()
+          .find((instance) => String(instance.id) === providerInstanceId),
       )?.refusesHelperRuns,
     defaultProvider: (projectId) => {
       const project = input.readProject(projectId);
