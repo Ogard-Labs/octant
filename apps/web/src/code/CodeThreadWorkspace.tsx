@@ -103,6 +103,7 @@ import { serverCodeThreadProviderGroups } from "./composer/serverCodeComposer";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
+import { SteeredMessages } from "../messageQueue/SteeredMessages";
 import { isChildResultDelivery } from "../agents/childResultDelivery";
 import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { ScheduledFollowUpMark } from "../automation/ScheduledFollowUpMark";
@@ -2483,6 +2484,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       providerGroups={providerGroups}
                       steered={message.steeredResults}
                     />
+                    <SteeredMessages
+                      className="code-thread-workspace__message"
+                      steered={message.steeredMessages}
+                    />
                     {message.role === "assistant" && message.operationId !== undefined ? (
                       <>
                         <FinishedReceiptInline
@@ -2602,10 +2607,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       kind: "input",
                       requestId: request.requestId,
                       response,
+                      ...(request.secret === true ? { secret: true } : {}),
                     })
                   }
                   options={request.options.map((label) => ({ label }))}
                   prompt={request.prompt}
+                  secret={request.secret === true}
                 />
               ),
             )}

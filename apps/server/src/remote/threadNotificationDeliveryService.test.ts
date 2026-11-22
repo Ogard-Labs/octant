@@ -137,6 +137,14 @@ function host(overrides: Partial<ThreadNotificationDeliveryOptions> = {}) {
         )
         .all() as ReadonlyArray<{ readonly payload_json: string }>
     ).map((row) => JSON.parse(row.payload_json) as Record<string, unknown>);
+  const joinedReceipts = () =>
+    (
+      connection
+        .prepare(
+          "SELECT payload_json FROM event_journal WHERE event_name = 'remote.push-device-joined-delivery-recorded@1' ORDER BY global_sequence",
+        )
+        .all() as ReadonlyArray<{ readonly payload_json: string }>
+    ).map((row) => JSON.parse(row.payload_json) as Record<string, unknown>);
   const open = (
     envelope: RemotePushEnvelopeV1 | undefined,
     deviceId: typeof phone | typeof tablet,
@@ -158,6 +166,7 @@ function host(overrides: Partial<ThreadNotificationDeliveryOptions> = {}) {
     register,
     receipts,
     moveReceipts,
+    joinedReceipts,
     service,
     transport: options.transport === transport ? transport : undefined,
     keys,
@@ -637,5 +646,59 @@ describe("held-move notifications", () => {
     expect(unavailable.moveReceipts()).toEqual([]);
     expect(quiet.transport?.sent).toHaveLength(0);
     expect(quiet.moveReceipts()).toEqual([]);
+  });
+});
+
+describe("new-device notifications", () => {
+  const alertId = "77777777-7777-4777-8777-777777777777";
+  const joined = {
+    alertId,
+    deviceName: "Ada's laptop",
+    privateAddress: "192.168.1.20",
+    joined: "host" as const,
+  };
+
+  it("tells every paired phone once, with the new device's name and address sealed for it alone", async () => {
+    const { register, service, transport, open, joinedReceipts, receipts } = host();
+    register(phone);
+    register(tablet);
+    service.notifyDeviceJoined(joined);
+    service.notifyDeviceJoined(joined);
+    await vi.waitFor(() => expect(joinedReceipts()).toHaveLength(2));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(transport?.sent.map((send) => send.destination.deviceId).sort()).toEqual(
+      [phone, tablet].sort(),
+    );
+    const envelope = transport?.sent.find((send) => send.destination.deviceId === phone)?.envelope;
+    expect(envelope?.urgency).toBe("high");
+    expect(envelope?.alert).toEqual(REMOTE_PUSH_PLACEHOLDER_ALERT);
+    expect(open(envelope, phone)).toEqual({
+      kind: "device-joined",
+      hostId,
+      alertId,
+      title: "New device: Ada's laptop",
+      body: "192.168.1.20 · paired with Studio Mac",
+    });
+    // The receipt names the alert, never the device's name or address.
+    expect(joinedReceipts()).toContainEqual({
+      hostId,
+      deviceId: phone,
+      alertId,
+      outcome: "delivered",
+      recordedAt: now,
+    });
+    expect(JSON.stringify(joinedReceipts())).not.toContain("192.168.1.20");
+    expect(receipts()).toEqual([]);
+  });
+
+  it("tells neither the new device itself nor a phone that turned new devices off", async () => {
+    const { register, service, transport, joinedReceipts } = host();
+    register(phone, { ...allKinds, newDevices: false });
+    register(tablet);
+    service.notifyDeviceJoined({ ...joined, newDeviceId: tablet });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(transport?.sent).toHaveLength(0);
+    expect(joinedReceipts()).toEqual([]);
   });
 });

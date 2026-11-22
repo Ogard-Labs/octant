@@ -28,9 +28,11 @@ describe("A provider's own memory", () => {
     expect(toggle).toBeChecked();
     expect(toggle).toHaveAccessibleDescription(/On by default/);
     expect(toggle).toHaveAccessibleDescription(
-      /stays off in Plan and in Chat, because it writes its memory in the background/,
+      /Under Strict it stays off in Plan and in Chat, because it writes its memory in the background/,
     );
-    expect(toggle).toHaveAccessibleDescription(/telemetry and self-update stay off either way/);
+    expect(toggle).toHaveAccessibleDescription(
+      /does not change Codex’s telemetry or self-update; those follow Provider channels/,
+    );
     await userEvent.click(toggle);
     expect(onChange).toHaveBeenCalledWith(false);
 

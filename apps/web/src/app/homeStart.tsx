@@ -18,7 +18,7 @@ import { createCiFailuresCard } from "../home/CiFailuresCard";
 import { currentCodeProjectBranches } from "../home/ciFailures";
 import { createComputersCard } from "../home/ComputersCard";
 import { computerConnection, sameHostOrigin } from "../home/computers";
-import { createNeedsYouCard } from "../home/NeedsYouCard";
+import { createNeedsYouCard, type OtherComputerAsk } from "../home/NeedsYouCard";
 import {
   isChildPendingRequest,
   type WaitingAskAnswerClients,
@@ -104,6 +104,9 @@ export interface HomeStartInput {
   readonly needsYouThreadProviders: ReadonlyMap<string, ThreadProviderIdentity>;
   /** The clients the Needs you card answers a host-held ask through, kept by identity. */
   readonly needsYouAskClients: WaitingAskAnswerClients;
+  /** What the person's other computers hold for them, each opened on its own computer. */
+  readonly otherComputerAsks: ReadonlyArray<OtherComputerAsk>;
+  readonly onOpenOtherComputerAsk: (hostId: string, threadId: string) => void;
   readonly now: number;
   /** The shell's safe door for a link the records point at; absent leaves anchors. */
   readonly onOpenExternal?: (url: string) => void;
@@ -170,6 +173,8 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
     needsYouCoordinatorTitles,
     needsYouThreadProviders,
     needsYouAskClients,
+    otherComputerAsks,
+    onOpenOtherComputerAsk,
     now,
     openRunningServiceLive,
     pendingRequestClient,
@@ -281,6 +286,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
       modes: workingNowModes,
       now: now,
       onOpenInbox: actions.openInbox,
+      ...(activeMode === "code" ? { otherComputerAsks, onOpenOtherComputerAsk } : {}),
       onOpenThread: (request) => {
         actions.closeWorkspaceReaders();
         if (isChildPendingRequest(request)) actions.openSubagentRequest(request);

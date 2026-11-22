@@ -1,6 +1,6 @@
 import { OwnerUnlockPrincipal } from "./hubAndSpokes";
 import { ConversationInputReceipt, ConversationInputPolicy } from "./conversationInputs";
-import { Questionnaire } from "./questionnaire";
+import { MAX_SECRET_ANSWER_LENGTH, Questionnaire } from "./questionnaire";
 import { SideChatDraftReturnReferences } from "./sideChatReturn";
 import {
   CodeGitHunk,
@@ -25,6 +25,7 @@ import {
   AgentRunResultDeliveryMark,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
 } from "./agentRun";
+import { ThreadMessagesSteeredIntoTurn } from "./threadMessageSteering";
 import { ExtensionSelection } from "./extensions";
 import { ComputerUseDestinationSelection } from "./desktopLease";
 import { AppleActionRequest } from "./appleToolchain";
@@ -1154,11 +1155,22 @@ const StartProviderTurn = Schema.Struct({
    */
   delivery: Schema.optional(AgentRunResultDeliveryMark),
 }).annotations(strict);
+/** The longest secret answer the host passes on; the same bound on every surface. */
+export const MAX_CODE_SECRET_ANSWER_LENGTH = MAX_SECRET_ANSWER_LENGTH;
 const AnswerProviderInput = Schema.Struct({
   kind: Schema.Literal("answer-provider-input"),
   ...OperationScope,
   requestId: ProviderRequestId,
-  response: CodeEvidenceReference,
+  /** The answer, put as evidence first. Every question but a secret one. */
+  response: Schema.optional(CodeEvidenceReference),
+  /**
+   * A secret question's answer (see `input-requested`'s `secret`), carried in
+   * the command itself so it reaches the provider in memory and never the
+   * evidence store. Exactly one of this and `response` is given; the host
+   * checks that, the bound and the question, so a decode failure never prints
+   * the value.
+   */
+  secretAnswer: Schema.optional(Schema.String),
 }).annotations(strict);
 const AnswerProviderApproval = Schema.Struct({
   kind: Schema.Literal("answer-provider-approval"),
@@ -2037,6 +2049,12 @@ const QuestionEvent = Schema.Struct({
   options: Schema.Array(CodeQuestionOptionText).pipe(
     Schema.filter((options) => options.length <= MAX_CODE_QUESTION_OPTIONS),
   ),
+  /**
+   * The provider asks for a secret: the person answers in a masked field,
+   * through `answer-provider-input`'s `secretAnswer`, and only the fact that
+   * it was answered is recorded.
+   */
+  secret: Schema.optional(Schema.Literal(true)),
 }).annotations({ ...strict, ...personDecides });
 /**
  * Journaled once, just before a turn's terminal state, on every settled
@@ -2709,6 +2727,11 @@ export const CodeConversationTurn = Schema.Struct({
    * ran, in arrival order. Absent on a turn that took none.
    */
   steeredResults: Schema.optional(AgentResultsSteeredIntoTurn),
+  /**
+   * The person's messages the runtime took into this turn while it ran, in
+   * arrival order. Absent on a turn that took none.
+   */
+  steeredMessages: Schema.optional(ThreadMessagesSteeredIntoTurn),
   status: Schema.Literal("waiting", "completed", "interrupted", "failed", "incomplete"),
   /**
    * Why a failed turn failed, or the usage limit a waiting turn stopped at, as

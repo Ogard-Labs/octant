@@ -67,7 +67,7 @@ function readingRefusal(reason: string): HubPairingRefusal {
 }
 
 /** Whether the hello is signed by the key it names, for the nonce this request carried. */
-function helloIsProven(hello: HostHelloV1, clientNonce: string, now: number): boolean {
+export function helloIsProven(hello: HostHelloV1, clientNonce: string, now: number): boolean {
   if (hello.hostPublicKey === undefined || hello.clientNonce !== clientNonce) return false;
   if (Date.parse(hello.expiresAt) + HELLO_CLOCK_SKEW_MS <= now) return false;
   try {

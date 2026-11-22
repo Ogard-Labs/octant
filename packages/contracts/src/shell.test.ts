@@ -105,6 +105,8 @@ const settings = {
   fullAccessStalledTurnLimitMinutes: null,
   providerToolCallPauseLimitMinutes: 120,
   backgroundSessionIdleLimitMinutes: 120,
+  providerTelemetry: false,
+  providerSelfUpdate: false,
   threadWakeupsWaitingLimit: 8,
   threadWakeupsRunMissedOnReturn: false,
   messageWakesPerHour: 30,
@@ -383,6 +385,14 @@ describe("shell bootstrap contracts", () => {
       false,
     );
     expect(() => decodeShellSettings({ ...settings, showThreadStats: "off" })).toThrow();
+  });
+
+  it("keeps every provider's own telemetry off for a store saved before the switch, until a person turns it on", () => {
+    const { providerTelemetry: _omitted, ...withoutSwitch } = settings;
+    expect(decodeShellSettings(withoutSwitch).providerTelemetry).toBe(false);
+    expect(decodeShellSettings({ ...settings, providerTelemetry: true }).providerTelemetry).toBe(
+      true,
+    );
   });
 
   it("reads a store from before the stalled-turn limit at thirty minutes, and keeps Off and a bounded choice", () => {

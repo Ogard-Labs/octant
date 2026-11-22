@@ -988,8 +988,8 @@ describe("remote route policy", () => {
       });
       expect(inspect(path, "GET")).toMatchObject({ kind: "reject" });
     }
-    // A skill folder is chosen in the host's own folder picker, whose receipt
-    // route no device is forwarded.
+    // A skill folder is chosen in the host's own native folder picker, which
+    // no device is forwarded.
     for (const method of ["GET", "POST"] as const) {
       const decision = inspect("/api/extensions/skill-folder-selection", method);
       expect(decision).toMatchObject({ kind: "reject" });
@@ -1000,14 +1000,41 @@ describe("remote route policy", () => {
         origin,
         authenticatedRoutes: [
           {
-            id: "folder-select",
-            match: { kind: "exact", path: "/api/folders/select" },
+            id: "secret-store-link",
+            match: { kind: "exact", path: "/api/secret-stores" },
             surface: "authenticated-product",
             methods: ["GET", "POST"],
           },
         ],
       }),
     ).toThrow("local-only");
+  });
+
+  it("forwards folder browse and choice for the product dispatch, which admits only the host's own person", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string, method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    for (const path of ["/api/folders/browse", "/api/folders/select"]) {
+      expect(inspect(path, "POST")).toMatchObject({
+        kind: "allow",
+        surface: "authenticated-product",
+      });
+      expect(inspect(path, "GET")).toMatchObject({ kind: "reject" });
+      // No catalogued action: every session but the host's own person is refused.
+      expect(classifyProductAction(new Request(`${origin}${path}`, { method: "POST" }))).toBe(
+        undefined,
+      );
+    }
   });
 
   it("forwards a provider key on its way to the credential broker, and keeps the desktop bridge's own key routes on the host", () => {
@@ -1194,6 +1221,31 @@ describe("remote route policy", () => {
       expect(classifyProductAction(new Request(`${origin}${path}`, { method }))).toBeUndefined();
     }
     expect(inspect("/api/pending-requests/defer", "POST")).toMatchObject({ maxBodyBytes: 1_024 });
+  });
+
+  it("forwards the new-device alert read for every device, a hub guest included, as a read", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request("/api/new-device-alerts", {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+    expect(inspect("GET")).toMatchObject({ kind: "allow", surface: "authenticated-product" });
+    expect(inspect("POST")).toMatchObject({ kind: "reject" });
+    // A catalogued read, so the product dispatch admits a hub guest too.
+    expect(
+      classifyProductAction(new Request(`${origin}/api/new-device-alerts`, { method: "GET" })),
+    ).toBe("project.overview.read");
+    expect(
+      classifyProductAction(new Request(`${origin}/api/new-device-alerts`, { method: "POST" })),
+    ).toBeUndefined();
   });
 
   it("lets a paired device send the query an exact route declares, and refuses a query on an exact route that declares none", () => {

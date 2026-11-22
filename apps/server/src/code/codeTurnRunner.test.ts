@@ -2706,6 +2706,7 @@ describe("CodeTurnRunner", () => {
                 begin: (startedAt) => seen.push(`begin ${startedAt}`),
                 observe: (observed) => seen.push(JSON.stringify(observed)),
                 connect: () => undefined,
+                promptSent: () => undefined,
                 end: () => seen.push("end"),
               },
             }),

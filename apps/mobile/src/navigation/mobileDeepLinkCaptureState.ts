@@ -1,22 +1,23 @@
 import type { MobileInboxRow } from "@octant/client-runtime";
 import {
   parseMobileMovesDeepLink,
-  type MobileMovesDeepLinkTarget,
+  parseMobileNewDevicesDeepLink,
+  type MobileComputersDeepLinkTarget,
 } from "../notifications/deepLinks";
 import { resolveDeepLinkToInboxRow } from "./deepLinkNavigation";
 
 /** At most one link waits: the one the person followed last. */
 export interface MobileDeepLinkCaptureState {
   readonly pendingDeepLinkRow?: MobileInboxRow | undefined;
-  readonly pendingMovesLink?: MobileMovesDeepLinkTarget | undefined;
+  readonly pendingComputersLink?: MobileComputersDeepLinkTarget | undefined;
 }
 
 export function captureMobileDeepLink(
   state: MobileDeepLinkCaptureState,
   url: string,
 ): MobileDeepLinkCaptureState {
-  const moves = parseMobileMovesDeepLink(url);
-  if (moves !== undefined) return { pendingMovesLink: moves };
+  const computers = parseMobileMovesDeepLink(url) ?? parseMobileNewDevicesDeepLink(url);
+  if (computers !== undefined) return { pendingComputersLink: computers };
   const row = resolveDeepLinkToInboxRow(url);
   return row === undefined ? state : { pendingDeepLinkRow: row };
 }

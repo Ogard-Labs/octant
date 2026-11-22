@@ -185,7 +185,13 @@ export type CodeProviderAnswer =
       readonly approvalId: CodeApprovalId;
       readonly decision: "approved" | "denied";
     }
-  | { readonly kind: "input"; readonly requestId: string; readonly response: string };
+  | {
+      readonly kind: "input";
+      readonly requestId: string;
+      readonly response: string;
+      /** A secret question's answer, sent in the command and never put as evidence. */
+      readonly secret?: true;
+    };
 
 export interface CodeThreadNavigationItem {
   readonly checkoutChip?: {
@@ -273,6 +279,13 @@ const INHERITED_HISTORY_UNAVAILABLE_MESSAGE = "Inherited conversation history co
 
 /** The first wait after a failed catch-up, before the delay starts doubling. */
 const MIN_CODE_RECONNECT_BACKOFF_MS = 100;
+/**
+ * A client that reads thread events without waiting (a paired computer reached
+ * through a bounded request channel) reads again at the pace the phone uses:
+ * soon after a read that brought frames, slower while nothing changes.
+ */
+const POLLED_THREAD_EVENTS_ACTIVE_MS = 750;
+const POLLED_THREAD_EVENTS_IDLE_MAX_MS = 3_000;
 
 /**
  * A streamed reply commits its text and reasoning to conversation state on
@@ -1875,14 +1888,27 @@ export function useCodeController(options: CodeControllerOptions) {
           }
         };
 
+        let polledIdleMs = POLLED_THREAD_EVENTS_ACTIVE_MS;
+        const nextReadDelayMs = (framesRead: number): number => {
+          if (client.threadEvents !== "poll") return reconnectDelayMs;
+          if (framesRead > 0) {
+            polledIdleMs = POLLED_THREAD_EVENTS_ACTIVE_MS;
+            return POLLED_THREAD_EVENTS_ACTIVE_MS;
+          }
+          const delay = polledIdleMs;
+          polledIdleMs = Math.min(polledIdleMs * 2, POLLED_THREAD_EVENTS_IDLE_MAX_MS);
+          return delay;
+        };
         for (;;) {
           if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted) return;
           let snapshotRequired = false;
+          let framesRead = 0;
           try {
             const frames = client.subscribe(threadId, cursor, controller.signal);
             for await (const frame of frames) {
               if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
                 return;
+              framesRead += 1;
               const position = framePosition(frame, threadId, cursor);
               if (position === "gap") {
                 snapshotRequired = true;
@@ -1936,7 +1962,7 @@ export function useCodeController(options: CodeControllerOptions) {
               cursor = Number(refreshed.lastSequence);
             }
             if (!snapshotRequired) {
-              await waitForReconnect(controller.signal, reconnectDelayMs);
+              await waitForReconnect(controller.signal, nextReadDelayMs(framesRead));
               continue;
             }
           } catch {
@@ -3470,12 +3496,19 @@ export function useCodeController(options: CodeControllerOptions) {
                 approvalId: answer.approvalId,
                 decision: answer.decision,
               })
-            : await client.executeOperation({
-                kind: "answer-provider-input",
-                ...scope,
-                requestId: answer.requestId,
-                response: await client.putEvidence(view.thread.id, answer.response),
-              });
+            : answer.secret === true
+              ? await client.executeOperation({
+                  kind: "answer-provider-input",
+                  ...scope,
+                  requestId: answer.requestId,
+                  secretAnswer: answer.response,
+                })
+              : await client.executeOperation({
+                  kind: "answer-provider-input",
+                  ...scope,
+                  requestId: answer.requestId,
+                  response: await client.putEvidence(view.thread.id, answer.response),
+                });
         if (!mounted.current) return false;
         // A refusal can arrive as a failed or interrupted turn state rather
         // than `operation-failed`; the request stays so the person sees why.

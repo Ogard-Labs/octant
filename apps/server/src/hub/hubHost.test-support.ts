@@ -82,6 +82,7 @@ import {
   type ThreadMoveSourceHost,
 } from "./threadMoveService";
 import { createThreadMoveStateStore } from "./threadMoveStateStore";
+import { HUB_ACT_WITHDRAWN_REASON } from "../remoteCredentialLifecycleService";
 
 /** What a test host's services did for applied offers. */
 export interface ProvisionedByOffer {
@@ -107,6 +108,9 @@ const tailscaleFacts: RequestTransportFacts = {
   listenerTrust: "remote",
   sourceClass: "tailscale",
   sourceKey: "opaque-tailscale-source-key",
+  // Every test caller arrives from one tailnet address, which a new-device
+  // alert shows for a guest that reaches a spoke.
+  privateAddress: "100.101.102.250",
 };
 
 const NO_DELEGATION_HOST: PeerDelegationHost = {
@@ -235,6 +239,8 @@ export interface HubTestHost {
   /** This host's Code wake switches, as the owner wake routes read and change them. */
   readonly threadWakes: TestThreadWakeHost;
   readonly listener: PrivateListenerHostStatus;
+  /** Serves this host's listener at another private address, as after a network change; its devices stay. */
+  readonly moveListener: (address: string) => Promise<void>;
   /** Every request this host's listener answered, as `METHOD path`. */
   readonly requests: string[];
   /** The listener, called as a signed member would call it. */
@@ -308,7 +314,7 @@ export async function startHubTestHost(input: {
   const directory = mkdtempSync(join(tmpdir(), "octant-hub-"));
   input.cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
   const hostId = decodeStableHostId(randomUUID());
-  const origin = `https://${input.address}:8443`;
+  let origin = `https://${input.address}:8443`;
   const connection = openSqlite(join(directory, "store.sqlite3"));
   const isoNow = () => new Date().toISOString();
   applyMigrations(connection, MIGRATIONS, isoNow);
@@ -398,6 +404,11 @@ export async function startHubTestHost(input: {
       },
       deviceKeyFingerprint: (deviceId) => current.pairedDeviceKeyFingerprint(deviceId),
       deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
+      admitIntroducedDevice: (input) => current.admitIntroducedDevice(input),
+      deviceLifecycle: (deviceId, now) =>
+        deviceLifecycleAt(administration.listDevices(), deviceId, now),
+      deviceOrigin: (deviceId) =>
+        administration.listDevices().find((device) => device.deviceId === deviceId)?.origin,
     };
   };
   const hub = new HubService({
@@ -425,10 +436,15 @@ export async function startHubTestHost(input: {
         admitIntroducedDevice: (input) => current.admitIntroducedDevice(input),
         deviceLifecycle: (deviceId, now) =>
           deviceLifecycleAt(administration.listDevices(), deviceId, now),
+        deviceOrigin: (deviceId) =>
+          administration.listDevices().find((device) => device.deviceId === deviceId)?.origin,
         revokeDevice: (deviceId) => {
           administration.revokeDevice({ deviceId });
         },
         deviceActive: (deviceId) => deviceIsActive(administration, deviceId),
+        endActSessions: (deviceIds) => {
+          current.endDeviceSessions(deviceIds, HUB_ACT_WITHDRAWN_REASON);
+        },
       };
     },
     record: (change) => {
@@ -820,8 +836,8 @@ export async function startHubTestHost(input: {
     record: (change) => delegationRecords.push(change),
     now: Date.now,
   });
-  const hubLink = async (request: Request) =>
-    (await hubLinkRoutes(request)) ??
+  const hubLink = async (request: Request, facts?: { readonly privateAddress?: string }) =>
+    (await hubLinkRoutes(request, facts)) ??
     (await peerDelegationRoutes(request)) ??
     (await peerCredentialRoutes(request)) ??
     (await threadMoveRoutes(request)) ??
@@ -834,21 +850,28 @@ export async function startHubTestHost(input: {
     gatewayFetch = serveOptions.fetch as typeof gatewayFetch;
     return { url: new URL(origin), stop: vi.fn(async () => {}) };
   };
-  gateway = createRemoteGateway({
-    connection,
-    journal,
-    hostId,
-    displayName: input.name,
-    serverBuildVersion: "0.1.0",
-    signing: identity.signing,
-    webAssets: () => Promise.resolve(new Response("web", { status: 200 })),
-    hubLink,
-    ...(input.productDispatch === undefined ? {} : { productDispatch: input.productDispatch }),
-    serve,
-    clock: isoNow,
-    config: { listener: { hostname: input.address, port: 8443, origin, tls: certificate.tls } },
-  });
-  await gateway.start();
+  const startGateway = async (
+    hostname: string,
+    tls: typeof certificate.tls,
+  ): Promise<RemoteGateway> => {
+    const started = createRemoteGateway({
+      connection,
+      journal,
+      hostId,
+      displayName: input.name,
+      serverBuildVersion: "0.1.0",
+      signing: identity.signing,
+      webAssets: () => Promise.resolve(new Response("web", { status: 200 })),
+      hubLink,
+      ...(input.productDispatch === undefined ? {} : { productDispatch: input.productDispatch }),
+      serve,
+      clock: isoNow,
+      config: { listener: { hostname, port: 8443, origin, tls } },
+    });
+    await started.start();
+    return started;
+  };
+  gateway = await startGateway(input.address, certificate.tls);
   input.cleanups.push(() => gateway?.stop());
   const administration = gateway.localDeviceAdministration();
   if (administration === undefined) throw new Error("No local administration.");
@@ -882,6 +905,7 @@ export async function startHubTestHost(input: {
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("No listener port.");
   input.network.register(input.address, address.port);
+  const listenerPort = address.port;
   input.cleanups.push(
     () =>
       new Promise<void>((resolve) => {
@@ -941,6 +965,20 @@ export async function startHubTestHost(input: {
     postures,
     threadWakes,
     listener,
+    moveListener: async (moved) => {
+      await gateway?.stop();
+      origin = `https://${moved}:8443`;
+      // The certificate is made again for the new address under the same key,
+      // so the pin the roster states stays true.
+      const renamed = createSelfMadeListenerCertificateStore({ dataDirectory: directory }).ensure(
+        moved,
+      );
+      if (renamed.status !== "ready") throw new Error(renamed.code);
+      Object.assign(listener, { hostname: moved, origin, tlsPin: renamed.tlsPin });
+      server.setSecureContext(renamed.tls);
+      gateway = await startGateway(moved, renamed.tls);
+      input.network.register(moved, listenerPort);
+    },
     requests,
     hubLink,
     signHostPayload,

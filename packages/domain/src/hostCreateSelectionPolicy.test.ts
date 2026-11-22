@@ -90,6 +90,29 @@ describe("preselectCreateHost", () => {
     expect(result).toEqual({ kind: "selected", host: healthyLocal });
   });
 
+  it("keeps a selected paired computer while it reconnects, then while it is ready again", () => {
+    const connectingLaptop = host(LAPTOP, "connecting", "Laptop");
+    const healthyLaptop = host(LAPTOP, "healthy", "Laptop");
+    const select = (laptop: HostIdentity) =>
+      preselectCreateHost({
+        hosts: [healthyLocal, laptop],
+        lastSelectedHealthyHostId: LAPTOP,
+        selectedHostId: LAPTOP,
+      });
+    expect(select(healthyLaptop)).toEqual({ kind: "selected", host: healthyLaptop });
+    expect(select(connectingLaptop)).toEqual({ kind: "selected", host: connectingLaptop });
+    expect(select(healthyLaptop)).toEqual({ kind: "selected", host: healthyLaptop });
+  });
+
+  it("moves to a healthy host once the selected computer is no longer registered", () => {
+    const result = preselectCreateHost({
+      hosts: [healthyLocal],
+      lastSelectedHealthyHostId: LAPTOP,
+      selectedHostId: LAPTOP,
+    });
+    expect(result).toEqual({ kind: "selected", host: healthyLocal });
+  });
+
   it("preselects the filtered host in a host-filtered view when that host is routable", () => {
     const result = preselectCreateHost({
       hosts: [healthyLocal, healthyStudio],

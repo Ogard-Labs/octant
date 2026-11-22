@@ -143,6 +143,15 @@ export interface RemoteGatewayServices {
   readonly journal: Journal;
   /** How long a device paired now stays paired; the host setting, 30 days when absent. */
   readonly registrationLifetime?: () => PairedDeviceLifetime;
+  /** Told once when a person approves a device pairing directly, so every connected device hears of it. */
+  readonly onDevicePaired?: (device: {
+    readonly deviceId: string;
+    readonly name: string;
+    readonly deviceKeyFingerprint: string;
+    readonly privateAddress?: string;
+  }) => void;
+  /** Told when a paired device loses its standing, so its new-device alert is cleared. */
+  readonly onDeviceRemoved?: (deviceId: string) => void;
   readonly hostId: StableHostId;
   readonly displayName: string;
   readonly serverBuildVersion: string;
@@ -169,7 +178,7 @@ export interface RemoteGatewayServices {
    */
   readonly hubLink?: (
     request: Request,
-    facts?: { readonly sourceKey: string },
+    facts?: { readonly sourceKey: string; readonly privateAddress?: string },
   ) => Promise<Response | undefined>;
   /**
    * An outside agent's key claim and MCP endpoint. Each request authenticates
@@ -255,6 +264,11 @@ export interface RemoteGateway {
    * caller has checked the roster, Introduce, and the key's proof.
    */
   readonly admitIntroducedDevice: PairingDeviceLifecycleService["admitIntroducedDevice"];
+  /**
+   * Ends the open sessions of these devices and keeps their registrations, with
+   * the reason journaled on each ended session. A device with none is skipped.
+   */
+  readonly endDeviceSessions: (deviceIds: ReadonlyArray<string>, reasonCode: string) => void;
 }
 
 /**
@@ -332,6 +346,7 @@ interface GatewayServices {
   readonly approvedPairingDevice: RemoteGateway["approvedPairingDevice"];
   readonly pairedDeviceKeyFingerprint: RemoteGateway["pairedDeviceKeyFingerprint"];
   readonly admitIntroducedDevice: RemoteGateway["admitIntroducedDevice"];
+  readonly endDeviceSessions: RemoteGateway["endDeviceSessions"];
 }
 
 interface RemoteCredentialInvalidationResult {
@@ -499,6 +514,8 @@ export function createRemoteGateway(options: RemoteGatewayOptions): RemoteGatewa
     pairedDeviceKeyFingerprint: (deviceId) =>
       generation.services.pairedDeviceKeyFingerprint(deviceId),
     admitIntroducedDevice: (input) => generation.services.admitIntroducedDevice(input),
+    endDeviceSessions: (deviceIds, reasonCode) =>
+      generation.services.endDeviceSessions(deviceIds, reasonCode),
   };
 }
 
@@ -668,6 +685,18 @@ function assembleServices(
         cancelHookFailures += result.cancelHookFailures;
       }
       const pushClearReason = pushRegistrationClearReasonFor(input.reasonCode);
+      // A device that lost its standing (not one that rotated a key) takes its
+      // new-device alert with it. A browser that signs out stays paired, so its
+      // alert stays until a local window dismisses it or removes the device.
+      if (pushClearReason !== undefined && input.reasonCode !== "signed-out") {
+        for (const deviceId of input.deviceIds) {
+          try {
+            options.onDeviceRemoved?.(String(deviceId));
+          } catch {
+            cancelHookFailures += 1;
+          }
+        }
+      }
       if (pushTokenStore !== undefined && pushClearReason !== undefined) {
         for (const deviceId of input.deviceIds) {
           try {
@@ -689,7 +718,20 @@ function assembleServices(
   const localDeviceAdministration: LocalDeviceAdministrationPort = {
     createPairingTicket: (input) => lifecycle.createTicket(input),
     listPendingPairings: () => lifecycle.listPendingClaims(),
-    approvePairing: (input) => lifecycle.approveTicket(input),
+    approvePairing: (input) => {
+      const approved = lifecycle.approveTicket(input);
+      if (approved.firstApproval) {
+        options.onDevicePaired?.({
+          deviceId: String(approved.device.deviceId),
+          name: approved.device.deviceLabel,
+          deviceKeyFingerprint: approved.device.deviceKeyFingerprint,
+          ...(approved.privateAddress === undefined
+            ? {}
+            : { privateAddress: approved.privateAddress }),
+        });
+      }
+      return approved;
+    },
     denyPairing: (input) => lifecycle.denyTicket(input),
     listDevices: () => lifecycle.listDevices(),
     renameDevice: (input) => lifecycle.renameDevice(input),
@@ -853,6 +895,9 @@ function assembleServices(
     const routeFacts: RemoteRouteFacts = {
       sourceClass: transportFacts.sourceClass,
       sourceKey: transportFacts.sourceKey,
+      ...(transportFacts.privateAddress === undefined
+        ? {}
+        : { privateAddress: transportFacts.privateAddress }),
     };
     try {
       const response = await routeHandler(request, routeFacts);
@@ -950,6 +995,22 @@ function assembleServices(
     pairedDeviceKeyFingerprint: (deviceId) =>
       lifecycle.listDevices().find((device) => device.deviceId === deviceId)?.deviceKeyFingerprint,
     admitIntroducedDevice: (input) => lifecycle.admitIntroducedDevice(input),
+    endDeviceSessions: (deviceIds, reasonCode) => {
+      for (const deviceId of deviceIds) {
+        const ended = credentialLifecycle.endDeviceSessions({
+          commandId: uuid(),
+          hostId: identity.hostId,
+          deviceId,
+          reasonCode,
+        });
+        // A device with no product session open is skipped there, so the
+        // invalidation hook never ran for it; a server proxy session it holds
+        // without one must end too, or its grants outlive the change.
+        if (ended === undefined) {
+          proxySessions?.endDevice(deviceId, proxySessionEndReasonForCredentialChange(reasonCode));
+        }
+      }
+    },
   };
 }
 
@@ -994,6 +1055,7 @@ async function handlePreAuthRoute(
       const result = protocol.claimPairing({
         sourceClass: facts.sourceClass,
         request: body,
+        ...(facts.privateAddress === undefined ? {} : { privateAddress: facts.privateAddress }),
       });
       return Response.json(pairingClaimToJson(result), {
         headers: { "content-type": "application/json; charset=utf-8" },

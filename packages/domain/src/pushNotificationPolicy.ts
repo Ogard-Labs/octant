@@ -7,6 +7,8 @@ import type {
   AutomationRunId,
   AutomationRunLifecycle,
   AutomationThreadId,
+  RemotePushDeviceJoinedKind,
+  RemotePushDeviceJoinedPayloadV1,
   RemotePushMoveWaitingKind,
   RemotePushMoveWaitingPayloadV1,
   RemotePushNotificationKind,
@@ -148,6 +150,43 @@ export function buildRedactedMoveWaitingPushNotification(input: {
 }
 
 /**
+ * Build the text a phone shows when a new device joins the hub or pairs with a
+ * host: its name and private address, sealed so only the phone reads them
+ * (maintainer decision, 2026-11-19). A name that looks like a secret or a path
+ * is left out, as anywhere else.
+ */
+export function buildRedactedDeviceJoinedPushNotification(input: {
+  readonly hostId: string;
+  readonly alertId: string;
+  readonly deviceName: string;
+  readonly privateAddress?: string;
+  /** Joined this host's hub, or paired with this host directly. */
+  readonly joined: "hub" | "host";
+  /** The name the paired computer shows the phone. */
+  readonly computerLabel: string;
+}): RemotePushDeviceJoinedPayloadV1 {
+  const name = shownName(input.deviceName);
+  const where =
+    input.joined === "hub" ? "joined the hub" : `paired with ${computerName(input.computerLabel)}`;
+  const line =
+    input.privateAddress === undefined
+      ? `${where.charAt(0).toUpperCase()}${where.slice(1)}`
+      : `${input.privateAddress} · ${where}`;
+  return {
+    kind: "device-joined",
+    hostId: input.hostId as RemotePushDeviceJoinedPayloadV1["hostId"],
+    alertId: input.alertId,
+    title: clamp(name === undefined ? "New device" : `New device: ${name}`, MAX_TITLE),
+    body: clamp(line, MAX_BODY),
+  };
+}
+
+/** Whether a phone hears about new devices: on unless it turned them off. */
+export function remotePushWantsNewDevices(preferences: RemotePushPreferencesV1): boolean {
+  return preferences.newDevices !== false;
+}
+
+/**
  * Build the display text a phone shows for an Automation run, under the same
  * rule as ordinary threads: the automation's name stands where a thread title
  * would and is shown only when the phone opted in. Includes Automation Center
@@ -261,9 +300,13 @@ export function admitRemotePushByRate(input: {
 
 /** What waits on the person goes at high urgency; the rest at normal. */
 export function remotePushUrgency(
-  kind: RemotePushNotificationKind | RemotePushMoveWaitingKind,
+  kind: RemotePushNotificationKind | RemotePushMoveWaitingKind | RemotePushDeviceJoinedKind,
 ): "high" | "normal" {
-  return kind === "approval-needed" || kind === "waiting" || kind === "move-waiting"
+  // A device the person did not add is worth seeing at once.
+  return kind === "approval-needed" ||
+    kind === "waiting" ||
+    kind === "move-waiting" ||
+    kind === "device-joined"
     ? "high"
     : "normal";
 }

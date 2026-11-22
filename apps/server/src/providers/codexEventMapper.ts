@@ -68,6 +68,11 @@ export interface CodexEventContext {
    * compaction it carries is `requested` rather than the runtime's own.
    */
   readonly compactionRequested?: boolean;
+  /**
+   * A secret question is shown, masked, rather than refused: set only for a
+   * session outside Strict, whose answer reaches Codex unrecorded.
+   */
+  readonly asksSecretQuestions?: true;
   readonly requestIds: Map<CodexRpcId, string>;
   readonly agentMessages: Map<string, CodexAgentMessageState>;
   readonly taskIds: Map<string, string>;
@@ -811,7 +816,10 @@ type CodexApprovalRequest = Exclude<
 /**
  * Codex's question set as the thread's questionnaire: one request per
  * question, each with its choices. Codex adds a free answer to every question
- * itself (`isOther`), so a typed answer is passed through as written.
+ * itself (`isOther`), so a typed answer is passed through as written. A set
+ * with a secret question (Codex's `isSecret`, or wording that asks for a
+ * password or key) is refused unseen unless the session asks secret
+ * questions, and then that question alone is marked `secret`.
  */
 function userInputRequest(
   context: CodexEventContext,
@@ -830,14 +838,11 @@ function userInputRequest(
   ) {
     return protocolFailure("Provider question set was malformed.");
   }
-  if (
-    questions.some(
-      (question) =>
-        question.isSecret === true ||
-        asksForSecret(question.question) ||
-        asksForSecret(question.header),
-    )
-  ) {
+  const secret = (question: (typeof questions)[number]) =>
+    question.isSecret === true ||
+    asksForSecret(question.question) ||
+    asksForSecret(question.header);
+  if (context.asksSecretQuestions !== true && questions.some(secret)) {
     context.requestIds.set(message.id, context.makeRequestId());
     return [
       {
@@ -860,13 +865,13 @@ function userInputRequest(
       const description = normalized(option.description, SUMMARY_MAX_CHARACTERS);
       return [{ label, ...(description === undefined ? {} : { description }) }];
     });
-    return [{ prompt, options }];
+    return [{ prompt, options, secret: secret(question) }];
   });
   if (prompts.length !== questions.length || prompts.some((prompt) => prompt.options.length > 20)) {
     return protocolFailure("Provider question set was malformed.");
   }
   const count = prompts.length;
-  const asked = prompts.map(({ prompt, options }, index) => {
+  const asked = prompts.map(({ prompt, options, secret }, index) => {
     const requestId = context.makeRequestId();
     return {
       requestId,
@@ -876,6 +881,7 @@ function userInputRequest(
         prompt,
         options,
         ...(count > 1 ? { questionIndex: index + 1, questionCount: count } : {}),
+        ...(secret ? { secret: true } : {}),
       }),
     };
   });

@@ -342,7 +342,34 @@ describe("a provider's own memory", () => {
     ).toBe(false);
   });
 
-  it("keeps a memory the runtime writes in the background off in Plan and Chat, and for a session that names no mode", () => {
+  it("follows the person's setting for a memory the runtime writes in the background in Plan and Chat outside Strict", () => {
+    const memoryWrites = "background";
+    for (const [mode, executionPolicy] of [
+      ["code", "plan"],
+      ["chat", "approval-gated"],
+    ] as const) {
+      expect(
+        providerOwnMemoryLaunches({
+          accountAllows: true,
+          mode,
+          executionPolicy,
+          memoryWrites,
+          strict: false,
+        }),
+      ).toBe(true);
+      expect(
+        providerOwnMemoryLaunches({
+          accountAllows: false,
+          mode,
+          executionPolicy,
+          memoryWrites,
+          strict: false,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("keeps a memory the runtime writes in the background off in Plan and Chat under Strict, and for a session that names no mode", () => {
     const memoryWrites = "background";
     expect(
       providerOwnMemoryLaunches({

@@ -42,6 +42,7 @@ import {
 import type {
   ProviderConnection,
   ProviderDriver,
+  ProviderOwnChannels,
   ProviderSessionCompaction,
   ProviderSessionOwnership,
 } from "@octant/provider-sdk/driver";
@@ -590,7 +591,7 @@ export interface OpenCodeToolProof {
    * Octant's private configuration (no Project config loaded), admitting
    * app-managed tools without claiming OS confinement.
    */
-  readonly windowsPrivateConfiguration?: boolean;
+  readonly privateConfiguration?: boolean;
 }
 
 function openCodeChatCapabilities(
@@ -605,7 +606,7 @@ function openCodeChatCapabilities(
       ? "supported"
       : "unsupported",
     appManagedTools:
-      tools.accepted && (tools.exclusive || tools.windowsPrivateConfiguration === true)
+      tools.accepted && (tools.exclusive || tools.privateConfiguration === true)
         ? "supported"
         : "unsupported",
     // Full access launches this runtime outside the sandbox the exclusivity
@@ -1954,8 +1955,8 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
             const normalized = normalizeOpenCodeProbe(instanceId, health, providers, clock(), {
               accepted: mcpAccepted,
               exclusive: runtime.isolatedConfiguration === true,
-              ...(platform === "win32" && runtime.windowsPrivateConfiguration === true
-                ? { windowsPrivateConfiguration: true }
+              ...(platform === "win32" && runtime.privateConfiguration === true
+                ? { privateConfiguration: true }
                 : {}),
             });
             if (runtime.runtime === "beta" && normalized.models.length > 0) {
@@ -2258,10 +2259,11 @@ function makeConnection(
     let runtimeKind: "legacy" | "beta" | undefined;
     let runtimeVersion: string | undefined;
     let runtimeIsolated = false;
-    // The running Windows outside-Strict launch uses a verified release with
-    // Octant's private configuration (no Project config loaded), admitting
-    // app-managed tools without claiming OS confinement.
-    let runtimeWindowsPrivateConfig = false;
+    // The running outside-Strict launch has no Octant sandbox (Windows, or
+    // Work and Code elsewhere) and uses a verified release with Octant's
+    // private configuration (no Project config loaded), admitting app-managed
+    // tools without claiming OS confinement.
+    let runtimePrivateConfig = false;
     // The running launch loads a trusted Project's own OpenCode configuration.
     let runtimeProjectConfig = false;
     let runtimeLoopbackPorts: ReadonlyArray<number> = [];
@@ -2271,7 +2273,7 @@ function makeConnection(
       strict: boolean,
     ): boolean =>
       runtimeIsolated ||
-      (platform === "win32" && !strict && runtimeWindowsPrivateConfig) ||
+      (!strict && runtimePrivateConfig) ||
       runtimeProjectConfig ||
       executionPolicy === "full-access";
 
@@ -2519,7 +2521,7 @@ function makeConnection(
       runtimeBlockedToolsKey = "[]";
       runtimeVersion = undefined;
       runtimeIsolated = false;
-      runtimeWindowsPrivateConfig = false;
+      runtimePrivateConfig = false;
       runtimeProjectConfig = false;
       runtimeLoopbackPorts = [];
       subscriptionReady = undefined;
@@ -2533,6 +2535,7 @@ function makeConnection(
       ownSkills: boolean,
       ownSetup: ResolvedOwnSetup | undefined,
       blockedTools: ReadonlyArray<string> | undefined,
+      ownChannels: ProviderOwnChannels | undefined,
     ): Effect.Effect<OpenCodeClientPort, ProviderFailure> =>
       Effect.tryPromise({
         try: async () => {
@@ -2579,6 +2582,9 @@ function makeConnection(
                   executionPolicy,
                   ...(fullAccessSandbox ? { fullAccessSandbox: true } : {}),
                   ...(strict ? {} : { strict: false }),
+                  // A running process keeps the self-update guard it started
+                  // with; a changed switch reaches the next process.
+                  ...(strict || ownChannels === undefined ? {} : { ownChannels }),
                   ...(!windowsChatDenyAll && ownSkills ? { ownSkills: true as const } : {}),
                   ...(windowsChatDenyAll ||
                   ownSetup === undefined ||
@@ -2632,7 +2638,7 @@ function makeConnection(
             runtimeKind = started.runtime ?? "legacy";
             runtimeVersion = started.version;
             runtimeIsolated = started.isolatedConfiguration === true;
-            runtimeWindowsPrivateConfig = started.windowsPrivateConfiguration === true;
+            runtimePrivateConfig = started.privateConfiguration === true;
             runtimeProjectConfig = ownSetup?.projectConfig === true;
             runtimeLoopbackPorts = loopbackPorts;
             client = nextClient;
@@ -3003,12 +3009,14 @@ function makeConnection(
                 state.nativeSetup?.skills === true,
                 ownSetup,
                 input.blockedTools,
+                input.ownChannels,
               ),
             ),
             Effect.flatMap((runtimeClient) => {
               // Below Full access the tools reach only a runtime that proved
-              // nothing else can enter it, or on Windows outside Strict a
-              // verified release using Octant's private configuration. At Full
+              // nothing else can enter it, or, outside Strict with no Octant
+              // sandbox (Windows, or Work and Code elsewhere), a verified
+              // release using Octant's private configuration. At Full
               // access, and in a trusted Project whose own OpenCode
               // configuration the launch loads, they are offered beside
               // whatever the runtime inherited.
@@ -3191,6 +3199,7 @@ function makeConnection(
                     state.nativeSetup?.skills === true,
                     ownSetup,
                     input.blockedTools,
+                    input.ownChannels,
                   ),
                 ),
                 Effect.flatMap((runtimeClient) => {

@@ -481,6 +481,7 @@ describe("a guest joining a hub that has a spoke", () => {
         throw new Error("No admission is expected.");
       },
       deviceLifecycle: () => "active",
+      deviceOrigin: () => undefined,
       revokeDevice: (deviceId) => {
         spoke.administration.revokeDevice({ deviceId });
       },

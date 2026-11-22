@@ -163,6 +163,12 @@ export const ChatAttemptQuestion = Schema.Struct({
   options: Schema.Array(ChatQuestionOption).pipe(Schema.maxItems(8)),
   questionIndex: Schema.optional(PositiveInt),
   questionCount: Schema.optional(PositiveInt),
+  /**
+   * The provider asks for a secret: the person answers in a masked field,
+   * through `answer-chat-turn-question`'s `secretAnswer`, and the attempt
+   * records only that a secret answer was given.
+   */
+  secret: Schema.optional(Schema.Literal(true)),
 })
   .annotations(strict)
   .pipe(
@@ -182,14 +188,18 @@ export const ChatAttemptAnsweredQuestion = Schema.Struct({
   options: Schema.Array(ChatQuestionOption).pipe(Schema.maxItems(8)),
   questionIndex: Schema.optional(PositiveInt),
   questionCount: Schema.optional(PositiveInt),
-  answer: QuestionnaireAnswerText,
+  /** What the person answered; absent only on a secret question, whose value is kept nowhere. */
+  answer: Schema.optional(QuestionnaireAnswerText),
+  /** The question asked for a secret and the person gave one; its value went to the provider only. */
+  secret: Schema.optional(Schema.Literal(true)),
   answeredAt: UtcTimestamp,
 })
   .annotations(strict)
   .pipe(
     Schema.filter(
       (question) =>
-        (question.questionIndex === undefined) === (question.questionCount === undefined),
+        (question.questionIndex === undefined) === (question.questionCount === undefined) &&
+        (question.secret === true) === (question.answer === undefined),
     ),
   );
 export type ChatAttemptAnsweredQuestion = typeof ChatAttemptAnsweredQuestion.Type;
@@ -893,7 +903,15 @@ export const AnswerChatTurnQuestionCommand = Schema.Struct({
   turnId: ChatTurnId,
   attemptId: ChatAttemptId,
   requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
-  answer: QuestionnaireAnswerText,
+  /** The answer to every question but a secret one. */
+  answer: Schema.optional(QuestionnaireAnswerText),
+  /**
+   * A secret question's answer (see the question's `secret`), handed to the
+   * provider in memory and never journaled. Exactly one of this and `answer`
+   * is given; the host checks that, the bound and the question, so a decode
+   * failure never prints the value.
+   */
+  secretAnswer: Schema.optional(Schema.String),
 }).annotations(strict);
 
 export const DeleteChatThreadCommand = Schema.Struct({

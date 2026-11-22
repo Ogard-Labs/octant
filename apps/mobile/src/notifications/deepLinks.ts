@@ -4,8 +4,12 @@ export interface MobileDeepLinkTarget {
   readonly mode?: "chat" | "work" | "code";
 }
 
-/** The computer whose held moves a tapped notification asks the phone to show. */
-export interface MobileMovesDeepLinkTarget {
+/**
+ * A computer whose held moves, or new devices, a tapped notification asks the
+ * phone to show. Both open the Computers screen, whose lists read each
+ * computer themselves.
+ */
+export interface MobileComputersDeepLinkTarget {
   readonly hostId: string;
 }
 
@@ -57,11 +61,27 @@ export function parseMobileThreadDeepLink(url: string): MobileDeepLinkTarget | u
  * waits for this phone opens. It names no thread: the Computers screen's
  * Moves waiting for you list reads what waits from each computer itself.
  */
-export function parseMobileMovesDeepLink(url: string): MobileMovesDeepLinkTarget | undefined {
+export function parseMobileMovesDeepLink(url: string): MobileComputersDeepLinkTarget | undefined {
   const pathSegments = octantLinkSegments(url);
   if (pathSegments === undefined || pathSegments.length !== 3) return undefined;
   const [hosts, hostId, moves] = pathSegments;
   if (hosts !== "hosts" || moves !== "moves") return undefined;
+  if (hostId === undefined || hostId.length === 0) return undefined;
+  return { hostId };
+}
+
+/**
+ * Parse `octant://hosts/{hostId}/new-devices`, the link a notification that a
+ * new device joined or paired opens. It names no device: the Computers screen's
+ * New devices list reads each computer's alerts itself.
+ */
+export function parseMobileNewDevicesDeepLink(
+  url: string,
+): MobileComputersDeepLinkTarget | undefined {
+  const pathSegments = octantLinkSegments(url);
+  if (pathSegments === undefined || pathSegments.length !== 3) return undefined;
+  const [hosts, hostId, newDevices] = pathSegments;
+  if (hosts !== "hosts" || newDevices !== "new-devices") return undefined;
   if (hostId === undefined || hostId.length === 0) return undefined;
   return { hostId };
 }

@@ -145,6 +145,46 @@ describe("compact message queue controls", () => {
     );
   });
 
+  it("offers no edit, move or removal for a message the running turn is still taking", async () => {
+    const host = queueTestHost();
+    const user = userEvent.setup();
+    const ids = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+    host.publish(
+      decodeThreadMessageQueueSnapshot({
+        scope: { mode: "work", threadId },
+        version: 3,
+        paused: false,
+        items: ids.map((messageId, index) => ({
+          messageId,
+          status: "queued",
+          revision: 0,
+          createdAt: "2026-10-03T10:00:00.000Z",
+          payload: { mode: "work", prompt: `Message ${index}` },
+          ...(index === 0 ? { steering: true } : {}),
+        })),
+      }),
+    );
+    function Harness() {
+      return (
+        <ThreadMessageQueue
+          queue={useThreadMessageQueue({ mode: "work", threadId, client: host })}
+        />
+      );
+    }
+    render(<Harness />);
+    await user.click(await screen.findByRole("button", { name: /3 queued/ }));
+    expect(screen.getByText("Sending into the running turn")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit queued message 1" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Remove queued message 1" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move queued message 1 down" })).toBeDisabled();
+    // The next message cannot be moved ahead of it, only behind the others.
+    expect(screen.getByRole("button", { name: "Move queued message 2 up" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Move queued message 3 up" }));
+    expect(host.execute.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ kind: "reorder", messageIds: [ids[0], ids[2], ids[1]] }),
+    );
+  });
+
   it("keeps unsaved text without overwriting a concurrent edit", async () => {
     const host = queueTestHost();
     const user = userEvent.setup();

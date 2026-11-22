@@ -19,6 +19,8 @@ import {
   authorizePeer,
   clampDelegation,
   decideHubFollow,
+  decideHubIntroducedAct,
+  decideHubOwnAct,
   decideRosterReplacement,
   decideStandIn,
   decideStandInHandback,
@@ -27,6 +29,7 @@ import {
   honorOwner,
   hubRosterSigningPayload,
   mergeStandInMembership,
+  newDevicePrivateAddress,
   newMemberConfirmationSigningPayload,
   orderStandbys,
   OWNER_ADMINISTRATION_SESSION_MS,
@@ -136,6 +139,20 @@ const clampPosture = (
   });
   return result.status === "clamped" ? result.authority.posture : result.kind;
 };
+
+describe("newDevicePrivateAddress", () => {
+  it("names a new device by its private-network address and never a public one", () => {
+    expect(newDevicePrivateAddress(["fd7a:115c:a1e0::5", "100.101.102.103"])).toBe(
+      "100.101.102.103",
+    );
+    expect(newDevicePrivateAddress(["203.0.113.9", "192.168.1.20"])).toBe("192.168.1.20");
+    expect(newDevicePrivateAddress(["fd12:3456::1"])).toBe("fd12:3456::1");
+    expect(newDevicePrivateAddress(["203.0.113.9", "127.0.0.1", "spare.tail1234.ts.net"])).toBe(
+      undefined,
+    );
+    expect(newDevicePrivateAddress([])).toBe(undefined);
+  });
+});
 
 describe("clampDelegation", () => {
   it("never widens a request past the peer grant", () => {
@@ -1083,5 +1100,77 @@ describe("the page on a member's own web app that opens one of its threads", () 
     expect(
       memberThreadPage("https://studio.tail1234.ts.net", { mode: "code", threadId: "../settings" }),
     ).toBeUndefined();
+  });
+});
+
+describe("a hub-introduced device starting a thread", () => {
+  const studio = "40000000-0000-4000-8000-000000000001";
+  const other = "40000000-0000-4000-8000-000000000002";
+  const actOn = (projects: ReadonlyArray<string>) =>
+    ({ items: ["roster", "introduce", "act"], actProjects: projects }) as never;
+
+  it("starts a thread only in a Project the member's Act item names", () => {
+    expect(
+      decideHubIntroducedAct({
+        membership: "member",
+        grant: actOn([studio]),
+        projectId: studio,
+      }),
+    ).toEqual({ status: "allowed" });
+    expect(
+      decideHubIntroducedAct({
+        membership: "member",
+        grant: actOn([studio]),
+        projectId: other,
+      }),
+    ).toEqual({ status: "refused", kind: "project-not-named" });
+  });
+
+  it("refuses the next start once the member unticks Act", () => {
+    expect(
+      decideHubIntroducedAct({
+        membership: "member",
+        grant: defaultHubGrant(),
+        projectId: studio,
+      }),
+    ).toEqual({ status: "refused", kind: "act-not-granted" });
+  });
+
+  it("refuses every start on a member the hub removed", () => {
+    expect(
+      decideHubIntroducedAct({
+        membership: "removed",
+        grant: actOn([studio]),
+        projectId: studio,
+      }),
+    ).toEqual({ status: "refused", kind: "removed-from-hub" });
+  });
+
+  it("leaves a host that is in no hub to its own rules", () => {
+    expect(
+      decideHubIntroducedAct({ membership: "none", grant: undefined, projectId: studio }),
+    ).toEqual({ status: "not-in-a-hub" });
+  });
+});
+
+describe("a member's window acting on the hub", () => {
+  const studio = "40000000-0000-4000-8000-000000000001";
+  const other = "40000000-0000-4000-8000-000000000002";
+
+  it("acts only in a Project the hub's own Act list names", () => {
+    expect(decideHubOwnAct({ actProjects: [studio], projectId: studio })).toEqual({
+      status: "allowed",
+    });
+    expect(decideHubOwnAct({ actProjects: [studio], projectId: other })).toEqual({
+      status: "refused",
+      kind: "hub-project-not-named",
+    });
+  });
+
+  it("refuses every Project while the hub's Act list names none", () => {
+    expect(decideHubOwnAct({ actProjects: [], projectId: studio })).toEqual({
+      status: "refused",
+      kind: "hub-project-not-named",
+    });
   });
 });

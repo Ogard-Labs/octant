@@ -25,11 +25,13 @@ import { RemoteDeviceSelfPanel } from "./RemoteDeviceSelfPanel";
 import {
   createRemoteAgentGrantClient,
   createRemoteExtensionClient,
+  createRemoteNewDeviceAlertsClient,
   createRemotePairedDeviceAdministrationClient,
   createRemoteProductClients,
   createRemoteProviderCredentialClient,
   createRemoteProviderOAuth,
 } from "./remoteProductClients";
+import { NewDeviceAlerts } from "../host/NewDeviceAlerts";
 import { RemoteHostSettings } from "./RemoteHostSettings";
 import { RemoteWorkspace } from "./RemoteWorkspace";
 import { useRemoteSession } from "./useRemoteSession";
@@ -82,6 +84,10 @@ export function RemoteShellView(props: RemoteShellViewProps) {
   );
   const pairedDevices = useMemo(
     () => createRemotePairedDeviceAdministrationClient(props.bridge),
+    [props.bridge],
+  );
+  const newDeviceAlerts = useMemo(
+    () => createRemoteNewDeviceAlertsClient(props.bridge),
     [props.bridge],
   );
   const providerKeys = useMemo(
@@ -188,6 +194,8 @@ export function RemoteShellView(props: RemoteShellViewProps) {
           title="Connection stale"
         />
       ) : null}
+
+      <NewDeviceAlerts client={newDeviceAlerts} />
 
       <ContinuityScreenContext.Provider
         value={{

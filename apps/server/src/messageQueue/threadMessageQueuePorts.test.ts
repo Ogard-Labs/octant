@@ -20,7 +20,9 @@ import {
   decodeProviderModelId,
   decodeProviderObservedState,
   decodeProviderRuntimeEvent,
+  decodeProviderSessionId,
   decodeStartWorkThreadTurnCommand,
+  decodeThreadMessageQueuePayload,
   decodeThreadQueueMessageId,
   decodeWindowId,
   decodeWorkThread,
@@ -28,7 +30,7 @@ import {
   type WorkTurnState,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
-import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import { ChatService } from "../chat/chatService";
 import { ResearchRouter } from "../chat/research/researchRouter";
 import { ThreadWorkService } from "../chat/threadWorkService";
@@ -1171,5 +1173,111 @@ describe("a Chat attempt parked on a usage limit after the thread moved to anoth
       status: "ready",
       tail: { id: attemptId, status: "failed", ordinaryFailure: true },
     });
+  });
+});
+
+describe("a message sent while the thread's turn runs", () => {
+  const now = thread.createdAt;
+  const messageId = decodeThreadQueueMessageId("92000000-0000-4000-8000-000000000004");
+  const workThread = decodeWorkThread({
+    id: threadId,
+    projectId: "92000000-0000-4000-8000-000000000010",
+    bindingRevisionId: "92000000-0000-4000-8000-000000000011",
+    title: "Steered work",
+    lifecycle: "active",
+    providerInstanceId: thread.providerInstanceId,
+    modelId: thread.modelId,
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+  });
+  const scope = { mode: "work", threadId } as const;
+  const sessionId = decodeProviderSessionId("92000000-0000-4000-8000-000000000020");
+  function steering(steer: ProviderConnection["steer"]) {
+    const { deps } = setup();
+    const record =
+      vi.fn<NonNullable<ThreadMessageQueuePortDependencies["steering"]>["recordSteered"]>();
+    const connection = (steer === undefined ? {} : { steer }) as unknown as ProviderConnection;
+    const port = createThreadMessageQueuePort({
+      ...deps,
+      work: { readThread: () => workThread, listTurns: () => [], startFirstTurn: vi.fn() },
+      steering: {
+        liveTurn: (id) =>
+          id === String(threadId)
+            ? {
+                connection,
+                sessionId,
+                providerInstanceId: thread.providerInstanceId,
+                takesSteeredResults: true,
+              }
+            : undefined,
+        isPersonWindow: (id) => String(id) === String(windowId),
+        recordSteered: record,
+      },
+    });
+    const asking = vi.fn();
+    const send = (
+      prompt: string,
+      from = windowId,
+      extra: { readonly attachmentIds?: ReadonlyArray<string> } = {},
+    ) => {
+      const steerQueued = port.steer;
+      if (steerQueued === undefined) throw new Error("The port offers no steering.");
+      return steerQueued({
+        scope,
+        messageId,
+        windowId: from,
+        payload: decodeThreadMessageQueuePayload({ mode: "work", prompt, ...extra }),
+        asking,
+      });
+    };
+    return { send, record, asking };
+  }
+
+  it("goes into the running turn as the person's note and is recorded on that turn", async () => {
+    const steer = vi.fn<NonNullable<ProviderConnection["steer"]>>(() => Effect.succeed("steered"));
+    const { send, record, asking } = steering(steer);
+    expect(await send("Use the staging database instead.")).toBe("steered");
+    // The queue shows the message as being sent once the runtime is asked.
+    expect(asking).toHaveBeenCalledOnce();
+    expect(steer).toHaveBeenCalledWith({
+      sessionId,
+      message: "Use the staging database instead.",
+      source: "person",
+    });
+    expect(record).toHaveBeenCalledWith({
+      scope,
+      messageId,
+      body: "Use the staging database instead.",
+    });
+  });
+
+  it("is left to the queue when the runtime cannot steer, refuses, or fails, and is not recorded", async () => {
+    expect(await steering(undefined).send("Wait for me.")).toBe("unavailable");
+    const refused = steering(() => Effect.succeed("unsupported"));
+    expect(await refused.send("Wait for me.")).toBe("refused");
+    const failed = steering(() =>
+      Effect.fail({ category: "protocol", message: "The runtime went away." }),
+    );
+    expect(await failed.send("Wait for me.")).toBe("refused");
+    expect(refused.record).not.toHaveBeenCalled();
+    expect(failed.record).not.toHaveBeenCalled();
+  });
+
+  it("is never steered when it carries more than text, is a command, or waits under another scope", async () => {
+    const steer = vi.fn<NonNullable<ProviderConnection["steer"]>>(() => Effect.succeed("steered"));
+    const { send, record, asking } = steering(steer);
+    const otherScope = decodeWindowId("92000000-0000-4000-8000-000000000030");
+    expect(
+      await send("See the attached log.", windowId, {
+        attachmentIds: ["92000000-0000-4000-8000-000000000031"],
+      }),
+    ).toBe("unavailable");
+    expect(await send("/compact")).toBe("unavailable");
+    expect(await send("Use staging.", otherScope)).toBe("unavailable");
+    expect(steer).not.toHaveBeenCalled();
+    expect(record).not.toHaveBeenCalled();
+    // Nothing was asked, so the queue shows nothing as being sent.
+    expect(asking).not.toHaveBeenCalled();
   });
 });
