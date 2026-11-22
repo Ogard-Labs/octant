@@ -1667,14 +1667,15 @@ Status: Partly built. Since: —; agent images in every mode 2026-11-07. Detail:
 
 ### Video generation
 
-Short video clips run as a journaled job on the person's own Gemini API key, following the image rule for asking, with the price on the card (design, 2026-11-22; awaiting maintainer approval).
+Short video clips run as a journaled job through provider-neutral video driver plugins on the person's own provider keys, following the image rule for asking, with the price on the card (design, 2026-11-22; direction approved by the maintainer on 2026-11-22, first-party provider shortlist awaiting confirmation).
 
-- Gemini Omni Flash (`gemini-omni-1.2-flash`) is the only provider at first: OpenAI shut its Videos API down on 2026-09-24, and Google shut down the Veo 3.1 previews in the Gemini API on 2026-10-22.
+- Video works like image generation: drivers plug into a `videoGeneration` seam in `@octant/provider-sdk` through the plugin-host activation ladder, and more than one provider is supported. Each model declares its durations, resolutions, aspect ratios, audio, inputs, price basis, cancel, removal and resume window, and the host builds the card, price, limits, spend, storage, recovery and viewing from those facts the same way for every provider.
+- Proposed first-party drivers: Google Gemini API (Gemini Omni Flash), Runway and fal; Replicate, MiniMax, xAI, Kling, Seedance, Wan, Luma, Pika and Vertex Veo are left to plugins. OpenAI's Videos API, Stability's video API and Bedrock Nova Reel are shut down.
 - A provider runtime's own native media output shows in the thread with no Octant gate, as in comparable agent workspaces; no runtime they drive makes video natively today.
-- The card shows duration × the published per-second rate before Generate and offers "Don't ask again" as for images; Full access, routines and paired devices behave as they do for images. Plan and Side Chats are never offered the tool.
-- Clips use the provider's own range (3–15 seconds, up to 4K). The host bounds only a clip's stored size (1 GB) and job time (30 minutes) and shares the image queue; the person's thread and Project spend ceilings apply, settled from the provider's token count.
-- Clips are stored beside generated images, exported and deleted with their thread, and the provider's stored interaction is deleted as soon as the clip is kept.
-- After a restart, a running job with a recorded provider id resumes; one without settles at its estimate as interrupted.
+- The card shows the estimate from the model's declared price before Generate, and what Stop does when the model cannot cancel, and offers "Don't ask again" as for images; Full access, routines and paired devices behave as they do for images. Plan and Side Chats are never offered the tool.
+- Clips use each model's declared range. The host bounds only a clip's stored size (1 GB), job time (30 minutes) and queued video jobs (16 per host) and shares the image queue; the person's thread and Project spend ceilings apply, settled from the provider's reported usage, else the estimate.
+- Clips are stored beside generated images, exported and deleted with their thread, and the provider's copy is removed as soon as the clip is kept where the driver can; otherwise the card says how long the provider keeps it.
+- After a restart, a running job with a recorded provider id resumes within its declared resume window; one without settles at its estimate as interrupted.
 
 Status: Designed, not built. Since: 2026-11-22. Detail: [Video generation](video-generation.md).
 
