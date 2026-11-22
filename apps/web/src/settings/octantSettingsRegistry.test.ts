@@ -7,6 +7,22 @@ import { listAvailableSections, resolveDeepLink, searchSettings } from "./regist
 const capabilities = { nativeBoundsAvailable: true, sidebarVibrancySupported: true };
 
 describe("octantSettingsRegistry", () => {
+  it("finds the switch that stops this computer taking delegated work by its label", () => {
+    expect(
+      searchSettings(
+        listAvailableSections(octantSettingsRegistry, capabilities),
+        capabilities,
+        "Take delegated work from other members",
+      ),
+    ).toContainEqual(
+      expect.objectContaining({
+        kind: "setting",
+        sectionId: "remote-access",
+        settingId: "hub-delegation-accepting",
+      }),
+    );
+  });
+
   it.each(["changed identity", "read-only check"])(
     "finds the read-only remote setup journey for %s",
     (query) => {

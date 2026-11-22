@@ -1,3 +1,4 @@
+import type { ProjectId } from "@octant/contracts";
 import type { OwnerApprovalHost } from "./ownerApprovalHost";
 // A whole Octant host for the hub tests: its journal, its real remote gateway
 // behind a real TLS listener serving a certificate it made itself, and the hub
@@ -39,7 +40,11 @@ import {
 } from "../remote/remoteGateway";
 import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListenerCertificate";
 import { DelegatingSpokeService, type DelegatingParentPort } from "./delegatingSpokeService";
-import { createDelegationStateStore, type DelegationStatePort } from "./delegationStateStore";
+import {
+  createDelegationStateStore,
+  delegationAcceptingSwitch,
+  type DelegationStatePort,
+} from "./delegationStateStore";
 import { FailoverService } from "./failoverService";
 import { createHubLinkRouteHandler } from "./hubLinkRoutes";
 import { createHubOwnerRouteHandler } from "./hubOwnerRoutes";
@@ -232,6 +237,8 @@ export interface HubTestHost {
   readonly delegationRecords: HubDelegationRecordedPayload[];
   /** The delegating side of this host: what its agents' remote child runs go through. */
   readonly delegating: DelegatingSpokeService;
+  /** This host's switch for taking delegated work, as its window turns it. */
+  readonly setDelegationAccepting: (accepting: boolean) => void;
   /** This host's credential broker: the sign-ins it holds and the provider rows that take one. */
   readonly credentials: TestCredentialBroker;
   /** This host's Code postures, as the owner posture routes read and change them. */
@@ -261,6 +268,11 @@ export async function startHubTestHost(input: {
   readonly listenerStatus?: Partial<PrivateListenerHostStatus>;
   /** What a delegation to this host becomes; absent, this host has no Project open for delegated work. */
   readonly delegationHost?: PeerDelegationHost;
+  /** This host's active Projects, for the list a member asks for. */
+  readonly delegationProjects?: () => ReadonlyArray<{
+    readonly projectId: ProjectId;
+    readonly name: string;
+  }>;
   /** The threads this host can send and receive in a move; absent, it holds none. */
   readonly threadMoveHosts?: {
     readonly source: ThreadMoveSourceHost;
@@ -822,6 +834,8 @@ export async function startHubTestHost(input: {
       authenticate: (request) => spoke.authenticatePeer(request),
       currentPeer: (memberId) => spoke.currentPeer(memberId),
       host: input.delegationHost ?? NO_DELEGATION_HOST,
+      ...(input.delegationProjects === undefined ? {} : { projects: input.delegationProjects }),
+      load: () => "busy",
       state: delegationState,
       record: (change) => delegationRecords.push(change),
       now: Date.now,
@@ -831,6 +845,10 @@ export async function startHubTestHost(input: {
     state: delegationState,
     identity: () => identity,
     target: (memberId) => spoke.memberTarget(memberId),
+    members: () => {
+      const status = spoke.status();
+      return status.membership === "member" ? status.acceptedMemberIds : [];
+    },
     transport: input.delegatingTransport?.(transport) ?? transport,
     parent: input.parent ?? NO_PARENT,
     record: (change) => delegationRecords.push(change),
@@ -961,6 +979,8 @@ export async function startHubTestHost(input: {
     delegationState,
     delegationRecords,
     delegating,
+    setDelegationAccepting: (accepting: boolean) =>
+      delegationAcceptingSwitch(delegationState).set(accepting),
     credentials,
     postures,
     threadWakes,

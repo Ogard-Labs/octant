@@ -2787,6 +2787,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         pullRequestSwitchAbort.abort();
       }),
     );
+    const codeTurnCancelledListeners = new Set<(threadId: string) => void>();
+    const onCodeTurnCancelled = (listener: (threadId: string) => void): void => {
+      codeTurnCancelledListeners.add(listener);
+    };
+    const boardExecuteOperation =
+      boardRouteCodeService.executeOperation?.bind(boardRouteCodeService);
     const routeCodeService: CodeRouteService = {
       ...boardRouteCodeService,
       readFollowUp: (_windowId, threadId) => codeFollowUpService.read(threadId),
@@ -2845,6 +2851,24 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         pullRequestSwitchService.setAutoFix(windowId, command, initiator, actor),
       noteComposerActivity: (_windowId, activity) =>
         pullRequestSwitchService.noteComposerActivity(activity.threadId),
+      // A person's Stop that interrupts a Code turn is told to hosts composed
+      // after Code (delegation to another member), as a Work turn's Stop is.
+      ...(boardExecuteOperation === undefined
+        ? {}
+        : {
+            executeOperation: async (windowId, command, options) => {
+              const result = await boardExecuteOperation(windowId, command, options);
+              if (
+                command.kind === "cancel-provider-turn" &&
+                result.kind === "provider-turn-state" &&
+                result.state === "interrupted"
+              ) {
+                for (const listener of codeTurnCancelledListeners)
+                  listener(String(command.threadId));
+              }
+              return result;
+            },
+          }),
     };
     // A Code thread's live tasks are read and stopped by a window that can
     // open the thread on this host; a paired device does not see them yet.
@@ -3047,6 +3071,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       pullRequestReviewRoutes,
       pullRequestReviewService,
       routeCodeService,
+      onCodeTurnCancelled,
       terminalProcessPort,
     };
   });
