@@ -61,6 +61,7 @@ import {
   decodeContextSubjectRef,
   decodeProviderAttachmentInput,
   decodeProviderInstanceId,
+  personalSignInRefusals,
   decodeProviderModelId,
   decodeProviderSessionId,
   MAX_PROVIDER_TOOLS,
@@ -316,6 +317,7 @@ import {
 } from "../context/inheritedExternalContentMark";
 import type { RuntimeOutsideContentMarking } from "../context/runtimeOutsideContentMark";
 import { STOP_CONFIRMATION_MS } from "../stopConfirmation";
+import { isRoutineHostScope } from "../routineHostScope";
 
 const RESEARCH_TOOL_NAME = WEB_SEARCH_TOOL_DEFINITION.name;
 const DEFAULT_CHAT_PERSONALITY_INSTRUCTIONS = "Be calm, direct, and useful.";
@@ -675,6 +677,12 @@ export interface ChatServiceExecutionContext {
    * question that asks for a secret; absent, a secret answer is refused.
    */
   readonly initiator?: "user" | "agent";
+  /**
+   * An outside agent's grant sent this, through the ordinary route: its
+   * grant's scope stands in as the window, so the window alone cannot say
+   * it is not the person. Set only by the route; absent, it is not one.
+   */
+  readonly fromOutsideAgent?: boolean;
   /** One-hop coordination calls cannot expose the coordination tool again. */
   readonly coordinationDepth?: number;
   /**
@@ -1861,6 +1869,13 @@ export class ChatService {
         return await this.#threadWork.execute(input);
       }
       const command = decodeChatCommand(input);
+      if (
+        command.kind === "send-chat-turn" ||
+        command.kind === "retry-chat-turn" ||
+        command.kind === "resume-chat-turn" ||
+        command.kind === "deliver-chat-agent-result"
+      )
+        this.#refuseUnattendedTurn(command.threadId, executionContext);
       switch (command.kind) {
         case "create-chat-thread":
           return await this.#createThread(command, executionContext?.inheritedMark);
@@ -1911,7 +1926,7 @@ export class ChatService {
           return await this.#forceStopTurn(command);
         case "answer-chat-turn-question":
           return await this.#withThreadAdmission(command.threadId, () =>
-            this.#answerTurnQuestion(command, executionContext?.initiator),
+            this.#answerTurnQuestion(command, executionContext?.initiator, executionContext),
           );
         case "snooze-chat-thread-at-usage-reset":
           return await this.#withThreadAdmission(command.threadId, () =>
@@ -2562,6 +2577,64 @@ export class ChatService {
       }
     }
     return { kind: "thread-created", thread };
+  }
+
+  /**
+   * Refuses a turn no person sent on a thread whose provider's personal
+   * sign-in does not cover it. The host's own sends (a restart continuation,
+   * a usage-limit retry, a routine, a benchmark, a child's result) carry no
+   * window or the host's scope, and another thread's message carries a
+   * coordination depth; a person's send carries their window and neither.
+   */
+  #refuseUnattendedTurn(threadId: string, context: ChatServiceExecutionContext | undefined): void {
+    let thread: ChatThread | undefined;
+    try {
+      thread = this.#persistence.readChatThread(decodeChatThreadId(threadId));
+    } catch {
+      // An id that does not decode is refused by the command's own handler.
+      return;
+    }
+    if (thread === undefined) return;
+    // A pool may route the turn to any of its candidates, and routing probes
+    // them all, so each is checked before a route is computed.
+    this.#refuseUnattendedOn(thread.providerInstanceId, context);
+    for (const candidate of thread.multiModelPool?.candidates ?? [])
+      if (candidate.hostId === LOCAL_HOST_ID)
+        this.#refuseUnattendedOn(candidate.providerInstanceId, context, "routable-only");
+  }
+
+  /**
+   * The same refusal for the provider a turn actually resolved to: a model
+   * pool or the Chat provider fallback can route a turn to a provider other
+   * than the thread's own, and a retry or resume runs on its attempt's.
+   */
+  #refuseUnattendedOn(
+    providerInstanceId: string,
+    context: ChatServiceExecutionContext | undefined,
+    /**
+     * `routable-only` for a pool candidate or the fallback: routing and
+     * fallback probing skip a provider that is off, so one still named there
+     * blocks no turn. The thread's own, routed or attempt provider is always
+     * checked.
+     */
+    among: "routable-only" | "always" = "always",
+  ): void {
+    const unattended =
+      context?.windowId === undefined ||
+      isRoutineHostScope(context.windowId) ||
+      (context.coordinationDepth ?? 0) > 0 ||
+      context.limitRecovery === true;
+    if (!unattended && context?.fromOutsideAgent !== true) return;
+    const instance = this.#persistence.readProviderInstance(
+      decodeProviderInstanceId(providerInstanceId),
+    );
+    if (among === "routable-only" && instance?.enabled !== true) return;
+    const refusals = personalSignInRefusals(instance?.driverKind ?? "");
+    // The grant's own check read the thread's provider; a pool or fallback
+    // can still route the agent's turn onto one that refuses outside agents.
+    const refusal = unattended ? refusals?.refusesUnattendedRuns : refusals?.refusesOutsideAgents;
+    if (refusal !== undefined)
+      throw new ChatServiceError({ category: "unauthorized", message: refusal });
   }
 
   /**
@@ -4772,6 +4845,7 @@ export class ChatService {
   async #answerTurnQuestion(
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "answer-chat-turn-question" }>,
     initiator: "user" | "agent" | undefined,
+    context?: ChatServiceExecutionContext,
   ): Promise<ChatCommandResult> {
     if ((command.secretAnswer === undefined) === (command.answer === undefined))
       throw new ChatServiceError({
@@ -4812,6 +4886,17 @@ export class ChatService {
         category: "invalid",
         message: "Chat attempt has no open question by that identity.",
       });
+    }
+    // An outside agent's grant checked the thread's providers before the
+    // request reached here; the answer goes to the attempt's own provider,
+    // which a pool or fallback chose, so that is read too.
+    if (context?.fromOutsideAgent === true) {
+      const refusal = personalSignInRefusals(
+        this.#persistence.readProviderInstance(decodeProviderInstanceId(attempt.providerInstanceId))
+          ?.driverKind ?? "",
+      )?.refusesOutsideAgents;
+      if (refusal !== undefined)
+        throw new ChatServiceError({ category: "unauthorized", message: refusal });
     }
     // A secret answer reaches only the question that asked for one, and a
     // secret question takes no answer the attempt would record.
@@ -4936,7 +5021,17 @@ export class ChatService {
     admittedInputReceipt?: ConversationInputReceipt,
   ): Promise<PreparedChatTurn> {
     const settings = this.#requireChatSettings();
-    const routed = await this.#resolveTurnProvider(requestedThread, settings, extensionPhase);
+    // Every send, retry, resume and delivery is prepared here, before its
+    // turn or attempt is journaled: the provider it was routed to (a pool's
+    // choice, or a retry's attempt) is checked before it is probed, and the
+    // fallback is checked before it is, so no session opens for a refusal.
+    this.#refuseUnattendedOn(requestedThread.providerInstanceId, executionContext);
+    const routed = await this.#resolveTurnProvider(
+      requestedThread,
+      settings,
+      extensionPhase,
+      executionContext,
+    );
     const thread = routed.thread;
     const providerInstanceId = routed.providerInstanceId;
     const driver = routed.driver;
@@ -5535,6 +5630,7 @@ export class ChatService {
     thread: ChatThread,
     settings: ConfiguredChatSettings,
     extensionPhase: "send" | "replay" | "resume",
+    executionContext?: ChatServiceExecutionContext,
   ): Promise<{
     readonly thread: ChatThread;
     readonly providerInstanceId: ProviderInstanceId;
@@ -5577,6 +5673,11 @@ export class ChatService {
       return { thread, providerInstanceId, driver: probed.driver, probe: probed.probe };
     }
     const preference = settings.providerFallback;
+    if (
+      preference !== undefined &&
+      String(preference.providerInstanceId) !== String(providerInstanceId)
+    )
+      this.#refuseUnattendedOn(preference.providerInstanceId, executionContext, "routable-only");
     const candidate =
       preference === undefined ||
       String(preference.providerInstanceId) === String(providerInstanceId)

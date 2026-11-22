@@ -1,6 +1,10 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { ServerProjectsClient } from "@octant/client-runtime";
-import type { ServerProject, ServerPreviewView } from "@octant/contracts/server-projects";
+import type {
+  ServerProject,
+  ServerPreviewView,
+  ServerProjectListenerList,
+} from "@octant/contracts/server-projects";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
@@ -14,7 +18,7 @@ export type ServerProjectRelayedPreviewOpener = (
 
 export function ServerProjectPreviewTunnel(props: {
   readonly project: ServerProject;
-  readonly client: Pick<ServerProjectsClient, "previewRead" | "previewCommand">;
+  readonly client: Pick<ServerProjectsClient, "previewRead" | "previewCommand" | "listeners">;
   /** Opens a host-relayed preview through the paired desktop app's signed forwarder. */
   readonly onOpenRelayedPreview?: ServerProjectRelayedPreviewOpener;
 }) {
@@ -27,6 +31,24 @@ export function ServerProjectPreviewTunnel(props: {
   const [view, setView] = useState<ServerPreviewView | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string>();
+  const [serving, setServing] = useState<ServerProjectListenerList>();
+  // What the login serves from this Project's folder, read on the server once
+  // the panel opens, so a preview is one click instead of a typed port.
+  useEffect(() => {
+    if (!open || client.listeners === undefined) return;
+    let active = true;
+    void client.listeners(String(project.id)).then(
+      (listed) => {
+        if (active) setServing(listed);
+      },
+      () => {
+        if (active) setServing({ status: "unavailable", message: "The server could not be read." });
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [client, project.id, open]);
   useEffect(() => {
     if (!open) return;
     let active = true;
@@ -52,7 +74,7 @@ export function ServerProjectPreviewTunnel(props: {
     };
   }, [client, project.id, open]);
   if (client.previewCommand === undefined || client.previewRead === undefined) return null;
-  async function command(kind: "start" | "stop" | "reconnect") {
+  async function command(kind: "start" | "stop" | "reconnect", port: string = remotePort) {
     if (client.previewCommand === undefined) return;
     sequence.current += 1;
     setBusy(true);
@@ -63,8 +85,9 @@ export function ServerProjectPreviewTunnel(props: {
           ? {
               kind,
               projectId: project.id,
-              remotePort: Number(remotePort),
-              localPort: Number(localPort),
+              remotePort: Number(port),
+              // A paired device's preview is relayed and uses no local port.
+              localPort: client.listeners === undefined ? 0 : Number(localPort),
             }
           : { kind, projectId: project.id },
       );
@@ -82,13 +105,17 @@ export function ServerProjectPreviewTunnel(props: {
     }
   }
   const running = view !== null && view.status !== "stopped" && view.status !== "revoked";
+  // Only a window on this computer is given the listing; a paired device's
+  // preview is relayed through a signed route, not a local TCP port, so its
+  // Local port field does not gate a start.
+  const localWindow = client.listeners !== undefined;
+  const localPortValid =
+    /^\d+$/.test(localPort) && Number(localPort) >= 0 && Number(localPort) <= 65535;
   const valid =
     /^\d+$/.test(remotePort) &&
     Number(remotePort) > 0 &&
     Number(remotePort) <= 65535 &&
-    /^\d+$/.test(localPort) &&
-    Number(localPort) >= 0 &&
-    Number(localPort) <= 65535;
+    (localPortValid || !localWindow);
   return (
     <OctantCollapsible
       className="w-full min-w-0"
@@ -100,9 +127,52 @@ export function ServerProjectPreviewTunnel(props: {
         existing paired-host preview.
       </p>
       <p className="shield-servers__note">
-        The remote endpoint is 127.0.0.1 on this Project's server. The local address is private to
-        this computer. Opening a preview does not start the dev server.
+        The remote endpoint is 127.0.0.1 on this Project's server. Opening a preview does not start
+        the dev server.
+        {localWindow
+          ? " Any TCP service works, not only web pages: a database on the server is reached at the local address with its own client."
+          : null}
       </p>
+      {localWindow ? (
+        <p className="shield-servers__note">
+          The local address is 127.0.0.1 on this computer. Agents' guarded commands can't reach it
+          unless you allow that port for a thread; a Full access thread, and a provider that reaches
+          this computer's own ports, can reach it as they can any local service.
+        </p>
+      ) : null}
+      {serving === undefined ? null : serving.status === "unavailable" ? (
+        <p className="shield-servers__note">{serving.message}</p>
+      ) : serving.listeners.length === 0 ? (
+        <p className="shield-servers__note">Nothing is listening from this Project's folder.</p>
+      ) : (
+        <ul aria-label="Running on the server" className="shield-servers__list">
+          {serving.listeners.map((listener) => (
+            <li key={listener.port}>
+              <span>
+                {listener.processName} on port {listener.port}
+                {listener.loopbackReachable
+                  ? null
+                  : " · not on 127.0.0.1, so it can't be previewed"}
+              </span>
+              {listener.loopbackReachable ? (
+                <OctantButton
+                  aria-label={`Preview ${listener.processName} on port ${String(listener.port)}`}
+                  disabled={busy || running || !localPortValid}
+                  onClick={() => {
+                    setRemotePort(String(listener.port));
+                    void command("start", String(listener.port));
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Preview
+                </OctantButton>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="shield-servers__form">
         <div className="host-settings__field">
           <label htmlFor={`${id}-remote`}>Remote port</label>

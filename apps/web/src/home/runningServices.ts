@@ -43,6 +43,20 @@ export type RemoteOpenOutcome =
   | { readonly kind: "opened"; readonly notice?: string }
   | { readonly kind: "refused"; readonly message: string };
 
+/** What forwarding a port answers; a refusal carries words fit for the row. */
+export type RemoteForwardOutcome =
+  | { readonly kind: "forwarded"; readonly localPort: number }
+  | { readonly kind: "refused"; readonly message: string };
+
+/**
+ * Said beside a forwarded port. The forward listens on this computer's
+ * loopback, which any process here can reach, not only the tool the person
+ * meant (maintainer decision, 2026-11-20).
+ */
+export function remoteForwardNote(localPort: number): string {
+  return `Forwarded to localhost:${String(localPort)} on this computer for an hour. Anything running on this computer can connect to it.`;
+}
+
 /** One line, because the page runs on this computer and its dev server does not. */
 export const REMOTE_OPEN_LIMITS =
   "Links to localhost inside the page won't load. Live reload works.";

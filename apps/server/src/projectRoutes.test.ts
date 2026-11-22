@@ -5,6 +5,8 @@ import {
   decodeWindowId,
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { createRemoteDevicePrincipal } from "./clientPrincipal";
+import { hubActScopeFromSpokeLink } from "./hub/hubActScope";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 import { createProjectRouteHandler } from "./projectRoutes";
@@ -1228,6 +1230,73 @@ describe("Project icon change route", () => {
     });
     const remoteResponse = await route(remoteRequest);
     expect(remoteResponse?.status).toBe(403);
+  });
+
+  it("lists to a hub-introduced device only the Code Projects the member's Act item names", async () => {
+    const named = decodeProjectId("00000000-0000-4000-8000-000000000710");
+    const unnamed = decodeProjectId("00000000-0000-4000-8000-000000000711");
+    const chat = decodeProjectId("00000000-0000-4000-8000-000000000712");
+    const summary = (id: typeof named, type: "code" | "chat") => ({ id, type, name: String(id) });
+    const projects = [summary(named, "code"), summary(unnamed, "code"), summary(chat, "chat")];
+    const available = (id: typeof named) => ({
+      projectId: id,
+      observedAt: "2026-11-22T00:00:00.000Z",
+      status: "available",
+    });
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: 0 });
+    const route = createProjectRouteHandler({
+      service: {
+        bootstrap: vi.fn(() => ({
+          active: projects,
+          archived: [],
+          availability: [available(named), available(unnamed), available(chat)],
+          memory: [],
+        })),
+        search: vi.fn(() => projects),
+      } as never,
+      environmentService: {} as never,
+      windowAuthorityStore: store,
+      now: () => 1,
+      hubActScope: () =>
+        hubActScopeFromSpokeLink({
+          status: () =>
+            ({
+              membership: "member",
+              grant: { items: ["roster", "introduce", "act"], actProjects: [named] },
+            }) as never,
+        }),
+    });
+    const from = (path: string, admittedBy: "hub-roster" | "host-person") => {
+      const remote = new Request(`http://127.0.0.1${path}`, {
+        headers: { "x-octant-window-capability": capability },
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: pairedDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000713" as never,
+          admittedBy,
+        }),
+        scopeId: windowId,
+      });
+      return remote;
+    };
+    const ids = (values: ReadonlyArray<{ readonly id?: unknown; readonly projectId?: unknown }>) =>
+      values.map((value) => String(value.id ?? value.projectId));
+
+    const bootstrap = await (await route(from("/api/projects/bootstrap", "hub-roster")))?.json();
+    expect(ids(bootstrap.active)).toEqual([String(named), String(chat)]);
+    expect(ids(bootstrap.availability)).toEqual([String(named), String(chat)]);
+    const search = await (await route(from("/api/projects/search?q=", "hub-roster")))?.json();
+    expect(ids(search)).toEqual([String(named), String(chat)]);
+    // A device the member's own person paired is that person and reads every Project.
+    const paired = await (await route(from("/api/projects/bootstrap", "host-person")))?.json();
+    expect(ids(paired.active)).toEqual(ids(projects));
   });
 });
 

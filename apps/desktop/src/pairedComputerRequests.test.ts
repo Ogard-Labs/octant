@@ -204,6 +204,7 @@ describe("a window's request to a paired computer", () => {
         "POST /api/remote/auth/rotate-key",
         "POST /api/remote/auth/revoke-self",
         "POST /api/server-proxy/grants",
+        "POST /api/server-proxy/forwards",
         "GET /api/host/resources",
         "POST /api/code/local-servers/commands",
         "GET /api/todos",

@@ -1,3 +1,4 @@
+import type { HubActScopeSlot } from "../hub/hubActScope";
 import { eventActorForPrincipal } from "../principalEventActor";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
@@ -43,7 +44,7 @@ import { readJournaledSessionHistory } from "../providers/nativeSessionHistory";
 import { createWorkSessionRouteHandler } from "../work/workSessionRoutes";
 import { stopKeptSessionsOfChangedWorkThreads } from "../work/workKeptSessions";
 import { codeThreadTurns } from "../code/codeForkPoint";
-import { SERVER_RUNTIME_NOT_HARNESS } from "../serverProjects/serverProjectThreads";
+import { SERVER_WORK_RUNTIME_NOT_HARNESS } from "../serverProjects/serverProjectThreads";
 import {
   bindServerWorkTurn,
   serverWorkBindingRevisionId,
@@ -170,6 +171,8 @@ import type { WorkRequestStateWiring } from "./workRequestState";
 import { workTurnToolLevel } from "../work/workTurnToolLevel";
 
 export type WorkDependencies = Pick<ServerStart, "persistence"> & {
+  /** The member's Act item, which holds a hub-introduced device's queued Code turns. */
+  readonly hubActScopeSlot: HubActScopeSlot;
   /** Sees images; absent on a host started without one. */
   readonly imageDescriber?: ImageDescriber;
   readonly narrationForTurn: NarrationForTurn;
@@ -680,7 +683,7 @@ export function wireWork(deps: WorkDependencies) {
         holds: (thread) => serverWorkProjectOf(serverProjectStore, thread) !== undefined,
         bind: (thread, turn) => {
           if (nativeHarnessComposition === undefined)
-            return { status: "refused", message: SERVER_RUNTIME_NOT_HARNESS };
+            return { status: "refused", message: SERVER_WORK_RUNTIME_NOT_HARNESS };
           const bound = bindServerWorkTurn(
             {
               store: serverProjectStore,
@@ -1917,6 +1920,8 @@ export function wireWork(deps: WorkDependencies) {
         },
         projectType: (projectId) => persistence.readProject(projectId)?.type,
         hasActiveCodeProject: (projectId) => codeProjectAccess.hasActiveCodeProject(projectId),
+        isRestrictedDevice: isRestrictedDeviceScope,
+        hubActScope: deps.hubActScopeSlot.current,
       }),
       effectiveCodeThread: (windowId, thread) =>
         codeSessionAuthority.effectiveThread(windowId, thread),

@@ -1690,6 +1690,21 @@ describe("createAgentRunSessionRuntime", () => {
     expect(provider.acquired).toHaveLength(0);
   });
 
+  it("starts no child on a provider that refuses helper runs, even one admitted before it did", () => {
+    const provider = fakeProvider();
+    const refusal = "Google doesn't support Google Antigravity as a helper agent.";
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        helperRunRefusal: (id) => (String(id) === providerInstanceId ? refusal : undefined),
+      }),
+    );
+
+    expect(() => runtime.start(agentRun())).toThrowError(
+      expect.objectContaining({ reason: "provider-unavailable", message: refusal }),
+    );
+    expect(provider.acquired).toHaveLength(0);
+  });
+
   it("refuses to resume a saved child whose provider the Project policy no longer allows", async () => {
     const runtime = createAgentRunSessionRuntime(
       runtimeOptions(fakeProvider({ resumable: true }), {

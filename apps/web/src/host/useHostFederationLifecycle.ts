@@ -21,7 +21,7 @@ import {
 } from "@octant/client-runtime/remote-pairing-client";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { createBrowserHostRegistryStorage } from "./browserHostRegistryStorage";
-import { syncHubComputersInWindow } from "./hubWindowComputers";
+import { syncHubComputersInWindow, withHubComputerDismissals } from "./hubWindowComputers";
 import { createPairedComputerFetch } from "./pairedComputerFetch";
 
 /** How often a window on a hub member reads the hub's members again, so one the hub drops leaves. */
@@ -84,28 +84,30 @@ export function useHostFederationLifecycle(
         },
       });
       const cache = createHostReadModelCache();
+      const rosterLifecycle = createHostFederationLifecycle({
+        registry,
+        transports,
+        deviceKeyStore,
+        cache,
+        onHostCleared: async (hostId, origin) => {
+          const outcome = await forgetPages.current?.(hostId);
+          // The desktop's pin goes with the host, so a computer removed from
+          // here cannot be reached again until it is paired again.
+          const pin = origin === undefined ? undefined : await forgetComputer.current?.(origin);
+          if (outcome?.status === "incomplete") {
+            throw new Error(
+              outcome.message ??
+                "Removed, but Octant couldn't clear everything its pages stored on this computer.",
+            );
+          }
+          if (pin?.status === "forgotten" && pin.warning !== undefined) {
+            throw new Error(pin.warning);
+          }
+        },
+      });
       return {
-        lifecycle: createHostFederationLifecycle({
-          registry,
-          transports,
-          deviceKeyStore,
-          cache,
-          onHostCleared: async (hostId, origin) => {
-            const outcome = await forgetPages.current?.(hostId);
-            // The desktop's pin goes with the host, so a computer removed from
-            // here cannot be reached again until it is paired again.
-            const pin = origin === undefined ? undefined : await forgetComputer.current?.(origin);
-            if (outcome?.status === "incomplete") {
-              throw new Error(
-                outcome.message ??
-                  "Removed, but Octant couldn't clear everything its pages stored on this computer.",
-              );
-            }
-            if (pin?.status === "forgotten" && pin.warning !== undefined) {
-              throw new Error(pin.warning);
-            }
-          },
-        }),
+        lifecycle: withHubComputerDismissals(rosterLifecycle, registry, storage),
+        rosterLifecycle,
         transports,
         registry,
         deviceKeyStore,
@@ -120,7 +122,7 @@ export function useHostFederationLifecycle(
   useEffect(() => {
     if (built === undefined) return;
     let cancelled = false;
-    const { storage, ...stackOnly } = built;
+    const { storage, rosterLifecycle, ...stackOnly } = built;
     // A desktop window on a hub member lists the hub's other members too. Only
     // the desktop offers the introduction; a browser joins a hub as a guest.
     const syncHubComputers = async (): Promise<void> => {
@@ -131,6 +133,7 @@ export function useHostFederationLifecycle(
         bridge: { introduceWindowToHub: introduce, requestPairedComputer: request },
         stack: stackOnly,
         storage,
+        removeHost: (hostId) => rosterLifecycle.removeLocal(hostId),
       }).catch(() => undefined);
     };
     void built.lifecycle.sync().then(() => {

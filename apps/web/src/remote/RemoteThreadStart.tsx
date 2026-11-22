@@ -168,10 +168,18 @@ export interface RemoteCodeThreadStartProps {
    * the host takes it, from a device its own person paired.
    */
   readonly folderBrowse?: Pick<FolderBrowseClient, "browse" | "select">;
+  /**
+   * False for a device that does not act as the host's person, such as one
+   * only the hub introduced: the host lists it only the Projects it may start
+   * in, and refuses it a thread raised to Full access, so a Full access
+   * default starts at Ask first instead.
+   */
+  readonly actsAsHostPerson?: boolean;
 }
 
 /**
- * Starts a Code thread from a browser the host's own person paired, by the
+ * Starts a Code thread from a browser the host's own person paired, or from a
+ * device only the hub introduced within the member's Act item, by the
  * steps a local window's start screen takes: prepare the Project's checkout,
  * create the thread on it at the Project's mode or the default (Full access
  * included; maintainer decision, 2026-11-12), then send the first message.
@@ -305,8 +313,12 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
       return `${chosen.name} is no longer an active Code Project on this host.`;
     }
     const currentSettings = current.settings;
+    const defaultMode = defaultPermissionModeFor({
+      project: currentProject,
+      settings: currentSettings,
+    });
     const access = threadAccessOf(
-      defaultPermissionModeFor({ project: currentProject, settings: currentSettings }),
+      defaultMode === "full-access" && props.actsAsHostPerson === false ? "ask-first" : defaultMode,
     );
     // The host refuses a model its Project's provider policy does not allow,
     // so the start picks the first model the policy admits; an EU or ZDR tag

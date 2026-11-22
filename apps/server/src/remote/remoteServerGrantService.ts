@@ -38,6 +38,7 @@ import {
   decideRemoteServerGrant,
   relayRequestHeaders,
   relayWebSocketRequestHeaders,
+  type RemoteServerGrantPolicyRefusal,
   type RemoteServerGrantThread,
   type RemoteServerRelayHeader,
 } from "@octant/domain";
@@ -187,6 +188,19 @@ export type RemoteServerGrantOpening =
   | { readonly kind: "answered"; readonly result: RemoteServerGrantResult }
   | { readonly kind: "unavailable" }
   | { readonly kind: "session-ended" };
+
+/**
+ * A thread's listed server as a port forward sees it: the port it holds now,
+ * observed by the host, or why it cannot leave the host. `unavailable` is the
+ * host failing to look, never a verdict on the server.
+ */
+export type RemoteThreadServerObservation =
+  | { readonly kind: "held"; readonly threadId: CodeThreadId; readonly port: number }
+  | {
+      readonly kind: "refused";
+      readonly reason: RemoteServerGrantPolicyRefusal["reason"];
+    }
+  | { readonly kind: "unavailable" };
 
 export interface RemoteServerGrantServiceOptions {
   /** Re-observe the named listing under the request's scope, as Open and Stop do. */
@@ -410,6 +424,58 @@ export class RemoteServerGrantService {
     }
     this.#grants.set(String(grant.grantId), grant);
     return opened(request, grant);
+  }
+
+  /**
+   * Observes the server a port forward names exactly as a grant request would
+   * be decided, and mints nothing: the thread readable under the device's
+   * scope, the listener listed for it now, Octant-owned, in that thread's own
+   * worktree, answering, and opening under the thread's Open rule. The port is
+   * the one the host saw the server hold, never one a client sent.
+   */
+  async observeThreadServer(input: {
+    readonly scopeId: WindowId;
+    readonly source: RemoteServerGrantSource;
+    readonly signal?: AbortSignal;
+  }): Promise<RemoteThreadServerObservation> {
+    // Readability before the listing, as for a grant: a device that cannot read
+    // the thread it named learns nothing about which ids are listed in it.
+    const named =
+      input.source.surface === "local-servers"
+        ? await this.#threadFact(input.scopeId, input.source.threadId)
+        : undefined;
+    if (named === "unavailable") return { kind: "unavailable" };
+    if (named?.access === "unreadable") return { kind: "refused", reason: "thread-unreadable" };
+    let target: RemoteServerGrantTarget;
+    try {
+      target = await this.#options.observeTarget(input.scopeId, input.source, input.signal);
+    } catch {
+      return { kind: "unavailable" };
+    }
+    if (target.status === "unavailable") return { kind: "unavailable" };
+    if (target.status === "not-listed") return { kind: "refused", reason: "not-found" };
+    const threadId = target.threadId;
+    const thread =
+      threadId === undefined ? undefined : await this.#threadFact(input.scopeId, threadId);
+    if (thread === "unavailable") return { kind: "unavailable" };
+    const decision = decideRemoteServerGrant({
+      actor: "remote-client",
+      ...(thread === undefined ? {} : { thread }),
+      listener: { status: "listed", ownership: target.ownership, health: target.health },
+    });
+    if (decision.kind === "refuse") return { kind: "refused", reason: decision.refusal.reason };
+    if (threadId === undefined) return { kind: "refused", reason: "not-in-thread" };
+    if (this.#options.readThread(threadId)?.lifecycle !== "active") {
+      return { kind: "refused", reason: "thread-unreadable" };
+    }
+    // A forward's bridge dials 127.0.0.1. A server the scan found answering
+    // only on [::1] is not what that dial reaches, and another service may
+    // hold the same IPv4 port outside the device's grant, so it is refused
+    // as not found where the forward connects.
+    if (new URL(target.endpoint.url).hostname !== "127.0.0.1") {
+      return { kind: "refused", reason: "not-found" };
+    }
+    return { kind: "held", threadId, port: target.endpoint.port };
   }
 
   /**

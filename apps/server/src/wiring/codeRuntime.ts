@@ -346,6 +346,8 @@ import {
   type ServerRepositoryTests,
 } from "../serverProjects/serverTests";
 import { serverPullRequestRepository } from "../serverProjects/serverWorktrees";
+import { ServerRuntimeRecords } from "../serverProjects/serverRuntimeRecords";
+import { privateListenerHostId } from "../remote/privateListenerHostIdentity";
 
 export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> & {
   /** Sees images; absent on a host started without one. */
@@ -953,6 +955,25 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       // server runs, and a restart is too high a price for a name.
       const serverGitServices = new Map<string, GitService>();
       const serverTestServices = new Map<string, ServerRepositoryTests>();
+      // A run whose host id cannot be read still records its programs, under
+      // a tag of its own: its sweeps then reach only what this run started.
+      const unnamedRunHostId = randomUUID();
+      const serverRuntimeRecords = new ServerRuntimeRecords({
+        connection: serverConnection,
+        hostId: () => {
+          try {
+            return String(
+              privateListenerHostId({
+                connection: persistence.connection,
+                dataDirectory: persistence.dataDirectory,
+                identityFiles: options.serverIdentityFiles,
+              }),
+            );
+          } catch {
+            return unnamedRunHostId;
+          }
+        },
+      });
       const gitMutationPort = new GitMutationPort(undefined, {
         commitIdentity: () => {
           const profile = persistence.readShellSettings()?.settings.userProfile;
@@ -1399,6 +1420,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                   store: serverProjectStore,
                   connection: serverConnection,
                   composition: nativeHarnessComposition,
+                  runtimes: serverRuntimeRecords,
                   record: (record) => shieldServerStore.recordServerCommand(record),
                 },
                 input,

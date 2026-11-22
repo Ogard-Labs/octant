@@ -41,6 +41,7 @@ function opened(grantId = GRANT_ID): Response {
 interface Sent {
   readonly url: string;
   readonly headers: Record<string, string>;
+  readonly body?: string;
 }
 
 function harness(answers: Array<Response | Error>, sessions: Array<RemoteSessionFacts | Error>) {
@@ -51,7 +52,11 @@ function harness(answers: Array<Response | Error>, sessions: Array<RemoteSession
     origin: ORIGIN,
     hostName: "Studio Mac",
     fetch: async (input, init) => {
-      sent.push({ url: String(input), headers: { ...(init?.headers as Record<string, string>) } });
+      sent.push({
+        url: String(input),
+        headers: { ...(init?.headers as Record<string, string>) },
+        ...(init?.body instanceof Uint8Array ? { body: new TextDecoder().decode(init.body) } : {}),
+      });
       const next = answers.shift();
       if (next === undefined) throw new Error("No answer left.");
       if (next instanceof Error) throw next;
@@ -249,5 +254,82 @@ describe("signing a page's request", () => {
         bodyDigest: DIGEST,
       }),
     ).toEqual({ status: "refused", reason: "grant-not-held" });
+  });
+
+  it("opens a port forward and signs only its connection's upgrade at the forward's exact path", async () => {
+    const forwardId = `rpf_${"ef".repeat(32)}`;
+    const { client, sent } = harness(
+      [
+        Response.json({
+          kind: "remote-port-forward-opened",
+          requestId: "33333333-3333-4333-8333-333333333333",
+          forward: { forwardId, port: 5432, expiresAt: 3_600_000 },
+        }),
+      ],
+      [facts("session-1")],
+    );
+    const opening = await client.openForward(5432);
+    expect(opening).toEqual({
+      status: "opened",
+      forward: { forwardId, port: 5432, expiresAt: 3_600_000 },
+    });
+    expect(sent[0]?.url).toBe(`${ORIGIN}/api/server-proxy/forwards`);
+
+    const upgrade = await client.signRelayRequest({
+      grantId: forwardId,
+      method: "GET",
+      pathQuery: `/api/server-proxy/${forwardId}`,
+      bodyDigest: DIGEST,
+    });
+    expect(upgrade.status).toBe("signed");
+    for (const outside of [
+      { method: "POST", pathQuery: `/api/server-proxy/${forwardId}` },
+      { method: "GET", pathQuery: `/api/server-proxy/${forwardId}/page` },
+      { method: "GET", pathQuery: `/api/server-proxy/${forwardId}/../grants` },
+    ]) {
+      expect(
+        await client.signRelayRequest({ grantId: forwardId, bodyDigest: DIGEST, ...outside }),
+      ).toEqual({ status: "refused", reason: "outside-grant" });
+    }
+  });
+
+  it("names a thread's listed server instead of a port, so the host forwards the port that server holds", async () => {
+    const forwardId = `rpf_${"ab".repeat(32)}`;
+    const { client, sent } = harness(
+      [
+        Response.json({
+          kind: "remote-port-forward-opened",
+          requestId: "33333333-3333-4333-8333-333333333333",
+          forward: { forwardId, port: 5173, expiresAt: 3_600_000 },
+        }),
+      ],
+      [facts("session-1")],
+    );
+    expect(await client.openForward(SOURCE)).toMatchObject({
+      status: "opened",
+      forward: { port: 5173 },
+    });
+    const body: unknown = JSON.parse(sent[0]?.body ?? "{}");
+    expect(body).toMatchObject({ kind: "open-remote-port-forward", source: SOURCE });
+    expect(body).not.toHaveProperty("port");
+  });
+
+  it("shows the host's refusal of a forward in the host's words", async () => {
+    const { client } = harness(
+      [
+        Response.json({
+          kind: "remote-port-forward-refused",
+          requestId: "33333333-3333-4333-8333-333333333333",
+          reason: "not-the-person",
+          message: "Only a device this computer's own person paired can forward one of its ports.",
+        }),
+      ],
+      [facts("session-1")],
+    );
+    expect(await client.openForward(5432)).toEqual({
+      status: "refused",
+      reason: "not-the-person",
+      message: "Only a device this computer's own person paired can forward one of its ports.",
+    });
   });
 });

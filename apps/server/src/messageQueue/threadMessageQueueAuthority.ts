@@ -1,5 +1,6 @@
 import type { OctantMode, ProjectId, WindowId } from "@octant/contracts";
 import { authorizePrincipalAction } from "@octant/domain";
+import { hubActRefusal, type HubActScopePort } from "../hub/hubActScope";
 import type { ThreadMessageQueuePortDependencies } from "./threadMessageQueuePorts";
 
 export interface ThreadMessageQueueAuthorityDependencies {
@@ -13,6 +14,10 @@ export interface ThreadMessageQueueAuthorityDependencies {
   ) => boolean;
   readonly projectType: (projectId: ProjectId) => OctantMode | undefined;
   readonly hasActiveCodeProject: (projectId: ProjectId) => boolean;
+  /** Whether a paired device is one the host's own person did not pair, so the Act item holds it. */
+  readonly isRestrictedDevice?: (scopeId: WindowId) => boolean;
+  /** The member's Act item, read at each check; undefined while this host is in no hub. */
+  readonly hubActScope?: () => HubActScopePort | undefined;
 }
 
 /** The catalogued action a paired device sends a turn under, per mode. */
@@ -44,8 +49,13 @@ export function createThreadMessageQueueAuthority(
       if (decision.kind !== "allow") return false;
       if (mode === "chat") return projectId === undefined || deps.projectType(projectId) === "chat";
       if (projectId === undefined) return false;
+      // A queued Code turn is held to the Act item as a sent one is, at
+      // enqueue and at every dispatch; otherwise queueing would carry a
+      // hub-introduced device's turn into a Project the item does not name.
       return mode === "code"
-        ? deps.hasActiveCodeProject(projectId)
+        ? deps.hasActiveCodeProject(projectId) &&
+            (deps.isRestrictedDevice?.(scopeId) !== true ||
+              hubActRefusal(deps.hubActScope?.(), String(projectId), "turn") === undefined)
         : deps.projectType(projectId) === "work";
     },
   };

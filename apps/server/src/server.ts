@@ -798,6 +798,7 @@ export function startOctantServer(
       roots,
       workAttachments,
     } = yield* wireCode({
+      hubActScopeSlot,
       isPairedDeviceScope,
       projectMemoryAccess,
       threadMoveHolds,
@@ -1294,6 +1295,7 @@ export function startOctantServer(
       workflowService,
     } = yield* wireWork({
       narrationForTurn,
+      hubActScopeSlot,
       transcriptionForTurn,
       imageDescriber,
       resolveThreadStrict,

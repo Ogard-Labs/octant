@@ -41,8 +41,23 @@ describe("Settings' flow for any ACP agent", () => {
     await userEvent.click(within(form).getByRole("button", { name: "Add" }));
     expect(onStep).toHaveBeenCalledWith({
       kind: "add",
-      source: { kind: "registry", registryId: "antigravity-acp" },
+      source: { kind: "registry", registryId: "factory-droid" },
     });
+  });
+
+  it("points Google Antigravity from the registry to its built-in provider, and offers no Add", async () => {
+    const onStep = vi.fn(async () => true);
+    render(<AddedAcpAgentsSection busy={false} instances={[]} onStep={onStep} />);
+    await userEvent.click(screen.getByRole("button", { name: "Add ACP agent" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Registry agent" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Google Antigravity" }));
+    const form = screen.getByRole("form", { name: "Add ACP agent" });
+    expect(form).toHaveTextContent(
+      "Google Antigravity runs only as its built-in provider, which keeps it to the use its vendor supports on a personal sign-in. Add Google Antigravity in Settings › Providers & Models instead.",
+    );
+    expect(form).not.toHaveTextContent(/downloaded from the address the registry lists/);
+    expect(within(form).getByRole("button", { name: "Add" })).toBeDisabled();
+    expect(onStep).not.toHaveBeenCalled();
   });
 
   it("offers Install, then Trust with what trusting grants and an unverified download said plainly, and Turn on only once trusted", async () => {

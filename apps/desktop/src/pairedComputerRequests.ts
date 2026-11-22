@@ -49,8 +49,9 @@ export const PAIRED_COMPUTER_REQUEST_LIMITS = {
  * this host's hub, pinned from the host's roster, may also be asked to admit
  * the window as the guest the hub introduced, a request the window signs with
  * its guest key; a computer paired directly is never sent it. Anything else,
- * including the relay under `/api/server-proxy/<grant>/`, which the desktop's
- * own forwarder drives, is refused.
+ * including the relay under `/api/server-proxy/<grant>/` and a forward's
+ * connections at `/api/server-proxy/<forward>`, which the desktop's own
+ * forwarder and forward listener drive, is refused.
  */
 export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
   readonly method: "GET" | "POST" | "PUT";
@@ -72,6 +73,7 @@ export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
   { method: "POST", path: "/api/remote/auth/rotate-key" },
   { method: "POST", path: "/api/remote/auth/revoke-self" },
   { method: "POST", path: "/api/server-proxy/grants" },
+  { method: "POST", path: "/api/server-proxy/forwards" },
   { method: "GET", path: "/api/host/resources" },
   { method: "POST", path: "/api/code/local-servers/commands" },
   { method: "GET", path: "/api/todos" },

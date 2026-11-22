@@ -3391,6 +3391,40 @@ describe("WorkTurnService", () => {
     expect(kinds.indexOf("project-memory")).toBe(yours + 3);
   });
 
+  it("starts no turn the host begins as itself on Google Antigravity, and takes the person's own", async () => {
+    const runs: Array<string> = [];
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          runs.push(input.command.prompt);
+          return { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+    const provider = fixture.persistence.readProviderInstance();
+    fixture.persistence.readProviderInstance.mockReturnValue({
+      ...provider,
+      driverKind: "antigravity",
+    } as never);
+
+    // A routine, a wake, a goal round, a usage-limit resume, a child's
+    // result, a peer's task and a restart continuation all start this way.
+    await expect(
+      fixture.service.startFirstTurn(ROUTINE_HOST_SCOPE_ID, startCommand()),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "unauthorized",
+        message:
+          "Google doesn't support unattended runs of Google Antigravity on a personal Google sign-in, so Octant did not start this run. Choose a provider that uses a Gemini API key, such as Gemini CLI with an API key.",
+      },
+    });
+    expect(runs).toEqual([]);
+
+    await expect(fixture.service.startFirstTurn(ids.window, startCommand())).resolves.toMatchObject(
+      { kind: "accepted" },
+    );
+  });
+
   it("gives a routine's Work turn your instructions though it gets no person memory", async () => {
     const contexts: Array<ReadonlyArray<ProviderContextBlock>> = [];
     const fixture = serviceFixture({

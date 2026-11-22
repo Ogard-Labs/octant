@@ -83,7 +83,8 @@ coding session on any member from one window, the hub as the front door, Code
 delegation, adding a computer over SSH, telling every connected device of a
 new one, and placement advice, were added on 2026-11-19; slices 13, 14 and
 15 are built for directly paired computers, slice 16 is partly built (the
-Act item bounds where a hub-introduced device starts threads, unticking Act
+Act item bounds where a hub-introduced device starts threads, including the
+Code start form, its Project list, checkout reads and Code turns, unticking Act
 ends such a device's sessions, and a desktop window on a member lists the
 hub and the other spokes as its computers, the hub bounding it by its own
 Act list), slice 17 (Code delegation) and slice 19 (new-device alerts) are
@@ -576,7 +577,11 @@ otherwise.
   within the member's **Act** hub-grant item: the Projects it names, and
   there three things: starting threads (Code included), answering their
   approvals and questions, and Stop (maintainer decision, 2026-11-20); never
-  more than the member's own level allows. Approvals stay on the member, as
+  more than the member's own level allows. The item also grants a port
+  forward for the Projects it names: such a device may forward the port of a
+  running server of a thread in such a Project (that thread's Local servers
+  row, or its Running services row), and no other port (maintainer decision,
+  2026-11-21). Approvals stay on the member, as
   [What the hub may do on a spoke](#what-the-hub-may-do-on-a-spoke) says.
   Built for starting threads (slice 16): while a host is a hub member, a
   device only the hub introduced starts a Code or Work thread there only in
@@ -606,7 +611,21 @@ otherwise.
   says which action was refused (maintainer decision, 2026-11-21). Built: on a
   member and on the hub, each refusal (unticked Act, a member out of its hub,
   a Project the Act item or the hub's list does not name) names the action it
-  refused. Built (slice
+  refused. Built for port forwards: such a
+  device names the thread's listed server, never a port; the member checks
+  the Act item for that thread's Project and observes the server as it would
+  for a grant, takes the port from what it saw, and checks both again at
+  every connection, closing the forward when Act no longer names the Project
+  or the server no longer holds the port. Any other port is refused with a
+  reason. The forward stays on the private listener, lasts an hour, and is
+  journaled with the thread and Project ([Architecture: port
+  forwards](../architecture.md#security-and-authority)); a device the
+  member's own person paired still forwards any port, an agent grant none,
+  and a host in no hub forwards nothing for such a device. A desktop window
+  offers Forward port on a hub member's Running services only for a server
+  in a thread; a paired computer's thread view lists that thread's Local
+  servers with Open in Octant and Open in browser, but offers no Forward port
+  there yet. Built (slice
   16): a desktop window on a member, or on the hub, lists the hub's other
   spokes and standbys as its computers. The window makes a device key of its
   own; its host asks the hub to list that key as a guest (the hub's own
@@ -624,7 +643,13 @@ otherwise.
   member, also when a standby removed that member and handed the removal
   back, and a newer window of the same member replaces the older one. A
   window guest the hub removed is not listed again when that window asks
-  next.
+  next. A member the person removes or revokes from the window's own
+  computer list stays off it, though the roster still lists it: the window
+  records the dismissal and its roster reads skip that member until the
+  window leaves the hub or the person pairs it directly. When the hub
+  re-admits the window under a replacement credential, previews and port
+  forwards to that host sign with the replacement, not the credential the
+  window first used there.
   A member's window is listed on the hub without a second approval, because
   the hub's person already approved that member, and every spoke still raises
   the new-member alert for it (its name, role, key fingerprint, and Remove),
@@ -636,8 +661,17 @@ otherwise.
   when a spoke's or the hub's listener has moved, the window's next ask is
   given a new device at the current address and the old one is revoked, as
   for an expired device; a device the person revoked stays refused.
-  Not built yet: a turn sent into an existing thread, and Chat threads, held
-  to the Act item.
+  Built for starting a Code thread from such a device: the member lists it
+  only the Code Projects its Act item names (the Projects bootstrap and
+  search), holds the start's checkout preparation and remote read to the
+  same item, and holds a Code turn, the new thread's first message included,
+  to it, each refused with the action's sentence (`send turns` for a turn).
+  A paired browser and a desktop window's paired computer show such a device
+  the Code start form with those Projects alone, never New Project from a
+  folder, and none when the item names no Code Project; a Project whose
+  default is Full access starts at Ask first, since such a device may lower a
+  thread but never raise one. Not built yet: a Work turn sent into an
+  existing thread, and Chat threads, held to the Act item.
 
   **The hub as one of a member window's computers** (maintainer decision,
   2026-11-21). A spoke's or standby's window also lists the hub, marked
@@ -4095,9 +4129,13 @@ sheets; a real machine and a published listing are maintainer gates.
     leaves the list. Approvals and Stop are held to the Act item. The hub is
     one of a spoke window's computers, labelled hub, holding the window to
     its own Act list, which Hub settings on the hub name; the smoke starts,
-    answers, and stops on the hub only in a Project that list names. Not
-    built: a turn sent into an existing thread, and Chat threads, held to the
-    Act item. Acceptance: a hub-introduced device starts a Code thread only
+    answers, and stops on the hub only in a Project that list names. Code
+    start under Act is built: the member lists such a device only the Code
+    Projects its Act item names, holds checkout preparation, remote reads
+    and Code turns to it, and the start form offers those Projects alone;
+    the smoke prepares, starts, and sends the first turn in a named Project
+    and is refused preparing in another. Not built: a Work turn sent into an
+    existing thread, and Chat threads, held to the Act item. Acceptance: a hub-introduced device starts a Code thread only
     in a Project the Act item names; removing the item refuses the next
     create; from a phone and from a browser, that thread's turn streams, its
     approvals are answered within the Act item, and Stop reaches it.
