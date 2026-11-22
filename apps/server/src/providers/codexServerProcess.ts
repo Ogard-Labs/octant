@@ -14,6 +14,8 @@
 import type { ProviderFailure } from "@octant/contracts";
 import type { ProviderServerPlacement } from "@octant/provider-sdk/driver";
 import { Effect, type Scope } from "effect";
+import { posix } from "node:path";
+import { protectedAtLevel, secretGuardEntries } from "../process/secretGuard";
 import { decodeInitializeResult } from "./codexProtocol";
 import type { CodexAppServerConnection } from "./codexProcess";
 import { makeCodexRpcClient } from "./codexRpcClient";
@@ -22,6 +24,7 @@ import type { ServerSignIn, ServerSignIns } from "./serverSignIn";
 const VERSION_TIMEOUT_MS = 20_000;
 const SIGN_IN_TIMEOUT_MS = 20_000;
 const STARTUP_TIMEOUT_MS = 30_000;
+const SIGN_IN_PATHS_TIMEOUT_MS = 20_000;
 const SEMVER = /\b(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/;
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
@@ -83,6 +86,64 @@ export async function readCodexSignInOnServer(
 }
 
 /**
+ * The other providers' sign-ins Codex's own sandbox refuses on the server, as
+ * Octant refuses them locally: the secret guard's provider sign-in list (the
+ * list Full access still refuses, after the person's Protected files choice)
+ * resolved for the server login's home and platform, read there with `uname`
+ * and `$HOME`. Codex's own home (`$CODEX_HOME`, else `~/.codex`) stays its
+ * own; it is re-allowed when it sits inside a denied folder. Entries for this
+ * host's own folders (Octant's data directory) name nothing on the server and
+ * are left out. Without a home the list cannot be built, so the launch is
+ * refused rather than leaving those sign-ins readable.
+ */
+export async function readCodexProtectedSignInsOnServer(
+  placement: ProviderServerPlacement,
+): Promise<
+  | {
+      readonly status: "found";
+      readonly denied: ReadonlyArray<string>;
+      readonly allowed: ReadonlyArray<string>;
+    }
+  | { readonly status: "refused"; readonly message: string }
+> {
+  const ran = await placement.run(
+    ["sh", "-c", 'uname -s; printf "%s\\n" "$HOME" "${CODEX_HOME:-}"'],
+    { timeoutMs: SIGN_IN_PATHS_TIMEOUT_MS },
+  );
+  const [system = "", home = "", codexHomeSetting = ""] =
+    ran.status === "ran" && ran.exitCode === 0
+      ? ran.output.split("\n").map((line) => line.trim())
+      : [];
+  if (!posix.isAbsolute(home) || posix.normalize(home) === "/") {
+    return {
+      status: "refused",
+      message: `Octant could not read the home folder of the login on ${placement.serverName}, so it cannot keep other providers' sign-ins there out of Codex's reach.`,
+    };
+  }
+  const serverHome = posix.normalize(home);
+  const inside = (path: string, folder: string) => path === folder || path.startsWith(`${folder}/`);
+  const codexHome = posix.isAbsolute(codexHomeSetting)
+    ? posix.normalize(codexHomeSetting)
+    : posix.join(serverHome, ".codex");
+  const entries = protectedAtLevel(
+    secretGuardEntries({
+      platform: system === "Darwin" ? "darwin" : "linux",
+      homeDirectory: serverHome,
+    }),
+    true,
+  );
+  const paths = entries
+    .map((entry) => posix.normalize(entry.kind === "path" ? entry.path : entry.directory))
+    .filter((path) => inside(path, serverHome));
+  const denied = [...new Set(paths.filter((path) => !inside(path, codexHome)))];
+  return {
+    status: "found",
+    denied,
+    allowed: denied.some((path) => inside(codexHome, path)) ? [codexHome] : [],
+  };
+}
+
+/**
  * Starts `codex app-server` on the server and initializes it, once Codex
  * there reports a sign-in. The connection
  * ends when its scope closes: standard input closes, and the host ends the
@@ -107,6 +168,10 @@ export function startCodexOnServer(input: {
           throw failure("unauthenticated", codexServerSignInRefusal(input.placement.serverName));
         }
         if (signIn.status === "refused") throw failure("unavailable", signIn.message);
+        const protectedSignIns = await readCodexProtectedSignInsOnServer(input.placement);
+        if (protectedSignIns.status === "refused") {
+          throw failure("unavailable", protectedSignIns.message);
+        }
         const stream = input.placement.start(["codex", ...input.args(found.version)]);
         if (stream.status === "unreachable") throw failure("unavailable", stream.message);
         const rpc = makeCodexRpcClient({
@@ -144,6 +209,10 @@ export function startCodexOnServer(input: {
           // No egress proxy runs on the server, so its commands reach the
           // network as the server allows; the sandbox should say so.
           networkOpen: true,
+          protectedSignIns: {
+            denied: protectedSignIns.denied,
+            allowed: protectedSignIns.allowed,
+          },
         };
         return { connection, stop: stream.stop };
       },

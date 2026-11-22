@@ -320,6 +320,33 @@ describe.skipIf(process.platform === "win32")("Codex on a server Project's serve
     expect(started.agent).toContain("args=app-server --listen stdio://");
   });
 
+  it("carries the server login's other provider sign-ins for Codex's own sandbox to refuse", async () => {
+    const { connection, folder, home } = standInServer();
+    const bound = bind(connection, folder, { placesOnServer: true, strict: false });
+    if (bound.status !== "placed") throw new Error(`not placed: ${bound.status}`);
+    const signIns = await Effect.runPromise(
+      Effect.scoped(
+        makeCodexProcessLive()
+          .start({
+            binaryPath: "/nonexistent/codex-on-this-host",
+            authority: {
+              kind: "thread",
+              root: folder,
+              mode: "code",
+              executionPolicy: "approval-gated",
+              strict: false,
+            },
+            server: bound.placement,
+          })
+          .pipe(Effect.map((codex) => codex.protectedSignIns)),
+      ),
+    );
+    // Claude's sign-in in the server login's home, not this host's.
+    expect(signIns?.denied).toContain(join(home, ".claude", ".credentials.json"));
+    expect(signIns?.denied.every((path) => path.startsWith(`${home}/`))).toBe(true);
+    expect(signIns?.denied.some((path) => path.startsWith(join(home, ".codex")))).toBe(false);
+  });
+
   it("refuses Codex on a server under Strict, before anything runs there", async () => {
     const { connection, folder } = standInServer();
     expect(bind(connection, folder, { placesOnServer: true, strict: true })).toEqual({

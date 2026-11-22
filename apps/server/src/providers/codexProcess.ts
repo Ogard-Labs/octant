@@ -97,6 +97,16 @@ export interface CodexAppServerConnection {
   readonly exited: Promise<void>;
   /** Set when the launch took no egress proxy, so the process keeps open network. */
   readonly networkOpen?: boolean;
+  /**
+   * Codex on a server: the other providers' sign-ins there, resolved for the
+   * server login, that Codex's own sandbox refuses (see
+   * `readCodexProtectedSignInsOnServer`). Absent for a local launch, whose
+   * list comes from this host.
+   */
+  readonly protectedSignIns?: {
+    readonly denied: ReadonlyArray<string>;
+    readonly allowed: ReadonlyArray<string>;
+  };
 }
 
 /**

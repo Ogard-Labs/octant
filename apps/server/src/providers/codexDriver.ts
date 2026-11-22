@@ -2358,6 +2358,8 @@ interface CodexLeasedRuntime {
   readonly exited: Promise<void>;
   /** Whether the process launched without Octant's egress proxy, so its commands reach every host. */
   readonly networkOpen: boolean;
+  /** Codex on a server: the server login's sign-ins its own sandbox refuses. */
+  readonly protectedSignIns?: CodexAppServerConnection["protectedSignIns"];
 }
 
 /**
@@ -2441,6 +2443,9 @@ function acquireRuntime(
             version: connection.version,
             exited: connection.exited,
             networkOpen: connection.networkOpen === true,
+            ...(connection.protectedSignIns === undefined
+              ? {}
+              : { protectedSignIns: connection.protectedSignIns }),
           },
           pid: connection.pid,
           ...(receipt === undefined ? {} : { receipt }),
@@ -2764,6 +2769,7 @@ function makeConnection(
     let version = "";
     let leased: CodexLeasePosture | undefined;
     let leasedNetworkOpen = false;
+    let leasedServerSignIns: CodexAppServerConnection["protectedSignIns"];
     let closed = false;
     const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ProviderSessionId, SessionState>();
@@ -2886,13 +2892,15 @@ function makeConnection(
         input.strict === false
           ? (options.openEnvironment ?? options.environment)
           : options.environment;
-      // This host's sign-in paths name nothing on a server.
-      const signIns = codexProtectedSignIns(
-        serverPlacement === undefined ? (options.protectedSignIns?.() ?? []) : [],
+      // This host's sign-in paths name nothing on a server; there the list
+      // was resolved for the server's login when Codex started on it.
+      const signIns =
         serverPlacement === undefined
-          ? (launchEnvironment?.CODEX_HOME ?? join(homedir(), ".codex"))
-          : "",
-      );
+          ? codexProtectedSignIns(
+              options.protectedSignIns?.() ?? [],
+              launchEnvironment?.CODEX_HOME ?? join(homedir(), ".codex"),
+            )
+          : (leasedServerSignIns ?? { denied: [], allowed: [] });
       return codexNativePermissionProfile({
         sessionSandbox: sessionSandbox(input),
         policy: input.executionPolicy,
@@ -2920,6 +2928,31 @@ function makeConnection(
         ...(profile === undefined ? {} : { permissions: { [CODEX_OCTANT_PROFILE]: profile } }),
       };
     };
+    /**
+     * Fails a Guarded or Accept edits session on a server whose Codex cannot
+     * carry the deny paths for the server login's other provider sign-ins (a
+     * release before permission profiles): Codex's built-in workspace sandbox
+     * has no deny field and would leave them readable.
+     */
+    const refuseServerUnprotectedSignIns = (input: {
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly fullAccessSandbox?: boolean;
+      readonly strict?: boolean;
+    }) =>
+      serverPlacement !== undefined &&
+      sessionSandbox(input).kind === "native" &&
+      input.fullAccessSandbox !== true &&
+      (input.executionPolicy === "approval-gated" ||
+        input.executionPolicy === "auto-accept-edits") &&
+      (leasedServerSignIns?.denied.length ?? 0) > 0 &&
+      nativeProfile(input) === undefined
+        ? Effect.fail(
+            failure(
+              "incompatible",
+              `Codex ${version} on ${serverPlacement.serverName} cannot keep other providers' sign-ins there out of its reach at this level. Update Codex on the server to ${CODEX_PERMISSION_PROFILES_RELEASE.join(".")} or later, or use Full access.`,
+            ),
+          )
+        : Effect.void;
     /** Fails a Strict session whose Project holds Codex configuration the person has not allowed. */
     const refuseStrictProjectConfig = (input: {
       readonly executionPolicy: ProviderExecutionPolicy;
@@ -3615,6 +3648,7 @@ function makeConnection(
               version = runtime.version;
               leased = posture;
               leasedNetworkOpen = runtime.networkOpen;
+              leasedServerSignIns = runtime.protectedSignIns;
               const lost = () => {
                 if (!closed) runtimeLost();
               };
@@ -3753,6 +3787,7 @@ function makeConnection(
             }
             const dynamicTools = codexDynamicTools(input.tools);
             yield* refuseStrictProjectConfig(input);
+            yield* refuseServerUnprotectedSignIns(input);
             const modeConfig = yield* modeThreadConfig(
               input.nativeSetup,
               input.executionPolicy,
@@ -3854,6 +3889,7 @@ function makeConnection(
             yield* ensureRuntime(codexLeasePosture(input));
             ensureSubscribed();
             yield* refuseStrictProjectConfig(input);
+            yield* refuseServerUnprotectedSignIns(input);
             const modeConfig = yield* modeThreadConfig(
               input.nativeSetup,
               input.executionPolicy,

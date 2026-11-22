@@ -273,6 +273,22 @@ app-server --listen stdio://` after `codex --version` there; for Claude Code,
     in the provider's own read-only plan mode; Claude Code's Plan there has no
     shell, since the sandbox that keeps Plan's commands read-only on this host
     cannot run there.
+  - At Guarded and Accept edits, Codex's own workspace sandbox on the server
+    refuses the other providers' sign-ins there, as Octant refuses them on this
+    host: before the program starts, the host reads the login's home (`$HOME`,
+    `uname -s`, and `$CODEX_HOME`) on the server and resolves the secret
+    guard's Provider sign-ins group for it (Claude's `~/.claude` credentials,
+    other providers' auth files, after the person's Protected files choice),
+    leaving out Codex's own home and anything of this host. Those paths go to
+    Codex as `deny` entries in the thread's permissions profile. A Codex there
+    older than the first release that takes a profile (0.169.0) is refused at
+    those levels, naming the server and the release, rather than run with the
+    sign-ins readable, and a home that cannot be read refuses the launch.
+    _Rationale:_ Codex's built-in workspace sandbox limits writes but has no
+    deny field, so under the same login it could read another provider's
+    sign-in. Full access carries no such list, as Full access is no sandbox.
+    Plan on the server runs Codex's built-in read-only sandbox, which takes no
+    profile, so it does not yet carry the list.
   - Before a turn starts the program, the host runs the provider's own status
     command on the server as that login (`codex login status`, whose exit
     status answers; `claude auth status --json`, whose `loggedIn` answers) and
@@ -383,9 +399,12 @@ app-server --listen stdio://` after `codex --version` there; for Claude Code,
   ([Plan and Chat tool parity](../architecture.md#security-and-authority)).
 - **The same levels.** The thread's guardrail level is resolved as it is for
   any Code thread (thread, then the account default), and decides each call as
-  it does locally: Plan is read-only, Guarded asks for every command and edit,
-  Accept edits waives edits inside the folder, Reviewed hands each request to
-  the chosen reviewer, and Full access asks nobody.
+  it does locally for Octant's own tools: Plan is read-only, Guarded asks for
+  every command and edit, Accept edits waives edits inside the folder, Reviewed
+  hands each request to the chosen reviewer, and Full access asks nobody. A
+  provider running on the server (Codex, Claude Code) maps the level to its own
+  sandbox and approval policy instead, and decides its own prompts inside that
+  sandbox ([Providers running on the server](#providers-running-on-the-server)).
 - **Reviewed on a server.** Shield judges a server Project's call by that
   server's action profile, as it judges a command that names the server over
   ssh. A command is placed in the same tiers: one the profile includes passes,
