@@ -18395,6 +18395,38 @@ approval-gated` command that undoes it. The terminal shows no one-time
     other devices** (`/api/remote/devices/sign-out-others`) revokes every other
     paired device's key and sessions and keeps the asking device; a window has
     no device of its own and uses Revoke all.
+  - **Access activity and change notices** (maintainer decision, 2026-11-22).
+    Both are read from the journal on each request, so no projection holds
+    them and a rebuild neither loses nor invents one. `GET
+/api/access-activity` answers the newest 200 devices added (the
+    `device-approved` record, with its level), removed (a revoke, a sign-out
+    of other devices, a self-revoke, an expiry) and re-levelled
+    (`remote.device-access-level-changed@1`, old and new), each with its time,
+    the device's label and who did it: the person at a window (a host record
+    for a change only a person makes), a device by label, an agent grant by
+    name, or the host itself for an expiry. A change notice is derived when a
+    paired device or an agent grant's session (a `remote-device` actor; an
+    agent grant acts under its scope id) raised a thread's level strictly up
+    the level order (`guardrail.level-lowered@1` at thread scope whose new
+    level holds the old one and more, so a move between Auto and Accept edits
+    is not one) or added or replaced a provider key (a `provider-key`
+    request that records `keyChange`, `added` with the key's random pool id
+    or `replaced`, completed as `stored`; never the key). A window's own
+    change raises none. `GET /api/change-notices` shows the undismissed ones
+    to a window and to a device paired at Full, other than the device that
+    made the change; every other principal is refused on both reads. Dismiss,
+    Undo and Revoke (`POST /api/change-notices/{dismiss,undo,revoke}`) act
+    only on a notice the caller sees and journal
+    `access-notice.dismissed@1` with the outcome and who acted, so it stays
+    gone across a restart and on every client. Undo runs the change's own
+    command as whoever pressed it: the thread's level command back to the
+    level before, refused unless the thread is still at the raised level; or
+    the key pool's journaled remove of exactly the added key, refused once the
+    provider's keys changed again. A replaced key has no Undo, since the
+    earlier key is not kept. Revoke uses the device revoke or the agent
+    grant's revoke. The change feed's `access-activity` and `change-notices`
+    topics refresh both without a reload. Notices stay in the app: none is
+    sent to a phone's push path or by email.
   - **What a person-paired device does.** As a local window does, with no
     owner unlock: sets a thread, a Project, or the default to Full access and
     starts a Work or Code thread there; changes a Project's access, actions,

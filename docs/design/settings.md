@@ -128,6 +128,23 @@ shows, with **Save the Projects**; it is the hub's own Act list, read at each
 request, and none ticked leaves a member's window nothing to start here
 ([Hub and spokes: the hub coordinates](hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work)).
 
+**Access activity** sits on Settings › Remote access above Paired devices
+(maintainer decision, 2026-11-22). Its rows are page rows, newest first: a
+device added at its level, changed from one level to another, or removed
+(removed, signed out with every other device, removed itself, pairing
+expired), with a meta line naming who did it (you on this computer, a device
+by its label, an agent by its name, or this computer) and how long ago. With
+nothing recorded the section is the one line "No devices added, removed or
+re-levelled yet". It refreshes as each change is journaled. Above the list,
+each change notice, a paired device or an agent raising a thread's level or
+adding or replacing a provider key, is a row naming who changed what, with
+**Undo**, **Revoke** the device (or **End** the agent's access) and
+**Dismiss**; a replaced key's row has no Undo and says the earlier key is not
+kept, and a refused action shows the host's reason. A window's notice stack
+shows the newest notice with **Review**, which opens this section, and a
+browser paired at Full shows the notices beside its new-device alerts. The
+rule is in [Architecture: Security and authority](../architecture.md#security-and-authority).
+
 Selecting a page replaces its controls as well as its heading. Plugin pages
 resolve the currently selected entry point; a missing entry point shows an
 error instead of retaining another integration's account controls.
