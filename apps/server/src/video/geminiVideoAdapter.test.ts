@@ -269,7 +269,11 @@ describe("Gemini video driver", () => {
     ].map((match) => match[1] ?? match[2] ?? match[3]);
     expect(specifiers.length).toBeGreaterThan(0);
     for (const specifier of specifiers) {
-      expect(["@octant/contracts", "@octant/provider-sdk/video-generation"]).toContain(specifier);
+      expect([
+        "@octant/contracts",
+        "@octant/contracts/video-generation",
+        "@octant/provider-sdk/video-generation",
+      ]).toContain(specifier);
     }
   });
 });
