@@ -283,6 +283,7 @@ let codeAnswerCalls = 0;
 let otherCodeCommands = 0;
 const answeredCodeThreads: string[] = [];
 const stagedCodeTexts: string[] = [];
+const startedCodeThreads: Array<string | undefined> = [];
 const codeRequest = (id: string, title: string) =>
   codeQuestionMode
     ? {
@@ -421,8 +422,10 @@ const codeSession = {
         return { status: 200, body: { kind: "provider-turn-state", state: "running" } };
       }
       if (body.kind !== "observe-git") otherCodeCommands++;
-      if (body.kind === "start-provider-turn")
+      if (body.kind === "start-provider-turn") {
+        startedCodeThreads.push(body.threadId);
         return { status: 200, body: { kind: "provider-turn-state", state: "running" } };
+      }
       if (checkoutReadRefused)
         return { status: 403, body: { message: "Checkout snapshot refused." } };
       return {
@@ -738,6 +741,7 @@ for (const hasPendingRequest of [false, true]) {
   otherCodeCommands = 0;
   answeredCodeThreads.length = 0;
   stagedCodeTexts.length = 0;
+  startedCodeThreads.length = 0;
   const recoveryRender = await createTestRenderer({ width: 120, height: 30 });
   const recoveryScreen = mountAgentScreen(
     tui,
@@ -790,8 +794,14 @@ for (const hasPendingRequest of [false, true]) {
         throw new Error("A replacement approval answer reached the wrong thread.");
     } else {
       recoveryRender.mockInput.pressEnter();
-      await recoveryRender.waitFor(() => stagedCodeTexts.includes("/tmp/file"));
-      if (codeAnswers !== 0 || stagedCodeTexts.at(-1) !== "/tmp/file")
+      await recoveryRender.waitFor(() => startedCodeThreads.length > 0);
+      if (
+        codeAnswers !== 0 ||
+        stagedCodeTexts.length !== 1 ||
+        stagedCodeTexts[0] !== "/tmp/file" ||
+        startedCodeThreads.length !== 1 ||
+        startedCodeThreads[0] !== codeThreadId
+      )
         throw new Error("Recovery did not submit the preserved text as the ordinary prompt.");
     }
   } finally {
@@ -808,6 +818,7 @@ for (const hasPendingRequest of [false, true]) {
     otherCodeCommands = 0;
     answeredCodeThreads.length = 0;
     stagedCodeTexts.length = 0;
+    startedCodeThreads.length = 0;
   }
 }
 console.log("Rendered first request-read refusal recovery");
