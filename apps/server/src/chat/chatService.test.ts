@@ -15,6 +15,7 @@ import { imageOfferDecisionRules } from "../image/imageOfferDecisionRules";
 import type { ServiceOfferAnswer } from "../offers/serviceOfferDecision";
 import { createServiceOfferRouteHandler } from "../offers/serviceOfferRoutes";
 import { ServiceOfferService } from "../offers/serviceOfferService";
+import { narrationDecision } from "../speech/narrationTool";
 import { transcriptionDecision } from "../speech/transcriptionTool";
 import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
@@ -1548,7 +1549,11 @@ describe("ChatService", () => {
     const chat = createChatRouteHandler({ service, windowAuthorityStore });
     const offerRoute = createServiceOfferRouteHandler({
       offers: waiting,
-      rules: { ...imageOfferDecisionRules(imageProfiles), transcribe: transcriptionDecision },
+      rules: {
+        ...imageOfferDecisionRules(imageProfiles),
+        transcribe: transcriptionDecision,
+        narrate: narrationDecision,
+      },
       authorizeScope: async (_scope, kind, id) =>
         kind === "chat-thread" &&
         service.read(decodeChatThreadId(id)).thread.lifecycle === "active",

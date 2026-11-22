@@ -1,5 +1,9 @@
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
-import { decodeTranscriptionOffer, type ServiceOffer } from "@octant/contracts";
+import {
+  decodeNarrationOffer,
+  decodeTranscriptionOffer,
+  type ServiceOffer,
+} from "@octant/contracts";
 import type {
   ImageGenerationOffer,
   ServiceOfferDecisionResult,
@@ -105,6 +109,45 @@ describe("ServiceOfferPrompt", () => {
       expect(fake.decide).toHaveBeenCalledExactlyOnceWith(
         approve
           ? { offerId, decision: "transcribe", rememberForThread: true }
+          : { offerId, decision: "cancel" },
+      );
+    },
+  );
+  it.each([true, false])(
+    "discloses the narration excerpt, path, voice and destination before answering: approve %s",
+    async (approve) => {
+      const fake = client([
+        decodeNarrationOffer({
+          kind: "narrate",
+          threadKind: "code-thread",
+          scopeId,
+          offerId,
+          requestedAt: "2026-11-07T10:00:00.000Z",
+          excerpt: "Welcome to the product tour",
+          characters: 420,
+          relativePath: "narration/intro.mp3",
+          voice: "nova",
+          endpointName: "Studio",
+          modelId: "tts-1",
+          format: "mp3",
+        }),
+      ]);
+      renderPrompt(fake);
+      const card = await screen.findByRole("article", { name: "Narration request" });
+      expect(card).toHaveTextContent("Welcome to the product tour…");
+      expect(card).toHaveTextContent("narration/intro.mp3");
+      expect(card).toHaveTextContent("420 characters");
+      expect(card).toHaveTextContent("Voice nova on Studio (tts-1)");
+      await userEvent.click(
+        screen.getByRole("checkbox", { name: "Don't ask again in this thread" }),
+      );
+      expect(fake.decide).not.toHaveBeenCalled();
+      await userEvent.click(
+        screen.getByRole("button", { name: approve ? "Narrate" : "Don't narrate" }),
+      );
+      expect(fake.decide).toHaveBeenCalledExactlyOnceWith(
+        approve
+          ? { offerId, decision: "narrate", rememberForThread: true }
           : { offerId, decision: "cancel" },
       );
     },

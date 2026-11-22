@@ -131,6 +131,7 @@ import {
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
+import type { NarrationForTurn } from "../speech/narrationTool";
 import type { TranscriptionForTurn } from "../speech/transcriptionTool";
 import { attachedImageSources, workspaceImageSources } from "../image/threadImageSourcePorts";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
@@ -171,6 +172,7 @@ import { workTurnToolLevel } from "../work/workTurnToolLevel";
 export type WorkDependencies = Pick<ServerStart, "persistence"> & {
   /** Sees images; absent on a host started without one. */
   readonly imageDescriber?: ImageDescriber;
+  readonly narrationForTurn: NarrationForTurn;
   readonly transcriptionForTurn: TranscriptionForTurn;
 } & Pick<
     AuthorityWiring,
@@ -905,37 +907,53 @@ export function wireWork(deps: WorkDependencies) {
           ).catch(() => undefined);
           return root === input.projectRoot ? root : undefined;
         };
-        const transcription =
-          !browserSupported ||
-          input.routineRun !== undefined ||
-          isRoutineHostScope(input.windowId) ||
-          isRestrictedDeviceScope(input.windowId)
-            ? undefined
-            : deps.transcriptionForTurn({
-                windowId: input.windowId,
-                threadKind: "work-thread",
-                scopeId: decodeImageGenerationScopeId(String(input.thread.id)),
-                inPlan: () =>
-                  composedPolicy === "plan" ||
-                  runningWorkTurns.get(String(input.thread.id))?.access === "plan" ||
-                  workThreadProjection.read(input.thread.id)?.access === "plan",
-                root: currentRoot,
-                allowed: () => {
-                  const active = runningWorkTurns.get(String(input.thread.id));
-                  const thread = workThreadProjection.read(input.thread.id);
-                  return (
-                    active !== undefined &&
-                    thread?.lifecycle === "active" &&
-                    (isPairedDeviceScope(input.windowId)
-                      ? !isRestrictedDeviceScope(input.windowId)
-                      : windowAuthorityStore.listWindowIds().includes(input.windowId) &&
-                        authorizeWorkThreadForWindow({
-                          windowId: input.windowId,
-                          threadId: String(input.thread.id),
-                        }))
-                  );
-                },
-              });
+        const speechTurnAllowed = () => {
+          const active = runningWorkTurns.get(String(input.thread.id));
+          const thread = workThreadProjection.read(input.thread.id);
+          return (
+            active !== undefined &&
+            thread?.lifecycle === "active" &&
+            (isPairedDeviceScope(input.windowId)
+              ? !isRestrictedDeviceScope(input.windowId)
+              : windowAuthorityStore.listWindowIds().includes(input.windowId) &&
+                authorizeWorkThreadForWindow({
+                  windowId: input.windowId,
+                  threadId: String(input.thread.id),
+                }))
+          );
+        };
+        const speechAttended =
+          browserSupported &&
+          input.routineRun === undefined &&
+          !isRoutineHostScope(input.windowId) &&
+          !isRestrictedDeviceScope(input.windowId);
+        const transcription = !speechAttended
+          ? undefined
+          : deps.transcriptionForTurn({
+              windowId: input.windowId,
+              threadKind: "work-thread",
+              scopeId: decodeImageGenerationScopeId(String(input.thread.id)),
+              inPlan: () =>
+                composedPolicy === "plan" ||
+                runningWorkTurns.get(String(input.thread.id))?.access === "plan" ||
+                workThreadProjection.read(input.thread.id)?.access === "plan",
+              root: currentRoot,
+              allowed: speechTurnAllowed,
+            });
+        const narration = !speechAttended
+          ? undefined
+          : deps.narrationForTurn({
+              windowId: input.windowId,
+              threadKind: "work-thread",
+              scopeId: decodeImageGenerationScopeId(String(input.thread.id)),
+              posture: () =>
+                composedPolicy === "plan" ||
+                workThreadProjection.read(input.thread.id)?.access === "plan"
+                  ? "refuse"
+                  : runningLevel().imageSave,
+              root: currentRoot,
+              allowed: speechTurnAllowed,
+            });
         // A routine can generate an image only where its Project keeps a choice.
         const imageTools = !browserSupported
           ? undefined
@@ -1124,6 +1142,7 @@ export function wireWork(deps: WorkDependencies) {
           computer === undefined &&
           canvasTools === undefined &&
           imageTools === undefined &&
+          narration === undefined &&
           transcription === undefined &&
           lookTools === undefined
         )
@@ -1138,6 +1157,7 @@ export function wireWork(deps: WorkDependencies) {
           agentsTools,
           canvasTools,
           imageTools,
+          narration,
           transcription,
           lookTools,
           pastThreads,

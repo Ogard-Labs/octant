@@ -8048,15 +8048,37 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   are cached in host memory by thread, content, destination and language.
   Pages carry at most 32,000 characters; a missing continuation refuses
   rather than silently making another paid call.
+  An attended Work or Code agent outside Plan can also use `octant_narrate`
+  when its provider carries Octant tools and Voice synthesis is ready with a
+  voice. It accepts text of at most 4,096 characters, a confined relative path
+  under the turn's folder (the Work folder or the Code thread's own checkout,
+  including a linked worktree), and a format (`mp3` default, `wav`, or `opus`)
+  whose extension matches (`.mp3`, `.wav`, or `.ogg`); longer text, mismatched
+  extensions, paths outside the folder, protected secret paths, existing files,
+  and Plan are refused before asking. Before calling the provider, the thread's
+  offer shows up to the first 300 characters of the text, character count,
+  target path, format, voice, Voice endpoint and model, covering both synthesis
+  and the file write. A person-paired device can confirm its own turn's offer,
+  with synthesis running on the host and writing the file there without
+  streaming audio to the phone. A remembered answer lives only in host memory
+  for this thread, provider instance, endpoint address, model and voice, and
+  skips the card only at Accept edits and Full access; Ask first and Work Auto
+  still ask on the card because it is also the write confirmation. A changed
+  folder, posture, destination or lost authority while the card waits or
+  synthesis runs writes nothing, and the write is confined and create-only so
+  it never overwrites. Agent narration shares at most one synthesis slot,
+  leaving one for local read-aloud.
   Every desktop composer (Chat, Work, Code, the welcome and draft composers) and
   Navigator show a microphone beside the attach control only while
   transcription is `ready`; the clip is recorded by the browser's own encoder,
   the transcript is appended to the draft, and the person still sends. Navigator
   can read replies aloud through the configured synthesis endpoint, or with the
-  operating system's voices when none is set. A paired device reaches status
-  and transcription only: the listener forwards those two routes
-  (`speech.transcribe` is remote-approvable) and never synthesis
-  (`speech.synthesize` stays with the host), and the route holds each device
+  operating system's voices when none is set. A paired device reaches the
+  status and transcription routes only: the listener forwards those two routes
+  (`speech.transcribe` is remote-approvable) while `/api/speech/synthesis`
+  stays host-only (`speech.synthesize` stays with the host; a paired device can
+  still confirm a thread's `octant_narrate` offer so the host writes the file),
+  and the route holds each device
   to its own clip bound and budget. The phone composers show a microphone only
   while the host reports transcription `ready` and append the transcript to
   the draft; the rules are in
@@ -14444,27 +14466,28 @@ feature: usage, diagnostics, Navigator, the automations UI, browser and
 computer use, agent hierarchy, remote and mobile access, the Apple workbench,
 and the marketplace and plugin registry are no longer extraction candidates.
 
-| Surface                                                                      | Status and boundary to preserve                                                                                                                                                                 |
-| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GitHub                                                                       | Switchable bundled plugin; integration ports and contributed views, no direct host-service wiring                                                                                               |
-| Thread boards                                                                | Switchable bundled plugin; separable projection and UI, Work/Code status policy stays host-owned, and Chat has no board                                                                         |
-| Zen                                                                          | Switchable bundled plugin; appearance contributions and their scoped state                                                                                                                      |
-| Linear, Azure Resource Manager reads                                         | Bundled Integration plugins with no switch; integration ports and contributed views                                                                                                             |
-| Declarative Code tools                                                       | Installed package declarations through the public Code-tool port; credential policy, consent and execution stay host-owned                                                                      |
-| Pull request reviewers                                                       | Code-only plugin seam (`pull-request-reviewer`); host owns Plan read-only turns, head-staleness, findings, and opt-ins                                                                          |
-| Canvas, preview viewers, backgrounds, theme presets                          | Core; scoped artifact contracts, registered viewers, and appearance contributions                                                                                                               |
-| Usage, diagnostics, Navigator, automations UI                                | Core; underlying authority stays in the host                                                                                                                                                    |
-| Project memory and its agent tool                                            | Core; the journal, the person's confirmation, and purge stay host-owned                                                                                                                         |
-| Host media tools (`octant_look`, `octant_transcribe`, `octant_create_image`) | Core; host-registered exception while thread-scoped attachments, confined files, host model/speech routing, paid service offers, and outside-content tainting stay outside the public tool port |
-| Octant Harness built-in tools (`read`, `edit`, `bash`, `diagnostics`)        | Core; part of the harness loop's closed catalog, judged by the same authority path                                                                                                              |
-| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench        | Core; capability, lifecycle, and security remain app-managed                                                                                                                                    |
-| Marketplace and plugin registry                                              | Core; they stay in the host because they admit and activate other components                                                                                                                    |
-| Provider drivers                                                             | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned                                                                            |
-| Image adapters (OpenAI, Gemini, BFL, Ideogram)                               | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                                                                                           |
+| Surface                                                                                        | Status and boundary to preserve                                                                                                                                                                 |
+| ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub                                                                                         | Switchable bundled plugin; integration ports and contributed views, no direct host-service wiring                                                                                               |
+| Thread boards                                                                                  | Switchable bundled plugin; separable projection and UI, Work/Code status policy stays host-owned, and Chat has no board                                                                         |
+| Zen                                                                                            | Switchable bundled plugin; appearance contributions and their scoped state                                                                                                                      |
+| Linear, Azure Resource Manager reads                                                           | Bundled Integration plugins with no switch; integration ports and contributed views                                                                                                             |
+| Declarative Code tools                                                                         | Installed package declarations through the public Code-tool port; credential policy, consent and execution stay host-owned                                                                      |
+| Pull request reviewers                                                                         | Code-only plugin seam (`pull-request-reviewer`); host owns Plan read-only turns, head-staleness, findings, and opt-ins                                                                          |
+| Canvas, preview viewers, backgrounds, theme presets                                            | Core; scoped artifact contracts, registered viewers, and appearance contributions                                                                                                               |
+| Usage, diagnostics, Navigator, automations UI                                                  | Core; underlying authority stays in the host                                                                                                                                                    |
+| Project memory and its agent tool                                                              | Core; the journal, the person's confirmation, and purge stay host-owned                                                                                                                         |
+| Host media tools (`octant_look`, `octant_narrate`, `octant_transcribe`, `octant_create_image`) | Core; host-registered exception while thread-scoped attachments, confined files, host model/speech routing, paid service offers, and outside-content tainting stay outside the public tool port |
+| Octant Harness built-in tools (`read`, `edit`, `bash`, `diagnostics`)                          | Core; part of the harness loop's closed catalog, judged by the same authority path                                                                                                              |
+| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench                          | Core; capability, lifecycle, and security remain app-managed                                                                                                                                    |
+| Marketplace and plugin registry                                                                | Core; they stay in the host because they admit and activate other components                                                                                                                    |
+| Provider drivers                                                                               | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned                                                                            |
+| Image adapters (OpenAI, Gemini, BFL, Ideogram)                                                 | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                                                                                           |
 
 **Host media tools stay in the host (maintainer decision, 2026-11-21).**
-`octant_look`, `octant_transcribe`, and `octant_create_image` are registered in
-the host rather than through the public declarative Code-tool port.
+`octant_look`, `octant_narrate`, `octant_transcribe`, and `octant_create_image`
+are registered in the host rather than through the public declarative Code-tool
+port.
 _Rationale:_ these media tools rely on thread-scoped attachments or confined
 turn files, host model or speech endpoint routing, paid service offers, and
 outside-content tainting that the current `CodeToolHostPort` does not carry.

@@ -67,7 +67,9 @@ export class ImageGenerationOfferService {
           requestedAt,
         }),
     });
-    return outcome.status === "transcribe" ? { status: "cancelled" } : outcome;
+    return outcome.status === "transcribe" || outcome.status === "narrate"
+      ? { status: "cancelled" }
+      : outcome;
   }
 
   remember(scope: ThreadScope, choice: ImageGenerationChoice): void {

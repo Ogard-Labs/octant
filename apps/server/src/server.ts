@@ -33,6 +33,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { resolveSpeechEndpoint } from "@octant/domain";
 import { makeOpenAiCompatibleSpeechAdapter } from "./speech/speechAdapter";
+import type { NarrationForTurn } from "./speech/narrationTool";
 import type { TranscriptionForTurn } from "./speech/transcriptionTool";
 import { CredentialRequests } from "./credentials/credentialRequests";
 import { createCredentialRequestRoutes } from "./credentials/credentialRequestRoutes";
@@ -306,6 +307,7 @@ export function startOctantServer(
       imageGenerationOffers,
       serviceOffers,
       speechGates,
+      threadNarration,
       threadTranscription,
       simulatorInputGrants,
       unsubscribeMachineChanges,
@@ -641,6 +643,22 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    const narrationForTurn: NarrationForTurn = (turn) =>
+      threadNarration.forTurn({
+        ...turn,
+        offers: serviceOffers,
+        gates: speechGates,
+        endpoint: () =>
+          resolveSpeechEndpoint(
+            persistence.readShellSettings()?.settings.voice.synthesis,
+            persistence.readProviderInstances(),
+          ),
+        adapter: ({ instance }) =>
+          makeOpenAiCompatibleSpeechAdapter({
+            instance,
+            ...(credentialResolver === undefined ? {} : { credentialResolver }),
+          }),
+      });
     const transcriptionForTurn: TranscriptionForTurn = (turn) =>
       threadTranscription.forTurn({
         ...turn,
@@ -983,6 +1001,7 @@ export function startOctantServer(
       onCodeTurnCancelled,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      narrationForTurn,
       transcriptionForTurn,
       imageDescriber,
       resolveThreadStrict,
@@ -1274,6 +1293,7 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      narrationForTurn,
       transcriptionForTurn,
       imageDescriber,
       resolveThreadStrict,

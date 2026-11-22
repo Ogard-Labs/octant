@@ -6,6 +6,7 @@ import {
 } from "@octant/contracts";
 import { canonicalizeWorkRelativePath } from "@octant/domain";
 import type { CodeFileRootAuthorityPort } from "../code/codeService";
+import { isProtectedSecretPath } from "../process/secretGuard";
 import { writeConfinedWorkFile } from "../work/workConfinedWrite";
 import { liveWorkFilesystem, type WorkFilesystemPort } from "../work/workFilesystemPort";
 import { WorkResolutionService } from "../work/workResolutionService";
@@ -90,4 +91,117 @@ export async function saveGeneratedImageUnder(
   } catch {
     return { status: "failed", reason: "The image could not be saved." };
   }
+}
+
+export type ConfinedNewFileCheck =
+  | {
+      readonly status: "ok";
+      readonly relativePath: string;
+      readonly absolutePath: string;
+      readonly parentAbsolute: string;
+      readonly parentIdentity: { readonly device: string; readonly inode: string };
+      readonly remaining: ReadonlyArray<string>;
+    }
+  | { readonly status: "refused"; readonly reason: string };
+
+export type ConfinedNewFileWriteResult =
+  | { readonly status: "saved"; readonly relativePath: string }
+  | { readonly status: "refused"; readonly reason: string }
+  | { readonly status: "failed"; readonly reason: string };
+
+/**
+ * Checks whether a new file can be created under `root` without leaving it,
+ * following an escaping symlink, touching a protected secret path, or
+ * overwriting an existing entry. Used both before asking for confirmation and
+ * again at write time.
+ */
+export async function checkConfinedNewFileUnder(
+  input: {
+    readonly root: string;
+    readonly relativePath: string;
+  },
+  filesystem: WorkFilesystemPort = liveWorkFilesystem,
+): Promise<ConfinedNewFileCheck> {
+  let relativePath: string;
+  try {
+    relativePath = canonicalizeWorkRelativePath(input.relativePath);
+  } catch {
+    return { status: "refused", reason: "The save path is outside the folder." };
+  }
+  const resolution = await new WorkResolutionService(filesystem).resolveForCreate({
+    binding: {
+      canonicalRoot: input.root,
+      knownCanonicalRoot: input.root,
+      availability: "available",
+      bindingSuperseded: false,
+    },
+    relativePath,
+  });
+  if (resolution.status !== "resolved-for-create") {
+    return { status: "refused", reason: "The save path is outside the folder." };
+  }
+  if (isProtectedSecretPath(resolution.absolutePath)) {
+    return { status: "refused", reason: "The save path is protected." };
+  }
+  if (resolution.remaining.length === 1) {
+    try {
+      await filesystem.lstat(resolution.absolutePath);
+      return { status: "refused", reason: "That file already exists. Choose a new path." };
+    } catch (error) {
+      if (!isMissingFileError(error)) {
+        return { status: "refused", reason: "The save path is unavailable." };
+      }
+    }
+  }
+  return {
+    status: "ok",
+    relativePath: resolution.relativePath,
+    absolutePath: resolution.absolutePath,
+    parentAbsolute: resolution.parentAbsolute,
+    parentIdentity: resolution.parentIdentity,
+    remaining: resolution.remaining,
+  };
+}
+
+/**
+ * Writes a new file under `root` through the same confined, exclusive-create
+ * path as `saveGeneratedImageUnder`, also refusing protected secret paths and
+ * existing files with neutral failure reasons.
+ */
+export async function writeConfinedNewFileUnder(
+  input: {
+    readonly root: string;
+    readonly relativePath: string;
+    readonly bytes: Uint8Array;
+    readonly current?: () => boolean;
+  },
+  filesystem: WorkFilesystemPort = liveWorkFilesystem,
+): Promise<ConfinedNewFileWriteResult> {
+  try {
+    const check = await checkConfinedNewFileUnder(input, filesystem);
+    if (check.status !== "ok") return check;
+    if (input.current?.() === false) {
+      return { status: "refused", reason: "The save folder is unavailable." };
+    }
+    const written = await writeConfinedWorkFile({
+      filesystem,
+      canonicalPath: check.absolutePath,
+      allowCreate: true,
+      parent: {
+        absolutePath: check.parentAbsolute,
+        identity: check.parentIdentity,
+        remaining: check.remaining,
+      },
+      bytes: input.bytes,
+    });
+    return written
+      ? { status: "saved", relativePath: check.relativePath }
+      : { status: "failed", reason: "The file could not be saved." };
+  } catch {
+    return { status: "failed", reason: "The file could not be saved." };
+  }
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }

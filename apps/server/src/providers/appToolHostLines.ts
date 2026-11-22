@@ -49,6 +49,8 @@ const GUIDE_LINES: Readonly<Record<string, string>> = {
     "When you cannot read an image yourself, have octant_look ask the Sees images model to describe it, with your question if you have one.",
   octant_memory:
     "When the person states a durable fact, decision or convention about this Project that its future threads should retain, use octant_memory; keep transient task details in the current thread.",
+  octant_narrate:
+    "Turn text into a spoken audio file in this thread's folder with octant_narrate instead of installing speech tools.",
   octant_offer_side_task:
     "When you notice work outside this request, offer it to the person with octant_offer_side_task instead of doing it.",
   octant_past_threads:
