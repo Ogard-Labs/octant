@@ -38,6 +38,12 @@ const CoordinatorBoundsDialog = lazy(() =>
   })),
 );
 
+// Opening another computer's to-do carries that computer's whole remote
+// workspace (Canvas, math, Markdown), so it loads only when a to-do opens there.
+const RemoteTodoDraft = lazy(() =>
+  import("../todos/RemoteTodoDraft").then((module) => ({ default: module.RemoteTodoDraft })),
+);
+
 const ProjectCreateDialog = lazy(() =>
   import("../projects/ProjectCreateDialog").then((module) => ({
     default: module.ProjectCreateDialog,
@@ -48,6 +54,7 @@ export {
   CoordinatorBoundsDialog,
   ProjectCreateDialog,
   RemotePairingView,
+  RemoteTodoDraft,
   UsageWorkspace,
   ZenCanvasCard,
   ZenProjectResearchDock,

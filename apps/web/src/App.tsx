@@ -413,7 +413,6 @@ interface TodoStartInProgress {
 }
 import { useTodoList } from "./todos/useTodoList";
 import { useRemoteTodoProjects, type RemoteTodoProject } from "./todos/useRemoteTodoProjects";
-import { RemoteTodoDraft } from "./todos/RemoteTodoDraft";
 import { OctantDialog } from "./ui/base/OctantDialog";
 import { useTodoListHost } from "./todos/useTodoListHost";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
@@ -514,7 +513,11 @@ import {
 import { describeUtilityTabs } from "./shell/utilityTabs";
 import { sidebarRowMode, threadDragSurface } from "./shell/threadDragSurface";
 import { deliverComposerThreadDrop } from "./chat/composerThreadDrop";
-import { CoordinatorBoundsDialog, RemotePairingView } from "./shell/deferredSurfaces";
+import {
+  CoordinatorBoundsDialog,
+  RemotePairingView,
+  RemoteTodoDraft,
+} from "./shell/deferredSurfaces";
 import { firstSelectableProviderSelection } from "./providers/firstSelectableProviderSelection";
 import {
   isAuthorizedCanvasDocument,
@@ -9930,27 +9933,29 @@ function LaunchedShell(
                                 {remoteTodoSlot?.bridge === undefined ? (
                                   <p>Pair with this computer to open its thread.</p>
                                 ) : (
-                                  <RemoteTodoDraft
-                                    key={`${remoteTodo.hostId}:${remoteTodo.todo?.id ?? remoteTodo.thread?.threadId}`}
-                                    bridge={remoteTodoSlot.bridge}
-                                    hostId={remoteTodo.hostId}
-                                    hostName={remoteTodoSlot.displayName}
-                                    connected={remoteTodoSlot.state.kind === "ready"}
-                                    {...(remoteTodo.destination === undefined
-                                      ? {}
-                                      : { project: remoteTodo.destination.project })}
-                                    {...(remoteTodo.todo === undefined
-                                      ? {}
-                                      : { todo: remoteTodo.todo })}
-                                    {...(remoteTodo.thread === undefined
-                                      ? {}
-                                      : { thread: remoteTodo.thread })}
-                                    onCreated={async (link) => {
-                                      if (remoteTodo.todo !== undefined)
-                                        await recordTodoLink(String(remoteTodo.todo.id), link);
-                                    }}
-                                    onClose={() => setRemoteTodo(undefined)}
-                                  />
+                                  <Suspense fallback={<SurfaceLoading label="Opening to-do" />}>
+                                    <RemoteTodoDraft
+                                      key={`${remoteTodo.hostId}:${remoteTodo.todo?.id ?? remoteTodo.thread?.threadId}`}
+                                      bridge={remoteTodoSlot.bridge}
+                                      hostId={remoteTodo.hostId}
+                                      hostName={remoteTodoSlot.displayName}
+                                      connected={remoteTodoSlot.state.kind === "ready"}
+                                      {...(remoteTodo.destination === undefined
+                                        ? {}
+                                        : { project: remoteTodo.destination.project })}
+                                      {...(remoteTodo.todo === undefined
+                                        ? {}
+                                        : { todo: remoteTodo.todo })}
+                                      {...(remoteTodo.thread === undefined
+                                        ? {}
+                                        : { thread: remoteTodo.thread })}
+                                      onCreated={async (link) => {
+                                        if (remoteTodo.todo !== undefined)
+                                          await recordTodoLink(String(remoteTodo.todo.id), link);
+                                      }}
+                                      onClose={() => setRemoteTodo(undefined)}
+                                    />
+                                  </Suspense>
                                 )}
                               </OctantDialog>
                             )}
