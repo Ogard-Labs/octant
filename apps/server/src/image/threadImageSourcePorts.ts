@@ -23,6 +23,7 @@ export function attachedImageSources<
       ? [
           {
             label: `your attached photo ${attachment.displayName}`,
+            name: attachment.displayName,
             size: attachment.byteLength,
             read: () => read(attachment),
           },

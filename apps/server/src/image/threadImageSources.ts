@@ -28,6 +28,8 @@ export type ImageSourceRequest =
 
 export interface ImageSource {
   readonly label: string;
+  /** The upload's own file name when the source is an attachment. */
+  readonly name?: string;
   readonly size: number;
   readonly signedIn?: true;
   readonly read: () => Promise<Uint8Array | undefined>;
@@ -96,6 +98,18 @@ export function parseImageSourceRequests(
   return requests;
 }
 
+// The agent names the upload's own file ("logo.png"), while an attachment's
+// label is display-prefixed ("your attached photo logo.png"); matching the
+// name by equality keeps it from also claiming "new logo.png", and the label
+// remains a fallback for sources that carry no name.
+function namedAttachments(
+  sources: ReadonlyArray<ImageSource>,
+  name: string,
+): ReadonlyArray<ImageSource> {
+  const byName = sources.filter((image) => image.name === name);
+  return byName.length > 0 ? byName : sources.filter((image) => image.label === name);
+}
+
 export async function describeImageSources(
   requests: ReadonlyArray<ImageSourceRequest>,
   ports: ThreadImageSources | undefined,
@@ -118,11 +132,7 @@ export async function describeImageSources(
       request.kind === "attachment"
         ? request.name === undefined
           ? attachments
-          : // An upload's label is prefixed ("your attached photo x.png"); the
-            // agent names the file, so match its own name too.
-            attachments.filter(
-              (image) => image.label === request.name || image.label.endsWith(` ${request.name}`),
-            )
+          : namedAttachments(attachments, request.name)
         : source === undefined
           ? []
           : [source];

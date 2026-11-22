@@ -117,3 +117,19 @@ it("checks the expanded count and recorded size before reading, then sniffs rath
     error: "A reference is not a PNG, JPEG, WebP or GIF image.",
   });
 });
+
+it("resolves a named upload by its file name, not by a suffix of a longer one", async () => {
+  const read = vi.fn(async () => png);
+  const attachments = [
+    { label: "your attached photo logo.png", name: "logo.png", size: 3, read },
+    { label: "your attached photo new logo.png", name: "new logo.png", size: 3, read },
+  ];
+  const described = await describeImageSources(
+    [{ kind: "attachment", name: "logo.png" }],
+    { latestAttachments: () => attachments },
+    () => undefined,
+  );
+  if ("error" in described) throw new Error(described.error);
+  expect(described).toHaveLength(1);
+  expect(described[0]?.source.label).toBe("your attached photo logo.png");
+});
