@@ -16248,6 +16248,96 @@ it("binds the Computer tool to the desktop the send named and asks its approvals
   fixture.close();
 });
 
+it("carries a person's Remember for this Project answer only on an ask that offered it", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  const bindings: Array<
+    Parameters<NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["computerUseTools"]>>[0]
+  > = [];
+  const fixture = runtimeFixture({
+    provider: providerDriver(connection),
+    supportsAppManagedTools: true,
+    computerUseTools: (input) => {
+      bindings.push(input);
+      return {
+        definitions: [{ name: "octant_computer", inputSchema: { type: "object" } }],
+        execute: async () => ({ result: { kind: "apps", apps: [] } }),
+      };
+    },
+  });
+  const startOperation = operationId(92);
+  await fixture.runtime.execute(windowId, {
+    kind: "start-provider-turn",
+    operationId: startOperation,
+    threadId,
+    checkoutId,
+    sessionId,
+    prompt: fixture.prompt,
+    computerUseDestination: {
+      kind: "desktop-lease" as const,
+      leaseId: decodeDesktopLeaseId("95000000-0000-4000-8000-000000000003"),
+    },
+  });
+  await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+  const ask = bindings.at(-1)?.ask;
+  if (ask === undefined) throw new Error("The tool was never bound.");
+  const askedAt = async (summary: string) => {
+    let requested:
+      | Extract<CodeOperationEventFrame["event"], { kind: "approval-requested" }>
+      | undefined;
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 50);
+      const frame = frames.find(
+        (candidate) =>
+          candidate.event.kind === "approval-requested" && candidate.event.summary === summary,
+      );
+      if (frame?.event.kind === "approval-requested") requested = frame.event;
+      expect(requested).toBeDefined();
+    });
+    if (requested === undefined) throw new Error("The turn never asked.");
+    return requested;
+  };
+  const answerRemembering = (approvalId: string, id: number, initiator: "user" | "agent") =>
+    fixture.runtime.execute(
+      windowId,
+      {
+        kind: "answer-provider-approval",
+        operationId: operationId(id),
+        threadId,
+        checkoutId,
+        approvalId,
+        decision: "approved",
+        rememberForProject: true,
+      },
+      { initiator },
+    );
+  try {
+    const offered = ask("Send dist/app?", undefined, { canRememberForProject: true });
+    const offeredAsk = await askedAt("Send dist/app?");
+    expect(offeredAsk.canRememberForProject).toBe(true);
+    await answerRemembering(offeredAsk.approvalId, 93, "user");
+    await expect(offered).resolves.toEqual({
+      kind: "remembered-for-project",
+      approver: { kind: "window", windowId },
+    });
+
+    // An ask that never offered it allows this once.
+    const plain = ask("Send dist/other?");
+    const plainAsk = await askedAt("Send dist/other?");
+    expect(plainAsk.canRememberForProject).toBeUndefined();
+    await answerRemembering(plainAsk.approvalId, 94, "user");
+    await expect(plain).resolves.toBe("approved");
+
+    // A caller answering as an agent allows this once too.
+    const byAgent = ask("Send dist/third?", undefined, { canRememberForProject: true });
+    await answerRemembering((await askedAt("Send dist/third?")).approvalId, 95, "agent");
+    await expect(byAgent).resolves.toBe("approved");
+  } finally {
+    await fixture.runtime.close();
+    fixture.close();
+  }
+});
+
 it("offers a selected MCP server's tools to the Code provider", async () => {
   const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
   const starts: Array<ProviderSessionStart> = [];

@@ -404,6 +404,13 @@ export interface DesktopLeaseService {
       readonly turn?: {
         readonly executionPolicy: ProviderExecutionPolicy;
         readonly externalContentIngested: boolean;
+        /**
+         * A person's "Remember for this Project" answer covers this thread
+         * now, as the tool binding read it. It stands in for the thread's
+         * own answer, and nothing is recorded for the thread, so forgetting
+         * the Project's answer brings the ask back.
+         */
+        readonly answeredForProject?: boolean;
       };
     },
   ) => Promise<DesktopLeaseTransferResult>;
@@ -1824,7 +1831,9 @@ export function createDesktopLeaseService(
       // provider that has placements.
       locality: first.record.lease.locality,
       initiator: caller.actor.kind,
-      answeredForThread: options.transferAnswers?.covers(owner, threadMarked) === true,
+      answeredForThread:
+        options.transferAnswers?.covers(owner, threadMarked) === true ||
+        caller.turn?.answeredForProject === true,
       confirmBilledDesktops,
     });
     if (gate.kind === "refused") return refused(gate.reason);
@@ -2423,6 +2432,8 @@ export interface LeasedComputerUsePort {
     confirm: (request: DesktopTransferConfirmation) => Promise<"approved" | "declined">,
     /** Whether the owner's thread has read outside content, which an answer from before it does not cover. */
     externalContentIngested: boolean,
+    /** Whether a person's "Remember for this Project" answer covers the owner's thread now. */
+    answeredForProject?: boolean,
   ) => Promise<ComputerControlResult>;
   readonly extend: (
     owner: ComputerUseOwner,
@@ -2480,14 +2491,18 @@ export function createLeasedComputerUsePort(
         ? answered.result
         : { kind: "refused", reason: answered.reason, message: LEASE_REFUSAL_MESSAGE };
     },
-    sendFile: async (owner, path, confirm, externalContentIngested) => {
+    sendFile: async (owner, path, confirm, externalContentIngested, answeredForProject) => {
       const caller = callerOf(owner);
       if (caller === undefined) return unbound;
       const sent = await service.transfer({
         ...caller,
         path,
         confirm,
-        turn: { executionPolicy: owner.executionPolicy, externalContentIngested },
+        turn: {
+          executionPolicy: owner.executionPolicy,
+          externalContentIngested,
+          ...(answeredForProject === true ? { answeredForProject } : {}),
+        },
       });
       switch (sent.status) {
         case "delivered":

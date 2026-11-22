@@ -1398,10 +1398,15 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
     options: {
       readonly bindable?: boolean;
       readonly withMac?: boolean;
-      readonly answers?: Array<"approved" | "denied">;
+      readonly answers?: Array<"approved" | "denied" | "remember">;
+      /** Each thread's Project, where it is not the default Code authority's. */
+      readonly projects?: Readonly<Record<string, ProjectId>>;
     } = {},
   ) {
     let tainted = false;
+    const projectOf = (target: ComputerUseOwner): ProjectId =>
+      options.projects?.[String(target.threadId)] ?? decodeProjectId(codeAuthority.projectId);
+    const rememberedProjects = new Set<string>();
     const control = vi.fn(async (_owner: ComputerUseOwner, command: ComputerControlCommand) =>
       decodeComputerControlResult(
         command.operation === "apps"
@@ -1420,8 +1425,11 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
         path: string,
         confirm: (request: DesktopTransferConfirmation) => Promise<"approved" | "declined">,
         _externalContentIngested: boolean,
+        answeredForProject?: boolean,
       ): Promise<ComputerControlResult> => {
         transfers.push(path);
+        // The lease service asks nobody once the Project's answer covers it.
+        if (answeredForProject === true) return sent;
         const answer = await confirm({
           owner: { mode: "code", threadId: onDesktop.threadId },
           leaseId,
@@ -1465,10 +1473,24 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
     );
     const answers = [...(options.answers ?? [])];
     const asked: Array<string> = [];
-    const ask = vi.fn(async (summary: string) => {
-      asked.push(summary);
-      return answers.shift() ?? "approved";
-    });
+    const offers: Array<{ readonly canRememberForProject: true } | undefined> = [];
+    const ask = vi.fn(
+      async (
+        summary: string,
+        _signal?: AbortSignal,
+        offer?: { readonly canRememberForProject: true },
+      ) => {
+        asked.push(summary);
+        offers.push(offer);
+        const answer = answers.shift() ?? "approved";
+        return answer === "remember"
+          ? ({
+              kind: "remembered-for-project",
+              approver: { kind: "window", windowId: owner.windowId },
+            } as const)
+          : answer;
+      },
+    );
     const recorded: Array<ComputerUseEvidenceEvent> = [];
     const macExecute = vi.fn(async () => decodeComputerControlResult({ kind: "apps", apps: [] }));
     const service = createComputerUseToolService({
@@ -1500,11 +1522,16 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
         ],
       }),
       settings: () => ({ enabled: true, automaticUpdates: true }),
-      authority: () => codeAuthority,
+      authority: (target) =>
+        decodeToolActionAuthority({ ...codeAuthority, projectId: projectOf(target) }),
       ownerIsCurrent: () => true,
       toolConstraints: () => [],
       fullAccess: () => false,
       externalContentIngested: () => tainted,
+      projectFileTransferRemembered: (projectId) => rememberedProjects.has(String(projectId)),
+      rememberProjectFileTransfer: ({ projectId }) => {
+        rememberedProjects.add(String(projectId));
+      },
       threadTitle: () => "Notes app",
       record: (event) => {
         recorded.push(event);
@@ -1518,6 +1545,8 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
       transfers,
       ask,
       asked,
+      offers,
+      rememberedProjects,
       recorded,
       macExecute,
       taint: () => {
@@ -1717,6 +1746,65 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
       expect(f.asked[0]).toBe(
         `Send dist/notes-app (9 bytes, SHA-256 ${"a".repeat(64)}) into this thread's disposable desktop on This host for "Notes app"? Approving also covers this thread's later files into that desktop.`,
       );
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("remembers a sent file for the Project, so its other threads send unasked until the person forgets it", async () => {
+    const sibling = decodeComputerUseOwner({
+      ...onDesktop,
+      threadId: "77777777-7777-4777-8777-777777777771",
+    });
+    const elsewhere = decodeComputerUseOwner({
+      ...onDesktop,
+      threadId: "77777777-7777-4777-8777-777777777772",
+    });
+    const otherProject = decodeProjectId("66666666-6666-4666-8666-666666666667");
+    const f = desktop({
+      answers: ["remember"],
+      projects: { [String(elsewhere.threadId)]: otherProject },
+    });
+    const send = call({ operation: "send-file", path: "dist/notes-app" });
+    try {
+      await expect(f.tools().execute(send)).resolves.toEqual({ result: sent, isError: false });
+      expect(f.offers).toEqual([{ canRememberForProject: true }]);
+      expect([...f.rememberedProjects]).toEqual([String(codeAuthority.projectId)]);
+
+      // Another thread of the same Project sends without asking.
+      await expect(f.tools(sibling).execute(send)).resolves.toEqual({
+        result: sent,
+        isError: false,
+      });
+      expect(f.asked).toHaveLength(1);
+
+      // A thread in another Project is still asked.
+      await f.tools(elsewhere).execute(send);
+      expect(f.asked).toHaveLength(2);
+
+      // Forgotten in Settings, the Project's threads are asked again.
+      f.rememberedProjects.clear();
+      await f.tools(sibling).execute(send);
+      expect(f.asked).toHaveLength(3);
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("neither offers nor honors a Project's sent-file answer once the thread has read outside content", async () => {
+    const sibling = decodeComputerUseOwner({
+      ...onDesktop,
+      threadId: "77777777-7777-4777-8777-777777777771",
+    });
+    const f = desktop({ answers: ["remember"] });
+    const send = call({ operation: "send-file", path: "dist/notes-app" });
+    try {
+      await f.tools().execute(send);
+      f.taint();
+      await f.tools(sibling).execute(send);
+      expect(f.asked).toHaveLength(2);
+      expect(f.offers[1]).toBeUndefined();
+      expect(f.sendFile.mock.calls[1]?.[4]).toBe(false);
     } finally {
       await f.service.close();
     }

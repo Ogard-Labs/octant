@@ -39,6 +39,7 @@ import {
   browserProfileSiteListed,
   browserTransferRemembered,
   computerUseAppRemembered,
+  desktopFileTransferRemembered,
   normalizeEnvironmentPresentationState,
   reconcileWorkspaceWithSettings,
   replaceShellSettings,
@@ -346,24 +347,7 @@ export class ShellService implements ShellServiceApi {
   }): ShellCommandResult {
     this.#assertReady();
     try {
-      let actor: EventActor;
-      if (input.approver.kind === "window") {
-        if (!this.#registeredWindowIds.has(input.approver.windowId)) {
-          throw new ShellServiceError({
-            category: "invalid",
-            message: "Shell command window is not registered with this server session.",
-          });
-        }
-        actor = { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID };
-      } else {
-        if (input.approver.actor.kind !== "remote-device") {
-          throw new ShellServiceError({
-            category: "invalid",
-            message: "Paired-device computer-use approval requires a remote-device actor.",
-          });
-        }
-        actor = input.approver.actor;
-      }
+      const actor = this.#computerUseApprover(input.approver);
       const current = this.#persistence.readShellSettings()?.settings ?? defaultShellSettings();
       const merged = computerUseAppRemembered(
         current.rememberedComputerUseApps,
@@ -395,6 +379,77 @@ export class ShellService implements ShellServiceApi {
     } catch (error) {
       throw this.#mapFailure(error);
     }
+  }
+
+  /**
+   * Remembers a "Remember for this Project" answer to an agent's file sent
+   * into a disposable desktop on this machine, journaled with the approving
+   * local user or person-paired device and time, as
+   * {@link rememberComputerUseApp} does for an application.
+   */
+  rememberDesktopFileTransfer(input: {
+    readonly approver:
+      | { readonly kind: "window"; readonly windowId: WindowId }
+      | { readonly kind: "paired-device"; readonly actor: EventActor };
+    readonly expectedVersion: AggregateVersion;
+    readonly projectId: ProjectId;
+  }): ShellCommandResult {
+    this.#assertReady();
+    try {
+      const actor = this.#computerUseApprover(input.approver);
+      const current = this.#persistence.readShellSettings()?.settings ?? defaultShellSettings();
+      const merged = desktopFileTransferRemembered(
+        current.rememberedDesktopFileTransfers,
+        input.projectId,
+      )
+        ? current.rememberedDesktopFileTransfers
+        : current.rememberedDesktopFileTransfers.concat([
+            {
+              projectId: input.projectId,
+              grantedBy: actor,
+              grantedAt: decodeTimestamp(this.#clock()),
+            },
+          ]);
+      const settings = this.#withJudgedDefaultFolder(
+        { ...current, rememberedDesktopFileTransfers: merged },
+        current,
+      );
+      const committed = this.#persistence.journal.append({
+        aggregate: {
+          aggregateType: "shell-settings",
+          aggregateId: SHELL_SETTINGS_AGGREGATE_ID,
+        },
+        expectedVersion: input.expectedVersion,
+        events: [this.#pendingEvent("shell.settings-replaced", { settings }, actor)],
+      });
+      return { kind: "settings-replaced", settings, version: committed.aggregateVersion };
+    } catch (error) {
+      throw this.#mapFailure(error);
+    }
+  }
+
+  /** The actor a Computer use Project answer is journaled under: a registered window's local user, or the paired device. */
+  #computerUseApprover(
+    approver:
+      | { readonly kind: "window"; readonly windowId: WindowId }
+      | { readonly kind: "paired-device"; readonly actor: EventActor },
+  ): EventActor {
+    if (approver.kind === "window") {
+      if (!this.#registeredWindowIds.has(approver.windowId)) {
+        throw new ShellServiceError({
+          category: "invalid",
+          message: "Shell command window is not registered with this server session.",
+        });
+      }
+      return { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID };
+    }
+    if (approver.actor.kind !== "remote-device") {
+      throw new ShellServiceError({
+        category: "invalid",
+        message: "Paired-device computer-use approval requires a remote-device actor.",
+      });
+    }
+    return approver.actor;
   }
 
   /**
