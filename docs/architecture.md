@@ -21097,11 +21097,15 @@ job, `scripts/publish-latest-download.sh`, moves the link: release creation
 stays off latest. It runs only after every build row has published, refuses
 a disk image that is empty or not fully uploaded, attaches that image a second
 time under the fixed name `Octant-darwin-arm64.dmg`, checks the copy, and then
-marks the release latest. A Preview builds as a GitHub prerelease and stops
+marks the release latest. A new copy is uploaded under a temporary name and
+checked before it replaces an earlier one, so a failed replacement leaves the
+old copy serving. A Preview builds as a GitHub prerelease and stops
 being one only when this job promotes it, because `releases/latest` skips
 prereleases. A promoted Preview stays a non-prerelease after stable takes the
 link, so the job orders releases by tag, never by the prerelease flag. The
-Preview and stable promotion jobs share one concurrency group. A candidate
+Preview and stable promotion jobs share one concurrency group; when three
+overlap, GitHub cancels the one still waiting, and rerunning that job is
+safe. A candidate
 after the first stable release, or a release older than the one holding the
 link, is left as it is, so rerunning an old run's job cannot move the link
 backward. Re-promoting the release that holds the link changes nothing.

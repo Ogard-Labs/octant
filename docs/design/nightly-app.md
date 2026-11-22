@@ -1702,18 +1702,11 @@ before it is ever used as a release gate outside CI.
   Nightly is published only once an Octant build (Stable or Preview) exists
   for it to attach to; "technical preview" names the product's stage, not the
   ring.
-- **Public download.** GitHub's latest release carries
-  `https://github.com/Ogard-Labs/octant/releases/latest/download/Octant-darwin-arm64.dmg`.
-  The newest Octant Preview holds it only until the first stable release
-  exists; after that only stable does (maintainer decision, 2026-11-22). Only
-  the release workflow's final job moves the link, after every build row has
-  published: it refuses an empty or unfinished disk image, attaches the image
-  a second time under the fixed name `Octant-darwin-arm64.dmg`, checks the
-  copy, and marks the release latest, which also takes a Preview out of
-  prerelease. Preview and stable promotions share one concurrency group, and
-  a rerun for an older release, or for a Preview once stable exists, leaves
-  the link where it is. Nightly releases and the `feed-*` mailbox releases
-  stay prereleases and can never hold the link.
+- **Public download.** GitHub's latest release carries the public Mac
+  download link: the newest Octant Preview until the first stable release,
+  then only stable. Nightly releases and the `feed-*` mailbox releases stay
+  prereleases and can never hold it. The promotion rules are owned by
+  [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
 ## Presentation
 

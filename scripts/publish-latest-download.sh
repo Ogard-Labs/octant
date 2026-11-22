@@ -23,12 +23,12 @@
 # The versioned disk image must be fully uploaded and non-empty: GitHub can
 # leave an empty asset in the `starter` state after a failed upload, and a
 # release with one is never marked. The fixed-name copy is reused only when it
-# is uploaded and the same size as the versioned image; a leftover starter or
-# mismatched copy is deleted and uploaded again, and the copy is checked again
-# before the latest flag moves, so the public link never points at a release
-# without a working installer.
+# is uploaded and the same size as the versioned image; otherwise a new copy
+# is uploaded and checked under a temporary name before it replaces the old
+# one (below), and the copy is checked again before the latest flag moves.
 #
-# Needs `GH_TOKEN` with `contents: write` and runs inside the checkout.
+# Needs `GH_TOKEN` with `contents: write` and `GITHUB_REPOSITORY`, and runs
+# inside the checkout.
 set -euo pipefail
 
 if [ "$#" -ne 1 ]; then
@@ -106,14 +106,18 @@ if [ -n "$current" ] && [ "$current" != "$tag" ]; then
   fi
 fi
 
-# name<TAB>state<TAB>size for one asset, or nothing when it is absent.
-asset() {
-  gh release view "$tag" --json assets \
-    --jq '.assets[] | [.name, .state, (.size | tostring)] | @tsv' |
-    awk -F'\t' -v want="$1" '!found && $1 == want { print; found = 1 }'
+assets_api="repos/${GITHUB_REPOSITORY}/releases/assets"
+
+# Prints id<TAB>name<TAB>state<TAB>size for every asset named exactly $1, or,
+# with a second argument `prefix`, for every asset whose name starts with $1.
+assets_named() {
+  gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
+    --jq '.assets[] | [(.id | tostring), .name, .state, (.size | tostring)] | @tsv' |
+    awk -F'\t' -v want="$1" -v mode="${2:-exact}" \
+      '(mode == "exact" && $2 == want) || (mode == "prefix" && index($2, want) == 1)'
 }
 
-IFS=$'\t' read -r _ versioned_state versioned_size <<<"$(asset "$versioned")" || true
+IFS=$'\t' read -r _ _ versioned_state versioned_size <<<"$(assets_named "$versioned")" || true
 if [ -z "${versioned_state:-}" ]; then
   echo "release ${tag} has no ${versioned}; not marking it latest" >&2
   exit 1
@@ -123,21 +127,39 @@ if [ "$versioned_state" != "uploaded" ] || [ "${versioned_size:-0}" -le 0 ]; the
   exit 1
 fi
 
-IFS=$'\t' read -r _ fixed_state fixed_size <<<"$(asset "$fixed")" || true
+# The fixed-name copy is replaced without first removing a working one: the
+# new copy is uploaded under a temporary name and checked, and only then is
+# the old copy deleted and the new one renamed into place, the pattern
+# publish-update-feed.sh uses. A release cannot hold two assets with one name,
+# so the link has no file for the moment between that delete and the rename;
+# a failure anywhere before it leaves the old copy serving.
+IFS=$'\t' read -r _ _ fixed_state fixed_size <<<"$(assets_named "$fixed")" || true
 if [ "${fixed_state:-}" != "uploaded" ] || [ "${fixed_size:-}" != "$versioned_size" ]; then
-  if [ -n "${fixed_state:-}" ]; then
-    echo "replacing ${fixed} (state ${fixed_state}, ${fixed_size:-0} bytes)"
-    gh release delete-asset "$tag" "$fixed" --yes
-  fi
+  temp="${fixed}.next-${GITHUB_RUN_ID:-local}"
+  # Leftovers of an earlier failed attempt are not the live file; drop them.
+  while IFS=$'\t' read -r id _; do
+    [ -n "$id" ] && gh api -X DELETE "${assets_api}/${id}" >/dev/null
+  done <<<"$(assets_named "${fixed}.next-" prefix)"
+
   staging=$(mktemp -d)
   trap 'rm -rf "$staging"' EXIT
   gh release download "$tag" --pattern "$versioned" --dir "$staging"
-  cp "${staging}/${versioned}" "${staging}/${fixed}"
-  gh release upload "$tag" "${staging}/${fixed}"
-  fixed_state="" fixed_size=""
-  IFS=$'\t' read -r _ fixed_state fixed_size <<<"$(asset "$fixed")" || true
+  mv "${staging}/${versioned}" "${staging}/${temp}"
+  gh release upload "$tag" "${staging}/${temp}"
+
+  IFS=$'\t' read -r new_id _ new_state new_size <<<"$(assets_named "$temp")" || true
+  if [ "${new_state:-}" != "uploaded" ] || [ "${new_size:-}" != "$versioned_size" ]; then
+    echo "uploaded ${temp} does not match ${versioned} (state ${new_state:-missing}, ${new_size:-0} of ${versioned_size} bytes); ${fixed} left as it was, not marking it latest" >&2
+    exit 1
+  fi
+  while IFS=$'\t' read -r id _; do
+    [ -n "$id" ] && gh api -X DELETE "${assets_api}/${id}" >/dev/null
+  done <<<"$(assets_named "$fixed")"
+  gh api -X PATCH "${assets_api}/${new_id}" -f name="$fixed" >/dev/null
+
+  IFS=$'\t' read -r _ _ fixed_state fixed_size <<<"$(assets_named "$fixed")" || true
   if [ "${fixed_state:-}" != "uploaded" ] || [ "${fixed_size:-}" != "$versioned_size" ]; then
-    echo "uploaded ${fixed} does not match ${versioned} (state ${fixed_state:-missing}, ${fixed_size:-0} of ${versioned_size} bytes); not marking it latest" >&2
+    echo "${fixed} does not match ${versioned} after the rename (state ${fixed_state:-missing}, ${fixed_size:-0} of ${versioned_size} bytes); not marking it latest" >&2
     exit 1
   fi
 fi

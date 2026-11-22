@@ -27,24 +27,35 @@ const IMAGE = "disk image bytes";
 const FAKE_GH = `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\\n' "$*" >> "$FAKE_CALLS"
-case "$1 $2" in
-  "release view")
+case "$1 $2 \${3:-}" in
+  "release view "*)
     [ -z "\${FAKE_MISSING_RELEASE:-}" ] || exit 1
-    if [[ "$*" == *isDraft* ]]; then printf '%s\\n' "\${FAKE_DRAFT:-false}"; exit 0; fi
+    printf '%s\\n' "\${FAKE_DRAFT:-false}"
+    ;;
+  "api repos/octant/releases/tags/"*)
+    # Asset ids are their file names here; GitHub's are numbers.
     for f in "$FAKE_ASSETS"/*; do
       [ -e "$f" ] || continue
       case "$f" in *.starter) continue ;; esac
       state=uploaded; [ -e "$f.starter" ] && state=starter
-      printf '%s\\t%s\\t%s\\n' "$(basename "$f")" "$state" "$(wc -c < "$f" | tr -d ' ')"
+      name=$(basename "$f")
+      printf '%s\\t%s\\t%s\\t%s\\n' "$name" "$name" "$state" "$(wc -c < "$f" | tr -d ' ')"
     done
     ;;
-  "release list")
+  "api -X "*)
+    id=\${4##*/}
+    if [ "$3" = DELETE ]; then
+      rm -f "$FAKE_ASSETS/$id" "$FAKE_ASSETS/$id.starter"
+    else
+      new=\${6#name=}
+      mv "$FAKE_ASSETS/$id" "$FAKE_ASSETS/$new"
+      [ ! -e "$FAKE_ASSETS/$id.starter" ] || mv "$FAKE_ASSETS/$id.starter" "$FAKE_ASSETS/$new.starter"
+    fi
+    ;;
+  "release list "*)
     cat "$FAKE_RELEASES"
     ;;
-  "release delete-asset")
-    rm -f "$FAKE_ASSETS/$4" "$FAKE_ASSETS/$4.starter"
-    ;;
-  "release download")
+  "release download "*)
     dir=""; pattern=""
     while [ "$#" -gt 0 ]; do
       case "$1" in
@@ -55,7 +66,7 @@ case "$1 $2" in
     done
     cp "$FAKE_ASSETS/$pattern" "$dir/$pattern"
     ;;
-  "release upload")
+  "release upload "*)
     if [ -n "\${FAKE_UPLOAD_LEAVES_STARTER:-}" ]; then
       : > "$FAKE_ASSETS/$(basename "$4")"
       : > "$FAKE_ASSETS/$(basename "$4").starter"
@@ -63,7 +74,7 @@ case "$1 $2" in
     fi
     cp "$4" "$FAKE_ASSETS/$(basename "$4")"
     ;;
-  "release edit") ;;
+  "release edit "*) ;;
   *) echo "fake gh: unhandled $*" >&2; exit 99 ;;
 esac
 `;
@@ -106,6 +117,7 @@ function release(
       env: {
         PATH: `${bin}:${process.env.PATH ?? ""}`,
         GH_TOKEN: "token",
+        GITHUB_REPOSITORY: "octant",
         FAKE_ASSETS: assets,
         FAKE_CALLS: calls,
         FAKE_RELEASES: releaseList,
@@ -190,15 +202,44 @@ describe("publish-latest-download.sh", () => {
     const result = run(TAG);
 
     expect(result.status).toBe(0);
-    const lines = callLog().trim().split("\n");
-    const remove = lines.findIndex((line) => line.startsWith("release delete-asset"));
-    const upload = lines.findIndex((line) => line.startsWith("release upload"));
-    const edit = lines.findIndex((line) => line.startsWith("release edit"));
-    expect(remove).toBeGreaterThanOrEqual(0);
-    expect(upload).toBeGreaterThan(remove);
-    expect(edit).toBeGreaterThan(upload);
+    expect(callLog()).toContain(`release edit ${TAG} --prerelease=false --latest`);
     expect(readFileSync(join(assets, FIXED_DMG), "utf8")).toBe(IMAGE);
     expect(existsSync(join(assets, `${FIXED_DMG}.starter`))).toBe(false);
+  });
+
+  it("keeps a working fixed-name image in place until its replacement is uploaded and checked", () => {
+    const { assets, callLog, run } = release({
+      [VERSIONED_DMG]: { bytes: `${IMAGE} rebuilt` },
+      [FIXED_DMG]: { bytes: IMAGE },
+    });
+
+    const result = run(TAG);
+
+    expect(result.status).toBe(0);
+    const lines = callLog().trim().split("\n");
+    const upload = lines.findIndex((line) => line.startsWith("release upload"));
+    const remove = lines.findIndex((line) => line.startsWith("api -X DELETE"));
+    const rename = lines.findIndex((line) => line.startsWith("api -X PATCH"));
+    const edit = lines.findIndex((line) => line.startsWith("release edit"));
+    expect(lines[upload]).toContain(`${FIXED_DMG}.next-`);
+    expect(remove).toBeGreaterThan(upload);
+    expect(lines[remove]).toMatch(new RegExp(`/${FIXED_DMG.replaceAll(".", "\\.")}$`));
+    expect(rename).toBeGreaterThan(remove);
+    expect(edit).toBeGreaterThan(rename);
+    expect(readFileSync(join(assets, FIXED_DMG), "utf8")).toBe(`${IMAGE} rebuilt`);
+  });
+
+  it("leaves the working fixed-name image serving when its replacement upload is incomplete", () => {
+    const { assets, callLog, run } = release({
+      [VERSIONED_DMG]: { bytes: `${IMAGE} rebuilt` },
+      [FIXED_DMG]: { bytes: IMAGE },
+    });
+
+    const result = run(TAG, { FAKE_UPLOAD_LEAVES_STARTER: "1" });
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(join(assets, FIXED_DMG), "utf8")).toBe(IMAGE);
+    expect(callLog()).not.toContain("release edit");
   });
 
   it("does not mark the release latest when the fixed-name upload is left incomplete", () => {
