@@ -8,7 +8,9 @@ import type { SpeechAudioMediaType, SpeechSynthesisFormat } from "@octant/contra
  */
 export function sniffSpeechAudioMediaType(bytes: Uint8Array): SpeechAudioMediaType | undefined {
   if (bytes.byteLength < 12) return undefined;
-  if (ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 12) === "WAVE") return "audio/wav";
+  const signature = ascii(bytes, 0, 4);
+  if ((signature === "RIFF" || signature === "RF64") && ascii(bytes, 8, 12) === "WAVE")
+    return "audio/wav";
   if (bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) {
     return "audio/webm";
   }

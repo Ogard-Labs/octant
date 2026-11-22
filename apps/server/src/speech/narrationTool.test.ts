@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
   mkdtemp,
   mkdir,
@@ -47,12 +47,12 @@ const mp3Bytes = Uint8Array.from([
 const wavBytes = Uint8Array.from([
   0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45,
 ]);
-// Minimal RFC 3533 + RFC 7845 Ogg Opus BOS page ("OggS" + 1 segment + "OpusHead").
-const oggBytes = Uint8Array.from([
-  0x4f, 0x67, 0x67, 0x53, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x13, 0x4f, 0x70, 0x75, 0x73,
-  0x48, 0x65, 0x61, 0x64, 0x01, 0x01, 0x38, 0x01, 0x80, 0xbb, 0x00, 0x00, 0x00, 0x00, 0x00,
-]);
+const oggBytes = Uint8Array.from(
+  readFileSync(new URL("./fixtures/narration-tone.ogg", import.meta.url)),
+);
+const rf64Bytes = Uint8Array.from(
+  readFileSync(new URL("./fixtures/narration-tone-rf64.wav", import.meta.url)),
+);
 
 beforeEach(async () => {
   dir = await realpath(await mkdtemp(join(tmpdir(), "octant-narrate-")));
@@ -244,6 +244,16 @@ it("supports wav and opus formats with matching case-insensitive extensions", as
     result: { status: "saved", relativePath: "audio/voice.ogg", bytes: oggBytes.byteLength },
   });
   expect(Uint8Array.from(await readFile(join(folder, "audio", "voice.ogg")))).toEqual(oggBytes);
+});
+
+it("saves RF64 WAV audio returned by the configured voice endpoint", async () => {
+  const wav = fixture("work-thread", { audio: rf64Bytes });
+  const pending = wav.call({ relativePath: "audio/rf64.wav", format: "wav" });
+  await wav.answer();
+  expect(await pending).toEqual({
+    result: { status: "saved", relativePath: "audio/rf64.wav", bytes: rf64Bytes.byteLength },
+  });
+  expect(Uint8Array.from(await readFile(join(folder, "audio", "rf64.wav")))).toEqual(rf64Bytes);
 });
 
 it("writes into a Code thread's linked git worktree rather than the main project checkout", async () => {
