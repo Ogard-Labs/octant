@@ -126,7 +126,20 @@ export interface AppendCodeOperationEventInput {
   readonly operationId: CodeOperationId;
   readonly expectedCursor: number;
   readonly event: CodeOperationEvent;
+  /**
+   * `host` journals the event as the host's own doing (the store's actor)
+   * whoever started the operation: what the host settles by itself after a
+   * restart has no person behind it.
+   */
+  readonly journaledAs?: "host";
 }
+
+/**
+ * How many operations' starters the store keeps at hand. A miss only costs
+ * reading the operation's first journaled event again, so the bound trades
+ * memory for that read, never correctness.
+ */
+const REMEMBERED_OPERATION_STARTERS = 512;
 
 export interface ReplayCodeOperationEventsInput {
   readonly threadId: CodeThreadId;
@@ -385,6 +398,10 @@ export class CodeOperationEventStore {
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #actor: typeof EventActor.Type;
+  /** Who each in-flight request acts as, for the operation it names. */
+  readonly #requests = new Map<string, { readonly actor: typeof EventActor.Type }>();
+  /** Who started an operation, as its first journaled event names them. */
+  readonly #starters = new Map<string, typeof EventActor.Type>();
   readonly #histories: RememberedHistories;
   readonly #summaries: RememberedHistories;
   /** Compact metadata for a few open turn comparisons, never their streamed text. */
@@ -412,6 +429,50 @@ export class CodeOperationEventStore {
     } catch {
       throw new CodeOperationEventStoreError("invalid", "Code operation event actor is invalid.");
     }
+  }
+
+  /**
+   * While a request runs, what it journals for its operation names `actor`:
+   * the window or paired device the route resolved, or the host when a
+   * request carries none (a routine, a host recovery). Once the request has
+   * answered, the operation's later events (a turn's streamed output, a
+   * terminal's) name whoever its first journaled event names, so a turn a
+   * device started stays the device's to the end. Returns the release.
+   */
+  actingFor(operationId: CodeOperationId, actor: typeof EventActor.Type | undefined): () => void {
+    const request = { actor: actor ?? this.#actor };
+    const key = String(operationId);
+    this.#requests.set(key, request);
+    return () => {
+      if (this.#requests.get(key) === request) this.#requests.delete(key);
+    };
+  }
+
+  #actorFor(input: AppendCodeOperationEventInput): typeof EventActor.Type {
+    if (input.journaledAs === "host") return this.#actor;
+    const key = String(input.operationId);
+    const requested = this.#requests.get(key)?.actor;
+    if (requested !== undefined) return requested;
+    const remembered = this.#starters.get(key);
+    if (remembered !== undefined) return remembered;
+    if (input.expectedCursor === 0) return this.#actor;
+    const first = this.#journal.replayAggregate({
+      aggregateType: "code-operation",
+      aggregateId: key,
+      afterVersion: 0,
+      limit: 1,
+    })[0];
+    const starter = first?.actor ?? this.#actor;
+    this.#rememberStarter(key, starter);
+    return starter;
+  }
+
+  #rememberStarter(key: string, starter: typeof EventActor.Type): void {
+    this.#starters.delete(key);
+    this.#starters.set(key, starter);
+    if (this.#starters.size <= REMEMBERED_OPERATION_STARTERS) return;
+    const oldest = this.#starters.keys().next();
+    if (oldest.done !== true) this.#starters.delete(oldest.value);
   }
 
   append(input: AppendCodeOperationEventInput): typeof CodeOperationEventFrame.Type {
@@ -456,6 +517,7 @@ export class CodeOperationEventStore {
       throw new CodeOperationEventStoreError("invalid", "Code operation event append is invalid.");
     }
 
+    const actor = this.#actorFor(input);
     const committed = this.#journal.append({
       aggregate: { aggregateType: "code-operation", aggregateId },
       expectedVersion,
@@ -465,7 +527,7 @@ export class CodeOperationEventStore {
           eventName: CODE_OPERATION_EVENT_RECORDED,
           eventVersion: 1,
           correlationId,
-          actor: this.#actor,
+          actor,
           occurredAt: frame.occurredAt,
           payload: frame,
         },
@@ -487,6 +549,7 @@ export class CodeOperationEventStore {
         "Committed Code operation event does not match its append.",
       );
     }
+    if (input.expectedCursor === 0) this.#rememberStarter(String(input.operationId), actor);
     return frame;
   }
 

@@ -176,6 +176,7 @@ import {
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
 import type { PrincipalRouteContext } from "../principalRouteContext";
+import { eventActorForPrincipal } from "../principalEventActor";
 import { CODE_TERMINAL_TOOL_NAME } from "./codeAppManagedTools";
 import { GhPullRequestPort, type GhCommandPort } from "./ghPullRequestPort";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
@@ -1827,6 +1828,60 @@ describe("CodeOperationRuntime", () => {
     );
     expect(onProviderTurnRequested).not.toHaveBeenCalled();
     fixture.close();
+  });
+
+  it("journals every event of a turn as whoever started it: the window, the paired device, or the host", async () => {
+    const localPerson = eventActorForPrincipal({ kind: "local-window" });
+    const device = eventActorForPrincipal({
+      kind: "remote-device",
+      deviceId: "90000000-0000-4000-8000-0000000000e1",
+    });
+    for (const [index, startedBy] of [localPerson, device, undefined].entries()) {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        approvalValidator: false,
+      });
+      try {
+        const start = operationId(4_200 + index);
+        await expect(
+          fixture.runtime.execute(
+            windowId,
+            {
+              kind: "start-provider-turn",
+              operationId: start,
+              threadId,
+              checkoutId,
+              sessionId,
+              prompt: fixture.prompt,
+            },
+            startedBy === undefined ? {} : { actor: startedBy },
+          ),
+        ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+        // What the provider streams after the start has answered is still
+        // the turn's, and so still its starter's.
+        await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+        await Effect.runPromise(
+          Queue.offer(queue, providerEvent({ kind: "text-delta", text: "Done." })),
+        );
+        await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+        await vi.waitFor(async () =>
+          expect(await lastOperationEvent(fixture.runtime, start)).toMatchObject({
+            kind: "operation-state",
+            state: "completed",
+          }),
+        );
+        const actors = fixture.operationActors(start);
+        expect(actors.length).toBeGreaterThan(3);
+        expect(new Set(actors.map((named) => JSON.stringify(named)))).toEqual(
+          new Set([JSON.stringify(startedBy ?? actor)]),
+        );
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    }
   });
 
   it("keeps feedback images pending through refused credentials and sends them once on retry", async () => {
@@ -14316,6 +14371,16 @@ function runtimeFixture(options: {
     },
     reviewFindings: () => readCodeReviewFindings(connection, threadId),
     readExternalContentTaint: () => readThreadExternalContentTaint(connection, String(threadId)),
+    /** The actor each of an operation's journaled events names, in order. */
+    operationActors: (id: CodeOperationId) =>
+      journal
+        .replayAggregate({
+          aggregateType: "code-operation",
+          aggregateId: String(id),
+          afterVersion: 0,
+          limit: 1_000,
+        })
+        .map((event) => event.actor),
     /** Journal a runtime work record directly, as an earlier process left it. */
     appendRuntimeWork: (work: Record<string, unknown> & { readonly id: string }) =>
       journal.append({
@@ -14806,6 +14871,12 @@ it("settles an answer to an approval a host exit left waiting as interrupted", a
 
 it("settles a turn a host restart cut off as interrupted when the harness gives up on it", async () => {
   const fixture = runtimeFixture({});
+  const device = eventActorForPrincipal({
+    kind: "remote-device",
+    deviceId: "90000000-0000-4000-8000-0000000000e2",
+  });
+  // A paired device started the turn before the restart.
+  const asDevice = fixture.operationEvents.actingFor(operationId(98), device);
   try {
     fixture.operationEvents.append({
       threadId,
@@ -14825,11 +14896,14 @@ it("settles a turn a host restart cut off as interrupted when the harness gives 
       expectedCursor: 1,
       event: decodeCodeOperationEvent({ kind: "operation-state", state: "waiting" }),
     });
+    asDevice();
     expect(
       fixture.conversation().turns.find((turn) => turn.operationId === operationId(98)),
     ).toMatchObject({ status: "waiting" });
 
     fixture.runtime.settleCutOffTurns?.(String(threadId));
+    // The host ended it, so the interruption is the host's, not the device's.
+    expect(fixture.operationActors(operationId(98))).toEqual([device, device, actor]);
 
     expect(
       fixture.conversation().turns.find((turn) => turn.operationId === operationId(98)),

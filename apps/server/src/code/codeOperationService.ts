@@ -380,6 +380,11 @@ export interface CodeOperationEventPort {
     readonly expectedCursor: number;
     readonly event: CodeOperationEvent;
   }) => void;
+  /**
+   * Names `actor` (the host when undefined) on what this request journals for
+   * the operation until the returned release; absent, the port's own actor.
+   */
+  readonly actingFor?: (operationId: CodeOperationId, actor: EventActor | undefined) => () => void;
   readonly replay: (input: {
     readonly threadId: CodeThreadId;
     readonly operationId: CodeOperationId;
@@ -1285,8 +1290,8 @@ export interface CodeOperationExecuteOptions {
   readonly initiator?: CodeOperationInitiator;
   /**
    * Who the route resolved the request to. It names the person's own records
-   * an operation writes (a review finding); the operation's own events keep
-   * the runtime's actor. Host-only: the wire command cannot carry it.
+   * an operation writes (a review finding) and the operation's own events;
+   * absent, they are the host's. Host-only: the wire command cannot carry it.
    */
   readonly actor?: EventActor;
   /**
@@ -1758,6 +1763,19 @@ export class CodeOperationService {
     options: CodeOperationExecuteOptions = {},
   ): Promise<CodeOperationResult> {
     const command = decodeCodeOperationCommand(rawCommand);
+    const release = this.#options.events.actingFor?.(command.operationId, options.actor);
+    try {
+      return await this.#executeAs(windowId, command, options);
+    } finally {
+      release?.();
+    }
+  }
+
+  async #executeAs(
+    windowId: WindowId,
+    command: CodeOperationCommand,
+    options: CodeOperationExecuteOptions,
+  ): Promise<CodeOperationResult> {
     if (!REMOTE_STEP_OPERATIONS.has(command.kind))
       return this.#executeDecoded(windowId, command, options);
     // The result that answers a retry is journaled only once the step has

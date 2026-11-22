@@ -1363,8 +1363,8 @@ export function wireProviders(deps: ProvidersDependencies) {
       userAddedMcpServers: {
         owns: (sourceRef) => userAddedMcpServers.owns(sourceRef),
         localSetupId: (sourceRef) => userAddedMcpServers.localSetupId(sourceRef),
-        prepareRemoval: async (extensionId) =>
-          (await mcpServerSignInHolder.current?.preparePackageRemoval(extensionId)) ??
+        prepareRemoval: async (extensionId, actor) =>
+          (await mcpServerSignInHolder.current?.preparePackageRemoval(extensionId, actor)) ??
           (() => undefined),
         remove: async (sourceRef, extensionId) => {
           await mcpServerSignInHolder.current?.forgetPackage(extensionId);
