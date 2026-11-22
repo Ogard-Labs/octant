@@ -43,6 +43,7 @@ import { attachWorkRequestRuntime } from "../work/workRequestRuntime";
 import { JournalNavigatorAssistantBindingStore } from "../navigatorAssistant/navigatorAssistantBindingStore";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "../chat/chatAttachmentStore";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
+import { createThreadVideoAgentTools } from "../video/videoAgentTools";
 import { attachedImageSources } from "../image/threadImageSourcePorts";
 import { createLinkedThreadRouteHandler } from "../linkedThread/linkedThreadRoutes";
 import { createLinkedThreadRuntime } from "../linkedThread/linkedThreadRuntime";
@@ -127,6 +128,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
     | "agentRunPersistence"
     | "browserCaptures"
     | "imageGenerationOffers"
+    | "videoOffers"
     | "liveTurns"
     | "machineChangeFeed"
     | "windowAuthorityStore"
@@ -154,7 +156,11 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools"> &
   Pick<
     WorkspaceWiring,
-    "contextHarness" | "keptImageChoices" | "projectMemoryAccess" | "shellService"
+    | "contextHarness"
+    | "keptImageChoices"
+    | "keptVideoChoices"
+    | "projectMemoryAccess"
+    | "shellService"
   > &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<CodeWiring, "environmentService"> &
@@ -168,6 +174,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
     | "extensionApiService"
     | "extensionPackageStore"
     | "imageJobService"
+    | "videoJobService"
     | "reviewedModelManifest"
     | "skillDiscoveryService"
     | "verifyModelToolsOnFirstUse"
@@ -222,7 +229,9 @@ export function wireChat(deps: ChatDependencies) {
     externalContentIngestionStore,
     githubIssueContextService,
     imageGenerationOffers,
+    videoOffers,
     imageJobService,
+    videoJobService,
     linearIssueContextService,
     liveTurns,
     machineChangeFeed,
@@ -250,6 +259,7 @@ export function wireChat(deps: ChatDependencies) {
     personMemoryAccess,
     octantInstructions,
     keptImageChoices,
+    keptVideoChoices,
     projectMemoryAccess,
   } = deps;
   return Effect.gen(function* () {
@@ -603,6 +613,28 @@ export function wireChat(deps: ChatDependencies) {
         coordinationDepth,
       }) => {
         const sideChat = sideChatSidecars.findBySidecarThread(thread.id) !== undefined;
+        const chatImageSources = {
+          latestAttachments: () => {
+            const view = persistence.readChatThreadView(thread.id);
+            const latest = view?.turns.findLast((turn) => turn.delivery === undefined);
+            if (view === undefined || latest === undefined) return [];
+            return attachedImageSources(
+              view.attachments.filter(
+                (attachment) =>
+                  attachment.status === "finalized" && latest.attachmentIds.includes(attachment.id),
+              ),
+              (attachment) =>
+                chatAttachmentStore.read({
+                  chatThreadId: thread.id,
+                  chatAttachmentId: attachment.id,
+                  displayName: attachment.displayName,
+                  size: attachment.byteLength,
+                  hash: attachment.digest,
+                  finalizedAt: attachment.createdAt,
+                }),
+            );
+          },
+        };
         return combineAppManagedToolSets(
           taintAppManagedToolResults({
             tools: combineAppManagedToolSets(
@@ -631,31 +663,7 @@ export function wireChat(deps: ChatDependencies) {
                       offers: imageGenerationOffers,
                       kept: keptImageChoices,
                       jobs: imageJobService,
-                      imageSources: {
-                        latestAttachments: () => {
-                          const view = persistence.readChatThreadView(thread.id);
-                          const latest = view?.turns.findLast(
-                            (turn) => turn.delivery === undefined,
-                          );
-                          if (view === undefined || latest === undefined) return [];
-                          return attachedImageSources(
-                            view.attachments.filter(
-                              (attachment) =>
-                                attachment.status === "finalized" &&
-                                latest.attachmentIds.includes(attachment.id),
-                            ),
-                            (attachment) =>
-                              chatAttachmentStore.read({
-                                chatThreadId: thread.id,
-                                chatAttachmentId: attachment.id,
-                                displayName: attachment.displayName,
-                                size: attachment.byteLength,
-                                hash: attachment.digest,
-                                finalizedAt: attachment.createdAt,
-                              }),
-                          );
-                        },
-                      },
+                      imageSources: chatImageSources,
                       listInstances: () => persistence.readProviderInstances(),
                       readImageGenerationCustomSources: () =>
                         (persistence.readShellSettings()?.settings ?? defaultShellSettings())
@@ -667,6 +675,16 @@ export function wireChat(deps: ChatDependencies) {
                             (candidate) => String(candidate.id) === String(thread.modelId),
                           )
                           ?.inputModalities.includes("image") === true,
+                    }),
+                    createThreadVideoAgentTools({
+                      windowId,
+                      threadKind: "chat-thread",
+                      scopeId: decodeImageGenerationScopeId(String(thread.id)),
+                      offers: videoOffers,
+                      kept: keptVideoChoices,
+                      jobs: videoJobService,
+                      imageSources: chatImageSources,
+                      imageJobs: imageJobService,
                     }),
                   ),
               }),

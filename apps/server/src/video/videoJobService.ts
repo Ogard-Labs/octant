@@ -222,6 +222,9 @@ export class VideoJobService {
   readonly #terminalWaiters = new Map<string, Array<(job: VideoJob) => void>>();
   readonly #inputs = new Map<string, { readonly prompt: string } & VideoJobInputs>();
   readonly #closing = new AbortController();
+  /** Each profile version's declared models, as last read from its adapter. */
+  readonly #declared = new Map<string, ReadonlyArray<VideoModelCapabilities>>();
+  readonly #declaring = new Set<string>();
   #active = 0;
   #removalTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -256,11 +259,54 @@ export class VideoJobService {
       const adapter = this.#adapterFor(candidate);
       if (adapter === undefined) continue;
       const models = await this.#modelsOf(adapter);
-      if (models !== undefined && models.length > 0) {
+      if (models === undefined) continue;
+      this.#declared.set(declaredKey(candidate), models);
+      if (models.length > 0) {
         ready.push({ instance: candidate, models });
       }
     }
     return ready;
+  }
+
+  /**
+   * The ready profiles as last read, without waiting: a turn decides whether
+   * to offer the video tool synchronously. A profile version not read yet is
+   * read in the background and offered from the next turn; `quote` still
+   * reads the adapter before anything is reserved or sent.
+   */
+  readyProfilesNow(): ReadonlyArray<{
+    readonly instance: ProviderInstance;
+    readonly models: ReadonlyArray<VideoModelCapabilities>;
+  }> {
+    const ready: Array<{
+      readonly instance: ProviderInstance;
+      readonly models: ReadonlyArray<VideoModelCapabilities>;
+    }> = [];
+    for (const candidate of this.#candidateInstances()) {
+      const adapter = this.#adapterFor(candidate);
+      if (adapter === undefined) continue;
+      const key = declaredKey(candidate);
+      const models = this.#declared.get(key);
+      if (models === undefined) {
+        if (!this.#declaring.has(key)) {
+          this.#declaring.add(key);
+          void adapter
+            .models()
+            .then((declared) => this.#declared.set(key, declared))
+            .catch(() => undefined)
+            .finally(() => this.#declaring.delete(key));
+        }
+      } else if (models.length > 0) {
+        ready.push({ instance: candidate, models });
+      }
+    }
+    return ready;
+  }
+
+  /** A finished clip's bytes, for a save under the turn's folder. */
+  async readClip(job: VideoJob): Promise<Uint8Array | undefined> {
+    if (job.status !== "completed" || job.clip === undefined) return undefined;
+    return this.#options.clips.readAll(job.scopeId, job.clip.clipId);
   }
 
   /**
@@ -478,6 +524,8 @@ export class VideoJobService {
    * still owed is tried again.
    */
   async recover(): Promise<void> {
+    // Reads each profile's models in the background so the first turn can offer the tool.
+    this.readyProfilesNow();
     await this.#options.clips.recover();
     if (this.#closing.signal.aborted) return;
     for (const job of this.#options.projection.listUnfinished()) {
@@ -1227,4 +1275,8 @@ function settleWithKnownPrice(
     : settleVideoCostUsdMicros(price, estimate, usage, job.options, {
         imageCount: job.imageCount,
       });
+}
+
+function declaredKey(instance: ProviderInstance): string {
+  return `${String(instance.id)}:${String(instance.version)}`;
 }

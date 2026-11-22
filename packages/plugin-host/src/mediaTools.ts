@@ -76,7 +76,7 @@ export const CREATE_IMAGE_TOOL_HOST_LINE =
   "Call octant_create_image when the person asks for a picture instead of drawing it as SVG or HTML. To restyle photos or screenshots, use references, which always need confirmation. Keep SVG for logos, icons, and diagrams.";
 
 export const CREATE_VIDEO_TOOL_HOST_LINE =
-  "Call octant_create_video only when the person asks for a video clip, instead of writing an animation by hand; it is billed per clip and the person confirms on a card.";
+  "Use octant_create_video only when asked for a video clip; clips are billed.";
 
 export const MEDIA_TOOL_HOST_LINES: Readonly<Record<string, string>> = {
   [CREATE_IMAGE_TOOL_NAME]: CREATE_IMAGE_TOOL_HOST_LINE,

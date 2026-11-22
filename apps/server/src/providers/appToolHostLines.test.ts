@@ -27,6 +27,7 @@ const BROADEST = [
   "octant_code",
   "octant_computer",
   "octant_create_image",
+  "octant_create_video",
   "octant_credential",
   "octant_debug",
   "octant_github",
