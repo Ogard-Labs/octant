@@ -18356,8 +18356,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   classifier. A remote principal can never exceed host, mode, provider, Project,
   or thread authority, cannot mint local receipts, and every remote mutation is
   journaled with its principal. An authenticated paired device the host's own
-  person paired is the person and holds what a local window holds on every
-  route the private listener forwards (maintainer decision, 2026-11-12): the
+  person paired is the person: full by default, narrower if the person chooses
+  (maintainer decisions, 2026-11-12 and 2026-11-22). At Full it holds what a
+  local window holds on every route the private listener forwards: the
   split of actions into ones a device may approve and ones that need the host
   no longer holds it. Each rule that held a paired device to less now names
   the new rule beside what is built today; the delivery notes, test evidence,
@@ -18388,6 +18389,46 @@ approval-gated` command that undoes it. The terminal shows no one-time
     refusal, an unreachable host) as restricted and hides what the host would
     refuse. The answer shapes only what a client shows; the host decides every
     request from its own record.
+  - **A device's access level.** The person picks one of three levels when
+    approving a pairing (at a window or from a Full device) and can change it
+    later in Settings › Remote access › Paired devices: **Full** (the default),
+    **Approve and steer**, or **Read only**. The level reuses the remote action
+    catalogue rather than adding a permission system of its own: Approve and
+    steer is exactly the catalogue a hub-introduced device is held to, and Read
+    only is the catalogue's reads alone (`project.overview.read`,
+    `code.language.read`, `browser.observe`, `simulator.observe`,
+    `terminal.read`, `preview.open-authorized`, `settings.read-non-secret`,
+    `provider.list-models`, `usage.spend-ceiling.read`). The level is the
+    host's record, never the client's: the `device-approved` audit record
+    carries it (absent on older records, which read as Full) and
+    `remote.device-access-level-changed@1` records each change with its actor
+    and the level before and after. The gateway marks a level below Full on
+    the principal beside its admission on every request, from a cache it
+    updates when the level changes, and ends that device's open requests so
+    its next one meets the new level. `principalAuthorityKind` judges such a
+    device `remote-device`, so every check of the host's person refuses it and
+    the product dispatch holds it to the catalogue, and at Read only to the
+    reads, before any route runs; a narrowed device can never raise itself.
+    Routes that change something but rode a read action before (revising or
+    refreshing a Canvas, a connector's sign-in and operations) carry their own
+    write actions, and the local-servers commands route and the server proxy
+    are outside Read only. A device's own sign-out, key rotation and
+    self-revoke keep working at every level. Hub-introduced devices and agent
+    grants have no level and keep their own limits.
+  - **Pause remote access and signing out other devices.** Pausing is a host
+    setting journaled as `remote.access-pause-changed@1` with its actor. While
+    it is on, the private listener refuses every paired device's session
+    request and authenticated request (product, self-service and server proxy)
+    with `403` and reason `remote-access-paused`, ends their open requests and
+    proxy sessions, and keeps every device record, key and session row; a
+    client keeps its pairing and says remote access is paused. A window turns it
+    on or off; a Full device may turn it on, which takes its own access too,
+    and never off. The hub's member-to-member routes between this person's own
+    computers and an agent grant's routes authenticate themselves on the
+    pre-auth surface, are not paired devices, and keep working. **Sign out all
+    other devices** (`/api/remote/devices/sign-out-others`) revokes every other
+    paired device's key and sessions and keeps the asking device; a window has
+    no device of its own and uses Revoke all.
   - **What a person-paired device does.** As a local window does, with no
     owner unlock: sets a thread, a Project, or the default to Full access and
     starts a Work or Code thread there; changes a Project's access, actions,
