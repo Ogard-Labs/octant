@@ -4,6 +4,7 @@ import {
   answerWorkRequest,
   readWorkRequests,
   stepWorkQuestionnaire,
+  workLevelChangeText,
   workQuestionnaireText,
 } from "./agentWorkRequests";
 import type { LocalControlRequest, OpenedLocalControlSession } from "./localControl";
@@ -19,6 +20,20 @@ const pending = {
   requestedAt: "2026-11-16T12:00:00.000Z",
   answer: { requestId, expectedVersion: 4 },
 };
+/** The journaled Work request the app's thread view reads, with its full detail. */
+const journaled = (detail: unknown) => ({
+  requestId,
+  projectId,
+  threadId,
+  providerInstanceId: "00000000-0000-4000-8000-000000000005",
+  providerSessionId: "00000000-0000-4000-8000-000000000006",
+  providerRequestId: "provider-request",
+  status: "pending",
+  requestedAt: "2026-11-16T12:00:00.000Z",
+  version: 4,
+  detail,
+});
+const questionDetail = { kind: "user-input", prompt: "Which format?", options: ["PDF"] };
 
 describe("terminal Work requests", () => {
   it("lists only answerable Work approvals and questions for the current thread", async () => {
@@ -30,7 +45,7 @@ describe("terminal Work requests", () => {
         status: 200,
         body: {
           requests: request.path.startsWith("/api/work/requests")
-            ? []
+            ? [journaled(questionDetail)]
             : [
                 { ...pending, kind: "approval", text: "Run the command?" },
                 {
@@ -133,7 +148,8 @@ describe("terminal Work requests", () => {
       send: async (request) => {
         if (request.path === "/api/pending-requests")
           return { status: 200, body: { requests: [approvalInput, questionInput] } };
-        if (request.method === "GET") return { status: 200, body: { requests: [] } };
+        if (request.method === "GET")
+          return { status: 200, body: { requests: [journaled(questionDetail)] } };
         seen.push(request);
         return { status: 200, body: { kind: "work-request-resolved" } };
       },
@@ -173,10 +189,12 @@ describe("terminal Work requests", () => {
       kind: "opened",
       windowId: "test",
       close: async () => undefined,
-      send: async () => ({
+      send: async (request) => ({
         status: 200,
         body: {
-          requests: [{ ...pending, kind: "approval", text: "Run the command?" }],
+          requests: request.path.startsWith("/api/work/requests")
+            ? [journaled({ kind: "approval", action: "Run", description: "Run the command?" })]
+            : [{ ...pending, kind: "approval", text: "Run the command?" }],
         },
       }),
     };
@@ -202,6 +220,45 @@ describe("terminal Work requests", () => {
 
     expect(await answerWorkRequest(empty, approval, "yes")).toContain("refused");
     expect(await answerWorkRequest(refused, approval, "yes")).toContain("already resolved");
+  });
+
+  it("shows the level and plan an approval to leave Plan would authorize", async () => {
+    const plan = [
+      "Edit the report",
+      ...Array.from({ length: 24 }, (_, i) => `Step ${String(i + 1)}`),
+    ];
+    const session: OpenedLocalControlSession = {
+      kind: "opened",
+      windowId: "test",
+      close: async () => undefined,
+      send: async (request) => ({
+        status: 200,
+        body: {
+          requests: request.path.startsWith("/api/work/requests")
+            ? [
+                journaled({
+                  kind: "approval",
+                  action: "Leave Plan",
+                  description: "Start implementing",
+                  levelChange: { to: "auto-accept-edits", plan: plan.join("\n") },
+                }),
+              ]
+            : [{ ...pending, kind: "approval", text: "Start implementing" }],
+        },
+      }),
+    };
+
+    const result = await readWorkRequests(session, threadId);
+    const approval = result.kind === "ready" ? result.requests[0] : undefined;
+    if (approval?.kind !== "approval") throw new Error("Missing Work approval");
+    const text = workLevelChangeText(approval.levelChange);
+
+    expect(text).toContain("Allowing moves this thread to Accept edits.");
+    expect(text).toContain("Plan:\nEdit the report\nStep 1");
+    expect(text).toContain("Step 19");
+    expect(text).not.toContain("Step 20");
+    expect(text).toContain("5 more lines. Read the whole plan in the app before allowing.");
+    expect(workLevelChangeText(undefined)).toBe("");
   });
 
   describe("questionnaires", () => {
@@ -303,7 +360,7 @@ describe("terminal Work requests", () => {
         "Question 2 of 2: Which extras?",
       );
       expect(workQuestionnaireText(questionnaire, first.answers)).toContain(
-        "Type numbers separated by commas, 0 for none, or your own answer",
+        "Type numbers separated by commas, 0 for none, or your own answer (start it with = if it is a number)",
       );
       expect(stepWorkQuestionnaire(questionnaire, first.answers, "1, 2, 3")).toMatchObject({
         kind: "asking",
@@ -312,6 +369,24 @@ describe("terminal Work requests", () => {
       expect(
         stepWorkQuestionnaire(questionnaire, first.answers, "see https://example.com"),
       ).toMatchObject({ kind: "asking", note: expect.stringContaining("links") });
+      expect(stepWorkQuestionnaire(questionnaire, first.answers, "=2")).toMatchObject({
+        kind: "complete",
+        response: {
+          answers: [{}, { questionId: "extras", selectedOptionIds: [], customAnswer: "2" }],
+        },
+      });
+      expect(stepWorkQuestionnaire(questionnaire, first.answers, "= 12")).toMatchObject({
+        kind: "complete",
+        response: { answers: [{}, { customAnswer: "12" }] },
+      });
+      expect(stepWorkQuestionnaire(questionnaire, first.answers, "=")).toMatchObject({
+        kind: "asking",
+        note: expect.any(String),
+      });
+      expect(stepWorkQuestionnaire(questionnaire, [], "=2")).toMatchObject({
+        kind: "asking",
+        answers: [],
+      });
       expect(stepWorkQuestionnaire(questionnaire, first.answers, "0")).toEqual({
         kind: "complete",
         response: {

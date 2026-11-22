@@ -9,6 +9,7 @@ import {
   answerWorkRequest,
   readWorkRequests,
   stepWorkQuestionnaire,
+  workLevelChangeText,
   workQuestionnaireText,
   workRequestId,
   type AgentQuestionnaireAnswer,
@@ -1177,7 +1178,9 @@ class AgentScreen {
           ? ""
           : `Request status unavailable: ${this.#requestReadRefusal}\n`) +
         (request.kind === "approval"
-          ? "y allow · n deny — then Enter"
+          ? (request.levelChange === undefined
+              ? ""
+              : workLevelChangeText(request.levelChange) + "\n") + "y allow · n deny — then Enter"
           : request.questionnaire !== undefined
             ? workQuestionnaireText(request.questionnaire, this.#answersTo(request))
             : request.options

@@ -5,6 +5,8 @@ import {
   type Questionnaire,
   type QuestionnaireQuestion,
   type QuestionnaireResponse,
+  type WorkAccess,
+  type WorkLevelChangeRequest,
 } from "@octant/contracts";
 import { PendingRequest } from "@octant/contracts/pending-requests";
 import { questionAnswerIsAllowed } from "@octant/domain";
@@ -14,12 +16,15 @@ import { refusalMessage } from "./agentHost";
 type PendingWorkRequest = Extract<PendingRequest, { mode: "work"; kind: "approval" | "question" }>;
 /**
  * A pending Work request as the terminal answers it. The pending-request list
- * flattens a questionnaire to its prompt, so a question that carries one also
- * holds the journaled questionnaire, read from the Work request route the
- * app's thread view uses.
+ * flattens a questionnaire to its prompt and an approval to its description,
+ * so the journaled questionnaire and the level an approval would move the
+ * thread to (with the plan it hands over) are read from the Work request route
+ * the app's thread view uses.
  */
 export type AgentWorkRequest =
-  | Extract<PendingWorkRequest, { kind: "approval" }>
+  | (Extract<PendingWorkRequest, { kind: "approval" }> & {
+      readonly levelChange?: WorkLevelChangeRequest;
+    })
   | (Extract<PendingWorkRequest, { kind: "question" }> & {
       readonly questionnaire?: Questionnaire;
     });
@@ -57,12 +62,13 @@ export async function readWorkRequests(
         ? [request]
         : [];
     });
-    const question = pending.find((request) => request.kind === "question");
-    if (question === undefined) return { kind: "ready", requests: pending };
-    // A questionnaire answered as plain text is refused by the host, so a
-    // question whose definition cannot be read is not offered at all.
+    const first = pending[0];
+    if (first === undefined) return { kind: "ready", requests: [] };
+    // A request whose definition cannot be read is not offered at all: a
+    // questionnaire answered as plain text is refused by the host, and an
+    // approval that changes the thread's level must show that level and plan.
     const details = await session.send({
-      path: `/api/work/requests?projectId=${encodeURIComponent(String(question.projectId))}&threadId=${encodeURIComponent(threadId)}`,
+      path: `/api/work/requests?projectId=${encodeURIComponent(String(first.projectId))}&threadId=${encodeURIComponent(threadId)}`,
       method: "GET",
     });
     if (details.status !== 200)
@@ -70,19 +76,21 @@ export async function readWorkRequests(
         kind: "refused",
         message: refusalMessage(details, "Provider requests are unavailable."),
       };
-    const questionnaires = new Map(
-      decodeWorkRequestList(details.body).requests.flatMap((request) =>
-        request.detail.kind === "user-input" && request.detail.questionnaire !== undefined
-          ? [[String(request.requestId), request.detail.questionnaire] as const]
-          : [],
+    const detailById = new Map(
+      decodeWorkRequestList(details.body).requests.map(
+        (request) => [String(request.requestId), request.detail] as const,
       ),
     );
-    const requests = pending.map((request): AgentWorkRequest => {
-      const questionnaire =
-        request.kind === "question" ? questionnaires.get(workRequestId(request)) : undefined;
-      return request.kind === "question" && questionnaire !== undefined
-        ? { ...request, questionnaire }
-        : request;
+    const requests = pending.flatMap((request): ReadonlyArray<AgentWorkRequest> => {
+      const detail = detailById.get(workRequestId(request));
+      if (detail === undefined) return [];
+      if (request.kind === "approval")
+        return detail.kind === "approval" && detail.levelChange !== undefined
+          ? [{ ...request, levelChange: detail.levelChange }]
+          : [request];
+      return detail.kind === "user-input" && detail.questionnaire !== undefined
+        ? [{ ...request, questionnaire: detail.questionnaire }]
+        : [request];
     });
     return { kind: "ready", requests };
   } catch {
@@ -150,7 +158,10 @@ function readQuestionAnswer(
       : `Choose ${min === max ? String(min) : `${String(min)} to ${String(max)}`} options by number`;
   const writes = question.allowCustom !== false;
   const refusal = `${limits}${writes ? ", or type your own answer" : ""}.`;
-  if (/^\d+([\s,]+\d+)*$/.test(text)) {
+  // Bare numbers choose options, so a written answer that is itself a number
+  // starts with "=" (seen in review: "12 copies" typed as 12 was refused).
+  const written = writes && text.startsWith("=") ? text.slice(1).trim() : undefined;
+  if (written === undefined && /^\d+([\s,]+\d+)*$/.test(text)) {
     const numbers = text.split(/[\s,]+/).map(Number);
     const selectedOptionIds =
       numbers.length === 1 && numbers[0] === 0
@@ -166,7 +177,12 @@ function readQuestionAnswer(
       : refusal;
   }
   if (!writes) return refusal;
-  const answer = { questionId: question.id, selectedOptionIds: [], customAnswer: text };
+  if (written !== undefined && written.length === 0) return refusal;
+  const answer = {
+    questionId: question.id,
+    selectedOptionIds: [],
+    customAnswer: written ?? text,
+  };
   try {
     // Work answers carry no path or link; refuse here rather than after the last question.
     decodeWorkQuestionnaireResponse({ version: 1, answers: [answer] });
@@ -235,11 +251,42 @@ export function workQuestionnaireText(
   const hint =
     (question.selection === "single" ? "Type a number" : "Type numbers separated by commas") +
     (min === 0 ? ", 0 for none" : "") +
-    (question.allowCustom !== false ? ", or your own answer" : "") +
+    (question.allowCustom !== false
+      ? ", or your own answer (start it with = if it is a number)"
+      : "") +
     ", then Enter.";
   return [
     `Question ${String(answers.length + 1)} of ${String(questionnaire.questions.length)}: ${question.prompt}`,
     ...options,
     hint,
   ].join("\n");
+}
+
+const WORK_ACCESS_LABEL: Readonly<Record<WorkAccess, string>> = {
+  "ask-first": "Ask first",
+  "auto-accept-edits": "Accept edits",
+  auto: "Auto",
+  "full-access": "Full access",
+  plan: "Plan",
+};
+/** A plan longer than this many lines is cut in the panel, and the panel says so. */
+const PLAN_PANEL_LINES = 20;
+
+/**
+ * What a Work approval that changes the thread's level authorizes, as the
+ * app's approval card shows it: the level the thread moves to and the plan the
+ * agent hands over. Empty for an approval that changes no level.
+ */
+export function workLevelChangeText(levelChange: WorkLevelChangeRequest | undefined): string {
+  if (levelChange === undefined) return "";
+  const lines = [`Allowing moves this thread to ${WORK_ACCESS_LABEL[levelChange.to]}.`];
+  if (levelChange.plan !== undefined) {
+    const plan = levelChange.plan.split("\n");
+    lines.push("Plan:", ...plan.slice(0, PLAN_PANEL_LINES));
+    if (plan.length > PLAN_PANEL_LINES)
+      lines.push(
+        `… ${String(plan.length - PLAN_PANEL_LINES)} more lines. Read the whole plan in the app before allowing.`,
+      );
+  }
+  return lines.join("\n");
 }

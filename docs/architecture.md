@@ -11337,11 +11337,14 @@ the model at another size.
   version, the command the transcript card sends. Line mode prompts for it and
   closes the prompt with a note when the app answers first; the terminal UI
   shows it in its question panel. Work and Code questions still come from the
-  harness session. A Work question that carries a questionnaire is read from
-  `/api/work/requests`, because the pending-request list flattens it to its
-  prompt. The terminal asks its questions in turn and submits the whole
-  response with `resolve-work-request`
+  harness session. The full screen reads each pending Work request's detail
+  from `/api/work/requests`, because the pending-request list flattens a
+  questionnaire to its prompt and drops an approval's level change and plan. It
+  asks a questionnaire's questions in turn and submits the whole response with
+  `resolve-work-request`, and shows the level and plan before a level-changing
+  approval is answered
   ([Workspace: inline questionnaires](design/workspace.md#inline-questionnaires)).
+  Line mode does not show Work provider requests.
   A terminal whose stdin has ended denies the
   ask instead of leaving the turn waiting. The thread's helper agents are read through the
   Agents Center list filtered to the thread (`/api/agent-runs/center`) and a
