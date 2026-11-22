@@ -65,7 +65,9 @@ it("reads ordinary provider approvals and questions, and answers approvals once 
         : { status: 200, body: { kind: "provider-turn-state", state: "running" } };
     },
   };
-  const requests = await readCodeRequests(session, threadId);
+  const result = await readCodeRequests(session, threadId);
+  if (result.kind !== "ready") throw new Error("Code requests were unavailable");
+  const requests = result.requests;
   expect(requests.map((request) => request.kind)).toEqual(["approval", "question"]);
   const approval = requests[0];
   if (approval === undefined) throw new Error("Missing approval");
@@ -91,7 +93,7 @@ it("reads ordinary provider approvals and questions, and answers approvals once 
   });
 });
 
-it("returns an empty Code request list and refuses unavailable or malformed responses", async () => {
+it("keeps unavailable Code requests distinct from an empty list", async () => {
   const empty: OpenedLocalControlSession = {
     kind: "opened",
     windowId: "test",
@@ -111,13 +113,27 @@ it("returns an empty Code request list and refuses unavailable or malformed resp
     send: async () => ({ status: 200, body: null }),
   };
 
-  expect(await readCodeRequests(empty, threadId)).toEqual([]);
-  await expect(readCodeRequests(unavailable, threadId)).rejects.toThrow(
-    "Provider requests are unavailable.",
-  );
-  await expect(readCodeRequests(malformed, threadId)).rejects.toThrow(
-    "Invalid provider request list.",
-  );
+  expect(await readCodeRequests(empty, threadId)).toEqual({ kind: "ready", requests: [] });
+  expect(await readCodeRequests(unavailable, threadId)).toMatchObject({
+    kind: "refused",
+    message: expect.any(String),
+  });
+  expect(await readCodeRequests(malformed, threadId)).toEqual({
+    kind: "refused",
+    message: "Provider requests are unavailable.",
+  });
+  const networkFailure: OpenedLocalControlSession = {
+    kind: "opened",
+    windowId: "test",
+    close: async () => {},
+    send: async () => {
+      throw new Error("network unavailable");
+    },
+  };
+  expect(await readCodeRequests(networkFailure, threadId)).toEqual({
+    kind: "refused",
+    message: "Provider requests are unavailable.",
+  });
 });
 
 it("reports a missing Code answer response instead of treating it as success", async () => {
@@ -138,7 +154,9 @@ it("reports a missing Code answer response instead of treating it as success", a
       },
     }),
   };
-  const approval = (await readCodeRequests(listing, threadId))[0];
+  const result = await readCodeRequests(listing, threadId);
+  if (result.kind !== "ready") throw new Error("Code requests were unavailable");
+  const approval = result.requests[0];
   if (approval?.kind !== "approval") throw new Error("Missing Code approval");
   const session: OpenedLocalControlSession = {
     kind: "opened",

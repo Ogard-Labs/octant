@@ -51,7 +51,9 @@ describe("terminal Work requests", () => {
       }),
     };
 
-    const requests = await readWorkRequests(session, threadId);
+    const result = await readWorkRequests(session, threadId);
+    if (result.kind !== "ready") throw new Error("Work requests were unavailable");
+    const requests = result.requests;
 
     expect(requests.map((request) => request.kind)).toEqual(["approval", "question"]);
   });
@@ -64,10 +66,10 @@ describe("terminal Work requests", () => {
       send: async () => ({ status: 200, body: { requests: [] } }),
     };
 
-    expect(await readWorkRequests(session, threadId)).toEqual([]);
+    expect(await readWorkRequests(session, threadId)).toEqual({ kind: "ready", requests: [] });
   });
 
-  it("rejects unavailable or malformed pending-request responses", async () => {
+  it("keeps unavailable or malformed pending-request responses distinct from empty", async () => {
     const unavailable: OpenedLocalControlSession = {
       kind: "opened",
       windowId: "test",
@@ -81,12 +83,26 @@ describe("terminal Work requests", () => {
       send: async () => ({ status: 200, body: null }),
     };
 
-    await expect(readWorkRequests(unavailable, threadId)).rejects.toThrow(
-      "Provider requests are unavailable.",
-    );
-    await expect(readWorkRequests(malformed, threadId)).rejects.toThrow(
-      "Invalid provider request list.",
-    );
+    expect(await readWorkRequests(unavailable, threadId)).toMatchObject({
+      kind: "refused",
+      message: expect.any(String),
+    });
+    expect(await readWorkRequests(malformed, threadId)).toEqual({
+      kind: "refused",
+      message: "Provider requests are unavailable.",
+    });
+    const networkFailure: OpenedLocalControlSession = {
+      kind: "opened",
+      windowId: "test",
+      close: async () => undefined,
+      send: async () => {
+        throw new Error("network unavailable");
+      },
+    };
+    expect(await readWorkRequests(networkFailure, threadId)).toEqual({
+      kind: "refused",
+      message: "Provider requests are unavailable.",
+    });
   });
 
   it("answers approvals and selects question options through the existing Work route", async () => {
@@ -113,7 +129,9 @@ describe("terminal Work requests", () => {
         return { status: 200, body: { kind: "work-request-resolved" } };
       },
     };
-    const requests = await readWorkRequests(session, threadId);
+    const result = await readWorkRequests(session, threadId);
+    if (result.kind !== "ready") throw new Error("Work requests were unavailable");
+    const requests = result.requests;
     const approval = requests[0];
     const question = requests[1];
     if (approval?.kind !== "approval" || question?.kind !== "question")
@@ -153,7 +171,9 @@ describe("terminal Work requests", () => {
         },
       }),
     };
-    const approval = (await readWorkRequests(listing, threadId))[0];
+    const result = await readWorkRequests(listing, threadId);
+    if (result.kind !== "ready") throw new Error("Work requests were unavailable");
+    const approval = result.requests[0];
     if (approval?.kind !== "approval") throw new Error("Missing Work approval");
     const empty: OpenedLocalControlSession = {
       kind: "opened",

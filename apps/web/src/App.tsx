@@ -4001,10 +4001,6 @@ function LaunchedShell(
         defaultPermissionPersistence: settings.defaultPermissionPersistence,
         defaultModel: selection,
       });
-      if (saved) {
-        setCodeDraftProviderInstanceId(selection.providerInstanceId);
-        setCodeDraftModelId(selection.modelId);
-      }
       return saved;
     },
     [workSettings, codeController],

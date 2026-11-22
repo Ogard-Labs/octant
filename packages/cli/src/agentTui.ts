@@ -213,6 +213,7 @@ class AgentScreen {
   #refreshSequence = 0;
   #lastAskId: string | undefined;
   #staleAnswer = false;
+  #requestReadRefusal: string | undefined;
   #note = "";
   #drawn = "";
   #streamingStructure = "";
@@ -532,10 +533,10 @@ class AgentScreen {
       listAgentSiteApprovals(this.#input.session, this.#port.mode, this.#threadId).catch(() => []),
       readingMode === "code"
         ? readCodeRequests(this.#input.session, readingThreadId)
-        : Promise.resolve([]),
+        : Promise.resolve({ kind: "ready", requests: [] } as const),
       readingMode === "work"
         ? readWorkRequests(this.#input.session, readingThreadId)
-        : Promise.resolve([]),
+        : Promise.resolve({ kind: "ready", requests: [] } as const),
     ]);
     let navigationFailed = false;
     const navigation = await listAgentNavigation(this.#input.session, readingMode).catch(() => {
@@ -582,8 +583,20 @@ class AgentScreen {
     this.#thread = thread;
     this.#session = session === "unavailable" ? undefined : session;
     this.#siteApproval = sites[0];
-    this.#codeRequest = codeRequests[0];
-    this.#workRequest = workRequests[0];
+    const refusedRequestRead =
+      codeRequests.kind === "refused"
+        ? codeRequests
+        : workRequests.kind === "refused"
+          ? workRequests
+          : undefined;
+    this.#requestReadRefusal = refusedRequestRead?.message;
+    if (refusedRequestRead === undefined) {
+      this.#codeRequest = codeRequests.kind === "ready" ? codeRequests.requests[0] : undefined;
+      this.#workRequest = workRequests.kind === "ready" ? workRequests.requests[0] : undefined;
+      if (this.#note.startsWith("Provider requests are unavailable: ")) this.#note = "";
+    } else {
+      this.#note = `Provider requests are unavailable: ${refusedRequestRead.message}`;
+    }
     const running = isAgentSnapshotRunning(thread);
     if (this.#wasRunning && !running && this.#input.quiet !== true) {
       const outcome = thread?.turns.at(-1)?.outcome ?? "ended";
@@ -723,15 +736,20 @@ class AgentScreen {
   }
 
   async #switchThread(threadId: string, mode: OctantMode = "chat"): Promise<void> {
-    this.#diff = undefined;
-    this.#checkoutChanges = undefined;
-    this.#checkoutChangesReadAt = undefined;
     const opened = await openAgentThreadById(this.#input.session, threadId);
     if (opened.kind === "refused") {
       this.#note = opened.message;
       this.#draw();
       return;
     }
+    if (this.#lastAskId !== undefined || this.#staleAnswer) this.#composer.setText("");
+    this.#diff = undefined;
+    this.#checkoutChanges = undefined;
+    this.#checkoutChangesReadAt = undefined;
+    this.#requestReadRefusal = undefined;
+    this.#codeRequest = undefined;
+    this.#workRequest = undefined;
+    this.#hostTicks = undefined;
     mode = opened.mode;
     this.#threadId = threadId;
     this.#mode = mode;
@@ -904,8 +922,8 @@ class AgentScreen {
       "",
       "Current checkout changes",
       this.#checkoutChangesReadAt === undefined
-        ? "No cached snapshot; run /diff to refresh."
-        : "Cached snapshot from /diff · " +
+        ? "No cached snapshot; open /files or /diff to refresh."
+        : "Cached checkout snapshot · " +
           Math.floor((Date.now() - this.#checkoutChangesReadAt) / 1000) +
           "s ago",
       ...(this.#checkoutChanges?.kind === "ready"
@@ -917,6 +935,9 @@ class AgentScreen {
             ...(this.#checkoutChanges.truncated ? ["Truncated"] : []),
           ]
         : [this.#checkoutChanges?.kind === "refused" ? this.#checkoutChanges.message : ""]),
+      this.#requestReadRefusal === undefined
+        ? ""
+        : `Requests unavailable: ${this.#requestReadRefusal}`,
       "/files lists files · /diff reviews",
       "",
       "/model changes model",
@@ -1099,6 +1120,9 @@ class AgentScreen {
       this.#panelText.content =
         request.text +
         "\n" +
+        (this.#requestReadRefusal === undefined
+          ? ""
+          : `Request status unavailable: ${this.#requestReadRefusal}\n`) +
         (request.kind === "approval"
           ? "y allow · n deny — then Enter"
           : request.options
@@ -1112,6 +1136,9 @@ class AgentScreen {
       this.#panelText.content =
         request.text +
         "\n" +
+        (this.#requestReadRefusal === undefined
+          ? ""
+          : `Request status unavailable: ${this.#requestReadRefusal}\n`) +
         (request.kind === "approval"
           ? "y allow once · n deny — then Enter"
           : request.options.map((option, index) => `${index + 1}. ${option.label}`).join("\n") +
@@ -1127,10 +1154,16 @@ class AgentScreen {
             ]
           : [];
       this.#panelText.content =
-        paths.length === 0
-          ? "No changed files reported yet."
-          : paths.map((path, index) => `${index + 1}. ${path}`).join("\n") +
-            "\nType a number and Enter to review the file.";
+        this.#checkoutChanges?.kind === "refused"
+          ? this.#checkoutChanges.message
+          : paths.length === 0
+            ? "No changed files reported yet."
+            : paths.map((path, index) => `${index + 1}. ${path}`).join("\n") +
+              "\nType a number and Enter to review the file.";
+      this.#panel.visible = true;
+    } else if (this.#requestReadRefusal !== undefined) {
+      this.#panel.title = " Requests unavailable ";
+      this.#panelText.content = this.#requestReadRefusal;
       this.#panel.visible = true;
     } else if (this.#listing === "palette") {
       this.#panel.title = " Command palette ";
@@ -1508,7 +1541,7 @@ class AgentScreen {
         node: import("@opentui/core").TextRenderable;
       }[] = [];
       const update = (source: string) => {
-        const lines = source.split("\n");
+        const lines = terminalMarkdownTables(source).split("\n");
         let fence = false;
         for (let start = 0, index = 0; start < lines.length; start += 32, index++) {
           const part = lines.slice(start, start + 32);
@@ -1608,6 +1641,16 @@ class AgentScreen {
 
   async #submit(): Promise<void> {
     const entered = this.#composer.plainText.trim();
+    if (
+      this.#requestReadRefusal !== undefined &&
+      this.#lastAskId !== undefined &&
+      entered.length > 0 &&
+      !entered.startsWith("/")
+    ) {
+      this.#note = `Provider requests are unavailable: ${this.#requestReadRefusal}`;
+      this.#draw();
+      return;
+    }
     const text =
       this.#listing === "files" && /^\d+$/.test(entered)
         ? `/diff ${entered}`
@@ -1663,7 +1706,36 @@ class AgentScreen {
       return;
     }
     if (text === "/files") {
-      this.#listing = this.#listing === "files" ? undefined : "files";
+      if (this.#listing === "files") this.#listing = undefined;
+      else {
+        this.#listing = "files";
+        const threadId = this.#threadId;
+        const checkoutId = this.#thread?.checkoutId;
+        if (this.#thread?.mode !== "code" || checkoutId === undefined)
+          this.#note = "Checkout files are available on Code threads.";
+        else if (
+          this.#session?.approvals?.some((entry) => entry.status === "pending") ||
+          this.#session?.questions.some((entry) => entry.status === "pending") ||
+          this.#siteApproval !== undefined ||
+          this.#codeRequest !== undefined ||
+          this.#workRequest !== undefined
+        )
+          this.#note = "Answer the pending request before opening checkout files.";
+        else {
+          this.#note = "";
+          this.#checkoutChanges = undefined;
+          this.#checkoutChangesReadAt = undefined;
+          const observed = await readAgentDiff(this.#input.session, threadId, checkoutId);
+          if (
+            threadId === this.#threadId &&
+            String(checkoutId) === String(this.#thread?.checkoutId)
+          ) {
+            this.#checkoutChanges = observed;
+            this.#checkoutChangesReadAt = observed.kind === "ready" ? Date.now() : undefined;
+            if (observed.kind === "refused") this.#note = observed.message;
+          }
+        }
+      }
       this.#draw();
       return;
     }
@@ -1690,12 +1762,13 @@ class AgentScreen {
               ]
             : [];
         const path = /^\d+$/.test(argument) ? listed[Number(argument) - 1] : argument;
-        const observed = await readAgentDiff(
-          this.#input.session,
-          threadId,
-          this.#thread.checkoutId,
-        );
-        if (threadId === this.#threadId && observed.kind === "ready") {
+        const checkoutId = this.#thread.checkoutId;
+        const observed = await readAgentDiff(this.#input.session, threadId, checkoutId);
+        if (
+          threadId === this.#threadId &&
+          String(checkoutId) === String(this.#thread?.checkoutId) &&
+          observed.kind === "ready"
+        ) {
           this.#checkoutChanges = observed;
           this.#checkoutChangesReadAt = Date.now();
         }

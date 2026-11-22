@@ -8,6 +8,10 @@ export type AgentCodeRequest = Extract<
   PendingRequest,
   { mode: "code"; kind: "approval" | "question" }
 >;
+export type AgentCodeRequestRead =
+  | { readonly kind: "ready"; readonly requests: readonly AgentCodeRequest[] }
+  | { readonly kind: "refused"; readonly message: string };
+
 export function codeRequestId(request: AgentCodeRequest): string {
   return request.kind === "approval"
     ? String(request.answer.approvalId)
@@ -16,23 +20,33 @@ export function codeRequestId(request: AgentCodeRequest): string {
 export async function readCodeRequests(
   session: OpenedLocalControlSession,
   threadId: string,
-): Promise<readonly AgentCodeRequest[]> {
-  const response = await session.send({ path: "/api/pending-requests", method: "GET" });
-  if (response.status !== 200) throw new Error("Provider requests are unavailable.");
-  const rows =
-    typeof response.body === "object" && response.body !== null && "requests" in response.body
-      ? response.body.requests
-      : undefined;
-  if (!Array.isArray(rows)) throw new Error("Invalid provider request list.");
-  return rows.flatMap((row: unknown) => {
-    const request = decodeHostAnswer(PendingRequest)(row);
-    return request.mode === "code" &&
-      String(request.threadId) === threadId &&
-      (request.kind === "question" ||
-        (request.kind === "approval" && request.browserOrigin === undefined))
-      ? [request]
-      : [];
-  });
+): Promise<AgentCodeRequestRead> {
+  try {
+    const response = await session.send({ path: "/api/pending-requests", method: "GET" });
+    if (response.status !== 200)
+      return {
+        kind: "refused",
+        message: refusalMessage(response, "Provider requests are unavailable."),
+      };
+    const rows =
+      typeof response.body === "object" && response.body !== null && "requests" in response.body
+        ? response.body.requests
+        : undefined;
+    if (!Array.isArray(rows))
+      return { kind: "refused", message: "Provider requests are unavailable." };
+    const requests = rows.flatMap((row: unknown) => {
+      const request = decodeHostAnswer(PendingRequest)(row);
+      return request.mode === "code" &&
+        String(request.threadId) === threadId &&
+        (request.kind === "question" ||
+          (request.kind === "approval" && request.browserOrigin === undefined))
+        ? [request]
+        : [];
+    });
+    return { kind: "ready", requests };
+  } catch {
+    return { kind: "refused", message: "Provider requests are unavailable." };
+  }
 }
 export async function answerCodeRequest(
   session: OpenedLocalControlSession,

@@ -22,6 +22,7 @@ const thread = {
 };
 let approvalPending = false;
 let decisions = 0;
+let refuseChatThreadOpen: string | undefined;
 const approval = {
   id: "70000000-0000-4000-8000-000000000001",
   toolName: "bash",
@@ -85,6 +86,8 @@ const session = {
       };
     if (path.startsWith("/api/chat/threads/")) {
       const openedId = path.slice("/api/chat/threads/".length);
+      if (openedId === refuseChatThreadOpen)
+        return { status: 403, body: { message: "Thread open refused." } };
       return {
         status: 200,
         body: {
@@ -116,6 +119,7 @@ const session = {
               updatedAt: now,
               lastSequence: 1,
               followUpOpen: false,
+              awaitingInput: true,
             },
             {
               id: waitingThreadId,
@@ -200,6 +204,11 @@ for (const width of [70, 80, 100, 160]) {
       await test.waitForFrame((next) => next.split("\n", 1)[0]?.includes("Waiting task") === true);
       if (!test.captureCharFrame().includes("unsent text stays here"))
         throw new Error("Ctrl+J replaced the unsent composer text");
+      refuseChatThreadOpen = threadId;
+      test.mockInput.pressKey("j", { ctrl: true });
+      await test.waitForFrame((next) => next.includes("Thread open refused."));
+      if (!test.captureCharFrame().includes("unsent text stays here"))
+        throw new Error("A refused Ctrl+J navigation replaced the unsent composer text");
     }
     test.mockInput.pressCtrlC();
     await running;
@@ -207,6 +216,267 @@ for (const width of [70, 80, 100, 160]) {
   } finally {
     test.renderer.destroy();
   }
+}
+
+const codeThreadId = "66000000-0000-4000-8000-000000000001";
+const waitingCodeThreadId = "66000000-0000-4000-8000-000000000002";
+const codeProjectId = "67000000-0000-4000-8000-000000000001";
+const codeBindingId = "68000000-0000-4000-8000-000000000001";
+const checkoutId = "69000000-0000-4000-8000-000000000001";
+const repositoryId = `repo_${"a".repeat(64)}`;
+const codeCheckout = {
+  id: checkoutId,
+  repositoryId,
+  kind: "existing-worktree",
+  availability: "available",
+  head: { kind: "branch", name: "main", oid: "b".repeat(40) },
+  observedAt: now,
+};
+const codeThread = (id: string, title: string) => ({
+  id,
+  projectId: codeProjectId,
+  bindingRevisionId: codeBindingId,
+  repositoryId,
+  checkoutId,
+  title,
+  lifecycle: "active",
+  providerInstanceId: providerId,
+  modelId: "test-model",
+  executionPolicy: "approval-gated",
+  permissionPersistence: "current-session",
+  deliveryTarget: {
+    branchIntent: "feature/smoke",
+    remoteName: "origin",
+    proposedBaseRepository: "octant/octant",
+    proposedBaseBranch: "main",
+    outcomeKind: "local-implementation",
+    confirmedAt: now,
+  },
+  version: 1,
+  createdAt: now,
+  updatedAt: now,
+});
+const codeThreads = [
+  codeThread(codeThreadId, "Code task A"),
+  codeThread(waitingCodeThreadId, "Code task B"),
+];
+const codeProject = {
+  id: codeProjectId,
+  name: "Terminal smoke",
+  type: "code",
+  lifecycle: "active",
+  pinned: false,
+  rank: "1/2",
+  version: 1,
+  createdAt: now,
+  updatedAt: now,
+  binding: { canonicalRoot: "/home/test/repo" },
+  bindingRevisionId: codeBindingId,
+  codeAccessPersistence: "current-session",
+};
+let pendingCodeRequests = true;
+let requestListUnavailable = false;
+let checkoutReadRefused = false;
+let codeAnswers = 0;
+let otherCodeCommands = 0;
+const codeRequest = (id: string, title: string) => ({
+  mode: "code",
+  projectId: codeProjectId,
+  threadId: id,
+  threadTitle: title,
+  requestedAt: now,
+  kind: "approval",
+  text: `Approve ${title}?`,
+  answer: {
+    threadId: id,
+    checkoutId,
+    approvalId:
+      id === codeThreadId
+        ? "6a000000-0000-4000-8000-000000000001"
+        : "6a000000-0000-4000-8000-000000000002",
+  },
+});
+const codeSession = {
+  kind: "opened" as const,
+  windowId: "test",
+  workspace: "none" as const,
+  close: async () => {},
+  send: async (request: { path: string; method?: string; body?: unknown }) => {
+    if (request.path === "/api/projects/bootstrap")
+      return {
+        status: 200,
+        body: { active: [codeProject], archived: [], availability: [], memory: [] },
+      };
+    if (request.path === "/api/code/bootstrap")
+      return {
+        status: 200,
+        body: {
+          settings: {
+            defaultExecutionPolicy: "approval-gated",
+            defaultPermissionPersistence: "current-session",
+            version: 1,
+            updatedAt: now,
+          },
+          threads: codeThreads,
+          checkouts: [codeCheckout],
+        },
+      };
+    if (request.path === "/api/code/navigation")
+      return {
+        status: 200,
+        body: {
+          threads: codeThreads,
+          runtime: pendingCodeRequests
+            ? codeThreads.map((entry) => ({
+                threadId: entry.id,
+                executing: false,
+                awaitingInput: true,
+              }))
+            : [],
+        },
+      };
+    if (request.path === "/api/code/board") return { status: 404, body: {} };
+    if (request.path === "/api/pending-requests")
+      return requestListUnavailable
+        ? { status: 503, body: {} }
+        : {
+            status: 200,
+            body: {
+              requests: pendingCodeRequests
+                ? codeThreads.map((entry) => codeRequest(entry.id, entry.title))
+                : [],
+            },
+          };
+    if (request.path.startsWith("/api/native-harness/sessions/"))
+      return { status: 200, body: { view: null } };
+    if (request.path.startsWith("/api/code/threads/") && !request.path.includes("/conversation"))
+      return {
+        status: 200,
+        body: {
+          thread: codeThreads.find((entry) => request.path.endsWith(entry.id)),
+          checkout: codeCheckout,
+          lastSequence: 1,
+        },
+      };
+    if (request.path.includes("/conversation/window"))
+      return {
+        status: 200,
+        body: {
+          version: 1,
+          threadId: request.path.includes(waitingCodeThreadId) ? waitingCodeThreadId : codeThreadId,
+          turns: [],
+          hasEarlier: false,
+          hasLater: false,
+        },
+      };
+    if (request.path === "/api/code/commands") {
+      const body = request.body as { kind?: string; operationId?: string; gitOperationId?: string };
+      if (body.kind === "answer-provider-approval") {
+        codeAnswers++;
+        pendingCodeRequests = false;
+        return { status: 200, body: { kind: "provider-turn-state", state: "running" } };
+      }
+      if (body.kind !== "observe-git") otherCodeCommands++;
+      if (checkoutReadRefused)
+        return { status: 403, body: { message: "Checkout snapshot refused." } };
+      return {
+        status: 200,
+        body: {
+          kind: "git-observed",
+          operationId: body.operationId,
+          gitOperationId: body.gitOperationId,
+          head: { kind: "branch", name: "main", oid: "b".repeat(40) },
+          stateToken: "a".repeat(64),
+          status: [],
+          changedPaths: ["src/a.ts"],
+          diff: {
+            contentId: "6b000000-0000-4000-8000-000000000001",
+            digest: "c".repeat(64),
+            byteLength: 36,
+            truncated: false,
+          },
+          remotes: [],
+          upstream: null,
+          worktrees: [],
+        },
+      };
+    }
+    if (request.path === "/api/code/evidence/batch") {
+      const body = request.body as {
+        threadId: string;
+        items: ReadonlyArray<{ operationId: string; contentId: string }>;
+      };
+      return {
+        status: 200,
+        body: {
+          threadId: body.threadId,
+          items: body.items.map((item) => ({
+            ...item,
+            text: "diff --git a/src/a.ts b/src/a.ts\n@@ -1 +1 @@\n-old\n+new\n",
+          })),
+        },
+      };
+    }
+    return { status: 404, body: {} };
+  },
+};
+const codeRender = await createTestRenderer({ width: 120, height: 30 });
+try {
+  const screen = mountAgentScreen(tui, codeRender.renderer, paletteFor(undefined, "dark"), {
+    session: codeSession,
+    threadId: codeThreadId,
+    mode: "code",
+    quiet: true,
+  });
+  await screen.refresh();
+  await codeRender.renderOnce();
+  const running = screen.run();
+  await codeRender.waitForFrame((frame) => frame.includes("Approve Code task A?"));
+  await codeRender.mockInput.typeText("y");
+  codeRender.mockInput.pressKey("j", { ctrl: true });
+  await codeRender.waitForFrame(
+    (frame) => frame.split("\n", 1)[0]?.includes("Code task B") === true,
+  );
+  codeRender.mockInput.pressEnter();
+  await codeRender.renderOnce();
+  if (codeAnswers !== 0) throw new Error("Switching threads submitted a provider approval.");
+
+  pendingCodeRequests = false;
+  await screen.refresh();
+  await codeRender.mockInput.typeText("/files");
+  codeRender.mockInput.pressEnter();
+  await codeRender.waitForFrame((frame) => frame.includes("src/a.ts"));
+  codeRender.mockInput.typeText("/files");
+  codeRender.mockInput.pressEnter();
+  checkoutReadRefused = true;
+  await codeRender.mockInput.typeText("/files");
+  codeRender.mockInput.pressEnter();
+  await codeRender.waitForFrame((frame) => frame.includes("Checkout snapshot refused."));
+
+  checkoutReadRefused = false;
+  pendingCodeRequests = true;
+  requestListUnavailable = false;
+  await screen.refresh();
+  await codeRender.mockInput.typeText("y");
+  requestListUnavailable = true;
+  await screen.refresh();
+  codeRender.mockInput.pressEnter();
+  await codeRender.waitForFrame((frame) => frame.includes("Provider requests are unavailable"));
+  if (codeAnswers !== 0 || otherCodeCommands !== 0)
+    throw new Error("A stale approval was submitted after request refresh failed.");
+  requestListUnavailable = false;
+  pendingCodeRequests = false;
+  await screen.refresh();
+  codeRender.mockInput.pressEnter();
+  await codeRender.waitForFrame((frame) =>
+    frame.includes("request changed or was answered elsewhere"),
+  );
+  if (codeAnswers !== 0 || otherCodeCommands !== 0)
+    throw new Error("A failed request read converted its draft into a prompt.");
+  codeRender.mockInput.pressCtrlC();
+  await running;
+} finally {
+  codeRender.renderer.destroy();
 }
 
 // Measure a growing 2,000-line reply across ordinary, block, newline, and table boundaries.
@@ -273,6 +543,38 @@ const streamSession = {
     };
   },
 };
+const initialReply = reply;
+reply = [
+  ...Array.from({ length: 31 }, (_, index) => `Before table ${index + 1}`),
+  "| State | Change |",
+  "| --- | --- |",
+  "| ready | updated |",
+  "",
+  "```ts",
+  'const pipe = "|";',
+  "```",
+].join("\n");
+replyRef.byteLength = reply.length;
+const tableRender = await createTestRenderer({ width: 120, height: 45 });
+try {
+  const screen = mountAgentScreen(tui, tableRender.renderer, paletteFor(undefined, "dark"), {
+    session: streamSession,
+    threadId,
+    quiet: true,
+  });
+  await screen.refresh();
+  await tableRender.renderOnce();
+  const frame = tableRender.captureCharFrame();
+  if (!frame.includes("┌") || !frame.includes("│ ready"))
+    throw new Error("A streaming table crossing the 32-line boundary was not formatted.");
+  if (!frame.includes('const pipe = "|";') || frame.includes("| --- |"))
+    throw new Error("Fenced streaming source was not kept literal.");
+  console.log("Rendered streaming table boundary and fenced source");
+} finally {
+  tableRender.renderer.destroy();
+}
+reply = initialReply;
+replyRef.byteLength = reply.length;
 const perf = await createTestRenderer({ width: 160, height: 45 });
 try {
   const screen = mountAgentScreen(tui, perf.renderer, paletteFor(undefined, "dark"), {
