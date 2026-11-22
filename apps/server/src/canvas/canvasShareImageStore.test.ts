@@ -114,22 +114,24 @@ describe("CanvasShareImageStore", () => {
   it("keeps a share that arrives while the startup reconcile runs", async () => {
     directory = mkdtempSync(join(tmpdir(), "octant-share-image-store-"));
     const store = new CanvasShareImageStore(directory);
-    // Nothing is recorded yet at start, so the reconcile names nothing.
+    const resolved = new Map([
+      [
+        "generated-image:x",
+        {
+          mediaType: "image/png" as const,
+          data: bytes.toString("base64"),
+          byteLength: bytes.byteLength,
+          sha256,
+        },
+      ],
+    ]);
+    // Bytes an earlier run left unrecorded are on disk when the host starts.
+    await store.keepResolved(snapshotId, resolved);
+    // The reconcile names nothing yet; a share of the same image arrives while
+    // it runs. Were the keep not to wait, it would find the old copy, keep
+    // nothing, and the reconcile would then remove the copy it relied on.
     const reconciling = store.reconcile(() => false);
-    const keeping = store.keepResolved(
-      snapshotId,
-      new Map([
-        [
-          "generated-image:x",
-          {
-            mediaType: "image/png" as const,
-            data: bytes.toString("base64"),
-            byteLength: bytes.byteLength,
-            sha256,
-          },
-        ],
-      ]),
-    );
+    const keeping = store.keepResolved(snapshotId, resolved);
     await Promise.all([reconciling, keeping]);
     const served = await store.withBytes(snapshotId, snapshotDocument());
     expect(served.images).toEqual([{ ...entry, data: bytes.toString("base64") }]);

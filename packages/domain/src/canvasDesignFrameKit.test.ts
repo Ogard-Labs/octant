@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { DESIGN_FRAME_THEME_TOKENS, designBrandDeclarations } from "./canvasDesignFrameKit";
+import {
+  DESIGN_FRAME_THEME_TOKENS,
+  designBrandDeclarations,
+  withDrawnDesignAssetAddresses,
+} from "./canvasDesignFrameKit";
 
 describe("brand declarations", () => {
   it("writes each brand token as a custom property and on the kit roles it names", () => {
@@ -39,5 +43,51 @@ describe("brand declarations", () => {
     expect(css).not.toContain("x-evil");
     expect(css).not.toContain("}");
     expect(css).toContain("--brand-radius-card: 10px;");
+  });
+});
+
+describe("drawn design asset references", () => {
+  const drawn = (markup: string, language: "html" | "css") => {
+    const ids: string[] = [];
+    withDrawnDesignAssetAddresses(markup, language, (id) => {
+      ids.push(id);
+      return "data:,";
+    });
+    return ids;
+  };
+
+  it("skips references a browser would never draw because they sit in a comment", () => {
+    expect(
+      drawn(
+        [
+          '<!-- <img src="octant-asset:html-comment"> -->',
+          "<div style=/*background:url(octant-asset:unquoted-style)*/color:red></div>",
+          '<div style="color:red; /* background:url(octant-asset:quoted-style) */"></div>',
+          "<style>/* .x { background: url(octant-asset:style-comment) } */</style>",
+          '<script>/* el.src = "octant-asset:script-block" */ // <img src="octant-asset:script-line">\n</script>',
+        ].join(""),
+        "html",
+      ),
+    ).toEqual([]);
+    expect(drawn("/* .x { background: url(octant-asset:old) } */", "css")).toEqual([]);
+  });
+
+  it("draws references after comment markers that are only text or strings", () => {
+    expect(
+      drawn(
+        [
+          '<p>Matches docs/*</p><img src="octant-asset:after-text">',
+          "<style>/* opening marker: <!-- */ .hero { background: url(octant-asset:after-css-comment) }</style>",
+          '<div class="hero" style="background:url(octant-asset:style-value)">Home</div>',
+        ].join(""),
+        "html",
+      ),
+    ).toEqual(["after-text", "after-css-comment", "style-value"]);
+    expect(
+      drawn(
+        '.a::before { content: "/*"; } .b { background: url(octant-asset:after-string) }',
+        "css",
+      ),
+    ).toEqual(["after-string"]);
   });
 });

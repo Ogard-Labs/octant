@@ -3,7 +3,7 @@ import {
   type CanvasStaticExportBlock,
   DESIGN_FRAME_KIT,
   type CanvasShareImage,
-  withDesignAssetAddresses,
+  withDrawnDesignAssetAddresses,
 } from "./shareKit.ts";
 import type { ServiceContext } from "./context.ts";
 import { escapeHtml, shareImageAddress } from "./render.ts";
@@ -197,40 +197,6 @@ class FramePageImageBudget {
   }
 }
 
-const CSS_COMMENT = /(\/\*[\s\S]*?(?:\*\/|$))/;
-const HTML_COMMENT = /(<!--[\s\S]*?(?:-->|$))/;
-
-/**
- * Apply `draw` to the CSS outside its comments. A reference inside a comment
- * is never drawn by the browser, so it keeps its address, which loads
- * nothing, and spends none of the page's image budget.
- */
-function cssOutsideComments(css: string, draw: (code: string) => string): string {
-  return css
-    .split(CSS_COMMENT)
-    .map((part, index) => (index % 2 === 1 ? part : draw(part)))
-    .join("");
-}
-
-/** Apply `draw` to frame markup outside HTML comments and the CSS comments in its styles. */
-function htmlOutsideComments(html: string, draw: (code: string) => string): string {
-  return html
-    .split(HTML_COMMENT)
-    .map((part, index) =>
-      index % 2 === 1
-        ? part
-        : part
-            .split(/(<style\b[^>]*>[\s\S]*?(?:<\/style\s*>|$))/i)
-            .map((piece, inner) => {
-              if (inner % 2 === 0) return draw(piece);
-              const open = /^<style\b[^>]*>/i.exec(piece)?.[0] ?? "";
-              return open + cssOutsideComments(piece.slice(open.length), draw);
-            })
-            .join(""),
-    )
-    .join("");
-}
-
 /**
  * The page for one design's frames, as the app draws them but without the
  * host bridge: a shared page has no host to report to. A static design gets a
@@ -248,8 +214,8 @@ export function renderDesignFramePage(
     new Map((block.assets ?? []).map((asset) => [String(asset.assetId), String(asset.imageRef)])),
     new Map(images.map((image) => [String(image.imageRef), shareImageAddress(image)])),
   );
-  const draw = (markup: string) =>
-    withDesignAssetAddresses(markup, (assetId) => budget.address(assetId));
+  const draw = (markup: string, language: "html" | "css") =>
+    withDrawnDesignAssetAddresses(markup, language, (assetId) => budget.address(assetId));
   const isDocument = block.size === "document";
   const themed = (block.theme ?? (isDocument ? "workspace" : "none")) === "workspace";
   const viewport = block.size === "document" ? undefined : CANVAS_DESIGN_VIEWPORT[block.size];
@@ -257,7 +223,7 @@ export function renderDesignFramePage(
   const frames = block.frames
     .map((frame) => {
       const id = String(frame.frameId);
-      return `<div class="octant-frame" id="${escapeHtml(id)}"${id === first ? " data-start" : ""}>${htmlOutsideComments(frame.html, draw)}</div>`;
+      return `<div class="octant-frame" id="${escapeHtml(id)}"${id === first ? " data-start" : ""}>${draw(frame.html, "html")}</div>`;
     })
     .join("");
   return [
@@ -269,7 +235,7 @@ export function renderDesignFramePage(
     `<style>${isDocument ? DOCUMENT_FRAME_RULES : DEVICE_FRAME_RULES}</style>`,
     themed ? themeStyles() : `<style>${UNTHEMED_PAGE}</style>`,
     // A stylesheet that closes its element would let author text become markup.
-    `<style>${cssOutsideComments(block.styles ?? "", draw).replace(/<\/style/gi, "<\\/style")}</style>`,
+    `<style>${draw(block.styles ?? "", "css").replace(/<\/style/gi, "<\\/style")}</style>`,
     `</head><body>${frames}</body></html>`,
   ].join("");
 }

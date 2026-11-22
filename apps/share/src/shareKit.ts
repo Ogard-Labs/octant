@@ -29,7 +29,10 @@ export {
   type CanvasPublicShareRefusalCode,
   type CanvasPublicShareReportReason,
 } from "@octant/contracts/canvas-public-share";
-export { DESIGN_FRAME_KIT, withDesignAssetAddresses } from "@octant/domain/canvas-design-frame-kit";
+export {
+  DESIGN_FRAME_KIT,
+  withDrawnDesignAssetAddresses,
+} from "@octant/domain/canvas-design-frame-kit";
 export { layoutCanvasBarList } from "@octant/domain/canvas-bar-list-layout";
 export {
   COMPARISON_MATRIX_GLYPH_LABEL,

@@ -730,3 +730,146 @@ export function withDesignAssetAddresses(
     reference.startsWith("octant-asset:") ? address(id) : reference,
   );
 }
+
+/** Half-open [start, end) offsets of the comments a browser ignores in some markup. */
+type CommentRanges = ReadonlyArray<readonly [number, number]>;
+
+/** The end of a quoted string opened at `start`, past its closing quote. */
+function quotedEnd(text: string, start: number, stopAtNewline: boolean): number {
+  const quote = text[start];
+  for (let index = start + 1; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === "\\") index += 1;
+    else if (char === quote) return index + 1;
+    else if (stopAtNewline && char === "\n") return index;
+  }
+  return text.length;
+}
+
+/** Comments in CSS from `start` to `end`: block comments outside strings. */
+function cssComments(text: string, start: number, end: number, into: Array<[number, number]>) {
+  let index = start;
+  while (index < end) {
+    const char = text[index];
+    if (char === '"' || char === "'") {
+      index = Math.min(quotedEnd(text, index, true), end);
+    } else if (char === "/" && text[index + 1] === "*") {
+      const close = text.indexOf("*/", index + 2);
+      const stop = close === -1 || close + 2 > end ? end : close + 2;
+      into.push([index, stop]);
+      index = stop;
+    } else {
+      index += 1;
+    }
+  }
+}
+
+/** Comments in a script from `start` to `end`: block and line comments outside strings. */
+function scriptComments(text: string, start: number, end: number, into: Array<[number, number]>) {
+  let index = start;
+  while (index < end) {
+    const char = text[index];
+    if (char === '"' || char === "'" || char === "`") {
+      index = Math.min(quotedEnd(text, index, char !== "`"), end);
+    } else if (char === "/" && text[index + 1] === "*") {
+      const close = text.indexOf("*/", index + 2);
+      const stop = close === -1 || close + 2 > end ? end : close + 2;
+      into.push([index, stop]);
+      index = stop;
+    } else if (char === "/" && text[index + 1] === "/") {
+      const close = text.indexOf("\n", index + 2);
+      const stop = close === -1 || close > end ? end : close;
+      into.push([index, stop]);
+      index = stop;
+    } else {
+      index += 1;
+    }
+  }
+}
+
+const RAW_TEXT_OPEN = /<(style|script)\b[^>]*>/iy;
+const STYLE_ATTRIBUTE = /(?:^|\s)style\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi;
+
+/**
+ * Where the comments are in a design's frame markup or stylesheet, read the
+ * way a browser reads them: HTML comments in markup, CSS comments in a
+ * stylesheet, a `<style>` element and a `style` attribute (quoted or not),
+ * and script comments in a `<script>` element. A `/*` in a frame's text, or a
+ * `<!--` inside CSS, is not a comment. It is a reading for finding image
+ * references, not a parser: a regular expression literal in a script is read
+ * as code, which can only hide a reference, never invent one.
+ */
+export function designMarkupComments(markup: string, language: "html" | "css"): CommentRanges {
+  const ranges: Array<[number, number]> = [];
+  if (language === "css") {
+    cssComments(markup, 0, markup.length, ranges);
+    return ranges;
+  }
+  let index = 0;
+  while (index < markup.length) {
+    if (markup.startsWith("<!--", index)) {
+      const close = markup.indexOf("-->", index + 4);
+      const stop = close === -1 ? markup.length : close + 3;
+      ranges.push([index, stop]);
+      index = stop;
+      continue;
+    }
+    if (markup[index] !== "<" || !/[A-Za-z]/.test(markup[index + 1] ?? "")) {
+      index += 1;
+      continue;
+    }
+    RAW_TEXT_OPEN.lastIndex = index;
+    const raw = RAW_TEXT_OPEN.exec(markup);
+    // A tag: its end is the first `>` outside a quoted attribute value.
+    let tagEnd = index + 1;
+    while (tagEnd < markup.length && markup[tagEnd] !== ">") {
+      const char = markup[tagEnd];
+      tagEnd =
+        (char === '"' || char === "'") && /=\s*$/.test(markup.slice(index, tagEnd))
+          ? quotedEnd(markup, tagEnd, false)
+          : tagEnd + 1;
+    }
+    tagEnd = Math.min(tagEnd + 1, markup.length);
+    const tag = markup.slice(index, tagEnd);
+    for (const match of tag.matchAll(STYLE_ATTRIBUTE)) {
+      const value = match[1] ?? "";
+      const valueStart = index + (match.index ?? 0) + match[0].length - value.length;
+      // A quoted value's CSS is what lies between its quotes.
+      const quoted = value.startsWith('"') || value.startsWith("'") ? 1 : 0;
+      cssComments(markup, valueStart + quoted, valueStart + value.length - quoted, ranges);
+    }
+    if (raw !== null) {
+      const element = (raw[1] ?? "").toLowerCase();
+      const closing = new RegExp(`</${element}\\s*>`, "ig");
+      closing.lastIndex = tagEnd;
+      const close = closing.exec(markup);
+      const bodyEnd = close === null ? markup.length : close.index;
+      if (element === "style") cssComments(markup, tagEnd, bodyEnd, ranges);
+      else scriptComments(markup, tagEnd, bodyEnd, ranges);
+      index = bodyEnd;
+      continue;
+    }
+    index = tagEnd;
+  }
+  return ranges;
+}
+
+/**
+ * {@link withDesignAssetAddresses} for the references a browser would draw:
+ * a reference inside a comment is left as written, which loads nothing, and
+ * `address` is never asked for it.
+ */
+export function withDrawnDesignAssetAddresses(
+  markup: string,
+  language: "html" | "css",
+  address: (assetId: string) => string,
+): string {
+  if (!/octant-asset:/i.test(markup)) return markup;
+  const comments = designMarkupComments(markup, language);
+  return markup.replace(DESIGN_ASSET_REFERENCE, (reference: string, id: string, offset: number) =>
+    !reference.startsWith("octant-asset:") ||
+    comments.some(([start, end]) => offset >= start && offset < end)
+      ? reference
+      : address(id),
+  );
+}
