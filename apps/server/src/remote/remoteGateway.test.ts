@@ -7,6 +7,10 @@ import {
   type KeyObject,
 } from "node:crypto";
 import { decodeEventActor, type EventActor } from "@octant/contracts";
+import { ReplayCursor } from "@octant/contracts/events";
+import { Schema } from "effect";
+
+const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursor);
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1997,7 +2001,7 @@ describe("RemoteGateway — a paired device's access level and the pause", () =>
       expect((await fetch(signedRequest(privateKey, "4"), lanFacts)).status).toBe(200);
 
       const recorded = journal
-        .replay({ afterSequence: 0, limit: 1_000 })
+        .replay(decodeReplayCursor({ afterSequence: 0, limit: 1_000 }))
         .filter(
           (event) =>
             event.eventName === "remote.device-access-level-changed@1" ||
