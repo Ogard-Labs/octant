@@ -686,6 +686,60 @@ export function memberThreadPage(
   return url.toString();
 }
 
+export type HubIntroducedActDecision =
+  | { readonly status: "allowed" }
+  /** This host is in no hub, so no hub grant speaks for the device. */
+  | { readonly status: "not-in-a-hub" }
+  | {
+      readonly status: "refused";
+      readonly kind:
+        | "removed-from-hub"
+        | "act-not-granted"
+        | "project-not-named"
+        | "hub-project-not-named";
+    };
+
+/**
+ * Whether a device only the hub introduced may act in a Project on this
+ * member: start a thread there, answer its threads' approvals and questions,
+ * or Stop their turns. Only while the member's grant to its hub ticks Act and
+ * names that Project. The grant is read at each request, so unticking Act or
+ * dropping a Project refuses the next one (hub and spokes, "What a
+ * hub-introduced device may do"). A device the member's own person paired
+ * never reaches this rule.
+ */
+export function decideHubIntroducedAct(input: {
+  readonly membership: "none" | "member" | "removed";
+  readonly grant: HubGrant | undefined;
+  readonly projectId: string;
+}): HubIntroducedActDecision {
+  if (input.membership === "none") return { status: "not-in-a-hub" };
+  if (input.membership === "removed" || input.grant === undefined) {
+    return { status: "refused", kind: "removed-from-hub" };
+  }
+  if (!input.grant.items.includes("act")) return { status: "refused", kind: "act-not-granted" };
+  return input.grant.actProjects.some((projectId) => String(projectId) === input.projectId)
+    ? { status: "allowed" }
+    : { status: "refused", kind: "project-not-named" };
+}
+
+/**
+ * On the hub, whether a member's own desktop window, which the hub admitted
+ * because the roster lists it, may act in a Project here: only when the hub's
+ * own Act list names it. The hub has no grant to itself, so its person names
+ * these Projects in the hub settings, and an empty list leaves such a window
+ * nothing to start, answer, or stop here (maintainer decision, 2026-11-21).
+ * Read at each request, like a member's Act item.
+ */
+export function decideHubOwnAct(input: {
+  readonly actProjects: ReadonlyArray<string>;
+  readonly projectId: string;
+}): HubIntroducedActDecision {
+  return input.actProjects.some((projectId) => String(projectId) === input.projectId)
+    ? { status: "allowed" }
+    : { status: "refused", kind: "hub-project-not-named" };
+}
+
 /** The hub grant a spoke starts with: the roster, Introduce, and Owners ticked, the rest off. */
 export function defaultHubGrant(): HubGrant {
   return { items: ["roster", "introduce", "owners"], actProjects: [] };

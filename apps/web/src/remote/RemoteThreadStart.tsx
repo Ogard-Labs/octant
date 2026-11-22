@@ -1,4 +1,5 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
+import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { decodeCodeThread, type CodeThread } from "@octant/contracts/code";
@@ -19,6 +20,7 @@ import {
 import { useState } from "react";
 import { planCodeThreadCreate } from "../code/codeThreadCreate";
 import type { useCodeController } from "../code/useCodeController";
+import { FolderPicker } from "../projects/FolderPicker";
 import { providerGroupsForProject } from "../projects/ProjectProviderPolicySection";
 import { useProjectController } from "../projects/useProjectController";
 import { firstSelectableProviderSelection } from "../providers/firstSelectableProviderSelection";
@@ -27,6 +29,12 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { useWorkSettings } from "../work/useWorkSettings";
+
+/**
+ * The base branch a plain folder's delivery target records. The folder has no
+ * Git, so nothing reads it; the local composer records the same name.
+ */
+const PLAIN_FOLDER_BASE_BRANCH = "development";
 
 /** The mode's Projects a thread can start in now: active, and their folder reachable. */
 function useStartableProjects(client: ProjectClient, mode: "work" | "code") {
@@ -39,7 +47,7 @@ function useStartableProjects(client: ProjectClient, mode: "work" | "code") {
   );
   const [chosenId, setChosenId] = useState<string>();
   const chosen = projects.find((project) => String(project.id) === chosenId) ?? projects[0];
-  return { projects, chosen, choose: setChosenId };
+  return { projects, chosen, choose: setChosenId, controller };
 }
 
 function ProjectChoice(props: {
@@ -155,6 +163,11 @@ export interface RemoteCodeThreadStartProps {
   /** False while the session is stale: the host would not hear the command. */
   readonly connected: boolean;
   readonly onCreated: (thread: CodeThread) => void;
+  /**
+   * That computer's folders, for a new Code Project there. Present only where
+   * the host takes it, from a device its own person paired.
+   */
+  readonly folderBrowse?: Pick<FolderBrowseClient, "browse" | "select">;
 }
 
 /**
@@ -167,11 +180,66 @@ export interface RemoteCodeThreadStartProps {
  */
 export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
   const { controller } = props;
-  const { projects, chosen, choose } = useStartableProjects(props.projectClient, "code");
+  const {
+    projects,
+    chosen,
+    choose,
+    controller: projectActions,
+  } = useStartableProjects(props.projectClient, "code");
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string>();
-  if (projects.length === 0) return null;
+  const [pickingFolder, setPickingFolder] = useState(false);
+  const { folderBrowse } = props;
+  if (projects.length === 0 && folderBrowse === undefined) return null;
+
+  // A folder on that computer becomes a Code Project there: the receipt is
+  // that host's own, so the Project is its local one.
+  const newProject =
+    folderBrowse === undefined ? null : (
+      <>
+        <OctantButton
+          aria-label="New Project from a folder on this computer"
+          disabled={!props.connected || busy}
+          onClick={() => setPickingFolder(true)}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          New Project from a folder…
+        </OctantButton>
+        {pickingFolder ? (
+          <FolderPicker
+            client={folderBrowse}
+            hostId={LOCAL_HOST_ID}
+            mode="code"
+            onCancel={() => setPickingFolder(false)}
+            onSelect={(receiptId, displayName, selection) => {
+              setPickingFolder(false);
+              void projectActions
+                .create("code", displayName, receiptId, LOCAL_HOST_ID, selection?.initializeGit)
+                .then((projectId) => {
+                  if (projectId === undefined) {
+                    setMessage(`The computer could not make ${displayName} a Code Project.`);
+                    return;
+                  }
+                  choose(String(projectId));
+                });
+            }}
+            showGitInit
+            title="Choose a folder on this computer"
+          />
+        ) : null}
+      </>
+    );
+  if (projects.length === 0) {
+    return (
+      <div className="flex flex-col gap-1">
+        {newProject}
+        {message === undefined ? null : <OctantAlert tone="warning">{message}</OctantAlert>}
+      </div>
+    );
+  }
 
   const start = async (): Promise<string | undefined> => {
     const text = prompt.trim();
@@ -188,29 +256,37 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
         `The host could not prepare a checkout for ${chosen.name}.`
       );
     }
-    if (prepared.checkout.head.kind !== "branch") {
+    // A host that does not require Git admits a plain folder: it has no branch
+    // and no remotes, so it starts in that folder itself, as a local start does.
+    const plainFolder = prepared.checkout.kind === "plain-folder";
+    if (!plainFolder && prepared.checkout.head.kind !== "branch") {
       return "Create or select a branch before starting a Code thread.";
     }
     // The delivery target is read by the host afterwards: the base branch for
     // a pull-request draft's diff, the repository for GitHub reads. So each
     // part is what the host says of this repository, and where the host
     // cannot say, the thread is not started on an assumption.
-    const facts = await controller.execute({
-      kind: "get-worktree-remote-facts",
-      projectId: chosen.id,
-    });
-    if (facts?.kind !== "worktree-remote-facts-retrieved") {
+    const remote = plainFolder
+      ? ({ status: "unavailable", reason: "no-remote" } as const)
+      : await (async () => {
+          const facts = await controller.execute({
+            kind: "get-worktree-remote-facts",
+            projectId: chosen.id,
+          });
+          if (facts?.kind !== "worktree-remote-facts-retrieved") return undefined;
+          const { remotes, upstreamRemote, defaultRemote } = facts.facts;
+          return selectWorktreeRemote({
+            remotes,
+            ...(upstreamRemote === undefined ? {} : { upstreamRemote }),
+            ...(defaultRemote === undefined ? {} : { defaultRemote }),
+          });
+        })();
+    if (remote === undefined) {
       return (
         controller.lastExecuteError.current?.message ??
         `The host could not read the remotes of ${chosen.name}.`
       );
     }
-    const { remotes, upstreamRemote, defaultRemote } = facts.facts;
-    const remote = selectWorktreeRemote({
-      remotes,
-      ...(upstreamRemote === undefined ? {} : { upstreamRemote }),
-      ...(defaultRemote === undefined ? {} : { defaultRemote }),
-    });
     if (remote.status === "unavailable" && remote.reason === "ambiguous") {
       return `${chosen.name} has more than one remote and none is its default. Start this thread at the host, where the remote can be chosen.`;
     }
@@ -243,7 +319,10 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
     }
     const timestamp = new Date().toISOString();
     const threadId = globalThis.crypto.randomUUID();
-    const baseBranch = String(prepared.checkout.head.name);
+    const baseBranch =
+      prepared.checkout.head.kind === "branch"
+        ? String(prepared.checkout.head.name)
+        : PLAIN_FOLDER_BASE_BRANCH;
     // The same planner a local start screen uses, so a Project whose default is
     // a dedicated worktree gets one here too instead of the current checkout.
     const plan = planCodeThreadCreate({
@@ -252,7 +331,10 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
         executionPolicy: access.executionPolicy,
         permissionPersistence: currentSettings.defaultPermissionPersistence,
         ...(access.autoApprove ? { autoApprove: true } : {}),
-        workspace: currentProject.newThreadWorkspace ?? DEFAULT_CODE_NEW_THREAD_WORKSPACE,
+        // A worktree needs a repository, so a plain folder is worked in place.
+        workspace: plainFolder
+          ? "current-checkout"
+          : (currentProject.newThreadWorkspace ?? DEFAULT_CODE_NEW_THREAD_WORKSPACE),
         worktreeSource: {
           startFromOrigin: remote.status === "selected",
           remoteName: remote.status === "selected" ? remote.remoteName : "",
@@ -326,6 +408,7 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
       }}
     >
       <ProjectChoice chosen={chosen} disabled={busy} onChoose={choose} projects={projects} />
+      {newProject}
       <OctantInput
         aria-label="First message"
         disabled={busy}

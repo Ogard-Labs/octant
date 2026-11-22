@@ -88,7 +88,6 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/shell/commands",
   "/api/shell/launch-session",
   "/api/shell/local-session",
-  "/api/folders",
   // Pointing a runtime at an executable goes through the host's native file
   // picker and the desktop broker. Scanning and connecting are forwarded below.
   "/api/providers/discovery/locate-binary",
@@ -108,6 +107,11 @@ const LOCAL_ONLY_PREFIXES = [
  * none of these is an action, and each route refuses such a principal itself.
  */
 const PERSON_PAIRED_DEVICE_ROUTES = [
+  // Browsing this computer's folders and choosing one for a Project: the
+  // receipt is bound to the device's own scope, and the route refuses every
+  // principal that is not the host's person.
+  "/api/folders/browse",
+  "/api/folders/select",
   // Installing, trusting, enabling, and removing a package; remembered tool
   // approvals; adding, pinning, signing in to, and reconnecting a server.
   "/api/extensions/lifecycle",
@@ -197,6 +201,7 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   status: "hub-link-status",
   guestRoster: "hub-link-guest-roster",
   guest: "hub-link-guest",
+  windowGuest: "hub-link-window-guest",
   standby: "hub-link-standby",
   heartbeat: "hub-link-heartbeat",
   handback: "hub-link-handback",
@@ -652,6 +657,19 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     allowQuery: false,
     allowedRequestHeaders: [HUB_LINK_HEADER],
     maxResponseBytes: 65_536,
+  },
+  // A spoke asks the hub to list its own desktop window as a guest, signed
+  // with the spoke's identity key like a leave.
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.windowGuest,
+    match: { kind: "exact", path: "/api/hub/window-guest" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 4_096,
+    maxResponseBytes: 4_096,
   },
   {
     id: REMOTE_HUB_LINK_ROUTE_IDS.guest,

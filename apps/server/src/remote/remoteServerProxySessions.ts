@@ -18,6 +18,7 @@ import {
   type RemoteRequestProofService,
   type RemoteServerProxySessionFacts,
 } from "../remoteRequestProofService";
+import { HUB_ACT_WITHDRAWN_REASON } from "../remoteCredentialLifecycleService";
 
 /**
  * The cookie a proxy session travels in. It is scoped to the proxy route's path
@@ -444,6 +445,10 @@ export function proxySessionEndReasonForCredentialChange(
       return "device-credential-expired";
     case "listener-disabled":
       return "listener-disabled";
+    // The member's hub grant no longer ticks Act: the device keeps its
+    // standing, and only what it had open ends.
+    case HUB_ACT_WITHDRAWN_REASON:
+      return "proxy-session-ended";
     // A self-revoke, a local revoke of one device or all, and a host key
     // recovery (which revokes every device the old key paired) all end the
     // device's standing as a revoke does, and are journaled with their own

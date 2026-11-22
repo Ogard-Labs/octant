@@ -67,6 +67,10 @@ export interface FederatedHostLifecycleSnapshot {
   readonly displayName: string;
   /** Remote origin the person paired; absent for the local host. */
   readonly origin?: string;
+  /** `hub` for a member the hub introduced this device to, which holds it to its Act item. */
+  readonly through?: "hub";
+  /** `hub` for the hub itself among the computers the hub introduced this device to. */
+  readonly role?: "hub";
   readonly state: FederatedHostLifecycleState;
   /** Shared HostHealth vocabulary (`ready` → `healthy`). */
   readonly health: HostHealth;
@@ -301,6 +305,8 @@ function snapshotFrom(input: {
     kind: input.registration.kind,
     displayName: input.registration.displayName,
     ...(input.registration.origin !== undefined ? { origin: input.registration.origin } : {}),
+    ...(input.registration.through === undefined ? {} : { through: input.registration.through }),
+    ...(input.registration.role === undefined ? {} : { role: input.registration.role }),
     state,
     health: mapLifecycleStateToHostHealth(state),
     ...(reason !== undefined ? { reason } : {}),

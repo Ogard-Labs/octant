@@ -91,6 +91,7 @@ import {
   localHostDisplayName,
   readPairingFragment,
   type AgentProfileClient,
+  type RemoteSessionBridge,
   type AutomationClient,
   type OwnerUnlockNotGiven,
 } from "@octant/client-runtime";
@@ -172,6 +173,7 @@ import type {
   CodeProjectPullRequestRow,
   LocalServerOpenTarget,
   RunningService,
+  RemoteServerGrantSource,
   ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
 import {
@@ -620,6 +622,11 @@ import {
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
 import { createPairedComputerFetch } from "./host/pairedComputerFetch";
 import { PairedComputerCodeSurface } from "./host/PairedComputerCodeSurface";
+import { usePairedComputerReads } from "./host/usePairedComputerReads";
+import {
+  isPairedComputerAsk,
+  isPairedComputerThread,
+} from "@octant/client-runtime/paired-computer-reads";
 import { NeedsYouProvider, OctantCommandProvider } from "./palette/CommandRegistry";
 import {
   buildOctantCommands,
@@ -2403,14 +2410,27 @@ function LaunchedShell(
         : createPairedComputerFetch({ requestPairedComputer }),
     [requestPairedComputer],
   );
-  const openRunningServiceLive = useMemo(() => {
-    const host = runningServicesRemoteHost;
+  // Opens one server another computer lists, in Octant's own window or the
+  // default browser: the start screen's Running services row, or a row of a
+  // thread on that computer. The host grants it again each time, and this
+  // device's key proves who asked.
+  const openPairedComputerServer = useMemo(() => {
     const opener = remoteServerLiveOpener;
     const registry = federation?.registry;
     const deviceKeyStore = federation?.deviceKeyStore;
-    if (host === undefined || host.status !== "ready" || opener === undefined) return undefined;
-    if (registry === undefined || deviceKeyStore === undefined) return undefined;
-    return async (service: RunningService, mode: RemoteOpenMode): Promise<RemoteOpenOutcome> => {
+    if (opener === undefined || registry === undefined || deviceKeyStore === undefined) {
+      return undefined;
+    }
+    return async (
+      host: {
+        readonly hostId: string;
+        readonly hostName: string;
+        readonly origin: string;
+        readonly bridge: RemoteSessionBridge;
+      },
+      source: RemoteServerGrantSource,
+      mode: RemoteOpenMode,
+    ): Promise<RemoteOpenOutcome> => {
       const credential = (await registry.get(host.hostId))?.credential;
       const connection = host.bridge.connection();
       if (credential === undefined || connection === undefined) {
@@ -2434,11 +2454,23 @@ function LaunchedShell(
             ? {}
             : { fetch: pairedComputerFetch }),
         },
-        service,
+        source,
         mode,
       );
     };
-  }, [runningServicesRemoteHost, remoteServerLiveOpener, federation, pairedComputerFetch]);
+  }, [remoteServerLiveOpener, federation, pairedComputerFetch]);
+  const openRunningServiceLive = useMemo(() => {
+    const host = runningServicesRemoteHost;
+    if (host === undefined || host.status !== "ready" || openPairedComputerServer === undefined) {
+      return undefined;
+    }
+    return (service: RunningService, mode: RemoteOpenMode) =>
+      openPairedComputerServer(
+        host,
+        { surface: "running-services", listenerId: service.listenerId },
+        mode,
+      );
+  }, [runningServicesRemoteHost, openPairedComputerServer]);
   const openRelayedServerProjectPreview = useMemo(() => {
     const host = runningServicesRemoteHost;
     const opener = remoteServerLiveOpener;
@@ -2540,6 +2572,69 @@ function LaunchedShell(
     (pairedComputerSlotReady || pairedComputerSlotBridge === pairedComputerOpenedBridge)
       ? pairedComputerSlotBridge
       : undefined;
+  // Every paired computer's Code threads and asks, listed in this window and
+  // each opened on its own computer through that computer's start screen.
+  const pairedComputerReads = usePairedComputerReads({
+    transports: hostFederationTransports,
+    cache: federation?.cache,
+  });
+  const pairedComputerThreads = useMemo(
+    () => pairedComputerReads.filter(isPairedComputerThread),
+    [pairedComputerReads],
+  );
+  const pairedComputerAsks = useMemo(
+    () => pairedComputerReads.filter(isPairedComputerAsk),
+    [pairedComputerReads],
+  );
+  // The start screen and sidebar keep their inputs' identity between renders,
+  // so they get one opener that always calls the latest one.
+  const openPairedComputerThreadRef = useRef(openPairedComputerThread);
+  openPairedComputerThreadRef.current = openPairedComputerThread;
+  const openPairedComputerThreadLatest = useCallback(
+    (hostId: string, threadId: string) => openPairedComputerThreadRef.current(hostId, threadId),
+    [],
+  );
+  const otherComputerAsks = useMemo(
+    () =>
+      pairedComputerAsks.map((item) => ({
+        hostId: String(item.ref.hostId),
+        computer: item.hostDisplayName,
+        request: item.payload.request,
+        readOnly: item.readOnly,
+      })),
+    [pairedComputerAsks],
+  );
+  const [pairedThreadToOpen, setPairedThreadToOpen] = useState<
+    | { readonly hostId: string; readonly threadId: CodeThreadId; readonly request: number }
+    | undefined
+  >(undefined);
+  const pairedThreadToOpenHere =
+    pairedThreadToOpen !== undefined && pairedThreadToOpen.hostId === String(createHostId)
+      ? pairedThreadToOpen
+      : undefined;
+  // A thread's servers on that computer open through a grant for that thread's
+  // listing, in Octant's own window or the default browser.
+  const pairedComputerOrigin =
+    pairedComputerCodeSlot?.kind === "remote" ? pairedComputerCodeSlot.origin : undefined;
+  const pairedComputerName =
+    pairedComputerCodeSlot?.kind === "remote" ? pairedComputerCodeSlot.displayName : undefined;
+  const pairedComputerServerOpener =
+    openPairedComputerServer === undefined ||
+    pairedComputerCodeBridge === undefined ||
+    pairedComputerOrigin === undefined ||
+    pairedComputerName === undefined
+      ? undefined
+      : (source: RemoteServerGrantSource, mode: RemoteOpenMode) =>
+          openPairedComputerServer(
+            {
+              hostId: String(createHostId),
+              hostName: pairedComputerName,
+              origin: pairedComputerOrigin,
+              bridge: pairedComputerCodeBridge,
+            },
+            source,
+            mode,
+          );
   const renderPairedComputerCodeStart =
     pairedComputerCodeBridge === undefined
       ? undefined
@@ -2551,6 +2646,15 @@ function LaunchedShell(
             selectedHostId={createHostId}
             onSelectHost={handleSelectCreateHost}
             viewScope={createHostViewScope}
+            {...(pairedThreadToOpenHere === undefined
+              ? {}
+              : {
+                  initialThreadId: pairedThreadToOpenHere.threadId,
+                  initialThreadRequest: pairedThreadToOpenHere.request,
+                })}
+            {...(pairedComputerServerOpener === undefined
+              ? {}
+              : { openServer: pairedComputerServerOpener })}
           />
         );
   function refuseUnlessCreatableDestination(input: {
@@ -5625,6 +5729,17 @@ function LaunchedShell(
       new Map(projectController.allProjects.map((project) => [String(project.id), project.name])),
     [projectController.allProjects],
   );
+  // Only Code and Work Projects: Act governs thread starts there, and a Chat
+  // Project offered under Act would be a setting nothing reads.
+  const actProjectNamesById = useMemo(
+    () =>
+      new Map(
+        projectController.allProjects
+          .filter((project) => project.type !== "chat")
+          .map((project) => [String(project.id), project.name]),
+      ),
+    [projectController.allProjects],
+  );
   const projectIconIds = useMemo(
     () => projectController.allProjects.map((project) => String(project.id)),
     [projectController.allProjects],
@@ -6142,6 +6257,8 @@ function LaunchedShell(
     needsYouCoordinatorTitles,
     needsYouThreadProviders,
     needsYouAskClients,
+    otherComputerAsks,
+    onOpenOtherComputerAsk: openPairedComputerThreadLatest,
     now: snoozeClockNow.getTime(),
     onOpenExternal: rootLinkActions.openExternal,
     openRunningServiceLive,
@@ -7082,6 +7199,22 @@ function LaunchedShell(
   // The global New thread action starts a clean draft. Project-scoped actions
   // still call `openDraftInProject`, but a failed folder must never become the
   // sticky default for every later draft opened from the sidebar.
+  // A thread listed from another computer opens in that computer's Code start
+  // screen, the same surface the picker shows, so every act on it goes to that
+  // computer over its session and none is aimed at this one.
+  // It opens an existing thread, not a new task, so it leaves the unsent Code
+  // draft as it is: resetting it here erased a typed prompt and attachments.
+  function openPairedComputerThread(hostId: string, threadId: string) {
+    handleSelectCreateHost(decodeHostId(hostId));
+    setPairedThreadToOpen((previous) => ({
+      hostId,
+      threadId: decodeCodeThreadId(threadId),
+      request: (previous?.request ?? 0) + 1,
+    }));
+    closeWorkspaceReaders();
+    void controller.openDraftThread("code");
+  }
+
   function openDraftInActiveProject(mode: "work" | "code") {
     closeWorkspaceReaders();
     setDraftStartFrom(undefined);
@@ -8689,6 +8822,7 @@ function LaunchedShell(
       nativeBoundsAvailable={nativeHost !== undefined}
       {...(pendingUsageFilter === undefined ? {} : { pendingUsageFilter })}
       projectNamesById={projectNamesById}
+      actProjectNamesById={actProjectNamesById}
       providerController={providerController}
       settings={loadedSettings}
       presentation={presentation}
@@ -8818,6 +8952,12 @@ function LaunchedShell(
               codeStatus={codeController.status}
               contextHealthByProject={contextHealthByProject}
               environmentSelection={environmentSelection}
+              {...(hostFederationTransports === undefined
+                ? {}
+                : {
+                    pairedComputerThreads,
+                    onOpenPairedComputerThread: openPairedComputerThreadLatest,
+                  })}
               federatedHostStates={federatedHostStates}
               githubIssuesReadAvailable={githubIssuesReadAvailable}
               {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}

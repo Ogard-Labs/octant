@@ -33,6 +33,7 @@ import {
 } from "@octant/contracts";
 import type { Journal } from "../persistence/journal";
 import { writeOwnerOnly } from "./selfMadeListenerCertificate";
+import { HUB_ACT_WITHDRAWN_REASON } from "../remoteCredentialLifecycleService";
 
 /** The registration file's path under the data directory; data removal names it too. */
 export const PUSH_REGISTRATIONS_FILE = join("remote", "push-registrations.json");
@@ -112,6 +113,7 @@ export function pushRegistrationClearReasonFor(
     case "credential-rotated":
     case "credentials-rotated-all":
     case "listener-disabled":
+    case HUB_ACT_WITHDRAWN_REASON:
       return undefined;
     case "signed-out":
     case "self-revoked":

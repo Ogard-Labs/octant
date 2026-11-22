@@ -23,8 +23,10 @@ import {
 } from "./threadDocumentDeliveryAuthority";
 import { Schema } from "effect";
 import { isAgentGrantSession, principalActsAsHostPerson } from "./clientPrincipal";
+import { hubActRefusal, type HubActScopePort } from "./hub/hubActScope";
 import {
   authenticateRouteWindowId,
+  boundPrincipalIsHubIntroduced,
   boundPrincipalIsRestricted,
   boundPrincipalIsAgent,
   readPrincipalRouteContext,
@@ -71,6 +73,8 @@ export interface WorkThreadRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxJsonBodySize?: number;
   readonly now?: () => number;
+  /** The member's Act item for its hub, which bounds where a device only the hub introduced may start a thread. */
+  readonly hubActScope?: () => HubActScopePort | undefined;
 }
 
 export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDependencies) {
@@ -218,6 +222,34 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
         );
       }
       const command = decodeWorkThreadCommand(value);
+      // A device only the hub introduced starts a thread only in a Project the
+      // member's Act item names, read at this start; the server always binds
+      // the scope, so a route built without one belongs to no hub. A fork's
+      // Project is its source's, which this route does not read, so a fork
+      // from such a device is refused while this host is in a hub, as the
+      // Code route does.
+      const startProjectId =
+        command.kind === "create-work-thread"
+          ? String(command.projectId)
+          : command.kind === "fork-work-thread"
+            ? ""
+            : undefined;
+      if (startProjectId !== undefined && boundPrincipalIsHubIntroduced(request)) {
+        const scope = dependencies.hubActScope?.();
+        const refusal = hubActRefusal(scope, startProjectId, "start");
+        if (refusal !== undefined) {
+          // A fork is refused whatever Act names, so it says so rather than
+          // pointing at a grant change that would not help.
+          const decision = scope?.decide(startProjectId);
+          const message =
+            command.kind === "fork-work-thread" &&
+            decision?.status === "refused" &&
+            decision.kind === "project-not-named"
+              ? "A device the hub introduced cannot fork a thread on this computer while it is in a hub."
+              : refusal;
+          return failureResponse({ category: "unauthorized", message }, 403, origin);
+        }
+      }
       if (
         boundPrincipalIsRestricted(request) &&
         ((command.kind === "change-work-thread-access" &&

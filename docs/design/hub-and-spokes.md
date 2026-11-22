@@ -81,9 +81,12 @@ view of the provider's own app, never against a real provider sign-in. After thi
 added the same day and is designed, not built. Slices 13 to 20, starting a
 coding session on any member from one window, the hub as the front door, Code
 delegation, adding a computer over SSH, telling every connected device of a
-new one, and placement advice, were added on
-2026-11-19; slice 13 is built for a directly paired computer, slice 18 is
-built for a hub, and the rest are designed, not built
+new one, and placement advice, were added on 2026-11-19; slices 13 and 15 are
+built for directly paired computers, slice 16 is partly built (the Act item
+bounds where a hub-introduced device starts threads, unticking Act ends such
+a device's sessions, and a desktop window on a member lists the hub and the
+other spokes as its computers, the hub bounding it by its own Act list), slice
+18 is built for a hub, and the rest are designed, not built
 ([The hub coordinates](#the-hub-coordinates-each-member-runs-its-own-work)).
 What remains of slices 1 to 10 is
 the maintainer's: the live checks the slices name (a real Wake-on-LAN wake, a
@@ -554,14 +557,129 @@ otherwise.
   chosen computer stays chosen while its session reconnects, with sending
   held until it is ready; opening a draft from one of this computer's
   Projects (its row, New coordinator) chooses this computer. A
-  computer the hub introduced follows in slice 16; choosing a folder there,
-  merged lists across computers, and image attachments are not built yet.
+  spoke the hub introduced is built the same way in slice 16 (below), and
+  choosing a folder there and making it a Code Project is built for a device
+  its own person paired (slice 14); image attachments there are not built yet.
+  The window also lists every directly paired computer's active Code threads
+  under "On your other computers" in the Code sidebar, and what those
+  computers hold for the person in the Code start screen's Needs you card,
+  each read over that computer's session every 15 seconds while the window
+  is visible (slice 15). A row opens its thread in that computer's Code start
+  screen, where it is answered; a computer that stops answering keeps its
+  last rows, marked not connected and not openable, and the Environments
+  filter decides which computers are listed.
 - **What a hub-introduced device may do.** A device the member's own person
   paired acts as that person there. A device that only the hub introduced acts
-  within the member's **Act** hub-grant item: the Projects it names, the
-  threads it may start there (Code included), and never more than the
-  member's own level allows. Approvals stay on the member, answerable as
+  within the member's **Act** hub-grant item: the Projects it names, and
+  there three things: starting threads (Code included), answering their
+  approvals and questions, and Stop (maintainer decision, 2026-11-20); never
+  more than the member's own level allows. Approvals stay on the member, as
   [What the hub may do on a spoke](#what-the-hub-may-do-on-a-spoke) says.
+  Built for starting threads (slice 16): while a host is a hub member, a
+  device only the hub introduced starts a Code or Work thread there only in
+  a Project the member's Act item names, read at each start, so unticking
+  Act or a Project refuses the next one with a sentence; a Code or Work fork from
+  such a device is refused, because its Project is its source's and the
+  route does not read it. The hub settings name those Projects under Act,
+  offering only Code and Work Projects because Chat starts never read Act;
+  `octant hub grant` keeps the Projects already named and cannot name new
+  ones, so a headless member names them from a window. A
+  host in no hub keeps its own rules for such a device. Unticking Act also
+  ends every open session of the devices the hub introduced on that member
+  (maintainer decision, 2026-11-20); they stay paired, so a new session opens
+  under the rules then in force and its next start is refused. Built for
+  answering and Stop: while a host is a hub member, such a device answers a
+  Code or Work thread's approval or question, and stops its turn, only when
+  the thread's Project is one the member's Act item names, read at each
+  request; unticking Act or the Project refuses the next answer or Stop with
+  a sentence that names what was refused. This holds on every route that
+  answers or stops: a Code thread's approval and question answers and its
+  Stop and Stop now, a Work request's answer or dismissal and a Work turn's
+  Stop, a harness thread's approval and question cards, and the MCP tool and
+  Browser prompts of a Code or Work thread. A thread the route cannot find
+  names no Project and is refused. A local window, a device the member's own
+  person paired, an agent grant's session, and a host in no hub keep their
+  own rules and never read the Act item. A refusal of an answer or a Stop
+  says which action was refused (maintainer decision, 2026-11-21). Built: on a
+  member and on the hub, each refusal (unticked Act, a member out of its hub,
+  a Project the Act item or the hub's list does not name) names the action it
+  refused. Built (slice
+  16): a desktop window on a member, or on the hub, lists the hub's other
+  spokes and standbys as its computers. The window makes a device key of its
+  own; its host asks the hub to list that key as a guest (the hub's own
+  window, or a spoke's signed request naming its own window), named for the
+  member whose window it is; and the window then asks each member, directly
+  over the private network, to admit it, as a phone that joined does. Each
+  member issues its own device and session, so no credential is shared
+  between members, and the hub carries none of that traffic. The member
+  holds the window to its Act item because the hub, not its person,
+  introduced it. The desktop pins each member from the roster its own host
+  names, never from the window, and a computer the person paired directly
+  stays theirs. A member the roster drops leaves the window's list at its
+  next read (on opening and every five minutes), and its device there is
+  revoked with the roster; a member's window leaves the roster with that
+  member, also when a standby removed that member and handed the removal
+  back, and a newer window of the same member replaces the older one. A
+  window guest the hub removed is not listed again when that window asks
+  next.
+  A member's window is listed on the hub without a second approval, because
+  the hub's person already approved that member, and every spoke still raises
+  the new-member alert for it (its name, role, key fingerprint, and Remove),
+  as for any member a roster adds (maintainer decision, 2026-11-21). The
+  window is admitted on each spoke through the guest path, which adds the
+  address of the connection it is admitted over to that guest's alert, so
+  the alert carries its private address; the roster itself lists no address for a guest.
+  A device signs in only at the listener origin it was registered at, so
+  when a spoke's or the hub's listener has moved, the window's next ask is
+  given a new device at the current address and the old one is revoked, as
+  for an expired device; a device the person revoked stays refused.
+  Not built yet: a turn sent into an existing thread, and Chat threads, held
+  to the Act item.
+
+  **The hub as one of a member window's computers** (maintainer decision,
+  2026-11-21). A spoke's or standby's window also lists the hub, marked
+  **hub** and Through the hub; the hub's own window does not list itself. The
+  window asks the hub for a device directly, as it asks each spoke, and the
+  hub admits only a window guest a spoke or standby asked it to list (the
+  roster lists it with the key it presents, and the request is signed with
+  that key); the hub's own window, a phone, and every other guest keep their
+  own rules. The device carries no person's approval on the hub, so the hub
+  holds it to its own **Act list**: the Projects on the hub its person ticks
+  under **Projects a member's window may work in** in Hub settings on the
+  hub, the same checklist a member's Act item shows. Such a window starts
+  threads, answers approvals and questions, and stops turns on the hub only
+  in a Project that list names, read at each request exactly as a member
+  reads its Act item, so taking a Project off refuses the next request with a
+  sentence naming the action. With none ticked, the hub is still listed and
+  nothing can be started there. Every route that holds a hub-introduced device
+  to a member's Act item holds it to the hub's list on the hub. The list is
+  changed only from a window on the hub, journaled with its principal (never
+  the Projects), and kept when the hub role is turned off and on again. The
+  window's device on the hub leaves with its roster entry, with the member it
+  belongs to, when a newer window of that member replaces it, and when the
+  hub role is turned off, since no list bounds it then; a device the
+  person revoked stays revoked across turning the role off and on, so the
+  window is not given a new one. A standby promoted to hub keeps the
+  roster's window guests without knowing whose each is, so the member whose
+  window asks again names it there. A revocation the device pairing cannot
+  take yet waits on the pending list, as a spoke's does. The hub carries only that window's own session with the hub. Built,
+  with a loopback smoke: the window lists the hub labelled hub, starts,
+  answers, and stops there only in a Project the hub's list names, sees the
+  hub with nothing to start when none is ticked, loses its hub device when
+  the hub role is turned off, and every spoke alerts on the window.
+
+  Rationale: the hub was first left out of a spoke window's computers because
+  it had no Act item of its own to bound a device it introduced to itself.
+  The hub's own Act list gives it one, read the same way, so the hub is held
+  to exactly what its person ticks and never more than a member would allow.
+
+  Rationale: a spoke asks the hub to list its own window without the hub's
+  person approving it again, because the hub's person already approved that
+  member, the window is that member's person at that member, and every
+  member that admits it still holds it to its own Introduce and Act items;
+  the alternative, a join code per window, would ask the person to pair each
+  window with the hub by hand, which is what the front door removes.
+
 - **A computer without Octant.** A server the person reaches only over SSH
   is a [server Project](server-projects.md), not a member. Adding a computer
   as a member over SSH, without visiting it, is [decision H26](#decisions).
@@ -2855,17 +2973,17 @@ reads each spoke directly.
 
 ## Threat model
 
-| Party                                                             | Can                                                                                                                                                                                                                                                                                                                 | Cannot, and why                                                                                                                                                                                                                                         |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A compromised hub                                                 | Use every hub grant each spoke gave it; add a fake member to the roster, which spokes accept as a full member unless they turned on Confirm new members, and which every spoke alerts on; drop or delay wakes and push; read roster metadata                                                                        | Approve on a spoke itself, hide a new-member alert, read a spoke's credentials, add an owner to any host's owner list, change a hub or peer grant, loosen a sandbox, read sealed push content, or act on a spoke that never granted Act                 |
-| A compromised standby                                             | While standing in, what a compromised hub can, limited to the spokes whose grant covers the standby                                                                                                                                                                                                                 | Stand in while members still reach the hub, change the standby order, promote itself, or anything a compromised hub cannot                                                                                                                              |
-| A compromised spoke                                               | Use the peer grants other spokes gave it; send bad results back to a delegating spoke; post text into the threads other members tagged Reachable, which arrives framed and tainting and can wake an idle tagged thread within the wake bounds, spending that spoke's provider usage; claim to be standing in as hub | Exceed those grants; answer approvals on another spoke; make another spoke's agent follow its output as instructions; stand in unless it is a named standby in the hub-signed roster; move a thread onto another member without an owner's fresh unlock |
-| A stolen owner device                                             | What an ordinary member can, until removed or revoked                                                                                                                                                                                                                                                               | Use owner powers without the person's face, finger, passcode, or passkey                                                                                                                                                                                |
-| A stolen or compromised device a host's own person paired with it | Everything a local window on that host can, Full access included, until its session expires or the device is revoked, each action journaled with the device as its actor (maintainer decision, 2026-11-12)                                                                                                          | Read a stored credential back, act on a host it never paired with beyond the grant that host gave, or outlive session expiry and revocation                                                                                                             |
-| A lost or stolen phone                                            | What each spoke allows that guest, until revoked                                                                                                                                                                                                                                                                    | Run agents, receive delegated work, or outlive Remove on the hub and revocation on each spoke                                                                                                                                                           |
-| A spoke's agent                                                   | Ask its own host to delegate within its thread's authority; from a tagged thread, message other members' tagged threads                                                                                                                                                                                             | Choose the peer grant, tag a thread, start more than the bounded wake turns on a tagged receiver, approve on the receiver, widen authority, carry a credential                                                                                          |
-| Someone on the private net                                        | Reach members' listeners, as today, and send Wake-on-LAN packets, as anyone on that LAN already can                                                                                                                                                                                                                 | Pass device authentication; make a spoke run anything: a wake starts no routine the spoke did not define                                                                                                                                                |
-| Someone who can push to a repository                              | Push a branch whose tip carries an `Octant-Handover` trailer, which a member lists under Handovers                                                                                                                                                                                                                  | Make its note more than outside content, or start a turn: only a person continues a handover                                                                                                                                                            |
+| Party                                                             | Can                                                                                                                                                                                                                                                                                                                                         | Cannot, and why                                                                                                                                                                                                                                         |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A compromised hub                                                 | Use every hub grant each spoke gave it; add a fake member to the roster, which spokes accept as a full member unless they turned on Confirm new members, and which every spoke alerts on; drop or delay wakes and push; read roster metadata; list a fake member window, which may act on the hub itself only within the hub's own Act list | Approve on a spoke itself, hide a new-member alert, read a spoke's credentials, add an owner to any host's owner list, change a hub or peer grant, loosen a sandbox, read sealed push content, or act on a spoke that never granted Act                 |
+| A compromised standby                                             | While standing in, what a compromised hub can, limited to the spokes whose grant covers the standby                                                                                                                                                                                                                                         | Stand in while members still reach the hub, change the standby order, promote itself, or anything a compromised hub cannot                                                                                                                              |
+| A compromised spoke                                               | Use the peer grants other spokes gave it; send bad results back to a delegating spoke; post text into the threads other members tagged Reachable, which arrives framed and tainting and can wake an idle tagged thread within the wake bounds, spending that spoke's provider usage; claim to be standing in as hub                         | Exceed those grants; answer approvals on another spoke; make another spoke's agent follow its output as instructions; stand in unless it is a named standby in the hub-signed roster; move a thread onto another member without an owner's fresh unlock |
+| A stolen owner device                                             | What an ordinary member can, until removed or revoked                                                                                                                                                                                                                                                                                       | Use owner powers without the person's face, finger, passcode, or passkey                                                                                                                                                                                |
+| A stolen or compromised device a host's own person paired with it | Everything a local window on that host can, Full access included, until its session expires or the device is revoked, each action journaled with the device as its actor (maintainer decision, 2026-11-12)                                                                                                                                  | Read a stored credential back, act on a host it never paired with beyond the grant that host gave, or outlive session expiry and revocation                                                                                                             |
+| A lost or stolen phone                                            | What each spoke allows that guest, until revoked                                                                                                                                                                                                                                                                                            | Run agents, receive delegated work, or outlive Remove on the hub and revocation on each spoke                                                                                                                                                           |
+| A spoke's agent                                                   | Ask its own host to delegate within its thread's authority; from a tagged thread, message other members' tagged threads                                                                                                                                                                                                                     | Choose the peer grant, tag a thread, start more than the bounded wake turns on a tagged receiver, approve on the receiver, widen authority, carry a credential                                                                                          |
+| Someone on the private net                                        | Reach members' listeners, as today, and send Wake-on-LAN packets, as anyone on that LAN already can                                                                                                                                                                                                                                         | Pass device authentication; make a spoke run anything: a wake starts no routine the spoke did not define                                                                                                                                                |
+| Someone who can push to a repository                              | Push a branch whose tip carries an `Octant-Handover` trailer, which a member lists under Handovers                                                                                                                                                                                                                                          | Make its note more than outside content, or start a turn: only a person continues a handover                                                                                                                                                            |
 
 The biggest risk is the hub as introducer: whoever controls the hub can tell a
 spoke that an attacker's key belongs to another member, and with full
@@ -3919,19 +4037,43 @@ sheets; a real machine and a published listing are maintainer gates.
     browse and one-use receipt for a device it admits as its person, and its
     Project bind. Acceptance: a device the host's person paired binds a
     folder there; a hub-introduced or restricted device is refused.
-    Verification: server route and permission tests.
-15. **One window shows every computer's work.** The merged reads carry
-    each reachable host's threads, Needs you and live turns, stale and
-    read-only when a host is unreachable. Verification: client-runtime tests
-    and rendered checks.
+    Verification: server route and permission tests. Built (2026-11-20):
+    the private listener forwards `/api/folders/browse` and `/select` as
+    routes for a device the host's own person paired, the route answers that
+    device in its own scope (so its candidates and receipt are its own) and
+    refuses a hub-introduced device and an agent grant, and the Code start
+    form in a paired browser or a desktop window's paired computer offers
+    **New Project from a folder…** on that computer.
+15. **One window shows every computer's work.** Built for computers paired
+    directly: the merged reads carry each reachable host's active Code
+    threads and Needs you, stale and read-only when a host is unreachable,
+    and a row opens its thread on that computer. A hub-introduced member's
+    rows follow with slice 16. Verification: client-runtime tests and web
+    component tests.
 16. **The hub as front door.** A device that joins the hub gets every
     member through introductions and reaches each directly; the Act item is
-    enforced on each member. Acceptance: a hub-introduced device starts a
-    Code thread only in a Project the Act item names; removing the item
-    refuses the next create; from a phone and from a browser, that thread's
-    turn streams, its approvals are answered within the Act item, and Stop
-    reaches it. Verification: server tests and a three-host
-    loopback smoke.
+    enforced on each member. Partly built: the Act item bounds where a
+    hub-introduced device starts Code and Work threads, with server route
+    and domain tests, and the hub settings name its Projects; unticking Act
+    ends such a device's open sessions on that member; and a desktop window
+    on a member or the hub adds the hub's spokes to its computers, each
+    reached directly with a device that member issued. A loopback smoke with
+    a hub and three spokes in one process, each a real gateway behind its own
+    TLS listener, runs the window's client runtime against them: the window
+    lists the other spokes, starts a Code thread on one in a Project its Act
+    item names through that spoke's real Code route and product dispatch and
+    is refused in another, the spoke's list shows it, unticking Act ends the
+    window's session there and refuses its next start, and a removed member
+    leaves the list. Approvals and Stop are held to the Act item. The hub is
+    one of a spoke window's computers, labelled hub, holding the window to
+    its own Act list, which Hub settings on the hub name; the smoke starts,
+    answers, and stops on the hub only in a Project that list names. Not
+    built: a turn sent into an existing thread, and Chat threads, held to the
+    Act item. Acceptance: a hub-introduced device starts a Code thread only
+    in a Project the Act item names; removing the item refuses the next
+    create; from a phone and from a browser, that thread's turn streams, its
+    approvals are answered within the Act item, and Stop reaches it.
+    Verification: server tests and a three-host loopback smoke.
 17. **Code delegation.** The Project mark, the receiving Code host, the
     member and Project list route, cancel and move as above. Acceptance: B
     refuses Code into an unmarked Project; a delegated Code thread is

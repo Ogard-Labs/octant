@@ -121,6 +121,13 @@ agent-created routines active at Full access**, off. Each change is the
 ordinary journaled settings replacement a local window or a device the host's
 own person paired makes; the server reads each value where it applies.
 
+**Hub settings** sit on Settings › Remote access. On the hub, **Member
+windows** holds the checklist **Projects a member's window may work in**,
+this computer's Projects by name, the same checklist a member's Act item
+shows, with **Save the Projects**; it is the hub's own Act list, read at each
+request, and none ticked leaves a member's window nothing to start here
+([Hub and spokes: the hub coordinates](hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work)).
+
 Selecting a page replaces its controls as well as its heading. Plugin pages
 resolve the currently selected entry point; a missing entry point shows an
 error instead of retaining another integration's account controls.

@@ -806,6 +806,7 @@ describe("desktop preload bridge", () => {
       "initialProjectTarget",
       "installAppUpdate",
       "installNightly",
+      "introduceWindowToHub",
       "listCaptureWindows",
       "listOpenInApplications",
       "listPairedComputers",

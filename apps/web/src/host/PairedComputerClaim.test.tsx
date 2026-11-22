@@ -1,3 +1,4 @@
+import { createHostReadModelCache } from "@octant/client-runtime/host-federation-merged-reads";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
@@ -46,6 +47,7 @@ function stack(): HostFederationStack {
     transports,
     registry,
     deviceKeyStore,
+    cache: createHostReadModelCache(),
   };
 }
 

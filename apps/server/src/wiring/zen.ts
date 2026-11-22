@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { assistantTranscript } from "../chat/assistantTranscript";
 import { createWorkTurnRouteHandler } from "../workTurnRoutes";
+import type { HubActScopeSlot } from "../hub/hubActScope";
 import { createNavigatorAssistantRouteHandler } from "../navigatorAssistant/navigatorAssistantRoutes";
 import { NavigatorAssistantService } from "../navigatorAssistant/navigatorAssistantService";
 import { readCanvasForWindow, resolveCanvasActiveContext } from "../canvasRoutes";
@@ -40,10 +41,14 @@ export type ZenDependencies = Pick<ServerStart, "persistence"> &
   Pick<CodeToolingWiring, "projectTerminals"> &
   Pick<ChatWiring, "chatService" | "contributeChatTools" | "navigatorAssistantBindings"> &
   Pick<WorkWiring, "workTurnService"> &
-  Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection">;
+  Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection"> & {
+    /** The member's Act item for its hub, bound by the hub side after this is built. */
+    readonly hubActScopeSlot: HubActScopeSlot;
+  };
 
 export function wireZen(deps: ZenDependencies) {
   const {
+    hubActScopeSlot,
     chatService,
     codeOperationRuntime,
     contributeChatTools,
@@ -317,6 +322,11 @@ export function wireZen(deps: ZenDependencies) {
     service: workTurnService,
     windowAuthorityStore,
     maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+    hubActScope: hubActScopeSlot.current,
+    threadProjectId: (threadId) => {
+      const projectId = workThreadProjection.read(threadId)?.projectId;
+      return projectId === undefined ? undefined : String(projectId);
+    },
   });
   return { navigatorAssistantRoutes, workTurnRoutes, zenBackgroundRoutes, zenRoutes, zenService };
 }

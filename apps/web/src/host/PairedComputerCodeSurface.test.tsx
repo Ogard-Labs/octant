@@ -20,9 +20,9 @@ const hosts: ReadonlyArray<HostIdentity> = [
   { hostId: LAPTOP, displayName: "Laptop", health: "healthy", capabilities: ["code"] },
 ];
 
-async function surfaceFor(actsAsHostPerson: boolean) {
+async function surfaceFor(actsAsHostPerson: boolean, sent: URL[] = []) {
   surfaces.length = 0;
-  const bridge = await readyPairedBridge([], { actsAsHostPerson });
+  const bridge = await readyPairedBridge(sent, { actsAsHostPerson });
   render(
     <PairedComputerCodeSurface
       bridge={bridge}
@@ -51,5 +51,15 @@ describe("a paired computer's Code start screen", () => {
     // Give the standing read time to answer; it must stay restricted.
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(surfaces.every((props) => props.actsAsHostPerson === false)).toBe(true);
+  });
+
+  it("lists a thread's MCP tool approvals on that computer, so one Needs you opens can be answered there", async () => {
+    const sent: URL[] = [];
+    await surfaceFor(true, sent);
+    await waitFor(() => expect(surfaces.at(-1)?.actsAsHostPerson).toBe(true));
+    const client = surfaces.at(-1)?.extensionClient;
+    expect(client?.toolGrantsAvailable).toBe(true);
+    await client?.listToolApprovals().catch(() => undefined);
+    expect(sent.some((url) => url.pathname === "/api/extensions/tool-approvals")).toBe(true);
   });
 });
