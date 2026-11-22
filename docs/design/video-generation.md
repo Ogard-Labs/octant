@@ -338,9 +338,19 @@ which the person sets, like any turn.
 - The clip is served by a host route that answers byte-range requests, so
   seeking does not download the whole clip. The route checks the window's or
   device's authority over the thread on every request, as image routes do.
+- A `<video>` element cannot send the window's credential, so the window asks
+  for a ten-minute ticket for one clip and plays from its address, asking for a
+  new one before it runs out. Every ranged request on a ticket checks the
+  issuing window's or device's authority over the thread again, and a revoked
+  window's tickets are dropped. A ticket grants only that clip.
+- A running job shows its state in the thread with Stop; a failed or stopped
+  one says why. Deleting a thread stops its jobs and removes its clips.
 - A paired browser or phone can watch and download clips from threads it can
   open, and answer its own video cards in the thread, as it answers image
-  cards. A client that cannot show the card's price cannot approve it.
+  cards. A client that cannot show the card's price cannot approve it. A
+  paired client does not stop jobs. A paired browser reads the clip through
+  its remote session in byte ranges, up to 512 MB, and plays it from memory.
+  Playing a clip on the phone needs a native player the app does not ship yet.
 - A clip can be placed in a Canvas design as a `generated-video` asset in a
   later change. This design does not add the asset kind.
 
