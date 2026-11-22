@@ -680,6 +680,148 @@ describe("ACP protocol boundary", () => {
     }
   });
 
+  it("cuts off a turn after fifteen silent minutes when no tool is running, and not at ten", async () => {
+    vi.useFakeTimers();
+    try {
+      const { client } = transport({ limits: { requestTimeoutMs: 30 } });
+      let settled = false;
+      const observed = failureOf(client.prompt("session-1", "a silent task")).finally(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(await observed).toMatchObject({ kind: "timeout" });
+      await client.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("holds the silence clock while a tool call is still running, and restarts it when the call settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const { client, stdout } = transport({ limits: { requestTimeoutMs: 30 } });
+      let settled = false;
+      const observed = failureOf(client.prompt("session-1", "a long build")).finally(() => {
+        settled = true;
+      });
+      const toolUpdate = (sessionUpdate: string, status: string) =>
+        stdout.write(
+          `${JSON.stringify({
+            jsonrpc: "2.0",
+            method: "session/update",
+            params: {
+              sessionId: "session-1",
+              update: { sessionUpdate, toolCallId: "build", title: "Build", status },
+            },
+          })}\n`,
+        );
+      toolUpdate("tool_call", "pending");
+      toolUpdate("tool_call_update", "in_progress");
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+      expect(settled).toBe(false);
+      toolUpdate("tool_call_update", "completed");
+      await vi.advanceTimersByTimeAsync(15 * 60_000 - 1);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await observed).toMatchObject({ kind: "timeout" });
+      await client.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears the running tool calls when the turn ends, so the next turn's silence counts", async () => {
+    vi.useFakeTimers();
+    try {
+      const { client, stdout } = transport({ limits: { requestTimeoutMs: 30 } });
+      const first = client.prompt("session-1", "start a tool and stop");
+      stdout.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            sessionId: "session-1",
+            update: { sessionUpdate: "tool_call", toolCallId: "left", title: "Left running" },
+          },
+        })}\n`,
+      );
+      stdout.write(
+        `${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { stopReason: "cancelled" } })}\n`,
+      );
+      await expect(first).resolves.toMatchObject({ stopReason: "cancelled" });
+      const second = failureOf(client.prompt("session-1", "a silent task"));
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      expect(await second).toMatchObject({ kind: "timeout" });
+      await client.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not hold the silence clock for a finished tool call whose start the agent repeats", async () => {
+    vi.useFakeTimers();
+    try {
+      const { client, stdout } = transport({ limits: { requestTimeoutMs: 30 } });
+      const observed = failureOf(client.prompt("session-1", "read a file"));
+      const update = (fields: Readonly<Record<string, unknown>>) =>
+        stdout.write(
+          `${JSON.stringify({
+            jsonrpc: "2.0",
+            method: "session/update",
+            params: { sessionId: "session-1", update: { toolCallId: "view-1", ...fields } },
+          })}\n`,
+        );
+      update({ sessionUpdate: "tool_call", title: "View", status: "in_progress" });
+      update({ sessionUpdate: "tool_call_update", status: "completed" });
+      update({ sessionUpdate: "tool_call", title: "View" });
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      expect(await observed).toMatchObject({ kind: "timeout" });
+      await client.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a steered turn's running tool holding the clock after the earlier prompt answers", async () => {
+    vi.useFakeTimers();
+    try {
+      const { client, stdout } = transport({ limits: { requestTimeoutMs: 30 } });
+      const original = client.prompt("session-1", "run the build");
+      let settled = false;
+      const steering = failureOf(client.prompt("session-1", "and then the tests")).finally(() => {
+        settled = true;
+      });
+      const update = (fields: Readonly<Record<string, unknown>>) =>
+        stdout.write(
+          `${JSON.stringify({
+            jsonrpc: "2.0",
+            method: "session/update",
+            params: { sessionId: "session-1", update: { toolCallId: "build", ...fields } },
+          })}\n`,
+        );
+      update({ sessionUpdate: "tool_call", title: "Build", status: "in_progress" });
+      stdout.write(
+        `${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { stopReason: "cancelled" } })}\n`,
+      );
+      await expect(original).resolves.toMatchObject({ stopReason: "cancelled" });
+      // Build output that does not restate the call's status.
+      update({
+        sessionUpdate: "tool_call_update",
+        content: [{ type: "content", content: { type: "text", text: "compiling" } }],
+      });
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+      expect(settled).toBe(false);
+      update({ sessionUpdate: "tool_call_update", status: "completed" });
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      expect(await steering).toMatchObject({ kind: "timeout" });
+      await client.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("still cancels a turn that outlives its own turn budget", async () => {
     const { client } = transport({ limits: { requestTimeoutMs: 30, turnTimeoutMs: 90 } });
     const observed = failureOf(client.prompt("session-1", "never answered"));
