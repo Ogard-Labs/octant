@@ -315,6 +315,10 @@ function nextStep(
   const instanceId = instance.id;
   if (!available) return { kind: "unavailable" };
   if (!instance.enabled) return { kind: "turn-on", instanceId };
+  // An outside image profile has nothing to probe: its driver starts at the
+  // first image, which the host admits and asks about then, so once it is on
+  // there is no connection step to offer.
+  if (instance.driverKind === "outside-image") return { kind: "done", instanceId };
   if (state.ready === "yes") return { kind: "done", instanceId };
   if (state.authenticated === "no") return { kind: "sign-in", instanceId };
   const readiness = observed?.readiness;

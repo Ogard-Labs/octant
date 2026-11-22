@@ -154,10 +154,15 @@ export interface EnqueueImageJobInput {
  */
 export interface OutsideImageDrivers {
   readonly admits: (instance: OutsideImageProviderInstance) => boolean;
-  readonly declaredUsdMicrosPerImage: (
+  /**
+   * The model as the package declares it at the profile's bound digest, with
+   * its published price when it states one; `undefined` when the package does
+   * not declare the model there, as after an update that removed it.
+   */
+  readonly declaredModel: (
     instance: OutsideImageProviderInstance,
     modelId: ProviderModelId,
-  ) => number | undefined;
+  ) => { readonly usdMicrosPerImage?: number | undefined } | undefined;
   readonly adapter: (
     instance: OutsideImageProviderInstance,
     ports: Pick<ImageGenerationPorts, "fetchApprovedImageUrl" | "sniffMediaType">,
@@ -199,6 +204,8 @@ interface QueuedImageWork {
   readonly estimatedCostUsdMicros: number | "unknown";
   /** An outside profile's declared price at enqueue, so settlement uses the price reserved. */
   readonly declaredUsdMicrosPerImage?: number;
+  /** The outside driver digest the price was read at; dispatch refuses any other. */
+  readonly outsideDriverDigest?: string;
   readonly quality?: OpenAiImageQuality;
   readonly size?: OpenAiImageSize;
   readonly aspectRatio?: GeminiImageAspectRatio;
@@ -415,9 +422,20 @@ export class ImageJobService {
         "This image provider's driver is not available.",
       );
     }
-    const declaredUsdMicrosPerImage =
+    const declaredModel =
       instance.driverKind === "outside-image"
-        ? this.#outsideImageDrivers?.declaredUsdMicrosPerImage(instance, input.modelId)
+        ? this.#outsideImageDrivers?.declaredModel(instance, input.modelId)
+        : undefined;
+    if (instance.driverKind === "outside-image" && declaredModel === undefined) {
+      throw new ImageJobServiceError(
+        "ineligible",
+        "This image provider's driver no longer offers that model.",
+      );
+    }
+    const declaredUsdMicrosPerImage = declaredModel?.usdMicrosPerImage;
+    const outsideDriverDigest =
+      instance.driverKind === "outside-image"
+        ? String(instance.configuration.driver.digest)
         : undefined;
 
     const scopeId = decodeImageGenerationScopeId(input.scopeId);
@@ -498,6 +516,7 @@ export class ImageJobService {
       variantCount,
       estimatedCostUsdMicros,
       ...(declaredUsdMicrosPerImage === undefined ? {} : { declaredUsdMicrosPerImage }),
+      ...(outsideDriverDigest === undefined ? {} : { outsideDriverDigest }),
       ...(effectiveOptions.quality === undefined ? {} : { quality: effectiveOptions.quality }),
       ...(effectiveOptions.size === undefined ? {} : { size: effectiveOptions.size }),
       ...(effectiveOptions.aspectRatio === undefined
@@ -793,6 +812,14 @@ export class ImageJobService {
           this.#resolve(failed);
           return;
         }
+      }
+      const outsideRefusal = this.#outsideDispatchRefusal(instance, running.modelId, work);
+      if (outsideRefusal !== undefined) {
+        const failed = this.#transition(running, "failed", {
+          failure: { category: "invalid-configuration", message: outsideRefusal },
+        });
+        this.#resolve(failed);
+        return;
       }
       const adapter = this.#adapterFor(instance, () => {
         reachedProvider = true;
@@ -1231,6 +1258,32 @@ export class ImageJobService {
           : new ImageJobServiceError("conflict", "The image job failed."),
       );
     }
+  }
+
+  /**
+   * Why an outside image job that waited in the queue must not run now, or
+   * nothing. Its reservation was made at one driver digest and price; a
+   * profile turned off, a driver no longer admitted, a newly trusted digest,
+   * or a model the package no longer declares each refuse here, before any
+   * process starts, and the reservation is released unspent.
+   */
+  #outsideDispatchRefusal(
+    instance: ProviderInstance,
+    modelId: ProviderModelId,
+    work: QueuedImageWork,
+  ): string | undefined {
+    if (instance.driverKind !== "outside-image") return undefined;
+    if (!instance.enabled) return "The image provider was turned off before this image started.";
+    if (this.#outsideImageDrivers?.admits(instance) !== true) {
+      return "This image provider's driver is not available.";
+    }
+    if (String(instance.configuration.driver.digest) !== work.outsideDriverDigest) {
+      return "This image provider moved to another version of its driver after this image was queued. Create it again.";
+    }
+    if (this.#outsideImageDrivers.declaredModel(instance, modelId) === undefined) {
+      return "This image provider's driver no longer offers that model.";
+    }
+    return undefined;
   }
 
   #finishSpendReservation(jobId: ImageJobId, outcome: "settle" | "abandon"): void {

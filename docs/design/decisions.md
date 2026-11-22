@@ -3859,9 +3859,9 @@ Status: Partly built. Since: 2026-10-26. Detail: [Enterprise provider identity: 
 
 ### Admission of an outside driver
 
-An outside driver is a harness-endpoint transport only, installed from outside Octant. Review, install, trust and enable are one flow for the person, at a local window or a device the host's own person paired, and each later step to use is a separate action that the flow does not imply (maintainer decision, 2026-11-12; built for that device, journaled with it as actor).
+An outside driver is a harness-endpoint transport or a media generator ([Outside media generation drivers](#outside-media-generation-drivers)), installed from outside Octant. Review, install, trust and enable are one flow for the person, at a local window or a device the host's own person paired, and each later step to use is a separate action that the flow does not imply (maintainer decision, 2026-11-12; built for that device, journaled with it as actor).
 
-- Only harness endpoints are admitted; outside agent CLIs and managed processes are not.
+- Harness endpoints and media generators are admitted; outside agent CLIs and managed processes are not.
 - One "Install and trust" flow covers inspect, install, trust and enable, as for any plugin or connector; digest-bound trust and confinement are unchanged, and add provider, connection check and Verify tools stay separate actions (maintainer request, 2026-11-12). Built for a package that holds a provider driver: the package review is the one confirmation, the host runs the steps in order through the separate actions' own lifecycle methods, and a refused step stops the flow with the earlier steps standing and is named to the person. Each step stays available on its own. Not built yet: today the host refuses the flow for a package that holds no provider driver. Structured references, tool calls, routines, hubs, peer hosts and agent grants cannot perform them; a device the host's own person paired can, as a local window does (maintainer decision, 2026-11-12; built), and a device the hub's roster introduced cannot.
 - A driver is a single ES module on the server's runtime, with no executables, native addons or install scripts.
 - Outside harness endpoints work in Chat, Work and Code with verified-model tools, like bundled endpoints.

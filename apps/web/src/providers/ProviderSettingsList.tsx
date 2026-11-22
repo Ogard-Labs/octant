@@ -930,7 +930,10 @@ function ProviderRow(props: ProviderRowProps) {
   // Image and video profiles hold a key and have no runtime to check.
   const isMediaProfile = isImageProfile || isVideoProfile;
   const outsideInstance =
-    props.instance.driverKind === "outside-harness-endpoint" ? props.instance : undefined;
+    props.instance.driverKind === "outside-harness-endpoint" ||
+    props.instance.driverKind === "outside-image"
+      ? props.instance
+      : undefined;
   const usesCredential =
     outsideInstance?.configuration.key !== undefined ||
     isHttp ||
@@ -1576,7 +1579,7 @@ function ProviderRow(props: ProviderRowProps) {
                     ? {}
                     : { onOpenExternalUrl: props.onOpenExternalUrl })}
                 />
-              ) : outsideInstance !== undefined &&
+              ) : outsideInstance?.driverKind === "outside-harness-endpoint" &&
                 props.onChangeOutsideHarnessEndpointConfiguration !== undefined ? (
                 <OutsideDriverConfigurationForm
                   credentialManagementAvailable={props.credentialManagementAvailable}

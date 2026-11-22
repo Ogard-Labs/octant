@@ -2709,10 +2709,10 @@ export function wireProviders(deps: ProvidersDependencies) {
         // anything is reserved, and outlives a restart.
         admits: (instance) =>
           !isOutsideDriverQuarantined(instance) && outsideDriverAdmission.isAdmitted(instance),
-        declaredUsdMicrosPerImage: (instance, modelId) =>
+        declaredModel: (instance, modelId) =>
           outsideDriverAdmission
             .imageDriverModels(instance.configuration.driver)
-            ?.find((model) => model.modelId === String(modelId))?.usdMicrosPerImage,
+            ?.find((model) => model.modelId === String(modelId)),
         adapter: (instance, ports) => outsideDriverAdmission.imageAdapter(instance, ports),
       },
       resolveThreadProjectId: ({ threadType, threadId }) => {

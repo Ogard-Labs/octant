@@ -84,6 +84,8 @@ export interface OutsideDriverAdmissionOptions {
   readonly fetch?: OutsideDriverFetch;
   readonly limits?: Partial<OutsideDriverLimits>;
   readonly clock?: () => string;
+  /** Resolves an image address's host name; the system resolver by default. */
+  readonly resolve?: (hostname: string) => Promise<ReadonlyArray<string>>;
   /**
    * The host's Strict, read at each admission: Strict as a Settings default
    * in Code or Work, the reading a host-scope use with no thread takes. An
@@ -181,6 +183,7 @@ export class OutsideDriverAdmission {
   readonly #fetch: OutsideDriverFetch | undefined;
   readonly #limits: Partial<OutsideDriverLimits> | undefined;
   readonly #clock: (() => string) | undefined;
+  readonly #resolve: OutsideDriverAdmissionOptions["resolve"];
   readonly #strict: () => boolean;
   readonly #running = new Map<string, RunningDriver>();
 
@@ -195,6 +198,7 @@ export class OutsideDriverAdmission {
     this.#fetch = options.fetch;
     this.#limits = options.limits;
     this.#clock = options.clock;
+    this.#resolve = options.resolve;
     this.#strict = options.strict ?? (() => true);
   }
 
@@ -581,6 +585,7 @@ export class OutsideDriverAdmission {
           ...shared,
           modelIds: instance.configuration.modelAllowlist,
           ports: imagePorts,
+          ...(this.#resolve === undefined ? {} : { resolve: this.#resolve }),
         }),
       };
     } else {

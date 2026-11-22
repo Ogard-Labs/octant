@@ -71,6 +71,7 @@ export const OUTSIDE_DRIVER_METHODS = {
   cloudCancel: "cloud/cancel",
   imageGenerate: "image/generate",
   imageCancel: "image/cancel",
+  imageChunk: "image/chunk",
   httpRequest: "http/request",
   httpChunk: "http/chunk",
   httpEnd: "http/end",
@@ -361,6 +362,11 @@ export const OutsideDriverToHostMessage = Schema.Union(
     method: Schema.Literal(OUTSIDE_DRIVER_METHODS.httpRequest),
     params: OutsideDriverHttpRequestParams,
   }).annotations(strict),
+  Schema.Struct({
+    jsonrpc: JsonRpcVersion,
+    method: Schema.Literal(OUTSIDE_DRIVER_METHODS.imageChunk),
+    params: Schema.suspend(() => OutsideDriverImageChunkParams),
+  }).annotations(strict),
 );
 export type OutsideDriverToHostMessage = typeof OutsideDriverToHostMessage.Type;
 
@@ -411,14 +417,41 @@ export const OutsideDriverImageCancelParams = Schema.Struct({
 }).annotations(strict);
 export type OutsideDriverImageCancelParams = typeof OutsideDriverImageCancelParams.Type;
 
+/** The most base64 characters one `image/chunk` may carry, well inside a line. */
+export const OUTSIDE_DRIVER_IMAGE_CHUNK_CHARACTERS = 1_000_000;
+
 /**
- * One image the driver returns: its bytes, or an address the provider's own
- * answer named. The host fetches an address itself, once, without the key,
+ * A notification: part of one image's bytes, in order, before the driver
+ * answers `image/generate`. A line is capped well below a whole image, so an
+ * image larger than an inline answer can carry crosses as chunks, and the
+ * answer names it with `chunked: true`. Base64 is chunked on four-character
+ * boundaries so each piece decodes on its own.
+ */
+export const OutsideDriverImageChunkParams = Schema.Struct({
+  requestId: OutsideDriverMessageId,
+  image: Schema.Int.pipe(Schema.between(0, 15)),
+  data: Schema.String.pipe(
+    Schema.minLength(4),
+    Schema.maxLength(OUTSIDE_DRIVER_IMAGE_CHUNK_CHARACTERS),
+    Schema.filter((data) => data.length % 4 === 0),
+    Schema.pattern(/^[A-Za-z0-9+/]+={0,2}$/),
+  ),
+}).annotations(strict);
+export type OutsideDriverImageChunkParams = typeof OutsideDriverImageChunkParams.Type;
+
+/**
+ * One image the driver returns: its bytes inline (only when the whole answer
+ * fits one line), bytes it streamed as `image/chunk` for this image's index,
+ * or an address the provider's own answer named. The host fetches an address itself, once, without the key,
  * and only when it appeared in a response the host relayed for this job, so
  * a driver cannot point the host at an address the provider never gave.
  */
 export const OutsideDriverGeneratedImage = Schema.Union(
   Schema.Struct({ mediaType: OutsideDriverImageMediaType, data: Base64Image }).annotations(strict),
+  Schema.Struct({
+    mediaType: OutsideDriverImageMediaType,
+    chunked: Schema.Literal(true),
+  }).annotations(strict),
   Schema.Struct({
     url: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(8_192)),
   }).annotations(strict),

@@ -221,6 +221,8 @@ interface PendingCall {
    * actually answered.
    */
   readonly relayed: Array<string> | undefined;
+  /** Receives each `image/chunk` the driver streams for this call; absent refuses them. */
+  readonly onImageChunk: ((image: number, data: string) => void) | undefined;
 }
 
 type BrokeredRequest = (
@@ -278,6 +280,7 @@ class OutsideDriverLink {
       readonly onEvent?: (event: OutsideDriverStreamEvent) => void;
       readonly cloudPorts?: CloudSessionPorts;
       readonly keepRelayed?: boolean;
+      readonly onImageChunk?: (image: number, data: string) => void;
     },
   ): {
     readonly id: number;
@@ -322,6 +325,7 @@ class OutsideDriverLink {
         cloudPorts: options.cloudPorts,
         cancelMethod,
         relayed: options.keepRelayed === true ? relayed : undefined,
+        onImageChunk: options.onImageChunk,
       });
       this.#write({ jsonrpc: "2.0", id, method, params });
     });
@@ -392,6 +396,16 @@ class OutsideDriverLink {
       clearTimeout(pending.timer);
       if ("result" in message) pending.resolve(message.result);
       else pending.reject(failureFromDriver(message.error.data));
+      return;
+    }
+    if (message.method === OUTSIDE_DRIVER_METHODS.imageChunk) {
+      const { requestId, image, data } = message.params;
+      if (requestId >= this.#nextId) return this.#violate();
+      const pending = this.#pending.get(requestId);
+      // A chunk for a job the host already settled reaches nothing.
+      if (pending === undefined) return;
+      if (pending.onImageChunk === undefined) return this.#violate();
+      pending.onImageChunk(image, data);
       return;
     }
     if (message.method === OUTSIDE_DRIVER_METHODS.sessionEvent) {

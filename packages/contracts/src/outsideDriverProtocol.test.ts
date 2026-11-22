@@ -32,6 +32,31 @@ describe("outside image generation protocol", () => {
     }
   });
 
+  it("reads an image chunk notification and an answer naming a chunked image", () => {
+    expect(
+      decodeOutsideDriverToHostMessage({
+        jsonrpc: "2.0",
+        method: "image/chunk",
+        params: { requestId: 4, image: 0, data: "iVBORw0K" },
+      })._tag,
+    ).toBe("Right");
+    for (const params of [
+      { requestId: 4, image: 16, data: "iVBORw0K" },
+      { requestId: 4, image: 0, data: "iVBORw0" },
+      { requestId: 4, image: 0, data: "iVBORw0K", note: "x" },
+    ]) {
+      expect(
+        decodeOutsideDriverToHostMessage({ jsonrpc: "2.0", method: "image/chunk", params })._tag,
+      ).toBe("Left");
+    }
+    expect(
+      decodeOutsideDriverImageGenerateResult({
+        status: "completed",
+        images: [{ mediaType: "image/png", chunked: true }],
+      })._tag,
+    ).toBe("Right");
+  });
+
   it("refuses a job result carrying anything the protocol does not name", () => {
     for (const result of [
       { status: "refused", message: "attacker text" },

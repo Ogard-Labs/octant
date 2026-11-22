@@ -167,6 +167,9 @@ function harness(
     readonly sendTimeoutMs?: number;
     readonly providerBody?: string;
     readonly imageFetch?: (url: string) => Response;
+    readonly resolve?: (hostname: string) => Promise<ReadonlyArray<string>>;
+    readonly profile?: () => OutsideImageProviderInstance;
+    readonly packageState?: () => ReturnType<typeof fixturePackage>;
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-outside-image-"));
@@ -196,7 +199,7 @@ function harness(
   });
   const admission = new OutsideDriverAdmission({
     platform: "darwin",
-    packages: () => [fixturePackage(options.activation)],
+    packages: () => [options.packageState?.() ?? fixturePackage(options.activation)],
     isCompatible: () => true,
     entry: async () => ({ packageRoot: directory, entryPoint: "dist/images.mjs" }),
     processes: {
@@ -210,6 +213,7 @@ function harness(
     runtimeRegistry: new ProviderRuntimeRegistry(),
     credentialResolver: { has: async () => true, resolve: async () => "sk-outside" },
     fetch: providerFetch,
+    resolve: options.resolve ?? (async () => ["93.184.216.34"]),
     ...(options.sendTimeoutMs === undefined
       ? {}
       : { limits: { sendTimeoutMs: options.sendTimeoutMs } }),
@@ -218,7 +222,8 @@ function harness(
     journal,
     projection: runtime.imageJobProjection,
     attachments: new GeneratedImageStore(directory),
-    readProviderInstance: (id) => (String(id) === String(profileId) ? outsideProfile() : undefined),
+    readProviderInstance: (id) =>
+      String(id) === String(profileId) ? (options.profile ?? outsideProfile)() : undefined,
     readImageGenerationCustomSources: () => [],
     credentialResolver: { has: async () => true, resolve: async () => "sk-outside" },
     uuid: () => crypto.randomUUID(),
@@ -228,10 +233,10 @@ function harness(
     spendCeiling,
     outsideImageDrivers: {
       admits: (instance) => admission.isAdmitted(instance),
-      declaredUsdMicrosPerImage: (instance, modelId) =>
+      declaredModel: (instance, modelId) =>
         admission
           .imageDriverModels(instance.configuration.driver)
-          ?.find((model) => model.modelId === String(modelId))?.usdMicrosPerImage,
+          ?.find((model) => model.modelId === String(modelId)),
       adapter: (instance, ports) => admission.imageAdapter(instance, ports),
     },
   });
@@ -519,4 +524,189 @@ describe("an outside image driver that misbehaves", () => {
     expect(hold.holds(profileId, driver.digest as never)).toBe(true);
     expect(hold.holds(profileId, `sha256:${"0".repeat(64)}` as never)).toBe(false);
   });
+});
+
+describe("an outside image driver's later fixes", () => {
+  const delayed = (): {
+    readonly handler: FixtureDriverHandler;
+    readonly release: () => void;
+  } => {
+    let release = () => undefined as void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return {
+      handler: async () => {
+        await gate;
+        return { status: "completed", images: [{ mediaType: "image/png", data: pngBase64 }] };
+      },
+      release: () => release(),
+    };
+  };
+
+  it("streams an image too large for one line as chunks and assembles it", async () => {
+    const { enqueue, service } = harness({
+      handlers: {
+        ...imageHandlers,
+        "image/generate": (_params, context) => {
+          // Split on four-character boundaries, as the protocol requires.
+          const half = Math.floor(pngBase64.length / 8) * 4;
+          for (const data of [pngBase64.slice(0, half), pngBase64.slice(half)]) {
+            context.writeRaw(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                method: "image/chunk",
+                params: { requestId: context.id, image: 0, data },
+              }),
+            );
+          }
+          return { status: "completed", images: [{ mediaType: "image/png", chunked: true }] };
+        },
+      },
+    });
+    const job = await service.whenTerminal((await enqueue({})).id);
+    expect(job.status).toBe("completed");
+    expect(job.artifacts).toHaveLength(1);
+  });
+
+  it("refuses a chunk for an image index past the variants it asked for", async () => {
+    const { enqueue, service } = harness({
+      handlers: {
+        ...imageHandlers,
+        "image/generate": (_params, context) => {
+          context.writeRaw(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              method: "image/chunk",
+              params: { requestId: context.id, image: 3, data: pngBase64.slice(0, 8) },
+            }),
+          );
+          return NO_ANSWER;
+        },
+      },
+    });
+    const job = await service.whenTerminal((await enqueue({})).id);
+    expect(job.status === "failed" ? job.failure?.message : undefined).toBe(
+      "The image driver sent more image data than Octant accepts.",
+    );
+  });
+
+  it("matches an address the provider escaped in its JSON answer", async () => {
+    const named = "https://cdn.images.example.test/out/1.png?a=1&sig=abc";
+    const imageFetch = vi.fn(() => new Response(png, { status: 200 }));
+    const run = harness({
+      handlers: {
+        ...imageHandlers,
+        "image/generate": async (_params, context) => {
+          await context.http({
+            requestId: context.id,
+            url: "https://images.example.test/v1/generate",
+            method: "POST",
+            auth: { header: "authorization", scheme: "Bearer" },
+          });
+          return { status: "completed", images: [{ url: named }] };
+        },
+      },
+      providerBody: '{"url":"https:\\/\\/cdn.images.example.test\\/out\\/1.png?a=1\\u0026sig=abc"}',
+      imageFetch,
+    });
+    const job = await run.service.whenTerminal((await run.enqueue({})).id);
+    expect(job.status).toBe("completed");
+    expect(imageFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses an image address whose name resolves to a private network", async () => {
+    const named = "https://cdn.images.example.test/out/1.png";
+    const imageFetch = vi.fn(() => new Response(png, { status: 200 }));
+    const run = harness({
+      handlers: {
+        ...imageHandlers,
+        "image/generate": async (_params, context) => {
+          await context.http({
+            requestId: context.id,
+            url: "https://images.example.test/v1/generate",
+            method: "POST",
+            auth: { header: "authorization", scheme: "Bearer" },
+          });
+          return { status: "completed", images: [{ url: named }] };
+        },
+      },
+      providerBody: JSON.stringify({ url: named }),
+      imageFetch,
+      resolve: async () => ["10.0.0.7"],
+    });
+    const job = await run.service.whenTerminal((await run.enqueue({})).id);
+    expect(job.status === "failed" ? job.failure?.category : undefined).toBe("unauthorized");
+    expect(imageFetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses a model the package does not declare at the bound digest before anything is reserved", async () => {
+    const { service, drivers } = harness({
+      profile: () => ({
+        ...outsideProfile(),
+        configuration: {
+          ...outsideProfile().configuration,
+          modelAllowlist: [pricedModel, decodeProviderModelId("example-image-retired")],
+        },
+      }),
+    });
+    await expect(
+      service.enqueue({
+        threadKind: "chat-thread",
+        scopeId,
+        profileInstanceId: profileId,
+        modelId: decodeProviderModelId("example-image-retired"),
+        prompt: "a lighthouse",
+      }),
+    ).rejects.toMatchObject({ category: "ineligible" });
+    expect(drivers).toHaveLength(0);
+  });
+
+  it.each([
+    ["turned off", (profile: OutsideImageProviderInstance) => ({ ...profile, enabled: false })],
+    [
+      "moved to another digest",
+      (profile: OutsideImageProviderInstance) => ({
+        ...profile,
+        configuration: {
+          ...profile.configuration,
+          driver: { ...profile.configuration.driver, digest: `sha256:${"e".repeat(64)}` as never },
+        },
+      }),
+    ],
+  ] as const)(
+    "does not start a queued image whose profile was %s while it waited, and charges nothing",
+    async (_label, change) => {
+      const blocker = delayed();
+      let current: OutsideImageProviderInstance = outsideProfile();
+      const movedPackage = () => {
+        const state = fixturePackage();
+        return String(current.configuration.driver.digest) === driver.digest
+          ? state
+          : { ...state, digest: current.configuration.driver.digest };
+      };
+      const run = harness({
+        handlers: { ...imageHandlers, "image/generate": blocker.handler },
+        profile: () => current,
+        packageState: movedPackage,
+      });
+      run.setCeiling(100);
+      // The host runs a few image jobs at once; fill them so the last one waits.
+      const first = await Promise.all(Array.from({ length: 4 }, () => run.enqueue({})));
+      const waiting = await run.enqueue({});
+      expect(run.service.get(waiting.id)?.status).toBe("queued");
+      current = change(current);
+      blocker.release();
+      const job = await run.service.whenTerminal(waiting.id);
+      expect(job.status).toBe("failed");
+      expect(job.status === "failed" ? job.failure?.category : undefined).toBe(
+        "invalid-configuration",
+      );
+      for (const done of first) await run.service.whenTerminal(done.id);
+      const generates = run.drivers.flatMap((entry) =>
+        entry.fixture.received.filter((message) => message.method === "image/generate"),
+      );
+      expect(generates.length).toBeLessThanOrEqual(first.length);
+    },
+  );
 });

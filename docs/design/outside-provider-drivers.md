@@ -74,8 +74,7 @@ and Octant's image tools use it exactly as they use a bundled image driver.
 
 ## First use case: an outside harness endpoint
 
-The first and, under this design, only admitted outside driver shape is a
-**harness endpoint**: a driver that supplies only a transport through the
+The first admitted outside driver shape is a **harness endpoint**: a driver that supplies only a transport through the
 provider-sdk harness endpoint port (`@octant/provider-sdk/harness-endpoint`,
 `packages/provider-sdk/src/harnessEndpoint.ts`). The concrete case is a model
 service whose native wire protocol is neither OpenAI- nor Anthropic-compatible,
@@ -140,6 +139,11 @@ Rules, each taking the fail-closed option:
   _Rationale:_ a driver that named its own price at run time could reserve
   nothing and bill anything; the declaration is reviewed, digest-bound and
   signed, as bundled drivers' checked-in rates are.
+- **A queued job.** A job carries the driver digest and price it was
+  reserved at. Before it starts, a profile turned off, a driver no longer
+  admitted, a newly trusted digest, or a model the package no longer declares
+  ends it unstarted and releases its reservation; a crash-limit hold
+  journaled at the digest holds across a restart.
 - **Admission.** An image profile's driver is effective on the same ladder as
   a harness endpoint, and its component must still declare image generation
   at that digest, so neither family can run the other's package. A profile
@@ -150,7 +154,10 @@ Rules, each taking the fail-closed option:
 - **The protocol.** `image-generation/1` shares the framing, `initialize`,
   failures and the brokered `http/*` calls with `harness-endpoint/1`, and adds
   `image/generate` (model, prompt, variant count, reference images as bytes,
-  and the frozen options) and the `image/cancel` notification. A driver's
+  and the frozen options), the `image/cancel` notification, and the driver's
+  `image/chunk` notification, which streams one image's base64 bytes in
+  pieces of at most a million characters when the whole answer would not fit
+  one line (the answer then names that image `chunked`). A driver's
   `http/request` may name the `image/generate` it serves, and the host closes
   those calls on cancel or deadline as it does for a send. The answer is
   `completed` with one to 16 images, or `refused` with no text.
@@ -158,9 +165,10 @@ Rules, each taking the fail-closed option:
   job fails as `protocol` and stores none; every image's bytes are sniffed by
   the host and a media type the driver names that the bytes do not bear out
   fails the job; an image given as an address is fetched by the host, once,
-  without the key, over HTTPS (no literal private or loopback address) or the
-  configured origin, and only when that exact address appeared in a response
-  the host relayed for this job. A safety refusal is Octant's sentence. A
+  without the key, over HTTPS to a name that resolves only to public
+  addresses, or the configured origin, and only when that exact address (JSON
+  escapes undone) appeared whole in a response the host relayed for this job.
+  The streamed bytes of one image are capped at the host's image size bound. A safety refusal is Octant's sentence. A
   crash, a deadline (ten minutes) or an unreadable message ends the job with
   the closed reason, and a failed job charges nothing.
 - **Process.** An image profile's process starts at its first job, never at

@@ -1,3 +1,4 @@
+import { MAX_GENERATED_IMAGE_BYTES } from "@octant/contracts";
 import type {
   ImageArtifactMediaType,
   OutsideDriverKeyPlacement,
@@ -22,6 +23,7 @@ import type {
   ImageGenerationAdapter,
   ImageGenerationPorts,
 } from "@octant/provider-sdk/image-generation";
+import { lookup } from "node:dns/promises";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import {
   makeOutsideDriverBroker,
@@ -71,12 +73,46 @@ export interface OutsideImageGenerationProxyOptions {
   readonly limits?: Partial<OutsideDriverLimits>;
   /** Called once when the driver is stopped, with the closed reason. */
   readonly onStopped?: (failure: ProviderFailure) => void;
+  /** Resolves a host name to its addresses; the system resolver by default. */
+  readonly resolve?: (hostname: string) => Promise<ReadonlyArray<string>>;
+}
+
+async function resolveAddresses(hostname: string): Promise<ReadonlyArray<string>> {
+  return (await lookup(hostname, { all: true })).map((entry) => entry.address);
+}
+
+/**
+ * Whether every address an image's host name resolves to is one the internet
+ * routes to, or the address is on the configured origin. A name that does not
+ * resolve is refused. The fetch resolves again, so this narrows rather than
+ * closes the window for a name that changes between the two answers.
+ */
+async function resolvesPublicly(
+  url: string,
+  origin: string | undefined,
+  resolve: (hostname: string) => Promise<ReadonlyArray<string>>,
+): Promise<boolean> {
+  const target = new URL(url);
+  if (origin !== undefined && `${target.protocol}//${target.host}` === origin) return true;
+  const host = target.hostname.replace(/^\[|\]$/g, "");
+  if (parseNetworkAddress(host) !== undefined) return isPublicNetworkAddress(host);
+  try {
+    const addresses = await resolve(host);
+    return addresses.length > 0 && addresses.every((address) => isPublicNetworkAddress(address));
+  } catch {
+    return false;
+  }
 }
 
 const SAFETY_REFUSAL = "The image provider declined this request.";
 
+/** The most base64 characters one image may stream: the host's own image size bound. */
+const MAX_CHUNKED_IMAGE_CHARACTERS = Math.ceil(MAX_GENERATED_IMAGE_BYTES / 3) * 4;
+
 const imageInvalid = () =>
   outsideDriverFailure("protocol", "The image driver returned an image Octant could not accept.");
+const tooLarge = () =>
+  outsideDriverFailure("protocol", "The image driver sent more image data than Octant accepts.");
 const tooManyImages = () =>
   outsideDriverFailure("protocol", "The provider returned more images than requested.");
 
@@ -138,12 +174,17 @@ export function makeOutsideImageGenerationProxy(
   const accept = async (
     image: OutsideDriverGeneratedImage,
     relayed: ReadonlyArray<string>,
+    streamed: ReadonlyArray<string> | undefined,
     signal: AbortSignal | undefined,
   ): Promise<ImageAdapterImage> => {
     let bytes: Uint8Array;
     let named: ImageArtifactMediaType | undefined;
     if ("data" in image) {
       bytes = Uint8Array.from(Buffer.from(image.data, "base64"));
+      named = image.mediaType;
+    } else if ("chunked" in image) {
+      if (streamed === undefined) throw imageInvalid();
+      bytes = Uint8Array.from(Buffer.concat(streamed.map((part) => Buffer.from(part, "base64"))));
       named = image.mediaType;
     } else {
       if (
@@ -153,6 +194,12 @@ export function makeOutsideImageGenerationProxy(
         throw outsideDriverFailure(
           "unauthorized",
           "The image driver named an image address the provider did not return.",
+        );
+      }
+      if (!(await resolvesPublicly(image.url, origin, options.resolve ?? resolveAddresses))) {
+        throw outsideDriverFailure(
+          "unauthorized",
+          "The image driver named an image address on a private network.",
         );
       }
       const fetched = await options.ports.fetchApprovedImageUrl({
@@ -188,21 +235,47 @@ export function makeOutsideImageGenerationProxy(
       ...(request.aspectRatio === undefined ? {} : { aspectRatio: request.aspectRatio }),
       ...(request.resolution === undefined ? {} : { resolution: request.resolution }),
     };
+    // Chunks are held per image index and bounded per image, so a driver
+    // cannot grow the host's memory past what the images could be.
+    const chunks = new Map<number, Array<string>>();
+    const chunkCharacters = new Map<number, number>();
+    let oversized = false;
     const call = link.call(OUTSIDE_DRIVER_METHODS.imageGenerate, params, {
       timeoutMs: limits.sendTimeoutMs,
       keepRelayed: true,
+      onImageChunk: (image, data) => {
+        if (oversized) return;
+        const total = (chunkCharacters.get(image) ?? 0) + data.length;
+        if (image >= variantCount || total > MAX_CHUNKED_IMAGE_CHARACTERS) {
+          oversized = true;
+          chunks.clear();
+          link.cancel(call.id);
+          return;
+        }
+        chunkCharacters.set(image, total);
+        const parts = chunks.get(image) ?? [];
+        parts.push(data);
+        chunks.set(image, parts);
+      },
     });
     const cancel = () => link.cancel(call.id);
     request.signal?.addEventListener("abort", cancel, { once: true });
     try {
-      const decoded = decodeOutsideDriverImageGenerateResult(await call.settled);
+      let settled: unknown;
+      try {
+        settled = await call.settled;
+      } catch (error) {
+        if (oversized) throw tooLarge();
+        throw error;
+      }
+      const decoded = decodeOutsideDriverImageGenerateResult(settled);
       if (decoded._tag === "Left") throw stopped();
       const result = decoded.right;
       if (result.status === "refused") return { status: "refused", safetyRefusal: SAFETY_REFUSAL };
       if (result.images.length > variantCount) throw tooManyImages();
       const images: Array<ImageAdapterImage> = [];
-      for (const image of result.images) {
-        images.push(await accept(image, call.relayed, request.signal));
+      for (const [index, image] of result.images.entries()) {
+        images.push(await accept(image, call.relayed, chunks.get(index), request.signal));
       }
       return { status: "completed", images };
     } finally {
@@ -230,7 +303,14 @@ export function makeOutsideImageGenerationProxy(
  * (`https://images.example.test.attacker.invalid/…`) authorizes nothing.
  */
 function returnedAddresses(relayed: ReadonlyArray<string>): ReadonlySet<string> {
-  const text = relayed.join("").replaceAll("\\/", "/");
+  // JSON may escape `/` as `\/` and any character as `\uXXXX` (a signed
+  // address's `&` often arrives as `\u0026`); both are undone first.
+  const text = relayed
+    .join("")
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_escape, hex: string) =>
+      String.fromCharCode(Number.parseInt(hex, 16)),
+    )
+    .replaceAll("\\/", "/");
   return new Set(text.match(/https?:\/\/[^\s"'<>\\`{}|^]+/g) ?? []);
 }
 
