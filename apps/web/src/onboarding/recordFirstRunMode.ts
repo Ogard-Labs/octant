@@ -11,8 +11,7 @@ export interface FirstRunModeWriters {
 
 /**
  * Records the first-run answer as the default for new Code threads and new
- * Work threads. No Work thread starts in Plan, so a Plan answer leaves Work
- * asking first.
+ * Work threads, Plan included.
  * The answer counts as recorded only when every default that exists took it.
  */
 export async function recordFirstRunMode(
@@ -21,6 +20,6 @@ export async function recordFirstRunMode(
 ): Promise<boolean> {
   const codeSaved = await writers.saveCode(threadAccessOf(mode));
   if (writers.saveWork === undefined) return codeSaved;
-  const workSaved = await writers.saveWork(workAccessOfPermissionMode(mode) ?? "ask-first");
+  const workSaved = await writers.saveWork(workAccessOfPermissionMode(mode));
   return codeSaved && workSaved;
 }

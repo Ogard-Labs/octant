@@ -7,6 +7,8 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   acpListedSessions,
+  acpReplayCollector,
+  acpReplayedMessages,
   makeAcpNativeSessions,
   readAcpSessionPages,
   type AcpListedSession,
@@ -194,5 +196,117 @@ describe("an ACP agent's own sessions", () => {
       cursor === undefined ? { sessions: [{ sessionId: "a" }], nextCursor: "b" } : { nope: true },
     );
     expect(listed).toBeUndefined();
+  });
+});
+
+describe("an ACP agent's session history", () => {
+  it("joins replayed message chunks into messages and names tool calls, leaving thoughts out", () => {
+    expect(
+      acpReplayedMessages([
+        { sessionUpdate: "user_message_chunk", content: { type: "text", text: "Find the " } },
+        { sessionUpdate: "user_message_chunk", content: { type: "text", text: "flaky test" } },
+        { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "hm" } },
+        { sessionUpdate: "tool_call", toolCallId: "t1", title: "Run tests", kind: "execute" },
+        { sessionUpdate: "tool_call_update", toolCallId: "t1", status: "completed" },
+        { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "It is " } },
+        { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "timing out." } },
+      ]),
+    ).toEqual([
+      { role: "person", text: "Find the flaky test" },
+      { role: "agent", text: "It is timing out.", tools: ["Run tests"] },
+    ]);
+  });
+
+  it("keeps the newest messages of a replay longer than its bound and counts the earlier ones as omitted", async () => {
+    const replay = acpReplayCollector(4);
+    const chunk = (role: "user" | "agent", text: string) => ({
+      sessionUpdate: `${role}_message_chunk`,
+      content: { type: "text", text },
+    });
+    for (const update of [
+      chunk("user", "first question"),
+      chunk("agent", "first "),
+      chunk("agent", "answer"),
+      chunk("user", "second "),
+      chunk("user", "question"),
+      chunk("agent", "second answer"),
+      chunk("user", "newest question"),
+      chunk("agent", "newest answer"),
+    ])
+      replay.add(update);
+    const sessions = makeAcpNativeSessions({
+      instanceId,
+      driverKind: "antigravity",
+      displayName: "Antigravity",
+      heldSessions: () => new Set(),
+      listSessions: async () => ({ sessions: [], truncated: false }),
+      readHistory: async () => replay.collected(),
+    });
+    const history = sessions.history;
+    if (history === undefined) throw new Error("A reader was given");
+    // The bound keeps the second question's last chunk; its earlier chunk was
+    // dropped, so the partial message is left out with the ones before it.
+    expect(
+      await Effect.runPromise(history({ instanceId, projectRoot: "/work", nativeSessionId: "s1" })),
+    ).toEqual({
+      status: "read",
+      messages: [
+        { role: "agent", text: "second answer" },
+        { role: "person", text: "newest question" },
+        { role: "agent", text: "newest answer" },
+      ],
+      omitted: 3,
+    });
+  });
+
+  it("keeps a tool-heavy session's conversation whole when its thoughts, plans and tool progress alone exceed the bound", async () => {
+    const replay = acpReplayCollector(4);
+    const chunk = (role: "user" | "agent", text: string) => ({
+      sessionUpdate: `${role}_message_chunk`,
+      content: { type: "text", text },
+    });
+    replay.add(chunk("user", "Fix the build"));
+    for (let step = 0; step < 50; step += 1) {
+      replay.add({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "hm" } });
+      replay.add({ sessionUpdate: "plan", entries: [] });
+      replay.add({ sessionUpdate: "tool_call_update", toolCallId: `t${step}`, status: "done" });
+    }
+    replay.add({ sessionUpdate: "tool_call", toolCallId: "t50", title: "Run build" });
+    replay.add(chunk("agent", "Fixed."));
+    const sessions = makeAcpNativeSessions({
+      instanceId,
+      driverKind: "antigravity",
+      displayName: "Antigravity",
+      heldSessions: () => new Set(),
+      listSessions: async () => ({ sessions: [], truncated: false }),
+      readHistory: async () => replay.collected(),
+    });
+    const history = sessions.history;
+    if (history === undefined) throw new Error("A reader was given");
+    expect(
+      await Effect.runPromise(history({ instanceId, projectRoot: "/work", nativeSessionId: "s1" })),
+    ).toEqual({
+      status: "read",
+      messages: [
+        { role: "person", text: "Fix the build" },
+        { role: "agent", text: "Fixed.", tools: ["Run build"] },
+      ],
+    });
+  });
+
+  it("imports none from an agent that cannot load its sessions", async () => {
+    const sessions = makeAcpNativeSessions({
+      instanceId,
+      driverKind: "antigravity",
+      displayName: "Antigravity",
+      heldSessions: () => new Set(),
+      listSessions: async () => ({ sessions: [], truncated: false }),
+      readHistory: async () => "unsupported",
+    });
+    const history = sessions.history;
+    if (history === undefined) throw new Error("A reader was given");
+    expect(
+      await Effect.runPromise(history({ instanceId, projectRoot: "/work", nativeSessionId: "s1" })),
+    ).toEqual({ status: "unsupported" });
   });
 });

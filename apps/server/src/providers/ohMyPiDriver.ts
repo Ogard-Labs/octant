@@ -37,8 +37,11 @@ const capabilities = {
   approvals: "unsupported",
   userQuestions: "unsupported",
   reasoning: "supported",
-  // The RPC mapper never emits usage, so a spend ceiling leaves its turns out
-  // and says they are not measured.
+  // Usage and tool activity come from a turn's event stream, and this driver
+  // runs no turns: `acquire` refuses, so nothing reads Oh My Pi's RPC events.
+  // Its RPC is Pi's, whose completed assistant messages carry usage, so when
+  // turn execution lands it should read them as the Pi driver does rather
+  // than claim support before any event is mapped.
   usage: "unsupported",
   toolActivity: "unsupported",
   fileChanges: "unavailable",

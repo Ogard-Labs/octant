@@ -1061,19 +1061,24 @@ export function decideAutomationFollowUp(input: {
   readonly scheduledAt: UtcTimestamp;
   readonly now: UtcTimestamp;
   readonly thread: AutomationFollowUpThreadFacts;
+  /** Settings' `followUpLatenessLimitHours`; absent is the former fixed day. */
+  readonly latenessLimitHours?: number;
 }): AutomationFollowUpDecision {
   const blocked = (reason: AutomationBlockReason, message: string): AutomationFollowUpDecision => ({
     kind: "blocked",
     reason,
     message,
   });
+  const latenessHours = input.latenessLimitHours;
   if (
     Date.parse(input.now) - Date.parse(input.scheduledAt) >
-    AUTOMATION_FOLLOW_UP_MISSED_WINDOW_MS
+    (latenessHours === undefined
+      ? AUTOMATION_FOLLOW_UP_MISSED_WINDOW_MS
+      : latenessHours * 3_600_000)
   ) {
     return blocked(
       "follow-up-missed",
-      "The follow-up was more than a day late, so it was recorded as missed and did not run.",
+      `The follow-up was more than ${latenessHours === undefined ? "a day" : `${String(latenessHours)} hours`} late, so it was recorded as missed and did not run.`,
     );
   }
   const thread = input.thread;

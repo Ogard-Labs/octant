@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -360,6 +360,89 @@ describe("one harness session on every surface", () => {
       ["native-harness-approval-settled", expect.objectContaining({ kind: "local-user" })],
       ["native-harness-question-settled", expect.objectContaining({ kind: "local-user" })],
     ]);
+  });
+
+  it("hands a subagent's secret question's answer back to it from the person alone and never journals it", async () => {
+    const { store } = journaledSession();
+    const directory = directories.at(-1) ?? "";
+    let counter = 0;
+    const questions = new NativeHarnessQuestionStore({
+      sessions: store,
+      uuid: () => `dddddddd-dddd-4ddd-8ddd-${(++counter).toString(16).padStart(12, "0")}`,
+      clock: () => "2026-10-06T12:00:00.000Z",
+    });
+    const handler = createNativeHarnessSessionRouteHandler({
+      windowAuthorityStore: new WindowAuthorityStore(),
+      store,
+      followUps: {} as never,
+      authorizeThread: () => true,
+      answerQuestion: ({ threadId, questionId, answer, secret, actor }) =>
+        questions.answer(threadId, questionId, answer, actor, secret),
+    });
+    const send = (body: unknown, principal: unknown = { kind: "local-window" }) => {
+      const request = new Request(
+        `http://127.0.0.1/api/native-harness/sessions/${threadId}/questions`,
+        { method: "POST", body: JSON.stringify(body) },
+      );
+      bindPrincipalRouteContext(request, { principal: principal as never, scopeId: windowId });
+      return handler(request);
+    };
+    const lead = decodeNativeHarnessSlotCandidate({
+      hostId: "00000000-0000-4000-8000-0000000000aa",
+      providerInstanceId: "00000000-0000-4000-8000-000000000001",
+      modelId: "frontier-large",
+    });
+    const secret = questions.ask({
+      threadId,
+      mode: "work",
+      lead,
+      prompt: "Database credential?",
+      options: [],
+      secret: true,
+    });
+    const plain = questions.ask({
+      threadId,
+      mode: "work",
+      lead,
+      prompt: "Which host?",
+      options: [],
+    });
+    const [secretQuestion, plainQuestion] = store.read(threadId)?.questions ?? [];
+    expect(secretQuestion).toMatchObject({ prompt: "Database credential?", secret: true });
+    const sentinel = "hunter2-secret-sentinel";
+
+    // Only the person answers it: a device they did not pair is refused, and
+    // neither answer stands in for the other.
+    expect(
+      (
+        await send(
+          { questionId: secretQuestion?.id, secretAnswer: sentinel },
+          { kind: "remote-device", deviceId: "55000000-0000-4000-8000-0000000000d2" },
+        )
+      )?.status,
+    ).toBe(403);
+    expect((await send({ questionId: secretQuestion?.id, answer: sentinel }))?.status).toBe(409);
+    expect((await send({ questionId: plainQuestion?.id, secretAnswer: sentinel }))?.status).toBe(
+      409,
+    );
+    expect(store.read(threadId)?.questions.map((question) => question.status)).toEqual([
+      "pending",
+      "pending",
+    ]);
+
+    const answered = await send({ questionId: secretQuestion?.id, secretAnswer: sentinel });
+    expect(answered?.status).toBe(200);
+    expect(await secret).toMatchObject({ status: "answered", answer: sentinel });
+    expect(store.read(threadId)?.questions[0]).toMatchObject({ status: "answered", secret: true });
+    expect(store.read(threadId)?.questions[0]).not.toHaveProperty("answer");
+    expect(JSON.stringify(await answered?.json())).not.toContain(sentinel);
+    expect((await send({ questionId: plainQuestion?.id, answer: "db.internal" }))?.status).toBe(
+      200,
+    );
+    expect(await plain).toMatchObject({ answer: "db.internal" });
+    expect(JSON.stringify(store.read(threadId))).not.toContain(sentinel);
+    for (const file of readdirSync(directory))
+      expect(readFileSync(join(directory, file)).includes(sentinel)).toBe(false);
   });
 
   it("journals a pause, a resume and the steering notes a paired device sends with the device as actor, and a local window's as the local person", async () => {

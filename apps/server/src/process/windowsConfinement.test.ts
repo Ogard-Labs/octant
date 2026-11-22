@@ -4,6 +4,7 @@ import {
   ProcessConfinementError,
   type ProcessConfinementPrepareInput,
 } from "./seatbeltProfile";
+import { resolvePackagedWindowsConfineLauncher } from "./windowsConfinement";
 
 const HOME = "C:\\Users\\Ada";
 const LAUNCHER = "C:\\Program Files\\Octant\\resources\\native\\octant-windows-confine.exe";
@@ -191,9 +192,17 @@ describe("Windows confinement port", () => {
       kind: "proxied",
       endpoint: { kind: "loopback", port: 9000 },
     } as const;
-    expect(refusalOf(() => port.prepare({ ...launch, networkEgress: proxied }))).toMatch(
-      /no proxied network/u,
+    expect(refusalOf(() => port.prepare({ ...launch, networkEgress: proxied }))).toBe(
+      "The requested network limits are not supported by the Windows sandbox.",
     );
+    expect(
+      refusalOf(() =>
+        port.prepare({
+          ...launch,
+          explicitReadOnlyRoots: [`${launch.boundRoot}\\readonly-sub`],
+        }),
+      ),
+    ).toMatch(/cannot keep .* read-only beneath/u);
     expect(refusalOf(() => port.prepare({ ...launch, allowFileReadStar: true }))).toMatch(
       /read-everywhere/u,
     );
@@ -214,5 +223,11 @@ describe("Windows confinement port", () => {
       unverifiedWindowsConfinement: { launcherPath: "C:\\Windows\\System32\\cmd.exe" },
     });
     expect(refusalOf(() => port.prepare(launch))).toMatch(/octant-windows-confine\.exe/u);
+  });
+
+  it("refuses packaged launcher discovery on non-Windows platforms and missing bundle paths", () => {
+    expect(resolvePackagedWindowsConfineLauncher(import.meta.url, "darwin")).toBeUndefined();
+    expect(resolvePackagedWindowsConfineLauncher(import.meta.url, "linux")).toBeUndefined();
+    expect(resolvePackagedWindowsConfineLauncher(import.meta.url, "win32")).toBeUndefined();
   });
 });

@@ -50,6 +50,7 @@ import {
   PERMISSION_MODE_LABEL,
   PermissionModePicker,
   threadKeepsFullAccessSandbox,
+  threadProviderDriverKind,
 } from "../code/PermissionModePicker";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useProjectTrustNotice } from "../providers/ProjectTrustNotice";
@@ -176,6 +177,7 @@ import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
+import { SteeredMessages } from "../messageQueue/SteeredMessages";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import {
   documentIsVisible,
@@ -277,6 +279,11 @@ type WorkTranscriptRow =
       readonly kind: "steered";
       readonly key: string;
       readonly steered: NonNullable<WorkTurnState["steeredResults"]>;
+    }
+  | {
+      readonly kind: "steered-messages";
+      readonly key: string;
+      readonly steered: NonNullable<WorkTurnState["steeredMessages"]>;
     }
   | {
       readonly kind: "side-tasks";
@@ -1376,7 +1383,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     }
   }, [props.threadId, props.turnClient, stoppableTurn, forceStop.requestStop]);
   const answerWorkRequest = useCallback(
-    async (request: WorkRequest, resolution: WorkRequestResolution) => {
+    async (request: WorkRequest, resolution: WorkRequestResolution, secretAnswer?: string) => {
       const requestClient = props.requestClient;
       if (requestClient === undefined) return false;
       const threadKey = String(props.threadId);
@@ -1386,6 +1393,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           requestId: request.requestId,
           expectedVersion: request.version,
           resolution,
+          // A secret question's answer rides beside its resolution, never in it.
+          ...(secretAnswer === undefined ? {} : { secretAnswer }),
         });
         if (currentThreadKeyRef.current !== threadKey) return false;
         setStatus(undefined);
@@ -1666,6 +1675,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           kind: "steered",
           key: `${String(turn.requestId)}-steered`,
           steered: turn.steeredResults,
+        });
+      }
+      if (turn.steeredMessages !== undefined && turn.steeredMessages.length > 0) {
+        rows.push({
+          kind: "steered-messages",
+          key: `${String(turn.requestId)}-steered-messages`,
+          steered: turn.steeredMessages,
         });
       }
       // The provider's restated task list lands where the turn it belongs to
@@ -2952,6 +2968,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   />
                 );
               }
+              if (row.kind === "steered-messages") {
+                return <SteeredMessages steered={row.steered} />;
+              }
               if (row.kind === "steered") {
                 return (
                   <SteeredChildResults
@@ -3019,6 +3038,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         ? {}
                         : { questionnaire: row.request.detail.questionnaire })}
                       onAnswer={(answer) => {
+                        if (row.request.detail.kind === "user-input" && row.request.detail.secret)
+                          return answerWorkRequest(
+                            row.request,
+                            { kind: "user-input", secret: true },
+                            answer,
+                          );
                         try {
                           const detail = row.request.detail;
                           const value =
@@ -3036,6 +3061,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       }}
                       options={row.request.detail.options.map((label) => ({ label }))}
                       prompt={row.request.detail.prompt}
+                      secret={row.request.detail.secret === true}
                     />
                   );
                 }
@@ -3521,6 +3547,10 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     }
                     legacyStrict={thread.strict === undefined && thread.fullAccessSandbox === true}
                     fullAccessSandboxSupported={threadKeepsFullAccessSandbox(
+                      props.providerGroups ?? [],
+                      thread.providerInstanceId,
+                    )}
+                    driverKind={threadProviderDriverKind(
                       props.providerGroups ?? [],
                       thread.providerInstanceId,
                     )}

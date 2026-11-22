@@ -47,10 +47,13 @@ import type {
   ProviderWakeupSchedule,
   ProviderBackgroundWork,
   ProviderNativeSession,
+  ProviderNativeSessionMessage,
   ProviderNativeSessionCarry,
   ProviderNativeSessions,
+  ProviderOwnChannels,
   ProviderServerPlacement,
 } from "@octant/provider-sdk/driver";
+import { launchOwnChannels } from "./providerOwnChannels";
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
   isOctantInstructionContext,
@@ -101,6 +104,7 @@ import {
   claudeAccountUsesStoredKey,
   mcpServerTool,
   planReadOnlyToolServers,
+  providerHoldsLevelWithoutSandbox,
   providerOwnMemoryLaunches,
   windowsProviderLaunch,
 } from "@octant/domain";
@@ -897,8 +901,8 @@ function isPlanShellCommand(
  * and their `permissions.allow`, `ask` and `deny` rules live. The source
  * cannot be read for those alone, because it also brings the plugins,
  * agents and commands the person's Octant switches keep out, so a session
- * that reads no home settings keeps Octant's gate and sandbox instead of
- * running with neither protection.
+ * that reads no home settings keeps Octant's gate, which asks before each
+ * command and each edit the level does not waive.
  */
 export function claudeOwnPermissions(input: {
   readonly strict: boolean;
@@ -917,17 +921,36 @@ export function claudeOwnPermissions(input: {
 /**
  * Whether Octant configures Claude's command sandbox for a session. Under
  * Strict it is today's configuration (the Project's folders, Network limits,
- * no unasked sandboxed commands); outside Strict Octant leaves Claude's
- * sandbox to the person's own Claude settings and passes it nothing. A Full
- * access thread that kept its sandbox keeps Octant's at every setting.
+ * no unasked sandboxed commands). Outside Strict a Work or Code launch
+ * below Full access outside Plan runs with no sandbox of Octant's
+ * (`providerHoldsLevelWithoutSandbox`, maintainer decision, 2026-11-21), as on
+ * Windows: Claude's own permission modes, the person's own Claude settings
+ * where the session reads them, and Octant's gate hold the level. Chat and
+ * Plan keep Octant's configuration, as does a legacy chosen sandbox policy in
+ * a session that reads none of the person's settings. A Full access thread
+ * that kept its sandbox keeps Octant's at every setting.
  */
 export function claudeOctantConfiguresSandbox(input: {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly fullAccessSandbox: boolean;
   readonly ownPermissions: boolean;
+  readonly mode: ProviderAcquireInput["mode"] | undefined;
+  readonly strict: boolean;
+  readonly sandboxPolicySelected: boolean;
 }): boolean {
   if (input.executionPolicy === "full-access" && input.fullAccessSandbox) return true;
-  return claudeRunsSandbox(input.executionPolicy) && !input.ownPermissions;
+  return (
+    claudeRunsSandbox(input.executionPolicy) &&
+    !input.ownPermissions &&
+    !providerHoldsLevelWithoutSandbox({
+      mode: input.mode ?? "code",
+      executionPolicy: input.executionPolicy,
+      strict: input.strict,
+      fullAccessSandbox: input.fullAccessSandbox,
+      sandboxPolicySelected: input.sandboxPolicySelected,
+      purpose: "session",
+    })
+  );
 }
 
 function claudePolicyOptions(
@@ -2940,6 +2963,9 @@ function makeClaudeNativeSessions(
             ? (error as ProviderFailure)
             : failure("unavailable", "The Claude session could not be taken up."),
       }),
+    ...(options.sdk.sessionMessages === undefined
+      ? {}
+      : { history: readHistory(options.sdk.sessionMessages) }),
     // Taken in turn with adoptions of the same session, so a release never
     // removes a record a later adoption wrote.
     release: (input) =>
@@ -3012,6 +3038,27 @@ function makeClaudeNativeSessions(
       ),
     );
   }
+  /**
+   * The adopted session's transcript, which the resume record points at, read
+   * through the SDK from this account's own directory.
+   */
+  function readHistory(
+    sessionMessages: NonNullable<ClaudeAgentSdkPort["sessionMessages"]>,
+  ): NonNullable<ProviderNativeSessions["history"]> {
+    return (input) =>
+      input.instanceId !== options.instanceId
+        ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
+        : sessionMessages({
+            sessionId: input.nativeSessionId,
+            projectRoot: input.projectRoot,
+            ...configDirectory,
+          }).pipe(
+            Effect.map((messages) => ({
+              status: "read" as const,
+              messages: claudeSessionMessages(messages),
+            })),
+          );
+  }
   async function adoptOnce(
     input: Parameters<NonNullable<ProviderDriver["nativeSessions"]>["adopt"]>[0],
   ) {
@@ -3057,6 +3104,48 @@ function makeClaudeNativeSessions(
       }),
     };
   }
+}
+
+/**
+ * A Claude transcript's messages as imported messages. A user message is the
+ * person's text; one that only returns tool results is the runtime's, not the
+ * person's, and is left out. An assistant message keeps its text and names its
+ * `tool_use` calls; thinking is left out.
+ */
+export function claudeSessionMessages(
+  messages: ReadonlyArray<{ readonly type: string; readonly message: unknown }>,
+): ReadonlyArray<ProviderNativeSessionMessage> {
+  const imported: ProviderNativeSessionMessage[] = [];
+  for (const entry of messages) {
+    if (entry.type !== "user" && entry.type !== "assistant") continue;
+    const message =
+      typeof entry.message === "object" && entry.message !== null
+        ? (entry.message as Readonly<Record<string, unknown>>)
+        : undefined;
+    const content = message?.content;
+    const texts: string[] = [];
+    const tools: string[] = [];
+    if (typeof content === "string") texts.push(content);
+    else if (Array.isArray(content))
+      for (const candidate of content as ReadonlyArray<unknown>) {
+        if (typeof candidate !== "object" || candidate === null) continue;
+        const part = candidate as Readonly<Record<string, unknown>>;
+        if (part.type === "text" && typeof part.text === "string") texts.push(part.text);
+        else if (
+          entry.type === "assistant" &&
+          part.type === "tool_use" &&
+          typeof part.name === "string"
+        )
+          tools.push(part.name);
+      }
+    if (texts.length === 0 && tools.length === 0) continue;
+    imported.push({
+      role: entry.type === "user" ? "person" : "agent",
+      text: texts.join("\n"),
+      ...(tools.length === 0 ? {} : { tools }),
+    });
+  }
+  return imported;
 }
 
 /**
@@ -3892,6 +3981,7 @@ function makeConnection(
         readonly executionPolicy: ProviderExecutionPolicy;
         readonly fullAccessSandbox?: boolean;
         readonly strict?: boolean;
+        readonly ownChannels?: ProviderOwnChannels;
         readonly autoApprove?: boolean;
         readonly modelOptionValues?: ProviderModelOptionValues;
         readonly singleUse?: boolean;
@@ -3917,6 +4007,7 @@ function makeConnection(
           executionPolicy: input.executionPolicy,
           fullAccessSandbox: input.fullAccessSandbox,
           strict: input.strict,
+          driverKind: "claude",
         });
         if (windows.status === "refused") throw failure("incompatible", windows.reason);
       }
@@ -4023,8 +4114,19 @@ function makeConnection(
         void initialized.promise.catch(() => undefined);
         const terminalResult = deferred<void>();
         // Read at each launch, like every other choice here: outside Strict the
-        // runtime gets the host's environment and its own channel settings.
+        // runtime gets the host's environment, and its telemetry and
+        // self-update follow the person's provider switches.
         const strict = input.strict !== false;
+        // A thread that keeps or chose a sandbox keeps the provider's own
+        // channels closed as Strict does, as an ACP agent's launch does: the
+        // person's switches open them only where Octant adds nothing of its own.
+        const ownChannels = launchOwnChannels(
+          strict || input.fullAccessSandbox === true || options.sandboxPolicy !== undefined,
+          input.ownChannels,
+        );
+        // Whether the launch carries Octant's telemetry guards, which decides
+        // how the host's own opt-outs are read and what Claude artifacts lift.
+        const telemetryGuarded = !ownChannels.telemetry;
         // A placed launch takes none of this host's environment: the server
         // login's own applies there, and the SDK's spawn passes on only its
         // fixed switches (`claudeServerProgram`).
@@ -4040,7 +4142,7 @@ function makeConnection(
                   ...(options.configDirectory === undefined
                     ? {}
                     : { configDirectory: options.configDirectory }),
-                  ...(strict ? {} : { strict: false }),
+                  ...(strict ? {} : { strict: false, ownChannels }),
                 }).pipe(Effect.provideService(Scope.Scope, scope)),
                 signal,
               );
@@ -4081,6 +4183,9 @@ function makeConnection(
           executionPolicy: input.executionPolicy,
           fullAccessSandbox: sandboxedFullAccess,
           ownPermissions,
+          mode,
+          strict,
+          sandboxPolicySelected: options.sandboxPolicy !== undefined,
         });
         const networkPolicy = sandboxedFullAccess ? "auto-accept-edits" : input.executionPolicy;
         // Claude's own process: its inference and in-process web fetch. It
@@ -4269,7 +4374,10 @@ function makeConnection(
             authentication: options.authentication,
             artifactDelivery: options.artifactDelivery?.() === true,
             threadChoseArtifacts: input.nativeArtifacts === true,
-            hostTrafficDisabled: disablesNonessentialTraffic(environment.environment, strict),
+            hostTrafficDisabled: disablesNonessentialTraffic(
+              environment.environment,
+              telemetryGuarded,
+            ),
             mode,
             executionPolicy: input.executionPolicy,
             strict,
@@ -5119,7 +5227,7 @@ function makeConnection(
           ...claudeGitIdentityEnvironment(gitIdentity),
         };
         const artifactEnvironment = offersArtifacts
-          ? claudeArtifactLaunchEnvironment(launchEnvironment, strict)
+          ? claudeArtifactLaunchEnvironment(launchEnvironment, telemetryGuarded)
           : launchEnvironment;
         // Read at each launch, like the artifact switch: the next turn after
         // the person turns the account's memory off launches guarded again.
@@ -5515,6 +5623,7 @@ function makeConnection(
                 ? {}
                 : { fullAccessSandbox: input.fullAccessSandbox }),
               ...(input.strict === false ? { strict: false } : {}),
+              ...(input.ownChannels === undefined ? {} : { ownChannels: input.ownChannels }),
               ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
               ...(input.modelOptionValues === undefined
                 ? {}

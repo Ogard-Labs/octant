@@ -302,11 +302,15 @@ describe("native harness endpoint port", () => {
     expect(requests).toHaveLength(2);
   });
 
-  it("withdraws the provider's own search from a retry once the turn's grant was revoked during the backoff", async () => {
-    const { driver, requests } = portDriver([
-      { category: "unavailable", message: "The endpoint is warming up." },
-      { text: "Searched without it.", toolCalls: [] },
-    ]);
+  it("checks the resumed turn's live search grant again when retrying the same conversation", async () => {
+    const liveSessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000a04");
+    const { driver, requests } = portDriver(
+      [
+        { category: "unavailable", message: "The endpoint is warming up." },
+        { text: "Searched without it.", toolCalls: [] },
+      ],
+      { admitsEveryTurn: true },
+    );
     const webSearch: ProviderToolDefinition = {
       name: "web-search",
       inputSchema: { type: "object", properties: {} },
@@ -314,11 +318,10 @@ describe("native harness endpoint port", () => {
     let grant: { readonly withdrawAfterFirstStep: boolean } | undefined = {
       withdrawAfterFirstStep: false,
     };
-    const endpoints = new NativeHarnessEndpointRegistry();
-    runOnNativeHarness(driver, {
-      ...host(new MemoryNativeHarnessTranscriptStore(), endpoints),
+    const composed = runOnNativeHarness(driver, {
+      ...host(new MemoryNativeHarnessTranscriptStore()),
+      runtimeRegistry: verifiedToolsOn(modelId),
       harness: {
-        endpoints,
         retry: {
           // The turn's level drops below Full access while the retry waits.
           sleep: async () => {
@@ -327,32 +330,54 @@ describe("native harness endpoint port", () => {
           random: () => 0.5,
         },
         providerSearch: {
-          now: () => ({ status: "decided", grant, webSearchTool: webSearch }),
+          now: (id) =>
+            String(id) === String(liveSessionId)
+              ? { status: "decided", grant, webSearchTool: webSearch }
+              : { status: "untracked" },
           release: () => undefined,
         },
       },
     });
-    const session = await endpoints.get(instanceId)?.open(modelId);
-    await session?.send(
-      {
-        sessionId,
-        modelId,
-        system: undefined,
-        history: [{ role: "user", text: "go" }],
-        tools: [readTool],
-        providerWebSearch: true,
-      },
-      { signal: new AbortController().signal, onEvent: () => undefined },
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* composed.acquire({ instanceId, projectRoot, mode: "code" });
+          const handle = yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
+          if (handle.resumeCursor === undefined) throw new Error("Expected a saved conversation.");
+          yield* connection.stop(sessionId);
+          yield* connection.resume({
+            sessionId: liveSessionId,
+            resumeCursor: handle.resumeCursor,
+            executionPolicy: "plan",
+          });
+          const done = yield* Effect.fork(
+            Stream.runCollect(
+              (yield* connection.subscribe).pipe(
+                Stream.takeUntil((event) => event.kind === "completed" || event.kind === "failed"),
+              ),
+            ),
+          );
+          yield* connection.send({
+            sessionId: liveSessionId,
+            prompt: "go",
+            attachments: [],
+            tools: [readTool],
+            providerWebSearch: { withdrawAfterFirstStep: false },
+          });
+          expect(Array.from(yield* Fiber.join(done)).at(-1)?.kind).toBe("completed");
+        }),
+      ),
     );
 
     expect(
       requests.map((request) => ({
+        sessionId: request.sessionId,
         providerWebSearch: request.providerWebSearch,
         tools: request.tools.map((tool) => tool.name),
       })),
     ).toEqual([
-      { providerWebSearch: true, tools: ["read"] },
-      { providerWebSearch: undefined, tools: ["read", "web-search"] },
+      { sessionId, providerWebSearch: true, tools: ["read"] },
+      { sessionId, providerWebSearch: undefined, tools: ["read", "web-search"] },
     ]);
   });
 

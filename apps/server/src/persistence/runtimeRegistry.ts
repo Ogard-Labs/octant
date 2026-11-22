@@ -167,6 +167,8 @@ import {
   NavigatorAssistantThreadBound,
   OllamaHistoryRecorded,
   ClaudeResumeIdentityRecorded,
+  NATIVE_SESSION_HISTORY_IMPORTED_EVENT,
+  NativeSessionHistoryImported,
   ProjectBindingRelinked,
   ProjectCreated,
   ProjectLifecycleChanged,
@@ -212,6 +214,7 @@ import {
   AgentRunResultAcknowledged,
   AgentRunResultDeliverySettled,
   AgentResultSteered,
+  ThreadMessageSteered,
   AgentRunStatusChanged,
   AutomationNotificationDeliveryRecorded,
   AutomationNotificationPreferences,
@@ -325,6 +328,13 @@ import {
   ShieldForgeChangeObservedPayload,
 } from "@octant/contracts";
 import {
+  MemberInstallRequestedPayload,
+  MemberInstallStepRecordedPayload,
+  MemberRemovalRequestedPayload,
+  MemberRemovalStepRecordedPayload,
+  MemberUpdateRequestedPayload,
+  MemberUpdateRequestedPayloadV1,
+  MemberUpdateStepRecordedPayload,
   SHIELD_REMOTE_COMMAND_EVENT_NAMES,
   SHIELD_SERVERS_EVENT_NAMES,
   ShieldRemoteCommandRanPayload,
@@ -479,6 +489,7 @@ import {
 import { AgentRunProjection } from "../agentRun/agentRunProjection";
 import { ActivityHistoryProjection } from "./activityHistoryProjection";
 import { AGENT_RESULT_STEERED } from "../agentRun/agentResultSteeredRecord";
+import { THREAD_MESSAGE_STEERED } from "../messageQueue/threadMessageSteeredRecord";
 import {
   AGENT_RUN_REQUESTED,
   AGENT_RUN_RESULT_ACKNOWLEDGED,
@@ -660,6 +671,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("secret-store.recorded@1", 1, SecretStoreJournalRecord)
     .register("ollama.history-recorded@1", 1, OllamaHistoryRecorded)
     .register("claude.resume-identity-recorded@1", 1, ClaudeResumeIdentityRecorded)
+    .register(NATIVE_SESSION_HISTORY_IMPORTED_EVENT, 1, NativeSessionHistoryImported)
     .register("context.manifest-created@1", 1, ContextManifestCreated)
     .register("context.overrides-updated@1", 1, ContextOverridesUpdated)
     .register("context.plan-created@1", 1, ContextPlanCreated)
@@ -755,6 +767,25 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       1,
       ShieldProjectServersClearedPayload,
     )
+    .register(SHIELD_SERVERS_EVENT_NAMES.memberInstallRequested, 1, MemberInstallRequestedPayload)
+    .register(
+      SHIELD_SERVERS_EVENT_NAMES.memberInstallStepRecorded,
+      1,
+      MemberInstallStepRecordedPayload,
+    )
+    .register(SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequestedV1, 1, MemberUpdateRequestedPayloadV1)
+    .register(SHIELD_SERVERS_EVENT_NAMES.memberUpdateRequested, 1, MemberUpdateRequestedPayload)
+    .register(
+      SHIELD_SERVERS_EVENT_NAMES.memberUpdateStepRecorded,
+      1,
+      MemberUpdateStepRecordedPayload,
+    )
+    .register(SHIELD_SERVERS_EVENT_NAMES.memberRemovalRequested, 1, MemberRemovalRequestedPayload)
+    .register(
+      SHIELD_SERVERS_EVENT_NAMES.memberRemovalStepRecorded,
+      1,
+      MemberRemovalStepRecordedPayload,
+    )
     .register(SHIELD_REMOTE_COMMAND_EVENT_NAMES.ran, 1, ShieldRemoteCommandRanPayload)
     .register(SERVER_PROJECTS_EVENT_NAMES.bound, 1, ServerProjectBoundPayload)
     .register(SERVER_PROJECTS_EVENT_NAMES_V2.bound, 1, ServerProjectBoundPayloadV2)
@@ -830,6 +861,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)
     .register(AGENT_RUN_RESULT_DELIVERY_SETTLED, 1, AgentRunResultDeliverySettled)
     .register(AGENT_RESULT_STEERED, 1, AgentResultSteered)
+    .register(THREAD_MESSAGE_STEERED, 1, ThreadMessageSteered)
     .register(AGENT_RUN_SETTINGS_UPDATED, 1, AgentRunPolicySettings)
     .register(AGENT_MESSAGE_EVENT_NAMES.sent, 1, AgentMessageSent)
     .register(AGENT_MESSAGE_EVENT_NAMES.delivered, 1, AgentMessageDelivered)

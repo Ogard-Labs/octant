@@ -15,10 +15,13 @@ import type { ProviderExecutionPolicy, ProviderToolDefinition } from "@octant/co
 import { Effect } from "effect";
 import {
   WINDOWS_KEPT_SANDBOX_REFUSAL,
+  WINDOWS_STRICT_CHAT_REFUSAL,
   WINDOWS_STRICT_REFUSAL,
+  windowsStrictRuntimeRefusal,
 } from "@octant/domain/guardrail-policy";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  READ_ROOTS_CHECK,
   makePiConfinementLive,
   makePiProcessLive,
   piArguments,
@@ -129,7 +132,7 @@ describe("Pi process boundary", () => {
     });
   });
 
-  it("outside Strict gives a Pi process the host's environment less Octant's variables and other providers' keys, with telemetry left to the person", () => {
+  it("outside Strict gives a Pi process the host's environment less Octant's variables and other providers' keys, with telemetry off until the person turns it on", () => {
     const host = {
       PATH: "/usr/bin",
       HOME: "/Users/test",
@@ -148,13 +151,33 @@ describe("Pi process boundary", () => {
       GH_TOKEN: "gh-token",
       OPENAI_API_KEY: "openai-key",
       PI_SKIP_VERSION_CHECK: "1",
+      PI_TELEMETRY: "0",
     });
     expect(open).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(open).not.toHaveProperty("OCTANT_PI_TOOL_BRIDGE_TOKEN");
-    expect(open).not.toHaveProperty("PI_TELEMETRY");
     const strict = sanitizePiEnvironment(host, "/managed", "enabled", "openai");
     expect(strict).toMatchObject({ PI_TELEMETRY: "0" });
     expect(strict).not.toHaveProperty("GH_TOKEN");
+  });
+
+  it("outside Strict keeps Pi's telemetry guard when the person turned provider telemetry off and drops its release check when the person lets providers update themselves", () => {
+    const host = { PATH: "/usr/bin" };
+    const closed = sanitizePiEnvironment(host, "/managed", "enabled", "openai", false, {
+      telemetry: false,
+      selfUpdate: false,
+    });
+    expect(closed).toMatchObject({ PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1" });
+    const updating = sanitizePiEnvironment(host, "/managed", "enabled", "openai", false, {
+      telemetry: true,
+      selfUpdate: true,
+    });
+    expect(updating).not.toHaveProperty("PI_SKIP_VERSION_CHECK");
+    expect(updating).not.toHaveProperty("PI_TELEMETRY");
+    const strict = sanitizePiEnvironment(host, "/managed", "enabled", "openai", true, {
+      telemetry: true,
+      selfUpdate: true,
+    });
+    expect(strict).toMatchObject({ PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1" });
   });
 
   it("gives a discovery run, or a provider with no host variable, no provider credential", () => {
@@ -311,7 +334,11 @@ describe("Pi process boundary", () => {
     });
     expect(await prepare({ mode: "chat", executionPolicy: "approval-gated" })).toMatchObject({
       _tag: "Left",
-      left: { category: "incompatible", message: WINDOWS_STRICT_REFUSAL },
+      left: { category: "incompatible", message: WINDOWS_STRICT_CHAT_REFUSAL },
+    });
+    expect(await prepare({ executionPolicy: "full-access", strict: true })).toMatchObject({
+      _tag: "Left",
+      left: { category: "incompatible", message: windowsStrictRuntimeRefusal("pi") },
     });
     expect(
       await prepare({ executionPolicy: "full-access", fullAccessSandbox: true, strict: false }),
@@ -414,6 +441,58 @@ describe("Pi process boundary", () => {
       ).args[1];
     expect(await profileFor("code")).toContain(`(allow file-write* (subpath "${notes}"))`);
     expect(await profileFor("chat")).not.toContain(notes);
+  });
+
+  it("starts Work and Code below Full access outside Strict unwrapped on macOS and Linux, with Pi's approval bridge asking Octant", async () => {
+    for (const platform of ["darwin", "linux"] as const) {
+      const f = fixture();
+      const confinement = makePiConfinementLive({
+        platform,
+        sandboxPath: platform === "darwin" ? f.sandbox : f.bwrap,
+        credentialPath: f.auth,
+        modelsPath: f.models,
+        temporaryDirectory: f.base,
+      });
+      const launchFor = (level: {
+        readonly mode: "chat" | "work" | "code";
+        readonly executionPolicy: ProviderExecutionPolicy;
+        readonly strict?: boolean;
+        readonly fullAccessSandbox?: boolean;
+      }) =>
+        Effect.runPromise(
+          confinement.prepare({
+            binaryPath: f.binary,
+            root: f.root,
+            piHome: f.home,
+            sessionDirectory: join(f.home, "sessions"),
+            sessionId: `${level.mode}-${level.executionPolicy}`,
+            environment: sanitizePiEnvironment({ PATH: "/usr/bin" }, f.home),
+            ...level,
+          }),
+        );
+      for (const mode of ["work", "code"] as const) {
+        for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
+          const open = await launchFor({ mode, executionPolicy, strict: false });
+          expect(open.command).toBe(f.binary);
+          expect(open.environment.OCTANT_PI_APPROVALS).toBe("enabled");
+          // Pi's unasked reads are bounded to the launch's folders instead.
+          expect(JSON.parse(open.environment.OCTANT_PI_READ_ROOTS ?? "[]")).toContain(
+            realpathSync(f.root),
+          );
+        }
+      }
+      for (const level of [
+        { mode: "code", executionPolicy: "approval-gated" },
+        { mode: "work", executionPolicy: "auto-accept-edits", strict: true },
+        { mode: "code", executionPolicy: "plan", strict: false },
+        { mode: "chat", executionPolicy: "approval-gated", strict: false },
+        { mode: "code", executionPolicy: "full-access", fullAccessSandbox: true, strict: false },
+      ] as const) {
+        const confined = await launchFor(level);
+        expect(confined.command).not.toBe(f.binary);
+        expect(confined.environment.OCTANT_PI_READ_ROOTS).toBeUndefined();
+      }
+    }
   });
 
   it("wraps a Full access launch that keeps the sandbox, with no approvals, and leaves open Full access unwrapped", async () => {
@@ -734,12 +813,13 @@ describe("Pi process boundary", () => {
     const bridge = piExtensionSource([
       { name: "octant_browser", inputSchema: { type: "object", properties: {} } },
     ]);
+    expect(bridge).toContain("if (octantTools.has(event.toolName)) return undefined;");
     expect(bridge).toContain(
-      "if (knownReads.has(event.toolName) || octantTools.has(event.toolName)) return undefined;",
+      "if (knownReads.has(event.toolName) && readsInsideRoots(event)) return undefined;",
     );
     expect(bridge).toContain('const knownReads = new Set(["read","grep","find","ls"]);');
     expect(piExtensionSource([])).toContain(
-      "if (knownReads.has(event.toolName)) return undefined;",
+      "if (knownReads.has(event.toolName) && readsInsideRoots(event)) return undefined;",
     );
   });
 
@@ -1018,5 +1098,43 @@ describe("Pi process boundary", () => {
     const profile = launch.args[1]!;
     expect(profile).not.toContain(seatbeltAllowRule("file-read*", shimDirectory));
     expect(profile).not.toContain(seatbeltDenyRule("file-read*", linkedBinary));
+  });
+});
+
+describe("Pi's unasked reads without Octant's sandbox", () => {
+  async function readCheck(roots: ReadonlyArray<string> | undefined, cwd: string) {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const fakeProcess = {
+      cwd: () => cwd,
+      env: roots === undefined ? {} : { OCTANT_PI_READ_ROOTS: JSON.stringify(roots) },
+    };
+    return new Function(
+      "nodeFs",
+      "nodePath",
+      "process",
+      `${READ_ROOTS_CHECK}\nreturn readsInsideRoots;`,
+    )(fs, path, fakeProcess) as (event: { readonly input?: unknown }) => boolean;
+  }
+
+  it("lets a read inside the launch's folders through and asks for any other path, links resolved", async () => {
+    const fs = await import("node:fs");
+    const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "octant-pi-reads-")));
+    const project = join(base, "project");
+    const outside = join(base, "outside");
+    fs.mkdirSync(project);
+    fs.mkdirSync(outside);
+    fs.writeFileSync(join(project, "notes.md"), "x");
+    fs.writeFileSync(join(outside, "auth.json"), "secret");
+    fs.symlinkSync(outside, join(project, "escape"));
+    const inside = await readCheck([project], project);
+    expect(inside({ input: { path: "notes.md" } })).toBe(true);
+    expect(inside({ input: {} })).toBe(true);
+    expect(inside({ input: { path: join(outside, "auth.json") } })).toBe(false);
+    expect(inside({ input: { path: "escape/auth.json" } })).toBe(false);
+    expect(inside({ input: { path: "../outside" } })).toBe(false);
+    // Where Octant's sandbox bounds the reads, no roots are set and nothing changes.
+    expect((await readCheck(undefined, project))({ input: { path: "/etc/hosts" } })).toBe(true);
+    fs.rmSync(base, { recursive: true, force: true });
   });
 });

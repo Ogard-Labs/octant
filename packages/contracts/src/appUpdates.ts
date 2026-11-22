@@ -154,6 +154,45 @@ export const AppUpdateFeed = Schema.Struct({
 }).annotations(strict);
 export type AppUpdateFeed = typeof AppUpdateFeed.Type;
 
+/** The systems a headless build is published for, as `octant-<version>-<target>.tar.gz` names them. */
+export const HeadlessBuildTarget = Schema.Literal("darwin-arm64", "linux-x64", "linux-arm64");
+export type HeadlessBuildTarget = typeof HeadlessBuildTarget.Type;
+
+/**
+ * One headless build a ring publishes, as its signed feed document lists it,
+ * so a host can download the build for a server it installs over SSH with the
+ * feed signature as the trust root (docs/design/hub-and-spokes.md, "Adding a
+ * computer over SSH").
+ *
+ * Every field is signed, for the reasons the desktop release's are. It names
+ * a `target` where a desktop release names `platform` and `arch`, so the
+ * canonical bytes of the two never coincide and neither document's signature
+ * verifies as the other.
+ */
+export const HeadlessBuildRelease = Schema.Struct({
+  product: Schema.Literal("octant"),
+  version: AppVersion,
+  target: HeadlessBuildTarget,
+  ring: AppReleaseRing,
+  /** The build on the release, `octant-<version>-<target>.tar.gz`; any HTTPS location. */
+  url: Schema.String.pipe(
+    Schema.maxLength(2048),
+    Schema.filter((value) => value.startsWith("https://")),
+  ),
+  /** Lowercase hex SHA-256 of the tarball, checked before anything else reads it. */
+  sha256: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)),
+  releasedAt: UtcTimestamp,
+}).annotations(strict);
+export type HeadlessBuildRelease = typeof HeadlessBuildRelease.Type;
+
+export const HeadlessBuildFeed = Schema.Struct({
+  schemaVersion: Schema.Literal(1),
+  release: HeadlessBuildRelease,
+  /** Base64 Ed25519 signature over the canonical encoding of `release`. */
+  signature: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9+/]{86}==$/)),
+}).annotations(strict);
+export type HeadlessBuildFeed = typeof HeadlessBuildFeed.Type;
+
 /**
  * Why no update is being offered.
  *
@@ -355,3 +394,5 @@ export const decodeAppUpdateFeed = Schema.decodeUnknownSync(AppUpdateFeed);
 export const decodeAppUpdateRelease = Schema.decodeUnknownSync(AppUpdateRelease);
 export const decodeAppUpdateState = Schema.decodeUnknownSync(AppUpdateState);
 export const decodeNightlyInstallState = Schema.decodeUnknownSync(NightlyInstallState);
+export const decodeHeadlessBuildFeed = Schema.decodeUnknownSync(HeadlessBuildFeed);
+export const decodeHeadlessBuildRelease = Schema.decodeUnknownSync(HeadlessBuildRelease);

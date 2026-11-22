@@ -157,7 +157,8 @@ describe("mapOpenCodeEvent", () => {
         kind: "usage",
         // 12 uncached plus 2 read from the cache and 1 written to it.
         inputTokens: 15,
-        outputTokens: 7,
+        // 7 of answer plus the 3 of reasoning OpenCode reports apart from it.
+        outputTokens: 10,
         reasoningTokens: 3,
         cacheReadInputTokens: 2,
         cacheWriteInputTokens: 1,
@@ -1083,7 +1084,7 @@ describe("OpenCode 2.0.22 events", () => {
       {
         kind: "usage",
         inputTokens: 7,
-        outputTokens: 7,
+        outputTokens: 8,
         reasoningTokens: 1,
         cacheReadInputTokens: 2,
         costUsd: 0.5,

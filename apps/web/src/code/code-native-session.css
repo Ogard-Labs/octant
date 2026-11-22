@@ -79,3 +79,33 @@
 .code-native-session__message {
   margin: 0.25rem 0 0;
 }
+/* Imported messages are the session's record, not the thread's turns: kept
+   in a bounded scroll region beside the composer and marked by speaker. */
+.code-native-session__history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  max-height: 20rem;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.code-native-session__imported-message {
+  min-width: 0;
+}
+.code-native-session__speaker {
+  color: var(--octant-text-primary);
+  font-weight: 600;
+}
+.code-native-session__text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--octant-text-primary);
+}
+.code-native-session__tools,
+.code-native-session__omitted {
+  margin: 0;
+  color: var(--octant-text-secondary);
+}

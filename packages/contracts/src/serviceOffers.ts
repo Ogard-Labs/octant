@@ -1,4 +1,8 @@
 import { Schema } from "effect";
+import { UtcTimestamp } from "./events";
+import { CodeRelativePath } from "./code";
+import { ProviderModelId } from "./providers";
+import { SPEECH_TRANSCRIPTION_MAX_AUDIO_BYTES } from "./speech";
 import { personDecides } from "./hostAnswer";
 import {
   ImageGenerationGenerateOffer,
@@ -6,6 +10,7 @@ import {
   ImageGenerationOfferId,
   ImageGenerationProfileView,
   ImageGenerationSaveOffer,
+  ImageGenerationScopeId,
   MAX_PENDING_IMAGE_GENERATION_OFFERS,
 } from "./imageGeneration";
 
@@ -18,13 +23,37 @@ export const SERVICE_OFFER_DECISION_MAX_BYTES = 8_192;
 export const ServiceOfferId = ImageGenerationOfferId;
 export type ServiceOfferId = typeof ServiceOfferId.Type;
 
+export const TranscriptionOffer = Schema.Struct({
+  kind: Schema.Literal("transcribe"),
+  offerId: ServiceOfferId,
+  threadKind: Schema.Literal("work-thread", "code-thread"),
+  scopeId: ImageGenerationScopeId,
+  requestedAt: UtcTimestamp,
+  relativePath: CodeRelativePath.pipe(Schema.maxLength(512)),
+  sizeBytes: Schema.Int.pipe(
+    Schema.positive(),
+    Schema.lessThanOrEqualTo(SPEECH_TRANSCRIPTION_MAX_AUDIO_BYTES),
+  ),
+  endpointName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(120)),
+  modelId: ProviderModelId,
+}).annotations(strict);
+export const decodeTranscriptionOffer = Schema.decodeUnknownSync(TranscriptionOffer);
+
 export const ServiceOffer = Schema.Union(
   ImageGenerationGenerateOffer,
   ImageGenerationSaveOffer,
+  TranscriptionOffer,
 ).annotations(personDecides);
 export type ServiceOffer = typeof ServiceOffer.Type;
 
-export const ServiceOfferDecision = ImageGenerationOfferDecision;
+export const ServiceOfferDecision = Schema.Union(
+  ImageGenerationOfferDecision,
+  Schema.Struct({
+    offerId: ServiceOfferId,
+    decision: Schema.Literal("transcribe"),
+    rememberForThread: Schema.Boolean,
+  }).annotations(strict),
+);
 export type ServiceOfferDecision = typeof ServiceOfferDecision.Type;
 
 export const ServiceOffersResponse = Schema.Struct({

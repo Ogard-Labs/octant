@@ -224,10 +224,12 @@ export * from "./simulatorDevice";
 export * from "./gitHistory";
 
 export * from "./threadMessageQueue";
+export * from "./threadMessageSteering";
 export * from "./threadWakeups";
 export * from "./codeSessions";
 export * from "./workSessions";
 export * from "./providerNativeSession";
+export * from "./importedSessionHistory";
 export * from "./agentObservation";
 export * from "./hostAnswer";
 export * from "./terminalSessions";

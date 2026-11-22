@@ -555,6 +555,16 @@ describe("image job service", () => {
       }),
     ).rejects.toThrow("size limit");
     expect(generate).not.toHaveBeenCalled();
+    await expect(
+      service.enqueue({
+        threadKind: "chat-thread",
+        scopeId,
+        profileInstanceId: profileId,
+        modelId,
+        prompt: "edit this",
+        references: Array.from({ length: 5 }, () => ({ bytes: png, mediaType: "image/png" })),
+      }),
+    ).rejects.toThrow("at most four");
   });
 
   it("rejects extra adapter images before staging artifacts", async () => {
@@ -1176,6 +1186,74 @@ describe("image providers behind the image seam", () => {
     expect(failed.failure?.category).toBe("unsupported");
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["refused by the provider", "refused", true],
+    ["failed after the provider answered", "failed", true],
+    ["failed before any provider call", "failed", false],
+  ] as const)(
+    "records a job %s as one unreported usage row only when the provider was asked",
+    async (_label, outcome, callsProvider) => {
+      const fetch = vi.fn(async () => new Response(png, { status: 200 }));
+      const driver: ImageGenerationDriver = {
+        driverKind: "bfl-image",
+        providerHosts: ["images.example.test"],
+        create: ({ ports }) => ({
+          generate: async () => {
+            if (callsProvider) {
+              await ports.request({
+                url: "https://images.example.test/v1/generate",
+                method: "POST",
+                auth: { header: "x-seam-key" },
+                body: "{}",
+              });
+            }
+            return outcome === "refused"
+              ? { status: "refused", safetyRefusal: "The prompt was blocked." }
+              : {
+                  status: "failed",
+                  providerFailure: { category: "protocol", message: "bad" },
+                };
+          },
+        }),
+      };
+      const { service, connection } = openHarness(undefined, {
+        bflInstance: bflInstance(),
+        fetch,
+        imageDrivers: [driver],
+      });
+      const queued = await service.enqueue({
+        threadKind: "chat-thread",
+        scopeId,
+        profileInstanceId: bflId,
+        modelId: bflModelId,
+        prompt: "a red cube",
+      });
+      expect((await service.whenTerminal(queued.id)).status).toBe("failed");
+
+      const rows = readUsageDashboard(
+        connection,
+        { filter: { requestShape: IMAGE_GENERATION_REQUEST_SHAPE } },
+        { queryAt: now, projectScope: { kind: "unfiled" } },
+      ).detail;
+      if (!callsProvider) {
+        // Nothing reached the provider, so nothing was spent; a row would make
+        // a money ceiling refuse over spend that never happened.
+        expect(rows).toEqual([]);
+        return;
+      }
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        requestShape: "image-generation",
+        quality: "unavailable",
+        inputTokens: 0,
+        outputTokens: 0,
+      });
+      expect(
+        connection.prepare("SELECT cost_usd_micros FROM usage_record_projection").all(),
+      ).toEqual([{ cost_usd_micros: null }]);
+    },
+  );
 });
 
 describe("image job spend ceilings", () => {

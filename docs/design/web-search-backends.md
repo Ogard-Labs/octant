@@ -263,7 +263,7 @@ turn's first search or first tool answer: the loop cannot tell which tool
 result was outside content before the host records it, so it withdraws at the
 first one, at the cost of one prompt cache miss in such a turn. A request
 that withholds it leaves the built-in tool out and offers `web-search` when an eligible backend exists, where the
-tool-call policy can refuse a query that looks like it carries data
+tool-call policy can refuse, under Strict, a query that looks like it carries data
 ([Search queries on a tainted thread](search-query-taint.md)). With no eligible
 backend, a tainted thread has no search; a status saying so is not built yet.
 At Full access the provider's own search stays offered and the mark is only

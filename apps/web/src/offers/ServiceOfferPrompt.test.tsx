@@ -1,4 +1,5 @@
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
+import { decodeTranscriptionOffer, type ServiceOffer } from "@octant/contracts";
 import type {
   ImageGenerationOffer,
   ServiceOfferDecisionResult,
@@ -50,7 +51,7 @@ function offer(overrides: Partial<ImageGenerationOffer> = {}): ImageGenerationOf
 }
 
 function client(
-  offers: ReadonlyArray<ImageGenerationOffer>,
+  offers: ReadonlyArray<ServiceOffer>,
   answer: ServiceOfferDecisionResult = { kind: "offer-answered" },
 ) {
   const fake = {
@@ -74,6 +75,40 @@ function renderPrompt(fake: ServiceOfferClient, keptIn: "project" | "thread" = "
 }
 
 describe("ServiceOfferPrompt", () => {
+  it.each([true, false])(
+    "discloses the recording and destination before answering: approve %s",
+    async (approve) => {
+      const fake = client([
+        decodeTranscriptionOffer({
+          kind: "transcribe",
+          threadKind: "code-thread",
+          scopeId,
+          offerId,
+          requestedAt: "2026-11-07T10:00:00.000Z",
+          relativePath: "meetings/notes.m4a",
+          sizeBytes: 2048,
+          endpointName: "Studio",
+          modelId: "speech-model",
+        }),
+      ]);
+      renderPrompt(fake);
+      const card = await screen.findByRole("article", { name: "Transcription request" });
+      expect(card).toHaveTextContent("meetings/notes.m4a (2,048 bytes)");
+      expect(card).toHaveTextContent("Studio (speech-model)");
+      await userEvent.click(
+        screen.getByRole("checkbox", { name: "Don't ask again in this thread" }),
+      );
+      expect(fake.decide).not.toHaveBeenCalled();
+      await userEvent.click(
+        screen.getByRole("button", { name: approve ? "Transcribe" : "Don't transcribe" }),
+      );
+      expect(fake.decide).toHaveBeenCalledExactlyOnceWith(
+        approve
+          ? { offerId, decision: "transcribe", rememberForThread: true }
+          : { offerId, decision: "cancel" },
+      );
+    },
+  );
   it("asks whether to generate the agent's picture with an image model, the suggested model chosen", async () => {
     renderPrompt(client([offer()]));
     const card = await screen.findByRole("article", { name: "Image generation request" });
@@ -116,6 +151,43 @@ describe("ServiceOfferPrompt", () => {
     await user.click(screen.getByRole("button", { name: "Generate" }));
     expect(fake.decide).toHaveBeenCalledWith(
       expect.objectContaining({ profileInstanceId: gemini, modelId: "gemini-3-pro-image" }),
+    );
+  });
+
+  it("discloses signed-in screenshots and offers only models that can use references", async () => {
+    const user = userEvent.setup();
+    const bfl = "cc000000-0000-4000-8000-000000000030";
+    const fake = client([
+      offer({
+        references: [
+          { kind: "browser-capture", label: "Browser screenshot of example.com", signedIn: true },
+        ],
+      }),
+    ]);
+    render(
+      <ServiceOfferPrompt
+        client={fake}
+        keptIn="project"
+        profiles={[...profiles, { ...profile(bfl, "BFL", ["flux-pro"]), driverKind: "bfl-image" }]}
+        scopeId={scopeId}
+        threadKind="code-thread"
+        turnActive={false}
+      />,
+    );
+    const card = await screen.findByRole("article", { name: "Image generation request" });
+    expect(card).toHaveTextContent("These images will be sent to the selected image provider");
+    expect(card).toHaveTextContent("Browser screenshot of example.com (signed-in page)");
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("combobox", { name: "Image model" }));
+    const geminiOption = await screen.findByRole("option", { name: "Gemini · gemini-3-pro-image" });
+    expect(screen.queryByRole("option", { name: "BFL · flux-pro" })).not.toBeInTheDocument();
+    await user.click(geminiOption);
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+    expect(fake.decide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        referenceImagesConfirmed: true,
+        rememberForThread: false,
+      }),
     );
   });
 

@@ -97,7 +97,7 @@ Rows in Settings are `SettingRow`; rows everywhere else are `surface-row`. Both
 draw the same hairline.
 
 **Octant's own limits** sit on Settings › Permissions after Tool steps, as
-host settings in four sections of number steppers (1 to the stated top) and
+host settings in five sections of number steppers (1 to the stated top) and
 switches, each row naming its default in its description
 ([Octant's own limits become settings](../architecture.md#security-and-authority)):
 **Wake-ups and messages** (Wake-ups waiting per thread, 8, up to 64; Message
@@ -105,9 +105,14 @@ wakes per hour, 30; Rounds of replies that wake, 10; Thread messages per turn,
 3, up to 20, under Strict only; Sibling thread reads per turn, 8, up to 64,
 under Strict only; Sibling thread waits per turn, 4, up to 32, under Strict
 only; and the switch **Run missed wake-ups on return**, off),
+**Octant Shield** (Denials in a row before you decide, 3, up to 50; Denials
+per thread before you decide, 20, up to 500),
 **Coordinators** (Coordinators per Project, 4, up to 32), **Pull requests**
 (Wakes per pull-request watch, 10, up to 100; Days a pull-request watch lasts,
-3, up to 30; Auto-fix tries per failure, 3, up to 20), **Waiting** (Longest
+3, up to 30; Auto-fix tries per failure, 3, up to 20), **Waiting** (Latest a
+follow-up still runs, in hours, 24, up to 720; Time to run a shown provider
+command, in minutes, 10, up to 1,440, whose description says a secret held
+for the command is deleted when the time runs out; Longest
 Browser wait, in minutes, 10, up to 60, under Strict only, whose description
 says outside Strict there is no wait limit and a Claude Code
 thread still ends one tool call at eleven minutes; Longest wait for a helper,
@@ -250,6 +255,21 @@ unusable, while the latest scan found that runtime elsewhere, says "Found at
 visible while the details are closed; pressing it opens the details and gives
 the same answer without the picker. See
 [Providers and model endpoints](model-endpoints.md).
+
+### Provider channels
+
+Providers & Models carries a **Provider channels** section after Stalled
+turns with two host switches, each read at the next provider launch:
+**Let providers send their own telemetry** (off by default, for every provider
+and for a store saved before the switch existed: Octant sets the provider's
+telemetry guards, as every launch did before the switch; on, each provider's
+own settings decide its usage metrics, error reports and feedback uploads) and **Let providers update
+themselves** (off by default: Octant keeps each provider's self-update guard
+set, since it installs and updates provider CLIs itself; **Update CLI** is
+unaffected). Strict keeps every telemetry and self-update guard set whatever
+the switches say, and so does a thread that keeps or chose a sandbox. Which guards each provider takes is in
+[Provider runtimes](provider-runtimes.md#provider-channel-switches) and the rule
+in [Decisions and requirements](decisions.md#provider-telemetry-and-self-update-are-the-persons-switches).
 
 Provider catalog and the Octant Harness model endpoints (rows, detail
 sub-pages, and Add endpoint) follow
@@ -458,7 +478,44 @@ when it signs in with one, with quiet Change and Remove, and **Show key** for
 such a server. Show key opens a line under the row: "Add this line to
 `~/.ssh/authorized_keys` for <user> on <alias>.", the public key in the code
 font, wrapping, and a quiet Copy that reads Copied once it has; a refusal
-shows there in the alert role. The form is Alias, User, Profile, Sign in with
+shows there in the alert role. An account server's row also offers **Make
+this an Octant computer**, which opens one dialog naming the server: it
+states what Octant read over SSH and will do there (server and `uname -sm`,
+version and signature check, install location, user service, the boot
+command with a quiet Copy, a **Listens on** select of the server's private
+addresses, and the hub it joins), with **Install and join** and Cancel; once
+confirmed it lists the six steps (Copy the build, Verify it on the server,
+Install, Start the service, Turn on the listener, Join the hub), each with
+Waiting, Running…, Done, Failed with what to fix, or Not run. A refusal shows
+in the alert role, with **Open the private network guide** for a server with
+no private address
+([Hub and spokes](hub-and-spokes.md#adding-a-computer-over-ssh)). A server
+this computer made an Octant computer reads "Octant computer, version <v>"
+under its open row, and offers **Update** and **Remove Octant** in place of
+that action. Update opens a dialog stating both versions and the ring, the
+signature check, how running turns stop, the `octant server upgrade` swap in
+the install folder and any store migration, and what makes Octant roll back.
+Running turns is a radio group of **Wait up to N minutes for running work**,
+chosen first, and **Stop now**; with Wait chosen a minutes field (1 to 60,
+default 10) follows, and the line under it says the server refuses new turns
+at once, lets running ones finish for up to that long, then stops, and that a
+turn still running continues once it starts again; with Stop now it says the
+server refuses new turns and stops now. It lists the five steps (Copy the
+build, Verify it on the server, Drain running turns, Swap to <v>, Confirm its
+signed hello) before **Update to <v>** and Cancel, then their states, the
+Drain step saying how many turns were still running when a wait ran out, with
+Roll back to <v> added after a failed drain, swap or confirmation and a
+closing line saying why it was rolled back.
+Remove Octant opens a dialog stating that the server leaves the hub, its user
+service is stopped and removed, what is Deleted and what is Kept, with one
+**Also delete the data folder** checkbox, unticked, that moves the data
+folder from Kept to Deleted with "This cannot be undone." (Deleted always
+names the install and its install and update work folders, and Kept then names
+service logs Octant keeps outside the data folder, with example paths, since
+logs inside it go with it, and files it did not make); it lists Leave the
+hub, Stop and remove the service, and Delete the install (or the install and
+the data folder), with **Remove Octant** (or **Remove Octant and its data**)
+and Cancel. The form is Alias, User, Profile, Sign in with
 (Your SSH agent, the default, or A key Octant keeps), Deploy commands (one per
 line, shown for Operate and Admin), and Runbook path. A refusal from the host shows inline in the alert role.
 Below it, **Projects on your servers** lists each server Project as its

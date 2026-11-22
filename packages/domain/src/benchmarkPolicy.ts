@@ -457,7 +457,7 @@ export function benchmarkExecutionLevel(
   const asked =
     picked === undefined ? "ask-first" : picked === "accept-edits" ? "auto-accept-edits" : picked;
   // Plan holds no level a run could use, so a Plan Project asks first.
-  const project = workAccessOfPermissionMode(projectMode) ?? "ask-first";
+  const project = projectMode === "plan" ? "ask-first" : workAccessOfPermissionMode(projectMode);
   if (asked === "full-access" && project !== "full-access") {
     return {
       status: "refused",

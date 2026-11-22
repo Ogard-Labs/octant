@@ -279,6 +279,11 @@ import {
 } from "../canvas/canvasDeliveryInstructions";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
 import { appToolHostLines } from "../providers/appToolHostLines";
+import {
+  nativeSessionHistoryAppend,
+  readImportedSessionHistory,
+  readJournaledSessionHistory,
+} from "../providers/nativeSessionHistory";
 import { STOP_CONFIRMATION_MS } from "../stopConfirmation";
 
 type Awaitable<T> = T | Promise<T>;
@@ -464,6 +469,8 @@ export interface CodeOperationRuntimeOptions {
     TerminalBrowserGrantService,
     "open" | "abandon" | "switchOff" | "terminalClosed" | "resolveCredential" | "liveGrant"
   >;
+  /** The program a thread's provider terminal opens; see CodeOperationServiceOptions. */
+  readonly providerTerminal?: CodeOperationServiceOptions["providerTerminal"];
   readonly resolvePullRequestTarget: (
     threadId: CodeThreadId,
   ) => Promise<GhDeliveryTarget | undefined>;
@@ -741,6 +748,8 @@ export interface CodeOperationRuntimeOptions {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
   }) => AppManagedToolSet | undefined;
+  /** Host platform override for tests; defaults to `process.platform`. */
+  readonly platform?: NodeJS.Platform;
   /**
    * The agent-run tool set for this thread: the model petitions the server's
    * own run admission for a child run, scoped to this thread as the parent.
@@ -1517,7 +1526,10 @@ export function createCodeOperationRuntime(
   const readRuntimeWorks = options.persistence.readCodeRuntimeWorks;
   const service = new CodeOperationService({
     authority: authorityForTurn,
+    ...(options.platform === undefined ? {} : { platform: options.platform }),
     threadStrict: (thread: CodeThread) => options.resolveStrict?.(thread.id) ?? true,
+    providerDriverKind: async (thread: CodeThread) =>
+      (await options.resolveProviderDriver(thread))?.kind,
     ...(readRuntimeWorks === undefined
       ? {}
       : {
@@ -1611,6 +1623,9 @@ export function createCodeOperationRuntime(
     ...(options.terminalBrowserGrants === undefined
       ? {}
       : { terminalBrowserGrants: options.terminalBrowserGrants }),
+    ...(options.providerTerminal === undefined
+      ? {}
+      : { providerTerminal: options.providerTerminal }),
     repositoryTests,
     ...(scaffolds === undefined ? {} : { scaffolds }),
     git,
@@ -1793,6 +1808,17 @@ export function createCodeOperationRuntime(
    * synchronously so a caller can act on the answer before another turn is
    * admitted.
    */
+  const adoptedWithHistory = (threadId: CodeThreadId, nativeSessionId: string) => {
+    const history = readJournaledSessionHistory(
+      options.persistence.journal,
+      String(threadId),
+      "code",
+    );
+    return {
+      nativeSessionId: decodeCodeNativeSessionId(nativeSessionId),
+      ...(history === undefined ? {} : { history }),
+    };
+  };
   const conversationRefusal = (
     thread: CodeThread,
   ): { readonly message: string; readonly adopted?: string } | undefined => {
@@ -2136,7 +2162,7 @@ export function createCodeOperationRuntime(
           command.kind === "start-provider-turn"
             ? undefined
             : hostSandboxRefusal({
-                platform: process.platform,
+                platform: options.platform ?? process.platform,
                 ...operationAccess(windowId, command),
               });
         if (sandboxRefusal !== undefined)
@@ -2242,6 +2268,11 @@ export function createCodeOperationRuntime(
                   modelId: thread.modelId,
                   projectId: thread.projectId,
                 });
+          if (admission?.kind === "draining") {
+            throw new CodeServiceError(
+              decodeCodeFailure({ category: "unavailable", message: admission.detail }),
+            );
+          }
           if (admission?.kind === "paused") {
             throw new CodeServiceError(
               decodeCodeFailure({
@@ -2454,7 +2485,7 @@ export function createCodeOperationRuntime(
             unavailable: target.message,
             ...(target.adopted === undefined
               ? {}
-              : { adopted: { nativeSessionId: target.adopted } }),
+              : { adopted: adoptedWithHistory(threadId, target.adopted) }),
           };
         const listed = await Effect.runPromise(
           Effect.either(
@@ -2518,6 +2549,14 @@ export function createCodeOperationRuntime(
           // back, or the session could never be offered or adopted again.
           let committed = false;
           try {
+            // Read before the commit checks below, which must not yield. The
+            // read never fails the adoption: a runtime without readable
+            // history, or a read that fails, imports none and says why.
+            const history = await readImportedSessionHistory(target.nativeSessions, {
+              instanceId: target.thread.providerInstanceId,
+              projectRoot: target.projectRoot,
+              nativeSessionId,
+            });
             // The thread must still be empty when the adoption commits. Nothing
             // yields from here to the journal appends, so no turn slips in.
             const occupied = conversationRefusal(target.thread);
@@ -2585,6 +2624,21 @@ export function createCodeOperationRuntime(
                   resumeCursor: cursor,
                 },
               });
+              // The session's earlier conversation, as the thread's own record:
+              // never prompt context, since the provider already holds it.
+              options.persistence.journal.append(
+                nativeSessionHistoryAppend({
+                  threadId: String(thread.id),
+                  mode: "code",
+                  providerInstanceId: thread.providerInstanceId,
+                  nativeSessionId,
+                  history,
+                  eventId: options.uuid(),
+                  correlationId: options.uuid(),
+                  actor: options.actor,
+                  occurredAt: options.clock(),
+                }),
+              );
             });
             committed = true;
             return { kind: "code-native-session-adopted", threadId, nativeSessionId };
@@ -3339,6 +3393,8 @@ interface ActiveTurn {
   readonly browserGrantKeys: Set<string>;
   readonly browserProfileContexts: Set<string>;
   readonly questions: Set<string>;
+  /** The provider questions on this turn that ask for a secret; see `answerInput`. */
+  readonly secretQuestions: Set<string>;
   readonly providerQuestionnaires: Map<string, Questionnaire>;
   /** Questions the native harness asked on this turn; answered by the host, not the provider. */
   readonly harnessQuestions: Set<string>;
@@ -4419,6 +4475,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       browserGrantKeys: new Set(),
       browserProfileContexts: new Set(),
       questions: new Set(),
+      secretQuestions: new Set(),
       harnessQuestions: new Set(),
       providerQuestionnaires: new Map(),
       cursor: 0,
@@ -4838,6 +4895,20 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       active.harnessQuestions.delete(input.requestId);
       return answeredTurnState(active.state);
     }
+    // A secret answer reaches the provider only for the question that asked
+    // for one, and a secret question takes no answer that was put as
+    // evidence, so the value is never stored either way.
+    if ((input.secret === true) !== active.secretQuestions.has(input.requestId))
+      return {
+        state: active.state,
+        failure: {
+          category: "invalid",
+          message:
+            input.secret === true
+              ? "That question does not ask for a secret."
+              : "That question asks for a secret. Answer it in its thread.",
+        },
+      };
     if (active.connection === undefined) {
       return turnState("failed", { category: "failed", message: APPROVAL_SESSION_GONE_MESSAGE });
     }
@@ -4855,6 +4926,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       };
     }
     active.questions.delete(input.requestId);
+    active.secretQuestions.delete(input.requestId);
     active.providerQuestionnaires.delete(input.requestId);
     await Effect.runPromise(
       active.connection.answerUserInput({
@@ -5091,6 +5163,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             requestId: event.requestId,
             prompt: event.prompt,
             options: event.options,
+            ...(event.secret === true ? { secret: true } : {}),
           });
         }
       }
@@ -5549,9 +5622,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const connection = active.connection;
     // The provider session was opened with the persistence the turn started
     // with. After the person changed it, an allow is delivered for this one
-    // call, so nothing is remembered beyond what either setting allows.
+    // call, so nothing is remembered beyond what either setting allows. A
+    // driver reads the host's default persistence, not this thread's, so a
+    // thread that keeps answers only as the Project's default says so with
+    // each answer; otherwise a host default of `current-session` would let
+    // the runtime remember the allow for the session.
     const once =
       ownerCurrent !== undefined ||
+      active.thread.permissionPersistence !== "current-session" ||
       active.thread.permissionPersistence !== input.thread.permissionPersistence;
     const askedUnder = active.approvalPostures.get(input.approvalId);
     if (ownerCurrent === undefined) {
@@ -6031,6 +6109,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   #appManagedTools(active: ActiveTurn): AppManagedToolSet | undefined {
+    // Windows Strict phase 1 withholds Octant-operated host tools (file reads/
+    // writes, thread terminals, checks, language/debug, browser/device/host
+    // tools) from advertised capabilities so the confined runtime uses only its
+    // own in-container tools.
+    if (
+      (this.#options.platform ?? process.platform) === "win32" &&
+      this.#strict(active.thread.id)
+    ) {
+      return undefined;
+    }
     if (active.serverTools !== undefined || active.serverPlacement !== undefined) {
       // The server tools and the few sets that touch only this host's
       // records: every other set reads or acts on a folder or a device of
@@ -6488,6 +6576,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       driverKind: active.driver.kind,
       executionPolicy: active.thread.executionPolicy,
       fullAccessSandbox: active.thread.fullAccessSandbox,
+      platform: this.#options.platform ?? process.platform,
     });
     const contextAccount: CodeTurnContextAccount = {
       carried: active.carriedSentContext,
@@ -7868,6 +7957,7 @@ function normalizedOperationEvent(
   }
   if (event.category === "question" && event.requestId !== undefined) {
     active.questions.add(event.requestId);
+    if (event.secret === true) active.secretQuestions.add(event.requestId);
     if (event.questionnaire !== undefined)
       active.providerQuestionnaires.set(event.requestId, event.questionnaire);
     return {
@@ -7881,6 +7971,7 @@ function normalizedOperationEvent(
         ) ?? "Provider input requested.",
       options: boundProviderInputOptions(event.options ?? []),
       ...(event.questionnaire === undefined ? {} : { questionnaire: event.questionnaire }),
+      ...(event.secret === true ? { secret: true } : {}),
     };
   }
   if (
@@ -7935,6 +8026,7 @@ function normalizedOperationEvent(
       ...(event.cacheWriteInputTokens === undefined
         ? {}
         : { cacheWriteInputTokens: event.cacheWriteInputTokens }),
+      ...(event.reasoningTokens === undefined ? {} : { reasoningTokens: event.reasoningTokens }),
 
       ...(event.contextWindow === undefined ? {} : { contextWindow: event.contextWindow }),
       ...(event.contextTokens === undefined ? {} : { contextTokens: event.contextTokens }),

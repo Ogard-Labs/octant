@@ -1,4 +1,7 @@
-import type { PendingQuestionDeferral } from "@octant/contracts/pending-requests";
+import {
+  PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE,
+  type PendingQuestionDeferral,
+} from "@octant/contracts/pending-requests";
 import { PendingRequestFailure, PendingRequestList, decodeHostAnswer } from "@octant/contracts";
 
 export interface PendingRequestClientOptions {
@@ -52,7 +55,10 @@ export function createPendingRequestClient(
       try {
         response = await options.fetch(url, {
           method: "GET",
-          headers: { "x-octant-window-capability": options.windowCapability },
+          headers: {
+            accept: PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE,
+            "x-octant-window-capability": options.windowCapability,
+          },
           ...(signal === undefined ? {} : { signal }),
         });
       } catch (error) {

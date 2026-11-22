@@ -17,6 +17,10 @@ import {
   type ShieldServerRule,
   type SshInvocation,
 } from "./shieldServerPolicy";
+import {
+  DEFAULT_SHIELD_DENIALS_IN_A_ROW,
+  DEFAULT_SHIELD_DENIALS_PER_THREAD,
+} from "@octant/contracts/shell";
 import { safeNetworkPlaceAllows } from "./safeNetworkPolicy";
 import { commandPathWords } from "./secretGuardPolicy";
 import { forgeShellChanges } from "./forgeShellChangePolicy";
@@ -1336,8 +1340,20 @@ export function parseShieldModelAnswer(text: string): ShieldModelAnswer | undefi
 // ---------------------------------------------------------------------------
 // The brakes.
 
-export const SHIELD_CONSECUTIVE_DENIAL_BRAKE = 3;
-export const SHIELD_THREAD_DENIAL_BRAKE = 20;
+/**
+ * The denial counts at which Shield pauses, from Settings › Permissions
+ * (`shieldDenialsInARow`, `shieldDenialsPerThread`); the defaults are the
+ * former fixed 3 and 20.
+ */
+export interface ShieldBrakeLimits {
+  readonly denialsInARow: number;
+  readonly denialsPerThread: number;
+}
+
+export const SHIELD_BRAKE_DEFAULT_LIMITS: ShieldBrakeLimits = {
+  denialsInARow: DEFAULT_SHIELD_DENIALS_IN_A_ROW,
+  denialsPerThread: DEFAULT_SHIELD_DENIALS_PER_THREAD,
+};
 
 export interface ShieldBrakeState {
   readonly consecutiveDenials: number;
@@ -1347,22 +1363,24 @@ export interface ShieldBrakeState {
 export const SHIELD_BRAKE_RELEASED: ShieldBrakeState = { consecutiveDenials: 0, threadDenials: 0 };
 
 /**
- * Whether Shield is paused for this thread. After 3 denials in a row the next
- * call goes to the person; after 20 in the thread every call does.
+ * Whether Shield is paused for this thread. After the person's denials in a
+ * row (3 by default) the next call goes to the person; after their count in
+ * the thread (20 by default) every call does.
  */
 export function shieldBrakeEngaged(
   state: ShieldBrakeState,
+  limits: ShieldBrakeLimits = SHIELD_BRAKE_DEFAULT_LIMITS,
 ): { readonly engaged: false } | { readonly engaged: true; readonly reason: string } {
-  if (state.threadDenials >= SHIELD_THREAD_DENIAL_BRAKE) {
+  if (state.threadDenials >= limits.denialsPerThread) {
     return {
       engaged: true,
-      reason: `Shield denied ${String(SHIELD_THREAD_DENIAL_BRAKE)} calls in this thread, so the person decides from here.`,
+      reason: `Shield denied ${String(limits.denialsPerThread)} calls in this thread, so the person decides from here.`,
     };
   }
-  if (state.consecutiveDenials >= SHIELD_CONSECUTIVE_DENIAL_BRAKE) {
+  if (state.consecutiveDenials >= limits.denialsInARow) {
     return {
       engaged: true,
-      reason: `Shield denied ${String(SHIELD_CONSECUTIVE_DENIAL_BRAKE)} calls in a row, so the person decides this one.`,
+      reason: `Shield denied ${String(limits.denialsInARow)} calls in a row, so the person decides this one.`,
     };
   }
   return { engaged: false };

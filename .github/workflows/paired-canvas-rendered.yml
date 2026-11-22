@@ -1,6 +1,8 @@
 name: Paired Canvas rendered checks
 on:
   pull_request:
+    # A draft runs nothing; marking it ready for review starts the run.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - apps/web/src/remote/**
       - apps/web/src/canvas/**
@@ -14,6 +16,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   rendered:
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:

@@ -1,6 +1,6 @@
 import { OwnerUnlockPrincipal } from "./hubAndSpokes";
 import { ConversationInputReceipt, ConversationInputPolicy } from "./conversationInputs";
-import { Questionnaire } from "./questionnaire";
+import { MAX_SECRET_ANSWER_LENGTH, Questionnaire } from "./questionnaire";
 import { SideChatDraftReturnReferences } from "./sideChatReturn";
 import {
   CodeGitHunk,
@@ -25,6 +25,7 @@ import {
   AgentRunResultDeliveryMark,
   MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
 } from "./agentRun";
+import { ThreadMessagesSteeredIntoTurn } from "./threadMessageSteering";
 import { ExtensionSelection } from "./extensions";
 import { ComputerUseDestinationSelection } from "./desktopLease";
 import { AppleActionRequest } from "./appleToolchain";
@@ -479,6 +480,13 @@ const StartTerminal = Schema.Struct({
    * working directory. The host refuses any other path.
    */
   folder: Schema.optional(Schema.String.pipe(Schema.maxLength(4_096))),
+  /**
+   * Start the thread's provider's own command-line program, interactively,
+   * instead of a shell. The host resolves the program, its account folder and
+   * its environment from the thread's provider; the command names none of
+   * them. Only the person may ask: the host refuses it for every other caller.
+   */
+  program: Schema.optional(Schema.Literal("provider")),
 }).annotations(strict);
 const AttachTerminal = Schema.Struct({
   kind: Schema.Literal("attach-terminal"),
@@ -1147,11 +1155,22 @@ const StartProviderTurn = Schema.Struct({
    */
   delivery: Schema.optional(AgentRunResultDeliveryMark),
 }).annotations(strict);
+/** The longest secret answer the host passes on; the same bound on every surface. */
+export const MAX_CODE_SECRET_ANSWER_LENGTH = MAX_SECRET_ANSWER_LENGTH;
 const AnswerProviderInput = Schema.Struct({
   kind: Schema.Literal("answer-provider-input"),
   ...OperationScope,
   requestId: ProviderRequestId,
-  response: CodeEvidenceReference,
+  /** The answer, put as evidence first. Every question but a secret one. */
+  response: Schema.optional(CodeEvidenceReference),
+  /**
+   * A secret question's answer (see `input-requested`'s `secret`), carried in
+   * the command itself so it reaches the provider in memory and never the
+   * evidence store. Exactly one of this and `response` is given; the host
+   * checks that, the bound and the question, so a decode failure never prints
+   * the value.
+   */
+  secretAnswer: Schema.optional(Schema.String),
 }).annotations(strict);
 const AnswerProviderApproval = Schema.Struct({
   kind: Schema.Literal("answer-provider-approval"),
@@ -2030,6 +2049,12 @@ const QuestionEvent = Schema.Struct({
   options: Schema.Array(CodeQuestionOptionText).pipe(
     Schema.filter((options) => options.length <= MAX_CODE_QUESTION_OPTIONS),
   ),
+  /**
+   * The provider asks for a secret: the person answers in a masked field,
+   * through `answer-provider-input`'s `secretAnswer`, and only the fact that
+   * it was answered is recorded.
+   */
+  secret: Schema.optional(Schema.Literal(true)),
 }).annotations({ ...strict, ...personDecides });
 /**
  * Journaled once, just before a turn's terminal state, on every settled
@@ -2079,6 +2104,8 @@ const UsageEvent = Schema.Struct({
   /** Absent means the provider did not report cache usage. */
   cacheReadInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   cacheWriteInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  /** Absent means the provider did not report reasoning tokens, never that it spent none. */
+  reasoningTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
 
   /**
    * What the provider says this turn cost, in US dollars. Absent whenever the
@@ -2163,9 +2190,10 @@ const ResultEvent = Schema.Struct({
  * The person started this thread from a provider session begun outside
  * Octant, on the same account and folder. Journaled ahead of the
  * `provider-session-ready` that records its resume cursor, in an operation
- * of its own that holds no turn. Only the runtime's own session id is kept,
- * never its title or history. Absent from every thread journaled before
- * adoption existed.
+ * of its own that holds no turn. Only the runtime's own session id is kept
+ * here, never its title; the session's earlier conversation is journaled in
+ * the same unit as a `native-session.history-imported@1` record of its own.
+ * Absent from every thread journaled before adoption existed.
  */
 const NativeSessionAdoptedEvent = Schema.Struct({
   kind: Schema.Literal("native-session-adopted"),
@@ -2699,6 +2727,11 @@ export const CodeConversationTurn = Schema.Struct({
    * ran, in arrival order. Absent on a turn that took none.
    */
   steeredResults: Schema.optional(AgentResultsSteeredIntoTurn),
+  /**
+   * The person's messages the runtime took into this turn while it ran, in
+   * arrival order. Absent on a turn that took none.
+   */
+  steeredMessages: Schema.optional(ThreadMessagesSteeredIntoTurn),
   status: Schema.Literal("waiting", "completed", "interrupted", "failed", "incomplete"),
   /**
    * Why a failed turn failed, or the usage limit a waiting turn stopped at, as

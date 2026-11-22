@@ -10,13 +10,12 @@ import {
 } from "@octant/contracts";
 import { listEligibleImageProfiles } from "@octant/domain";
 import { createThreadImageAgentTools, IMAGE_TOOL_NAME } from "../image/imageAgentTools";
-import {
-  ImageGenerationOfferService,
-  type ImageOfferAnswer,
-} from "../image/imageGenerationOfferService";
+import { ImageGenerationOfferService } from "../image/imageGenerationOfferService";
 import { imageOfferDecisionRules } from "../image/imageOfferDecisionRules";
+import type { ServiceOfferAnswer } from "../offers/serviceOfferDecision";
 import { createServiceOfferRouteHandler } from "../offers/serviceOfferRoutes";
 import { ServiceOfferService } from "../offers/serviceOfferService";
+import { transcriptionDecision } from "../speech/transcriptionTool";
 import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { createRemoteDevicePrincipal } from "../clientPrincipal";
@@ -58,6 +57,8 @@ import {
   symlinkSync,
   writeFileSync,
   readFileSync,
+  readdirSync,
+  statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -344,6 +345,9 @@ function openFixture(options?: {
   ) => Promise<import("./research/researchRouter").ProviderNativeResearchResultSet>;
   readonly resolveAppManagedTools?: (input: {
     readonly windowId: WindowId;
+    readonly thread: ChatThread;
+  }) => import("../providers/appManagedToolSet").AppManagedToolSet | undefined;
+  readonly resolveHostRunTools?: (input: {
     readonly thread: ChatThread;
   }) => import("../providers/appManagedToolSet").AppManagedToolSet | undefined;
   readonly resolveComputerUseTools?: (input: {
@@ -831,6 +835,9 @@ function openFixture(options?: {
     ...(options?.resolveComputerUseTools === undefined
       ? {}
       : { resolveComputerUseTools: options.resolveComputerUseTools }),
+    ...(options?.resolveHostRunTools === undefined
+      ? {}
+      : { resolveHostRunTools: options.resolveHostRunTools }),
     ...(options?.resolveExtensionSelectionContext === undefined
       ? {}
       : { resolveExtensionSelectionContext: options.resolveExtensionSelectionContext }),
@@ -1147,6 +1154,57 @@ function questionDriver(
   } as unknown as ProviderDriver;
 }
 
+/** Asks a plain question, then one that wants a secret, and finishes once both are answered. */
+function secretQuestionDriver(
+  answered: Array<{ requestId: string; answer: string }>,
+): ProviderDriver {
+  return {
+    acquire: () =>
+      Effect.sync(() => {
+        const queue = Effect.runSync(Queue.unbounded<never>());
+        let sessionId = "";
+        const emit = (event: Record<string, unknown>) =>
+          Queue.offer(queue, { sessionId, ...event } as never);
+        return {
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
+          start: (input: { readonly sessionId: string }) =>
+            Effect.sync(() => {
+              sessionId = input.sessionId;
+              return { sessionId: input.sessionId };
+            }),
+          send: () =>
+            Effect.gen(function* () {
+              yield* emit({ kind: "text-delta", text: "Connecting." });
+              yield* emit({
+                kind: "user-input-request",
+                requestId: "q-host",
+                prompt: "Which host?",
+                options: [],
+              });
+              yield* emit({
+                kind: "user-input-request",
+                requestId: "q-secret",
+                prompt: "Database credential?",
+                options: [],
+                secret: true,
+              });
+            }),
+          answerUserInput: (input: { readonly requestId: string; readonly answer: string }) =>
+            Effect.gen(function* () {
+              answered.push({ requestId: input.requestId, answer: input.answer });
+              if (answered.length < 2) return;
+              yield* emit({ kind: "text-delta", text: " Connected." });
+              yield* emit({ kind: "completed" });
+            }),
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerTool: () => Effect.void,
+        };
+      }),
+  } as unknown as ProviderDriver;
+}
+
 /**
  * The conversation a snapshot's plan says its turn sends, keyed by the opening
  * of the material — which is exactly how the manifest labels an entry.
@@ -1448,7 +1506,7 @@ describe("ChatService", () => {
       listInstances: () => [profile],
       readImageGenerationSettings: () => ({ customSources: [] }),
     };
-    const waiting = new ServiceOfferService<ServiceOffer, ImageOfferAnswer>(5, {
+    const waiting = new ServiceOfferService<ServiceOffer, ServiceOfferAnswer>(5, {
       uuid: () => crypto.randomUUID(),
       now: Date.now,
     });
@@ -1490,7 +1548,7 @@ describe("ChatService", () => {
     const chat = createChatRouteHandler({ service, windowAuthorityStore });
     const offerRoute = createServiceOfferRouteHandler({
       offers: waiting,
-      rules: imageOfferDecisionRules(imageProfiles),
+      rules: { ...imageOfferDecisionRules(imageProfiles), transcribe: transcriptionDecision },
       authorizeScope: async (_scope, kind, id) =>
         kind === "chat-thread" &&
         service.read(decodeChatThreadId(id)).thread.lifecycle === "active",
@@ -1592,6 +1650,49 @@ describe("ChatService", () => {
     });
     expect(fakeDriver.sentTurns[1]?.tools.map(({ name }) => name)).not.toContain("octant_canvas");
     expect(JSON.stringify(fakeDriver.sentTurns[1]?.context)).not.toContain("octant_canvas");
+  });
+
+  it("gives a turn the host sends with no window the host-run Canvas, and none of the window's tools", async () => {
+    const windowTools = vi.fn(() => ({
+      definitions: [{ name: "octant_computer", inputSchema: { type: "object" } }],
+      execute: async () => ({ result: {} }),
+    }));
+    const hostRunTools = vi.fn(() => ({
+      definitions: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
+      execute: async () => ({ result: {} }),
+    }));
+    const { service, fakeDriver } = openFixture({
+      resolveAppManagedTools: windowTools,
+      resolveComputerUseTools: windowTools,
+      resolveHostRunTools: hostRunTools,
+    });
+    for (const hostRun of [true, false]) {
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: hostRun ? "Routine run" : "No window",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Write the weekly memo",
+        },
+        hostRun ? { hostRun: true } : {},
+      );
+    }
+    const toolNames = fakeDriver.sentTurns.map((turn) => turn.tools.map(({ name }) => name));
+    expect(toolNames[0]).toContain("octant_canvas");
+    expect(toolNames[0]).not.toContain("octant_computer");
+    expect(hostRunTools).toHaveBeenCalledTimes(1);
+    expect(hostRunTools).toHaveBeenCalledWith(
+      expect.objectContaining({ thread: expect.objectContaining({ title: "Routine run" }) }),
+    );
+    // A window-less send that is not the host's own takes nothing.
+    expect(toolNames[1]).not.toContain("octant_canvas");
+    expect(windowTools).not.toHaveBeenCalled();
   });
 
   it("offers Octant's tools only to a model the host verified, not one the driver's probe claims", async () => {
@@ -7627,6 +7728,94 @@ describe("ChatService", () => {
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
   });
 
+  it("hands a secret question's answer to the provider from the person alone and never records it", async () => {
+    const answered: Array<{ requestId: string; answer: string }> = [];
+    const { service, dataDirectory } = openFixture({ driver: secretQuestionDriver(answered) });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Secret question",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sendPromise = service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Connect to the database",
+    });
+    const pendingQuestion = () =>
+      service.read(created.thread.id).turns[0]?.attempts[0]?.pendingQuestion;
+    const sentinel = "hunter2-secret-sentinel";
+    const answer = (
+      requestId: string,
+      answered: Record<string, unknown>,
+      initiator?: "user" | "agent",
+    ) => {
+      const view = service.read(created.thread.id);
+      return service.execute(
+        {
+          kind: "answer-chat-turn-question",
+          threadId: created.thread.id,
+          expectedVersion: view.thread.version,
+          turnId: view.turns[0]!.id,
+          attemptId: view.turns[0]!.attempts[0]!.id,
+          requestId,
+          ...answered,
+        } as never,
+        initiator === undefined ? undefined : { initiator },
+      );
+    };
+
+    // A secret goes to no plain question.
+    await until(() => pendingQuestion()?.requestId === "q-host");
+    expect(pendingQuestion()).not.toHaveProperty("secret");
+    await expect(answer("q-host", { secretAnswer: sentinel }, "user")).rejects.toMatchObject({
+      failure: { category: "invalid" },
+    });
+    await answer("q-host", { answer: "db.internal" }, "user");
+
+    await until(() => pendingQuestion()?.requestId === "q-secret");
+    expect(pendingQuestion()).toMatchObject({ prompt: "Database credential?", secret: true });
+    expect(service.listPendingQuestions()).toMatchObject([
+      { mode: "chat", kind: "question", text: "Database credential?", secret: true },
+    ]);
+    // An agent acting for the person cannot answer it, nor can a caller
+    // that never said it was the person, and a secret question takes no
+    // answer the attempt would record.
+    await expect(answer("q-secret", { secretAnswer: sentinel }, "agent")).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+    await expect(answer("q-secret", { secretAnswer: sentinel })).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+    await expect(answer("q-secret", { answer: sentinel }, "user")).rejects.toMatchObject({
+      failure: { category: "invalid" },
+    });
+    expect(answered).toEqual([{ requestId: "q-host", answer: "db.internal" }]);
+
+    const accepted = await answer("q-secret", { secretAnswer: sentinel }, "user");
+    expect(accepted).toMatchObject({ kind: "attempt-updated" });
+    await sendPromise;
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts.at(-1)?.outcome === "completed",
+    );
+    expect(answered).toEqual([
+      { requestId: "q-host", answer: "db.internal" },
+      { requestId: "q-secret", answer: sentinel },
+    ]);
+    const settled = service.read(created.thread.id).turns[0]!.attempts.at(-1)!;
+    expect(settled.answeredQuestions).toEqual([
+      expect.objectContaining({ requestId: "q-host", answer: "db.internal" }),
+      expect.objectContaining({ requestId: "q-secret", secret: true }),
+    ]);
+    expect(settled.answeredQuestions?.[1]).not.toHaveProperty("answer");
+    expect(JSON.stringify(service.read(created.thread.id))).not.toContain(sentinel);
+    for (const file of readdirSync(dataDirectory, { recursive: true, encoding: "utf8" })) {
+      const path = join(dataDirectory, file);
+      if (statSync(path).isFile()) expect(readFileSync(path).includes(sentinel)).toBe(false);
+    }
+  });
+
   it("keeps saying an idle thread awaits its agent's approval, as after a restart took the turn", async () => {
     const { service } = openFixture({ awaitsHarnessApproval: () => true });
     const created = await service.execute({
@@ -12509,6 +12698,52 @@ describe("handing a Chat conversation to a new provider session", () => {
 
   const lastAttempt = (fixture: ReturnType<typeof openFixture>, threadId: ChatThreadId) =>
     fixture.service.read(threadId).turns.at(-1)?.attempts.at(-1);
+
+  it("sends a follow-up without the host-run Canvas when the saved session's tools lack it, rather than failing for a handoff no one can choose", async () => {
+    const canvas = vi.fn(() => ({
+      definitions: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
+      execute: async () => ({ result: {} }),
+      close: vi.fn(async () => undefined),
+    }));
+    const fixture = openMoving({
+      nativeConversation: true,
+      // A fixed catalog recorded before the Canvas existed: only adding it
+      // needs a handoff.
+      toolCatalogContinuation: ({ tools }) =>
+        tools.some((tool) => tool.name === "octant_canvas") ? "handoff-required" : "unchanged",
+      resolveHostRunTools: canvas,
+    });
+    const threadId = await answeredThread(fixture);
+    await fixture.service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId,
+        expectedVersion: fixture.service.read(threadId).thread.version,
+        prompt: "Scheduled follow-up",
+      },
+      { hostRun: true },
+    );
+    expect(fixture.service.read(threadId).turns).toHaveLength(2);
+    expect(fixture.fakeDriver.sentTurns.at(-1)?.tools.map(({ name }) => name)).not.toContain(
+      "octant_canvas",
+    );
+    // The saved session is resumed, not replaced by a handed-over one.
+    expect(fixture.fakeDriver.startedSessionIds).toHaveLength(1);
+    expect(lastAttempt(fixture, threadId)?.handoff).toBeUndefined();
+    expect(canvas.mock.results[0]?.value.close).toHaveBeenCalled();
+
+    // A person's own send keeps the explicit choice: no window-less hostRun,
+    // so nothing is dropped for them and the changed-tools refusal stands.
+    const refusing = openMoving({
+      nativeConversation: true,
+      toolCatalogContinuation: () => "handoff-required",
+      resolveHostRunTools: canvas,
+    });
+    const other = await answeredThread(refusing);
+    await expect(sendFollowUp(refusing, other, "Use the new tools")).rejects.toThrow(
+      "different tools",
+    );
+  });
 
   it("keeps the draft unaccepted until the person chooses a text handoff for changed tools", async () => {
     const fixture = openMoving({

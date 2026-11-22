@@ -1,58 +1,14 @@
 import type {
-  ImageGenerationGenerateOffer,
   ImageGenerationProfileView,
-  ProviderInstanceId,
-  ProviderModelId,
   ServiceOffer,
   ServiceOfferDecision,
 } from "@octant/contracts";
+import { imageOfferModelChoices } from "@octant/client-runtime/service-offer-client";
 import { useId, useState } from "react";
 import { Image as ImageIcon, X } from "../ui/icons";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-
-interface ModelChoice {
-  readonly id: string;
-  readonly label: string;
-  readonly profileInstanceId: ProviderInstanceId;
-  readonly modelId: ProviderModelId;
-}
-
-/** Every profile and model the person can generate with, the agent's suggestion first. */
-function modelChoices(
-  profiles: ReadonlyArray<ImageGenerationProfileView>,
-  suggested: ImageGenerationGenerateOffer["suggested"],
-): ReadonlyArray<ModelChoice> {
-  const choices = profiles.flatMap((profile) =>
-    profile.modelAllowlist.map((modelId) => {
-      const source = profile.sourceLabels?.find(
-        (candidate) => String(candidate.modelId) === String(modelId),
-      )?.label;
-      return {
-        id: `${String(profile.instanceId)}::${String(modelId)}`,
-        label: `${profile.displayName} · ${source ?? String(modelId)}`,
-        profileInstanceId: profile.instanceId,
-        modelId,
-      };
-    }),
-  );
-  const suggestedId = `${String(suggested.profileInstanceId)}::${String(suggested.modelId)}`;
-  const first = choices.find((choice) => choice.id === suggestedId);
-  // The window's profile list can lag the host's by a read; the suggestion is
-  // still one the host can run, so it is offered under its own name.
-  return first === undefined
-    ? [
-        {
-          id: suggestedId,
-          label: String(suggested.modelId),
-          profileInstanceId: suggested.profileInstanceId,
-          modelId: suggested.modelId,
-        },
-        ...choices,
-      ]
-    : [first, ...choices.filter((choice) => choice.id !== suggestedId)];
-}
 
 interface ImageOfferCardProps {
   readonly offer: ServiceOffer;
@@ -113,7 +69,12 @@ export function ImageGenerateOfferCard(props: ImageOfferCardProps) {
   const [remember, setRemember] = useState(false);
   const rememberId = useId();
   if (pending.kind !== "generate") return null;
-  const choices = modelChoices(props.profiles, pending.suggested);
+  const references = pending.references;
+  const choices = imageOfferModelChoices(
+    props.profiles,
+    pending.suggested,
+    references !== undefined,
+  );
   const choice = choices.find((candidate) => candidate.id === selected) ?? choices[0];
   const title = pending.revision
     ? "Revise this image with an image model?"
@@ -128,7 +89,8 @@ export function ImageGenerateOfferCard(props: ImageOfferCardProps) {
         decision,
         profileInstanceId: choice.profileInstanceId,
         modelId: choice.modelId,
-        rememberForThread: remember,
+        rememberForThread: references === undefined && remember,
+        ...(references === undefined ? {} : { referenceImagesConfirmed: true }),
       });
     }
   }
@@ -158,6 +120,19 @@ export function ImageGenerateOfferCard(props: ImageOfferCardProps) {
       <p className="follow-up-card__prompt" title={pending.prompt}>
         {pending.prompt}
       </p>
+      {references === undefined ? null : (
+        <div className="follow-up-card__summary">
+          <p>These images will be sent to the selected image provider:</p>
+          <ul>
+            {references.map((reference, index) => (
+              <li key={index}>
+                {reference.label}
+                {reference.signedIn === true ? " (signed-in page)" : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="follow-up-card__confirm">
         <OctantSelectField
           aria-label="Image model"
@@ -166,17 +141,19 @@ export function ImageGenerateOfferCard(props: ImageOfferCardProps) {
           options={choices.map((candidate) => ({ id: candidate.id, label: candidate.label }))}
           value={choice?.id ?? ""}
         />
-        <label className="follow-up-card__summary" htmlFor={rememberId}>
-          <OctantCheckbox
-            checked={remember}
-            disabled={busy}
-            id={rememberId}
-            onChange={(event) => setRemember(event.currentTarget.checked)}
-          />{" "}
-          {props.keptIn === "project"
-            ? "Don't ask again in this Project"
-            : "Don't ask again in this thread"}
-        </label>
+        {references === undefined ? (
+          <label className="follow-up-card__summary" htmlFor={rememberId}>
+            <OctantCheckbox
+              checked={remember}
+              disabled={busy}
+              id={rememberId}
+              onChange={(event) => setRemember(event.currentTarget.checked)}
+            />{" "}
+            {props.keptIn === "project"
+              ? "Don't ask again in this Project"
+              : "Don't ask again in this thread"}
+          </label>
+        ) : null}
       </div>
       <div className="follow-up-card__actions">
         <OctantButton

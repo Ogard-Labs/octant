@@ -187,6 +187,7 @@ export function makeProviderDriver(
         managedHome: options.acpHome("acp-agent", instance.id),
         process: options.acpProcess,
         runtimeRegistry: options.runtimeRegistry,
+        permissionPersistence: options.permissionPersistence,
       }),
       instance,
       hasPending === undefined

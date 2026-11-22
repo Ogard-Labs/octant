@@ -19,12 +19,17 @@ import {
   type ProjectId,
 } from "@octant/contracts";
 import { WORK_TURN_CAPABILITIES, decodeAgentResultSteered } from "@octant/contracts";
-import type { AgentResultSteered } from "@octant/contracts";
+import type { AgentResultSteered, ThreadMessageSteered } from "@octant/contracts";
 import {
   AGENT_RESULT_STEERED,
   AGENT_RESULT_STEERING_AGGREGATE_TYPE,
   withAgentResultSteered,
 } from "../agentRun/agentResultSteeredRecord";
+import {
+  THREAD_MESSAGE_STEERING_AGGREGATE_TYPE,
+  threadMessageSteeredFrom,
+  withThreadMessageSteered,
+} from "../messageQueue/threadMessageSteeredRecord";
 import { hydrateJournalProjection } from "../persistence/journalHydration";
 
 /** Isolate the new receipt from event and caller object aliases; legacy rows retain their shape. */
@@ -248,6 +253,22 @@ export class WorkTurnProjection {
     this.#byRequest.set(current.requestId, decodeWorkTurnState({ ...current, steeredResults }));
   }
 
+  /**
+   * A message the person sent while one of this thread's turns ran, which the
+   * runtime took into it. Like a steered result, it leaves the turn's version
+   * alone, and a record already shown changes nothing.
+   */
+  applySteeredMessage(record: ThreadMessageSteered): void {
+    const requestId = this.#byThread
+      .get(String(record.threadId))
+      ?.find((candidate) => String(candidate) === record.turnKey);
+    const current = requestId === undefined ? undefined : this.#byRequest.get(requestId);
+    if (current === undefined) return;
+    const steeredMessages = withThreadMessageSteered(current.steeredMessages, record);
+    if (steeredMessages === current.steeredMessages) return;
+    this.#byRequest.set(current.requestId, decodeWorkTurnState({ ...current, steeredMessages }));
+  }
+
   lookup(requestId: WorkTurnRequestId): WorkTurnState | undefined {
     const turn = this.#byRequest.get(decodeWorkTurnRequestId(requestId));
     return turn === undefined ? undefined : snapshotExternalInput(turn);
@@ -432,7 +453,22 @@ export function hydrateWorkTurnProjectionFromJournal(input: {
     },
   });
   if (turns !== "ok") return turns;
-  // Steered results name turns the first pass already rebuilt.
+  // Steered messages and results name turns the first pass already rebuilt.
+  const messages = hydrateJournalProjection({
+    replay: input.replay,
+    aggregateType: THREAD_MESSAGE_STEERING_AGGREGATE_TYPE,
+    ...(input.maxScan === undefined ? {} : { maxScan: input.maxScan }),
+    apply: (event) => {
+      if (
+        event.aggregateType !== undefined &&
+        event.aggregateType !== THREAD_MESSAGE_STEERING_AGGREGATE_TYPE
+      )
+        return;
+      const record = threadMessageSteeredFrom(event);
+      if (record?.mode === "work") input.projection.applySteeredMessage(record);
+    },
+  });
+  if (messages !== "ok") return messages;
   return hydrateJournalProjection({
     replay: input.replay,
     aggregateType: AGENT_RESULT_STEERING_AGGREGATE_TYPE,

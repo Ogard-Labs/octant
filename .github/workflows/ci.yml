@@ -4,8 +4,14 @@ name: CI
 # the merge queue, and the queue's commit is the one that lands, so its
 # `merge_group` run has already checked that exact commit. A run on push
 # repeated every job for the same commit.
+#
+# A draft pull request runs nothing: every job below carries the draft guard,
+# and `ready_for_review` starts the run when the draft is marked ready. Agents
+# park work in drafts, and each push to one ran every job, macOS and Windows
+# included (November 2026: about 60 pull requests in two days).
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
   workflow_dispatch:
 
@@ -19,6 +25,7 @@ permissions:
 jobs:
   sandbox-native:
     name: Sandbox native contract (${{ matrix.os }})
+    if: github.event.pull_request.draft != true
     strategy:
       fail-fast: false
       matrix:
@@ -50,6 +57,7 @@ jobs:
   # two long suites are split across machines with vitest's `--shard`.
   static:
     name: Format, lint, typecheck, build
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -101,8 +109,12 @@ jobs:
           OCTANT_MOBILE_PUSH=1 EAS_BUILD_PROFILE=production bunx expo config --type introspect --json >/dev/null
       - run: bun run build --filter=!@octant/desktop --filter=!@octant/scripts
 
+  # The macOS and Windows jobs that `checks` does not need also skip on a stack
+  # layer whose base is not `main`: those runners cost several times a Linux
+  # one, and the merge queue runs them on the commit that lands.
   electron-windows:
     name: Windows Electron installer cleanup and recovery
+    if: github.event.pull_request.draft != true && (github.event_name != 'pull_request' || github.base_ref == 'main')
     runs-on: windows-2025
     timeout-minutes: 10
     steps:
@@ -142,6 +154,7 @@ jobs:
 
   packages:
     name: Package tests
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -159,6 +172,7 @@ jobs:
   # in `checks` below) until it has been seen green on the hosted runner.
   packages-windows:
     name: Package tests on Windows (domain, contracts)
+    if: github.event.pull_request.draft != true && (github.event_name != 'pull_request' || github.base_ref == 'main')
     runs-on: windows-2025
     timeout-minutes: 20
     steps:
@@ -178,6 +192,7 @@ jobs:
   # the hosted runner.
   server-windows:
     name: Server Full access tests on Windows
+    if: github.event.pull_request.draft != true && (github.event_name != 'pull_request' || github.base_ref == 'main')
     runs-on: windows-2025
     timeout-minutes: 20
     steps:
@@ -200,6 +215,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'The fake Pi did not compile' }
           bun build --compile apps/server/src/providers/fixtures/fakeKiloAcpAgent.ts --outfile "$env:RUNNER_TEMP/fake-kilo/kilo.exe"
           if ($LASTEXITCODE -ne 0) { throw 'The fake Kilo ACP agent did not compile' }
+          cmake -S apps/desktop/native/windows-confine -B "$env:RUNNER_TEMP/confine-build" -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'The Windows confinement launcher did not configure' }
+          cmake --build "$env:RUNNER_TEMP/confine-build" --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'The Windows confinement launcher did not compile' }
       - name: Run provider launches, shells and terminals on Windows
         working-directory: apps/server
         shell: pwsh
@@ -209,6 +228,7 @@ jobs:
           $env:OCTANT_FAKE_OPENCODE_EXE = "$env:RUNNER_TEMP/fake-opencode/opencode.exe"
           $env:OCTANT_FAKE_PI_EXE = "$env:RUNNER_TEMP/fake-pi/pi.exe"
           $env:OCTANT_FAKE_ACP_EXE = "$env:RUNNER_TEMP/fake-kilo/kilo.exe"
+          $env:OCTANT_WINDOWS_CONFINE_EXE = "$env:RUNNER_TEMP/confine-build/Release/octant-windows-confine.exe"
           bun run test src/process/windowsProcessTree.test.ts src/code/terminalProcessPort.windows.test.ts src/code/repositoryTestProcessPort.windows.test.ts src/code/languageServices.windows.test.ts src/code/terminalShell.test.ts src/harness/windowsFullAccessShell.test.ts src/providers/codexProcess.windows.test.ts src/providers/providerFamilies.windows.test.ts src/process/windowsProviderProgram.test.ts src/process/nodeOwnedProcessReceipt.windows.test.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -217,6 +237,7 @@ jobs:
   # merge queue lands the commit, so users can `docker pull` instead of building.
   share-image:
     name: Build the share-service image
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -243,6 +264,7 @@ jobs:
 
   web:
     name: Web tests (${{ matrix.shard }}/5)
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
@@ -260,6 +282,7 @@ jobs:
 
   server:
     name: Server tests (${{ matrix.shard }}/4)
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
@@ -289,7 +312,9 @@ jobs:
     # touching the rules. `always()` matters: a skipped required check counts
     # as passed, so this job must run, and fail, when a needed job did not pass.
     name: Format, lint, typecheck, test, build
-    if: always()
+    # Skipped on a draft along with the jobs it needs. A draft cannot merge, and
+    # marking it ready runs this again before the merge queue runs it once more.
+    if: always() && github.event.pull_request.draft != true
     needs: [static, packages, web, server, sandbox-native]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -304,6 +329,7 @@ jobs:
 
   download-manifest-ui:
     name: Browser download manifest rendered review
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -325,6 +351,7 @@ jobs:
 
   desktop:
     name: Desktop and scripts (macOS)
+    if: github.event.pull_request.draft != true && (github.event_name != 'pull_request' || github.base_ref == 'main')
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -452,6 +479,7 @@ jobs:
 
   desktop-linux:
     name: Desktop Linux client trust
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:

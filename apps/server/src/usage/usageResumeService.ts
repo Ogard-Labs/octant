@@ -124,6 +124,8 @@ interface UsageResumeServiceOptions {
   readonly unschedule?: (handle: UsageResumeTimerHandle) => void;
   /** How long a failed settle waits before re-arming. */
   readonly retryAfterMs?: number;
+  /** Whether the host refuses new turns now (an update is draining it). */
+  readonly refusesNewTurns?: () => boolean;
   /** Watches committed appends for schedule, cancel, and supersede events. */
   readonly onError?: (message: string, error: unknown) => void;
 }
@@ -459,6 +461,12 @@ export class UsageResumeService {
       const verdict = await port.inspect(pending.record);
       if (verdict.kind === "invalid") {
         await this.#settle(pending, "invalidated", verdict.detail);
+        return;
+      }
+      // An update draining the host refuses new turns, and a refused dispatch
+      // fails the continuation for good, so it waits and is offered again.
+      if (this.#options.refusesNewTurns?.() === true) {
+        this.#armTimer(pending, this.#options.clock().getTime() + this.#retryAfterMs());
         return;
       }
       const result = await port.dispatch(pending.record);

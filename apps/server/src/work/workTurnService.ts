@@ -5,6 +5,7 @@ import {
   partitionAttachedFiles,
   type AttachedFileByPath,
 } from "../attachments/attachedFiles";
+import type { TurnAcceptance } from "../hostDrain";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import type { ConversationInputReceipt } from "@octant/contracts/conversation-inputs";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
@@ -106,6 +107,7 @@ import {
   type WorkThreadAdoptedSession,
   decodeThreadWorkingDirectory,
   ProviderNativeSessionId,
+  type ImportedSessionHistory,
 } from "@octant/contracts";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
@@ -118,6 +120,7 @@ import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/
 import type { TurnImage, TurnImagesDescription } from "../harness/imageDescription";
 import type { TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNativeSetup";
+import { readImportedSessionHistory } from "../providers/nativeSessionHistory";
 import type {
   NativeHarnessTurnAdmission,
   NativeHarnessTurnScope,
@@ -255,6 +258,36 @@ export class WorkTurnServiceError extends Error {
   constructor(readonly failure: WorkTurnFailure) {
     super(failure.message);
   }
+}
+
+/**
+ * A Work turn's admission as the host sees it: the person's own start reads
+ * a drain as an unavailable failure, while a host caller that retries (a due
+ * wake-up) waits for the drain to lift instead of ending its schedule.
+ */
+export type WorkTurnAdmission =
+  | WorkTurnLookupResult
+  | { readonly kind: "draining"; readonly failure: WorkTurnFailure };
+
+/**
+ * A host-started Work turn (a due wake-up) as the wake-up schedule reads it.
+ * A drain that began while the turn was prepared refuses it late; that reads
+ * as busy, so the wake-up is offered again once the drain lifts rather than
+ * ending its schedule.
+ */
+export async function wakeupTurnOutcome(
+  start: Promise<{ readonly kind: string }>,
+  turnId: string,
+): Promise<
+  | { readonly status: "started"; readonly turnId: string }
+  | { readonly status: "busy" }
+  | { readonly status: "refused"; readonly message: string }
+> {
+  const result = await start;
+  if (result.kind === "draining") return { status: "busy" };
+  return result.kind === "accepted"
+    ? { status: "started", turnId }
+    : { status: "refused", message: "The turn was not admitted." };
 }
 
 /** What the turn's latest usage report said about the window and model time. */
@@ -403,7 +436,15 @@ export interface WorkTurnServiceDependencies {
   readonly recordAdoptedSession?: (
     thread: WorkThread,
     adopted: WorkThreadAdoptedSession,
+    history: ImportedSessionHistory,
   ) => { readonly status: "recorded" } | { readonly status: "refused"; readonly message: string };
+  /**
+   * The earlier conversation the thread's adoption imported, as journaled;
+   * undefined for a thread adopted before Octant imported any.
+   */
+  readonly readImportedSessionHistory?: (
+    threadId: WorkThreadId,
+  ) => ImportedSessionHistory | undefined;
   /**
    * Stops the thread's session the host kept past its last turn, and every
    * background task in it. Absent, no Work session is kept.
@@ -434,6 +475,7 @@ export interface WorkTurnServiceDependencies {
   readonly conversationInputTransfer?: Pick<ConversationInputTransfer, "prepare">;
   /** Carries a thread's session to another account of the same provider after a move. */
   readonly accountSessionCarrier?: AccountSessionCarrier;
+  readonly platform?: NodeJS.Platform;
   readonly supportsAttachments?: (input: {
     readonly providerInstanceId: WorkThread["providerInstanceId"];
     readonly modelId: WorkThread["modelId"];
@@ -558,6 +600,11 @@ export interface WorkTurnServiceDependencies {
     ) => void;
     /** Absent means every turn is admitted. */
     readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
+    /**
+     * Rechecks the host drain right before a prepared turn is accepted and
+     * counts the turn as running; the refusal, or nothing when admitted.
+     */
+    readonly acceptTurn?: (scope: NativeHarnessTurnScope) => TurnAcceptance;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
     /** Every turn's end, whatever its outcome, with what the turn cost and how it ran. */
     readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
@@ -694,6 +741,7 @@ export class WorkTurnService {
    */
   readonly #adoptingThreads = new Set<string>();
   readonly #recordAdoptedSession: WorkTurnServiceDependencies["recordAdoptedSession"];
+  readonly #readImportedSessionHistory: WorkTurnServiceDependencies["readImportedSessionHistory"];
   readonly #stopKeptSession: WorkTurnServiceDependencies["stopKeptSession"];
   /**
    * The access each running turn holds, by thread. The native harness checks
@@ -768,8 +816,10 @@ export class WorkTurnService {
 
   readonly #moveHold: ((threadId: string) => boolean) | undefined;
   readonly #wakeupsForThread: WorkTurnServiceDependencies["wakeupsForThread"];
+  readonly #platform: NodeJS.Platform | undefined;
 
   constructor(dependencies: WorkTurnServiceDependencies) {
+    this.#platform = dependencies.platform;
     this.#moveHold = dependencies.moveHold;
     this.#wakeupsForThread = dependencies.wakeupsForThread;
     this.#runningAccess = dependencies.runningAccess ?? new Map();
@@ -796,6 +846,7 @@ export class WorkTurnService {
     this.#resolveStrict = dependencies.resolveStrict;
     this.#forgeChanges = dependencies.forgeChanges;
     this.#recordAdoptedSession = dependencies.recordAdoptedSession;
+    this.#readImportedSessionHistory = dependencies.readImportedSessionHistory;
     this.#stopKeptSession = dependencies.stopKeptSession;
     this.#onRequestSettled = dependencies.onRequestSettled;
     this.#resolveAppManagedTools = dependencies.resolveAppManagedTools;
@@ -1046,6 +1097,20 @@ export class WorkTurnService {
     input: unknown,
     options?: WorkTurnStartOptions,
   ): Promise<WorkTurnLookupResult> {
+    const admission = await this.startHostTurn(authenticatedWindowId, input, options);
+    if (admission.kind === "draining") throw new WorkTurnServiceError(admission.failure);
+    return admission;
+  }
+
+  /**
+   * Starts a turn as `startFirstTurn` does, but returns a drain refusal as a
+   * value, so a host caller that retries (a due wake-up) keeps its schedule.
+   */
+  async startHostTurn(
+    authenticatedWindowId: WindowId,
+    input: unknown,
+    options?: WorkTurnStartOptions,
+  ): Promise<WorkTurnAdmission> {
     this.#assertReady();
     const command = decodeStartWorkThreadTurnCommand(input);
     const existing = this.#projection.lookup(command.requestId);
@@ -1204,7 +1269,9 @@ export class WorkTurnService {
         threadId,
         sessions: [],
         unavailable: target.message,
-        ...(target.adopted === undefined ? {} : { adopted: { nativeSessionId: target.adopted } }),
+        ...(target.adopted === undefined
+          ? {}
+          : { adopted: this.#adoptedWithHistory(threadId, target.adopted) }),
       };
     const listed = await Effect.runPromise(
       Effect.either(
@@ -1293,6 +1360,14 @@ export class WorkTurnService {
           ).pipe(Effect.catchAll(() => Effect.void)),
         );
       try {
+        // Read before the commit checks below, which must not yield. The read
+        // never fails the adoption: a runtime without readable history, or a
+        // read that fails, imports none and says why.
+        const history = await readImportedSessionHistory(target.nativeSessions, {
+          instanceId: target.thread.providerInstanceId,
+          projectRoot: target.projectRoot,
+          nativeSessionId,
+        });
         // The thread must still be empty when the adoption commits. Nothing
         // yields from here to the journal append, so no turn slips in.
         const occupied = this.#conversationRefusal(target.thread);
@@ -1313,18 +1388,22 @@ export class WorkTurnService {
             message:
               "This thread's Project folder changed while it took up the session. Try again.",
           };
-        const recorded = record(target.thread, {
-          nativeSessionId,
-          providerSessionId,
-          resumeCursor: adopted.right,
-          providerInstanceId: target.thread.providerInstanceId,
-          modelId: target.thread.modelId,
-          bindingRevisionId: target.thread.bindingRevisionId,
-          workingDirectory: target.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
-          ...(target.thread.workingFolderId === undefined
-            ? {}
-            : { workingFolderId: target.thread.workingFolderId }),
-        });
+        const recorded = record(
+          target.thread,
+          {
+            nativeSessionId,
+            providerSessionId,
+            resumeCursor: adopted.right,
+            providerInstanceId: target.thread.providerInstanceId,
+            modelId: target.thread.modelId,
+            bindingRevisionId: target.thread.bindingRevisionId,
+            workingDirectory: target.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+            ...(target.thread.workingFolderId === undefined
+              ? {}
+              : { workingFolderId: target.thread.workingFolderId }),
+          },
+          history,
+        );
         if (recorded.status === "refused")
           return { kind: "work-native-session-refused", message: recorded.message };
         committed = true;
@@ -1335,6 +1414,11 @@ export class WorkTurnService {
     } finally {
       this.#adoptingThreads.delete(key);
     }
+  }
+
+  #adoptedWithHistory(threadId: WorkThreadId, nativeSessionId: ProviderNativeSessionId) {
+    const history = this.#readImportedSessionHistory?.(threadId);
+    return { nativeSessionId, ...(history === undefined ? {} : { history }) };
   }
 
   /**
@@ -1451,7 +1535,7 @@ export class WorkTurnService {
     authenticatedWindowId: WindowId,
     command: StartWorkThreadTurnCommand,
     options: WorkTurnStartOptions | undefined,
-  ): Promise<WorkTurnLookupResult> {
+  ): Promise<WorkTurnAdmission> {
     const externalData =
       options?.externalData === undefined
         ? undefined
@@ -1479,14 +1563,20 @@ export class WorkTurnService {
     // is journaled or started: on a host without Octant's sandbox a turn below
     // Full access runs with the provider's own approvals, and only Strict and
     // a kept sandbox, which need Octant's sandbox, refuse.
+    const platform = this.#platform ?? process.platform;
+    const providerInstance =
+      thread === undefined
+        ? this.#persistence.readProviderInstance(command.authority.providerInstanceId)
+        : this.#persistence.readProviderInstance(thread.providerInstanceId);
     const sandboxRefusal = hostProviderTurnRefusal({
-      platform: process.platform,
+      platform,
       access: {
         ...workThreadAccessOf(turnAccess),
         ...(thread?.strict === undefined ? {} : { strict: thread.strict }),
         ...(thread?.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
       },
       strict: this.#resolveStrict?.(String(command.threadId)) ?? true,
+      driverKind: providerInstance?.driverKind,
     });
     if (sandboxRefusal !== undefined) throw this.#failure("unavailable", sandboxRefusal);
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
@@ -1558,6 +1648,12 @@ export class WorkTurnService {
             modelId: thread.modelId,
             projectId: thread.projectId,
           });
+    if (admission?.kind === "draining") {
+      return {
+        kind: "draining",
+        failure: decodeWorkTurnFailure({ category: "unavailable", message: admission.detail }),
+      };
+    }
     if (admission?.kind === "paused") {
       throw this.#failure(
         "unavailable",
@@ -1783,10 +1879,21 @@ export class WorkTurnService {
       skillContext = resolved.context;
       extensionTools = resolved.tools;
     }
+    // Windows Strict phase 1 withholds Octant-operated host tools before
+    // continuation checks so follow-up turns compare the actual admitted empty
+    // tool catalog against the saved session instead of demanding a handoff.
+    const windowsStrictLocal =
+      server === undefined &&
+      platform === "win32" &&
+      (this.#resolveStrict?.(String(command.threadId)) ?? true);
+    if (windowsStrictLocal && extensionTools !== undefined) {
+      await extensionTools.close?.().catch(() => undefined);
+      extensionTools = undefined;
+    }
     const hostTools =
       server !== undefined
         ? server.tools
-        : thread === undefined
+        : windowsStrictLocal || thread === undefined
           ? undefined
           : this.#resolveAppManagedTools?.({
               thread,
@@ -1796,11 +1903,13 @@ export class WorkTurnService {
               turnId: command.turnId,
               ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
             });
-    const preparedTools =
-      extensionTools === undefined
+    const preparedTools = windowsStrictLocal
+      ? undefined
+      : extensionTools === undefined
         ? hostTools
         : combineAppManagedToolSets(hostTools, extensionTools);
     let toolsLaunched = false;
+    let releaseDrain: (() => void) | undefined;
     try {
       const acceptedAt = decodeTimestamp(this.#clock());
       const nativeConversation = driver.conversationOwnership === "provider";
@@ -2304,6 +2413,28 @@ export class WorkTurnService {
         throw this.#failure("unauthorized", "Work turn admission is no longer current.");
       }
 
+      // A drain that began while the turn was prepared refuses it here; from
+      // here the drain counts it, before its provider reports a start.
+      const acceptance =
+        thread === undefined
+          ? undefined
+          : this.#nativeHarness?.acceptTurn?.({
+              threadId: String(thread.id),
+              mode: "work",
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+              projectId: thread.projectId,
+            });
+      if (acceptance?.status === "refused") {
+        return {
+          kind: "draining",
+          failure: decodeWorkTurnFailure({ category: "unavailable", message: acceptance.message }),
+        };
+      }
+      // A turn that ends before its launch (a spend refusal, a failed journal
+      // write) never reports an end, so it stops counting here.
+      if (acceptance?.status === "accepted") releaseDrain = acceptance.release;
+
       const spendReservationId = decodeSpendCeilingReservationId(this.#uuid());
       const spendAdmission = this.#spendCeiling?.admit({
         reservationId: spendReservationId,
@@ -2466,6 +2597,7 @@ export class WorkTurnService {
       toolsLaunched = true;
       return decodeWorkTurnLookupResult({ kind: "accepted", turn: this.#withLive(accepted) });
     } finally {
+      if (!toolsLaunched) releaseDrain?.();
       if (!toolsLaunched)
         await Effect.runPromise(
           Effect.promise(async () => {
@@ -2923,7 +3055,12 @@ export class WorkTurnService {
         ? this.#turnFileObserver?.observe(input.projectRoot, input.extraFolders)
         : undefined;
 
-    const appManagedTools = input.preparedTools;
+    const launchStrict = this.#resolveStrict?.(String(input.command.threadId)) ?? true;
+    const windowsStrict = (this.#platform ?? process.platform) === "win32" && launchStrict;
+    const appManagedTools = windowsStrict ? undefined : input.preparedTools;
+    if (windowsStrict && input.preparedTools !== undefined) {
+      await input.preparedTools.close?.().catch(() => undefined);
+    }
     const toolEffects = this.#nativeHarness?.toolEffects?.({
       threadId: String(input.command.threadId),
       turnId: String(input.command.requestId),
@@ -3052,12 +3189,12 @@ export class WorkTurnService {
     });
     // Read as the turn launches, never carried from an earlier one: the
     // session starts with it, and the turn records what it kept.
-    const launchStrict = this.#resolveStrict?.(String(input.command.threadId)) ?? true;
     const strictKept = strictKeptForLaunch({
       strict: launchStrict,
       driverKind: input.driver.kind,
       executionPolicy: input.access === "full-access" ? "full-access" : "approval-gated",
       fullAccessSandbox: input.fullAccessSandbox,
+      ...(this.#platform === undefined ? {} : { platform: this.#platform }),
     });
     if (strictKept !== undefined) {
       const launching = this.#projection.lookup(input.command.requestId);

@@ -94,6 +94,7 @@ import {
   type AgentRun,
   type Project,
   type WorkThreadAdoptedSession,
+  type ImportedSessionHistory,
   type WorkTurnStreamFrame,
 } from "@octant/contracts";
 import { Effect, Queue, Schema, Stream } from "effect";
@@ -116,6 +117,7 @@ import {
   WorkTurnService,
   WorkTurnServiceError,
   type WorkTurnServiceDependencies,
+  wakeupTurnOutcome,
 } from "./workTurnService";
 import { WorkProjectStatusFiles } from "./workProjectStatusFiles";
 import { WorkTurnRuntime, workSessionTerms, type WorkTurnRuntimePort } from "./workTurnRuntime";
@@ -128,6 +130,7 @@ import { liveWorkFilesystem } from "./workFilesystemPort";
 import type { TurnEndSummary } from "../metrics/turnEnd";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { HOST_DRAINING_REFUSAL, HostDrain } from "../hostDrain";
 import { frameExternalContentForModel } from "../context/externalContentFraming";
 import {
   WINDOWS_KEPT_SANDBOX_REFUSAL,
@@ -219,6 +222,80 @@ describe("WorkTurnService", () => {
         failure: { category: "unavailable", message: WINDOWS_STRICT_REFUSAL },
       });
       expect(fixture.acquireInputs).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("withholds Octant host tools before continuation checks so Windows Strict Work follow-up turns resume without tools-changed", async () => {
+    const resolveAppManagedTools = vi.fn(() => ({
+      definitions: [
+        {
+          name: "octant_host_tool",
+          description: "Host tool withheld under Windows Strict",
+          inputSchema: { type: "object", properties: {} },
+        },
+      ],
+      execute: async () => ({ result: "ok" }),
+    }));
+    const observedContinuationTools: Array<number> = [];
+    const fixture = serviceFixture({
+      threadAccess: "full-access",
+      resolveStrict: () => true,
+      resolveAppManagedTools,
+      turnRuntime: {
+        run: async (input) => {
+          input.onSessionReady?.({
+            sessionId: input.providerSessionId,
+            resumeCursor: { driverKind: "codex", value: "codex-session-1" },
+          });
+          return { kind: "completed" as const, response: "done" };
+        },
+      },
+      resolveDriver: (_id, fallback) => ({
+        ...fallback,
+        kind: "codex",
+        conversationOwnership: "provider",
+        toolCatalogContinuation: ({ tools }) => {
+          observedContinuationTools.push(tools.length);
+          return tools.length === 0 ? "unchanged" : "handoff-required";
+        },
+      }),
+    });
+    const providerRecord = fixture.persistence.readProviderInstance();
+    if (providerRecord !== undefined) {
+      fixture.persistence.readProviderInstance.mockReturnValue({
+        id: providerRecord.id,
+        displayName: providerRecord.displayName,
+        enabled: providerRecord.enabled,
+        environmentPolicy: providerRecord.environmentPolicy,
+        version: providerRecord.version,
+        createdAt: providerRecord.createdAt,
+        updatedAt: providerRecord.updatedAt,
+        driverKind: "codex",
+        configuration: { kind: "codex-cli", binaryPath: "C:\\Tools\\Codex\\codex.exe" },
+      });
+    }
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      const first = startCommand();
+      await expect(fixture.service.startFirstTurn(ids.window, first)).resolves.toMatchObject({
+        kind: "accepted",
+      });
+      await fixture.waitForIdle();
+
+      const second = {
+        ...first,
+        requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+        turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+        prompt: "Follow-up turn under Windows Strict",
+      };
+      await expect(fixture.service.startFirstTurn(ids.window, second)).resolves.toMatchObject({
+        kind: "accepted",
+      });
+      await fixture.waitForIdle(second.requestId);
+      expect(resolveAppManagedTools).not.toHaveBeenCalled();
+      expect(observedContinuationTools).toEqual([0]);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -2115,6 +2192,124 @@ describe("WorkTurnService", () => {
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("a draining host refuses a new turn and lets a running one finish", async () => {
+    // Composed as the harness wiring composes it: the drain answers admission
+    // first and counts the turns every mode reports starting and ending.
+    const drain = new HostDrain({ now: Date.now });
+    const started = deferred<void>();
+    const release = deferred<void>();
+    const run = vi.fn<WorkTurnRuntimePort["run"]>(async () => {
+      started.resolve();
+      await release.promise;
+      return { kind: "completed", response: "Provider reply" };
+    });
+    const fixture = serviceFixture({
+      turnRuntime: { run },
+      nativeHarness: {
+        contextFor: () => [],
+        admitTurn: () => {
+          const refusal = drain.refusal();
+          return refusal === undefined
+            ? { kind: "admitted" }
+            : { kind: "draining", detail: refusal };
+        },
+        turnStarted: (scope) => drain.turnStarted(scope),
+        turnCompleted: vi.fn(async () => undefined),
+        turnEnded: (scope) => drain.turnEnded(scope),
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await started.promise;
+
+    expect(drain.enter(10)).toEqual({ state: "draining", running: 1 });
+    const next = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    await expect(
+      fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        requestId: decodeWorkTurnRequestId(next),
+        turnId: decodeWorkTurnId(next),
+        prompt: "One more thing",
+      }),
+    ).rejects.toMatchObject({
+      failure: { category: "unavailable", message: HOST_DRAINING_REFUSAL },
+    });
+    expect(run).toHaveBeenCalledOnce();
+
+    release.resolve();
+    await fixture.waitForIdle();
+    expect(await fixture.service.lookupFirstTurn(ids.window, ids.request)).toMatchObject({
+      kind: "accepted",
+      turn: { status: "completed" },
+    });
+    expect(drain.status()).toEqual({ state: "drained" });
+  });
+
+  it("a drain that begins while a due wake-up's turn describes its image keeps the wake-up for later instead of reporting drained", async () => {
+    const drain = new HostDrain({ now: Date.now });
+    const describing = deferred<void>();
+    const describe = deferred<void>();
+    const store = await attachmentStore();
+    const attachmentId = decodeWorkAttachmentId("30000000-0000-4000-8000-000000000012");
+    const run = vi.fn<WorkTurnRuntimePort["run"]>(async () => ({
+      kind: "completed",
+      response: "Should not run",
+    }));
+    const fixture = serviceFixture({
+      attachments: store,
+      supportsAttachments: () => false,
+      describeImages: async (input) => {
+        describing.resolve();
+        await describe.promise;
+        return {
+          status: "described",
+          images: input.images.map((image) => ({
+            attachmentId: image.attachmentId,
+            name: image.name,
+            describedBy: { model: "Haiku 5.5", provider: "Anthropic" },
+            text: "A chart.",
+          })),
+        };
+      },
+      turnRuntime: { run },
+      nativeHarness: {
+        contextFor: () => [],
+        admitTurn: () => {
+          const refusal = drain.refusal();
+          return refusal === undefined
+            ? { kind: "admitted" }
+            : { kind: "draining", detail: refusal };
+        },
+        acceptTurn: (scope) => drain.accept(scope),
+        turnStarted: (scope) => drain.turnStarted(scope),
+        turnCompleted: vi.fn(async () => undefined),
+        turnEnded: (scope) => drain.turnEnded(scope),
+      },
+    });
+    await fixture.service.stageAttachment(ids.window, {
+      threadId: ids.thread,
+      attachmentId,
+      displayName: "chart.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([137, 80, 78]),
+    });
+    // The wake-up schedule's own path: admission returns the late drain as a
+    // value, which the schedule reads as busy and offers again later.
+    const sending = wakeupTurnOutcome(
+      fixture.service.startHostTurn(ids.window, {
+        ...startCommand(),
+        attachmentIds: [attachmentId],
+      }),
+      String(ids.turn),
+    );
+    await describing.promise;
+
+    expect(drain.enter(10)).toEqual({ state: "drained" });
+    describe.resolve();
+    await expect(sending).resolves.toEqual({ status: "busy" });
+    expect(run).not.toHaveBeenCalled();
+    expect(drain.status()).toEqual({ state: "drained" });
+  });
+
   it("hands what a Work turn cost and how it ran to the harness when it completes and when it ends", async () => {
     const summary: TurnEndSummary = {
       stopReason: "end-of-turn",
@@ -2422,6 +2617,54 @@ describe("WorkTurnService", () => {
       expect(seen).toEqual([
         { sessionId: String(adopted?.providerSessionId), cursor: "outside-cursor" },
       ]);
+    });
+
+    it("records the adopted session's earlier conversation with the adoption, shows it back, and never sends it to the provider", async () => {
+      let adopted: WorkThreadAdoptedSession | undefined;
+      let imported: ImportedSessionHistory | undefined;
+      const prompts: string[] = [];
+      const fixture = serviceFixture({
+        resolveDriver: (_id, fallback) => ({
+          ...fallback,
+          nativeSessions: {
+            list: () => Effect.succeed([]),
+            adopt: () => Effect.succeed(cursor),
+            history: () =>
+              Effect.succeed({
+                status: "read" as const,
+                messages: [{ role: "person" as const, text: "Collect the vendor quotes" }],
+              }),
+          },
+        }),
+        recordAdoptedSession: (_thread, record, history) => {
+          adopted = record;
+          imported = history;
+          return { status: "recorded" };
+        },
+        readImportedSessionHistory: () => imported,
+        adoptedSession: () => adopted,
+        turnRuntime: {
+          run: async (input) => {
+            prompts.push(JSON.stringify(input));
+            return { kind: "completed", response: "Done" };
+          },
+        },
+      });
+
+      await fixture.service.adoptNativeSession(ids.window, ids.thread, "outside-1");
+
+      expect(imported).toEqual({
+        status: "imported",
+        messages: [{ role: "person", text: "Collect the vendor quotes" }],
+      });
+      expect((await fixture.service.nativeSessions(ids.window, ids.thread)).adopted).toEqual({
+        nativeSessionId: "outside-1",
+        history: imported,
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0]).not.toContain("Collect the vendor quotes");
     });
 
     it("refuses a message sent while the thread takes up a session, and an adoption once it has a turn", async () => {
@@ -3537,6 +3780,33 @@ describe("WorkTurnService", () => {
       gate.resolve();
       await fixture.waitForIdle();
     }
+  });
+
+  it("a Work send the spend ceiling refuses does not hold a later drain open", async () => {
+    const drain = new HostDrain({ now: Date.now });
+    const run = vi.fn<WorkTurnRuntimePort["run"]>();
+    const fixture = serviceFixture({
+      spendCeiling: {
+        admit: vi.fn().mockReturnValue({
+          status: "refused",
+          refusal: { message: "This Project reached its spend ceiling." },
+        }),
+        settle: vi.fn(),
+      },
+      turnRuntime: { run },
+      nativeHarness: {
+        contextFor: () => [],
+        acceptTurn: (scope) => drain.accept(scope),
+        turnStarted: (scope) => drain.turnStarted(scope),
+        turnCompleted: vi.fn(async () => undefined),
+        turnEnded: (scope) => drain.turnEnded(scope),
+      },
+    });
+    await expect(fixture.service.startFirstTurn(ids.window, startCommand())).rejects.toMatchObject({
+      failure: { message: "This Project reached its spend ceiling." },
+    });
+    expect(run).not.toHaveBeenCalled();
+    expect(drain.enter(10)).toEqual({ state: "drained" });
   });
 
   it("releases the spend reservation when a Work turn is cancelled", async () => {
@@ -6643,6 +6913,7 @@ function serviceFixture(
     /** Read on every admission and rewind, so a test can freeze the thread for a move. */
     readonly moveHold?: (threadId: string) => boolean;
     readonly recordAdoptedSession?: WorkTurnServiceDependencies["recordAdoptedSession"];
+    readonly readImportedSessionHistory?: WorkTurnServiceDependencies["readImportedSessionHistory"];
     readonly stopKeptSession?: WorkTurnServiceDependencies["stopKeptSession"];
     /** Read on every thread read, so a test can adopt a session between reads. */
     readonly adoptedSession?: () => WorkThreadAdoptedSession | undefined;
@@ -6874,6 +7145,9 @@ function serviceFixture(
     ...(options.recordAdoptedSession === undefined
       ? {}
       : { recordAdoptedSession: options.recordAdoptedSession }),
+    ...(options.readImportedSessionHistory === undefined
+      ? {}
+      : { readImportedSessionHistory: options.readImportedSessionHistory }),
     ...(options.stopKeptSession === undefined ? {} : { stopKeptSession: options.stopKeptSession }),
     ...(options.onTurnCancelled === undefined ? {} : { onTurnCancelled: options.onTurnCancelled }),
     ...(options.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),

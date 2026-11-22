@@ -179,7 +179,7 @@ describe("Chat routes", () => {
     expect(response?.status).toBe(200);
     expect(execute).toHaveBeenCalledWith(
       { kind: "create-chat-thread", title: "Browser thread" },
-      { windowId, actor: expect.objectContaining({ kind: "local-user" }) },
+      { windowId, actor: expect.objectContaining({ kind: "local-user" }), initiator: "user" },
     );
   });
 
@@ -270,6 +270,56 @@ describe("Chat routes", () => {
       );
     }
     expect(execute).toHaveBeenCalledTimes(4);
+  });
+
+  it("speaks for the person only from a window or a device they paired, so no other device answers a secret question", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-updated", thread: threadFixture }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "73000000-0000-4000-8000-000000000060";
+    const command = {
+      kind: "answer-chat-turn-question",
+      threadId: threadFixture.id,
+      expectedVersion: 1,
+      turnId: "73000000-0000-4000-8000-000000000061",
+      attemptId: "73000000-0000-4000-8000-000000000062",
+      requestId: "q-secret",
+      secretAnswer: "hunter2",
+    };
+    const post = () =>
+      request("/api/chat/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      });
+    const from = (admittedBy?: "host-person" | "hub-roster") => {
+      const remote = post();
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "73000000-0000-4000-8000-000000000063" as never,
+          ...(admittedBy === undefined ? {} : { admittedBy }),
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    for (const [sent, initiator] of [
+      [post(), "user"],
+      [from("host-person"), "user"],
+      [from("hub-roster"), "agent"],
+      [from(), "agent"],
+    ] as const) {
+      expect((await route(sent))?.status).toBe(200);
+      expect(execute).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: "answer-chat-turn-question" }),
+        expect.objectContaining({ initiator }),
+      );
+    }
   });
 
   it("rejects an attachment whose media type is not a type/subtype", async () => {

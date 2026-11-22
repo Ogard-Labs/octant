@@ -28,6 +28,14 @@ import {
   CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_DAYS,
   CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES,
   DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS,
+  DEFAULT_FOLLOW_UP_LATENESS_LIMIT_HOURS,
+  DEFAULT_SHIELD_DENIALS_IN_A_ROW,
+  DEFAULT_SHIELD_DENIALS_PER_THREAD,
+  DEFAULT_TOOLING_COMMAND_CONFIRM_MINUTES,
+  MAX_FOLLOW_UP_LATENESS_LIMIT_HOURS_SETTING,
+  MAX_SHIELD_DENIALS_IN_A_ROW_SETTING,
+  MAX_SHIELD_DENIALS_PER_THREAD_SETTING,
+  MAX_TOOLING_COMMAND_CONFIRM_MINUTES_SETTING,
   DEFAULT_COORDINATOR_ROUNDS,
   DEFAULT_COORDINATOR_WAKES_PER_HOUR,
   DEFAULT_SIBLING_THREAD_READS_PER_TURN,
@@ -625,6 +633,14 @@ export const DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES: BackgroundSessionIdl
 export const DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT: AutoCompactWindowPercent = 85;
 export {
   DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS,
+  DEFAULT_FOLLOW_UP_LATENESS_LIMIT_HOURS,
+  DEFAULT_SHIELD_DENIALS_IN_A_ROW,
+  DEFAULT_SHIELD_DENIALS_PER_THREAD,
+  DEFAULT_TOOLING_COMMAND_CONFIRM_MINUTES,
+  MAX_FOLLOW_UP_LATENESS_LIMIT_HOURS_SETTING,
+  MAX_SHIELD_DENIALS_IN_A_ROW_SETTING,
+  MAX_SHIELD_DENIALS_PER_THREAD_SETTING,
+  MAX_TOOLING_COMMAND_CONFIRM_MINUTES_SETTING,
   DEFAULT_SIBLING_THREAD_READS_PER_TURN,
   DEFAULT_SIBLING_THREAD_WAITS_PER_TURN,
   DEFAULT_THREAD_MESSAGES_PER_TURN,
@@ -971,6 +987,23 @@ export const ShellSettings = Schema.Struct({
     { default: () => DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES },
   ),
   /**
+   * Whether a provider launch outside Strict leaves the provider's own
+   * telemetry (usage metrics, error reports, trace and feedback uploads) to
+   * the provider's own settings. Off, Octant sets the provider's telemetry
+   * guards as Strict does. Strict sets them whatever this says. Off by
+   * default, including for a store persisted before the setting existed:
+   * before it, every launch set the telemetry guards, and Octant sends
+   * nothing to a vendor the person did not turn on.
+   */
+  providerTelemetry: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * Whether a provider launch outside Strict lets the provider check for and
+   * install a newer version of itself. Off, the default, keeps every
+   * self-update guard set, since Octant installs and updates provider CLIs
+   * itself; Strict keeps them set whatever this says.
+   */
+  providerSelfUpdate: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
    * How many wake-ups one thread may have waiting, missed ones included. A
    * store persisted before the setting existed decodes to the former fixed 8.
    */
@@ -1042,6 +1075,26 @@ export const ShellSettings = Schema.Struct({
   childRunWaitLimitSeconds: Schema.optionalWith(
     Schema.Int.pipe(Schema.between(1, MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING)),
     { default: () => DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS },
+  ),
+  /** Shield denials in a row after which the next call goes to the person. */
+  shieldDenialsInARow: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_SHIELD_DENIALS_IN_A_ROW_SETTING)),
+    { default: () => DEFAULT_SHIELD_DENIALS_IN_A_ROW },
+  ),
+  /** Shield denials in one thread after which every call goes to the person. */
+  shieldDenialsPerThread: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_SHIELD_DENIALS_PER_THREAD_SETTING)),
+    { default: () => DEFAULT_SHIELD_DENIALS_PER_THREAD },
+  ),
+  /** How many hours late a follow-up may still run before it is recorded missed. */
+  followUpLatenessLimitHours: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_FOLLOW_UP_LATENESS_LIMIT_HOURS_SETTING)),
+    { default: () => DEFAULT_FOLLOW_UP_LATENESS_LIMIT_HOURS },
+  ),
+  /** Minutes a shown provider command may still be run with "Run this command once". */
+  toolingCommandConfirmMinutes: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_TOOLING_COMMAND_CONFIRM_MINUTES_SETTING)),
+    { default: () => DEFAULT_TOOLING_COMMAND_CONFIRM_MINUTES },
   ),
   /**
    * "Start agent-created routines active at Full access": a routine an agent
@@ -1375,6 +1428,8 @@ const CodeTerminalWorkspaceTab = Schema.Struct({
    * own, which stays bound to the thread's original terminal.
    */
   terminalId: Schema.optional(CodeTerminalId),
+  /** The tab runs the thread's provider's own command-line program rather than a shell. */
+  program: Schema.optional(Schema.Literal("provider")),
 }).annotations(strict);
 const CodeTestWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("code-test"),

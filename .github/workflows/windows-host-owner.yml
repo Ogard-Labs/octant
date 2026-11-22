@@ -2,6 +2,8 @@ name: Native Windows host ownership
 
 on:
   pull_request:
+    # A draft runs nothing; marking it ready for review starts the run.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - .github/workflows/windows-host-owner.yml
       - packages/host-runtime/native/windows-host-owner/**
@@ -32,6 +34,7 @@ concurrency:
 
 jobs:
   native:
+    if: github.event.pull_request.draft != true
     name: Own Windows control endpoints in Bun, Node and Electron
     runs-on: windows-2025
     timeout-minutes: 12

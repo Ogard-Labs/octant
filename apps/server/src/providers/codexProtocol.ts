@@ -212,6 +212,24 @@ export type CodexThreadListResult = typeof ThreadListResult.Type;
 export const decodeThreadListResult = decode(ThreadListResult);
 
 const ThreadReadResult = Schema.Struct({ thread: StoredThread });
+
+/**
+ * `thread/read` with `includeTurns`: the stored thread's turns, each with its
+ * items as Codex keeps them. Items stay unknown here; only the imported
+ * history reads them, by their `type`. `turns` is absent from a server that
+ * ignores the flag.
+ */
+const ThreadTurnsReadResult = Schema.Struct({
+  thread: Schema.Struct({
+    id: Schema.NonEmptyString,
+    turns: Schema.optionalWith(
+      Schema.Array(Schema.Struct({ items: Schema.Array(Schema.Unknown) })),
+      { nullable: true },
+    ),
+  }),
+});
+export type CodexThreadTurnsReadResult = typeof ThreadTurnsReadResult.Type;
+export const decodeThreadTurnsReadResult = decode(ThreadTurnsReadResult);
 export type CodexThreadReadResult = typeof ThreadReadResult.Type;
 export const decodeThreadReadResult = decode(ThreadReadResult);
 

@@ -41,7 +41,7 @@ import {
   type OpenCodeProcessPort,
   type OpenCodeProcessStartInput,
 } from "./openCodeProcess";
-import { WINDOWS_STRICT_REFUSAL } from "@octant/domain/guardrail-policy";
+import { WINDOWS_STRICT_CHAT_REFUSAL } from "@octant/domain/guardrail-policy";
 import { SECRET_QUESTION_REFUSAL } from "./secretQuestion";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeOpenCodeCli.ts", import.meta.url));
@@ -332,6 +332,35 @@ describe("OpenCode driver", () => {
     expect(fixture.calls.slice(probeCallCount).some((call) => call.startsWith("mcp.add:"))).toBe(
       false,
     );
+  });
+
+  it("offers app tools below Full access outside Strict to a runtime with no Octant sandbox on Octant's private configuration", async () => {
+    for (const strict of [false, true]) {
+      const fixture = driverFixture({
+        platform: "darwin",
+        isolatedConfiguration: false,
+        privateConfiguration: true,
+      });
+      const result = await Effect.runPromise(
+        Effect.scoped(
+          fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+            Effect.flatMap((connection) =>
+              Effect.exit(
+                connection.start({
+                  sessionId,
+                  modelId,
+                  executionPolicy: "approval-gated",
+                  strict,
+                  tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+                }),
+              ),
+            ),
+          ),
+        ),
+      );
+      // Under Strict the launch is confined, so only an OS receipt admits them.
+      expect(Exit.isSuccess(result)).toBe(!strict);
+    }
   });
 
   it("offers a Full access thread app tools on a runtime that can inherit external configuration", async () => {
@@ -665,7 +694,7 @@ describe("OpenCode driver", () => {
     ).toMatchObject([
       {
         inputTokens: 15,
-        outputTokens: 7,
+        outputTokens: 10,
         reasoningTokens: 3,
         cacheReadInputTokens: 2,
         cacheWriteInputTokens: 1,
@@ -673,7 +702,7 @@ describe("OpenCode driver", () => {
       },
       {
         inputTokens: 51,
-        outputTokens: 18,
+        outputTokens: 26,
         reasoningTokens: 8,
         cacheReadInputTokens: 6,
         cacheWriteInputTokens: 3,
@@ -1938,7 +1967,10 @@ describe("OpenCode driver", () => {
         ),
       ),
     );
-    expect(refused).toMatchObject({ category: "incompatible", message: WINDOWS_STRICT_REFUSAL });
+    expect(refused).toMatchObject({
+      category: "incompatible",
+      message: WINDOWS_STRICT_CHAT_REFUSAL,
+    });
   });
 
   it("offers app-managed tools in native Windows Chat outside Strict for a verified release with private config, and keeps unverified releases refused", async () => {
@@ -4449,6 +4481,8 @@ function launchScratchDirectory(): string {
 function driverFixture(
   options: {
     readonly isolatedConfiguration?: boolean;
+    /** The launch ran with no Octant sandbox on Octant's private configuration. */
+    readonly privateConfiguration?: true;
     readonly process?: OpenCodeProcessPort;
     readonly events?: ReadonlyArray<OpenCodeEvent>;
     readonly permissionPersistence?:
@@ -4502,6 +4536,9 @@ function driverFixture(
                 ...(options.isolatedConfiguration === false
                   ? {}
                   : { isolatedConfiguration: true as const }),
+                ...(options.privateConfiguration === true
+                  ? { privateConfiguration: true as const }
+                  : {}),
                 authorization: "Basic redacted",
                 pid: process.pid,
                 url: new URL("http://127.0.0.1:1/"),

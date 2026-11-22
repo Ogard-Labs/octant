@@ -132,7 +132,10 @@ export function RoutineProposalPrompt(props: {
         <p className="follow-up-card__title">{pending.displayName}</p>
         <p className="follow-up-card__summary">
           {followUp
-            ? `Once, ${formatAutomationInstant(pending.firstRunAt)}. It sends this prompt as a new turn in this thread, asks before it changes anything, and is skipped if the thread is busy, done, or archived by then.`
+            ? pending.mode === "chat"
+              ? // A Chat thread has nothing to change, so there is nothing to ask before.
+                `Once, ${formatAutomationInstant(pending.firstRunAt)}. It sends this prompt as a new turn in this thread, and is skipped if the thread is busy or archived by then.`
+              : `Once, ${formatAutomationInstant(pending.firstRunAt)}. It sends this prompt as a new turn in this thread, asks before it changes anything, and is skipped if the thread is busy, done, or archived by then.`
             : `${schedule} · First run ${formatAutomationInstant(pending.firstRunAt)} · ${automationMissedRunPolicyLabel(pending.missedRunPolicy)}. Each run starts a new ${automationModeLabel(pending.mode)} thread in this Project with this prompt, and asks before it changes anything.`}
         </p>
         <p className="follow-up-card__prompt">{pending.taskPrompt}</p>

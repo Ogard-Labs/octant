@@ -106,7 +106,9 @@ Project. A finished run keeps its original cases and check results.
 
 The host uses the newest finished run for each provider/model pair in a suite.
 When that run tested several effort settings, the highest-ranked passing setting
-represents the model. Accepting the suggestion uses that measured effort.
+represents the model. Accepting the suggestion applies that measured effort when
+the model still offers it, and otherwise uses the model's default effort while
+keeping compatible non-reasoning options (such as Fast).
 It considers only models tested on at least five distinct cases. A trial
 passes when the cell answered and all its recorded checks passed; a trial with
 no checks or no answer does not pass. Repetitions count as separate trials in

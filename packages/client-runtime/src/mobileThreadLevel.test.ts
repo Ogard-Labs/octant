@@ -46,7 +46,7 @@ describe("a thread's level on the phone", () => {
     ).toBe("plan");
   });
 
-  it("offers Plan for a Work thread as for a Code thread, but never as a Work default", () => {
+  it("offers Plan for a Work thread and as a Work default, as for Code", () => {
     expect(mobileThreadLevelChoices()).toEqual([
       "auto",
       "ask-first",
@@ -54,9 +54,7 @@ describe("a thread's level on the phone", () => {
       "plan",
       "full-access",
     ]);
-    expect(mobileDefaultLevelChoices("code")).toContain("plan");
-    expect(mobileDefaultLevelChoices("work")).not.toContain("plan");
-    expect(mobileDefaultLevelChoices("work")).toContain("full-access");
+    expect(mobileDefaultLevelChoices()).toEqual(mobileThreadLevelChoices());
   });
 
   it("sends a Code thread's Full access as the command a window sends, with nothing unlocked first", async () => {
@@ -196,12 +194,12 @@ describe("the Project and default levels on the phone", () => {
     ]);
   });
 
-  it("returns a Work Project to the default by naming no level, and never sends Work a Plan", async () => {
+  it("returns a Work Project to the default by naming no level, and sends a Plan start mode as a window does", async () => {
     const { transport, sent } = host(200, { kind: "work-project-permission-mode-changed" });
     await changeMobileProjectLevel({ transport, project: workProject as never, level: undefined });
     expect(
       await changeMobileProjectLevel({ transport, project: workProject as never, level: "plan" }),
-    ).toMatchObject({ status: "refused" });
+    ).toEqual({ status: "changed" });
 
     expect(sent).toEqual([
       {
@@ -210,6 +208,15 @@ describe("the Project and default levels on the phone", () => {
           kind: "change-work-project-permission-mode",
           projectId: workProject.id,
           expectedVersion: 2,
+        },
+      },
+      {
+        path: "/api/projects/commands",
+        body: {
+          kind: "change-work-project-permission-mode",
+          projectId: workProject.id,
+          expectedVersion: 2,
+          permissionMode: "plan",
         },
       },
     ]);
@@ -258,6 +265,18 @@ describe("the Project and default levels on the phone", () => {
         },
       },
     ]);
+  });
+
+  it("sets Work's default to Plan, so new Work threads start read-only", async () => {
+    const { transport, sent } = host(200, { kind: "settings-updated" });
+    expect(
+      await changeMobileDefaultLevel({
+        transport,
+        subject: { mode: "work", settings: workSettings as never },
+        level: "plan",
+      }),
+    ).toEqual({ status: "changed" });
+    expect(sent[0]?.body).toMatchObject({ kind: "update-work-settings", defaultAccess: "plan" });
   });
 
   it("reports the host's refusal of a Project or default level from a restricted session", async () => {

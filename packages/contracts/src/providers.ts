@@ -1740,21 +1740,6 @@ export const ProviderCapabilities = Schema.Struct({
    */
   appManagedToolsAtFullAccess: Schema.optional(Schema.Literal("mixed")),
   /**
-   * What a Full access thread is offered on an install whose release is newer
-   * than the one Octant reviewed a version-pinned feature against: the
-   * features that pin gates, offered as unverified instead of lost. Every
-   * other level keeps the values above, since below Full access the pin
-   * holds. Absent means Full access reads the values above.
-   */
-  atFullAccess: Schema.optional(
-    Schema.Struct({
-      release: Schema.Literal("unverified"),
-      usage: ProviderCapabilitySupport,
-      userQuestions: ProviderCapabilitySupport,
-      appManagedTools: ProviderCapabilitySupport,
-    }).annotations(strict),
-  ),
-  /**
    * The driver natively serves ACP client filesystem and terminal methods
    * (`fs/read_text_file`, `fs/write_text_file`, `terminal/*`) over its own
    * connection, independently of the app-managed tool bridge.
@@ -3540,6 +3525,13 @@ export const ProviderRuntimeEvent = Schema.Union(
      */
     questionIndex: Schema.optional(PositiveInt),
     questionCount: Schema.optional(PositiveInt),
+    /**
+     * The answer is a secret (a password or key): it is typed into a masked
+     * field and goes to the provider in memory only, never into a journal,
+     * evidence, log or transcript. A surface that cannot keep it out of its
+     * record never receives such a question; the driver refuses it instead.
+     */
+    secret: Schema.optional(Schema.Literal(true)),
   })
     .annotations(strict)
     .pipe(

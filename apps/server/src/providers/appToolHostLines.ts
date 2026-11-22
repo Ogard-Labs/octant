@@ -38,7 +38,7 @@ const GUIDE_LINES: Readonly<Record<string, string>> = {
     "Ask the language server about a saved file with octant_code: its errors, where a name is defined, and where it is used.",
   octant_computer: COMPUTER_TOOL_HOST_LINE,
   octant_create_image:
-    "Call octant_create_image when the person asks for a picture (photo, illustration, rendered scene) instead of drawing it as SVG or HTML. Keep SVG for logos, icons, and diagrams.",
+    "Call octant_create_image when the person asks for a picture instead of drawing it as SVG or HTML. To restyle photos or screenshots, use references, which always need confirmation. Keep SVG for logos, icons, and diagrams.",
   octant_credential:
     "When a registered operation or a saved command needs a credential the person holds, use octant_credential; you never see the value, and it is not a command runner.",
   octant_debug:
@@ -71,6 +71,8 @@ const GUIDE_LINES: Readonly<Record<string, string>> = {
     "Start long-running processes such as dev servers and watchers with octant_terminal rather than a backgrounded shell command, so their output stays readable and the person can see them.",
   octant_threads:
     "See this Project's other threads, and message them where its operations allow, with octant_threads.",
+  octant_transcribe:
+    "Transcribe a recording from this thread's folder with octant_transcribe instead of installing speech models; page long transcripts with nextOffset.",
   octant_zen:
     "Read and arrange this Zen space with octant_zen: pin threads, add widgets, move elements.",
 };

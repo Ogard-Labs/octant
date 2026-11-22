@@ -99,7 +99,18 @@ export function createServiceOfferRouteHandler<Outcome>(input: {
         ) {
           return fail("Offers are unavailable.", 404);
         }
-        const waiting = offers.list(windowId, { threadKind: kind, scopeId });
+        const supportsReferences = !legacy && url.searchParams.get("referenceImages") === "1";
+        const waiting = offers
+          .list(windowId, { threadKind: kind, scopeId })
+          .filter(
+            (offer) =>
+              offer.kind !== "transcribe" ||
+              (!legacy && url.searchParams.get("transcription") === "1"),
+          )
+          .filter(
+            (offer) =>
+              supportsReferences || offer.kind !== "generate" || offer.references === undefined,
+          );
         const response = { offers: legacy ? waiting.filter(isImageOffer) : waiting };
         return reply(
           legacy

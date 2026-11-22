@@ -22,8 +22,10 @@ import { decidesCodeEffectsByApproval } from "@octant/domain";
 import type {
   ProviderConnection,
   ProviderDriver,
+  ProviderOwnChannels,
   ProviderSessionForkRequest,
 } from "@octant/provider-sdk/driver";
+import { launchOwnChannels } from "./providerOwnChannels";
 import {
   rejectUnsupportedChatTurn,
   renderProviderTurnPrompt,
@@ -42,7 +44,7 @@ import { forkPiSession, makePiNativeSessions, piSessionLastEntryId } from "./piN
 import { PiRpcFailure, type PiRpcEvent, type PiRpcResponse } from "./piRpcClient";
 import { outputStopReason } from "./outputStopReason";
 import { providerApprovalCall } from "./providerApprovalCall";
-import { versionAtLeast } from "./acpProcess";
+import { releaseAtLeast } from "./acpProfiles";
 import {
   createPiManagedToolsBridge,
   type PiManagedToolCall,
@@ -199,26 +201,34 @@ const PROBE_TOOL_BRIDGE = {
   token: "octant-probe",
 } as const;
 /**
- * Octant verified Pi's tool attestation, approval bridge and confinement on 0.85.1 and from
- * 1.1.0. A later release is accepted when its probe attests the tools too, so a Pi update does
- * not need an Octant release; a release below the floor, or one that does not attest, refuses.
+ * Octant reviewed Pi's tool attestation, approval bridge and confinement on 0.85.1 and from
+ * 1.1.0. Every release from 0.85.1 on offers the tools when its probe attests them, so a Pi
+ * update does not need an Octant release; one between 0.85.1 and 1.1.0 offers them unverified
+ * (maintainer decision, 2026-11-21). An older release, or one that does not attest, refuses.
  */
-const PI_APP_MANAGED_TOOLS_FLOOR = [1, 1, 0] as const;
-const PI_APP_MANAGED_TOOLS_LEGACY = "0.85.1";
+const PI_APP_MANAGED_TOOLS_EARLIEST = "0.85.1";
+const PI_APP_MANAGED_TOOLS_REVIEWED_FROM = "1.1.0";
 
+/** Whether this Pi release reads as one Octant's tools may run on, reviewed or unverified. */
 export function piVerifiesManagedTools(version: string): boolean {
-  if (version === PI_APP_MANAGED_TOOLS_LEGACY) return true;
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
-  if (match === null) return false;
-  return versionAtLeast(
-    [Number(match[1]), Number(match[2]), Number(match[3])],
-    PI_APP_MANAGED_TOOLS_FLOOR,
+  return releaseAtLeast(version, PI_APP_MANAGED_TOOLS_EARLIEST);
+}
+
+/** A release that keeps Octant's tools without being one they were reviewed on. */
+function piManagedToolsUnverified(version: string): boolean {
+  return (
+    version !== PI_APP_MANAGED_TOOLS_EARLIEST &&
+    piVerifiesManagedTools(version) &&
+    !releaseAtLeast(version, PI_APP_MANAGED_TOOLS_REVIEWED_FROM)
   );
 }
 /** How long a requested compaction may run before Octant stops waiting for it. */
 const PI_COMPACTION_TIMEOUT_MS = 10 * 60_000;
-/** The one release whose settled process Octant verified for warm reuse; others cold-resume. */
-const PI_WARM_REUSE_VERSION = "0.85.1";
+/**
+ * The release whose settled process Octant reviewed for warm reuse. It and every later
+ * release keep the process between turns; an older one cold-resumes.
+ */
+const PI_WARM_REUSE_EARLIEST = "0.85.1";
 
 function capabilitiesFor(
   appManagedTools: "supported" | "unsupported",
@@ -407,7 +417,11 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
           ),
           ...(models.length === 0
             ? { message: "Pi did not report an authenticated selectable model." }
-            : {}),
+            : appManagedToolsVerified && piManagedToolsUnverified(connection.version)
+              ? {
+                  message: `Pi ${connection.version} keeps Octant's tools, unverified: Octant reviewed them on another release.`,
+                }
+              : {}),
           lastSuccessfulProbeAt: observedAt,
           observedAt,
         });
@@ -622,9 +636,21 @@ function makeConnection(
         : Effect.succeed(state);
     };
 
+    /**
+     * What a turn that ends without settling already spent: the requests Pi
+     * finished before the process went away or broke its protocol were billed
+     * all the same. Only whole counts are reported; one request that reported
+     * none would make the sum understate the turn, so it stays unreported.
+     */
+    const reportSpentUsage = (state: SessionState) => {
+      if (state.promptActive && state.usage !== undefined && !state.usageIncomplete)
+        emit(state, state.usage);
+    };
+
     const protocolFailure = (state: SessionState, message: string) => {
       if (state.terminal) return;
       state.terminal = true;
+      reportSpentUsage(state);
       emit(state, { kind: "failed", failure: failure("protocol", message) });
     };
 
@@ -947,6 +973,7 @@ function makeConnection(
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly fullAccessSandbox?: boolean;
       readonly strict?: boolean;
+      readonly ownChannels?: ProviderOwnChannels;
       readonly tools: ReadonlyArray<ProviderToolDefinition>;
       readonly blockedTools?: ReadonlyArray<string>;
     }) =>
@@ -986,6 +1013,8 @@ function makeConnection(
             // Strict changes the launch's environment, channels and protected
             // files, so a warm runtime never crosses a change of it.
             input.strict,
+            // Its telemetry and release-check guards are fixed at start too.
+            launchOwnChannels(input.strict !== false, input.ownChannels),
             tools,
             // The blocked tools are written into the bridge and the tool list
             // when the process starts, so a warm runtime never crosses a change.
@@ -1067,6 +1096,9 @@ function makeConnection(
                     executionPolicy: input.executionPolicy,
                     ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
                     ...(input.strict === false ? { strict: false } : {}),
+                    ...(input.strict === false && input.ownChannels !== undefined
+                      ? { ownChannels: input.ownChannels }
+                      : {}),
                     modelProvider: selection.provider,
                     ...(tools.length === 0 ? {} : { tools }),
                     ...(managedTools === undefined ? {} : { toolBridge: managedTools.config }),
@@ -1086,7 +1118,7 @@ function makeConnection(
               if (tools.length > 0 && !piVerifiesManagedTools(processConnection.version))
                 throw failure(
                   "unsupported",
-                  `Pi ${processConnection.version} is not verified for app-managed tools. Update Pi to 1.1.0 or later.`,
+                  `Pi ${processConnection.version} is older than ${PI_APP_MANAGED_TOOLS_EARLIEST}, the earliest release Octant reviewed for app-managed tools. Update Pi.`,
                 );
               if (receipt === undefined)
                 await options.runtimeRegistry.trackProcess(options.instanceId, processConnection);
@@ -1187,6 +1219,7 @@ function makeConnection(
                 if (state.closed) return;
                 if (!state.terminal) {
                   state.terminal = true;
+                  reportSpentUsage(state);
                   emit(state, {
                     kind: "failed",
                     failure: failure("interrupted", "Pi process disconnected."),
@@ -1289,6 +1322,7 @@ function makeConnection(
           executionPolicy: input.executionPolicy,
           ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
           ...(input.strict === false ? { strict: false } : {}),
+          ...(input.ownChannels === undefined ? {} : { ownChannels: input.ownChannels }),
           ...(input.blockedTools === undefined ? {} : { blockedTools: input.blockedTools }),
           // A Plan resume with no caller-supplied set fails closed to no tools,
           // not the full catalogue the session was first opened with.
@@ -1452,7 +1486,7 @@ function makeConnection(
               if (
                 options.sandboxPolicy === undefined &&
                 state.completed &&
-                state.runtime.version === PI_WARM_REUSE_VERSION &&
+                releaseAtLeast(state.runtime.version, PI_WARM_REUSE_EARLIEST) &&
                 state.approvals.size === 0 &&
                 state.pendingTools.size === 0 &&
                 [...state.tools.values()].every((tool) => tool.terminal) &&

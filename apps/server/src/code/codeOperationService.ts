@@ -1,4 +1,4 @@
-import type { EventActor } from "@octant/contracts";
+import type { EventActor, ProviderDriverKind } from "@octant/contracts";
 import {
   attachedFilesMessage,
   partitionAttachedFiles,
@@ -25,6 +25,7 @@ import type {
 import { frameExternalContentForModel } from "../context/externalContentFraming";
 import {
   MAX_CODE_OPERATION_PATHS,
+  MAX_CODE_SECRET_ANSWER_LENGTH,
   type AutomationRunReference,
   type CodeGitOperationId,
   type CodeRelativePath,
@@ -115,7 +116,10 @@ import {
   turnBlocksInPlaceRestore,
   type CodeOperation,
 } from "@octant/domain/code-policy";
-import { hostProviderTurnRefusal } from "@octant/domain/guardrail-policy";
+import {
+  hostProviderTurnRefusal,
+  providerHoldsLevelWithoutSandbox,
+} from "@octant/domain/guardrail-policy";
 import {
   coordinatorTurnPosture,
   decideRunMerge,
@@ -157,6 +161,8 @@ import { ReviewFindingServiceError } from "./reviewFindingService";
 import type { ProjectForgeChoices } from "./standingMergeAllowance";
 
 import type { ServerTerminalLogin, ServerTerminalRefusal } from "../serverProjects/serverTerminal";
+import type { ProviderTerminalLaunch } from "../providers/providerTerminal";
+import { turnHoldsSandboxPolicy } from "../process/sandboxRuntimePolicy";
 
 type Awaitable<T> = T | Promise<T>;
 
@@ -270,6 +276,8 @@ function pullRequestTargetOf(
 }
 const SERVER_OPERATION_UNAVAILABLE =
   "This is not available for a Project on a server yet. Ask the thread to do it there, or use a terminal on the server.";
+const PROVIDER_TERMINAL_PERSON_ONLY =
+  "Only the person can open or type into a provider terminal, from their own window or a device they paired.";
 const SERVER_CONNECTORS_UNAVAILABLE =
   "Connectors and plugins run on this computer, so a thread in a Project on a server does not offer them. Send the message without them.";
 
@@ -443,6 +451,10 @@ export interface CodeOperationTerminalPort {
     readonly executionPolicy?: CodeThread["executionPolicy"];
     /** The thread's resolved Strict value, passed on a host without Octant's sandbox. */
     readonly strict?: boolean;
+    /** What the shell runs instead of opening interactively: a provider terminal's program. */
+    readonly command?: string;
+    /** Variables beyond the terminal's own: a provider terminal's account environment. */
+    readonly environment?: Readonly<Record<string, string>>;
   }) => Promise<CodeOperationTerminalSnapshot>;
   readonly attach: (terminalId: string) => CodeOperationTerminalSnapshot;
   readonly observe?: (
@@ -571,6 +583,8 @@ interface TerminalOwner {
    * launch it would journal everything printed since a second time.
    */
   journaledCharacters?: number;
+  /** The shell runs the thread's provider's own program; only the person types into it. */
+  readonly providerProgram?: true;
 }
 
 export type CodeOperationServerTestPort = CodeOperationRepositoryTestPort & {
@@ -1152,6 +1166,12 @@ export interface CodeOperationTurnPort {
     readonly checkoutRoot: string;
     readonly requestId: string;
     readonly response: string;
+    /**
+     * The response answers a secret question and exists only in memory. The
+     * port refuses it for any other question, and refuses a non-secret
+     * response to a secret one, so neither path can stand in for the other.
+     */
+    readonly secret?: true;
   }) => Promise<CodeOperationTurnResult>;
   readonly answerApproval: (input: {
     readonly thread: CodeThread;
@@ -1221,6 +1241,8 @@ export type CodeTurnPendingRequest = {
       readonly requestId: string;
       readonly prompt: string;
       readonly options: ReadonlyArray<string>;
+      /** Answered only in its thread, masked; see `input-requested`'s `secret`. */
+      readonly secret?: true;
     }
 );
 
@@ -1295,6 +1317,12 @@ export interface CodeOperationServiceOptions {
    * Absent reads as Strict.
    */
   readonly threadStrict?: (thread: CodeThread) => boolean;
+  /** The driver kind for a thread's provider instance, used for host admission. */
+  readonly providerDriverKind?: (
+    thread: CodeThread,
+  ) => ProviderDriverKind | undefined | Promise<ProviderDriverKind | undefined>;
+  /** Host platform override for tests; defaults to `process.platform`. */
+  readonly platform?: NodeJS.Platform;
   /**
    * Journal the head an operation established on the checkout it scoped: a
    * branch switch changes it without an observation event, and thread reads
@@ -1375,6 +1403,16 @@ export interface CodeOperationServiceOptions {
     TerminalBrowserGrantService,
     "open" | "abandon" | "switchOff" | "terminalClosed" | "liveGrant"
   >;
+  /**
+   * The program a thread's provider terminal opens, resolved from the thread's
+   * provider as its own launch would be. Absent on a host that opens none: a
+   * start that asks for one is then refused and starts no terminal.
+   */
+  readonly providerTerminal?: (input: {
+    readonly thread: CodeThread;
+    readonly shell: string;
+    readonly strict: boolean;
+  }) => ProviderTerminalLaunch;
   readonly repositoryTests: CodeOperationRepositoryTestPort;
   readonly scaffolds?: CodeOperationScaffoldPort;
   readonly git: CodeOperationGitPort;
@@ -1782,6 +1820,16 @@ export class CodeOperationService {
         ),
       );
     const initiator = options.initiator ?? "agent";
+    // A provider terminal hands its keystrokes straight to the provider's own
+    // program, past Octant's approvals, so no approval can stand in for the
+    // person: only their own window, or a device they paired, opens one.
+    if (
+      initiator !== "user" &&
+      ((command.kind === "start-terminal" && command.program === "provider") ||
+        (command.kind === "write-terminal" &&
+          this.#terminalOwners.get(command.terminalId)?.providerProgram === true))
+    )
+      return this.#failed(command.operationId, "unauthorized", PROVIDER_TERMINAL_PERSON_ONLY);
     // Switching a grant off only narrows authority, so losing the checkout
     // cannot stand in its way: it needs the thread and a window that can open
     // it, and nothing about the folder.
@@ -2926,6 +2974,7 @@ export class CodeOperationService {
               kind: "question",
               text: request.prompt,
               options: request.options.map((label) => ({ label })),
+              ...(request.secret === true ? { secret: true } : {}),
               answer: {
                 threadId: scope.thread.id,
                 checkoutId: scope.checkout.id,
@@ -4053,10 +4102,51 @@ export class CodeOperationService {
             command.browserGrant === "on" ||
             command.credentialRefs.length > 0 ||
             command.folder !== undefined ||
+            command.program !== undefined ||
             thread.executionPolicy === "plan"
           ) {
             return this.#failed(command.operationId, "unavailable", SERVER_OPERATION_UNAVAILABLE);
           }
+        }
+        // A provider terminal runs the thread's provider's own program in the
+        // thread's folder. The host names the program and its account
+        // environment; the command cannot. It lends no Browser: the program is
+        // the provider's, not a CLI the person pointed at `octant mcp`.
+        let providerProgram: Extract<ProviderTerminalLaunch, { status: "resolved" }> | undefined;
+        // The program runs the way the thread's turns do (maintainer decision,
+        // 2026-11-21): where a turn runs without Octant's sandbox and the
+        // provider's own approvals hold the level, so does its terminal, with
+        // no confinement wall and no egress proxy. Under Strict, or where the
+        // thread kept its sandbox or a turn holds a chosen sandbox policy, it
+        // stays confined as an ordinary Code terminal is.
+        let providerProgramUnconfined = false;
+        if (command.program === "provider") {
+          if (command.browserGrant === "on")
+            return this.#failed(
+              command.operationId,
+              "invalid",
+              "A provider terminal does not use the Browser.",
+            );
+          const strict = this.#options.threadStrict?.(thread) ?? true;
+          const launch = this.#options.providerTerminal?.({
+            thread,
+            shell: root.shell,
+            strict,
+          }) ?? {
+            status: "refused",
+            message: "This host does not open provider terminals.",
+          };
+          if (launch.status === "refused")
+            return this.#failed(command.operationId, "unavailable", launch.message);
+          providerProgram = launch;
+          providerProgramUnconfined = providerHoldsLevelWithoutSandbox({
+            mode: "code",
+            executionPolicy: thread.executionPolicy,
+            strict,
+            fullAccessSandbox: thread.fullAccessSandbox,
+            sandboxPolicySelected: turnHoldsSandboxPolicy(String(thread.id)),
+            purpose: "session",
+          });
         }
         const allowed = new Set(command.credentialRefs);
         const credentialReferences = root.credentialReferences.filter((credential) =>
@@ -4135,10 +4225,14 @@ export class CodeOperationService {
           threadId: thread.id,
           checkoutId: checkout.id,
           readers: new Map(),
+          ...(providerProgram === undefined ? {} : { providerProgram: true }),
         };
         const starting = this.#options.terminals.launch({
           terminalId: command.terminalId,
           shell: root.shell,
+          ...(providerProgram === undefined
+            ? {}
+            : { command: providerProgram.command, environment: providerProgram.environment }),
           cwd: folder.cwd,
           ...(folder.extraFolders.length === 0 ? {} : { extraFolders: folder.extraFolders }),
           // The repository this checkout belongs to, not the path it sits at.
@@ -4154,7 +4248,16 @@ export class CodeOperationService {
             : {}),
           ...(serverLogin === undefined ? {} : { server: serverLogin }),
           executionPolicy: thread.executionPolicy,
-          ...this.#windowsStrict(thread),
+          // A provider terminal that does not run as the turns do passes no
+          // Strict value, which the terminal reads as Strict: confined where
+          // Octant has a sandbox, refused on Windows, where it has none. The
+          // thread's own Strict value there would open a thread that kept its
+          // sandbox unconfined, though its turns are refused.
+          ...(providerProgram === undefined
+            ? this.#windowsStrict(thread)
+            : providerProgramUnconfined
+              ? { strict: false }
+              : {}),
         });
         owner.starting = starting;
         this.#terminalOwners.set(command.terminalId, owner);
@@ -4815,7 +4918,7 @@ export class CodeOperationService {
           includeProductFeedback,
         );
       case "answer-provider-input":
-        return this.#providerInput(command, thread, root.checkoutRoot);
+        return this.#providerInput(command, thread, root.checkoutRoot, initiator);
       case "answer-provider-approval":
         return this.#providerResult(
           command.operationId,
@@ -6705,10 +6808,17 @@ export class CodeOperationService {
     // Checked before the worktree is prepared or any runtime starts. Below
     // Full access on a host without Octant's sandbox the provider's own
     // approvals hold the turn, so only Strict and a kept sandbox refuse there.
+    const hostPlatform = this.#options.platform ?? process.platform;
+    const strict = this.#options.threadStrict?.(thread) ?? true;
+    const driverKind =
+      hostPlatform === "win32" && strict && thread.executionPolicy === "full-access"
+        ? await this.#options.providerDriverKind?.(thread)
+        : undefined;
     const sandboxRefusal = hostProviderTurnRefusal({
-      platform: process.platform,
+      platform: hostPlatform,
       access: thread,
-      strict: this.#options.threadStrict?.(thread) ?? true,
+      strict,
+      driverKind,
     });
     if (sandboxRefusal !== undefined)
       return this.#failed(command.operationId, "unavailable", sandboxRefusal, "refused");
@@ -7380,8 +7490,47 @@ export class CodeOperationService {
     command: Extract<CodeOperationCommand, { readonly kind: "answer-provider-input" }>,
     thread: CodeThread,
     checkoutRoot: string,
+    initiator: "user" | "agent",
   ): Promise<CodeOperationResult> {
-    const response = await this.#options.evidence.read?.(command.response);
+    if ((command.secretAnswer === undefined) === (command.response === undefined))
+      return this.#failed(
+        command.operationId,
+        "invalid",
+        "Answer a question with either its response or its secret answer.",
+      );
+    if (command.secretAnswer !== undefined) {
+      // A secret is the person's own to give: only a window on this host or
+      // a device they paired answers one, never an agent acting for them.
+      if (initiator !== "user")
+        return this.#failed(
+          command.operationId,
+          "unauthorized",
+          "Only you, from a window or a device you paired, can answer a secret question.",
+        );
+      if (
+        command.secretAnswer.trim().length === 0 ||
+        command.secretAnswer.length > MAX_CODE_SECRET_ANSWER_LENGTH
+      )
+        return this.#failed(
+          command.operationId,
+          "invalid",
+          `A secret answer is between 1 and ${String(MAX_CODE_SECRET_ANSWER_LENGTH)} characters.`,
+        );
+      return this.#providerResult(
+        command.operationId,
+        await this.#options.turns.answerInput({
+          thread,
+          checkoutRoot,
+          requestId: command.requestId,
+          response: command.secretAnswer,
+          secret: true,
+        }),
+      );
+    }
+    const response =
+      command.response === undefined
+        ? undefined
+        : await this.#options.evidence.read?.(command.response);
     if (response === undefined)
       return this.#failed(
         command.operationId,

@@ -28,6 +28,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -85,6 +86,8 @@ import {
   type ProviderResumeCursor,
   type ProviderRuntimeEvent,
   type WindowId,
+  NATIVE_SESSION_HISTORY_IMPORTED_EVENT,
+  NativeSessionHistoryImported,
 } from "@octant/contracts";
 import { Deferred, Effect, Queue, Schema, Stream } from "effect";
 import type {
@@ -166,8 +169,9 @@ import {
   APPROVAL_REFUSED_IN_PLAN_MESSAGE,
   defaultWindowWorkspace,
   contextKeyForProject,
-  WINDOWS_SANDBOX_MISSING_REASON,
+  WINDOWS_SANDBOX_OPERATION_REFUSAL,
   WINDOWS_STRICT_REFUSAL,
+  windowsStrictRuntimeRefusal,
 } from "@octant/domain";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
@@ -241,7 +245,7 @@ describe("CodeOperationRuntime", () => {
           credentialRefs: [],
         }),
       ).rejects.toMatchObject({
-        failure: { category: "unavailable", message: WINDOWS_SANDBOX_MISSING_REASON },
+        failure: { category: "unavailable", message: WINDOWS_SANDBOX_OPERATION_REFUSAL },
       });
     } finally {
       vi.unstubAllGlobals();
@@ -269,7 +273,7 @@ describe("CodeOperationRuntime", () => {
             (result) => JSON.stringify(result),
             (error: unknown) => JSON.stringify(error),
           );
-        expect(outcome).not.toContain(WINDOWS_SANDBOX_MISSING_REASON);
+        expect(outcome).not.toContain(WINDOWS_SANDBOX_OPERATION_REFUSAL);
       } finally {
         vi.unstubAllGlobals();
       }
@@ -293,7 +297,7 @@ describe("CodeOperationRuntime", () => {
           credentialRefs: [],
         }),
       ).rejects.toMatchObject({
-        failure: { category: "unavailable", message: WINDOWS_SANDBOX_MISSING_REASON },
+        failure: { category: "unavailable", message: WINDOWS_SANDBOX_OPERATION_REFUSAL },
       });
     } finally {
       vi.unstubAllGlobals();
@@ -4502,6 +4506,103 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("hands a secret question's answer to the provider from the person alone and never records it", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(10);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: startOperation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    for (const [requestId, secret] of [
+      ["secret-question", true],
+      ["plain-question", false],
+    ] as const)
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "user-input-request",
+            requestId,
+            prompt: secret ? "Database credential?" : "Which host?",
+            options: [],
+            ...(secret ? { secret: true as const } : {}),
+          }),
+        ),
+      );
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
+      expect(
+        frames.flatMap((frame) => (frame.event.kind === "input-requested" ? [frame.event] : [])),
+      ).toMatchObject([
+        { requestId: "secret-question", secret: true },
+        { requestId: "plain-question" },
+      ]);
+    });
+    const sentinel = "hunter2-secret-sentinel";
+    let nextOperation = 20;
+    const answer = (requestId: string, answered: Record<string, unknown>) =>
+      fixture.runtime.execute(
+        windowId,
+        {
+          kind: "answer-provider-input",
+          operationId: operationId(nextOperation++),
+          threadId,
+          checkoutId,
+          requestId,
+          ...answered,
+        } as never,
+        { initiator: "user" },
+      );
+
+    // An agent acting for the person cannot answer it, and neither path
+    // stands in for the other: a secret goes to no plain question, and a
+    // secret question takes no answer put as evidence.
+    await expect(
+      fixture.runtime.execute(
+        windowId,
+        {
+          kind: "answer-provider-input",
+          operationId: operationId(11),
+          threadId,
+          checkoutId,
+          requestId: "secret-question",
+          secretAnswer: sentinel,
+        },
+        { initiator: "agent" },
+      ),
+    ).resolves.toMatchObject({ kind: "operation-failed", failure: { category: "unauthorized" } });
+    await expect(answer("plain-question", { secretAnswer: sentinel })).resolves.toMatchObject({
+      failure: { category: "invalid" },
+    });
+    await expect(answer("secret-question", { response: fixture.response })).resolves.toMatchObject({
+      failure: { category: "invalid" },
+    });
+    expect(connection.answerUserInput).not.toHaveBeenCalled();
+
+    await expect(answer("secret-question", { secretAnswer: sentinel })).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+    expect(connection.answerUserInput).toHaveBeenCalledWith({
+      sessionId,
+      requestId: "secret-question",
+      answer: sentinel,
+    });
+    await fixture.runtime.close();
+    expect([...fixture.evidenceValues.values()]).not.toContain(sentinel);
+    for (const file of readdirSync(fixture.directory))
+      if (statSync(join(fixture.directory, file)).isFile())
+        expect(readFileSync(join(fixture.directory, file)).includes(sentinel)).toBe(false);
+    fixture.close();
+  });
+
   it("refuses an answer to a turn that was cancelled while it waited, naming why", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -4665,6 +4766,132 @@ describe("CodeOperationRuntime", () => {
       vi.unstubAllGlobals();
       await fixture.runtime.close();
       fixture.close();
+    }
+  });
+
+  it("admits a Windows Strict Codex turn at Full access without offering Octant-operated tools, and refuses non-Codex by name", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const codexFixture = runtimeFixture({
+      provider: { ...providerDriver(connection), kind: "codex" },
+      resolveStrict: () => true,
+      supportsAppManagedTools: true,
+    });
+    codexFixture.setThread(
+      decodeCodeThread({ ...thread(), executionPolicy: "full-access", strict: true }),
+    );
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      await expect(
+        codexFixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(17),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: codexFixture.prompt,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      const sent = vi.mocked(connection.send).mock.calls[0]?.[0];
+      expect(sent?.tools).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+      await codexFixture.runtime.close();
+      codexFixture.close();
+    }
+
+    const claudeQueue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const claudeConnection = providerConnection(claudeQueue);
+    const claudeFixture = runtimeFixture({
+      provider: { ...providerDriver(claudeConnection), kind: "claude" },
+      resolveStrict: () => true,
+    });
+    claudeFixture.setThread(
+      decodeCodeThread({ ...thread(), executionPolicy: "full-access", strict: true }),
+    );
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      await expect(
+        claudeFixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(18),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: claudeFixture.prompt,
+        }),
+      ).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: {
+          category: "unavailable",
+          message: windowsStrictRuntimeRefusal("claude"),
+        },
+      });
+      expect(claudeConnection.send).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      await claudeFixture.runtime.close();
+      claudeFixture.close();
+    }
+  });
+
+  it("validates non-default model options on a Full-access Codex Code thread under Windows Strict", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const baseThread = thread();
+    const probeProvider = vi.fn(async () => ({
+      readiness: "ready" as const,
+      models: [
+        {
+          id: baseThread.modelId,
+          displayName: "GPT-5.4",
+          reasoning: "supported" as const,
+          inputModalities: ["text" as const],
+          source: "discovered" as const,
+          verification: "verified" as const,
+          options: [
+            {
+              id: "effort",
+              displayName: "Effort",
+              kind: "selection" as const,
+              values: ["medium", "high"] as const,
+            },
+          ],
+        },
+      ],
+    }));
+    const codexFixture = runtimeFixture({
+      provider: { ...providerDriver(connection), kind: "codex" },
+      resolveStrict: () => true,
+      probeProvider,
+    });
+    codexFixture.setThread(
+      decodeCodeThread({
+        ...baseThread,
+        executionPolicy: "full-access",
+        strict: true,
+        modelOptionValues: { effort: "high" },
+      }),
+    );
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      await expect(
+        codexFixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(19),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: codexFixture.prompt,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      expect(probeProvider).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    } finally {
+      vi.unstubAllGlobals();
+      await codexFixture.runtime.close();
+      codexFixture.close();
     }
   });
 
@@ -4982,6 +5209,69 @@ describe("CodeOperationRuntime", () => {
       { kind: "approval-answered", approvalId: denied, decision: "denied" },
     ]);
     expect(await fixture.runtime.pendingRequests?.(windowId)).toEqual([]);
+    fixture.close();
+  });
+
+  it("delivers an allow for this one call on a thread that keeps answers only as the Project's default", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    fixture.setThread(decodeCodeThread({ ...thread(), permissionPersistence: "project-default" }));
+    const startOperation = operationId(31);
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "approval-request",
+          requestId: "provider-approval-project-default",
+          action: "write",
+          description: "Modify src/a.ts",
+        }),
+      ),
+    );
+    let approvalId:
+      | Extract<OperationFrame["event"], { kind: "approval-requested" }>["approvalId"]
+      | undefined;
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 40);
+      approvalId = frames
+        .map((frame) => frame.event)
+        .find((event) => event.kind === "approval-requested")?.approvalId;
+      expect(approvalId).toBeDefined();
+    });
+    if (approvalId === undefined) throw new Error("Expected a provider approval");
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(32),
+        threadId,
+        checkoutId,
+        approvalId,
+        decision: "approved",
+      }),
+    ).resolves.toMatchObject({ state: "running" });
+    // The driver reads the host's default, which may keep answers for the
+    // session; this thread's own setting must still hold the allow to one call.
+    expect(connection.answerApproval).toHaveBeenCalledWith({
+      sessionId,
+      requestId: "provider-approval-project-default",
+      approved: true,
+      scope: "once",
+    });
     fixture.close();
   });
 
@@ -7061,6 +7351,97 @@ describe("CodeOperationRuntime", () => {
       expect(connection.start).not.toHaveBeenCalled();
       expect(await sessions.adopt(windowId, threadId, outside)).toMatchObject({
         kind: "code-native-session-refused",
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("journals the adopted session's earlier conversation as imported history the thread replays without sending it to the provider", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const outside = decodeCodeNativeSessionId("outside-session-history");
+    const history = vi.fn(() =>
+      Effect.succeed({
+        status: "read" as const,
+        messages: [
+          { role: "person" as const, text: "Rename the login handler" },
+          { role: "agent" as const, text: "Renamed it to signIn.", tools: ["Edit"] },
+        ],
+      }),
+    );
+    const provider: ProviderDriver = {
+      ...providerDriver(connection),
+      nativeSessions: {
+        list: () => Effect.succeed([]),
+        adopt: () => Effect.succeed<ProviderResumeCursor>({ driverKind: "codex", value: outside }),
+        history,
+      },
+    };
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: [] },
+    }));
+    const fixture = runtimeFixture({ provider, recordExternalContentIngestion });
+    try {
+      const sessions = fixture.runtime.nativeSessions!;
+      expect(await sessions.adopt(windowId, threadId, outside)).toMatchObject({
+        kind: "code-native-session-adopted",
+      });
+      expect(history).toHaveBeenCalledWith(expect.objectContaining({ nativeSessionId: outside }));
+      // Read back from the journal, as a reopened thread or a restart reads it.
+      expect(await sessions.list(windowId, threadId)).toMatchObject({
+        adopted: {
+          nativeSessionId: outside,
+          history: {
+            status: "imported",
+            messages: [
+              { role: "person", text: "Rename the login handler" },
+              { role: "agent", text: "Renamed it to signIn.", tools: ["Edit"] },
+            ],
+          },
+        },
+      });
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1386),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalled());
+      // The provider already holds the session: nothing imported rides along.
+      const sent = JSON.stringify([
+        vi.mocked(connection.resume).mock.calls,
+        vi.mocked(connection.send).mock.calls,
+      ]);
+      expect(sent).not.toContain("Rename the login handler");
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("imports no history from a provider that keeps none it can read, and says so", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const outside = decodeCodeNativeSessionId("outside-session-silent");
+    const provider: ProviderDriver = {
+      ...providerDriver(providerConnection(queue)),
+      nativeSessions: {
+        list: () => Effect.succeed([]),
+        adopt: () => Effect.succeed<ProviderResumeCursor>({ driverKind: "codex", value: outside }),
+      },
+    };
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: [] },
+    }));
+    const fixture = runtimeFixture({ provider, recordExternalContentIngestion });
+    try {
+      const sessions = fixture.runtime.nativeSessions!;
+      await sessions.adopt(windowId, threadId, outside);
+      expect(await sessions.list(windowId, threadId)).toMatchObject({
+        adopted: { nativeSessionId: outside, history: { status: "none", reason: "unsupported" } },
       });
     } finally {
       fixture.close();
@@ -13401,6 +13782,7 @@ function runtimeFixture(options: {
       .register("code.review-finding-updated@1", 1, CodeReviewFindingUpdated)
       .register("feedback.note-captured@1", 1, ProductFeedbackCaptured)
       .register("feedback.note-delivered@1", 1, ProductFeedbackDelivered)
+      .register(NATIVE_SESSION_HISTORY_IMPORTED_EVENT, 1, NativeSessionHistoryImported)
       .register("feedback.note-updated@1", 1, ProductFeedbackUpdated)
       .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested, 1, ContentIngestedPayload),
     projections: new ProjectionRegistry()

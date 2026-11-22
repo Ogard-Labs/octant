@@ -26,9 +26,9 @@ export const ACP_PACKAGE_NEEDS_INSTALL_SCRIPT_MESSAGE =
  * The generic profile for one added agent. Its mode is never selected, since
  * no mapping of Chat, Work, Code and Plan onto the agent's own modes was
  * read; Plan's read-only wall and the level's approvals are Octant's sandbox
- * and approval bridge instead. No exact-release feature (usage, compaction,
- * file review, forms, warm reuse, unadvertised HTTP tools) is pinned, so none
- * is offered at any level.
+ * and approval bridge instead. No exact-release feature (compaction, file
+ * review, forms, warm reuse, unadvertised HTTP tools) is pinned, so none is
+ * offered at any level; its usage is read by ACP's standard schema.
  */
 export function addedAcpAgentProfile(instance: AddedAcpAgentProviderInstance): AcpProviderProfile {
   const { configuration } = instance;

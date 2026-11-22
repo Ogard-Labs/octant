@@ -49,7 +49,7 @@ export function appToolThreadLevel(
 /** The capabilities that decide what a thread gets of Octant's tools. */
 export type AppToolCapabilities = Pick<
   ProviderObservedState["capabilities"],
-  "appManagedTools" | "appManagedToolsAtFullAccess" | "atFullAccess"
+  "appManagedTools" | "appManagedToolsAtFullAccess"
 >;
 
 /**
@@ -59,19 +59,11 @@ export type AppToolCapabilities = Pick<
  * unwrapped shell there, so the tools are offered and labelled rather than
  * withheld. A thread that keeps the sandbox at Full access is launched as the
  * guarded levels are, so a runtime that proves exclusivity there keeps it.
- * A release newer than the one Octant reviewed its tool transport against
- * carries them at Full access only (`atFullAccess`), where the pin no longer
- * holds.
  */
 export function threadAppToolSupport(
   capabilities: AppToolCapabilities,
   level: AppToolThreadLevel,
 ): ProviderCapabilitySupport | "mixed" {
-  if (
-    level.executionPolicy === "full-access" &&
-    capabilities.atFullAccess?.appManagedTools === "supported"
-  )
-    return "supported";
   if (
     level.executionPolicy !== "full-access" ||
     capabilities.appManagedToolsAtFullAccess !== "mixed"

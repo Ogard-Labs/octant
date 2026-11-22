@@ -17,6 +17,7 @@ import {
   removeHeadlessUserData,
   uninstallHeadlessArtifact,
   upgradeHeadlessArtifact,
+  type HeadlessArtifactSignaturePolicy,
   type HeadlessBackupReceipt,
   type HeadlessUpgradePorts,
 } from "./artifactInstall";
@@ -27,9 +28,16 @@ import { createUserServiceManager } from "./serviceManager";
 // upgrade coordinator's ports onto the owner control socket and the user
 // service manager.
 
+interface HeadlessArtifactCliPlacement {
+  readonly artifactRoot: string;
+  readonly installRoot: string;
+  /** The person said they built this themselves, so no release signature is required. */
+  readonly selfBuilt: boolean;
+}
+
 export type HeadlessArtifactCliCommand =
-  | { readonly action: "install"; readonly artifactRoot: string; readonly installRoot: string }
-  | { readonly action: "upgrade"; readonly artifactRoot: string; readonly installRoot: string }
+  | ({ readonly action: "install" } & HeadlessArtifactCliPlacement)
+  | ({ readonly action: "upgrade" } & HeadlessArtifactCliPlacement)
   | {
       readonly action: "uninstall";
       readonly installRoot: string;
@@ -52,15 +60,20 @@ export function resolveHeadlessArtifactCliCommand(
   const action = positional[0];
   if (action === "install" || action === "upgrade") {
     for (const name of Object.keys(flags)) {
-      if (name !== "artifact" && name !== "install-root") return undefined;
+      if (name !== "artifact" && name !== "install-root" && name !== "self-built") {
+        return undefined;
+      }
     }
     if (typeof flags.artifact !== "string") return undefined;
     const installRoot = flags["install-root"];
     if (installRoot !== undefined && typeof installRoot !== "string") return undefined;
+    const selfBuilt = flags["self-built"];
+    if (selfBuilt !== undefined && selfBuilt !== true) return undefined;
     return {
       action,
       artifactRoot: flags.artifact,
       installRoot: installRoot ?? defaults.installRoot,
+      selfBuilt: selfBuilt === true,
     };
   }
   if (action === "uninstall") {
@@ -135,6 +148,10 @@ async function makeStateDirectoryPrivate(stateDirectory: string): Promise<string
   return undefined;
 }
 
+function signaturePolicy(selfBuilt: boolean): HeadlessArtifactSignaturePolicy {
+  return selfBuilt ? { kind: "self-built" } : { kind: "release-keys" };
+}
+
 export async function runHeadlessArtifactCliCommand(
   options: RunHeadlessArtifactCliCommandOptions,
 ): Promise<number> {
@@ -157,6 +174,7 @@ export async function runHeadlessArtifactCliCommand(
         artifactRoot: command.artifactRoot,
         installRoot: command.installRoot,
         runtime: options.runtime,
+        signature: signaturePolicy(command.selfBuilt),
       });
       stdout.write(`Octant ${report.version} installed at ${command.installRoot}.\n`);
       return 0;
@@ -166,6 +184,7 @@ export async function runHeadlessArtifactCliCommand(
         artifactRoot: command.artifactRoot,
         installRoot: command.installRoot,
         runtime: options.runtime,
+        signature: signaturePolicy(command.selfBuilt),
         ports: options.ports,
       });
       if (report.outcome === "upgraded") {

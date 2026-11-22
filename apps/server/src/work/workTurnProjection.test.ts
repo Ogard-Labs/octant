@@ -4,6 +4,10 @@ import {
   AGENT_RESULT_STEERED,
   AGENT_RESULT_STEERING_AGGREGATE_TYPE,
 } from "../agentRun/agentResultSteeredRecord";
+import {
+  THREAD_MESSAGE_STEERED,
+  THREAD_MESSAGE_STEERING_AGGREGATE_TYPE,
+} from "../messageQueue/threadMessageSteeredRecord";
 import { WorkTurnProjection, hydrateWorkTurnProjectionFromJournal } from "./workTurnProjection";
 
 const ids = {
@@ -15,6 +19,7 @@ const ids = {
   provider: "ffffffff-ffff-4fff-8fff-ffffffffffff",
   session: "11111111-1111-4111-8111-111111111111",
   run: "22222222-2222-4222-8222-222222222222",
+  message: "33333333-3333-4333-8333-333333333333",
 } as const;
 const now = "2026-08-11T12:00:00.000Z";
 
@@ -29,6 +34,16 @@ const steered = {
     runGenerations: [{ runId: ids.run, generation: 1 }],
   },
   body: "A delegated subagent has finished.",
+  steeredAt: now,
+} as const;
+
+const steeredMessage = {
+  kind: "thread-message-steered",
+  mode: "work",
+  threadId: ids.thread,
+  turnKey: ids.request,
+  messageId: ids.message,
+  body: "Skip the generated files.",
   steeredAt: now,
 } as const;
 
@@ -66,6 +81,13 @@ const rows = [
     eventVersion: 1,
     payload: steered,
   },
+  {
+    globalSequence: 5,
+    aggregateType: THREAD_MESSAGE_STEERING_AGGREGATE_TYPE,
+    eventName: THREAD_MESSAGE_STEERED,
+    eventVersion: 1,
+    payload: steeredMessage,
+  },
   // The turn ends after the result entered it; the card stays.
   {
     globalSequence: 3,
@@ -90,9 +112,16 @@ const rows = [
     eventVersion: 1,
     payload: steered,
   },
+  {
+    globalSequence: 6,
+    aggregateType: THREAD_MESSAGE_STEERING_AGGREGATE_TYPE,
+    eventName: THREAD_MESSAGE_STEERED,
+    eventVersion: 1,
+    payload: steeredMessage,
+  },
 ];
 
-describe("a Work turn's steered child results", () => {
+describe("a Work turn's steered child results and messages", () => {
   it("rebuild onto the turn they entered from the journal, once each", () => {
     const projection = new WorkTurnProjection();
     expect(
@@ -111,6 +140,9 @@ describe("a Work turn's steered child results", () => {
     expect(turn?.status).toBe("completed");
     expect(turn?.steeredResults).toEqual([
       { delivery: steered.delivery, body: steered.body, steeredAt: now },
+    ]);
+    expect(turn?.steeredMessages).toEqual([
+      { messageId: ids.message, body: "Skip the generated files.", steeredAt: now },
     ]);
   });
 

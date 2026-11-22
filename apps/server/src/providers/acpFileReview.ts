@@ -67,8 +67,7 @@ export interface AcpFileReviewRead {
 /**
  * Exact native read dialect; no approve/revert, prompt or session creation
  * lives here. The caller decides whether the release may use it: a reviewed
- * release, or at Full access a newer one offered unverified
- * (`acpExactReleaseClaim`).
+ * release, or a newer one offered unverified (`acpReleaseClaim`).
  */
 export async function readAcpFileReview(input: AcpFileReviewRead): Promise<ProviderFileReviewRead> {
   if (!validPath(input.path)) return refused("path-refused");

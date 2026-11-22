@@ -50,6 +50,12 @@ export interface AutomationDispatchServiceOptions {
   /** Absent, a Chat routine is refused as `unsupported-mode`. */
   readonly chat?: AutomationChatDispatchPort;
   readonly capacity: AutomationCapacityAdmissionPort;
+  /**
+   * True while the host drains before an update. A run then waits without a
+   * thread, and the scheduler's lease recovery offers it again once the drain
+   * lifts or the updated host starts.
+   */
+  readonly refusesNewRuns?: () => boolean;
   readonly resolveFacts: (input: {
     readonly definition: AutomationDefinition;
     readonly run: AutomationRun;
@@ -63,6 +69,8 @@ export interface AutomationDispatchServiceOptions {
     readonly mode: AutomationRun["definitionSnapshot"]["mode"];
     readonly threadId: AutomationThreadId;
   }) => AutomationFollowUpThreadFacts;
+  /** Settings' `followUpLatenessLimitHours`, read at each offer; absent is one day. */
+  readonly followUpLatenessLimitHours?: () => number;
   readonly now: () => UtcTimestamp;
   readonly launchClaimLeaseMs?: number;
   /**
@@ -97,8 +105,10 @@ export class AutomationDispatchService implements AutomationDispatchPort {
   readonly #work: AutomationWorkDispatchPort;
   readonly #chat: AutomationChatDispatchPort | undefined;
   readonly #capacity: AutomationCapacityAdmissionPort;
+  readonly #refusesNewRuns: (() => boolean) | undefined;
   readonly #resolveFacts: AutomationDispatchServiceOptions["resolveFacts"];
   readonly #readFollowUpThread: AutomationDispatchServiceOptions["readFollowUpThread"];
+  readonly #followUpLatenessLimitHours: AutomationDispatchServiceOptions["followUpLatenessLimitHours"];
   readonly #now: () => UtcTimestamp;
   readonly #launchClaimLeaseMs: number;
   readonly #schedule: (work: () => Promise<void>) => void;
@@ -112,8 +122,10 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     this.#work = options.work;
     this.#chat = options.chat;
     this.#capacity = options.capacity;
+    this.#refusesNewRuns = options.refusesNewRuns;
     this.#resolveFacts = options.resolveFacts;
     this.#readFollowUpThread = options.readFollowUpThread;
+    this.#followUpLatenessLimitHours = options.followUpLatenessLimitHours;
     this.#now = options.now;
     this.#launchClaimLeaseMs = options.launchClaimLeaseMs ?? DEFAULT_LAUNCH_CLAIM_LEASE_MS;
     this.#schedule =
@@ -156,6 +168,12 @@ export class AutomationDispatchService implements AutomationDispatchPort {
       if (run === undefined) return;
     }
 
+    // Moved to dispatching first, so the lease recovery offers it again:
+    // left queued, the scheduler would not offer it until a restart. A run
+    // that already holds its thread but waited for provider capacity is held
+    // here too: turn admission would refuse its first turn during a drain, and
+    // that refusal fails the run for good.
+    if (this.#refusesNewRuns?.() === true) return;
     if (run.dispatchIntent === undefined) {
       const revalidation = revalidateAutomationAuthority({
         definition,
@@ -281,7 +299,9 @@ export class AutomationDispatchService implements AutomationDispatchPort {
     if (definition.lifecycle === "paused") return undefined;
     const threadId = definition.originThreadId;
     const snapshot = run.definitionSnapshot;
+    const latenessLimitHours = this.#followUpLatenessLimitHours?.();
     const decision = decideAutomationFollowUp({
+      ...(latenessLimitHours === undefined ? {} : { latenessLimitHours }),
       projectId: String(snapshot.projectId),
       providerInstanceId: String(snapshot.executionProfile.providerInstanceId),
       modelId: String(snapshot.executionProfile.modelId),

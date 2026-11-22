@@ -233,7 +233,7 @@ describe("addElement", () => {
     ).toThrow(ZenPolicyRejected);
   });
 
-  it("refuses a Project terminal card naming a shell on some other host, and keeps its Project fixed", () => {
+  it("refuses a Project terminal card naming a shell on some other host, and keeps its Project and program fixed", () => {
     const card = {
       elementId: makeId("6a6a6a6a") as ZenElementId,
       kind: "project-terminal",
@@ -262,6 +262,13 @@ describe("addElement", () => {
         pinned.version,
         localHostId,
       ),
+    ).toThrow(ZenPolicyRejected);
+    // What the terminal runs is the owner's answer at pinning, not the client's.
+    expect(() =>
+      updateElement(pinned, { ...card, program: "provider" }, pinned.version, localHostId),
+    ).toThrow(ZenPolicyRejected);
+    expect(() =>
+      updateElement(pinned, { ...card, programName: "Gemini CLI" }, pinned.version, localHostId),
     ).toThrow(ZenPolicyRejected);
     expect(
       updateElement(

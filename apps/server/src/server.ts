@@ -31,6 +31,9 @@ import {
   MAX_CODE_OPERATION_REPLAY_LIMIT,
 } from "@octant/contracts";
 import { randomUUID } from "node:crypto";
+import { resolveSpeechEndpoint } from "@octant/domain";
+import { makeOpenAiCompatibleSpeechAdapter } from "./speech/speechAdapter";
+import type { TranscriptionForTurn } from "./speech/transcriptionTool";
 import { CredentialRequests } from "./credentials/credentialRequests";
 import { createCredentialRequestRoutes } from "./credentials/credentialRequestRoutes";
 import { registeredCredentialOperations } from "./credentials/credentialRequestTools";
@@ -297,6 +300,8 @@ export function startOctantServer(
       routineProposalService,
       imageGenerationOffers,
       serviceOffers,
+      speechGates,
+      threadTranscription,
       simulatorInputGrants,
       unsubscribeMachineChanges,
       unsubscribeThreadArchivals,
@@ -630,6 +635,24 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    const transcriptionForTurn: TranscriptionForTurn = (turn) =>
+      threadTranscription.forTurn({
+        ...turn,
+        offers: serviceOffers,
+        gates: speechGates,
+        uuid: randomUUID,
+        recordExternalContentIngestion: (mark) => externalContentIngestionStore.record(mark),
+        endpoint: () =>
+          resolveSpeechEndpoint(
+            persistence.readShellSettings()?.settings.voice.transcription,
+            persistence.readProviderInstances(),
+          ),
+        adapter: ({ instance }) =>
+          makeOpenAiCompatibleSpeechAdapter({
+            instance,
+            ...(credentialResolver === undefined ? {} : { credentialResolver }),
+          }),
+      });
     const {
       readHarnessProcessReceipts,
       beginGoogleCliChange,
@@ -647,6 +670,7 @@ export function startOctantServer(
       nativeHarnessComposition,
       nativeHarnessEgressRoutes,
       nativeHarnessHooks,
+      hostDrain,
       nativeHarnessRoutingRoutes,
       imageDescriber,
       shieldServerRoutes,
@@ -802,6 +826,7 @@ export function startOctantServer(
       replicaArtifactSync,
       resolveCanvasWorkspace,
       snapshotCanvas,
+      threadProjectAssetRoot,
     } = wireCanvas({
       claudePublishes: makeClaudeLibraryPublishes({
         workThreads: () =>
@@ -950,6 +975,7 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      transcriptionForTurn,
       imageDescriber,
       resolveThreadStrict,
       isPairedDeviceScope,
@@ -997,8 +1023,10 @@ export function startOctantServer(
       buildCodeService,
       appleToolchainService,
       browserAuthority,
+      browserCaptures,
       canAccessCodeProject,
       canvasAgentToolPort,
+      threadProjectAssetRoot,
       codeActiveTurns,
       codeApprovalStore,
       codeAttachments,
@@ -1097,6 +1125,7 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      configuredDriverOptions,
       providerRuntimeNetwork,
       resolveThreadStrict,
       resolveProjectStrict,
@@ -1236,6 +1265,7 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      transcriptionForTurn,
       imageDescriber,
       resolveThreadStrict,
       machineChangeFeed,
@@ -1339,6 +1369,7 @@ export function startOctantServer(
       shieldServerStore,
     });
     const { restartRecovery } = yield* wireContinuation({
+      hostDrain,
       threadWakeups,
       workThreadWakeupPort,
       codeThreadWakeupPort,
@@ -1448,6 +1479,7 @@ export function startOctantServer(
       workResearchProjection,
       workResearchRoutes,
     } = wireWorkFiles({
+      speechGates,
       credentialResolver,
       serviceOffers,
       keptImageChoices,
@@ -1492,9 +1524,11 @@ export function startOctantServer(
       agentRunOrchestration,
       externalContentIngestionStore,
       readHarnessProcessReceipts,
+      hostDrain,
       capacityScheduler,
       chatService,
       codeCompletedThreadSource,
+      contributeChatTools,
       contributeCodeTools,
       contributeServerCodeTools,
       liveTurns,
@@ -1573,6 +1607,7 @@ export function startOctantServer(
       browserToolApprovalService,
       extensionToolApprovalService,
       serviceOffers,
+      windowCanOpenThread,
       projectMemoryAccess,
       routineProposalService,
       decisionReviewModelPort,
@@ -2035,6 +2070,7 @@ export function startOctantServer(
       threadMoveAdministrationRoutes,
       hubAdministrationRoutes,
       localDeviceAdministrationRoutes,
+      memberInstallRoutes,
       agentAccessAdministrationRoutes,
       agentAccessLoopbackRoutes,
       privateListenerAdministrationRoutes,
@@ -2045,6 +2081,9 @@ export function startOctantServer(
       remoteHost,
       threadRetention,
     } = wireRemote({
+      hostDrain,
+      shieldServerStore,
+      serverConnection,
       resolveThreadStrict,
       restartRecovery,
       agentGrantRouteSlot,
@@ -2242,6 +2281,7 @@ export function startOctantServer(
                 (await secretStoresRoutes(request)) ??
                 (await commandRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
+                (await memberInstallRoutes(request)) ??
                 (await agentAccessAdministrationRoutes(request)) ??
                 (await agentAccessLoopbackRoutes(request)) ??
                 (await personQuitRoutes(request)) ??

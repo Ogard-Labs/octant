@@ -43,6 +43,7 @@ import { attachWorkRequestRuntime } from "../work/workRequestRuntime";
 import { JournalNavigatorAssistantBindingStore } from "../navigatorAssistant/navigatorAssistantBindingStore";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "../chat/chatAttachmentStore";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
+import { attachedImageSources } from "../image/threadImageSourcePorts";
 import { createLinkedThreadRouteHandler } from "../linkedThread/linkedThreadRoutes";
 import { createLinkedThreadRuntime } from "../linkedThread/linkedThreadRuntime";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -83,6 +84,7 @@ import { hydrateAgentMessageProjectionFromJournal } from "../agentMessage/agentM
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { defaultShellSettings, findWorkspacePresetTarget } from "@octant/domain";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
+import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import type { AppManagedToolSet } from "../chat/chatTurnRunner";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
@@ -406,13 +408,26 @@ export function wireChat(deps: ChatDependencies) {
     const guardChatAttachmentPurge = (guard: (threadId: ChatThreadId) => Promise<void>): void => {
       attachmentPurgeGuards.push(guard);
     };
-    const chatToolContributors: Array<
-      (windowId: WindowId, thread: ChatThread) => AppManagedToolSet | undefined
-    > = [];
+    type ChatToolContributor = (
+      windowId: WindowId,
+      thread: ChatThread,
+    ) => AppManagedToolSet | undefined;
+    const chatToolContributors: Array<ChatToolContributor> = [];
+    const chatHostAnsweredToolContributors: Array<ChatToolContributor> = [];
+    /**
+     * A contributed set's results are outside content unless the area says
+     * they are only the host's own answers (a card the person confirms, a
+     * receipt); those stay outside the taint wrapper, as the side-task offer
+     * does, so offering one does not mark the thread.
+     */
     const contributeChatTools = (
-      contributor: (windowId: WindowId, thread: ChatThread) => AppManagedToolSet | undefined,
+      contributor: ChatToolContributor,
+      options?: { readonly results: "host-answers" },
     ): void => {
-      chatToolContributors.push(contributor);
+      (options?.results === "host-answers"
+        ? chatHostAnsweredToolContributors
+        : chatToolContributors
+      ).push(contributor);
     };
     // Side Chat lanes and the navigator assistant's own threads, which no
     // thread list shows and no notification names.
@@ -471,6 +486,22 @@ export function wireChat(deps: ChatDependencies) {
         for (const guard of attachmentPurgeGuards) await guard(threadId);
       },
       agentRuns: agentRunPersistence,
+      // A routine's or a follow-up's turn runs as the host with no window, so
+      // it takes only the Canvas, bound to the thread's own Chat Project, the
+      // scope a window showing that Project would give. Chat has no Browser
+      // at all, and the other window tools need the window they are keyed on.
+      // The Canvas tool asks the person nothing, so no answer is borrowed.
+      resolveHostRunTools: ({ thread }) =>
+        withheldFromSideChat({
+          sideChat: sideChatSidecars.findBySidecarThread(thread.id) !== undefined,
+          tools: () =>
+            createCanvasAgentTools({
+              windowId: ROUTINE_HOST_SCOPE_ID,
+              hostRun: true,
+              thread,
+              port: canvasAgentToolPort,
+            }),
+        }),
       resolveComputerUseTools: ({ windowId, thread }) =>
         withheldFromSideChat({
           sideChat: sideChatSidecars.findBySidecarThread(thread.id) !== undefined,
@@ -600,6 +631,31 @@ export function wireChat(deps: ChatDependencies) {
                       offers: imageGenerationOffers,
                       kept: keptImageChoices,
                       jobs: imageJobService,
+                      imageSources: {
+                        latestAttachments: () => {
+                          const view = persistence.readChatThreadView(thread.id);
+                          const latest = view?.turns.findLast(
+                            (turn) => turn.delivery === undefined,
+                          );
+                          if (view === undefined || latest === undefined) return [];
+                          return attachedImageSources(
+                            view.attachments.filter(
+                              (attachment) =>
+                                attachment.status === "finalized" &&
+                                latest.attachmentIds.includes(attachment.id),
+                            ),
+                            (attachment) =>
+                              chatAttachmentStore.read({
+                                chatThreadId: thread.id,
+                                chatAttachmentId: attachment.id,
+                                displayName: attachment.displayName,
+                                size: attachment.byteLength,
+                                hash: attachment.digest,
+                                finalizedAt: attachment.createdAt,
+                              }),
+                          );
+                        },
+                      },
                       listInstances: () => persistence.readProviderInstances(),
                       readImageGenerationCustomSources: () =>
                         (persistence.readShellSettings()?.settings ?? defaultShellSettings())
@@ -623,6 +679,9 @@ export function wireChat(deps: ChatDependencies) {
             sideChat,
             tools: () =>
               combineAppManagedToolSets(
+                ...chatHostAnsweredToolContributors.map((contribute) =>
+                  contribute(windowId, thread),
+                ),
                 // Outside the taint wrapper: a Canvas marks its reader only
                 // when a read or preview returns content from a Canvas that
                 // carries a mark, the rule Work and Code follow, so describe

@@ -23,6 +23,11 @@
  * `--legacy-document` writes the old shape for the one name such Octant
  * installs still read (`legacyUpdateFeedRelativePath`). Nothing writes the old
  * shape for Nightly: the old preview names were read by Octant builds.
+ *
+ * `--headless` signs the document that lists one headless build of a release
+ * (`headlessBuildFeedRelativePath`), with its digest, so a host downloading a
+ * build for a server it installs over SSH trusts the feed signature exactly
+ * as the desktop updater does.
  */
 
 import {
@@ -42,10 +47,22 @@ import {
   APP_RELEASE_RINGS,
   decodeAppUpdateFeed,
   decodeAppUpdateRelease,
+  decodeHeadlessBuildFeed,
+  decodeHeadlessBuildRelease,
+  type HeadlessBuildFeed,
+  type HeadlessBuildRelease,
   isAppReleaseRing,
 } from "@octant/contracts/app-updates";
-import { canonicalReleaseBytes, canonicalReleaseBytesWithoutProduct } from "@octant/domain";
-import { type DesktopFlavor, desktopIdentity } from "@octant/host-runtime";
+import {
+  canonicalHeadlessReleaseBytes,
+  canonicalReleaseBytes,
+  canonicalReleaseBytesWithoutProduct,
+} from "@octant/domain";
+import {
+  type DesktopFlavor,
+  desktopIdentity,
+  headlessBuildFeedRelativePath,
+} from "@octant/host-runtime";
 import {
   legacyUpdateFeedRelativePath,
   OCTANT_UPDATE_TRUSTED_KEYS,
@@ -273,6 +290,80 @@ export function dryRunFeedDocument(input: ReleaseInput): {
   return { release, feedPath: feedRelativePath(release) };
 }
 
+export interface HeadlessReleaseInput {
+  readonly version: string;
+  readonly ring: AppReleaseRing;
+  readonly target: string;
+  readonly url: string;
+  readonly sha256: string;
+  readonly releasedAt: string;
+}
+
+/**
+ * Validate a headless build listing against the contract a host decodes it
+ * with. Only Octant's rings carry headless builds: Octant Nightly, the only
+ * app on `preview`, never installs a host.
+ */
+export function buildHeadlessRelease(input: HeadlessReleaseInput): HeadlessBuildRelease {
+  if (input.ring === "preview") {
+    throw new Error("Octant Nightly's preview ring carries no headless build.");
+  }
+  return decodeHeadlessBuildRelease({
+    product: "octant",
+    version: input.version,
+    target: input.target,
+    ring: input.ring,
+    url: input.url,
+    sha256: input.sha256,
+    releasedAt: input.releasedAt,
+  });
+}
+
+/** Sign a headless build listing over its canonical bytes, decoded before it is returned. */
+export function signHeadlessFeed(
+  release: HeadlessBuildRelease,
+  privateKeyBase64: string,
+): HeadlessBuildFeed {
+  const key = createPrivateKey({
+    key: Buffer.from(privateKeyBase64, "base64"),
+    format: "der",
+    type: "pkcs8",
+  });
+  const signature = sign(null, canonicalHeadlessReleaseBytes(release), key).toString("base64");
+  return decodeHeadlessBuildFeed({ schemaVersion: 1, release, signature });
+}
+
+export interface HeadlessFeedCommand {
+  readonly version: string;
+  readonly ring: AppReleaseRing;
+  readonly target: string;
+  readonly url: string;
+  readonly artifact: string;
+  readonly releasedAt: string;
+  readonly out: string;
+}
+
+/** `--headless`: every field required, for the reason {@link parseFeedCommand} gives. */
+export function parseHeadlessFeedCommand(argv: ReadonlyArray<string>): HeadlessFeedCommand {
+  const values = readFlagValues(argv.filter((argument) => argument !== "--headless"));
+  const required = requiredFlag(values);
+  const ring = required("ring");
+  if (!isAppReleaseRing(ring)) {
+    throw new Error(
+      `--ring must be a known release ring (${APP_RELEASE_RINGS.join(", ")}), not ${ring}.`,
+    );
+  }
+  return {
+    version: required("version"),
+    ring,
+    target: required("target"),
+    url: required("url"),
+    artifact: required("artifact"),
+    releasedAt: required("released-at"),
+    out: required("out"),
+  };
+}
+
 export interface FeedCommand {
   readonly version: string;
   readonly ring: AppReleaseRing;
@@ -297,28 +388,8 @@ export interface FeedCommand {
  * until someone downloads it.
  */
 export function parseFeedCommand(argv: ReadonlyArray<string>): FeedCommand {
-  const values = new Map<string, string>();
-  const valued = argv.filter((argument) => argument !== "--legacy-document");
-  for (let index = 0; index < valued.length; index += 1) {
-    const argument = valued[index] ?? "";
-    if (!argument.startsWith("--")) continue;
-    const equals = argument.indexOf("=");
-    if (equals === -1) {
-      const next = valued[index + 1];
-      if (next === undefined || next.startsWith("--")) {
-        throw new Error(`${argument} needs a value.`);
-      }
-      values.set(argument.slice(2), next);
-      index += 1;
-    } else {
-      values.set(argument.slice(2, equals), argument.slice(equals + 1));
-    }
-  }
-  const required = (name: string): string => {
-    const value = values.get(name);
-    if (value === undefined || value === "") throw new Error(`--${name} is required.`);
-    return value;
-  };
+  const values = readFlagValues(argv.filter((argument) => argument !== "--legacy-document"));
+  const required = requiredFlag(values);
   const ring = required("ring");
   if (!isAppReleaseRing(ring)) {
     throw new Error(
@@ -345,9 +416,38 @@ export function parseFeedCommand(argv: ReadonlyArray<string>): FeedCommand {
   };
 }
 
+function readFlagValues(valued: ReadonlyArray<string>): ReadonlyMap<string, string> {
+  const values = new Map<string, string>();
+  for (let index = 0; index < valued.length; index += 1) {
+    const argument = valued[index] ?? "";
+    if (!argument.startsWith("--")) continue;
+    const equals = argument.indexOf("=");
+    if (equals === -1) {
+      const next = valued[index + 1];
+      if (next === undefined || next.startsWith("--")) {
+        throw new Error(`${argument} needs a value.`);
+      }
+      values.set(argument.slice(2), next);
+      index += 1;
+    } else {
+      values.set(argument.slice(2, equals), argument.slice(equals + 1));
+    }
+  }
+  return values;
+}
+
+function requiredFlag(values: ReadonlyMap<string, string>): (name: string) => string {
+  return (name) => {
+    const value = values.get(name);
+    if (value === undefined || value === "") throw new Error(`--${name} is required.`);
+    return value;
+  };
+}
+
 /**
- * `--print-feed-path --ring <ring> --platform <p> --arch <a> [--legacy-document]`:
- * the file name, under the ring's mailbox, that a feed is published as.
+ * `--print-feed-path --ring <ring> --platform <p> --arch <a> [--legacy-document]`,
+ * or `--print-feed-path --headless --ring <ring> --target <target>`: the file
+ * name, under the ring's mailbox, that a feed is published as.
  */
 export function printedFeedPath(argv: ReadonlyArray<string>): string {
   const value = (name: string): string => {
@@ -358,6 +458,11 @@ export function printedFeedPath(argv: ReadonlyArray<string>): string {
     }
     return found;
   };
+  if (argv.includes("--headless")) {
+    const ring = value("ring");
+    if (!isAppReleaseRing(ring)) throw new Error(`Unknown release ring ${ring}.`);
+    return headlessBuildFeedRelativePath({ ring, target: value("target") });
+  }
   const target = { ring: value("ring"), platform: value("platform"), arch: value("arch") };
   if (!isAppReleaseRing(target.ring)) throw new Error(`Unknown release ring ${target.ring}.`);
   if (!argv.includes("--legacy-document")) return updateFeedRelativePath(target);
@@ -383,6 +488,10 @@ async function main(argv: ReadonlyArray<string>): Promise<void> {
     // The workflows name the files they publish from here, so a feed cannot
     // land at a name the app does not read.
     console.log(printedFeedPath(argv));
+    return;
+  }
+  if (argv.includes("--headless")) {
+    await signHeadlessFeedFile(parseHeadlessFeedCommand(argv));
     return;
   }
   const dryRun = argv.includes("--dry-run");
@@ -442,6 +551,32 @@ async function main(argv: ReadonlyArray<string>): Promise<void> {
   await writeFile(command.out, `${JSON.stringify(feed, null, 2)}\n`, "utf8");
   console.log(`Signed ${release.ring} feed for ${release.version}: ${command.out}`);
   console.log(`Publish it at <base>/${published}`);
+}
+
+/**
+ * Sign the listing of one headless build: hashed from the signed tarball on
+ * disk, with the ring's own key, refused when the app does not trust that key
+ * for the ring. There is no dry run: the workflow signs headless builds only
+ * with the key present.
+ */
+async function signHeadlessFeedFile(command: HeadlessFeedCommand): Promise<void> {
+  const material = resolveFeedSigningMaterial(command.ring);
+  if (material.kind === "unsigned-refuse") throw new Error(material.reason);
+  const trust = refuseUntrustedSigningKey(material.privateKey, command.ring);
+  if (trust.kind === "refused") throw new Error(`Refusing to sign: ${trust.reason}`);
+  const release = buildHeadlessRelease({
+    version: command.version,
+    ring: command.ring,
+    target: command.target,
+    url: command.url,
+    sha256: sha256Hex(await readFile(command.artifact)),
+    releasedAt: command.releasedAt,
+  });
+  const feed = signHeadlessFeed(release, material.privateKey);
+  await mkdir(dirname(command.out), { recursive: true });
+  await writeFile(command.out, `${JSON.stringify(feed, null, 2)}\n`, "utf8");
+  console.log(`Signed ${release.ring} headless listing for ${release.version} ${release.target}.`);
+  console.log(`Publish it at <base>/${headlessBuildFeedRelativePath(release)}`);
 }
 
 if (import.meta.main) {

@@ -13,7 +13,11 @@ import type {
   ProviderResumeCursor,
   ProviderDriverKind,
 } from "@octant/contracts";
-import type { ProviderDriver, ProviderNativeSession } from "@octant/provider-sdk/driver";
+import type {
+  ProviderDriver,
+  ProviderNativeSession,
+  ProviderNativeSessionMessage,
+} from "@octant/provider-sdk/driver";
 import { Effect } from "effect";
 import { providerResumeBinding } from "./resumeBinding";
 
@@ -50,6 +54,135 @@ export interface AcpSessionPages {
  * advertised no `session/list`.
  */
 export type AcpSessionLister = (projectRoot: string) => Promise<AcpSessionPages | "unsupported">;
+
+/**
+ * The newest `session/update` payloads an agent replayed for one session
+ * while it loaded it, in order, and how many earlier messages the bound left
+ * out; `unsupported` when its `initialize` advertised no `loadSession`.
+ */
+export type AcpSessionHistoryReader = (
+  projectRoot: string,
+  sessionId: string,
+) => Promise<AcpReplayedHistory | "unsupported">;
+
+export interface AcpReplayedHistory {
+  readonly updates: ReadonlyArray<Readonly<Record<string, unknown>>>;
+  readonly omittedMessages: number;
+}
+
+/** The most imported replay updates a history read keeps; earlier ones are counted as omitted. */
+export const MAX_ACP_REPLAYED_UPDATES = 20_000;
+
+/** Which imported message an update adds to, as `acpReplayedMessages` joins them. */
+function replayedRole(update: Readonly<Record<string, unknown>>): "person" | "agent" | undefined {
+  const kind = update.sessionUpdate;
+  if (kind === "user_message_chunk" || kind === "agent_message_chunk")
+    return chunkText(update) === undefined
+      ? undefined
+      : kind === "user_message_chunk"
+        ? "person"
+        : "agent";
+  return kind === "tool_call" && toolTitle(update) !== undefined ? "agent" : undefined;
+}
+
+/**
+ * Collects a replay, keeping only its newest `limit` updates that
+ * `acpReplayedMessages` imports (text message chunks and named tool calls;
+ * every other update is dropped before it counts): the replay runs
+ * oldest first, and keeping its first updates dropped the newest
+ * conversation, which is the part a thread taken up from the session needs.
+ * Each evicted update is counted into the messages it belonged to, and a
+ * message whose earlier chunks were evicted is left out whole and counted
+ * with them rather than imported cut short.
+ */
+export function acpReplayCollector(limit: number = MAX_ACP_REPLAYED_UPDATES): {
+  readonly add: (update: Readonly<Record<string, unknown>>) => void;
+  readonly collected: () => AcpReplayedHistory;
+} {
+  const ring: Array<Readonly<Record<string, unknown>>> = [];
+  let start = 0;
+  let evictedMessages = 0;
+  let evictedRole: "person" | "agent" | undefined;
+  return {
+    add: (update) => {
+      // Thoughts, plans and tool progress are never imported; counting them
+      // let a tool-heavy session's replay push out its recent conversation.
+      if (replayedRole(update) === undefined) return;
+      if (ring.length < limit) {
+        ring.push(update);
+        return;
+      }
+      const evicted = ring[start];
+      ring[start] = update;
+      start = (start + 1) % limit;
+      const role = evicted === undefined ? undefined : replayedRole(evicted);
+      if (role !== undefined && role !== evictedRole) {
+        evictedMessages += 1;
+        evictedRole = role;
+      }
+    },
+    collected: () => {
+      const ordered = [...ring.slice(start), ...ring.slice(0, start)];
+      if (evictedRole === undefined) return { updates: ordered, omittedMessages: 0 };
+      const first = ordered.findIndex((update) => {
+        const role = replayedRole(update);
+        return role !== undefined && role !== evictedRole;
+      });
+      return {
+        updates: first === -1 ? [] : ordered.slice(first),
+        omittedMessages: evictedMessages,
+      };
+    },
+  };
+}
+
+function chunkText(update: Readonly<Record<string, unknown>>): string | undefined {
+  const content = record(update.content);
+  return content?.type === "text" && typeof content.text === "string" ? content.text : undefined;
+}
+
+function toolTitle(update: Readonly<Record<string, unknown>>): string | undefined {
+  return typeof update.title === "string" && update.title.trim().length > 0
+    ? update.title
+    : typeof update.kind === "string"
+      ? update.kind
+      : undefined;
+}
+
+/**
+ * A `session/load` replay as imported messages: runs of `user_message_chunk`
+ * and of `agent_message_chunk` each make one message, and each `tool_call`
+ * is named on the agent message it falls in (by its title, else its kind).
+ * Thoughts, plans, tool-call updates and every other update are left out.
+ */
+export function acpReplayedMessages(
+  updates: ReadonlyArray<Readonly<Record<string, unknown>>>,
+): ReadonlyArray<ProviderNativeSessionMessage> {
+  const messages: Array<{ role: "person" | "agent"; text: string; tools: string[] }> = [];
+  const current = (role: "person" | "agent") => {
+    const last = messages.at(-1);
+    if (last !== undefined && last.role === role) return last;
+    const next = { role, text: "", tools: [] };
+    messages.push(next);
+    return next;
+  };
+  for (const update of updates) {
+    const kind = update.sessionUpdate;
+    if (kind === "user_message_chunk" || kind === "agent_message_chunk") {
+      const text = chunkText(update);
+      if (text !== undefined)
+        current(kind === "user_message_chunk" ? "person" : "agent").text += text;
+    } else if (kind === "tool_call") {
+      const title = toolTitle(update);
+      if (title !== undefined) current("agent").tools.push(title);
+    }
+  }
+  return messages.map((message) => ({
+    role: message.role,
+    text: message.text,
+    ...(message.tools.length === 0 ? {} : { tools: message.tools }),
+  }));
+}
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
   return { category, message };
@@ -128,6 +261,8 @@ export function makeAcpNativeSessions(options: {
   /** The agent sessions the host's journal records an Octant thread holding. */
   readonly heldSessions: () => ReadonlySet<string>;
   readonly listSessions: AcpSessionLister;
+  /** Reads a session's replay; absent, the agent's sessions import no history. */
+  readonly readHistory?: AcpSessionHistoryReader;
 }): NonNullable<ProviderDriver["nativeSessions"]> {
   const name = options.displayName;
   // Agent session id -> the Octant session that claimed it, until the host
@@ -222,6 +357,35 @@ export function makeAcpNativeSessions(options: {
         },
         catch: (error) => asFailure(error, `The ${name} session could not be taken up.`),
       }),
+    ...(options.readHistory === undefined
+      ? {}
+      : {
+          history: (input: {
+            readonly instanceId: ProviderInstanceId;
+            readonly projectRoot: string;
+            readonly nativeSessionId: string;
+          }) => {
+            const readHistory = options.readHistory;
+            return wrongInstance(input.instanceId) || readHistory === undefined
+              ? Effect.fail(
+                  failure("invalid-configuration", "Provider instance does not match driver."),
+                )
+              : Effect.tryPromise({
+                  try: async () => {
+                    const replayed = await readHistory(input.projectRoot, input.nativeSessionId);
+                    if (replayed === "unsupported") return { status: "unsupported" as const };
+                    return {
+                      status: "read" as const,
+                      messages: acpReplayedMessages(replayed.updates),
+                      ...(replayed.omittedMessages > 0
+                        ? { omitted: replayed.omittedMessages }
+                        : {}),
+                    };
+                  },
+                  catch: (error) => asFailure(error, `${name}'s session could not be read.`),
+                });
+          },
+        }),
     release: (input) =>
       wrongInstance(input.instanceId)
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))

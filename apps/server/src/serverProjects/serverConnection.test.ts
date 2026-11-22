@@ -141,6 +141,45 @@ describe("a server connection's arguments", () => {
       ),
     ).toBe(false);
   });
+
+  it.skipIf(spawnSync("ssh", ["-V"]).status !== 0)(
+    "signs in to the destination with the kept agent over the person's config, leaving the jump host on their own agent",
+    () => {
+      const scratch = mkdtempSync(join(tmpdir(), "octant-kept-ssh-"));
+      try {
+        const config = join(scratch, "config");
+        writeFileSync(
+          config,
+          [
+            "Host web1",
+            "  HostName 10.0.0.5",
+            "  IdentityAgent /home/me/personal.sock",
+            "  IdentitiesOnly yes",
+            "  ProxyJump jump",
+            "Host jump",
+            "  IdentityAgent /home/me/personal.sock",
+            "",
+          ].join("\n"),
+        );
+        const args = serverSshArguments({ alias: "web1", user: "deploy" }, "true", {
+          terminal: false,
+          configFile: config,
+          identityAgent: "/tmp/octant-key-1/agent",
+        });
+        const destination = spawnSync("ssh", ["-G", ...args], { encoding: "utf8" }).stdout;
+        expect(destination).toContain("identityagent /tmp/octant-key-1/agent\n");
+        expect(destination).toContain("identitiesonly no\n");
+        expect(destination).toContain("hostname 10.0.0.5\n");
+        expect(destination).toContain("proxyjump jump\n");
+        // OpenSSH starts the ProxyJump hop as `ssh -F <config> ... jump` with
+        // none of the destination's `-o` options, so the hop reads this.
+        const jump = spawnSync("ssh", ["-G", "-F", config, "jump"], { encoding: "utf8" }).stdout;
+        expect(jump).toContain("identityagent /home/me/personal.sock\n");
+      } finally {
+        rmSync(scratch, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 it.skipIf(process.platform === "win32")(

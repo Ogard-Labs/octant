@@ -102,6 +102,11 @@ const ThreadSearchHitFields = {
   canvasTitle: Schema.optional(Schema.NonEmptyTrimmedString),
   /** When the thread last changed, so a client can order or label hits. */
   updatedAt: Schema.String,
+  /**
+   * The match is in the earlier conversation of a provider session the thread
+   * was started from, imported when it was adopted, not in one of its turns.
+   */
+  imported: Schema.optional(Schema.Literal(true)),
 };
 
 export const ChatThreadSearchHit = Schema.Struct({

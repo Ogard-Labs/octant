@@ -7,17 +7,6 @@ import {
 } from "@octant/contracts/extension-rpc";
 
 /**
- * Waiting MCP tool prompts. Each one keeps the call's input text until it is
- * answered or withdrawn (its turn stops, its thread is archived, its window
- * goes away) and never lapses by itself, so this cap is the only bound on a
- * turn that calls tools in a loop. The cap is host-wide: every thread and
- * window shares this one waiting set, as the browser tool-approval service's
- * cap of 32 already does, so one busy thread can use slots another thread
- * would otherwise get. A call past it is denied at once and is not stored.
- */
-export const MAX_PENDING_APPROVALS = 32;
-
-/**
  * Who is answering: a person at a local window, or a paired device, each by
  * the service scope its authenticated principal resolved to.
  */
@@ -41,6 +30,15 @@ interface PendingApproval {
   readonly onAbort?: () => void;
 }
 
+/**
+ * Waiting MCP tool prompts. Each one keeps the call's input text until it is
+ * answered or withdrawn (its turn stops, its thread is archived, its window
+ * goes away) and never lapses by itself. There is no host-wide count: a call
+ * waits for its answer before its turn can make the next one, so the set is
+ * bounded by the turns running, and a fixed cap of 32 only refused the
+ * thirty-third prompt of a host whose routines waited overnight
+ * (maintainer decision, 2026-11-21).
+ */
 export class ExtensionToolApprovalService {
   readonly #pending = new Map<string, PendingApproval>();
 
@@ -122,7 +120,6 @@ export class ExtensionToolApprovalService {
     readonly signal?: AbortSignal;
   }): Promise<boolean> {
     if (input.signal?.aborted) return Promise.resolve(false);
-    if (this.#pending.size >= MAX_PENDING_APPROVALS) return Promise.resolve(false);
     const approvalId = this.options.uuid();
     const requestedAt = this.options.now();
     const view = decodeExtensionToolApproval({

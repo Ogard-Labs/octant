@@ -1651,6 +1651,51 @@ describe("WorkThreadWorkspace", () => {
     );
   });
 
+  it("takes a secret question's answer in a masked field and sends it beside a secret resolution", async () => {
+    const user = userEvent.setup();
+    const requestClient = {
+      list: vi.fn(async () => ({
+        requests: [
+          {
+            requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccd",
+            projectId: "20000000-0000-4000-8000-000000000101",
+            threadId,
+            status: "pending",
+            detail: {
+              kind: "user-input",
+              prompt: "Database credential?",
+              options: [],
+              secret: true,
+            },
+            version: 1,
+          },
+        ],
+      })),
+      execute: vi.fn(async () => ({ kind: "work-request-resolved" })),
+    };
+    render(
+      <WorkThreadWorkspace
+        requestClient={requestClient as never}
+        threadClient={
+          { bootstrap: vi.fn(async () => ({ threads: [workThread()] })), execute: vi.fn() } as never
+        }
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    const field = await screen.findByLabelText("Your secret answer");
+    expect(field).toHaveAttribute("type", "password");
+    await user.type(field, "hunter2");
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    expect(requestClient.execute).toHaveBeenCalledExactlyOnceWith({
+      kind: "resolve-work-request",
+      requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccd",
+      expectedVersion: 1,
+      resolution: { kind: "user-input", secret: true },
+      secretAnswer: "hunter2",
+    });
+  });
+
   it("shows why the host refused an answer instead of a lost delivery", async () => {
     const user = userEvent.setup();
     const questionnaire = {

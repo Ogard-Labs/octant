@@ -1,5 +1,7 @@
 import { decodeHostAnswer } from "@octant/contracts";
 import {
+  type MemberInstallCommand,
+  MemberInstallResult,
   type ShieldServersCommand,
   ShieldServersCommandResult,
   ShieldServersView,
@@ -9,8 +11,8 @@ import { bindFetchPort } from "./bindFetchPort";
 /**
  * Settings › Servers: the servers a person registered with Octant Shield, a
  * Project's own list when one is asked about, and whether their SSH agent is
- * there to use. A refused change is a value the
- * caller shows; only a transport failure throws.
+ * there to use, and making one of them an Octant computer. A refused change
+ * is a value the caller shows; only a transport failure throws.
  */
 
 export interface ShieldServersClientOptions {
@@ -22,6 +24,7 @@ export interface ShieldServersClientOptions {
 export interface ShieldServersClient {
   read(projectId?: string, signal?: AbortSignal): Promise<ShieldServersView>;
   command(command: ShieldServersCommand, signal?: AbortSignal): Promise<ShieldServersCommandResult>;
+  memberInstall(command: MemberInstallCommand, signal?: AbortSignal): Promise<MemberInstallResult>;
 }
 
 export class ShieldServersClientFailure extends Error {
@@ -34,6 +37,7 @@ export class ShieldServersClientFailure extends Error {
 }
 
 const PATH = "/api/shield/servers";
+const MEMBER_INSTALL_PATH = "/api/shield/servers/member-install";
 
 export function createShieldServersClient(
   options: ShieldServersClientOptions,
@@ -66,7 +70,8 @@ export function createShieldServersClient(
     const refusal =
       typeof body === "object" &&
       body !== null &&
-      (body as { kind?: unknown }).kind === "shield-servers-refused";
+      ((body as { kind?: unknown }).kind === "shield-servers-refused" ||
+        (body as { kind?: unknown }).kind === "member-install-refused");
     if (!response.ok && !refusal) {
       const message =
         typeof (body as { error?: unknown } | null)?.error === "string"
@@ -87,6 +92,15 @@ export function createShieldServersClient(
     async command(command, signal) {
       return decodeHostAnswer(ShieldServersCommandResult)(
         await send(url(undefined), {
+          method: "POST",
+          body: JSON.stringify(command),
+          ...(signal === undefined ? {} : { signal }),
+        }),
+      );
+    },
+    async memberInstall(command, signal) {
+      return decodeHostAnswer(MemberInstallResult)(
+        await send(new URL(MEMBER_INSTALL_PATH, options.baseUrl).toString(), {
           method: "POST",
           body: JSON.stringify(command),
           ...(signal === undefined ? {} : { signal }),

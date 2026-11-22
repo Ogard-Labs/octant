@@ -2,12 +2,14 @@
 
 This topic specification owns the patterns that make the native harness refuse
 a `web-search` query on a tainted thread. Architecture owns the rule itself:
-on a tainted thread the tool-call policy refuses a query that looks like it
-carries data, before any request leaves, with a named reason
+under Strict, on a tainted thread the tool-call policy refuses a query that
+looks like it carries data, before any request leaves, with a named reason
 ([Architecture: native harness](../architecture.md#native-harness)). The rule
 follows the [guardrail level](../architecture.md#security-and-authority): it
 refuses at Guarded and Reviewed, and at Full access only records the mark,
-never prompting or blocking.
+never prompting or blocking. Outside Strict no query is refused for these
+patterns: it goes to the endpoint the person configured and the thread keeps
+its mark (maintainer decision, 2026-11-21).
 
 The rule applies to every `web-search` call the harness's tool-call policy
 decides: a harness thread's in Work and Code, and a harness Chat thread's

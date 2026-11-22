@@ -189,6 +189,8 @@ export interface CodeTurnEvent {
   /** The labels a provider question offers; absent on every other category. */
   readonly options?: ReadonlyArray<string>;
   readonly questionnaire?: Questionnaire;
+  /** The question asks for a secret, answered masked and never recorded; only on `question`. */
+  readonly secret?: true;
   /** The ids a restated plan still lists, in order; only on `task-list`. */
   readonly taskIds?: ReadonlyArray<string>;
   readonly toolCallId?: string;
@@ -221,6 +223,7 @@ export interface CodeTurnEvent {
   readonly inputTokens?: number;
   readonly cacheReadInputTokens?: number;
   readonly cacheWriteInputTokens?: number;
+  readonly reasoningTokens?: number;
 
   readonly outputTokens?: number;
   readonly costUsd?: number;
@@ -1067,6 +1070,7 @@ export class CodeTurnRunner {
           }
         }),
       });
+      input.liveTurn?.promptSent();
 
       const awaitCollection = Fiber.join(collected).pipe(
         Effect.catchAll((error) =>
@@ -1344,6 +1348,7 @@ function normalizeProviderEvent(
         text: text(event.prompt),
         options: event.options.map((option) => text(option.label)),
         ...(event.questionnaire === undefined ? {} : { questionnaire: event.questionnaire }),
+        ...(event.secret === true ? { secret: true } : {}),
       });
     case "tool-request":
       return Effect.succeed({
@@ -1405,6 +1410,7 @@ function normalizeProviderEvent(
         ...(event.cacheWriteInputTokens === undefined
           ? {}
           : { cacheWriteInputTokens: event.cacheWriteInputTokens }),
+        ...(event.reasoningTokens === undefined ? {} : { reasoningTokens: event.reasoningTokens }),
 
         ...(event.contextWindow === undefined ? {} : { contextWindow: event.contextWindow }),
         ...(event.contextTokens === undefined ? {} : { contextTokens: event.contextTokens }),

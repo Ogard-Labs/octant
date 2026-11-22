@@ -1162,7 +1162,12 @@ describe("Codex driver probe and runtime lifecycle", () => {
                   : "externalSandbox"
                 : "workspaceWrite",
           },
-          approvalPolicy: executionPolicy === "plan" ? "never" : "untrusted",
+          approvalPolicy:
+            executionPolicy === "plan"
+              ? "never"
+              : executionPolicy === "auto-accept-edits"
+                ? "on-request"
+                : "untrusted",
         });
       } finally {
         await acquired.close();
@@ -3621,14 +3626,17 @@ describe("Codex execution authority and approvals", () => {
           turn: f.calls.find(({ method }) => method === "turn/start")?.input,
         };
       };
+      // Outside Strict Accept edits lets Codex decide when to ask, as its own
+      // CLI does; Ask first keeps asking for every command it does not know.
+      const openApprovals = policy === "auto-accept-edits" ? "on-request" : "untrusted";
       const open = await turnFor(false);
       expect(open.authority).toMatchObject({ kind: "thread", strict: false });
       expect(open.thread).toMatchObject({
         sandbox: "workspace-write",
-        approvalPolicy: "untrusted",
+        approvalPolicy: openApprovals,
       });
       expect(open.turn).toMatchObject({
-        approvalPolicy: "untrusted",
+        approvalPolicy: openApprovals,
         sandboxPolicy: {
           type: "workspaceWrite",
           writableRoots: [projectRoot, extra],
@@ -3640,8 +3648,11 @@ describe("Codex execution authority and approvals", () => {
       for (const strict of [true, undefined]) {
         const held = await turnFor(strict);
         expect(held.authority).not.toHaveProperty("strict");
-        expect(held.thread).toMatchObject({ sandbox: "read-only" });
+        // Under Octant's external sandbox `on-request` would run every command
+        // unasked, so both levels keep `untrusted` there.
+        expect(held.thread).toMatchObject({ sandbox: "read-only", approvalPolicy: "untrusted" });
         expect(held.turn).toMatchObject({
+          approvalPolicy: "untrusted",
           sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },
         });
       }
@@ -3661,6 +3672,72 @@ describe("Codex execution authority and approvals", () => {
     expect(
       codexRunsNativeSandbox({ mode: "work", executionPolicy: "full-access", strict: false }),
     ).toBe(false);
+  });
+
+  it("uses a fresh confined process per session and externalSandbox with never approvals for Windows Strict at Full access", async () => {
+    const f = fixture();
+    const driver = makeCodexDriver({ ...f.options(), platform: "win32" });
+    const first = await acquireConnection(driver, "code");
+    await Effect.runPromise(
+      first.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+        strict: true,
+      }),
+    );
+    await Effect.runPromise(
+      first.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
+    );
+    await first.close();
+
+    const second = await acquireConnection(driver, "code");
+    await Effect.runPromise(
+      second.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+        strict: true,
+      }),
+    );
+    await second.close();
+
+    expect(f.authorities()).toHaveLength(2);
+    expect(f.authorities()[0]).toMatchObject({
+      kind: "thread",
+      executionPolicy: "full-access",
+      strict: true,
+    });
+    expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
+      sandbox: "read-only",
+      approvalPolicy: "never",
+    });
+    expect(f.calls.find(({ method }) => method === "turn/start")?.input).toMatchObject({
+      approvalPolicy: "never",
+      sandboxPolicy: { type: "externalSandbox" },
+    });
+  });
+
+  it("runs Codex's own sandbox for Work and Code outside Strict and keeps Octant's profile under Strict or a chosen sandbox", () => {
+    for (const mode of ["work", "code"] as const) {
+      for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
+        expect(codexRunsNativeSandbox({ mode, executionPolicy, strict: false })).toBe(true);
+        expect(codexRunsNativeSandbox({ mode, executionPolicy, strict: true })).toBe(false);
+        // A caller that never resolved Strict keeps Octant's profile.
+        expect(codexRunsNativeSandbox({ mode, executionPolicy })).toBe(false);
+        expect(
+          codexRunsNativeSandbox({
+            mode,
+            executionPolicy,
+            strict: false,
+            sandboxPolicySelected: true,
+          }),
+        ).toBe(false);
+        expect(
+          codexRunsNativeSandbox({ mode, executionPolicy, strict: false, fullAccessSandbox: true }),
+        ).toBe(false);
+      }
+    }
   });
 
   it("runs Reviewed's escalation past Codex's reviewer in its own sandbox outside Strict", () => {
@@ -4769,6 +4846,112 @@ describe("Codex execution authority and approvals", () => {
     await acquired.close();
   });
 
+  it("asks a secret question outside Strict, on every surface and for a subagent, as a masked question and hands Codex the typed answer", async () => {
+    const userInput = (id: string, questions: ReadonlyArray<object>): CodexServerMessage =>
+      ({
+        kind: "request",
+        id,
+        method: "item/tool/requestUserInput",
+        params: { threadId: "thread-1", turnId: "turn-1", itemId: `item-${id}`, questions },
+      }) as CodexServerMessage;
+    const secretSet = [
+      { id: "pw", header: "Database", question: "Database credential?", isSecret: true },
+      { id: "host", header: "Host", question: "Which host?", options: null },
+    ];
+    const open = async (
+      mode: "code" | "work" | "chat",
+      posture: { readonly strict?: boolean; readonly asksSecretQuestions?: true },
+    ) => {
+      const f = fixture();
+      let request = 0;
+      const acquired = await acquireConnection(
+        makeCodexDriver(f.options({ requestId: () => `request-${++request}` })),
+        mode,
+      );
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId: "gpt-5.4" as never,
+          executionPolicy: "plan",
+          ...posture,
+        }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "plan it", attachments: [], tools: [] }),
+      );
+      return { f, acquired };
+    };
+
+    // A Code, Work or Chat thread outside Strict, and a subagent whose
+    // surface says its parent is outside Strict, all ask it.
+    for (const [mode, posture] of [
+      ["code", { strict: false }],
+      ["work", { strict: false }],
+      ["chat", { strict: false }],
+      ["work", { asksSecretQuestions: true }],
+    ] as const) {
+      const { f, acquired } = await open(mode, posture);
+      const asked = takeEvents(acquired.connection, 2);
+      f.emit(userInput("ask-secret", secretSet));
+      const events = await asked;
+      expect(events).toMatchObject([
+        { kind: "user-input-request", prompt: "Database credential?", secret: true },
+        { kind: "user-input-request", prompt: "Which host?" },
+      ]);
+      expect(events[1]).not.toHaveProperty("secret");
+      for (const [event, answer] of [
+        [events[0], "hunter2-sentinel"],
+        [events[1], "db.internal"],
+      ] as const) {
+        if (event?.kind !== "user-input-request") throw new Error("Codex asked a question.");
+        await Effect.runPromise(
+          acquired.connection.answerUserInput({ sessionId, requestId: event.requestId, answer }),
+        );
+      }
+      expect(f.calls.filter((call) => call.method === "approval/respond")).toEqual([
+        {
+          method: "approval/respond",
+          input: {
+            providerRequestId: "ask-secret",
+            result: {
+              answers: {
+                pw: { answers: ["hunter2-sentinel"] },
+                host: { answers: ["db.internal"] },
+              },
+            },
+          },
+        },
+      ]);
+      await acquired.close();
+    }
+
+    // Strict refuses the set unseen, whatever the surface says, and so does a
+    // session whose surface never said it keeps the answer out of its record.
+    for (const [mode, posture] of [
+      ["code", { strict: true }],
+      ["chat", { strict: true, asksSecretQuestions: true }],
+      ["work", {}],
+    ] as const) {
+      const held = await open(mode, posture);
+      held.f.emit(userInput("ask-held", secretSet));
+      await vi.waitFor(() =>
+        expect(held.f.calls.at(-1)).toEqual({
+          method: "approval/respond",
+          input: {
+            providerRequestId: "ask-held",
+            result: {
+              answers: {
+                pw: { answers: [SECRET_QUESTION_REFUSAL] },
+                host: { answers: [SECRET_QUESTION_REFUSAL] },
+              },
+            },
+          },
+        }),
+      );
+      await held.acquired.close();
+    }
+  });
+
   it("runs a Plan session in Codex's own Plan mode and returns a thread that recorded it to the default mode", async () => {
     const plan = fixture();
     const planned = await acquireConnection(makeCodexDriver(plan.options()));
@@ -5235,14 +5418,17 @@ describe("Codex running as itself", () => {
     expect(codexAppServerArgs("0.164.0")).toContain("agents.enabled=false");
   });
 
-  it("leases a process that keeps Codex's memories only for a Work or Code session outside Plan on an account whose person turned them on", async () => {
-    for (const [mode, executionPolicy, ownMemory, keeps] of [
-      ["code", "approval-gated", true, true],
-      ["work", "full-access", true, true],
-      ["code", "plan", true, false],
-      ["chat", "approval-gated", true, false],
+  it("leases a process that keeps Codex's memories on an account whose person turned them on, in Plan and Chat only outside Strict", async () => {
+    for (const [mode, executionPolicy, ownMemory, strict, keeps] of [
+      ["code", "approval-gated", true, true, true],
+      ["work", "full-access", true, true, true],
+      ["code", "plan", true, true, false],
+      ["chat", "approval-gated", true, true, false],
+      ["code", "plan", true, false, true],
+      ["chat", "approval-gated", true, false, true],
       // Full access and running as itself never turn the account's memory on.
-      ["code", "full-access", false, false],
+      ["code", "full-access", false, true, false],
+      ["code", "plan", false, false, false],
     ] as const) {
       const f = fixture();
       const acquired = await acquireConnection(
@@ -5255,10 +5441,11 @@ describe("Codex running as itself", () => {
           modelId: "gpt-5.4" as never,
           executionPolicy,
           nativeSetup: ownSetup,
+          ...(strict ? {} : { strict: false }),
         }),
       );
       const authority = f.authorities()[0];
-      const label = `${mode} ${executionPolicy} ${String(ownMemory)}`;
+      const label = `${mode} ${executionPolicy} ${String(ownMemory)} strict=${String(strict)}`;
       if (keeps) expect(authority, label).toMatchObject({ ownMemory: true });
       else expect(authority, label).not.toHaveProperty("ownMemory");
       await acquired.close();

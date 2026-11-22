@@ -558,6 +558,25 @@ describe("Octant Shield's brakes", () => {
     state = nextShieldBrakeState(state, "braked");
     expect(shieldBrakeEngaged(state).engaged).toBe(true);
   });
+
+  it("pauses at the denial counts the person set in Settings instead of 3 and 20", () => {
+    const limits = { denialsInARow: 5, denialsPerThread: 7 };
+    let state = SHIELD_BRAKE_RELEASED;
+    for (let index = 0; index < 4; index += 1) state = nextShieldBrakeState(state, "deny");
+    expect(shieldBrakeEngaged(state, limits).engaged).toBe(false);
+    state = nextShieldBrakeState(state, "deny");
+    expect(shieldBrakeEngaged(state, limits)).toMatchObject({
+      engaged: true,
+      reason: "Shield denied 5 calls in a row, so the person decides this one.",
+    });
+    state = nextShieldBrakeState(nextShieldBrakeState(state, "braked"), "deny");
+    expect(shieldBrakeEngaged(state, limits).engaged).toBe(false);
+    state = nextShieldBrakeState(state, "deny");
+    expect(shieldBrakeEngaged(state, limits)).toMatchObject({
+      engaged: true,
+      reason: "Shield denied 7 calls in this thread, so the person decides from here.",
+    });
+  });
 });
 
 describe("Octant Shield's model choice", () => {

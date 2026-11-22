@@ -29,6 +29,27 @@ describe("Octant's own limits in Settings", () => {
     ).toBeTruthy();
   });
 
+  it("changes Shield's brakes, a follow-up's lateness and a shown command's time from their defaults", async () => {
+    const onSettingsChange = vi.fn();
+    render(
+      <OctantLimitsSettings
+        focusedSetting={undefined}
+        onSettingsChange={onSettingsChange}
+        settings={defaultShellSettings()}
+      />,
+    );
+    const steps: ReadonlyArray<readonly [string, Record<string, number>]> = [
+      ["Denials in a row before you decide", { shieldDenialsInARow: 4 }],
+      ["Denials per thread before you decide", { shieldDenialsPerThread: 21 }],
+      ["Latest a follow-up still runs, in hours", { followUpLatenessLimitHours: 25 }],
+      ["Time to run a shown provider command, in minutes", { toolingCommandConfirmMinutes: 11 }],
+    ];
+    for (const [label, patch] of steps) {
+      await userEvent.click(screen.getByRole("button", { name: `Increase ${label}` }));
+      expect(onSettingsChange).toHaveBeenLastCalledWith(patch);
+    }
+  });
+
   it("shows the Strict-only messaging and Browser wait limits at their defaults and emits updated values", async () => {
     const onSettingsChange = vi.fn();
     render(

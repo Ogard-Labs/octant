@@ -1112,6 +1112,55 @@ describe("ChatTranscript", () => {
     });
   });
 
+  it("takes a secret question's answer in a masked field and says the answer was given without showing it", async () => {
+    const onAnswerQuestion = vi.fn();
+    const user = userEvent.setup();
+    const attempt = viewFixture().turns[0]!.attempts[1]!;
+    const view = viewFixture({
+      turns: [
+        {
+          ...viewFixture().turns[0]!,
+          attempts: [
+            {
+              ...attempt,
+              outcome: "waiting",
+              answeredQuestions: [
+                {
+                  requestId: "q0",
+                  prompt: "Earlier credential?",
+                  options: [],
+                  secret: true,
+                  answeredAt: attempt.updatedAt,
+                },
+              ],
+              pendingQuestion: {
+                requestId: "q1",
+                prompt: "Database credential?",
+                options: [],
+                secret: true,
+              },
+            },
+          ],
+        },
+      ],
+    });
+    render(<ChatTranscript onAnswerQuestion={onAnswerQuestion} view={view} />);
+    expect(screen.getByLabelText("Answered question")).toHaveTextContent(
+      "Answered with a secret, which Octant did not keep",
+    );
+    const field = screen.getByLabelText("Your secret answer");
+    expect(field).toHaveAttribute("type", "password");
+    await user.type(field, "hunter2");
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+    expect(onAnswerQuestion).toHaveBeenCalledWith({
+      turnId: ids.turn,
+      attemptId: ids.secondAttempt,
+      requestId: "q1",
+      answer: "hunter2",
+      secret: true,
+    });
+  });
+
   it("submits the final question of a set and offers typed text when no option fits", async () => {
     const onAnswerQuestion = vi.fn();
     const user = userEvent.setup();

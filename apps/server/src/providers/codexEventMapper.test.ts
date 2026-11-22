@@ -2128,6 +2128,44 @@ describe("mapCodexMessage", () => {
     ]);
   });
 
+  it("ignores a usage report that lands after the turn ended instead of failing the turn", () => {
+    const ctx = context();
+    map(
+      ctx,
+      notification("turn/completed", {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed" },
+      }),
+    );
+    const late = (turnId: string) =>
+      map(
+        ctx,
+        notification("thread/tokenUsage/updated", {
+          threadId: "thread-1",
+          turnId,
+          tokenUsage: {
+            total: {
+              totalTokens: 30,
+              inputTokens: 20,
+              cachedInputTokens: 0,
+              outputTokens: 10,
+              reasoningOutputTokens: 0,
+            },
+            last: {
+              totalTokens: 30,
+              inputTokens: 20,
+              cachedInputTokens: 0,
+              outputTokens: 10,
+              reasoningOutputTokens: 0,
+            },
+            modelContextWindow: null,
+          },
+        }),
+      );
+    expect(late("turn-1")).toEqual([{ kind: "ignored" }]);
+    expect(late("turn-2")).toEqual([{ kind: "ignored" }]);
+  });
+
   it("ignores unrelated unknown notifications but fails an unknown required transition", () => {
     expect(map(context(), { kind: "unknown-notification", method: "account/updated" })).toEqual([
       { kind: "ignored" },

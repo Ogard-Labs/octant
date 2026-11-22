@@ -28,7 +28,10 @@ import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { SpendCeilingService } from "../spendCeilingService";
 import { GeneratedImageStore } from "./generatedImageStore";
-import { ImageGenerationOfferService, type ImageOfferAnswer } from "./imageGenerationOfferService";
+import { ImageGenerationOfferService } from "./imageGenerationOfferService";
+import type { ServiceOfferAnswer } from "../offers/serviceOfferDecision";
+import { transcriptionDecision } from "../speech/transcriptionTool";
+import { decodeTranscriptionOffer } from "@octant/contracts";
 import { createImageRouteHandler } from "./imageRoutes";
 import { ImageJobService } from "./imageJobService";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
@@ -98,7 +101,7 @@ function setup(
   }));
   const authorizeScope = vi.fn(async () => options.authorized !== false);
   let uuid = 0;
-  const serviceOffers = new ServiceOfferService<ServiceOffer, ImageOfferAnswer>(
+  const serviceOffers = new ServiceOfferService<ServiceOffer, ServiceOfferAnswer>(
     MAX_PENDING_IMAGE_GENERATION_OFFERS,
     {
       uuid: () => `b3000000-0000-4000-8000-${String(++uuid).padStart(12, "0")}`,
@@ -116,10 +119,13 @@ function setup(
   const offerRoute = createServiceOfferRouteHandler({
     offers: serviceOffers,
     listImageProfiles: () => listEligibleImageProfiles(imageProfiles.listInstances()),
-    rules: imageOfferDecisionRules({
-      ...imageProfiles,
-      kept: { remember },
-    }),
+    rules: {
+      transcribe: transcriptionDecision,
+      ...imageOfferDecisionRules({
+        ...imageProfiles,
+        kept: { remember },
+      }),
+    },
     authorizeScope,
     windowAuthorityStore,
     now: () => nowMs,
@@ -394,6 +400,110 @@ describe("image routes", () => {
       await expect(outcome).resolves.toEqual({ status: "cancelled" });
       const legacy = await handler(request("/api/image/offers/decide", { method: "POST", body }));
       expect(await legacy?.json()).toMatchObject({ kind: "image-offer-gone" });
+    });
+
+    it("shows a recording only to clients with its disclosure and permits one matching answer", async () => {
+      const { handler, serviceOffers } = setup();
+      const pending = serviceOffers.wait({
+        windowId: decodeWindowId(windowId),
+        stamp: (offerId, requestedAt) =>
+          decodeTranscriptionOffer({
+            kind: "transcribe",
+            threadKind: "code-thread",
+            scopeId,
+            offerId,
+            requestedAt,
+            relativePath: "audio.m4a",
+            sizeBytes: 123,
+            endpointName: "Studio",
+            modelId: "voice",
+          }),
+      });
+      const query = `threadKind=code-thread&scopeId=${scopeId}`;
+      for (const path of ["/api/image/offers?", "/api/offers?referenceImages=1&"]) {
+        const response = await handler(request(path + query));
+        expect(await response?.json()).toEqual({ offers: [] });
+      }
+      const [offer] = decodeServiceOffersResponse(
+        await (await handler(request("/api/offers?transcription=1&" + query)))?.json(),
+      ).offers;
+      expect(offer?.kind).toBe("transcribe");
+      const decide = async (body: object) =>
+        (
+          await handler(
+            request("/api/offers/decide", {
+              method: "POST",
+              body: { offerId: offer?.offerId, ...body },
+            }),
+          )
+        )?.json();
+      expect(await decide({ decision: "save" })).toMatchObject({ kind: "offer-refused" });
+      expect(await decide({ decision: "transcribe", rememberForThread: true })).toEqual({
+        kind: "offer-answered",
+      });
+      expect(await decide({ decision: "transcribe", rememberForThread: true })).toEqual({
+        kind: "offer-gone",
+      });
+      expect(await pending).toEqual({ status: "transcribe", rememberForThread: true });
+    });
+
+    it("shows reference offers only to current clients and requires disclosure and a compatible model", async () => {
+      const incompatibleId = decodeProviderInstanceId(attachmentId);
+      const incompatible = {
+        ...imageProfile(),
+        id: incompatibleId,
+        driverKind: "bfl-image",
+        configuration: {
+          kind: "bfl-image-http",
+          modelAllowlist: ["flux-pro" as never],
+          defaultModel: "flux-pro" as never,
+        },
+      } satisfies ProviderInstance;
+      const { handler, offers } = setup({ instances: [imageProfile(), incompatible] });
+      const references = [{ kind: "file", label: "art/logo.png" }] as const;
+      const outcome = offers.offer({
+        windowId: windowId as never,
+        offer: { ...offer, references },
+      });
+      const query = `threadKind=code-thread&scopeId=${scopeId}`;
+      expect(await listed(handler)).toEqual([]);
+      const oldClient = await handler(request(`/api/offers?${query}`));
+      expect(decodeServiceOffersResponse(await oldClient?.json()).offers).toEqual([]);
+      const currentClient = await handler(request(`/api/offers?${query}&referenceImages=1`));
+      const [waiting] = decodeServiceOffersResponse(await currentClient?.json()).offers;
+      expect(waiting).toMatchObject({ references });
+      const body = {
+        offerId: waiting?.offerId,
+        decision: "generate",
+        profileInstanceId: profileId,
+        modelId: "gpt-image-2",
+        rememberForThread: true,
+      };
+      const decide = (answer: Record<string, unknown>) =>
+        handler(request("/api/offers/decide", { method: "POST", body: answer }));
+      expect(await (await decide(body))?.json()).toMatchObject({
+        kind: "offer-refused",
+        reason: expect.stringContaining("shows which images"),
+      });
+      const disclosed = { ...body, referenceImagesConfirmed: true };
+      expect(
+        await (
+          await decide({
+            ...disclosed,
+            profileInstanceId: incompatibleId,
+            modelId: "flux-pro",
+          })
+        )?.json(),
+      ).toMatchObject({
+        kind: "offer-refused",
+        reason: expect.stringContaining("can't use reference images"),
+      });
+      expect(await (await decide(disclosed))?.json()).toEqual({ kind: "offer-answered" });
+      await expect(outcome).resolves.toMatchObject({
+        status: "generate",
+        profileInstanceId: profileId,
+      });
+      expect(offers.remembered(scope)).toBeUndefined();
     });
 
     it("lets a person-paired device answer only its own offer and rechecks access before claiming", async () => {
