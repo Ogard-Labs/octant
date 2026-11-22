@@ -12969,15 +12969,17 @@ that is not yet effective for the thread is refused and never reaches the model.
   trusted (next item). Who may answer: a local window or a device the host's
   own person paired, alike, for any prompt on a thread it may drive, with the
   same answers, remembering included (maintainer decision, 2026-11-12).
-  Built: such a device's answer to a prompt its own turn raised is kept as a
-  local window's is, journaled as the device. Not built yet: a device answers
-  no prompt but its own turns', so the three rules below still hold:
+  Built: such a device answers any prompt whose thread still stands in the
+  Project the prompt recorded, whichever window, device or host turn raised
+  it, and its answer is kept as a local window's is, journaled as the device.
+  The three rules below hold for a local window and for every other device
+  session (a device the hub introduced, an agent grant):
   - A local window answers its own turns' prompts, and any prompt raised by
     a host-owned turn or by a paired device's turn on a thread that window
     may drive (bound to the Project the prompt recorded; no window binding
     holds a Chat thread, so every local window may drive one while it is
     still active and in the Chat Project the prompt recorded, or in none).
-  - A paired device answers only the prompts its own turns raised, approve
+  - Such another device session answers only the prompts its own turns raised, approve
     once or deny, and only while the thread is still active and bound in
     that Project (a Chat thread: still active and in the same Chat Project,
     or still in none). It never sees or answers a local window's, another
