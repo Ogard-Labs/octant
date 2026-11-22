@@ -6488,7 +6488,11 @@ or .zip>` write the same files, built by one host command
   host serves is built with the host and is not affected. The host control
   wire has no protocol version to raise for this, and recording more waits
   for a person (below) adds no hold reason, so no client minimum moves with
-  it. Chat and Work turns are continued by the same
+  it. A Code approval that offers "Remember for this Project" sets its own
+  client minimum: the first release built with it, after
+  0.1.0-preview.20261122.11
+  ([Disposable desktops: artifact transfer](design/disposable-desktops.md#artifact-transfer)).
+  Chat and Work turns are continued by the same
   rule (Chat and Work restart recovery, below), and so are Work goal loops,
   subagent runs (subagent restart recovery, below) and pending coordinator
   wakes (coordinator wake restart recovery, below).

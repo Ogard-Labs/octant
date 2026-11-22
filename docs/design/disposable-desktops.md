@@ -911,6 +911,17 @@ Rules this slice resolved:
   there; outside Strict the mark adds no restriction to it
   ([Octant adds no restrictions of its own unless Strict is on](decisions.md#octant-adds-no-restrictions-of-its-own-unless-strict-is-on)).
   Plan, Full access, and the off-machine ask are unchanged.
+  The offer travels on the Code approval as `canRememberForProject`. A Code
+  approval is an ask a person decides on, which a client keeps reading
+  strictly ([principles](../architecture.md#overview-and-principles): "The
+  host reads strictly; a client ignores what it does not know"), so a phone
+  or CLI build that predates the field refuses a conversation window or
+  stream frame that holds such an ask, answered or not. The minimum compatible client is the first Octant
+  release built with this offer; a client of 0.1.0-preview.20261122.11 or
+  earlier cannot read a Code thread that has asked it. Carrying the offer
+  outside the ask was rejected: it qualifies what the person's answer
+  authorizes, which is exactly what the strict ask exists to keep whole. The
+  window a host serves is built with the host and is not affected.
 - **Where it lands.** The file is written whole beside the lease's `home` and
   `inbox`, made read-only (`0444`), and renamed into the inbox under its base
   name, so the desktop never sees a partial file and a later transfer under
