@@ -16571,7 +16571,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   can be recovered from the notice. Selecting a waiting service offer in the
   desktop menu bar opens its originating local window. If it is gone, no
   other window receives the request or the authority to answer.
-  The phone Inbox shows the action line on its thread; the phone's in-thread
+  The phone's Needs you shows the action line on its thread; the phone's in-thread
   card requires device confirmation before sending image generation or save.
   A memory or routine proposal and an image offer are still not raised by a
   turn the host runs with no person behind it (their owning sections refuse
@@ -16626,9 +16626,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
   parent it still owns), never by a window's Project binding, which a device
   scope does not have. Each new waiting ask is told to the paired phones through the
   existing sealed push path, as an approval-needed notification naming the
-  thread under that phone's settings and nothing of the ask; the phone app
-  itself shows the MCP prompt on its thread and has no list of the other
-  asks yet. Freshness rides the Machine change feed: a waiting ask starting or ending publishes `tool-approvals`, any harness question,
+  thread under that phone's settings and nothing of the ask. The phone app
+  lists every request and ask of this read in its Needs you, each row naming
+  the ask's kind and the host's one line and opening its thread, whose own
+  card answers it; it reads each item on its own, so a kind it cannot read is
+  listed as a generic row on the thread the item names and hides no other
+  row. Freshness rides the Machine change feed: a waiting ask starting or ending publishes `tool-approvals`, any harness question,
   the lead's own or a child's, asked or settled publishes `work-navigation` and
   `code-navigation` (a Chat lead's question is journaled on the attempt), and
   any harness approval, the
