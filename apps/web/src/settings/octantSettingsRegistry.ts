@@ -935,6 +935,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "background task command dev server watch monitor live tasks session kept after turn idle stop limit hours off",
         },
         {
+          id: settingId("provider-own-telemetry"),
+          label: "Let providers send their own telemetry",
+          scope: "host",
+          keywords:
+            "provider telemetry usage metrics error reports crash feedback bug upload analytics tracking vendor own settings strict privacy claude code kimi grok mistral vibe kilo antigravity pi",
+        },
+        {
+          id: settingId("provider-self-update"),
+          label: "Let providers update themselves",
+          scope: "host",
+          keywords:
+            "provider self-update self update auto update autoupdate updater update check upgrade new version cli strict claude code opencode kimi grok kilo antigravity fx pi",
+        },
+        {
           id: settingId("opencode-managed-update"),
           label: "OpenCode update",
           scope: "host",
@@ -1627,6 +1641,30 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "helper agent child subagent wait seconds limit timeout",
         },
         {
+          id: settingId("shield-denials-in-a-row"),
+          label: "Denials in a row before you decide",
+          scope: "host",
+          keywords: "octant shield denials brake pause reviewer auto in a row",
+        },
+        {
+          id: settingId("shield-denials-per-thread"),
+          label: "Denials per thread before you decide",
+          scope: "host",
+          keywords: "octant shield denials brake pause reviewer auto thread",
+        },
+        {
+          id: settingId("follow-up-lateness-limit"),
+          label: "Latest a follow-up still runs",
+          scope: "host",
+          keywords: "follow-up follow up late missed hours routine asleep",
+        },
+        {
+          id: settingId("tooling-command-confirm"),
+          label: "Time to run a shown provider command",
+          scope: "host",
+          keywords: "run this command once provider claude codex mcp plugin minutes expire",
+        },
+        {
           id: settingId("agent-routines-start-active"),
           label: "Start agent-created routines active at Full access",
           scope: "host",
@@ -2067,6 +2105,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "hub confirm new members alert owner devices status-only fingerprint remove dismiss",
+        },
+        {
+          id: settingId("hub-delegation-accepting"),
+          label: "Take delegated work from other members",
+          scope: "host",
+          keywords:
+            "hub delegated work delegation take accept stop pause other members requests running carries on",
         },
         {
           id: settingId("hub-push-sender"),

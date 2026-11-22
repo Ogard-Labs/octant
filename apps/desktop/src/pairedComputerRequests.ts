@@ -36,19 +36,24 @@ export const PAIRED_COMPUTER_REQUEST_LIMITS = {
 } as const;
 
 /**
- * What a window may ask a paired computer for, as exact method and path pairs
- * (the query is free): the host hello, pairing, and the session and
- * device-service routes the client runtime calls; the one dev-server grant
- * route; and the product calls the main window makes of a paired computer:
- * its resources, its running servers, Project drafts and threads, and the person's to-do list when that
- * computer keeps it (the to-do routes refuse any device but the person's
- * own). Anything else, including
- * the relay under `/api/server-proxy/<grant>/`, which the desktop's own
- * forwarder drives, is refused.
+ * What a window may ask a paired computer for, as exact method and path
+ * patterns. Query parameters are free except where a route requires them.
+ * Thread and evidence ids match only lowercase UUIDs. Code thread events are
+ * carried only with `wait=0`, because without it the host holds the read open
+ * past this channel's time limit. To-do routes refuse any device but the
+ * person's own. A member of this host's hub, pinned from the host's roster,
+ * may also be asked to admit the window as the guest the hub introduced; a
+ * computer paired directly is never sent that request. Anything else,
+ * including the relay under `/api/server-proxy/<grant>/`, which the desktop's
+ * own forwarder drives, is refused.
  */
 export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
   readonly method: "GET" | "POST" | "PUT" | "DELETE";
   readonly path: string;
+  /** Query parameters the request must carry with exactly these values. */
+  readonly requiredQuery?: Readonly<Record<string, string>>;
+  /** Sent only to a member of this host's hub, never to a computer paired directly. */
+  readonly hubMemberOnly?: true;
 }> = [
   { method: "GET", path: "/api/remote/hello" },
   { method: "POST", path: "/api/remote/pairing" },
@@ -64,13 +69,12 @@ export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
   { method: "POST", path: "/api/server-proxy/grants" },
   { method: "GET", path: "/api/host/resources" },
   { method: "POST", path: "/api/code/local-servers/commands" },
+  { method: "GET", path: "/api/todos" },
+  { method: "GET", path: "/api/todos/changes" },
+  { method: "POST", path: "/api/todos/commands" },
   ...[
-    "/api/projects/bootstrap",
-    "/api/providers/bootstrap",
     "/api/chat/bootstrap",
     "/api/chat/navigation",
-    "/api/code/bootstrap",
-    "/api/code/navigation",
     "/api/work/threads/bootstrap",
     "/api/work/navigation",
     "/api/reply-detail",
@@ -82,25 +86,69 @@ export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
   ].map((path) => ({ method: "GET" as const, path })),
   ...[
     "/api/chat/commands",
-    "/api/code/commands",
     "/api/work/threads/commands",
     "/api/work/turns",
-    "/api/extensions/tool-approvals",
     "/api/work/turns/cancel",
     "/api/work/turns/rewind",
     "/api/work/mutations",
     "/api/work/requests/commands",
-    "/api/code/evidence/batch",
   ].map((path) => ({ method: "POST" as const, path })),
   { method: "POST", path: "/api/chat/attachments" },
   { method: "PUT", path: "/api/code/attachments" },
   { method: "PUT", path: "/api/work/attachments" },
   { method: "DELETE", path: "/api/code/attachments" },
   { method: "DELETE", path: "/api/work/attachments" },
-  { method: "GET", path: "/api/todos" },
-  { method: "GET", path: "/api/todos/changes" },
-  { method: "POST", path: "/api/todos/commands" },
+  ...[
+    "/api/chat/threads/:id",
+    "/api/chat/threads/:id/window",
+    "/api/chat/threads/:id/events",
+    "/api/work/turns/transcript/:id",
+    "/api/work/turns/window/:id",
+    "/api/work/turns/stream/:id",
+    "/api/code/content/:id",
+    "/api/chat/attachments/:id",
+  ].map((path) => ({ method: "GET" as const, path })),
+  { method: "DELETE", path: "/api/chat/attachments/:id" },
+  { method: "GET", path: "/api/code/bootstrap" },
+  { method: "GET", path: "/api/code/navigation" },
+  { method: "GET", path: "/api/code/threads/:id" },
+  { method: "GET", path: "/api/code/threads/:id/conversation" },
+  { method: "GET", path: "/api/code/threads/:id/conversation/window" },
+  { method: "GET", path: "/api/code/threads/:id/follow-up" },
+  { method: "POST", path: "/api/code/threads/:id/follow-up" },
+  { method: "GET", path: "/api/code/threads/:id/events", requiredQuery: { wait: "0" } },
+  { method: "GET", path: "/api/code/threads/:id/operations/:id/events" },
+  { method: "GET", path: "/api/code/threads/:id/operations/:id/evidence/:id" },
+  { method: "POST", path: "/api/code/commands" },
+  { method: "POST", path: "/api/code/evidence/batch" },
+  { method: "PUT", path: "/api/code/evidence" },
+  { method: "GET", path: "/api/projects/bootstrap" },
+  // Choosing a folder on that computer and making a Code Project from it, as
+  // its own person; the host refuses any other device.
+  { method: "POST", path: "/api/folders/browse" },
+  { method: "POST", path: "/api/folders/select" },
+  { method: "POST", path: "/api/projects/commands" },
+  { method: "GET", path: "/api/providers/bootstrap" },
+  { method: "GET", path: "/api/pending-requests" },
+  // Listing and answering a thread's MCP tool approvals, which Needs you opens
+  // there; the host answers only its own person's device.
+  { method: "POST", path: "/api/extensions/tool-approvals" },
+  { method: "POST", path: "/api/hub/guest", hubMemberOnly: true },
 ];
+
+const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** True when `pathname` fills the allowed path, an `:id` segment taking only a lowercase UUID. */
+function pathMatches(pattern: string, pathname: string): boolean {
+  const expected = pattern.split("/");
+  const actual = pathname.split("/");
+  if (expected.length !== actual.length) return false;
+  return expected.every((segment, index) => {
+    const given = actual[index];
+    if (given === undefined) return false;
+    return segment === ":id" ? UUID_SEGMENT.test(given) : segment === given;
+  });
+}
 
 /** The routes a pairing uses; only these may be held to a pin that is staged and not yet recorded. */
 const PAIRING_PATHS: ReadonlySet<string> = new Set([
@@ -119,6 +167,8 @@ const ALLOWED_REQUEST_HEADERS: ReadonlySet<string> = new Set([
   "x-octant-device-proof",
   "x-octant-csrf",
   "x-octant-command-id",
+  "x-octant-code-thread-id",
+  "x-octant-hub-link",
 ]);
 
 /** Octant's own session cookies for a paired computer, and nothing else. */
@@ -240,7 +290,10 @@ function decodeRequest(value: unknown, pins: PairedComputerPins): DecodedRequest
   if (typeof origin !== "string" || pins.reachPinFor(origin, true) === undefined) {
     return refuse(NOT_PAIRED);
   }
-  if (typeof method !== "string" || !isAllowedRequest(origin, path, method)) {
+  if (
+    typeof method !== "string" ||
+    !isAllowedRequest(origin, path, method, pins.isThroughHub(origin))
+  ) {
     return refuse("Octant doesn't send that request to another computer.");
   }
   // Held to the recorded pin unless this is a pairing route.
@@ -290,7 +343,12 @@ function decodeRequest(value: unknown, pins: PairedComputerPins): DecodedRequest
  * list all see the same string. Dot segments, a second slash, a scheme or
  * authority, and control characters never pass.
  */
-function isAllowedRequest(origin: string, path: unknown, method: string): boolean {
+function isAllowedRequest(
+  origin: string,
+  path: unknown,
+  method: string,
+  hubMember: boolean,
+): boolean {
   if (typeof path !== "string" || path.length === 0) return false;
   if (path.length > PAIRED_COMPUTER_REQUEST_LIMITS.pathChars) return false;
   if (!path.startsWith("/") || path.startsWith("//") || /[\\#]/.test(path)) return false;
@@ -302,18 +360,14 @@ function isAllowedRequest(origin: string, path: unknown, method: string): boolea
     return false;
   }
   if (url.origin !== origin || `${url.pathname}${url.search}` !== path) return false;
-  const thread = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
-  const threadRead = new RegExp(
-    `^/api/(?:chat/threads/${thread}(?:/window|/events)?|code/threads/${thread}(?:/events|/conversation(?:/window)?|/follow-up|/operations/${thread}/(?:events|evidence/${thread}))?|work/turns/(?:transcript|window|stream)/${thread}|code/content/${thread}|chat/attachments/${thread})$`,
-  );
-  return (
-    (method === "GET" && threadRead.test(url.pathname)) ||
-    (method === "POST" &&
-      new RegExp(`^/api/code/threads/${thread}/follow-up$`).test(url.pathname)) ||
-    (method === "DELETE" && new RegExp(`^/api/chat/attachments/${thread}$`).test(url.pathname)) ||
-    PAIRED_COMPUTER_ALLOWED_REQUESTS.some(
-      (allowed) => allowed.method === method && allowed.path === url.pathname,
-    )
+  return PAIRED_COMPUTER_ALLOWED_REQUESTS.some(
+    (allowed) =>
+      allowed.method === method &&
+      (allowed.hubMemberOnly !== true || hubMember) &&
+      pathMatches(allowed.path, url.pathname) &&
+      Object.entries(allowed.requiredQuery ?? {}).every(
+        ([name, value]) => url.searchParams.get(name) === value,
+      ),
   );
 }
 

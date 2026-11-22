@@ -224,6 +224,7 @@ export * from "./simulatorDevice";
 export * from "./gitHistory";
 
 export * from "./threadMessageQueue";
+export * from "./threadMessageSteering";
 export * from "./threadWakeups";
 export * from "./codeSessions";
 export * from "./workSessions";

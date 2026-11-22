@@ -3684,7 +3684,6 @@ function observation(patch: Partial<ProviderObservedState> = {}): ProviderObserv
       | "nativeSetup"
       | "reviewVerdicts"
       | "appManagedToolsAtFullAccess"
-      | "atFullAccess"
       | "turnModes"
     >,
     observedAt: "2026-07-14T10:00:00.000Z" as never,
@@ -3708,7 +3707,6 @@ function failureObservation(
       | "nativeSetup"
       | "reviewVerdicts"
       | "appManagedToolsAtFullAccess"
-      | "atFullAccess"
       | "turnModes"
     >,
     message: "Provider probe failed.",

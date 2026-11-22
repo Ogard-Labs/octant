@@ -144,6 +144,24 @@ describe("WorkRequestApplicationService.execute", () => {
     expect(requests.resolve).toHaveBeenCalled();
   });
 
+  it("takes a secret answer from the person alone, never from an agent or another device", async () => {
+    const { service, requests } = fixture();
+    const command = {
+      kind: "resolve-work-request",
+      requestId,
+      expectedVersion: pendingRequest.version,
+      resolution: { kind: "user-input", secret: true },
+      secretAnswer: "hunter2",
+    } as const;
+    for (const initiator of ["agent", undefined] as const)
+      await expect(service.execute(windowId, command, undefined, initiator)).rejects.toMatchObject({
+        failure: { code: "unauthorized" },
+      });
+    expect(requests.resolve).not.toHaveBeenCalled();
+    await service.execute(windowId, command, undefined, "user");
+    expect(requests.resolve).toHaveBeenCalledOnce();
+  });
+
   it("cancels a request for an authorized Work Project", async () => {
     const { service, requests } = fixture();
     const result = await service.execute(windowId, {
@@ -210,6 +228,20 @@ describe("WorkRequestApplicationService.listPendingForWindow", () => {
         requestedAt: pendingRequest.requestedAt,
         answer: { requestId, expectedVersion: 1 },
       },
+    ]);
+  });
+
+  it("marks a question that asks for a secret, so its row finds the thread rather than answering", async () => {
+    const secretQuestion = decodeWorkRequest({
+      ...pendingRequest,
+      detail: { kind: "user-input", prompt: "Database credential?", options: [], secret: true },
+    });
+    const { service } = fixture({
+      threads: [{ id: threadId, projectId, title: "Report" }],
+      requestsOverride: { listPending: vi.fn(() => [secretQuestion]) },
+    });
+    expect(await service.listPendingForWindow(windowId)).toMatchObject([
+      { mode: "work", kind: "question", text: "Database credential?", secret: true },
     ]);
   });
 

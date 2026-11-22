@@ -57,7 +57,14 @@ export interface HubSettingsSectionProps {
   readonly ownerUnlock?: Pick<OwnerUnlockBridge, "ownerUnlockMakeKey" | "ownerUnlockForgetKey">;
   /** Reads the clock so a test can freeze a code's time left. */
   readonly now?: () => number;
+  /**
+   * This computer's Code and Work Projects by id, for the Projects the Act
+   * item names. A saved id missing here stays listed so it can be unticked.
+   */
+  readonly projectNames?: ReadonlyMap<string, string>;
 }
+
+const NO_PROJECTS: ReadonlyMap<string, string> = new Map();
 
 const GRANT_ITEM_COPY: Readonly<Record<HubGrantItem, { label: string; line: string }>> = {
   roster: { label: "Roster", line: "The hub's signed list of members." },
@@ -271,11 +278,15 @@ interface HubStatus {
   readonly standbyOrder: ReadonlyArray<string>;
   /** Whether this hub takes threads its members move to it. */
   readonly acceptMovedThreads: boolean;
+  /** The hub's own Act list: the Projects here a member's window may work in. */
+  readonly actProjects: ReadonlyArray<string>;
   readonly wake?: WakeView;
   readonly push?: PushView;
   readonly directPush?: DirectPushView;
   readonly provision?: ProvisionView;
   readonly signIn?: SignInView;
+  /** Whether this computer takes work other members delegate; absent where delegation is not composed. */
+  readonly delegationAccepting?: boolean;
   readonly link?: {
     readonly membership: "member" | "removed";
     readonly hubName: string;
@@ -439,7 +450,13 @@ const JOIN_POLL_MS = 2_000;
 /** How often the hub re-reads its pairing requests while a code is live. */
 const PENDING_POLL_MS = 3_000;
 
-export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettingsSectionProps) {
+export function HubSettingsSection({
+  hub,
+  pairing,
+  ownerUnlock,
+  now,
+  projectNames = NO_PROJECTS,
+}: HubSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
   /** The public half of the unlock key made for the join in progress; the private half never leaves the Secure Enclave. */
   const unlockPublicKey = useRef<string | undefined>(undefined);
@@ -486,6 +503,10 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
   const [joinCode, setJoinCode] = useState("");
   const [join, setJoin] = useState<JoinState>({ phase: "idle" });
   const [draft, setDraft] = useState<ReadonlyArray<HubGrantItem>>([]);
+  /** The Projects the Act item names, as edited; absent while the list shows the saved one. */
+  const [actDraft, setActDraft] = useState<ReadonlyArray<string>>();
+  /** The hub's own Act list, as edited; absent while the list shows the saved one. */
+  const [hubActDraft, setHubActDraft] = useState<ReadonlyArray<string>>();
   const ownerId = useId();
   const codeId = useId();
   const removeOpener = useRef<HTMLButtonElement>(null);
@@ -717,6 +738,24 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
         on
           ? "Accept moved threads is on. Each move still asks for an owner's Touch ID."
           : "Accept moved threads is off. This hub refuses every move.",
+      );
+    }
+    await refresh();
+  };
+
+  const saveHubActProjects = async (actProjects: ReadonlyArray<string>) => {
+    const reply = await act(
+      "act-projects",
+      { actProjects },
+      "changed",
+      "Octant could not save the Projects a member's window may work in.",
+    );
+    if (reply !== undefined) {
+      setHubActDraft(undefined);
+      setMessage(
+        actProjects.length === 0
+          ? "A member's window can see this hub but start nothing here."
+          : "Saved. A member's window may work only in the Projects you ticked.",
       );
     }
     await refresh();
@@ -998,12 +1037,13 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
     const reply = await act(
       "grant",
       // Projects may be named only while Act is ticked.
-      { items, actProjects: items.includes("act") ? current.actProjects : [] },
+      { items, actProjects: items.includes("act") ? (actDraft ?? current.actProjects) : [] },
       "changed",
       "Octant could not change the hub grant.",
     );
     if (reply !== undefined) {
       setJoin({ phase: "idle" });
+      setActDraft(undefined);
       setMessage("The hub grant is saved.");
     }
     await refresh();
@@ -1085,6 +1125,23 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
       "Octant could not change Confirm new members.",
     );
     if (reply !== undefined) setMessage(`Confirm new members is ${enabled ? "on" : "off"}.`);
+    await refresh();
+  };
+
+  const setDelegationAccepting = async (accepting: boolean) => {
+    const reply = await act(
+      "delegation-accepting",
+      { accepting },
+      "changed",
+      "Octant could not change whether this computer takes delegated work.",
+    );
+    if (reply !== undefined) {
+      setMessage(
+        accepting
+          ? "This computer takes delegated work again."
+          : "This computer takes no new delegated work. Work already running carries on.",
+      );
+    }
     await refresh();
   };
 
@@ -1175,9 +1232,15 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
 
   // A joined computer keeps editing the grant it already has.
   const linked = status?.link;
+  // Keyed by the saved grant, not the status object: any refresh (turning
+  // delegated work on or off, confirming a member) returns a new object, and
+  // resetting on that would throw away unsaved grant edits.
+  const savedGrant = linked === undefined ? undefined : JSON.stringify(linked.grant.items);
+  const savedGrantItems = linked?.grant.items;
   useEffect(() => {
-    if (linked !== undefined && join.phase === "idle") setDraft(linked.grant.items);
-  }, [linked, join.phase]);
+    if (savedGrantItems !== undefined && join.phase === "idle") setDraft(savedGrantItems);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedGrant, join.phase]);
 
   // The hub shows the devices that ask to join while a code is live.
   useEffect(() => {
@@ -1224,6 +1287,47 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
       HUB_GRANT_ITEMS.filter((each) => (each === item ? on : items.includes(each))),
     );
 
+  // Which Projects a device the hub introduced may start threads in (on a
+  // member, its Act item; on the hub, its own Act list), read by this computer
+  // at each request. A Project no longer here stays listed by id so unticking
+  // it is still possible.
+  const actProjectsEditor = (
+    named: ReadonlyArray<string>,
+    legend: string,
+    change: (next: ReadonlyArray<string>) => void,
+  ) => {
+    const rows = [
+      ...[...projectNames.entries()].map(([projectId, name]) => ({ projectId, name })),
+      ...named
+        .filter((projectId) => !projectNames.has(projectId))
+        .map((projectId) => ({ projectId, name: projectId })),
+    ];
+    return (
+      <fieldset className="settings-panel__stack">
+        <legend>{legend}</legend>
+        {rows.length === 0 ? (
+          <p className="settings-section-line">This computer has no Projects yet.</p>
+        ) : (
+          rows.map((row) => (
+            <label className="check" key={row.projectId}>
+              <OctantCheckbox
+                checked={named.includes(row.projectId)}
+                onChange={(event) =>
+                  change(
+                    event.target.checked
+                      ? [...named.filter((each) => each !== row.projectId), row.projectId]
+                      : named.filter((each) => each !== row.projectId),
+                  )
+                }
+              />
+              <span>{row.name}</span>
+            </label>
+          ))
+        )}
+      </fieldset>
+    );
+  };
+
   const grantEditor = (current: Grant, actionLabel: string) => (
     <fieldset className="settings-panel__stack">
       <legend>What the hub may do here</legend>
@@ -1238,6 +1342,13 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
           </span>
         </label>
       ))}
+      {draft.includes("act")
+        ? actProjectsEditor(
+            actDraft ?? current.actProjects,
+            "Projects a device the hub introduced may start threads in",
+            setActDraft,
+          )
+        : null}
       <p className="settings-section-line">
         This computer keeps its files, sign-ins, sandbox, and every approval whatever you tick. Only
         you can change this list.
@@ -1287,7 +1398,7 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
         {message === undefined ? null : (
           <SettingsState
             kind={
-              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub|Wake service is|Accept moved threads is|Push sender is|Direct sending is|Apple key (stored|removed)|Apple notifications go|Google service account (stored|removed)|Offers are|Offered|Offer withdrawn|Offer applied|Hardware address)/.test(
+              /^(Approved|Denied|Removed|Left|Added|Confirm|Dismissed|The hub grant is saved|Standby order saved|This computer is now the hub|Wake service is|Accept moved threads is|Push sender is|Direct sending is|Apple key (stored|removed)|Apple notifications go|Google service account (stored|removed)|Offers are|Offered|Offer withdrawn|Offer applied|Hardware address|Saved\. A member|A member.s window can see this hub)/.test(
                 message,
               )
                 ? "success"
@@ -1574,6 +1685,32 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
                 onCheckedChange={(on) => void setAcceptMovedThreads(on)}
               />
             </SettingRow>
+          </div>
+        </SettingsSection>
+      )}
+
+      {!hubOn || status === undefined ? null : (
+        <SettingsSection title="Member windows">
+          <p className="settings-section-line">
+            A desktop window on one of your other computers lists this hub as one of its computers.
+            It may start threads, answer approvals and questions, and stop turns here only in the
+            Projects you tick. With none ticked, it sees this hub and can start nothing here.
+          </p>
+          {actProjectsEditor(
+            hubActDraft ?? status.actProjects,
+            "Projects a member's window may work in",
+            setHubActDraft,
+          )}
+          <div className="host-settings__controls">
+            <OctantButton
+              disabled={busy || hubActDraft === undefined}
+              onClick={() => void saveHubActProjects(hubActDraft ?? status.actProjects)}
+              size="sm"
+              type="button"
+              variant="default"
+            >
+              Save the Projects
+            </OctantButton>
           </div>
         </SettingsSection>
       )}
@@ -1942,6 +2079,25 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
               </SettingsState>
             )}
           </SettingsSection>
+          {status?.delegationAccepting === undefined ? null : (
+            <SettingsSection title="Delegated work">
+              <div className="setgroup">
+                <SettingRow
+                  description="Other members of the hub can ask this computer to run work in the Projects you open to them. Turning this off refuses every new request at once; work already running here carries on."
+                  label="Take delegated work from other members"
+                  scope="host"
+                  settingId="hub-delegation-accepting"
+                >
+                  <OctantSwitch
+                    checked={status.delegationAccepting}
+                    disabled={busy}
+                    label="Take delegated work from other members"
+                    onCheckedChange={(accepting) => void setDelegationAccepting(accepting)}
+                  />
+                </SettingRow>
+              </div>
+            </SettingsSection>
+          )}
           <SettingsSection title="New members">
             <NewMemberChecks
               alerts={linked.alerts}
@@ -1957,6 +2113,33 @@ export function HubSettingsSection({ hub, pairing, ownerUnlock, now }: HubSettin
         </>
       )}
 
+      {/* Settings search lists this switch on every computer, so a computer
+          whose live switch is not shown (in no hub, the hub itself, or a member
+          that did not report it) still shows its row, saying why. */}
+      {status === undefined ||
+      (linked !== undefined && status.delegationAccepting !== undefined) ? null : (
+        <SettingsSection title="Delegated work">
+          <div className="setgroup">
+            <SettingRow
+              description={
+                hubOn || linked !== undefined
+                  ? "This computer has not reported whether it takes work from other members, so the switch is unavailable here. It appears once the computer reports it as a hub member."
+                  : "Join a hub to take work from its other members. Once this computer is a member, they can ask it to run work in the Projects you open to them, and this switch stops new requests."
+              }
+              label="Take delegated work from other members"
+              scope="host"
+              settingId="hub-delegation-accepting"
+            >
+              <OctantSwitch
+                checked={false}
+                disabled
+                label="Take delegated work from other members"
+                onCheckedChange={() => undefined}
+              />
+            </SettingRow>
+          </div>
+        </SettingsSection>
+      )}
       {hubOn ? null : (
         <SettingsSection title="Join a hub">
           {linked !== undefined ? (
@@ -2345,6 +2528,7 @@ function readStatus(body: unknown): HubStatus | undefined {
   const signIn = readSignIn(field(body, "signIn"));
   const pairedMergeUnlock = field(body, "pairedMergeUnlock") === true;
   const ownerApprovalAnswerUnlock = field(body, "ownerApprovalAnswerUnlock") === true;
+  const delegationAccepting = field(field(body, "delegation"), "accepting");
   if (
     (membership === "member" || membership === "removed") &&
     typeof hubName === "string" &&
@@ -2370,11 +2554,13 @@ function readStatus(body: unknown): HubStatus | undefined {
       ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),
       standbyOrder,
       acceptMovedThreads: field(hub, "acceptMovedThreads") !== false,
+      actProjects: readProjectIds(field(hub, "actProjects")),
       ...(wake === undefined ? {} : { wake }),
       ...(push === undefined ? {} : { push }),
       ...(directPush === undefined ? {} : { directPush }),
       ...(provision === undefined ? {} : { provision }),
       ...(signIn === undefined ? {} : { signIn }),
+      ...(typeof delegationAccepting === "boolean" ? { delegationAccepting } : {}),
       link: {
         membership,
         hubName,
@@ -2405,6 +2591,7 @@ function readStatus(body: unknown): HubStatus | undefined {
     ownerCandidates: readOwnerCandidates(field(hub, "ownerCandidates")),
     standbyOrder,
     acceptMovedThreads: field(hub, "acceptMovedThreads") !== false,
+    actProjects: readProjectIds(field(hub, "actProjects")),
     ...(wake === undefined ? {} : { wake }),
     ...(push === undefined ? {} : { push }),
     ...(directPush === undefined ? {} : { directPush }),
@@ -2676,6 +2863,10 @@ function readHeldMembers(rows: unknown): HeldMemberRow[] {
   return held;
 }
 
+function readProjectIds(value: unknown): ReadonlyArray<string> {
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : [];
+}
+
 function readMembers(rows: unknown): Member[] {
   const members: Member[] = [];
   for (const entry of Array.isArray(rows) ? rows : []) {
@@ -2736,7 +2927,15 @@ function readAlerts(rows: unknown): NewMemberAlertRow[] {
       typeof role === "string" &&
       typeof identity === "string"
     ) {
-      alerts.push({ alertId, memberId, name, role, identityKeyFingerprint: identity });
+      const privateAddress = field(entry, "privateAddress");
+      alerts.push({
+        alertId,
+        memberId,
+        name,
+        role,
+        identityKeyFingerprint: identity,
+        ...(typeof privateAddress === "string" ? { privateAddress } : {}),
+      });
     }
   }
   return alerts;

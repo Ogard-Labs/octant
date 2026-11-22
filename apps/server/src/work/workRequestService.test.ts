@@ -20,6 +20,16 @@ import {
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
 import { EventActor } from "@octant/contracts/events";
 import { WorkRequestProjection } from "./workRequestProjection";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
+import { EventRegistry } from "../persistence/eventRegistry";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { ProjectionRegistry } from "../persistence/projection";
+import { openSqlite } from "../persistence/sqlitePort";
+import { WorkRequestEventStore } from "./workRequestEventStore";
 import {
   WorkRequestService,
   type WorkApprovalNotDeliverable,
@@ -751,6 +761,98 @@ describe("WorkRequestService.resolve", () => {
     });
     expect(resolved.status).toBe("ok");
     expect(calls).toEqual([`answer:${ids.session}:provider-input-1:PDF`]);
+  });
+
+  it("hands a secret question's answer to the provider and records only that it was given", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-work-request-secret-"));
+    try {
+      const connection = openSqlite(join(directory, "events.sqlite3"));
+      applyMigrations(connection, MIGRATIONS, () => clockNow);
+      const journal = new Journal({
+        connection,
+        registry: new EventRegistry().register("work.request-recorded@1", 1, Schema.Unknown),
+        projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+        clock: () => clockNow,
+      });
+      let uuid = 0;
+      const delivered: Array<{ requestId: string; answer: string }> = [];
+      const { service, projection } = createService({
+        eventStore: new WorkRequestEventStore({
+          journal,
+          uuid: () => `00000000-0000-4000-8000-${String(++uuid).padStart(12, "0")}`,
+        }) as never,
+        providerSessions: {
+          answerUserInput: async ({ requestId, answer }) => {
+            delivered.push({ requestId, answer });
+          },
+        },
+      });
+      const record = (requestId: string, callback: string, secret: boolean) => {
+        const recorded = service.record({
+          requestId: decodeWorkRequestId(requestId),
+          projectId: ids.project,
+          threadId: ids.thread,
+          providerInstanceId: ids.provider,
+          providerSessionId: ids.session,
+          providerCallbackId: callback,
+          detail: {
+            kind: "user-input",
+            prompt: secret ? "Database credential?" : "Which host?",
+            options: [],
+            ...(secret ? { secret: true as const } : {}),
+          },
+        });
+        if (recorded.status !== "ok") throw new Error("setup failed");
+        return recorded.request;
+      };
+      const secretRequest = record("11111111-1111-4111-8111-111111111112", "ask-secret", true);
+      const plainRequest = record("11111111-1111-4111-8111-111111111113", "ask-host", false);
+      const sentinel = "hunter2-secret-sentinel";
+      const resolve = (request: WorkRequest, answer: Record<string, unknown>) =>
+        service.resolve({
+          kind: "resolve-work-request",
+          requestId: request.requestId,
+          expectedVersion: request.version,
+          ...answer,
+        } as never);
+
+      // A secret goes to no plain question, a secret question takes no answer
+      // the request would record, and the value never travels without its
+      // secret resolution or the other way round.
+      for (const [request, answer] of [
+        [
+          plainRequest,
+          { resolution: { kind: "user-input", secret: true }, secretAnswer: sentinel },
+        ],
+        [secretRequest, { resolution: { kind: "user-input", answer: sentinel } }],
+        [secretRequest, { resolution: { kind: "user-input", secret: true } }],
+        [
+          secretRequest,
+          { resolution: { kind: "user-input", answer: "db.internal" }, secretAnswer: sentinel },
+        ],
+      ] as const)
+        await expect(resolve(request, answer)).resolves.toMatchObject({
+          status: "failure",
+          failure: { code: "invalid" },
+        });
+      expect(delivered).toEqual([]);
+
+      const resolved = await resolve(secretRequest, {
+        resolution: { kind: "user-input", secret: true },
+        secretAnswer: sentinel,
+      });
+      expect(resolved).toMatchObject({
+        status: "ok",
+        request: { status: "resolved", resolution: { kind: "user-input", secret: true } },
+      });
+      expect(delivered).toEqual([{ requestId: "ask-secret", answer: sentinel }]);
+      expect(JSON.stringify([...projection.snapshot().values()])).not.toContain(sentinel);
+      connection.close();
+      for (const file of readdirSync(directory))
+        expect(readFileSync(join(directory, file)).includes(sentinel)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("validates the full questionnaire before delivery and preserves the exact durable answer", async () => {

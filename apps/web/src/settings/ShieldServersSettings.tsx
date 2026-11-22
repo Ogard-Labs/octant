@@ -14,6 +14,13 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { MEMBER_INSTALL_ACTION, MemberInstallSheet } from "./MemberInstallSheet";
+import {
+  MEMBER_REMOVAL_ACTION,
+  MEMBER_UPDATE_ACTION,
+  MemberRemovalSheet,
+  MemberUpdateSheet,
+} from "./MemberUpkeepSheets";
 import {
   SettingsCompactRow,
   SettingsDisclosure,
@@ -25,10 +32,15 @@ import {
 
 export interface ShieldServersSettingsProps {
   /** Absent off this computer: the registry is host authority. */
-  readonly client: Pick<ShieldServersClient, "read" | "command"> | undefined;
+  readonly client:
+    | (Pick<ShieldServersClient, "read" | "command"> &
+        Partial<Pick<ShieldServersClient, "memberInstall">>)
+    | undefined;
   readonly focusedSetting?: string | undefined;
   /** Project names by id, for the picker; the host's own ids. */
   readonly projectNames: ReadonlyMap<string, string>;
+  /** Opens the guide to putting a computer on Tailscale or a private network. */
+  readonly onOpenPrivateNetworkGuide?: (() => void) | undefined;
 }
 
 export const SHIELD_SERVERS_INTRO =
@@ -255,6 +267,13 @@ interface ServerEditorProps {
   readonly onChange: (server: ShieldServer, fields: ShieldServerFields) => Promise<boolean>;
   readonly onRemove: (server: ShieldServer) => Promise<boolean>;
   readonly onShowKey: (server: ShieldServer) => Promise<KeyShown>;
+  /** Opens Make this an Octant computer for a server; the account list offers it. */
+  readonly onMakeComputer?: ((server: ShieldServer) => void) | undefined;
+  /** The Octant version of a server this computer made an Octant computer, by server id. */
+  readonly memberVersions?: ReadonlyMap<string, string> | undefined;
+  /** Opens Update or Remove Octant for such a server. */
+  readonly onUpdateComputer?: ((server: ShieldServer) => void) | undefined;
+  readonly onRemoveOctant?: ((server: ShieldServer) => void) | undefined;
 }
 
 /**
@@ -271,6 +290,8 @@ function ServerEditor(props: ServerEditorProps) {
   const suffix = forProject === undefined ? "" : ` for ${forProject}`;
   const [shownKeys, setShownKeys] = useState<ReadonlyMap<string, KeyShown>>(new Map());
   const [copiedId, setCopiedId] = useState<string | undefined>(undefined);
+  const memberVersion = (server: ShieldServer) =>
+    props.memberVersions?.get(String(server.serverId));
 
   return (
     <>
@@ -295,6 +316,11 @@ function ServerEditor(props: ServerEditorProps) {
                     {server.signIn === "octant-key" ? (
                       <span className="shield-servers__deploys">Key Octant keeps</span>
                     ) : null}
+                    {memberVersion(server) === undefined ? null : (
+                      <span className="shield-servers__deploys">
+                        Octant computer, version {memberVersion(server)}
+                      </span>
+                    )}
                   </>
                 }
                 label={server.alias}
@@ -309,6 +335,47 @@ function ServerEditor(props: ServerEditorProps) {
                       }`
                 }
               >
+                {memberVersion(server) === undefined ? null : (
+                  <>
+                    {props.onUpdateComputer === undefined ? null : (
+                      <OctantButton
+                        aria-label={`${MEMBER_UPDATE_ACTION} Octant on ${server.alias}`}
+                        disabled={props.busy}
+                        onClick={() => props.onUpdateComputer?.(server)}
+                        size="sm"
+                        type="button"
+                        variant="secondary"
+                      >
+                        {MEMBER_UPDATE_ACTION}
+                      </OctantButton>
+                    )}
+                    {props.onRemoveOctant === undefined ? null : (
+                      <OctantButton
+                        aria-label={`${MEMBER_REMOVAL_ACTION} from ${server.alias}`}
+                        disabled={props.busy}
+                        onClick={() => props.onRemoveOctant?.(server)}
+                        size="sm"
+                        type="button"
+                        variant="secondary"
+                      >
+                        {MEMBER_REMOVAL_ACTION}
+                      </OctantButton>
+                    )}
+                  </>
+                )}
+                {props.onMakeComputer === undefined ||
+                memberVersion(server) !== undefined ? null : (
+                  <OctantButton
+                    aria-label={`${MEMBER_INSTALL_ACTION}: ${server.alias}`}
+                    disabled={props.busy}
+                    onClick={() => props.onMakeComputer?.(server)}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                  >
+                    {MEMBER_INSTALL_ACTION}
+                  </OctantButton>
+                )}
                 {server.signIn === "octant-key" ? (
                   <OctantButton
                     aria-label={`Show the key for ${server.alias}${suffix}`}
@@ -474,6 +541,34 @@ export function ShieldServersSettings(props: ShieldServersSettingsProps) {
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem | undefined>(undefined);
+  /** The server whose Make this an Octant computer, Update or Remove Octant sheet is open. */
+  const [sheet, setSheet] = useState<
+    { readonly kind: "install" | "update" | "remove"; readonly server: ShieldServer } | undefined
+  >(undefined);
+  const memberInstall = client?.memberInstall;
+  /** The servers this computer made Octant computers, read again whenever a sheet closes. */
+  const [memberVersions, setMemberVersions] = useState<ReadonlyMap<string, string>>(new Map());
+  const sheetOpen = sheet !== undefined;
+  useEffect(() => {
+    if (memberInstall === undefined || sheetOpen) return;
+    let current = true;
+    memberInstall({ kind: "list-member-computers" }).then(
+      (result) => {
+        if (!current || result.kind !== "member-computers") return;
+        setMemberVersions(
+          new Map(
+            result.members.map((member) => [String(member.serverId), member.artifactVersion]),
+          ),
+        );
+      },
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+    // Read again when the registry changes too: editing a server's login ends
+    // its standing as an Octant computer, and its row must stop offering Update.
+  }, [memberInstall, sheetOpen, view]);
 
   const focused = props.focusedSetting?.startsWith("shield-servers") === true;
   // The panel is drawn only once the registry has been read. A link followed
@@ -657,10 +752,46 @@ export function ShieldServersSettings(props: ShieldServersSettingsProps) {
           onRemove={(server) =>
             send({ kind: "remove-server", serverId: server.serverId }, "account")
           }
+          memberVersions={memberVersions}
+          onMakeComputer={
+            memberInstall === undefined
+              ? undefined
+              : (server) => setSheet({ kind: "install", server })
+          }
+          onRemoveOctant={
+            memberInstall === undefined
+              ? undefined
+              : (server) => setSheet({ kind: "remove", server })
+          }
           onShowKey={showKey}
+          onUpdateComputer={
+            memberInstall === undefined
+              ? undefined
+              : (server) => setSheet({ kind: "update", server })
+          }
           problem={problemFor("account")}
           servers={view.servers}
         />
+        {sheet === undefined || memberInstall === undefined ? null : sheet.kind === "install" ? (
+          <MemberInstallSheet
+            client={{ memberInstall }}
+            onClose={() => setSheet(undefined)}
+            onOpenPrivateNetworkGuide={props.onOpenPrivateNetworkGuide}
+            server={sheet.server}
+          />
+        ) : sheet.kind === "update" ? (
+          <MemberUpdateSheet
+            client={{ memberInstall }}
+            onClose={() => setSheet(undefined)}
+            server={sheet.server}
+          />
+        ) : (
+          <MemberRemovalSheet
+            client={{ memberInstall }}
+            onClose={() => setSheet(undefined)}
+            server={sheet.server}
+          />
+        )}
       </SettingsPanel>
       <SettingsPanel
         collapse={{

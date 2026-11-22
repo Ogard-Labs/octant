@@ -2577,6 +2577,7 @@ describe("WorkTurnRuntime", () => {
         begin: (startedAt: string) => calls.push(`begin ${startedAt}`),
         observe: (observed: { readonly kind: string }) => calls.push(observed.kind),
         connect: () => calls.push("connect"),
+        promptSent: () => calls.push("prompt-sent"),
         end: () => calls.push("end"),
       };
 
@@ -2597,6 +2598,9 @@ describe("WorkTurnRuntime", () => {
       expect(calls).toEqual([
         `begin ${at(0)}`,
         "connect",
+        // The prompt is with the runtime before it says anything, so a
+        // person's note can be steered in from here.
+        "prompt-sent",
         "tool-start",
         "text-delta",
         "completed",
@@ -2647,6 +2651,7 @@ describe("WorkTurnRuntime", () => {
           begin: () => calls.push("begin"),
           observe: () => calls.push("observe"),
           connect: () => undefined,
+          promptSent: () => undefined,
           end: () => calls.push("end"),
         },
       });

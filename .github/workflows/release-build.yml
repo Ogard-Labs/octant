@@ -288,6 +288,22 @@ jobs:
       rollback_ref: ${{ inputs.rollback_ref }}
     secrets: inherit
 
+  # The headless build of Octant, signed with the preview key and attached to
+  # this release. Octant Nightly never installs a host, and a rollback
+  # rebuilds a Nightly tag, so neither carries one.
+  headless:
+    name: Headless build
+    if: inputs.flavor == 'stable' && inputs.source_commit == ''
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-headless.yml
+    with:
+      version: ${{ inputs.version }}
+      ring: ${{ inputs.ring }}
+      product: ${{ inputs.product }}
+      environment: preview
+    secrets: inherit
+
   # Signs and publishes the feed without running any of the built source's
   # code: it checks out this workflow's own commit, downloads the archive the
   # build job uploaded, hashes it into the signature and publishes. Only this

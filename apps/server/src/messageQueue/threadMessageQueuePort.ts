@@ -97,6 +97,28 @@ export interface ThreadMessageQueueModePort {
     | { readonly status: "refused"; readonly reason: ThreadMessageQueueHoldReason }
     | { readonly status: "unknown" }
   >;
+  /**
+   * Delivers the queue's next message into the thread's running turn rather
+   * than holding it for a turn of its own (maintainer decision, 2026-11-21).
+   * Asked only while the thread is busy and every dispatch check passed.
+   * `steered` means the runtime took it and the turn's transcript records it;
+   * `refused` means the runtime would not take it or failed, so the message
+   * waits for the next turn; `unavailable` means nothing was tried (no
+   * steering runtime, a message that is more than text, or a scope that is
+   * not the person's own window here), so a later pass may ask again.
+   */
+  readonly steer?: (input: {
+    readonly scope: ThreadMessageQueueScope;
+    readonly messageId: ThreadQueueMessageId;
+    readonly payload: ThreadMessageQueuePayload;
+    readonly windowId: WindowId;
+    /**
+     * Called once every check passed and the running turn's runtime is about
+     * to be asked, so the queue shows the message as being sent only then,
+     * never for an offer ruled out at once.
+     */
+    readonly asking?: () => void;
+  }) => Promise<"steered" | "refused" | "unavailable">;
   /** not-admitted is proof from durable mode state, never an absent live handle. */
   readonly reconcile: (input: {
     readonly scope: ThreadMessageQueueScope;

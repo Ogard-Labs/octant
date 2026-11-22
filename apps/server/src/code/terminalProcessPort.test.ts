@@ -645,6 +645,38 @@ describe("TerminalProcessPort", () => {
     ).toThrow(ProcessConfinementError);
   });
 
+  it("starts a terminal whose host environment carries lowercase proxy names", () => {
+    const pty = fakePty();
+    const spawn = vi.fn(() => pty);
+    // Outside Strict a provider terminal takes the person's own environment,
+    // where curl-style proxies are spelled in lowercase.
+    new TerminalProcessPort({ spawn, killProcessGroup: vi.fn(), platform: "linux" }).start({
+      shell: "/bin/bash",
+      cwd: "/repo",
+      stateScope: "repo_test",
+      environment: { http_proxy: "http://proxy.internal:3128", no_proxy: "localhost" },
+      columns: 80,
+      rows: 24,
+      strict: false,
+    });
+
+    expect(launchedCall(spawn)[2].env).toMatchObject({
+      http_proxy: "http://proxy.internal:3128",
+      no_proxy: "localhost",
+    });
+    expect(() =>
+      new TerminalProcessPort({ spawn, killProcessGroup: vi.fn(), platform: "linux" }).start({
+        shell: "/bin/bash",
+        cwd: "/repo",
+        stateScope: "repo_test",
+        environment: { "BAD=NAME": "x" },
+        columns: 80,
+        rows: 24,
+        strict: false,
+      }),
+    ).toThrow("Terminal environment is invalid.");
+  });
+
   it("bounds input and geometry before invoking the PTY", () => {
     const pty = fakePty();
     const handle = new TerminalProcessPort(confinedOptions({ spawn: () => pty })).start({

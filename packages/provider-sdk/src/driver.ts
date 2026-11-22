@@ -101,6 +101,18 @@ export interface ProviderCompactionPoint {
   readonly contextWindow: number;
 }
 
+/**
+ * The provider's own channels to its vendor that the person lets it use.
+ * `true` means Octant sets none of that family's guards on the launch, so the
+ * provider's own settings decide; `false` means Octant keeps them set.
+ */
+export interface ProviderOwnChannels {
+  /** Usage metrics, error reports, trace uploads and feedback uploads. */
+  readonly telemetry: boolean;
+  /** The provider replacing or checking for a newer version of itself. */
+  readonly selfUpdate: boolean;
+}
+
 export interface ProviderSessionStart {
   readonly sessionId: ProviderSessionId;
   readonly modelId: ProviderModelId;
@@ -132,6 +144,23 @@ export interface ProviderSessionStart {
    * never loosens one.
    */
   readonly strict?: boolean;
+  /**
+   * The session's surface asks a question that wants a secret (a password or
+   * key) masked and keeps the typed answer out of every record, for a session
+   * that is not Strict but carries no `strict` of its own (a subagent, whose
+   * parent thread is outside Strict). A session with `strict: false` asks
+   * such questions already; `strict: true` never does. Absent, a driver that
+   * can tell such a question refuses it unseen.
+   */
+  readonly asksSecretQuestions?: true;
+  /**
+   * Which of the provider's own channels to its vendor the person lets it
+   * use, from Settings › Providers & Models. Read only outside Strict: under
+   * Strict every telemetry and self-update guard stays set whatever this
+   * says. Absent outside Strict keeps the default: both stay off, every
+   * telemetry and self-update guard set.
+   */
+  readonly ownChannels?: ProviderOwnChannels;
   /**
    * Tools the person blocked for this provider in Settings, by the name its
    * runtime gives them, or `server__tool` for a tool of the provider's own
@@ -314,6 +343,10 @@ export interface ProviderSessionResume {
   readonly fullAccessSandbox?: boolean;
   /** Same meaning as in {@link ProviderSessionStart.strict}. */
   readonly strict?: boolean;
+  /** Same meaning as in {@link ProviderSessionStart.asksSecretQuestions}. */
+  readonly asksSecretQuestions?: true;
+  /** Same meaning as in {@link ProviderSessionStart.ownChannels}. */
+  readonly ownChannels?: ProviderOwnChannels;
   /** As on {@link ProviderSessionStart}; restated on every resume. */
   readonly blockedTools?: ReadonlyArray<string>;
   /**

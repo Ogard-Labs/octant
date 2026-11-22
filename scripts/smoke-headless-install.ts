@@ -1,10 +1,19 @@
 import { execFile } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  createReleaseFeedVerifier,
+  decodeHeadlessArtifactManifest,
+  HEADLESS_ARTIFACT_MANIFEST_FILENAME,
+  HEADLESS_ARTIFACT_SIGNATURE_FILENAME,
+  inspectHeadlessArtifact,
+  type ReleaseRing,
+  verifyHeadlessArtifactSignature,
+} from "@octant/host-runtime";
 import { hostHeadlessTarget } from "./package-headless";
 
 // Installs a built headless artifact into an empty prefix and drives the
@@ -45,17 +54,17 @@ export function serviceDescriptorPath(platform: NodeJS.Platform, home: string): 
 /**
  * The installed CLI's environment: nothing from the caller's shell that could
  * point module resolution back at a checkout, only what the service manager
- * and the Bun runtime need.
+ * needs. No Bun directory is on `PATH`, so the install proves the build runs on
+ * the Bun it carries.
  */
 export function installedCliEnvironment(input: {
   readonly source: Readonly<Record<string, string | undefined>>;
-  readonly bunDirectory: string;
   readonly dataDirectory: string;
   readonly port: number;
 }): Record<string, string> {
   const environment: Record<string, string> = {
     HOME: input.source.HOME ?? homedir(),
-    PATH: `${input.bunDirectory}:/usr/bin:/bin`,
+    PATH: "/usr/bin:/bin",
     OCTANT_DATA_DIR: input.dataDirectory,
     OCTANT_SERVER_PORT: String(input.port),
   };
@@ -126,21 +135,128 @@ function defaultTarball(): string {
   return newest;
 }
 
+const USAGE =
+  "Usage: smoke-headless-install.ts [--tarball <path>] [--prefix <empty dir>] [--self-built]";
+
 function parseArguments(argv: readonly string[]): {
   readonly tarball?: string;
   readonly prefix?: string;
+  readonly selfBuilt: boolean;
 } {
-  const parsed: { tarball?: string; prefix?: string } = {};
-  for (let index = 0; index < argv.length; index += 2) {
+  const parsed: { tarball?: string; prefix?: string; selfBuilt: boolean } = { selfBuilt: false };
+  for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
+    if (flag === "--self-built") {
+      parsed.selfBuilt = true;
+      continue;
+    }
     const value = argv[index + 1];
     if (value === undefined || (flag !== "--tarball" && flag !== "--prefix")) {
-      throw new Error("Usage: smoke-headless-install.ts [--tarball <path>] [--prefix <empty dir>]");
+      throw new Error(USAGE);
     }
     if (flag === "--tarball") parsed.tarball = resolve(value);
     else parsed.prefix = resolve(value);
+    index += 1;
   }
   return parsed;
+}
+
+export type DownloadedBuildCheck =
+  | { readonly status: "verified" }
+  | { readonly status: "refused"; readonly reason: string };
+
+/**
+ * Checks an unpacked build against this checkout's release keys before the
+ * smoke runs anything from it. The install command would check the signature
+ * too, but that command is the build's own CLI: a replaced download would
+ * already be running as the operator by the time it reported.
+ */
+export async function verifyDownloadedBuild(
+  artifactRoot: string,
+  trustedKeys?: Readonly<Record<ReleaseRing, ReadonlyArray<string>>>,
+): Promise<DownloadedBuildCheck> {
+  let manifestText: string;
+  try {
+    manifestText = await readFile(join(artifactRoot, HEADLESS_ARTIFACT_MANIFEST_FILENAME), "utf8");
+  } catch {
+    return { status: "refused", reason: "the build has no readable manifest" };
+  }
+  let declared;
+  try {
+    declared = decodeHeadlessArtifactManifest(manifestText);
+  } catch {
+    return { status: "refused", reason: "the build's manifest is malformed" };
+  }
+  const inspection = await inspectHeadlessArtifact({
+    artifactRoot,
+    runtime: {
+      platform: declared.target.platform,
+      arch: declared.target.arch,
+      wireVersion: declared.wireVersion,
+    },
+  });
+  if (!inspection.ok) {
+    return {
+      status: "refused",
+      reason: `the build does not match its manifest (${inspection.rejection.code})`,
+    };
+  }
+  const unlisted = await firstUnlistedEntry(
+    artifactRoot,
+    new Set([
+      HEADLESS_ARTIFACT_MANIFEST_FILENAME,
+      HEADLESS_ARTIFACT_SIGNATURE_FILENAME,
+      ...inspection.manifest.components.map((component) => component.path),
+    ]),
+  );
+  if (unlisted !== undefined) {
+    return {
+      status: "refused",
+      reason: `the build carries ${unlisted}, which its manifest does not list`,
+    };
+  }
+  let signatureText: string | undefined;
+  try {
+    signatureText = await readFile(
+      join(artifactRoot, HEADLESS_ARTIFACT_SIGNATURE_FILENAME),
+      "utf8",
+    );
+  } catch {
+    signatureText = undefined;
+  }
+  const check = verifyHeadlessArtifactSignature({
+    manifest: inspection.manifest,
+    signatureText,
+    verifier: createReleaseFeedVerifier(trustedKeys),
+  });
+  return check.status === "refused"
+    ? { status: "refused", reason: `the signature is ${check.reason}` }
+    : { status: "verified" };
+}
+
+/**
+ * The first entry under `root` that is neither a listed file nor a directory
+ * holding one. The signature covers listed files only, and the launcher runs
+ * from this tree, so an unlisted module beside them could be loaded unsigned.
+ */
+async function firstUnlistedEntry(
+  root: string,
+  listed: ReadonlySet<string>,
+  prefix = "",
+): Promise<string | undefined> {
+  for (const name of await readdir(join(root, prefix))) {
+    const path = prefix === "" ? name : `${prefix}/${name}`;
+    const entry = await lstat(join(root, path));
+    if (entry.isDirectory()) {
+      const holdsListed = [...listed].some((listedPath) => listedPath.startsWith(`${path}/`));
+      if (!holdsListed) return path;
+      const nested = await firstUnlistedEntry(root, listed, path);
+      if (nested !== undefined) return nested;
+    } else if (!listed.has(path)) {
+      return path;
+    }
+  }
+  return undefined;
 }
 
 async function smokeHeadlessInstall(argv: readonly string[]): Promise<void> {
@@ -158,11 +274,15 @@ async function smokeHeadlessInstall(argv: readonly string[]): Promise<void> {
     throw new Error(`${descriptor} already exists; refusing to replace another Octant service.`);
   }
 
-  const bunDirectory = dirname(Bun.which("bun") ?? process.execPath);
+  const systemBun = Bun.which("bun", { PATH: "/usr/bin:/bin" });
+  if (systemBun !== null) {
+    process.stdout.write(
+      `Note: ${systemBun} is on the installed CLI's PATH, so this run cannot show the build needs no Bun of its own.\n`,
+    );
+  }
   const port = await freePort();
   const env = installedCliEnvironment({
     source: process.env,
-    bunDirectory,
     dataDirectory: join(prefix, "data"),
     port,
   });
@@ -177,12 +297,29 @@ async function smokeHeadlessInstall(argv: readonly string[]): Promise<void> {
   const artifactRoot = join(extracted, artifactName);
   const installRoot = join(prefix, "install");
   const installed = join(installRoot, "current", "bin", "octant");
+  if (!options.selfBuilt) {
+    const check = await verifyDownloadedBuild(artifactRoot);
+    if (check.status === "refused") {
+      throw new Error(`Refusing to run ${artifactName}: ${check.reason}.`);
+    }
+  }
 
   await expectSuccess(
     "octant server install",
     await run(
       join(artifactRoot, "bin", "octant"),
-      ["server", "install", "--artifact", artifactRoot, "--install-root", installRoot],
+      // A build made here carries no release signature, so it installs only as
+      // self-built; a published tarball is smoked without the flag, which
+      // proves its signature verifies against the keys this CLI trusts.
+      [
+        "server",
+        "install",
+        "--artifact",
+        artifactRoot,
+        "--install-root",
+        installRoot,
+        ...(options.selfBuilt ? ["--self-built"] : []),
+      ],
       { cwd: prefix, env },
     ),
   );

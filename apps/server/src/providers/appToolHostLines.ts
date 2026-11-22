@@ -71,6 +71,8 @@ const GUIDE_LINES: Readonly<Record<string, string>> = {
     "Start long-running processes such as dev servers and watchers with octant_terminal rather than a backgrounded shell command, so their output stays readable and the person can see them.",
   octant_threads:
     "See this Project's other threads, and message them where its operations allow, with octant_threads.",
+  octant_transcribe:
+    "Transcribe a recording from this thread's folder with octant_transcribe instead of installing speech models; page long transcripts with nextOffset.",
   octant_zen:
     "Read and arrange this Zen space with octant_zen: pin threads, add widgets, move elements.",
 };

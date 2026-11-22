@@ -92,7 +92,12 @@ export type ShellActions = {
   readonly activatePane: ShellController["activatePane"];
   readonly addDockTab: (surface: RightUtilityDockSurfaceId) => void;
   readonly addZenBrowser: (sourceContext: ZenSourceContext) => void;
-  readonly addZenProjectTerminal: (projectId: ProjectId) => Promise<CodeTerminalId | undefined>;
+  readonly addZenProjectTerminal: (
+    projectId: ProjectId,
+    folder?: string,
+    /** Opens the window's Work task's provider program rather than a shell. */
+    program?: "provider",
+  ) => Promise<CodeTerminalId | undefined>;
   readonly addZenTerminal: (sourceContext: ZenSourceContext) => Promise<void>;
   readonly archiveCodeThread: CodeController["archiveThread"];
   readonly clearFocus: ShellController["clearFocus"];
@@ -243,6 +248,7 @@ export type ShellActions = {
     readonly action: string;
     readonly requiredCapability?: string;
     readonly projectHostId?: HostId;
+    readonly onlyThisHost?: boolean;
     readonly onRefuse: (reason: string) => void;
   }) => HostId | undefined;
   readonly addProjectExtraFolder: ProjectController["addExtraFolder"];
@@ -346,6 +352,7 @@ export type ShellActions = {
   readonly setProjectActions: ProjectController["setActions"];
   readonly setProjectWorkStatusFile: ProjectController["setWorkStatusFile"];
   readonly setProjectOwnToolchain: ProjectController["setCodeOwnToolchain"];
+  readonly setProjectDelegatedCode: ProjectController["setCodeDelegatedCode"];
   readonly setProjectWorkDeveloperTools: ProjectController["setWorkDeveloperTools"];
   readonly setProjectsListOpen: Dispatch<SetStateAction<boolean>>;
   readonly setRailPlaceholder: Dispatch<

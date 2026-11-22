@@ -25,6 +25,7 @@ import {
 import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
 import { HUB_LINK_HEADER, HUB_PEER_KEY_HEADER } from "./hub/hubLink";
 import { PENDING_REQUESTS_PATH } from "./pendingRequestRoutes";
+import { NEW_DEVICE_ALERTS_PATH } from "./hub/newDeviceAlertRoutes";
 import { PAIRED_DEVICE_PROVIDER_CREDENTIAL_PATHS } from "./providers/providerCredentialRoutes";
 import { PAIRED_DEVICE_ADMINISTRATION_ROUTES } from "./remote/localDeviceAdministrationRoutes";
 import { withAdmissionRelease } from "./remote/remoteAdmissionPolicy";
@@ -87,7 +88,6 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/shell/commands",
   "/api/shell/launch-session",
   "/api/shell/local-session",
-  "/api/folders",
   // Pointing a runtime at an executable goes through the host's native file
   // picker and the desktop broker. Scanning and connecting are forwarded below.
   "/api/providers/discovery/locate-binary",
@@ -107,6 +107,11 @@ const LOCAL_ONLY_PREFIXES = [
  * none of these is an action, and each route refuses such a principal itself.
  */
 const PERSON_PAIRED_DEVICE_ROUTES = [
+  // Browsing this computer's folders and choosing one for a Project: the
+  // receipt is bound to the device's own scope, and the route refuses every
+  // principal that is not the host's person.
+  "/api/folders/browse",
+  "/api/folders/select",
   // Installing, trusting, enabling, and removing a package; remembered tool
   // approvals; adding, pinning, signing in to, and reconnecting a server.
   "/api/extensions/lifecycle",
@@ -145,6 +150,9 @@ const PERSON_PAIRED_DEVICE_ROUTES = [
   "/api/benchmarks/runs/start",
   "/api/benchmarks/runs/cancel",
   "/api/benchmarks/runs/purge",
+  // Making a registered server an Octant computer over SSH; the route
+  // refuses any principal that does not act as the host's person.
+  "/api/shield/servers/member-install",
 ] as const;
 
 /**
@@ -193,6 +201,7 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   status: "hub-link-status",
   guestRoster: "hub-link-guest-roster",
   guest: "hub-link-guest",
+  windowGuest: "hub-link-window-guest",
   standby: "hub-link-standby",
   heartbeat: "hub-link-heartbeat",
   handback: "hub-link-handback",
@@ -212,6 +221,7 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   delegate: "hub-link-delegate",
   delegationStatus: "hub-link-delegation-status",
   delegationCancel: "hub-link-delegation-cancel",
+  delegationProjects: "hub-link-delegation-projects",
   credentialTransfer: "hub-link-credential-transfer",
   threadMoveOffer: "hub-link-thread-move-offer",
   threadMoveChunk: "hub-link-thread-move-chunk",
@@ -649,6 +659,19 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedRequestHeaders: [HUB_LINK_HEADER],
     maxResponseBytes: 65_536,
   },
+  // A spoke asks the hub to list its own desktop window as a guest, signed
+  // with the spoke's identity key like a leave.
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.windowGuest,
+    match: { kind: "exact", path: "/api/hub/window-guest" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 4_096,
+    maxResponseBytes: 4_096,
+  },
   {
     id: REMOTE_HUB_LINK_ROUTE_IDS.guest,
     match: { kind: "exact", path: "/api/hub/guest" },
@@ -696,6 +719,19 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedContentTypes: ["application/json"],
     maxBodyBytes: 4_096,
     maxResponseBytes: 4_096,
+  },
+  // The Projects a member may delegate to here, by name: read-only, signed by
+  // the sender, and filtered by the grant this host gave it.
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.delegationProjects,
+    match: { kind: "exact", path: "/api/hub/peer/delegations/projects" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 4_096,
+    maxResponseBytes: 131_072,
   },
   // The sending host's half of a sign-in copy an owner device started: the key
   // arrives only against a one-time ticket the owner made on this host.
@@ -1088,6 +1124,14 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     methods: ["GET"] as const,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
   })),
+  // Every connected device is told when a new device joins, a hub guest
+  // included: the read changes nothing, and Remove stays on its own routes.
+  {
+    kind: "exact" as const,
+    path: NEW_DEVICE_ALERTS_PATH,
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
   {
     kind: "exact" as const,
     path: `${PENDING_REQUESTS_PATH}/defer`,
@@ -1792,6 +1836,8 @@ export interface RemoteRouteHandlerOptions {
 export interface RemoteRouteFacts {
   readonly sourceClass: "loopback" | "lan-private" | "tailscale" | "unknown";
   readonly sourceKey: string;
+  /** The peer's private-network address, for a new-device alert only. */
+  readonly privateAddress?: string;
 }
 
 export const REMOTE_SECURITY_POLICY = {

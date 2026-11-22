@@ -332,6 +332,34 @@ export function windowsProviderLaunch(input: {
 }
 
 /**
+ * Whether a provider launch below Full access on a host with Octant's sandbox
+ * runs without it, as on Windows: the provider's own permission modes and the
+ * approvals it asks Octant for hold the thread's level (maintainer decision,
+ * 2026-11-21). It holds for Work and Code outside Strict, unless the thread
+ * keeps the sandbox, a sandbox policy is chosen, or the launch is a readiness
+ * check. Chat (no folder) and Plan (writes nothing) keep Octant's sandbox,
+ * since there it enforces the mode itself rather than an approval. Other ACP
+ * clients and coding workspaces run providers this way.
+ */
+export function providerHoldsLevelWithoutSandbox(input: {
+  readonly mode: "chat" | "work" | "code";
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly strict?: boolean | undefined;
+  readonly fullAccessSandbox?: boolean | undefined;
+  readonly sandboxPolicySelected?: boolean | undefined;
+  readonly purpose?: "probe" | "session" | undefined;
+}): boolean {
+  return (
+    input.strict === false &&
+    input.fullAccessSandbox !== true &&
+    input.sandboxPolicySelected !== true &&
+    input.purpose !== "probe" &&
+    (input.mode === "work" || input.mode === "code") &&
+    input.executionPolicy !== "plan"
+  );
+}
+
+/**
  * Whether a Windows host reads a provider's version and model catalog with no
  * Octant sandbox, for a read that serves no one thread: while new threads start
  * at open Full access, or while neither the Code nor the Work default in
@@ -468,9 +496,9 @@ export function clampWorkAccess(thread: WorkAccess, ceiling: WorkAccess): WorkAc
 
 /**
  * The Work default (Settings › Work, a Work Project's start mode) a Code mode
- * picker choice stands for; Plan has none, since no thread starts in Plan.
+ * picker choice stands for, Plan included.
  */
-export function workAccessOfPermissionMode(mode: PermissionMode): WorkDefaultAccess | undefined {
+export function workAccessOfPermissionMode(mode: PermissionMode): WorkDefaultAccess {
   switch (mode) {
     case "auto":
       return "auto";
@@ -481,13 +509,13 @@ export function workAccessOfPermissionMode(mode: PermissionMode): WorkDefaultAcc
     case "full-access":
       return "full-access";
     case "plan":
-      return undefined;
+      return "plan";
   }
 }
 
 /** The level a Work thread's mode picker choice sets, Plan included. */
 export function workThreadAccessOfMode(mode: PermissionMode): WorkAccess {
-  return workAccessOfPermissionMode(mode) ?? "plan";
+  return workAccessOfPermissionMode(mode);
 }
 
 /** The Code mode picker choice a Work access stands for. */

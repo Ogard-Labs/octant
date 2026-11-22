@@ -82,7 +82,7 @@ function federationStack(options: { onForget?: (origin: string) => Promise<void>
       if (origin !== undefined) await options.onForget?.(origin);
     },
   });
-  const stack: HostFederationStack = { lifecycle, transports, registry, deviceKeyStore };
+  const stack: HostFederationStack = { lifecycle, transports, registry, deviceKeyStore, cache };
   return { stack, cache };
 }
 

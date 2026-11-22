@@ -536,6 +536,16 @@ keeps its ordinary meaning. Settings › General › Composer turns this off
 everywhere or per mode ([Settings](settings.md)); off, the composer says
 "Reply…" and Tab offers nothing, while the suggestion cards stay.
 
+A start-screen composer in a window that reaches more than one computer shows
+a computer picker. The thread is made on the computer it names, in one of that
+computer's Projects, with its providers, models and defaults, and never on
+this one in its place (maintainer decision, 2026-11-19). Built for a
+computer the window paired directly: the pane shows that computer's own Code
+start screen and threads, with the picker kept on top. Until the window can
+route a create for any other computer, one aimed there is refused with a
+sentence;
+[Hub and spokes: the hub coordinates](hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work)).
+
 Attachment and model controls sit on the left; access, context usage and send
 stay together at the right edge even when the controls wrap. Menus use compact
 interface text, and model choices stay in a bounded scrollable popup.
@@ -728,8 +738,23 @@ host's current version; conflicting edits refresh the list and preserve the
 person's unsent text. A failed enqueue leaves the draft and attachments in the
 composer. Reopening a thread reads the accepted queue from the host without
 resending it. Queue controls remain keyboard accessible and wrap at narrow
-widths. A running-turn steering control is separate and appears only where the
-runtime supports it.
+widths. There is no separate steering control: steering goes through the
+queue's own send.
+
+In Work and Code a message sent while the turn runs is steered into that
+turn where its runtime steers (maintainer decision, 2026-11-21;
+[Architecture](../architecture.md#persistence)): it passes through the queue,
+leaves it once the runtime takes it, and shows inside the running turn, after
+its reply, as the person's message headed "Sent while the turn ran", with its
+time. The phone's Work and Code transcripts show it the same way, in the
+person's message bubble under the same heading. The queue shows no separate
+steered state, since its read lists only messages still waiting. While the
+runtime has not yet taken it, that one message shows "Sending into the
+running turn" and cannot be edited, removed or
+moved; the rest of the queue stays usable. A transcript read afresh shows it
+at once; a desktop transcript already open shows it when the turn settles or
+is read again. A message the runtime does not take stays in the queue for
+the next turn.
 
 ## Scheduled wake-ups
 

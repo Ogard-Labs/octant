@@ -100,6 +100,31 @@ interface MessageSource {
   readonly inherited?: boolean;
 }
 
+/**
+ * The person's messages the runtime took into a turn while it ran. They are
+ * user messages of that turn, journaled beside it rather than in it, so they
+ * follow its prompt in the order they were sent; without them a handoff
+ * would drop a correction the earlier provider acted on.
+ */
+function addSteeredMessages(
+  selected: { add(message: MessageSource): void },
+  attribution: SourcePoint,
+  steered: WorkTurnState["steeredMessages"],
+  inherited?: boolean,
+): void {
+  for (const message of steered ?? [])
+    selected.add({
+      kind: "user-message",
+      point: {
+        ...attribution,
+        steeredMessage: message.messageId,
+        steeredAt: message.steeredAt,
+      },
+      read: () => message.body,
+      ...(inherited === undefined ? {} : { inherited }),
+    });
+}
+
 function unchangedThread(before: ThreadSource, after: ThreadSource | undefined): boolean {
   return (
     after !== undefined &&
@@ -393,6 +418,7 @@ export function admittedParentWorkContext(
             }),
       });
       attachments += turn.attachments?.length ?? 0;
+      addSteeredMessages(selected, { ...attribution, role: "user" }, turn.steeredMessages);
       for (const [index, entry] of turn.transcript.entries()) {
         if (entry.role !== "assistant") continue;
         if (
@@ -771,6 +797,12 @@ function scanCodeConversation(
         });
       add("user-message", turn.prompt);
       attachments += turn.attachments?.length ?? 0;
+      addSteeredMessages(
+        selected,
+        { ...attribution, role: "user-message" },
+        turn.steeredMessages,
+        read.inherited,
+      );
       if (turn.status === "completed")
         for (const reference of turn.assistant) add("assistant-message", reference);
       else unfinishedReplies += turn.assistant.length;

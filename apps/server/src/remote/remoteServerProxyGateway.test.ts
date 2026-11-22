@@ -54,6 +54,7 @@ import {
   PRIVATE_LISTENER_TEST_KEY,
 } from "../privateListener.test-certs";
 import type { RequestTransportFacts, Serve } from "../server";
+import { HUB_ACT_WITHDRAWN_REASON } from "../remoteCredentialLifecycleService";
 import { createRemoteGateway, type RemoteGateway } from "./remoteGateway";
 import {
   RemoteServerGrantService,
@@ -859,6 +860,18 @@ describe("proxy session and grant route on the private listener", () => {
     expect(harness.grants.openCount()).toBe(0);
     expect(closedReasons(harness.connection)).toEqual(["device-revoked"]);
     expect((await openGrant(harness, proxy, 2)).status).toBe(401);
+  });
+
+  it("closes the grants of a device that holds only a proxy session when its sessions are ended", async () => {
+    const harness = await setup();
+    harness.targets.set(listenerKey(1), listed(1));
+    const paired = await pair(harness);
+    const proxy = await session(harness, paired, "server-proxy");
+    result(await openGrant(harness, proxy, 1));
+
+    harness.gateway.endDeviceSessions([paired.deviceId], HUB_ACT_WITHDRAWN_REASON);
+
+    expect(harness.grants.openCount()).toBe(0);
   });
 
   it("closes a device's grants when it signs itself out", async () => {

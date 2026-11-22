@@ -295,6 +295,12 @@ export interface WorkspaceViewProps {
   readonly lastSelectedHealthyHostId?: import("@octant/contracts/host").HostId;
   readonly createHostViewScope?: import("@octant/domain").CreateHostViewScope;
   readonly onSelectCreateHost?: (hostId: import("@octant/contracts/host").HostId) => void;
+  /**
+   * The Code start screen of the paired computer the picker names, when it can
+   * be reached; undefined while the picker names this computer. Shown in place
+   * of the local Code draft, so no local create is ever aimed at that computer.
+   */
+  readonly renderPairedComputerCodeStart?: () => ReactNode | undefined;
   readonly hidden?: boolean;
   readonly layout: WorkspaceLayoutNode;
   readonly memoryRevision?: number;
@@ -377,6 +383,8 @@ export interface WorkspaceViewProps {
      * is opening a second shell rather than returning to the thread's first.
      */
     terminalId?: import("@octant/contracts/code").CodeTerminalId,
+    /** The new terminal runs the thread's provider's own program rather than a shell. */
+    program?: "provider",
   ) => void;
   /**
    * Open one workspace surface, resolving to whether a tab bound to
@@ -540,6 +548,10 @@ export interface WorkspaceViewProps {
   ) => Promise<boolean>;
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   readonly onOwnToolchainChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
+  readonly onDelegatedCodeChange?: (
+    projectId: ProjectId,
+    delegatedCode: import("@octant/contracts/projects").CodeProjectDelegatedCode | undefined,
+  ) => Promise<boolean>;
   readonly onWorkDeveloperToolsChange?: (
     projectId: ProjectId,
     enabled: boolean,
@@ -1674,8 +1686,9 @@ function renderCodeTab(
             : props.onOpenCodeSurface(
                 kind,
                 tab.threadId,
-                codeSurfaceTitle(kind),
+                options.title ?? codeSurfaceTitle(kind),
                 options.terminalId,
+                options.program,
               )
         }
         {...(props.onOpenCodeFile === undefined
@@ -2096,6 +2109,9 @@ function renderNonCodeTab(
     );
   }
   if (tab.kind === "draft-thread") {
+    const pairedComputerStart =
+      tab.mode === "code" ? props.renderPairedComputerCodeStart?.() : undefined;
+    if (pairedComputerStart !== undefined) return pairedComputerStart;
     const recentThreads = draftRecentThreads(tab.mode, props);
     const draftProjectId = tab.projectId ?? props.draftProjectSelection?.[tab.mode];
     return (
@@ -2314,6 +2330,10 @@ function renderNonCodeTab(
         {...(props.onOpenUsageDashboard === undefined
           ? {}
           : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
+        {...(props.automationClient === undefined
+          ? {}
+          : { automationClient: props.automationClient })}
+        {...(props.onOpenRoutine === undefined ? {} : { onOpenRoutine: props.onOpenRoutine })}
         key={tab.threadId}
         onClearCanvasSelections={canvasContext.clearCanvasSelections}
         onRemoveCanvasSelection={canvasContext.onRemoveCanvasSelection}
@@ -2975,6 +2995,9 @@ function renderNonCodeTab(
         {...(props.onOwnToolchainChange === undefined
           ? {}
           : { onOwnToolchainChange: props.onOwnToolchainChange })}
+        {...(props.onDelegatedCodeChange === undefined
+          ? {}
+          : { onDelegatedCodeChange: props.onDelegatedCodeChange })}
         {...(props.onWorkDeveloperToolsChange === undefined
           ? {}
           : { onWorkDeveloperToolsChange: props.onWorkDeveloperToolsChange })}
@@ -3387,6 +3410,8 @@ function ChatThreadWorkspace(props: {
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
   readonly spendCeilingShown?: boolean;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
+  readonly automationClient?: AutomationClient;
+  readonly onOpenRoutine?: (automationId: string) => void;
 }) {
   const controller = useChatController({
     // The App-level controller already refreshes navigation from the Machine
@@ -3432,6 +3457,10 @@ function ChatThreadWorkspace(props: {
       {...(props.onOpenUsageDashboard === undefined
         ? {}
         : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
+      {...(props.automationClient === undefined
+        ? {}
+        : { automationClient: props.automationClient })}
+      {...(props.onOpenRoutine === undefined ? {} : { onOpenRoutine: props.onOpenRoutine })}
       projects={props.projects}
       tab={props.tab}
     >
@@ -3448,6 +3477,9 @@ function ChatThreadWorkspace(props: {
         {...(props.memoryProposalClient === undefined
           ? {}
           : { memoryProposalClient: props.memoryProposalClient })}
+        {...(props.automationClient === undefined
+          ? {}
+          : { automationClient: props.automationClient })}
         {...(props.browserAutomationClient === undefined
           ? {}
           : { browserAutomationClient: props.browserAutomationClient })}

@@ -2814,6 +2814,53 @@ it("answers a child's repeated question only once and records the person's answe
   );
 });
 
+it("lets a child outside Strict be asked a secret, hands it the answer and keeps only that one was given", async () => {
+  const sentinel = "hunter2-secret-sentinel";
+  for (const parentOutsideStrict of [true, false]) {
+    const provider = fakeProvider();
+    const askUser = vi.fn(async () => sentinel);
+    const onUserMessage = vi.fn();
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        interactions: { askUser },
+        onUserMessage,
+        asksSecretQuestions: () => parentOutsideStrict,
+      }),
+    );
+    const result = settled(runtime.start(agentRun()));
+    await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+    // Strict is not loosened for the child: only the secret question is.
+    expect(provider.starts[0]).not.toHaveProperty("strict");
+    if (!parentOutsideStrict) {
+      expect(provider.starts[0]).not.toHaveProperty("asksSecretQuestions");
+      await provider.emit({ kind: "completed", sessionId });
+      await result;
+      continue;
+    }
+    expect(provider.starts[0]).toMatchObject({ asksSecretQuestions: true });
+    await provider.emit({
+      kind: "user-input-request",
+      sessionId,
+      requestId: "question-1",
+      prompt: "Database credential?",
+      options: [],
+      secret: true,
+    });
+    await vi.waitFor(() => expect(provider.answeredQuestions).toHaveLength(1));
+    await provider.emit({ kind: "text-delta", sessionId, text: "Connected", occurredAt: now });
+    await provider.emit({ kind: "completed", sessionId });
+    expect((await result).kind).toBe("completed");
+    expect(provider.answeredQuestions[0]).toMatchObject({ answer: sentinel });
+    expect(onUserMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "answer",
+        text: expect.stringContaining("Database credential?"),
+      }),
+    );
+    expect(JSON.stringify(onUserMessage.mock.calls)).not.toContain(sentinel);
+  }
+});
+
 it("refuses an unanswered question instead of manufacturing an empty provider answer", async () => {
   const provider = fakeProvider();
   const runtime = createAgentRunSessionRuntime(runtimeOptions(provider));

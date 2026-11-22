@@ -6,7 +6,7 @@ import type { ProjectMemoryProposalClient } from "../projects/ProjectMemoryPropo
 import { CodeLocalReview } from "./CodeLocalReview";
 import type { CodeReviewFileRequest } from "./codeReviewNavigation";
 import type { CodeClient } from "@octant/client-runtime/code-client";
-import { decodeBrowserThreadId } from "@octant/contracts";
+import { decodeBrowserThreadId, decodeCodeTerminalId } from "@octant/contracts";
 import type { AutoReview } from "./autoReview";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import type {
@@ -28,6 +28,7 @@ import {
   presentAppleSimulatorLiveFrame,
   type AppleSimulatorLiveFrameAttach,
 } from "@octant/domain";
+import { providerTerminalOffer } from "./providerTerminalOffer";
 import { FolderGit2, TriangleAlert } from "../ui/icons";
 import { documentIsVisible } from "../polling/documentVisibility";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -163,7 +164,12 @@ export interface CodeWorkspaceProps {
   readonly onOpenReview?: (request?: CodeReviewFileRequest) => void;
   readonly onOpenSurface?: (
     kind: CodeOverviewSurfaceKind,
-    options?: { readonly terminalId?: CodeTerminalId },
+    options?: {
+      readonly terminalId?: CodeTerminalId;
+      /** A terminal tab running the thread's provider's own program, under its name. */
+      readonly program?: "provider";
+      readonly title?: string;
+    },
   ) => void;
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly harnessAutoReviewSupported?: boolean;
@@ -488,6 +494,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
             : { terminal: props.projections.terminal })}
           checkoutAvailability={view.checkout.availability}
           threadPolicy={view.thread.executionPolicy}
+          {...(serverThread ? {} : providerTerminalOffer(props.providerGroups, view.thread))}
         />
       );
     case "code-test": {
@@ -1344,9 +1351,12 @@ function TerminalWorkspaceSurface(
     readonly terminal?: TerminalResult;
     readonly terminalId: CodeTerminalId;
     readonly threadPolicy: ProviderExecutionPolicy;
+    /** The thread's provider's program, when it has one a terminal tab can open. */
+    readonly providerProgramName?: string;
   },
 ) {
   const TERMINAL_REATTACH_INITIAL_MS = 500;
+  const providerTab = props.tab.kind === "code-terminal" && props.tab.program === "provider";
   const TERMINAL_REATTACH_MAX_MS = 4_000;
   const [terminal, setTerminal] = useState(props.terminal);
   const [terminalId, setTerminalId] = useState(props.terminalId);
@@ -1513,6 +1523,7 @@ function TerminalWorkspaceSurface(
       columns: 100,
       rows: 30,
       credentialRefs: [],
+      ...(providerTab ? { program: "provider" as const } : {}),
       ...props.scope,
     } as const;
     setFailure(undefined);
@@ -1585,7 +1596,10 @@ function TerminalWorkspaceSurface(
         client={props.client}
         createOperationId={() => props.nextUuid() as never}
         executionPolicy={props.threadPolicy}
-        offerBrowserGrant
+        offerBrowserGrant={!providerTab}
+        {...(providerTab && props.providerProgramName !== undefined
+          ? { providerProgramName: props.providerProgramName }
+          : {})}
         onAddSelectionToChat={(selection) =>
           props.controller.setPendingDraft(
             appendTerminalSelection(props.controller.pendingDraft, selection),
@@ -1599,6 +1613,19 @@ function TerminalWorkspaceSurface(
                 props.onOpenSurface?.("code-terminal", {
                   terminalId: props.nextUuid() as unknown as CodeTerminalId,
                 }),
+            })}
+        {...(props.onOpenSurface === undefined || props.providerProgramName === undefined
+          ? {}
+          : {
+              onOpenProviderTerminal: {
+                name: props.providerProgramName,
+                open: () =>
+                  props.onOpenSurface?.("code-terminal", {
+                    terminalId: decodeCodeTerminalId(props.nextUuid()),
+                    program: "provider",
+                    title: props.providerProgramName ?? "Terminal",
+                  }),
+              },
             })}
         {...(props.onPinTerminal === undefined
           ? {}
@@ -1614,7 +1641,10 @@ function TerminalWorkspaceSurface(
           columns: 100,
           createTerminalId: () => terminalId,
           credentialRefs: [],
-          ...(props.projectExtraFolders === undefined || props.projectExtraFolders.length === 0
+          ...(providerTab ? { program: "provider" as const } : {}),
+          ...(providerTab ||
+          props.projectExtraFolders === undefined ||
+          props.projectExtraFolders.length === 0
             ? {}
             : { folders: props.projectExtraFolders }),
           rows: 30,

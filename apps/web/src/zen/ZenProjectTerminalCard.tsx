@@ -31,6 +31,17 @@ export interface ZenProjectTerminalCardProps {
    * true once a new shell started, after which the card offers no second one.
    */
   readonly onRestart?: () => Promise<boolean>;
+  /**
+   * Opens a terminal running the window's Work task's provider program, in a
+   * card of its own. Absent when that provider has none; the host still
+   * decides, and refuses anyone but the person.
+   */
+  readonly onOpenProviderTerminal?: { readonly name: string; readonly open: () => void };
+  /**
+   * Set when this card's terminal runs the Work task's provider program rather
+   * than a shell, as its pinned element records.
+   */
+  readonly providerProgramName?: string;
 }
 
 /**
@@ -233,12 +244,29 @@ export function ZenProjectTerminalCard(props: ZenProjectTerminalCardProps) {
   return (
     <section aria-label="Project terminal" className="code-delivery-pane code-terminal-pane">
       {failure === undefined ? null : <OctantAlert tone="warning">{failure}</OctantAlert>}
+      {props.providerProgramName === undefined ? null : (
+        <OctantAlert layout="row" className="code-terminal-pane__provider" tone="neutral">
+          {props.providerProgramName} runs here on its own, with its own approvals. What you do in
+          it stays outside this task's record and usage.
+        </OctantAlert>
+      )}
       {terminal.state === "running" ? (
         <div className="code-terminal-pane__actions-menu">
           <OctantMenu
-            items={[{ value: "stop", label: "Stop terminal" }]}
+            items={[
+              { value: "stop", label: "Stop terminal" },
+              ...(props.onOpenProviderTerminal === undefined
+                ? []
+                : [
+                    {
+                      value: "provider",
+                      label: `Open ${props.onOpenProviderTerminal.name} terminal`,
+                    },
+                  ]),
+            ]}
             onValueChange={(value) => {
               if (value === "stop") void stop();
+              else if (value === "provider") props.onOpenProviderTerminal?.open();
             }}
             selectionMode="action"
             trigger={<MoreHorizontal aria-hidden="true" size={16} />}

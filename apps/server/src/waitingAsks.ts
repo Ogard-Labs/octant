@@ -250,6 +250,8 @@ function serviceOfferWords(offer: ServiceOffer): AskWords {
 
 function serviceOfferText(offer: ServiceOffer): string {
   switch (offer.kind) {
+    case "transcribe":
+      return "Transcribe an audio file?";
     case "save":
       return "Save a generated image?";
     case "generate":

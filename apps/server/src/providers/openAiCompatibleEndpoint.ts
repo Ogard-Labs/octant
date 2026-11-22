@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   decodeProviderFailure,
   type OpenAiCompatibleProviderConfiguration,
@@ -5,6 +6,7 @@ import {
   type ProviderInputModality,
   type ProviderModel,
   type ProviderReadiness,
+  type ProviderSessionId,
 } from "@octant/contracts";
 import { readDirectoryOAuthCredential } from "@octant/provider-sdk/directory-oauth";
 import type { ProviderCredentialLease, ProviderCredentialResolver } from "./credentialBrokerClient";
@@ -48,6 +50,8 @@ export function openAiCompatibleAuthStrategy(
 
 export interface OpenAiCompatibleEndpointOptions {
   readonly instanceId: string;
+  /** The running harness version, supplied by the host for its model endpoint. */
+  readonly octantVersion?: string;
   readonly configuration: OpenAiCompatibleProviderConfiguration;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: CompatibleFetch;
@@ -79,6 +83,7 @@ export type CompatibleRequestAuthorization = (
 
 export interface OpenAiCompatibleEndpoint {
   readonly instanceId: string;
+  readonly openCodeGo?: { readonly userAgent: string; readonly sessionId?: string };
   readonly configuration: OpenAiCompatibleProviderConfiguration;
   readonly authStrategy: OpenAiCompatibleAuthStrategy;
   readonly fetch: CompatibleFetch;
@@ -128,6 +133,34 @@ export interface CompatibleGenerationRejection {
   readonly failure: ProviderFailure;
 }
 
+const OPEN_CODE_GO_BASES = new Set([
+  "https://opencode.ai/inference/go/v1",
+  "https://opencode.ai/inference/go/openai/v1",
+  "https://opencode.ai/zen/go/v1",
+]);
+
+function openCodeGoIdentity(baseUrl: string, version: string | undefined) {
+  if (version === undefined || !OPEN_CODE_GO_BASES.has(URL.parse(baseUrl)?.href ?? ""))
+    return undefined;
+  // A configured development version need not be a valid HTTP product token.
+  const userAgent = /^[a-zA-Z0-9.+-]{1,64}$/.test(version)
+    ? `octant-harness/${version}`
+    : "octant-harness";
+  return { userAgent };
+}
+
+/** Bind one immutable endpoint view to a conversation. A standalone tool check gets its own ID. */
+export function forOpenCodeGoConversation(
+  endpoint: OpenAiCompatibleEndpoint,
+  sessionId?: ProviderSessionId,
+): OpenAiCompatibleEndpoint {
+  if (endpoint.openCodeGo === undefined) return endpoint;
+  return {
+    ...endpoint,
+    openCodeGo: { ...endpoint.openCodeGo, sessionId: sessionId ?? randomUUID() },
+  };
+}
+
 export function makeOpenAiCompatibleEndpoint(
   options: OpenAiCompatibleEndpointOptions,
 ): OpenAiCompatibleEndpoint {
@@ -139,8 +172,10 @@ export function makeOpenAiCompatibleEndpoint(
   assertPositiveLimit(limits.streamIdleTimeoutMs);
   const authStrategy: OpenAiCompatibleAuthStrategy =
     options.authStrategy ?? openAiCompatibleAuthStrategy(options.configuration);
+  const openCodeGo = openCodeGoIdentity(baseUrl, options.octantVersion);
   return Object.freeze({
     instanceId: options.instanceId,
+    ...(openCodeGo === undefined ? {} : { openCodeGo }),
     configuration: options.configuration,
     authStrategy,
     fetch: options.fetch ?? globalThis.fetch,
@@ -528,6 +563,12 @@ async function sendOnce(
 ): Promise<Response> {
   let response: Response;
   try {
+    if (endpoint.openCodeGo !== undefined) {
+      headers.set("user-agent", endpoint.openCodeGo.userAgent);
+      if (endpoint.openCodeGo.sessionId !== undefined) {
+        headers.set("x-opencode-session", endpoint.openCodeGo.sessionId);
+      }
+    }
     const fetchRequest = Promise.resolve().then(async () =>
       endpoint.fetch(url, {
         ...init,

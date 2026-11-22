@@ -4,7 +4,6 @@ import {
   decodeSpeechSynthesisRequest,
   decodeSpeechTranscript,
   decodeSpeechTranscriptionLanguage,
-  SPEECH_HOST_CONCURRENCY,
   SPEECH_TRANSCRIPTION_MAX_AUDIO_BYTES,
   type ProviderFailure,
   type ProviderInstance,
@@ -32,6 +31,7 @@ import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import { makeOpenAiCompatibleSpeechAdapter, type SpeechAdapter } from "./speechAdapter";
 import { sniffSpeechAudioMediaType } from "./speechAudio";
+import type { SpeechGates } from "./speechGates";
 
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
@@ -43,11 +43,9 @@ const SYNTHESIS_PATH = "/api/speech/synthesis";
 const TRANSCRIPTION_BODY_LIMIT = SPEECH_TRANSCRIPTION_MAX_AUDIO_BYTES + 65_536;
 const PAIRED_TRANSCRIPTION_BODY_LIMIT = REMOTE_TRANSCRIPTION_MAX_AUDIO_BYTES + 65_536;
 const SYNTHESIS_BODY_LIMIT = 65_536;
-// Paired devices together may hold every transcription slot but one, so the
-// computer's own dictation never answers busy because phones are sending.
-const PAIRED_TRANSCRIPTION_SLOTS = SPEECH_HOST_CONCURRENCY - 1;
 
 export interface SpeechRouteDependencies {
+  readonly gates: SpeechGates;
   readonly readVoiceSettings: () => VoiceSettings;
   readonly listInstances: () => ReadonlyArray<ProviderInstance>;
   readonly windowAuthorityStore: WindowAuthorityStore;
@@ -79,10 +77,7 @@ export interface SpeechRouteDependencies {
  */
 export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) {
   const now = dependencies.now ?? Date.now;
-  const gates = {
-    transcription: new AdmissionGate(SPEECH_HOST_CONCURRENCY),
-    synthesis: new AdmissionGate(SPEECH_HOST_CONCURRENCY),
-  };
+  const { gates } = dependencies;
   // Admission times per paired device inside the budget window, and the
   // devices with a clip being transcribed now. Nothing here outlives the
   // process: a restart is the owner's act and starts every budget afresh.
@@ -194,11 +189,9 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
       );
     }
     // Checked before admission so a busy refusal spends none of the budget.
-    if (pairedDeviceId !== undefined && pairedClipsInFlight.size >= PAIRED_TRANSCRIPTION_SLOTS) {
-      return busy(origin);
-    }
-
-    const release = gates.transcription.tryAcquire();
+    const release = gates.transcription.tryAcquire(
+      pairedDeviceId === undefined ? "local" : "shared",
+    );
     if (release === null) return busy(origin);
     if (pairedDeviceId !== undefined) {
       const admission = admitRemoteTranscription({
@@ -289,7 +282,7 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
         origin,
       );
     }
-    const release = gates.synthesis.tryAcquire();
+    const release = gates.synthesis.tryAcquire("local");
     if (release === null) return busy(origin);
     try {
       const decoded = await readJson(request, SYNTHESIS_BODY_LIMIT);
@@ -332,31 +325,6 @@ export function createSpeechRouteHandler(dependencies: SpeechRouteDependencies) 
     ref: SpeechEndpointRef | SpeechSynthesisEndpointRef | undefined,
   ): SpeechEndpointResolution {
     return resolveSpeechEndpoint(ref, dependencies.listInstances());
-  }
-}
-
-/**
- * Bounds concurrent voice calls per direction before any body is buffered.
- * The overflow is refused, not queued: a person speaking into a composer
- * would rather retry than wait behind an unknown number of other clips.
- */
-class AdmissionGate {
-  #active = 0;
-  readonly #capacity: number;
-
-  constructor(capacity: number) {
-    this.#capacity = capacity;
-  }
-
-  tryAcquire(): (() => void) | null {
-    if (this.#active >= this.#capacity) return null;
-    this.#active += 1;
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      this.#active -= 1;
-    };
   }
 }
 

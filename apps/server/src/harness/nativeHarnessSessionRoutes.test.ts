@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -19,6 +19,8 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
+import type { HubGrant } from "@octant/contracts";
+import { hubActScopeFromSpokeLink, type HubActScopePort } from "../hub/hubActScope";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { registerNativeHarnessEvents } from "./nativeHarnessEvents";
@@ -362,6 +364,89 @@ describe("one harness session on every surface", () => {
     ]);
   });
 
+  it("hands a subagent's secret question's answer back to it from the person alone and never journals it", async () => {
+    const { store } = journaledSession();
+    const directory = directories.at(-1) ?? "";
+    let counter = 0;
+    const questions = new NativeHarnessQuestionStore({
+      sessions: store,
+      uuid: () => `dddddddd-dddd-4ddd-8ddd-${(++counter).toString(16).padStart(12, "0")}`,
+      clock: () => "2026-10-06T12:00:00.000Z",
+    });
+    const handler = createNativeHarnessSessionRouteHandler({
+      windowAuthorityStore: new WindowAuthorityStore(),
+      store,
+      followUps: {} as never,
+      authorizeThread: () => true,
+      answerQuestion: ({ threadId, questionId, answer, secret, actor }) =>
+        questions.answer(threadId, questionId, answer, actor, secret),
+    });
+    const send = (body: unknown, principal: unknown = { kind: "local-window" }) => {
+      const request = new Request(
+        `http://127.0.0.1/api/native-harness/sessions/${threadId}/questions`,
+        { method: "POST", body: JSON.stringify(body) },
+      );
+      bindPrincipalRouteContext(request, { principal: principal as never, scopeId: windowId });
+      return handler(request);
+    };
+    const lead = decodeNativeHarnessSlotCandidate({
+      hostId: "00000000-0000-4000-8000-0000000000aa",
+      providerInstanceId: "00000000-0000-4000-8000-000000000001",
+      modelId: "frontier-large",
+    });
+    const secret = questions.ask({
+      threadId,
+      mode: "work",
+      lead,
+      prompt: "Database credential?",
+      options: [],
+      secret: true,
+    });
+    const plain = questions.ask({
+      threadId,
+      mode: "work",
+      lead,
+      prompt: "Which host?",
+      options: [],
+    });
+    const [secretQuestion, plainQuestion] = store.read(threadId)?.questions ?? [];
+    expect(secretQuestion).toMatchObject({ prompt: "Database credential?", secret: true });
+    const sentinel = "hunter2-secret-sentinel";
+
+    // Only the person answers it: a device they did not pair is refused, and
+    // neither answer stands in for the other.
+    expect(
+      (
+        await send(
+          { questionId: secretQuestion?.id, secretAnswer: sentinel },
+          { kind: "remote-device", deviceId: "55000000-0000-4000-8000-0000000000d2" },
+        )
+      )?.status,
+    ).toBe(403);
+    expect((await send({ questionId: secretQuestion?.id, answer: sentinel }))?.status).toBe(409);
+    expect((await send({ questionId: plainQuestion?.id, secretAnswer: sentinel }))?.status).toBe(
+      409,
+    );
+    expect(store.read(threadId)?.questions.map((question) => question.status)).toEqual([
+      "pending",
+      "pending",
+    ]);
+
+    const answered = await send({ questionId: secretQuestion?.id, secretAnswer: sentinel });
+    expect(answered?.status).toBe(200);
+    expect(await secret).toMatchObject({ status: "answered", answer: sentinel });
+    expect(store.read(threadId)?.questions[0]).toMatchObject({ status: "answered", secret: true });
+    expect(store.read(threadId)?.questions[0]).not.toHaveProperty("answer");
+    expect(JSON.stringify(await answered?.json())).not.toContain(sentinel);
+    expect((await send({ questionId: plainQuestion?.id, answer: "db.internal" }))?.status).toBe(
+      200,
+    );
+    expect(await plain).toMatchObject({ answer: "db.internal" });
+    expect(JSON.stringify(store.read(threadId))).not.toContain(sentinel);
+    for (const file of readdirSync(directory))
+      expect(readFileSync(join(directory, file)).includes(sentinel)).toBe(false);
+  });
+
   it("journals a pause, a resume and the steering notes a paired device sends with the device as actor, and a local window's as the local person", async () => {
     const deviceId = "55000000-0000-4000-8000-0000000000d2";
     const controlledBy = async (principal: unknown) => {
@@ -565,7 +650,13 @@ describe("a paired device answering its own managed child's request", () => {
   const runId = "00000000-0000-4000-8000-000000000633";
   const approvalId = "00000000-0000-4000-8000-000000000644";
   const questionId = "00000000-0000-4000-8000-000000000655";
-  function fixture() {
+  function fixture(
+    extra: {
+      readonly mode?: "chat" | "work" | "code";
+      readonly hubActScope?: () => HubActScopePort | undefined;
+      readonly threadProjectId?: (threadId: string) => string | undefined;
+    } = {},
+  ) {
     let current = true;
     const approval = { id: approvalId, status: "pending", source: { runId } };
     const question = { id: questionId, status: "pending", source: { runId } };
@@ -581,7 +672,11 @@ describe("a paired device answering its own managed child's request", () => {
       windowAuthorityStore: new WindowAuthorityStore(),
       store: {
         read: () => ({
-          session: { status: "running", detail: "private-parent-state" },
+          session: {
+            status: "running",
+            detail: "private-parent-state",
+            ...(extra.mode === undefined ? {} : { mode: extra.mode }),
+          },
           turns: [{ result: "private-tool-result" }],
           tasks: [{ title: "private-parent-task" }],
           steering: [{ text: "private-steering" }],
@@ -600,6 +695,8 @@ describe("a paired device answering its own managed child's request", () => {
         input.deviceId === deviceId,
       decideApproval,
       answerQuestion,
+      ...(extra.hubActScope === undefined ? {} : { hubActScope: extra.hubActScope }),
+      ...(extra.threadProjectId === undefined ? {} : { threadProjectId: extra.threadProjectId }),
     });
     const send = (action = "", body?: unknown, device = deviceId) => {
       const request = new Request(
@@ -651,6 +748,36 @@ describe("a paired device answering its own managed child's request", () => {
       answer: "Strict",
       actor: { kind: "remote-device", actorId: deviceId, deviceId },
     });
+  });
+  it("a hub-introduced device answers its child's approval and question only in a Project the member's Act item names", async () => {
+    const namedProject = "00000000-0000-4000-8000-000000000666";
+    const grant: { current: HubGrant } = {
+      current: { items: ["roster", "introduce", "act"], actProjects: [] },
+    };
+    const scope = hubActScopeFromSpokeLink({
+      status: () => ({ membership: "member", grant: grant.current }) as never,
+    });
+    const { send, decideApproval, answerQuestion } = fixture({
+      mode: "code",
+      hubActScope: () => scope,
+      threadProjectId: () => namedProject,
+    });
+
+    const unnamed = await send("approvals", { approvalId, decision: "approve" });
+    expect(unnamed?.status).toBe(403);
+    expect(await unnamed?.json()).toEqual({
+      error:
+        "This computer's Act item for its hub does not name this Project, so a device the hub introduced cannot answer approvals or questions in it here.",
+    });
+    expect((await send("questions", { questionId, answer: "Strict" }))?.status).toBe(403);
+    expect(decideApproval).not.toHaveBeenCalled();
+    expect(answerQuestion).not.toHaveBeenCalled();
+
+    grant.current = { items: ["roster", "introduce", "act"], actProjects: [namedProject as never] };
+    expect((await send("approvals", { approvalId, decision: "approve" }))?.status).toBe(200);
+    expect((await send("questions", { questionId, answer: "Strict" }))?.status).toBe(200);
+    expect(decideApproval).toHaveBeenCalledOnce();
+    expect(answerQuestion).toHaveBeenCalledOnce();
   });
   it("refuses another device, remembered answers, revoked authority and session commands", async () => {
     const { send, decideApproval } = fixture();

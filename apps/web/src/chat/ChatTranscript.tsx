@@ -103,6 +103,8 @@ export interface ChatTranscriptProps {
     readonly attemptId: ChatAttemptId;
     readonly requestId: string;
     readonly answer: string;
+    /** The question asks for a secret: sent as the command's `secretAnswer`, never recorded. */
+    readonly secret?: true;
   }) => void | boolean | Promise<void | boolean>;
   /** Cancels the turn a question belongs to, without answering it. */
   readonly onDismissQuestion?: (turnId: ChatTurnId, attemptId: ChatAttemptId) => void;
@@ -1122,6 +1124,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
                 attemptId: props.attempt.id,
                 requestId: props.attempt.pendingQuestion!.requestId,
                 answer,
+                ...(props.attempt.pendingQuestion?.secret === true ? { secret: true } : {}),
               })
             }
             onDismiss={
@@ -1137,6 +1140,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
                   questionCount: props.attempt.pendingQuestion.questionCount,
                 })}
             prompt={props.attempt.pendingQuestion.prompt}
+            secret={props.attempt.pendingQuestion.secret === true}
           />
         )}
         {(props.attempt.answeredQuestions ?? []).length === 0
@@ -1213,7 +1217,7 @@ function AssistantResponse(props: {
  * the reply grew from stays readable after the turn moves on.
  */
 function AnsweredQuestionRow(props: { readonly question: ChatAttemptAnsweredQuestion }) {
-  if (props.question.questionnaire !== undefined)
+  if (props.question.questionnaire !== undefined && props.question.answer !== undefined)
     return (
       <QuestionnaireSummary
         prompt={props.question.prompt}
@@ -1226,7 +1230,11 @@ function AnsweredQuestionRow(props: { readonly question: ChatAttemptAnsweredQues
       <CircleCheck aria-hidden="true" size={14} />
       <span className="approval-row__text">
         {props.question.prompt}
-        <span className="approval-row__detail">Answered: {props.question.answer}</span>
+        <span className="approval-row__detail">
+          {props.question.answer === undefined
+            ? "Answered with a secret, which Octant did not keep"
+            : `Answered: ${props.question.answer}`}
+        </span>
       </span>
     </div>
   );

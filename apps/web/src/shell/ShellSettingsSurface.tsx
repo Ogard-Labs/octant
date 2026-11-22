@@ -1,3 +1,4 @@
+import type { NewDeviceAlertsClient } from "@octant/client-runtime/new-device-alerts-client";
 import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-restrictions-client";
 import type { SandboxSettingsScope } from "../settings/SandboxRestrictionsSettings";
 import type { ServerProjectRelayedPreviewOpener } from "../settings/ServerProjectPreviewTunnel";
@@ -96,6 +97,7 @@ export interface ShellSettingsSurfaceProps {
     "manageExtensions" | "manageFlows" | "manageProfiles"
   >;
   readonly protectedFilesClient?: ProtectedFilesClient;
+  readonly newDeviceAlertsClient?: NewDeviceAlertsClient;
   readonly blockedToolsClient?: BlockedToolsClient;
   readonly sandboxRestrictionsClient?: SandboxRestrictionsClient;
   readonly sandboxScopes?: ReadonlyArray<SandboxSettingsScope>;
@@ -139,6 +141,8 @@ export interface ShellSettingsSurfaceProps {
   readonly extensionClient: ExtensionClient;
   /** Project names by Project id, to head the remembered tool approvals. */
   readonly projectNames?: ReadonlyMap<string, string>;
+  /** The Code and Work Projects, which the hub grant's Act item can name. */
+  readonly actProjectNames?: ReadonlyMap<string, string>;
 }
 
 export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
@@ -164,6 +168,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
               ? {}
               : { pickSkillFolder: props.pickSkillFolder })}
             {...(props.projectNames === undefined ? {} : { projectNames: props.projectNames })}
+            {...(props.actProjectNames === undefined
+              ? {}
+              : { actProjectNames: props.actProjectNames })}
             {...(props.pickLocalPluginFolder === undefined
               ? {}
               : { pickLocalPluginFolder: props.pickLocalPluginFolder })}
@@ -203,6 +210,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
               ? {}
               : { sandboxRestrictionsClient: props.sandboxRestrictionsClient })}
             {...(props.sandboxScopes === undefined ? {} : { sandboxScopes: props.sandboxScopes })}
+            {...(props.newDeviceAlertsClient === undefined
+              ? {}
+              : { newDeviceAlertsClient: props.newDeviceAlertsClient })}
             {...(props.protectedFilesClient === undefined
               ? {}
               : { protectedFilesClient: props.protectedFilesClient })}

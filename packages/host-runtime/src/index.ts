@@ -249,6 +249,16 @@ export {
   type KeyRejection,
 } from "./apiKeyPool";
 export {
+  canonicalHeadlessArtifactManifestBytes,
+  decodeHeadlessArtifactSignature,
+  encodeHeadlessArtifactSignature,
+  HEADLESS_ARTIFACT_SIGNATURE_FILENAME,
+  signHeadlessArtifactManifest,
+  verifyHeadlessArtifactSignature,
+  type HeadlessArtifactSignature,
+  type HeadlessArtifactSignatureCheck,
+} from "./artifactSignature";
+export {
   createReleaseFeedVerifier,
   RELEASE_PREVIEW_PUBLIC_KEY,
   RELEASE_STABLE_PUBLIC_KEY,
@@ -256,6 +266,19 @@ export {
   type ReleaseFeedVerifier,
   type ReleaseRing,
 } from "./updateReleaseKeys";
+export {
+  DEFAULT_OCTANT_UPDATE_FEED_BASE_URL,
+  fetchReleaseFeedDocument,
+  fetchVerifiedArtifact,
+  headlessBuildFeedRelativePath,
+  isHttpsUrl,
+  resolveUpdateFeedBaseUrl,
+  UPDATE_FEED_BASE_URL_ENVIRONMENT_VARIABLE,
+  type ArtifactFetchOutcome,
+  type FeedFetchFailure,
+  type FeedFetchResult,
+} from "./releaseFeedFetch";
+export { createPinnedUpdateFetch, UpdateDestinationRefused } from "./updateHttpsTransport";
 export {
   browserDownloadHoldRoot,
   isInsideBrowserDownloadHold,

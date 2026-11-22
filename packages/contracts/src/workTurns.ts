@@ -9,6 +9,7 @@ import { HarnessRetryEventFields } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
 import { AgentResultsSteeredIntoTurn, AgentRunResultDeliveryMark } from "./agentRun";
+import { ThreadMessagesSteeredIntoTurn } from "./threadMessageSteering";
 import { ContextCompactionSettledRecord } from "./context";
 import {
   ContextHandoffMessages,
@@ -339,6 +340,8 @@ export const WorkTurnState = Schema.Struct({
   delivery: Schema.optional(AgentRunResultDeliveryMark),
   /** Finished children's results steered into this turn while it ran, in arrival order. */
   steeredResults: Schema.optional(AgentResultsSteeredIntoTurn),
+  /** The person's messages steered into this turn while it ran, in arrival order. */
+  steeredMessages: Schema.optional(ThreadMessagesSteeredIntoTurn),
   capabilities: WorkTurnCapabilityFacts,
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   version: AggregateVersion,

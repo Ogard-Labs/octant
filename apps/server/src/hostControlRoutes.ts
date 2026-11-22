@@ -2,11 +2,13 @@ import { principalAuthorityKind } from "./clientPrincipal";
 import { eventActorForPrincipal } from "./principalEventActor";
 import {
   decodeHostBackupRequest,
+  decodeHostDrainRequest,
   decodeHostLifecycleRequest,
   decodeSetHostMemoryLimitsRequest,
   type HostBackupOutcome,
   type HostControlPolicy,
   type HostControlStatus,
+  type HostDrainRequest,
   type HostLifecycleAction,
   type HostMemoryStatus,
   type HostRestartRecovery,
@@ -52,6 +54,7 @@ import { isLoopbackHostname } from "./shellRoutes";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 import type { HostExportPage } from "@octant/contracts/host-export";
+import type { HostDrain } from "./hostDrain";
 import type { EventActor, WindowId } from "@octant/contracts";
 
 /**
@@ -89,6 +92,7 @@ const ROUTES = {
   status: "/api/host-control/status",
   dataMap: "/api/host-control/data-map",
   lifecycle: "/api/host-control/lifecycle",
+  drain: "/api/host-control/drain",
   backup: "/api/host-control/backup",
   restore: "/api/host-control/restore",
   memoryLimits: "/api/host-control/memory-limits",
@@ -140,6 +144,11 @@ export interface HostControlRouteDependencies {
   readonly servicePolicy?: HostControlServicePolicyPort;
   /** Graceful owner drain request (the same authority the control socket uses). */
   readonly requestOwnerStop?: () => void;
+  /**
+   * Refusing new turns before an update (`octant server drain`); omitting it
+   * answers that draining is unavailable on this host.
+   */
+  readonly drain?: Pick<HostDrain, "enter" | "lift" | "status">;
   readonly backup?: (label: string) => HostControlBackupReceipt;
   /** The memory guard's report; omitting it leaves `memory` off the status. */
   readonly memory?: () => HostMemoryStatus;
@@ -287,6 +296,15 @@ export function createHostControlRouteHandler(
         handleLifecycle(dependencies, body.action, origin, scheduleStop),
       );
     }
+    if (route === ROUTES.drain) {
+      let body;
+      try {
+        body = decodeHostDrainRequest(decoded.value);
+      } catch {
+        return failure("Host drain request is invalid.", 400, origin);
+      }
+      return authorized("drain", () => handleDrain(dependencies, body, origin));
+    }
     if (route === ROUTES.backup) {
       let body;
       try {
@@ -371,6 +389,25 @@ async function authorizedFor(
     return failure("Host control is unauthorized.", 403, origin);
   }
   return handle();
+}
+
+/**
+ * Starts, reads or lifts the drain and answers how it stands. Waiting is the
+ * caller's: it reads again until the drain is `drained` or `timed-out`, so
+ * no request stays open for the minutes a wait may take.
+ */
+function handleDrain(
+  dependencies: HostControlRouteDependencies,
+  body: HostDrainRequest,
+  origin: string | null,
+): Response {
+  const drain = dependencies.drain;
+  if (drain === undefined) {
+    return failure("Draining is unavailable on this host.", 503, origin);
+  }
+  if (body.action === "drain") return json(drain.enter(body.minutes), 200, origin);
+  if (body.action === "lift") drain.lift();
+  return json(drain.status(), 200, origin);
 }
 
 async function handleExport(

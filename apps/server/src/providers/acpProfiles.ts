@@ -23,6 +23,7 @@ import type {
   ProviderExecutionPolicy,
   ProviderNativeSetup,
 } from "@octant/contracts";
+import type { ProviderOwnChannels } from "@octant/provider-sdk";
 import type { AcpInitializeResult } from "./acpProtocol";
 import type { AcpTurnUsageWithoutTotal } from "./acpUsage";
 
@@ -61,14 +62,13 @@ export type AcpHostAuthentication =
     };
 
 export type AcpConfinementStrategy =
-  /** Shared deny-default Seatbelt profile; explicit Full access runs unconfined. */
-  | { readonly kind: "deny-default-seatbelt" }
   /**
-   * Work and Code outside Strict start unconfined at every level, the agent's
-   * own mode asking Octant before each side effect; everything else takes
-   * the deny-default profile.
+   * Shared deny-default Seatbelt profile where Octant's sandbox applies: Chat,
+   * Plan, Strict, a chosen sandbox, a kept sandbox and readiness checks. Full
+   * access and Work and Code outside Strict run unconfined
+   * (`providerHoldsLevelWithoutSandbox`).
    */
-  | { readonly kind: "provider-approvals-outside-strict" };
+  { readonly kind: "deny-default-seatbelt" };
 
 export interface AcpProcessProfile {
   /** `agentInfo.name` the ACP `initialize` response must report. */
@@ -83,18 +83,37 @@ export interface AcpProcessProfile {
    * it. A reviewed profile fails closed on a version it cannot read.
    */
   readonly versionProbe?: "best-effort";
+  /**
+   * The earliest release this profile was probed on; an older one is refused,
+   * since nothing shows it speaks the wire the profile reads (Mistral Vibe's
+   * is also a protocol requirement: its mode ids moved in 2.23.3 and 2.24.1).
+   * Every later release runs unless `brokenVersions` lists it.
+   */
   readonly minimumVersion: readonly [number, number, number];
+  /**
+   * Releases known to break with Octant, each `major.minor.patch`. A launch
+   * on one is refused with a sentence that names it; every other release at
+   * or above `minimumVersion` runs. Empty for every profile until a release
+   * is found broken.
+   */
+  readonly brokenVersions?: ReadonlyArray<string>;
   /** When set, version is read from the matching npm `package.json` instead of `--version`. */
   readonly npmPackageName?: string;
   readonly passthroughVariables: ReadonlyArray<string>;
   readonly guards: Readonly<Record<string, string>>;
   /**
-   * The guards that close one of the agent's own channels to its vendor
-   * (telemetry, trace uploads, feedback). Under Strict they are set as today;
-   * outside Strict they follow the person's own settings. Self-update guards
-   * are not channels and stay set.
+   * The guards that close one of the agent's own telemetry channels to its
+   * vendor (usage metrics, trace uploads, feedback). Under Strict they are
+   * set; outside Strict they are left out while the person lets providers
+   * send their own telemetry, the default, and set otherwise.
    */
   readonly channelGuards?: ReadonlyArray<string>;
+  /**
+   * The guards that keep the agent from checking for or installing a newer
+   * version of itself. Under Strict they are set; outside Strict they are set
+   * unless the person lets providers update themselves.
+   */
+  readonly selfUpdateGuards?: ReadonlyArray<string>;
   /** User-owned configuration files the provider needs to read, never write. */
   readonly hostReadPaths?: ReadonlyArray<string>;
   /** The CLI starts a same-binary stdio server before serving ACP messages. */
@@ -128,6 +147,8 @@ export interface AcpProcessProfile {
   readonly args: (input: {
     readonly root: string;
     readonly managedHome: string;
+    /** The provider's own channels this launch opens; absent opens none. */
+    readonly ownChannels?: ProviderOwnChannels;
   }) => ReadonlyArray<string>;
   readonly managedFiles: (input: {
     readonly managedHome: string;
@@ -185,24 +206,24 @@ export interface AcpSessionMetaReasoning {
 
 export interface AcpProviderProfile {
   /**
-   * Exact releases whose cumulative usage/context update semantics were
-   * verified. A profile that pins them is read only by that reviewed rule;
-   * every other agent's usage is read by ACP's standard schema
-   * (`acpTurnUsage`, `finishAcpReportedTurn`).
+   * Releases whose cumulative usage/context update semantics were reviewed.
+   * A profile that names them is read only by that rule, from the earliest of
+   * them on (`acpReleaseClaim`); every other agent's usage is read by ACP's
+   * standard schema (`acpTurnUsage`, `finishAcpReportedTurn`).
    */
   readonly usageVersions?: ReadonlyArray<string>;
-  /** Exact releases whose signed-in supplementary read and cold-resume semantics passed. */
+  /** Releases whose signed-in supplementary read and cold-resume semantics passed. */
   readonly fileReviewVersions?: ReadonlyArray<string>;
-  /** Exact releases whose signed-in nonempty compaction and resume semantics passed. */
+  /** Releases whose signed-in nonempty compaction and resume semantics passed. */
   readonly compactionVersions?: ReadonlyArray<string>;
-  /** Exact releases whose native session lifecycle has passed warm-reuse evidence. */
+  /** Releases whose native session lifecycle has passed warm-reuse evidence. */
   readonly retainedSessionVersions?: ReadonlyArray<string>;
   /**
    * The process stays open between turns on every release, as other ACP
    * clients of the agent keep it, without a pinned one.
    */
   readonly retainsSessions?: true;
-  /** Verified HTTP MCP implementations that omit, rather than deny, negotiation. */
+  /** Reviewed HTTP MCP implementations that omit, rather than deny, negotiation. */
   readonly unadvertisedHttpMcpVersions?: ReadonlyArray<string>;
   readonly kind: AcpProviderKind;
   readonly displayName: string;
@@ -273,8 +294,12 @@ export interface AcpProviderProfile {
    * session and otherwise rejects.
    */
   readonly toleratesStrayUpdates?: true;
-  /** The agent's own allow-always option is chosen when approvals hold for the session. */
-  readonly forwardsAllowAlways?: true;
+  /**
+   * The agent takes a second `session/prompt` while one is open and folds it
+   * into the running turn instead of starting another, so the connection
+   * offers `steer`. Without it a prompt sent mid-turn is refused.
+   */
+  readonly steersMidTurn?: true;
   /** What a turn the agent ends with `refusal` says. */
   readonly refusalMessage?: string;
   /**
@@ -327,8 +352,9 @@ export interface AcpProviderProfile {
    * (MCP servers, hooks, extensions). Used where the entry cannot be denied
    * because the agent fails to start without being able to read it. A session
    * whose setup carries the Project's code (`projectCode`, a Project trusted
-   * for the agent, outside Plan) is not refused: the files then load as the
-   * agent loads them on its own.
+   * for the agent, outside Plan) is not refused, nor is any session outside
+   * Strict that carries the person's setup (`acpLoadsAllOwnSetup`): the files
+   * then load as the agent loads them on its own.
    */
   readonly refusesProject?: (root: string) => string | undefined;
   /**
@@ -350,7 +376,7 @@ export interface AcpProviderProfile {
   /** Chat sessions run in the managed home unless the agent needs a real Project root. */
   readonly chatSessionRoot: "managed-home" | "project-root";
   readonly userQuestions: "supported" | "unsupported";
-  /** Exact native versions accepted by signed-in session-form verification. */
+  /** Native releases accepted by signed-in session-form verification. */
   readonly elicitationVersions?: ReadonlyArray<string>;
   /** ACP method used to reattach to a prior session. */
   readonly resumeMethod: "session/load" | "session/resume";
@@ -359,13 +385,13 @@ export interface AcpProviderProfile {
   /** Whether the probe calls `authenticate` before opening a scratch session. */
   readonly authenticateOnProbe: boolean;
   /**
-   * When present, the probe fails closed unless the agent advertises exactly
-   * this embedded command inventory. A prompt starting with `/` runs one of
-   * those commands in Work and Code outside Plan, as in the agent's own app
-   * (maintainer decision, 2026-11-14); Plan and Chat refuse it, since a
-   * command such as `update-config` writes.
+   * A prompt starting with `/` runs only a command the agent listed (its
+   * session's `available_commands_update`, or the readiness check's until the
+   * session lists any), whatever the release lists (maintainer decisions,
+   * 2026-11-14 and 2026-11-21); an unlisted one is refused before it reaches
+   * the agent. The level's tool rules decide what a command does.
    */
-  readonly reviewedCommands?: ReadonlyArray<string>;
+  readonly listedCommandsOnly?: true;
   /** Provider-owned CLI login, with delegated browser auth reserved for legacy profiles. */
   readonly authentication:
     | { readonly kind: "provider-owned" }
@@ -375,40 +401,47 @@ export interface AcpProviderProfile {
 }
 
 /**
- * What a feature pinned to exact reviewed releases (`usageVersions`,
- * `compactionVersions` and the like) may do on the release that runs.
- * `reviewed`: the release is one of them. `unverified`: at Full access, a
- * release newer than every reviewed one keeps the feature, offered as
- * unverified instead of lost, since a person who runs the agent open already
- * gives it more than the feature reaches. `absent`: below Full access the pin
- * holds, and an older or unparseable release never inherits newer evidence.
+ * What a feature reviewed on named releases (`usageVersions`,
+ * `compactionVersions` and the like) may do on the release that runs, at
+ * every level alike (maintainer decision, 2026-11-21). `reviewed`: the
+ * release is one of them. `unverified`: a release at or above the earliest
+ * of them keeps the feature, and the runtime card says so. `absent`: an
+ * older or unreadable release never inherits newer evidence. A release known
+ * to break is refused at launch (`brokenVersions`), not here.
  */
-export type AcpExactReleaseClaim = "reviewed" | "unverified" | "absent";
+export type AcpReleaseClaim = "reviewed" | "unverified" | "absent";
 
-export function acpExactReleaseClaim(
+export function acpReleaseClaim(
   reviewed: ReadonlyArray<string> | undefined,
   version: string | undefined,
-  executionPolicy: ProviderExecutionPolicy | undefined,
-): AcpExactReleaseClaim {
+): AcpReleaseClaim {
   if (reviewed === undefined || reviewed.length === 0 || version === undefined) return "absent";
   if (reviewed.includes(version)) return "reviewed";
-  if (executionPolicy !== "full-access") return "absent";
-  return reviewed.every((release) => newerRelease(version, release)) ? "unverified" : "absent";
+  return reviewed.some((release) => releaseAtLeast(version, release)) ? "unverified" : "absent";
 }
 
-/** Whether `candidate` is a later major.minor.patch release than `than`. */
-function newerRelease(candidate: string, than: string): boolean {
+/** Whether `candidate` is the same major.minor.patch release as `floor` or a later one. */
+export function releaseAtLeast(candidate: string, floor: string): boolean {
   const parse = (text: string) => /^(\d+)\.(\d+)\.(\d+)$/.exec(text)?.slice(1, 4).map(Number);
   const left = parse(candidate);
-  const right = parse(than);
+  const right = parse(floor);
   if (left === undefined || right === undefined) return false;
   for (let index = 0; index < 3; index += 1) {
     const a = left[index] ?? 0;
     const b = right[index] ?? 0;
     if (a !== b) return a > b;
   }
-  return false;
+  return true;
 }
+
+/**
+ * The guards that exist only to keep the piped ACP JSON-RPC stream clean, left
+ * out of a person's interactive provider terminal, which is a TTY. `NO_COLOR`
+ * is the only one: every other guard a profile sets closes a vendor channel,
+ * a self-update, or a source of configuration and holds there too; no profile
+ * sets `TERM`, `CI` or another TTY guard; and the terminal sets its own `TERM`.
+ */
+export const PROTOCOL_STREAM_GUARDS: ReadonlyArray<string> = ["NO_COLOR"];
 
 export const HOST_PASSTHROUGH_VARIABLES: ReadonlyArray<string> = [
   "COLORTERM",
@@ -465,6 +498,23 @@ export function acpSubagentsRun(
   return (
     setup?.subagents === true && executionPolicy !== "plan" && (mode === "work" || mode === "code")
   );
+}
+
+/**
+ * Whether a launch loads all of the agent's own setup, holding back none of
+ * the profile's denied Project and home entries and refusing no Project at
+ * start: outside Strict, wherever the session carries the person's setup, in
+ * every mode, as the agent loads it on its own (maintainer decision,
+ * 2026-11-21). Plan stays read-only through its OS wall, not through these
+ * entries. Strict keeps the hold-backs until the person allows the Project's
+ * code, and a person who turned the setup off for the account or thread
+ * (no setup on the session) keeps them too.
+ */
+export function acpLoadsAllOwnSetup(input: {
+  readonly strict: boolean | undefined;
+  readonly setup: ProviderNativeSetup | undefined;
+}): boolean {
+  return input.strict === false && input.setup !== undefined;
 }
 
 /**
@@ -555,6 +605,7 @@ const opencodeProfile: AcpProviderProfile = {
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     requiresChildServer: true,
     hostReadPaths: opencodeGlobalConfigPaths,
+    selfUpdateGuards: ["OPENCODE_DISABLE_AUTOUPDATE"],
     guards: {
       NO_COLOR: "1",
       OPENCODE_DISABLE_AUTOUPDATE: "1",
@@ -628,6 +679,8 @@ const kiloProfile: AcpProviderProfile = {
       /^(?:kilo )?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)?\r?\n?$/,
     minimumVersion: [1, 0, 0],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    channelGuards: ["KILO_TELEMETRY_LEVEL"],
+    selfUpdateGuards: ["KILO_DISABLE_AUTOUPDATE"],
     guards: {
       KILO_DISABLE_AUTOUPDATE: "1",
       KILO_DISABLE_AUTOCOMPACT: "1",
@@ -895,6 +948,7 @@ const vibeProfile: AcpProviderProfile = {
     minimumVersion: [2, 24, 1],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     channelGuards: ["VIBE_ENABLE_TELEMETRY"],
+    selfUpdateGuards: ["VIBE_ENABLE_UPDATE_CHECKS"],
     guards: {
       VIBE_ENABLE_TELEMETRY: "false",
       VIBE_ENABLE_UPDATE_CHECKS: "false",
@@ -1118,6 +1172,7 @@ const grokProfile: AcpProviderProfile = {
       "GROK_TELEMETRY_MIXPANEL_ENABLED",
       "GROK_FEEDBACK_ENABLED",
     ],
+    selfUpdateGuards: ["GROK_DISABLE_AUTOUPDATER"],
     guards: {
       GROK_TELEMETRY_ENABLED: "0",
       GROK_TELEMETRY_TRACE_UPLOAD: "0",
@@ -1337,7 +1392,7 @@ const refusesProjectEntries =
     const found = entries.filter((entry) => projectHoldsEntry(root, entry));
     if (found.length === 0) return undefined;
     const names = found.map((entry) => `\`${entry}\``).join(", ");
-    return `${displayName} starts the MCP servers, hooks, and extensions that ${names} in this Project declare, so it starts here only once you trust this Project for ${displayName}. Trust it, remove or rename ${found.length === 1 ? "that file" : "those files"}, or use another provider in this Project.`;
+    return `${displayName} starts the MCP servers, hooks, and extensions that ${names} in this Project declare, so it starts here only once you allow this Project's code for ${displayName}. Allow it, remove or rename ${found.length === 1 ? "that file" : "those files"}, or use another provider in this Project.`;
   };
 
 const geminiProfile: AcpProviderProfile = {
@@ -1653,6 +1708,7 @@ const fxProfile: AcpProviderProfile = {
     // encrypted with the root-only /var/db/SystemKey, which stays denied.
     readsSystemKeychain: true,
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    selfUpdateGuards: ["FX_AUTO_UPGRADE"],
     guards: {
       // fx's default `permission_mode` is `auto`, and its ACP `code` mode maps
       // to that same auto-review. Pin the profile default to `ask` and select
@@ -1684,23 +1740,6 @@ const fxProfile: AcpProviderProfile = {
   },
 };
 
-const KIMI_REVIEWED_COMMANDS = [
-  "compact",
-  "status",
-  "usage",
-  "mcp",
-  "tasks",
-  "help",
-  "mcp-config",
-  "import-from-cc-codex",
-  "update-config",
-  "custom-theme",
-  "write-goal",
-  "check-kimi-code-docs",
-  "sub-skill",
-  "sub-skill.review",
-  "sub-skill.consolidate",
-] as const;
 const kimiProfile: AcpProviderProfile = {
   kind: "kimi-code",
   displayName: "Kimi Code",
@@ -1715,7 +1754,7 @@ const kimiProfile: AcpProviderProfile = {
   resumeMethod: "session/resume",
   closesSessions: false,
   authenticateOnProbe: true,
-  reviewedCommands: KIMI_REVIEWED_COMMANDS,
+  listedCommandsOnly: true,
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage: "Kimi Code is not authenticated. Run kimi login, then retry.",
   nativeSetupSupport: acpOwnSetupSupport(["skills", "toolServers", "hooks"]),
@@ -1729,6 +1768,7 @@ const kimiProfile: AcpProviderProfile = {
       "FORCE_COLOR",
     ],
     channelGuards: ["KIMI_DISABLE_TELEMETRY"],
+    selfUpdateGuards: ["KIMI_CODE_NO_AUTO_UPDATE"],
     guards: {
       KIMI_DISABLE_TELEMETRY: "1",
       KIMI_CODE_NO_AUTO_UPDATE: "1",
@@ -1812,7 +1852,9 @@ const antigravityProfile: AcpProviderProfile = {
   userQuestions: "supported",
   unnamedPermissionDescription: "Google Antigravity is asking before it continues.",
   toleratesStrayUpdates: true,
-  forwardsAllowAlways: true,
+  // Google's ACP guide: a prompt sent while a turn runs steers that turn
+  // instead of starting a new one.
+  steersMidTurn: true,
   // Each launch unpacks the CLI again before it answers, so a cold start per
   // turn costs far more than for any other agent; other clients keep it open.
   retainsSessions: true,
@@ -1849,13 +1891,19 @@ const antigravityProfile: AcpProviderProfile = {
     // (recorded `initialize` reply); later releases may still.
     protocolVersions: [1, 2],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    selfUpdateGuards: ["AGY_CLI_DISABLE_AUTO_UPDATE"],
     guards: { NO_COLOR: "1", AGY_CLI_DISABLE_AUTO_UPDATE: "1" },
     environment: () => ({}),
     // Google's ACP guide: `--process-per-session` serves each session from an
     // isolated worker and is required for HTTP MCP servers the client
     // configures, which is how Octant offers its tools; `--disable-telemetry`
-    // is the CLI's own switch.
-    args: () => ["acp", "--process-per-session", "--disable-telemetry"],
+    // is the CLI's own telemetry switch, so it follows the launch's telemetry
+    // channel as other agents' telemetry guards do.
+    args: ({ ownChannels }) => [
+      "acp",
+      "--process-per-session",
+      ...(ownChannels?.telemetry === true ? [] : ["--disable-telemetry"]),
+    ],
     managedFiles: () => [],
     readsLoginKeychain: true,
     // The CLI keeps its settings, conversations, instructions and skills
@@ -1867,7 +1915,7 @@ const antigravityProfile: AcpProviderProfile = {
         "Run agy (or agy acp --login) in your terminal and sign in with your Google account, then retry.",
       environment: (path) => ({ GEMINI_HOME: path }),
     },
-    confinement: { kind: "provider-approvals-outside-strict" },
+    confinement: { kind: "deny-default-seatbelt" },
   },
 };
 
@@ -1889,6 +1937,21 @@ export const acpProviderProfiles: Readonly<
   fx: fxProfile,
   antigravity: antigravityProfile,
 };
+
+/**
+ * Whether a runtime's release keeps its pinned usage reading unverified: a
+ * release newer than the one Octant reviewed it on. The spend ceiling reads
+ * it for unreported turns run below Full access while such a release still
+ * read usage at Full access only.
+ */
+export function acpUsageUnverified(
+  driverKind: ProviderDriverKind,
+  version: string | undefined,
+): boolean {
+  const profiles: Readonly<Partial<Record<ProviderDriverKind, AcpProviderProfile>>> =
+    acpProviderProfiles;
+  return acpReleaseClaim(profiles[driverKind]?.usageVersions, version) === "unverified";
+}
 
 export function isAcpProviderKind(kind: ProviderDriverKind): kind is AcpProviderKind {
   return kind === "acp-agent" || kind in acpProviderProfiles;

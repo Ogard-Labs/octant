@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { hostReadsProviderCatalogUnconfined } from "@octant/domain/guardrail-policy";
+import { codeOrWorkThreadProjectId, type HubActScopeSlot } from "../hub/hubActScope";
 import { openAdmittedSqlite, openSqlite } from "../persistence/sqlitePort";
 import { ChildWorktreeSourceService } from "../code/childWorktreeSourceService";
 import { GitObservationPort } from "../code/gitObservationPort";
@@ -64,6 +65,7 @@ import {
   type HarnessEndpointDriver,
   type ProviderDriver,
   type ProviderLocalUsageHistorySource,
+  type ProviderOwnChannels,
   type ProviderProjectFolderDiscoveryPort,
 } from "@octant/provider-sdk";
 import { Effect, Schema } from "effect";
@@ -187,6 +189,10 @@ import { compactionPointFor, withCompactionPoint } from "../providers/compaction
 import { withBlockedTools } from "../providers/blockedToolsDriver";
 import { BlockedToolsService } from "../providers/blockedToolsService";
 import { createBlockedToolsRouteHandler } from "../blockedToolsRoutes";
+import {
+  providerOwnChannelsFromSettings,
+  withProviderOwnChannels,
+} from "../providers/providerOwnChannels";
 import { redactProviderRuntimeSecrets } from "../providers/secretRedactingDriver";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
@@ -292,6 +298,7 @@ import { protectedAtLevel, secretGuardEntries } from "../process/secretGuard";
 import type { OpenCodeProtectedPaths } from "../providers/openCodeDriver";
 
 export interface ConfiguredProviderDriverOptions {
+  readonly octantVersion?: string;
   readonly openCodeProcess: OpenCodeProcessPort;
   readonly codexProcess: CodexProcessPort;
   readonly acpProcess?: AcpProcessPort;
@@ -321,6 +328,8 @@ export interface ConfiguredProviderDriverOptions {
   readonly planMcpServers?: (provider: McpPlanServerProvider) => ReadonlyArray<string>;
   /** The tools the person blocked for a provider in Settings, read at each launch. */
   readonly blockedTools?: (provider: BlockableToolProvider) => ReadonlyArray<string>;
+  /** The person's provider telemetry and self-update switches, read at each launch. */
+  readonly providerOwnChannels?: () => ProviderOwnChannels;
   /** Whether the host enforces Strict; read on Claude probes so Bedrock/custom routing works outside Strict. */
   readonly hostStrict?: () => boolean;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
@@ -418,6 +427,7 @@ export function makeConfiguredProviderDriver(
     driver = runDirectEndpointOnNativeHarness(
       makeOpenAiCompatibleDriver({
         instanceId: instance.id,
+        ...(options.octantVersion === undefined ? {} : { octantVersion: options.octantVersion }),
         configuration: instance.configuration,
         runtimeRegistry: options.runtimeRegistry,
         ...(options.credentialResolver === undefined
@@ -595,6 +605,12 @@ export function makeConfiguredProviderDriver(
   if (blockedTools !== undefined && blockable !== undefined) {
     driver = withBlockedTools(driver, () => blockedTools(blockable));
   }
+  // The person's telemetry and self-update switches ride on every launch;
+  // each driver applies them only outside Strict.
+  const ownChannels = options.providerOwnChannels;
+  if (ownChannels !== undefined) {
+    driver = withProviderOwnChannels(driver, ownChannels);
+  }
   // Redaction comes first, so every consumer of the stream, the usage tap
   // included, reads the redacted events.
   const redacted = redactProviderRuntimeSecrets(driver);
@@ -751,10 +767,14 @@ export type ProvidersDependencies = Pick<
   Pick<
     FoundationsWiring,
     "providerRuntimeRegistry" | "workThreadProjection" | "resolveThreadStrict" | "resolveHostStrict"
-  >;
+  > & {
+    /** The member's Act item for its hub, bound by the hub side after this is built. */
+    readonly hubActScopeSlot: HubActScopeSlot;
+  };
 
 export function wireProviders(deps: ProvidersDependencies) {
   const {
+    hubActScopeSlot,
     agentRunChildWorktree,
     agentRunProcessSupervisor,
     agentRunSessionStore,
@@ -806,6 +826,10 @@ export function wireProviders(deps: ProvidersDependencies) {
     });
     const blockedTools = (provider: BlockableToolProvider) =>
       blockedToolsService.toolsFor(provider);
+    const providerOwnChannels = () =>
+      providerOwnChannelsFromSettings(
+        persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+      );
     // What each provider-owned session already holds outlives this process, as
     // the runtime's own history does, so a resumed session's first turn after
     // a restart is sent only what is new.
@@ -1434,6 +1458,9 @@ export function wireProviders(deps: ProvidersDependencies) {
         hostEnvironment: () => process.env,
         homeDirectory: homedir(),
         workingDirectory: join(providerDataDirectory, "provider-tooling"),
+        confirmMinutes: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+            .toolingCommandConfirmMinutes,
         ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
           ? {}
           : {
@@ -1578,6 +1605,11 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
       toolApprovals: extensionToolApprovalService,
       toolGrants: extensionToolGrantStore,
+      hubActScope: hubActScopeSlot.current,
+      codeOrWorkThreadProjectId: codeOrWorkThreadProjectId({
+        readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+        readWorkThread: (threadId) => workThreadProjection.read(threadId),
+      }),
     });
     const preparationProcess = new RepositoryTestProcessPort({
       resourceBudget: deps.hostResourceBudget,
@@ -2077,6 +2109,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         attachWorkRequestRuntime(
           makeConfiguredProviderDriver(instance, {
             hostStrict: () => deps.resolveHostStrict(),
+            octantVersion: version,
             openCodeProcess,
             codexProcess,
             acpProcess,
@@ -2099,6 +2132,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             protectedPaths: hostProtectedPaths,
             planMcpServers,
             blockedTools,
+            providerOwnChannels,
             get claudeInstances() {
               return persistence.readProviderInstances();
             },
@@ -2310,6 +2344,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       return openAdmittedSqlite(admission);
     };
     const configuredDriverOptions: ConfiguredProviderDriverOptions = {
+      octantVersion: version,
       runtimeTurnsPerTurn: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).runtimeTurnsPerTurn,
       compactionShare: (keeper) => {
@@ -2340,6 +2375,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       protectedPaths: hostProtectedPaths,
       planMcpServers,
       blockedTools,
+      providerOwnChannels,
       runtimeRegistry: providerRuntimeRegistry,
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
       onRuntimeEvent: recordProviderRuntimeUsage,

@@ -1,4 +1,5 @@
 import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-client";
+import { decodeTranscriptionOffer, type ServiceOffer } from "@octant/contracts";
 import type {
   ImageGenerationOffer,
   ServiceOfferDecisionResult,
@@ -50,7 +51,7 @@ function offer(overrides: Partial<ImageGenerationOffer> = {}): ImageGenerationOf
 }
 
 function client(
-  offers: ReadonlyArray<ImageGenerationOffer>,
+  offers: ReadonlyArray<ServiceOffer>,
   answer: ServiceOfferDecisionResult = { kind: "offer-answered" },
 ) {
   const fake = {
@@ -74,6 +75,40 @@ function renderPrompt(fake: ServiceOfferClient, keptIn: "project" | "thread" = "
 }
 
 describe("ServiceOfferPrompt", () => {
+  it.each([true, false])(
+    "discloses the recording and destination before answering: approve %s",
+    async (approve) => {
+      const fake = client([
+        decodeTranscriptionOffer({
+          kind: "transcribe",
+          threadKind: "code-thread",
+          scopeId,
+          offerId,
+          requestedAt: "2026-11-07T10:00:00.000Z",
+          relativePath: "meetings/notes.m4a",
+          sizeBytes: 2048,
+          endpointName: "Studio",
+          modelId: "speech-model",
+        }),
+      ]);
+      renderPrompt(fake);
+      const card = await screen.findByRole("article", { name: "Transcription request" });
+      expect(card).toHaveTextContent("meetings/notes.m4a (2,048 bytes)");
+      expect(card).toHaveTextContent("Studio (speech-model)");
+      await userEvent.click(
+        screen.getByRole("checkbox", { name: "Don't ask again in this thread" }),
+      );
+      expect(fake.decide).not.toHaveBeenCalled();
+      await userEvent.click(
+        screen.getByRole("button", { name: approve ? "Transcribe" : "Don't transcribe" }),
+      );
+      expect(fake.decide).toHaveBeenCalledExactlyOnceWith(
+        approve
+          ? { offerId, decision: "transcribe", rememberForThread: true }
+          : { offerId, decision: "cancel" },
+      );
+    },
+  );
   it("asks whether to generate the agent's picture with an image model, the suggested model chosen", async () => {
     renderPrompt(client([offer()]));
     const card = await screen.findByRole("article", { name: "Image generation request" });

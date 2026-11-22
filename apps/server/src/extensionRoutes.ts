@@ -2,8 +2,10 @@ import {
   isAgentGrantSession,
   principalActsAsHostPerson,
   principalAuthorityKind,
+  principalIsHubIntroduced,
 } from "./clientPrincipal";
 import { actsAsHostPerson, type PrincipalKind } from "@octant/domain/remote-access-policy";
+import { hubActRefusal, type HubActScopePort } from "./hub/hubActScope";
 import type { McpOAuthClientRegistration } from "@octant/contracts/host-oauth";
 import type {
   ExtensionCommand,
@@ -165,6 +167,10 @@ export function createExtensionRouteHandler(options: {
       decision: ExtensionToolApprovalDecision,
     ): boolean;
   };
+  /** The member's Act item for its hub, which bounds where a device only the hub introduced may answer. */
+  readonly hubActScope?: () => HubActScopePort | undefined;
+  /** The Project of a Code or Work thread; undefined for any other thread, such as a Chat thread. */
+  readonly codeOrWorkThreadProjectId?: (threadId: string) => string | undefined;
   /**
    * Remembered tool approvals, for a local window to read and take away.
    * There is deliberately no way to add one here: a grant is recorded only
@@ -302,6 +308,26 @@ export function createExtensionRouteHandler(options: {
         }
         const { kind: _kind, ...rawDecision } = body.value as Record<string, unknown>;
         const decision = decodeExtensionToolApprovalDecision(rawDecision);
+        // A device only the hub introduced answers a Code or Work thread's
+        // prompt only in a Project the member's Act item names, read at this
+        // answer. A prompt it may not answer is refused by the service anyway,
+        // and Chat is not held to the Act item.
+        if (principalIsHubIntroduced(principalContext.principal)) {
+          const prompt = options.toolApprovals
+            .list(answerer)
+            .find((listed) => String(listed.approvalId) === String(decision.approvalId));
+          const projectId =
+            prompt === undefined
+              ? undefined
+              : options.codeOrWorkThreadProjectId?.(String(prompt.threadId));
+          const refusal =
+            projectId === undefined
+              ? undefined
+              : hubActRefusal(options.hubActScope?.(), projectId, "answer");
+          if (refusal !== undefined) {
+            return response(failure("unauthorized", refusal), 403, origin);
+          }
+        }
         const accepted = options.toolApprovals.decide(answerer, decision);
         return response({ accepted }, accepted ? 200 : 409, origin);
       } catch {

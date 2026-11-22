@@ -1,3 +1,5 @@
+import { ThreadTranscription } from "../speech/transcriptionTool";
+import { createSpeechGates } from "../speech/speechGates";
 import { workThreadAccessOf, threadAccessOf } from "@octant/domain/guardrail-policy";
 import { decodeWorkThreadId } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts";
@@ -65,10 +67,8 @@ import { createProtectedFilesRouteHandler } from "../protectedFilesRoutes";
 import { ExtensionToolApprovalService } from "../extensions/extensionToolApprovalService";
 import { AutomationEventStore } from "../automation/automationEventStore";
 import { RoutineProposalService } from "../automation/routineProposalService";
-import {
-  ImageGenerationOfferService,
-  type ImageOfferAnswer,
-} from "../image/imageGenerationOfferService";
+import { ImageGenerationOfferService } from "../image/imageGenerationOfferService";
+import type { ServiceOfferAnswer } from "../offers/serviceOfferDecision";
 import { ServiceOfferService } from "../offers/serviceOfferService";
 import {
   chatThreadStandsInProject,
@@ -347,7 +347,9 @@ export function wireAuthority(deps: AuthorityDependencies) {
     now: processAuthorityTime,
     onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
   });
-  const serviceOffers = new ServiceOfferService<ServiceOffer, ImageOfferAnswer>(
+  const speechGates = createSpeechGates();
+  const threadTranscription = new ThreadTranscription();
+  const serviceOffers = new ServiceOfferService<ServiceOffer, ServiceOfferAnswer>(
     MAX_PENDING_IMAGE_GENERATION_OFFERS,
     {
       onAsked: onWaitingAsk,
@@ -364,6 +366,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     (id) => extensionToolApprovalService.withdrawThread(id),
     (id) => routineProposalService.withdrawThread(id),
     (id) => serviceOffers.withdrawThread(id),
+    (id) => threadTranscription.forget(id),
   ];
   const onThreadArchived = (withdraw: (threadId: string) => void): void => {
     threadArchivals.push(withdraw);
@@ -459,6 +462,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
         (id) => extensionToolApprovalService.revokeWindow(id),
         (id) => routineProposalService.revokeWindow(id),
         (id) => serviceOffers.revokeWindow(id),
+        (id) => threadTranscription.revokeWindow(id),
         (id) => codeSessionAuthority.revokeWindow(id),
         (id) => {
           for (const [requestId, binding] of agentRunExecutionWindows) {
@@ -537,6 +541,8 @@ export function wireAuthority(deps: AuthorityDependencies) {
     routineProposalService,
     imageGenerationOffers,
     serviceOffers,
+    speechGates,
+    threadTranscription,
     isPairedDeviceScope,
     isRestrictedDeviceScope,
     isPersonPairedDeviceCurrent,

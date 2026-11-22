@@ -876,6 +876,10 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
   // the run rather than inherited from the parent thread at execution time.
   const agentRunSessionSupervisor = new AgentRunSessionSupervisor({
     port: createAgentRunSessionRuntime({
+      // A child's provider asks a secret question only while its parent
+      // thread is outside Strict, the same parent Strict every child policy
+      // reads; the answer reaches the child in memory and is kept nowhere.
+      asksSecretQuestions: (run) => !resolveThreadStrict(String(run.parentThreadId)),
       // A run keeps one record under its own id, with its parent thread as
       // the thread a purge finds it by. Whatever an earlier execution left
       // open was read by the restart that cut it off, so it is closed here.
@@ -1371,6 +1375,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
             message: "This host cannot start helpers on other members.",
           }
         : remoteDelegationHolder.port.start(input),
+    listTargets: async () => (await remoteDelegationHolder.port?.listTargets?.()) ?? [],
   };
   // Every turn's `octant_agents` tool set binds to the calling thread: the
   // delegation and the cancellation authority it petitions are the same ones
@@ -1513,6 +1518,21 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
           run,
           randomUUID,
         ),
+      recordPeerListingIngestion: () => {
+        try {
+          return (
+            externalContentIngestionStore.record({
+              threadId: input.parentThreadId,
+              provenance: { origin: "tool-result", sourceLabel: "peer-project-listing" },
+              contentReference: `peer-project-listing-${randomUUID()}`,
+              correlationId: randomUUID(),
+              authorized: true,
+            }).kind !== "refused"
+          );
+        } catch {
+          return false;
+        }
+      },
       uuid: randomUUID,
     });
   };

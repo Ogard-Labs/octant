@@ -51,6 +51,7 @@ import {
 } from "../serverProjects/serverWorkThreads";
 import { ThreadMessageQueueService } from "../messageQueue/threadMessageQueueService";
 import { createThreadMessageQueuePort } from "../messageQueue/threadMessageQueuePorts";
+import { journalThreadMessageSteered } from "../messageQueue/threadMessageSteeredRecord";
 import { createThreadMessageQueueAuthority } from "../messageQueue/threadMessageQueueAuthority";
 import { createThreadMessageQueueAttachments } from "../messageQueue/threadMessageQueueAttachments";
 import { createThreadMessageQueueRouteHandler } from "../messageQueue/threadMessageQueueRoutes";
@@ -61,7 +62,7 @@ import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
 import { WorkTurnFileObserver } from "../work/workTurnFileObserver";
 import { WorkThreadService } from "../work/workThreadService";
 import { WorkTurnRuntime, workSessionKey, workSessionTerms } from "../work/workTurnRuntime";
-import { WorkTurnService } from "../work/workTurnService";
+import { WorkTurnService, wakeupTurnOutcome } from "../work/workTurnService";
 import { withWorkflowLifecycle } from "../work/workThreadWorkflowHook";
 import { WorkflowEventStore } from "../work/workflowEventStore";
 import { WorkflowProjection } from "../work/workflowProjection";
@@ -130,6 +131,7 @@ import {
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
+import type { TranscriptionForTurn } from "../speech/transcriptionTool";
 import { attachedImageSources, workspaceImageSources } from "../image/threadImageSourcePorts";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { describeTurnImages, type ImageDescriber } from "../harness/imageDescription";
@@ -169,6 +171,7 @@ import { workTurnToolLevel } from "../work/workTurnToolLevel";
 export type WorkDependencies = Pick<ServerStart, "persistence"> & {
   /** Sees images; absent on a host started without one. */
   readonly imageDescriber?: ImageDescriber;
+  readonly transcriptionForTurn: TranscriptionForTurn;
 } & Pick<
     AuthorityWiring,
     | "agentRunPersistence"
@@ -884,8 +887,56 @@ export function wireWork(deps: WorkDependencies) {
               },
               port: canvasAgentToolPort,
             });
-        // A routine's turn has nobody at a window to answer the card, so it
-        // is offered the tool only where its Project keeps a choice.
+        const currentRoot = async () => {
+          const thread = workThreadProjection.read(input.thread.id);
+          if (thread?.lifecycle !== "active") return undefined;
+          const project = persistence.readProject(thread.projectId);
+          if (
+            project?.type !== "work" ||
+            project.lifecycle !== "active" ||
+            project.bindingHistory.at(-1)?.revisionId !== thread.bindingRevisionId
+          )
+            return undefined;
+          const selected = approvedWorkingFolderRoot(project, thread.workingFolderId);
+          if (selected === undefined) return undefined;
+          const root = await resolveThreadWorkingDirectory(
+            selected,
+            thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+          ).catch(() => undefined);
+          return root === input.projectRoot ? root : undefined;
+        };
+        const transcription =
+          !browserSupported ||
+          input.routineRun !== undefined ||
+          isRoutineHostScope(input.windowId) ||
+          isRestrictedDeviceScope(input.windowId)
+            ? undefined
+            : deps.transcriptionForTurn({
+                windowId: input.windowId,
+                threadKind: "work-thread",
+                scopeId: decodeImageGenerationScopeId(String(input.thread.id)),
+                inPlan: () =>
+                  composedPolicy === "plan" ||
+                  runningWorkTurns.get(String(input.thread.id))?.access === "plan" ||
+                  workThreadProjection.read(input.thread.id)?.access === "plan",
+                root: currentRoot,
+                allowed: () => {
+                  const active = runningWorkTurns.get(String(input.thread.id));
+                  const thread = workThreadProjection.read(input.thread.id);
+                  return (
+                    active !== undefined &&
+                    thread?.lifecycle === "active" &&
+                    (isPairedDeviceScope(input.windowId)
+                      ? !isRestrictedDeviceScope(input.windowId)
+                      : windowAuthorityStore.listWindowIds().includes(input.windowId) &&
+                        authorizeWorkThreadForWindow({
+                          windowId: input.windowId,
+                          threadId: String(input.thread.id),
+                        }))
+                  );
+                },
+              });
+        // A routine can generate an image only where its Project keeps a choice.
         const imageTools = !browserSupported
           ? undefined
           : createThreadImageAgentTools({
@@ -910,24 +961,7 @@ export function wireWork(deps: WorkDependencies) {
                 ...workspaceImageSources({
                   threadId: decodeBrowserThreadId(String(input.thread.id)),
                   browserCaptures,
-                  root: async () => {
-                    const thread = workThreadProjection.read(input.thread.id);
-                    if (thread?.lifecycle !== "active") return undefined;
-                    const project = persistence.readProject(thread.projectId);
-                    if (
-                      project?.type !== "work" ||
-                      project.lifecycle !== "active" ||
-                      project.bindingHistory.at(-1)?.revisionId !== thread.bindingRevisionId
-                    )
-                      return undefined;
-                    const selected = approvedWorkingFolderRoot(project, thread.workingFolderId);
-                    if (selected === undefined) return undefined;
-                    const root = await resolveThreadWorkingDirectory(
-                      selected,
-                      thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
-                    ).catch(() => undefined);
-                    return root === input.projectRoot ? root : undefined;
-                  },
+                  root: currentRoot,
                 }),
               },
               listInstances: () => persistence.readProviderInstances(),
@@ -1090,6 +1124,7 @@ export function wireWork(deps: WorkDependencies) {
           computer === undefined &&
           canvasTools === undefined &&
           imageTools === undefined &&
+          transcription === undefined &&
           lookTools === undefined
         )
           return undefined;
@@ -1103,6 +1138,7 @@ export function wireWork(deps: WorkDependencies) {
           agentsTools,
           canvasTools,
           imageTools,
+          transcription,
           lookTools,
           pastThreads,
           projectMemoryTools,
@@ -1863,6 +1899,40 @@ export function wireWork(deps: WorkDependencies) {
       recoveryRequired: (threadId) =>
         nativeHarnessSessions.read(threadId)?.session.status === "recovery-required",
       attachments: queueAttachments,
+      steering: {
+        liveTurn: (threadId) => liveTurns.answeringConnection(threadId),
+        isPersonWindow: (windowId) =>
+          !isPairedDeviceScope(windowId) && !isRoutineHostScope(windowId),
+        // The turn that took the message is the thread's newest: it was
+        // running when the runtime accepted it.
+        recordSteered: ({ scope, messageId, body }) => {
+          const threadId = String(scope.threadId);
+          const turnKey =
+            scope.mode === "work"
+              ? workTurnProjection.latestForThread(decodeWorkThreadId(threadId))?.requestId
+              : scope.mode === "code"
+                ? persistence.journal.latestThreadEvents({
+                    aggregateType: "code-operation",
+                    threadId,
+                    kind: "conversation-turn-started",
+                    limit: 1,
+                  })[0]?.aggregateId
+                : undefined;
+          if (turnKey === undefined || scope.mode === "chat") return;
+          const record = journalThreadMessageSteered(persistence.journal, {
+            mode: scope.mode,
+            threadId,
+            turnKey: String(turnKey),
+            messageId: String(messageId),
+            body,
+            steeredAt: new Date().toISOString(),
+            uuid: randomUUID,
+            actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+          });
+          // Work keeps its turns in memory; the journal rebuilds them at start.
+          if (scope.mode === "work") workTurnProjection.applySteeredMessage(record);
+        },
+      },
     });
     const threadMessageQueue = new ThreadMessageQueueService({
       connection: persistence.connection,
@@ -1872,6 +1942,7 @@ export function wireWork(deps: WorkDependencies) {
       // A device the host's own person paired manages the queue as a window
       // does; any other device keeps to its own messages.
       isRestrictedDevice: isRestrictedDeviceScope,
+      onSteeringChanged: () => machineChangeFeed.publish(["thread-message-queue"]),
       deviceActor: (scopeId) =>
         isPairedDeviceScope(scopeId)
           ? eventActorForPrincipal({ kind: "remote-device", deviceId: String(scopeId) })
@@ -1989,28 +2060,28 @@ export function wireWork(deps: WorkDependencies) {
         }
         if (workTurnService.isTurnActive(thread.id)) return { status: "busy" };
         const requestId = randomUUID();
-        const result = await workTurnService.startFirstTurn(ROUTINE_HOST_SCOPE_ID, {
-          kind: "start-work-thread-turn",
-          requestId: decodeWorkTurnRequestId(requestId),
-          threadId: thread.id,
-          turnId: decodeWorkTurnId(randomUUID()),
-          prompt,
-          authority: {
-            hostId: LOCAL_HOST_ID,
-            projectId: thread.projectId,
-            bindingRevisionId: thread.bindingRevisionId,
-            workingDirectory: thread.workingDirectory ?? ".",
-            ...(thread.workingFolderId === undefined
-              ? {}
-              : { workingFolderId: thread.workingFolderId }),
-            confinementPosture: "project-root-confined",
-            providerInstanceId: thread.providerInstanceId,
-            modelId: thread.modelId,
-          },
-        });
-        return result.kind === "accepted"
-          ? { status: "started", turnId: requestId }
-          : { status: "refused", message: "The turn was not admitted." };
+        return await wakeupTurnOutcome(
+          workTurnService.startHostTurn(ROUTINE_HOST_SCOPE_ID, {
+            kind: "start-work-thread-turn",
+            requestId: decodeWorkTurnRequestId(requestId),
+            threadId: thread.id,
+            turnId: decodeWorkTurnId(randomUUID()),
+            prompt,
+            authority: {
+              hostId: LOCAL_HOST_ID,
+              projectId: thread.projectId,
+              bindingRevisionId: thread.bindingRevisionId,
+              workingDirectory: thread.workingDirectory ?? ".",
+              ...(thread.workingFolderId === undefined
+                ? {}
+                : { workingFolderId: thread.workingFolderId }),
+              confinementPosture: "project-root-confined",
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+            },
+          }),
+          requestId,
+        );
       },
     };
     // The runtime's own turn runs at the thread's level as the host, like a

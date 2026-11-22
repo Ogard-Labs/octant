@@ -698,6 +698,7 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     "/api/hub/provision-mirror",
     "/api/hub/sign-in-request",
     "/api/hub/sign-in-outcome",
+    "/api/hub/window-guest",
   ].map((endpoint): [string, string] => [
     endpoint,
     "Member-to-member request that a hub, standby, or spoke signs and sends over the private listener from apps/server (hubService.ts, spokeLinkService.ts, failoverService.ts, wakeService.ts, spokeWakeService.ts, pushService.ts, spokePushService.ts, provisionService.ts, spokeProvisionService.ts, signInService.ts, spokeSignInService.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",
@@ -710,6 +711,7 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     "/api/hub/peer/delegations",
     "/api/hub/peer/delegations/status",
     "/api/hub/peer/delegations/cancel",
+    "/api/hub/peer/delegations/projects",
   ].map((endpoint): [string, string] => [
     endpoint,
     "A delegating spoke signs and sends this over the private listener from apps/server (delegatingSpokeService.ts), which builds the path itself; no window or device calls it. Remove when the checker counts apps/server as a caller of its own listener's routes.",

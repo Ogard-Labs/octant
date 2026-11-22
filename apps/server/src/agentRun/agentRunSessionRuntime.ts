@@ -262,6 +262,14 @@ export interface AgentRunSessionInteractions {
 }
 
 export interface AgentRunSessionRuntimeOptions {
+  /**
+   * Whether the child's provider may ask it a question that wants a secret:
+   * only when its parent thread is outside Strict, read the way every other
+   * child policy reads its parent's Strict. Its answer reaches the child in
+   * memory and is kept nowhere. The child's session still runs Strict in
+   * every other respect. Absent, or unreadable, such a question is refused.
+   */
+  readonly asksSecretQuestions?: (run: AgentRun) => boolean;
   readonly reviewCapture?: AgentRunReviewCapture;
   readonly canCaptureReview?: (run: AgentRun) => boolean;
   readonly interactions?: AgentRunSessionInteractions;
@@ -1177,6 +1185,7 @@ export function createAgentRunSessionRuntime(
             outsideContentMarks: options.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS,
             onUserMessage: options.onUserMessage,
             interactions: options.interactions,
+            asksSecretQuestions: safeAsksSecretQuestions(options, run),
             onSessionEnding: () => {
               live.steer = undefined;
               inputController.abort();
@@ -1375,6 +1384,14 @@ export function createAgentRunSessionRuntime(
   };
 }
 
+function safeAsksSecretQuestions(options: AgentRunSessionRuntimeOptions, run: AgentRun): boolean {
+  try {
+    return options.asksSecretQuestions?.(run) === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Intersects the run's persisted authority with the mode ceiling and the
  * immutable authority its routing receipt recorded. Both inputs come from the
@@ -1539,6 +1556,8 @@ interface ManagedSessionInput {
   readonly outsideContentMarks: RuntimeOutsideContentMarking;
   readonly onUserMessage?: AgentRunSessionRuntimeOptions["onUserMessage"];
   readonly interactions: AgentRunSessionRuntimeOptions["interactions"];
+  /** See {@link AgentRunSessionRuntimeOptions.asksSecretQuestions}. */
+  readonly asksSecretQuestions: boolean;
   readonly onConnectionReady: (
     connection: ProviderConnection,
     sessionId: ProviderSessionId,
@@ -1939,6 +1958,7 @@ function runSessionTurn(
             // Every approval a helper gets holds for that one call.
             answersOncePerCall: true,
             ...(sandboxPolicy === undefined ? {} : { fullAccessSandbox: true }),
+            ...(input.asksSecretQuestions ? { asksSecretQuestions: true } : {}),
             tools: input.appManagedTools?.definitions ?? [],
           })
         : connection.resume({
@@ -1951,6 +1971,7 @@ function runSessionTurn(
             executionPolicy: input.authority.executionPolicy,
             answersOncePerCall: true,
             ...(sandboxPolicy === undefined ? {} : { fullAccessSandbox: true }),
+            ...(input.asksSecretQuestions ? { asksSecretQuestions: true } : {}),
             tools: input.appManagedTools?.definitions ?? [],
           });
     const handle = yield* startup.pipe(
@@ -2315,7 +2336,10 @@ function collectSessionEvents(
                     input.onUserMessage?.({
                       runId: input.run.id,
                       kind: "answer",
-                      text: `Question: ${event.prompt}\nAnswer: ${answer}`,
+                      // A secret answer is never shown or kept, only that it was given.
+                      text: `Question: ${event.prompt}\nAnswer: ${
+                        event.secret === true ? "(a secret, not kept)" : answer
+                      }`,
                       occurredAt: decodeUtcTimestamp(new Date().toISOString()),
                     });
                   } catch {

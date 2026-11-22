@@ -20,6 +20,7 @@ const ACCESS_NOTES: Readonly<Record<WorkDefaultAccess, string>> = {
   "auto-accept-edits":
     "Edits files in the Project folder without asking. Asks before commands. Anything outside the folder is refused.",
   "full-access": FULL_ACCESS_WARNING,
+  plan: "Starts each new thread read-only: the agent looks and proposes a plan, and changes nothing until you approve it.",
 };
 
 /**
@@ -128,6 +129,7 @@ export function WorkSettingsView(props: {
             <OctantToggleGroupItem value="auto">Auto</OctantToggleGroupItem>
             <OctantToggleGroupItem value="ask-first">Ask first</OctantToggleGroupItem>
             <OctantToggleGroupItem value="auto-accept-edits">Accept edits</OctantToggleGroupItem>
+            <OctantToggleGroupItem value="plan">Plan</OctantToggleGroupItem>
             <OctantToggleGroupItem value="full-access">Full access</OctantToggleGroupItem>
           </OctantToggleGroup>
           {warning.dialog}

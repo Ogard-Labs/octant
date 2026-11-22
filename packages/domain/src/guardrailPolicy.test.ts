@@ -499,7 +499,8 @@ describe("Work levels", () => {
     expect(workThreadAccessOf("auto-accept-edits")).toEqual(threadAccessOf("accept-edits"));
     expect(workThreadAccessOf("full-access")).toEqual(threadAccessOf("full-access"));
     expect(workThreadAccessOf("plan")).toEqual(threadAccessOf("plan"));
-    expect(workAccessOfPermissionMode("plan")).toBeUndefined();
+    // Plan is a Work default as any other level is (maintainer decision, 2026-11-21).
+    expect(workAccessOfPermissionMode("plan")).toBe("plan");
     expect(workThreadAccessOfMode("plan")).toBe("plan");
     expect(workAccessOfPermissionMode("accept-edits")).toBe("auto-accept-edits");
   });

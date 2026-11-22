@@ -4,6 +4,7 @@ import {
   type ConversationInputPolicy,
   type ConversationInputReceipt,
 } from "@octant/contracts/conversation-inputs";
+import type { TurnAcceptance } from "../hostDrain";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
@@ -121,6 +122,7 @@ import {
   type MentionableThreadId,
   type PendingRequest,
   type ProviderServiceLimits,
+  MAX_SECRET_ANSWER_LENGTH,
   USAGE_RESUME_CANCELLED,
   USAGE_RESUME_SCHEDULED,
   type UsageResumeRecord,
@@ -667,6 +669,12 @@ export interface ChatServiceExecutionContext {
    * route resolved it for. Absent, the change is the local person's.
    */
   readonly actor?: EventActor;
+  /**
+   * `user` when the person sent the command, from a window on this host or a
+   * device they paired, as the route resolved it. Only the person answers a
+   * question that asks for a secret; absent, a secret answer is refused.
+   */
+  readonly initiator?: "user" | "agent";
   /** One-hop coordination calls cannot expose the coordination tool again. */
   readonly coordinationDepth?: number;
   /**
@@ -688,6 +696,12 @@ export interface ChatServiceExecutionContext {
    * Host-only: the wire commands cannot carry it.
    */
   readonly inheritedMark?: InheritedExternalContentMark;
+  /**
+   * Set by the host when it sends a turn itself with no window: a Chat
+   * routine's run or a follow-up. The turn then takes the host-run tool set
+   * rather than none. Host-only: the wire commands cannot carry it.
+   */
+  readonly hostRun?: true;
 }
 
 interface PreparedChatContent {
@@ -826,6 +840,15 @@ export interface ChatServiceOptions {
    * The turn's Computer tool, offered on every eligible turn without a
    * composer selection; undefined when the turn cannot use it.
    */
+  /**
+   * The app-managed tools a turn the host sends with no window takes
+   * (`hostRun`): only those that need no window, bound to the thread's own
+   * Project. Absent, such a turn takes none.
+   */
+  readonly resolveHostRunTools?: (input: {
+    readonly thread: ChatThread;
+    readonly turnId?: ChatTurn["id"];
+  }) => AppManagedToolSet | undefined;
   readonly resolveComputerUseTools?: (input: {
     readonly thread: ChatThread;
     readonly windowId: WindowId;
@@ -860,6 +883,11 @@ export interface ChatServiceOptions {
     }) => TurnToolEffects;
     /** Absent means every turn is admitted. */
     readonly admitTurn?: (scope: NativeHarnessTurnScope) => NativeHarnessTurnAdmission;
+    /**
+     * Rechecks the host drain right before a prepared turn is accepted and
+     * counts the turn as running; the refusal, or nothing when admitted.
+     */
+    readonly acceptTurn?: (scope: NativeHarnessTurnScope) => TurnAcceptance;
     readonly turnStarted: (scope: NativeHarnessTurnScope) => void;
     /** Every turn's end, whatever its outcome, with what the turn cost and how it ran. */
     readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
@@ -1234,6 +1262,7 @@ export class ChatService {
   readonly #resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
   readonly #verifyModelToolsOnFirstUse: ChatServiceOptions["verifyModelToolsOnFirstUse"];
   readonly #resolveComputerUseTools?: ChatServiceOptions["resolveComputerUseTools"];
+  readonly #resolveHostRunTools?: ChatServiceOptions["resolveHostRunTools"];
   readonly #personMemoryBlock?: ChatServiceOptions["personMemoryBlock"];
   readonly #octantInstructionBlocks?: ChatServiceOptions["octantInstructionBlocks"];
   readonly #hiddenThreadIds: () => ReadonlySet<string>;
@@ -1321,6 +1350,8 @@ export class ChatService {
     this.#verifyModelToolsOnFirstUse = options.verifyModelToolsOnFirstUse;
     if (options.resolveComputerUseTools !== undefined)
       this.#resolveComputerUseTools = options.resolveComputerUseTools;
+    if (options.resolveHostRunTools !== undefined)
+      this.#resolveHostRunTools = options.resolveHostRunTools;
     if (options.personMemoryBlock !== undefined)
       this.#personMemoryBlock = options.personMemoryBlock;
     if (options.octantInstructionBlocks !== undefined)
@@ -1795,6 +1826,8 @@ export class ChatService {
             threadTitle: thread.title,
             text: question.prompt,
             options: question.options,
+            // A secret question's row finds the thread; only its masked field answers it.
+            ...(question.secret === true ? { secret: true } : {}),
             // A question carries no time of its own; journaling it is the
             // attempt's last update while the turn stays parked on it.
             requestedAt: attempt.updatedAt,
@@ -1878,7 +1911,7 @@ export class ChatService {
           return await this.#forceStopTurn(command);
         case "answer-chat-turn-question":
           return await this.#withThreadAdmission(command.threadId, () =>
-            this.#answerTurnQuestion(command),
+            this.#answerTurnQuestion(command, executionContext?.initiator),
           );
         case "snooze-chat-thread-at-usage-reset":
           return await this.#withThreadAdmission(command.threadId, () =>
@@ -2996,7 +3029,10 @@ export class ChatService {
     return { kind: "thread-updated", thread: next };
   }
 
-  /** A paused harness session refuses a new prompt, whether sent or edited in. */
+  /**
+   * A paused harness session refuses a new prompt, whether sent or edited in,
+   * and so does a host draining before an update.
+   */
   #admitHarnessTurn(thread: ChatThread): void {
     const admission = this.#nativeHarness?.admitTurn?.({
       threadId: String(thread.id),
@@ -3005,6 +3041,11 @@ export class ChatService {
       modelId: decodeProviderModelId(thread.modelId),
       ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
     });
+    if (admission?.kind === "draining") {
+      throw new ChatServiceError(
+        decodeChatFailure({ category: "unavailable", message: admission.detail }),
+      );
+    }
     if (admission?.kind === "paused") {
       throw new ChatServiceError(
         decodeChatFailure({
@@ -3173,34 +3214,56 @@ export class ChatService {
           message: "Queued Chat admission was revoked during preparation.",
         });
       }
-      this.#persistence.journal.append(
-        {
-          aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
-          expectedVersion: command.expectedVersion,
-          events: [
-            this.#pending("chat.thread-updated@1", {
-              kind: "thread-updated",
-              thread: updatedThread,
-            }),
-            this.#pending("chat.turn-created@1", { kind: "turn-created", turn }),
-            ...(routing !== undefined && routing.decision.decision.kind === "selected"
-              ? [
-                  this.#pending("chat.turn-route-decided@1", {
-                    kind: "turn-route-decided",
-                    decision: routing.decision,
-                  }),
-                ]
-              : []),
-          ],
-        },
-        {
-          beforeEvents: (connection) => {
-            this.#writePreparedContent(connection, userMessage);
-            for (const content of prepared.describedContents ?? [])
-              this.#writePreparedContent(connection, content);
+      // A drain that began while the send was prepared refuses it here; from
+      // here the drain counts it, before its provider reports a start.
+      const acceptance = this.#nativeHarness?.acceptTurn?.({
+        threadId: String(thread.id),
+        mode: "chat",
+        providerInstanceId: decodeProviderInstanceId(thread.providerInstanceId),
+        modelId: decodeProviderModelId(thread.modelId),
+        ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+      });
+      if (acceptance?.status === "refused") {
+        await prepared.appManagedTools?.close?.().catch(() => undefined);
+        throw new ChatServiceError(
+          decodeChatFailure({ category: "unavailable", message: acceptance.message }),
+        );
+      }
+      // A send whose journal write fails never starts, so it stops counting.
+      const releaseDrain = acceptance?.status === "accepted" ? acceptance.release : () => {};
+      try {
+        this.#persistence.journal.append(
+          {
+            aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+            expectedVersion: command.expectedVersion,
+            events: [
+              this.#pending("chat.thread-updated@1", {
+                kind: "thread-updated",
+                thread: updatedThread,
+              }),
+              this.#pending("chat.turn-created@1", { kind: "turn-created", turn }),
+              ...(routing !== undefined && routing.decision.decision.kind === "selected"
+                ? [
+                    this.#pending("chat.turn-route-decided@1", {
+                      kind: "turn-route-decided",
+                      decision: routing.decision,
+                    }),
+                  ]
+                : []),
+            ],
           },
-        },
-      );
+          {
+            beforeEvents: (connection) => {
+              this.#writePreparedContent(connection, userMessage);
+              for (const content of prepared.describedContents ?? [])
+                this.#writePreparedContent(connection, content);
+            },
+          },
+        );
+      } catch (error) {
+        releaseDrain();
+        throw error;
+      }
       return {
         kind: "accepted" as const,
         thread: updatedThread,
@@ -4708,7 +4771,29 @@ export class ChatService {
    */
   async #answerTurnQuestion(
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "answer-chat-turn-question" }>,
+    initiator: "user" | "agent" | undefined,
   ): Promise<ChatCommandResult> {
+    if ((command.secretAnswer === undefined) === (command.answer === undefined))
+      throw new ChatServiceError({
+        category: "invalid",
+        message: "Answer a question with either its answer or its secret answer.",
+      });
+    // A secret is the person's own to give: only a window on this host or a
+    // device they paired answers one, never an agent acting for them.
+    if (command.secretAnswer !== undefined && initiator !== "user")
+      throw new ChatServiceError({
+        category: "unauthorized",
+        message: "Only you, from a window or a device you paired, can answer a secret question.",
+      });
+    if (
+      command.secretAnswer !== undefined &&
+      (command.secretAnswer.trim().length === 0 ||
+        command.secretAnswer.length > MAX_SECRET_ANSWER_LENGTH)
+    )
+      throw new ChatServiceError({
+        category: "invalid",
+        message: `A secret answer is between 1 and ${String(MAX_SECRET_ANSWER_LENGTH)} characters.`,
+      });
     const thread = this.#requireActiveThread(command.threadId);
     this.#assertExpectedThreadVersion(thread, command.expectedVersion);
     const view = this.#requireThreadView(command.threadId);
@@ -4728,15 +4813,27 @@ export class ChatService {
         message: "Chat attempt has no open question by that identity.",
       });
     }
+    // A secret answer reaches only the question that asked for one, and a
+    // secret question takes no answer the attempt would record.
+    if ((question.secret === true) !== (command.secretAnswer !== undefined))
+      throw new ChatServiceError({
+        category: "invalid",
+        message:
+          question.secret === true
+            ? "That question asks for a secret. Answer it in its thread."
+            : "That question does not ask for a secret.",
+      });
+    const answer = command.secretAnswer ?? command.answer ?? "";
     if (question.questionnaire !== undefined) {
-      const validation = validateQuestionnaireAnswer(question.questionnaire, command.answer);
+      const validation = validateQuestionnaireAnswer(question.questionnaire, answer);
       if (validation.status === "invalid")
         throw new ChatServiceError({ category: "invalid", message: validation.message });
     }
     const answered = await this.#turnRunner.deliverQuestionAnswer({
       attemptId: String(command.attemptId),
       requestId: String(command.requestId),
-      answer: command.answer,
+      answer,
+      ...(command.secretAnswer === undefined ? {} : { secret: true }),
     });
     if (answered === undefined) {
       // The turn is not running in this host: its provider session died with
@@ -4913,9 +5010,19 @@ export class ChatService {
     );
     const researchRoute = this.#resolveResearchRoute(thread, settings, probe);
     this.#assertResearchAvailable(thread, researchRoute);
-    const carriesAppTools =
-      executionContext?.windowId !== undefined &&
+    const toolsSupported =
       this.#effectiveAppManagedTools(probe, decodeProviderModelId(thread.modelId)) === "supported";
+    const carriesAppTools = executionContext?.windowId !== undefined && toolsSupported;
+    // A turn the host sends with no window takes only the tools that need
+    // none; the window-scoped set (Computer, the window's harness and the
+    // other tools keyed on a window) stays with turns a window sends.
+    const hostRunTools =
+      !carriesAppTools && executionContext?.hostRun === true && toolsSupported
+        ? this.#resolveHostRunTools?.({
+            thread,
+            ...(executionContext.turnId === undefined ? {} : { turnId: executionContext.turnId }),
+          })
+        : undefined;
     const hostAppTools =
       carriesAppTools && this.#resolveAppManagedTools !== undefined
         ? this.#resolveAppManagedTools({
@@ -4927,7 +5034,7 @@ export class ChatService {
               ? {}
               : { coordinationDepth: executionContext.coordinationDepth }),
           })
-        : undefined;
+        : hostRunTools;
     // Computer is offered on every eligible turn, built here against the
     // provider the turn routes to rather than with the send's selections.
     const computerTools = carriesAppTools
@@ -4946,7 +5053,7 @@ export class ChatService {
         extensionPhase,
         executionContext?.windowId,
       ));
-    const tools = this.#mergeToolSets(
+    let tools = this.#mergeToolSets(
       appManagedTools,
       resolvedExtensions.toolSet,
       MAX_PROVIDER_TOOLS,
@@ -4968,13 +5075,31 @@ export class ChatService {
       // The session the turn takes up: the moved one under the new account
       // when it came along, otherwise the previous attempt's as it stands.
       const sessionPrevious = accountMove.session ?? previous;
-      const catalogChanged =
+      const needsHandoff = (candidate: AppManagedToolSet | undefined): boolean =>
         sessionPrevious?.resumeCursor !== undefined &&
         String(sessionPrevious.providerInstanceId) === String(thread.providerInstanceId) &&
         driver.toolCatalogContinuation?.({
           resumeCursor: sessionPrevious.resumeCursor,
-          tools: tools?.definitions ?? [],
+          tools: candidate?.definitions ?? [],
         }) === "handoff-required";
+      let catalogChanged = needsHandoff(tools);
+      // A host-run turn (a routine's or a follow-up's) has no person to
+      // choose Continue with updated tools, so where its host-run tools are
+      // all that a saved session's fixed catalog lacks, the turn goes without
+      // them rather than failing. Seen with a Codex follow-up whose saved
+      // session predated the Canvas: the send failed as a launch error.
+      if (catalogChanged && !toolCatalogHandoff && hostRunTools !== undefined) {
+        const withoutHostRun = this.#mergeToolSets(
+          searchTools,
+          resolvedExtensions.toolSet,
+          MAX_PROVIDER_TOOLS,
+        );
+        if (!needsHandoff(withoutHostRun)) {
+          await hostRunTools.close?.().catch(() => undefined);
+          tools = withoutHostRun;
+          catalogChanged = false;
+        }
+      }
       if (catalogChanged && !toolCatalogHandoff) {
         throw new ChatServiceError({
           category: "tools-changed",

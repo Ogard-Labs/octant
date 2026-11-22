@@ -1,4 +1,9 @@
 import type { EventActor, WindowId } from "@octant/contracts";
+import type { ImageOfferAnswer } from "../image/imageGenerationOfferService";
+
+export type ServiceOfferAnswer =
+  | ImageOfferAnswer
+  | { readonly status: "transcribe"; readonly rememberForThread: boolean };
 
 type Prepared<Outcome> =
   | { readonly reason: string }

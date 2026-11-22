@@ -853,8 +853,12 @@ function validateLaunch(input: TerminalLaunchInput, platform: NodeJS.Platform): 
   if (!paths.isAbsolute(input.shell) || !paths.isAbsolute(input.cwd))
     throw new Error("Terminal launch is invalid.");
   validateGeometry(input.columns, input.rows);
+  // Lowercase names are allowed: outside Strict a provider terminal takes the
+  // person's own environment, and `http_proxy` or `no_proxy` there kept the
+  // terminal from starting at all. A credential's own name stays uppercase,
+  // which TerminalService checks before it reaches this boundary.
   for (const [name, value] of Object.entries(input.environment)) {
-    if (!/^[A-Z_][A-Z0-9_]*$/.test(name) || value.includes("\0"))
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || value.includes("\0"))
       throw new Error("Terminal environment is invalid.");
   }
 }

@@ -32,6 +32,7 @@ export interface PendingRequestRouteDependencies {
       windowId: WindowId,
       reader?: PrincipalKind,
       principal?: ClientPrincipal,
+      imageOffersOnly?: boolean,
     ) => Promise<PendingRequestList>;
   };
   readonly windowAuthorityStore: WindowAuthorityStore;
@@ -52,8 +53,9 @@ export function createPendingRequestRouteHandler(dependencies: PendingRequestRou
     noun: "Pending request",
     plural: "Pending requests",
     read: async (windowId, reader, request, principal) => {
-      const list = await dependencies.service.list(windowId, reader, principal);
-      if (request.headers.get("accept") === PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE) {
+      const shared = request.headers.get("accept") === PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE;
+      const list = await dependencies.service.list(windowId, reader, principal, !shared);
+      if (shared) {
         return decodePendingRequestList(list);
       }
       // Only image offers are served on the legacy pending-list representation.

@@ -43,6 +43,7 @@ const BROADEST = [
   "octant_side_chat_search_files",
   "octant_terminal",
   "octant_threads",
+  "octant_transcribe",
   "octant_zen",
 ];
 

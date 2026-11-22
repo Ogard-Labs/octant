@@ -113,6 +113,11 @@ export const DelegationState = Schema.Struct({
   received: Schema.Array(ReceivedDelegation),
   sent: Schema.Array(SentDelegation),
   owedCancels: Schema.optional(Schema.Array(OwedCancel)),
+  /**
+   * False once this member's person stopped accepting delegated work. Absent
+   * reads as accepting, which every member did before the switch existed.
+   */
+  accepting: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type DelegationState = typeof DelegationState.Type;
 
@@ -155,6 +160,24 @@ function keptDelegationState(state: DelegationState): DelegationState {
     sent: dropOldestSettled(state.sent, isSettledSent),
     // An owed cancel is a promise to stop a child; it expires by age, not by count.
     ...(state.owedCancels === undefined ? {} : { owedCancels: state.owedCancels }),
+    ...(state.accepting === undefined ? {} : { accepting: state.accepting }),
+  };
+}
+
+/**
+ * This member's switch for taking delegated work, kept with its delegations:
+ * on unless its person turned it off.
+ */
+export function delegationAcceptingSwitch(state: DelegationStatePort): {
+  readonly read: () => boolean;
+  readonly set: (accepting: boolean) => void;
+} {
+  return {
+    read: () => state.load().accepting !== false,
+    set: (accepting) => {
+      const { accepting: _previous, ...rest } = state.load();
+      state.save(accepting ? rest : { ...rest, accepting: false });
+    },
   };
 }
 

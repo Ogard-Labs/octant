@@ -3,6 +3,7 @@ import {
   buildMobileMovesDeepLink,
   buildMobileThreadDeepLink,
   parseMobileMovesDeepLink,
+  parseMobileNewDevicesDeepLink,
   parseMobileThreadDeepLink,
 } from "./deepLinks";
 
@@ -32,5 +33,18 @@ describe("mobile deep links", () => {
     expect(
       parseMobileMovesDeepLink(`octant://hosts/${hostId}/threads/chat/thread-1`),
     ).toBeUndefined();
+  });
+
+  it("reads the link a new-device notification opens, and keeps it apart from thread and move links", () => {
+    const hostId = "11111111-1111-4111-8111-111111111111";
+    expect(parseMobileNewDevicesDeepLink(`octant://hosts/${hostId}/new-devices`)).toEqual({
+      hostId,
+    });
+    expect(parseMobileThreadDeepLink(`octant://hosts/${hostId}/new-devices`)).toBeUndefined();
+    expect(parseMobileMovesDeepLink(`octant://hosts/${hostId}/new-devices`)).toBeUndefined();
+    expect(
+      parseMobileNewDevicesDeepLink(`octant://hosts/${hostId}/new-devices/extra`),
+    ).toBeUndefined();
+    expect(parseMobileNewDevicesDeepLink(`https://hosts/${hostId}/new-devices`)).toBeUndefined();
   });
 });

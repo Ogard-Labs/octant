@@ -231,6 +231,40 @@ describe("admitted parent context", () => {
     expect(result.blocks[1]?.text).toContain(id(301));
     expect(result.omissions.unfinishedReplies).toBe(1);
   });
+  it("hands over a message the person steered into a turn as that turn's user message, after its prompt", () => {
+    const steeredMessages = [
+      {
+        messageId: id(700),
+        body: "Only change the test; keep the public API as it is.",
+        steeredAt: "2026-10-03T10:00:05.000Z",
+      },
+    ];
+    const code = admittedParentCodeContext({
+      ...codeInput([decodeCodeConversationTurn({ ...codeTurn(1), steeredMessages })]),
+      purpose: "provider-switch",
+    });
+    const work = admittedParentWorkContext({
+      threadId: workThreadId,
+      externalContentIngested: false,
+      purpose: "provider-switch",
+      readThread: () => workThread,
+      readTurns: () => [decodeWorkTurnState({ ...workTurn(1), steeredMessages })],
+    });
+    for (const result of [code, work]) {
+      expect(result.status).toBe("available");
+      if (result.status !== "available") return;
+      expect(result.blocks.map((block) => block.kind)).toEqual([
+        "conversation-summary",
+        "user-message",
+        "user-message",
+        "assistant-message",
+      ]);
+      expect(result.blocks[2]?.text).toContain(
+        "Only change the test; keep the public API as it is.",
+      );
+      expect(result.blocks[2]?.text).toContain("2026-10-03T10:00:05.000Z");
+    }
+  });
   it("refuses foreign threads, Projects and pages before reading source bodies", () => {
     const input = codeInput();
     const foreign = decodeCodeThreadId(id(99));

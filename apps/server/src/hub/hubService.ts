@@ -13,10 +13,12 @@ import {
   type HubHeartbeatResponse,
   type HubJoinRequest,
   type HubJoinResponse,
+  type HubGuestAdmissionRequest,
   type HubMembershipChangedPayload,
   type HubStandInHandback,
   type OwnerCandidate,
   type OwnerListEntry,
+  type ProjectId,
   type RosterMember,
   type SignedHubRoster,
 } from "@octant/contracts";
@@ -32,9 +34,9 @@ import { Schema } from "effect";
 import type { PrivateListenerHostStatus } from "../remote/privateListenerLifecycleController";
 import type { HostSigningPort } from "../remote/remoteProtocolService";
 import { listenerPinFromDigest, publicKeyFingerprint } from "./hubCrypto";
-import { sendHubLinkRequest } from "./hubLink";
+import { HubLinkVerifier, sendHubLinkRequest, type HubLinkVerification } from "./hubLink";
 import { memberOrigin } from "./memberOrigin";
-import type { HostOwnerRecord, HubSideState, HubStatePort } from "./hubStateStore";
+import type { HostOwnerRecord, HubMemberRecord, HubSideState, HubStatePort } from "./hubStateStore";
 import {
   addOwnerRecords,
   isUnlockPublicKey,
@@ -47,6 +49,7 @@ import {
 import type { HubTransport } from "./pinnedHubTransport";
 import { originIsPrivate, readPrivateListener } from "./privateListenerReading";
 import type { RosterSigningKeyStore } from "./rosterSigningKey";
+import type { SpokeDeviceLifecycle } from "./spokeLinkService";
 
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberId);
 const decodeDeviceId = Schema.decodeUnknownSync(EventActorDeviceId);
@@ -74,6 +77,20 @@ export interface HubPairingPort {
   readonly deviceKeyFingerprint: (deviceId: string) => string | undefined;
   /** False for a device that is revoked, expired, or not held here. */
   readonly deviceActive: (deviceId: string) => boolean;
+  /**
+   * Makes a paired device for a member's desktop window the roster lists, as a
+   * spoke does for a guest. No person approves it here, so the hub's own Act
+   * list bounds what it does.
+   */
+  readonly admitIntroducedDevice: (input: {
+    readonly devicePublicKey: string;
+    readonly deviceLabel: string;
+    readonly origin: string;
+    readonly sourceClass: "lan-private" | "tailscale";
+  }) => { readonly deviceId: string };
+  readonly deviceLifecycle: (deviceId: string, now: number) => SpokeDeviceLifecycle;
+  /** The listener origin a device was registered at; it signs in only there. */
+  readonly deviceOrigin: (deviceId: string) => string | undefined;
 }
 
 export interface HubServiceOptions {
@@ -88,6 +105,11 @@ export interface HubServiceOptions {
 }
 
 const hubMemberId = (identity: HubHostIdentity) => decodeMemberId(String(identity.hostId));
+
+function withoutWindowDevice(record: HubMemberRecord): HubMemberRecord {
+  const { windowDeviceId: _revoked, ...rest } = record;
+  return rest;
+}
 
 /** The port a member's listener origin names, which the hub states in the roster instead of trusting a claim. */
 export function listenerPortOf(origin: string | undefined): { readonly listenerPort?: number } {
@@ -174,15 +196,56 @@ export type PromoteOutcome =
         | "listener-has-no-pin";
     };
 
+export type WindowGuestOutcome =
+  | { readonly status: "introduced"; readonly sequence: number }
+  | { readonly status: "unchanged" }
+  | {
+      readonly status: "refused";
+      readonly kind:
+        | "hub-role-off"
+        | "not-a-member"
+        | "already-member"
+        | "key-invalid"
+        | "removed-from-hub";
+    };
+
+export type HubWindowAdmission =
+  | { readonly status: "admitted"; readonly hubMemberId: HubMemberId; readonly deviceId: string }
+  | {
+      readonly status: "refused";
+      readonly kind:
+        | Extract<HubLinkVerification, { readonly status: "refused" }>["kind"]
+        | "hub-role-off"
+        | "not-in-roster"
+        | "not-a-member-window"
+        | "key-mismatch"
+        | "listener-not-running"
+        | "listener-not-private"
+        | "listener-has-no-pin"
+        | "devices-unavailable"
+        | "device-revoked";
+    };
+
+export type HubActProjectsOutcome =
+  | { readonly status: "changed"; readonly actProjects: ReadonlyArray<ProjectId> }
+  | { readonly status: "refused"; readonly kind: "hub-role-off" };
+
+const publicKeyPem = (publicKey: string): string => {
+  const body = Buffer.from(publicKey, "base64url").toString("base64");
+  return `-----BEGIN PUBLIC KEY-----\n${body.match(/.{1,64}/g)?.join("\n") ?? body}\n-----END PUBLIC KEY-----`;
+};
+
 /** The most removals the hub remembers for merging a standby's changes back. */
 const MAX_REMEMBERED_REMOVALS = 256;
 
 export class HubService {
   readonly #options: HubServiceOptions;
+  readonly #verifier: HubLinkVerifier;
   #ownerListRevision = 0;
 
   constructor(options: HubServiceOptions) {
     this.#options = options;
+    this.#verifier = new HubLinkVerifier({ now: options.now });
   }
 
   /** Whether the hub role is on, and the roster it holds. */
@@ -293,6 +356,38 @@ export class HubService {
     return { status: "changed", enabled };
   }
 
+  /**
+   * The hub's own Act list while the hub role is on: the Projects here a
+   * member's desktop window may start threads in, answer, and stop. Undefined
+   * while this host is not the hub, so a member's grant speaks instead.
+   */
+  ownActProjects(): ReadonlyArray<ProjectId> | undefined {
+    const hub = this.#options.state.load().hub;
+    return hub?.enabled === true ? (hub.actProjects ?? []) : undefined;
+  }
+
+  /**
+   * Only a window on the hub names the Projects a member's window may act in
+   * here. The list is read at each request, so a Project taken off refuses
+   * the next one; the journal keeps the change and its principal, never the
+   * Projects, as a member's Act change does.
+   */
+  setActProjects(
+    actProjects: ReadonlyArray<ProjectId>,
+    principal: AuditActingPrincipal,
+  ): HubActProjectsOutcome {
+    const state = this.#options.state.load();
+    const hub = state.hub;
+    if (hub?.enabled !== true) return { status: "refused", kind: "hub-role-off" };
+    const { actProjects: _previous, ...rest } = hub;
+    this.#options.state.save({
+      ...state,
+      hub: actProjects.length === 0 ? rest : { ...rest, actProjects: [...actProjects] },
+    });
+    this.#options.record({ change: "hub-act-changed", actingPrincipal: principal });
+    return { status: "changed", actProjects };
+  }
+
   enable(principal: AuditActingPrincipal): HubRoleOutcome {
     const reading = readPrivateListener(this.#options.listener());
     if (reading.status === "refused") return { status: "refused", kind: reading.kind };
@@ -338,6 +433,7 @@ export class HubService {
               },
             }),
         ...(hub?.owners === undefined ? {} : { owners: hub.owners }),
+        ...(hub?.actProjects === undefined ? {} : { actProjects: hub.actProjects }),
       },
     });
     this.#options.record({
@@ -352,11 +448,29 @@ export class HubService {
     const current = this.#options.state.load();
     if (current.hub?.enabled !== true) return { status: "refused", kind: "hub-role-off" };
     // Members and the roster stay, so turning the role back on resumes them;
-    // outstanding join codes do not.
+    // outstanding join codes do not. A member window's device here goes: with
+    // the role off no Act list bounds it, and the window asks again once the
+    // role is back on. A device the person already revoked keeps its link, so
+    // admission still finds it revoked after the role comes back: forgetting
+    // it let the window's next ask mint a fresh device, undoing the revoke.
+    const pairing = this.#options.pairing();
+    const now = this.#options.now();
+    const revokedByPerson = (deviceId: string | undefined) =>
+      deviceId !== undefined &&
+      pairing !== undefined &&
+      pairing.deviceLifecycle(deviceId, now) === "revoked";
     this.#options.state.save({
       ...current,
-      hub: { ...current.hub, enabled: false, joinTickets: [] },
+      hub: {
+        ...current.hub,
+        enabled: false,
+        joinTickets: [],
+        members: current.hub.members.map((member) =>
+          revokedByPerson(member.windowDeviceId) ? member : withoutWindowDevice(member),
+        ),
+      },
     });
+    this.#revokeMemberDevices(current.hub.members.map((member) => member.windowDeviceId));
     this.#options.record({ change: "hub-role-disabled", actingPrincipal: principal });
     return { status: "disabled" };
   }
@@ -644,6 +758,227 @@ export class HubService {
     };
   }
 
+  /**
+   * Lists a member's desktop window as a guest, so every member that ticked
+   * Introduce lets that window ask it, directly, for a device of its own, as a
+   * phone that joined the hub does. The window generated the key and holds it;
+   * only the public key comes here. `introducedBy` is the member whose window it
+   * is: this hub for its own window (a person at this hub's window), or a spoke
+   * whose signed request the caller verified. The guest leaves the roster with
+   * that member, and a newer window guest of the same member replaces the
+   * older one, so a window that lost its key does not leave a stale guest
+   * behind.
+   */
+  async introduceWindowGuest(
+    input: {
+      readonly memberId: HubMemberId;
+      readonly devicePublicKey: string;
+      readonly introducedBy: string;
+    },
+    principal: AuditActingPrincipal,
+  ): Promise<WindowGuestOutcome> {
+    const current = this.#options.state.load();
+    const hub = current.hub;
+    if (hub?.enabled !== true || hub.roster === undefined) {
+      return { status: "refused", kind: "hub-role-off" };
+    }
+    const roster = hub.roster.roster;
+    const introducer = roster.members.find(
+      (member) => String(member.memberId) === input.introducedBy,
+    );
+    // A guest's window is not a member's window: only the hub and its spokes
+    // run a window that can ask.
+    if (introducer === undefined || introducer.role === "guest") {
+      return { status: "refused", kind: "not-a-member" };
+    }
+    if (!isUnlockPublicKey(input.devicePublicKey))
+      return { status: "refused", kind: "key-invalid" };
+    // A window guest the operator removed stays out: the window asks again on
+    // every refresh, and accepting it put it straight back on the roster for
+    // accepting members to give fresh credentials.
+    if (
+      (hub.removals ?? []).some((removal) => String(removal.memberId) === String(input.memberId))
+    ) {
+      return { status: "refused", kind: "removed-from-hub" };
+    }
+    const fingerprint = publicKeyFingerprint(input.devicePublicKey);
+    const listed = roster.members.find(
+      (member) => String(member.memberId) === String(input.memberId),
+    );
+    const listedRecord = hub.members.find(
+      (member) => String(member.memberId) === String(input.memberId),
+    );
+    // A standby promoted to hub keeps the roster's guests but holds no record
+    // of whose window each is, so a window it already lists with this key is
+    // attributed again by the member that asks, as a first listing would be.
+    // Without it the window could never be admitted on the promoted hub.
+    const unattributed =
+      listed !== undefined &&
+      listedRecord === undefined &&
+      listed.role === "guest" &&
+      listed.identityKeyFingerprint === fingerprint;
+    if (listed !== undefined && !unattributed) {
+      return listed.role === "guest" &&
+        listed.identityKeyFingerprint === fingerprint &&
+        String(listedRecord?.introducedBy) === input.introducedBy
+        ? { status: "unchanged" }
+        : { status: "refused", kind: "already-member" };
+    }
+    const replacedRecords = hub.members.filter(
+      (member) => String(member.introducedBy) === input.introducedBy,
+    );
+    const replaced = new Set([
+      ...replacedRecords.map((member) => String(member.memberId)),
+      String(input.memberId),
+    ]);
+    const member: RosterMember = {
+      memberId: input.memberId,
+      // The roster states what the hub knows: whose window this is.
+      name: `${introducer.name} window`.slice(0, 128).trimEnd(),
+      role: "guest",
+      identityKeyFingerprint: fingerprint,
+      listenerPin: NO_LISTENER_PIN,
+      privateNames: [],
+      addresses: [],
+      owner: false,
+    };
+    const signed = this.#sign({
+      ...roster,
+      sequence: roster.sequence + 1,
+      members: [...roster.members.filter((entry) => !replaced.has(String(entry.memberId))), member],
+    });
+    this.#options.state.save({
+      ...current,
+      hub: {
+        ...hub,
+        roster: signed,
+        members: [
+          ...hub.members.filter((entry) => !replaced.has(String(entry.memberId))),
+          {
+            memberId: input.memberId,
+            identityPublicKey: input.devicePublicKey,
+            introducedBy: decodeMemberId(input.introducedBy),
+          },
+        ],
+      },
+    });
+    // The older window's device here goes with its roster entry.
+    this.#revokeMemberDevices(replacedRecords.map((member) => member.windowDeviceId));
+    this.#options.record({
+      change: "member-added",
+      actingPrincipal: principal,
+      memberId: input.memberId,
+      sequence: signed.roster.sequence,
+    });
+    // Sent before answering, so a window that asks a spoke for its device next
+    // finds itself on the roster that spoke holds.
+    await this.#publish(signed, hub, roster.members, []);
+    return { status: "introduced", sequence: signed.roster.sequence };
+  }
+
+  /**
+   * A member's desktop window asking the hub, directly, to admit it as a
+   * paired device, as it asks every spoke (maintainer decision, 2026-11-21).
+   * Only a window guest a spoke or standby asked the hub to list is admitted:
+   * the hub's own window, a phone, and any other guest keep their own rules.
+   * The roster must list it with the key it presents, and the request must be
+   * signed with that key. The device carries no person's approval here, so
+   * the hub's own Act list bounds it, read at each request.
+   */
+  admitWindowGuest(input: {
+    readonly header: string | null;
+    readonly method: string;
+    readonly path: string;
+    readonly body: string;
+    readonly request: HubGuestAdmissionRequest;
+  }): HubWindowAdmission {
+    const state = this.#options.state.load();
+    const hub = state.hub;
+    if (hub?.enabled !== true || hub.roster === undefined) {
+      return { status: "refused", kind: "hub-role-off" };
+    }
+    const { request } = input;
+    const listed = hub.roster.roster.members.find(
+      (member) => String(member.memberId) === String(request.memberId) && member.role === "guest",
+    );
+    if (listed === undefined) return { status: "refused", kind: "not-in-roster" };
+    const record = hub.members.find(
+      (member) => String(member.memberId) === String(request.memberId),
+    );
+    const selfId = this.hubMemberId();
+    const introducer = hub.roster.roster.members.find(
+      (member) => String(member.memberId) === String(record?.introducedBy),
+    );
+    if (
+      record?.introducedBy === undefined ||
+      String(record.introducedBy) === selfId ||
+      introducer === undefined ||
+      (introducer.role !== "spoke" && introducer.role !== "standby-hub")
+    ) {
+      return { status: "refused", kind: "not-a-member-window" };
+    }
+    if (publicKeyFingerprint(request.devicePublicKey) !== listed.identityKeyFingerprint) {
+      return { status: "refused", kind: "key-mismatch" };
+    }
+    const verified = this.#verifier.verify({
+      header: input.header,
+      method: input.method,
+      path: input.path,
+      body: input.body,
+      recipientMemberId: selfId,
+      publicKeyFor: (sender) =>
+        sender === String(request.memberId) ? request.devicePublicKey : undefined,
+    });
+    if (verified.status === "refused") return { status: "refused", kind: verified.kind };
+    const pairing = this.#options.pairing();
+    const hubId = decodeMemberId(selfId);
+    if (record.windowDeviceId !== undefined) {
+      // As on a spoke: an expired or lost device is replaced, a revoked one is
+      // the person's decision and stays refused.
+      if (pairing === undefined) return { status: "refused", kind: "devices-unavailable" };
+      const lifecycle = pairing.deviceLifecycle(record.windowDeviceId, this.#options.now());
+      if (lifecycle === "revoked") return { status: "refused", kind: "device-revoked" };
+    }
+    const own = readPrivateListener(this.#options.listener());
+    if (own.status === "refused") return { status: "refused", kind: own.kind };
+    // As on a spoke: a device made before this listener moved signs in only at
+    // the old origin, so it is replaced rather than handed out again.
+    if (
+      record.windowDeviceId !== undefined &&
+      pairing !== undefined &&
+      pairing.deviceLifecycle(record.windowDeviceId, this.#options.now()) === "active" &&
+      pairing.deviceOrigin(record.windowDeviceId) === own.origin
+    ) {
+      return { status: "admitted", hubMemberId: hubId, deviceId: record.windowDeviceId };
+    }
+    if (pairing === undefined) return { status: "refused", kind: "devices-unavailable" };
+    const device = pairing.admitIntroducedDevice({
+      devicePublicKey: publicKeyPem(request.devicePublicKey),
+      deviceLabel: request.deviceLabel,
+      origin: own.origin,
+      sourceClass: own.sourceClass,
+    });
+    this.#options.state.save({
+      ...state,
+      hub: {
+        ...hub,
+        members: hub.members.map((member) =>
+          String(member.memberId) === String(request.memberId)
+            ? { ...member, windowDeviceId: device.deviceId }
+            : member,
+        ),
+      },
+    });
+    this.#revokeMemberDevices([record.windowDeviceId]);
+    this.#options.record({
+      change: "guest-admitted",
+      actingPrincipal: { kind: "hub", memberId: hubId },
+      memberId: request.memberId,
+      sequence: hub.roster.roster.sequence,
+    });
+    return { status: "admitted", hubMemberId: hubId, deviceId: device.deviceId };
+  }
+
   /** Remove runs on the hub: it revokes the member's device and drops it from the next roster. */
   async removeMember(
     input: { readonly memberId: string },
@@ -816,7 +1151,7 @@ export class HubService {
         key: entry.identityPublicKey,
       });
     }
-    const merged = mergeStandInMembership({
+    const mergedByStandby = mergeStandInMembership({
       hub: roster,
       hubRemovedSinceBase: (hub.removals ?? [])
         .filter((removal) => removal.sequence > handback.baseSequence)
@@ -827,14 +1162,38 @@ export class HubService {
         removed: handback.removed,
       },
     });
+    // A spoke's desktop window was listed as a guest because of it, and goes
+    // with it, as it does when the hub itself removes the spoke: the standby
+    // only names the spoke, so without this its window kept its device here.
+    const leftByStandby = new Set(
+      roster.members
+        .filter(
+          (member) =>
+            !mergedByStandby.members.some(
+              (each) => String(each.memberId) === String(member.memberId),
+            ),
+        )
+        .map((member) => String(member.memberId)),
+    );
+    const merged = {
+      ...mergedByStandby,
+      members: mergedByStandby.members.filter(
+        (member) =>
+          !hub.members.some(
+            (record) =>
+              String(record.memberId) === String(member.memberId) &&
+              record.introducedBy !== undefined &&
+              leftByStandby.has(String(record.introducedBy)),
+          ),
+      ),
+    };
     const kept = (memberId: string) =>
       merged.members.some((member) => String(member.memberId) === memberId);
     const dropped = roster.members.filter((member) => !kept(String(member.memberId)));
-    for (const member of dropped) {
-      this.#revokeMemberDevice(
-        hub.members.find((record) => String(record.memberId) === String(member.memberId))?.deviceId,
-      );
-    }
+    const droppedRecords = hub.members.filter((record) =>
+      dropped.some((member) => String(member.memberId) === String(record.memberId)),
+    );
+    for (const record of droppedRecords) this.#revokeMemberDevice(record.deviceId);
     const known = new Set(hub.members.map((record) => String(record.memberId)));
     const signed = this.#sign(merged);
     const nextHub: HubSideState = {
@@ -865,6 +1224,7 @@ export class HubService {
       ].slice(-MAX_REMEMBERED_REMOVALS),
     };
     this.#options.state.save({ ...current, hub: nextHub });
+    this.#revokeMemberDevices(droppedRecords.map((record) => record.windowDeviceId));
     this.#options.record({
       change: "stand-in-merged",
       actingPrincipal: { kind: "hub", memberId: sender.memberId },
@@ -967,7 +1327,14 @@ export class HubService {
     if (entry === undefined) return { status: "refused", kind: "not-a-member" };
     if (entry.role === "hub") return { status: "refused", kind: "cannot-remove-the-hub" };
     this.#revokeMemberDevice(record?.deviceId);
-    const members = roster.members.filter((member) => String(member.memberId) !== memberId);
+    // The member's desktop window was listed as a guest because of it, and goes with it.
+    const leaving = new Set([
+      memberId,
+      ...hub.members
+        .filter((member) => String(member.introducedBy) === memberId)
+        .map((member) => String(member.memberId)),
+    ]);
+    const members = roster.members.filter((member) => !leaving.has(String(member.memberId)));
     const signed = this.#sign({
       ...roster,
       sequence: roster.sequence + 1,
@@ -979,7 +1346,7 @@ export class HubService {
       hub: {
         ...hub,
         roster: signed,
-        members: hub.members.filter((member) => String(member.memberId) !== memberId),
+        members: hub.members.filter((member) => !leaving.has(String(member.memberId))),
         // What the hub held to wake the member goes with it, hardware address included.
         ...(hub.wake === undefined
           ? {}
@@ -1004,6 +1371,11 @@ export class HubService {
         ].slice(-MAX_REMEMBERED_REMOVALS),
       },
     });
+    this.#revokeMemberDevices(
+      hub.members
+        .filter((member) => leaving.has(String(member.memberId)))
+        .map((member) => member.windowDeviceId),
+    );
     this.#options.record({
       change,
       actingPrincipal: principal,
@@ -1023,6 +1395,25 @@ export class HubService {
     } catch {
       // A device already revoked, or one the host no longer holds, leaves nothing to revoke.
     }
+  }
+
+  /**
+   * Revokes these devices, keeping on the pending list any the device pairing
+   * cannot reach yet: a member window's device left active would act with no
+   * Act list once the pairing starts.
+   */
+  #revokeMemberDevices(deviceIds: ReadonlyArray<string | undefined>): void {
+    const ids = deviceIds.filter((deviceId) => deviceId !== undefined);
+    if (ids.length === 0) return;
+    if (this.#options.pairing() === undefined) {
+      const state = this.#options.state.load();
+      this.#options.state.save({
+        ...state,
+        pendingDeviceRevocations: [...(state.pendingDeviceRevocations ?? []), ...ids],
+      });
+      return;
+    }
+    for (const deviceId of ids) this.#revokeMemberDevice(deviceId);
   }
 
   /**

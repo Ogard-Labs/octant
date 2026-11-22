@@ -468,6 +468,8 @@ export interface CodeOperationRuntimeOptions {
     TerminalBrowserGrantService,
     "open" | "abandon" | "switchOff" | "terminalClosed" | "resolveCredential" | "liveGrant"
   >;
+  /** The program a thread's provider terminal opens; see CodeOperationServiceOptions. */
+  readonly providerTerminal?: CodeOperationServiceOptions["providerTerminal"];
   readonly resolvePullRequestTarget: (
     threadId: CodeThreadId,
   ) => Promise<GhDeliveryTarget | undefined>;
@@ -1617,6 +1619,9 @@ export function createCodeOperationRuntime(
     ...(options.terminalBrowserGrants === undefined
       ? {}
       : { terminalBrowserGrants: options.terminalBrowserGrants }),
+    ...(options.providerTerminal === undefined
+      ? {}
+      : { providerTerminal: options.providerTerminal }),
     repositoryTests,
     ...(scaffolds === undefined ? {} : { scaffolds }),
     git,
@@ -2255,6 +2260,11 @@ export function createCodeOperationRuntime(
                   modelId: thread.modelId,
                   projectId: thread.projectId,
                 });
+          if (admission?.kind === "draining") {
+            throw new CodeServiceError(
+              decodeCodeFailure({ category: "unavailable", message: admission.detail }),
+            );
+          }
           if (admission?.kind === "paused") {
             throw new CodeServiceError(
               decodeCodeFailure({
@@ -3370,6 +3380,8 @@ interface ActiveTurn {
   readonly browserGrantKeys: Set<string>;
   readonly browserProfileContexts: Set<string>;
   readonly questions: Set<string>;
+  /** The provider questions on this turn that ask for a secret; see `answerInput`. */
+  readonly secretQuestions: Set<string>;
   readonly providerQuestionnaires: Map<string, Questionnaire>;
   /** Questions the native harness asked on this turn; answered by the host, not the provider. */
   readonly harnessQuestions: Set<string>;
@@ -4443,6 +4455,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       browserGrantKeys: new Set(),
       browserProfileContexts: new Set(),
       questions: new Set(),
+      secretQuestions: new Set(),
       harnessQuestions: new Set(),
       providerQuestionnaires: new Map(),
       cursor: 0,
@@ -4862,6 +4875,20 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       active.harnessQuestions.delete(input.requestId);
       return answeredTurnState(active.state);
     }
+    // A secret answer reaches the provider only for the question that asked
+    // for one, and a secret question takes no answer that was put as
+    // evidence, so the value is never stored either way.
+    if ((input.secret === true) !== active.secretQuestions.has(input.requestId))
+      return {
+        state: active.state,
+        failure: {
+          category: "invalid",
+          message:
+            input.secret === true
+              ? "That question does not ask for a secret."
+              : "That question asks for a secret. Answer it in its thread.",
+        },
+      };
     if (active.connection === undefined) {
       return turnState("failed", { category: "failed", message: APPROVAL_SESSION_GONE_MESSAGE });
     }
@@ -4879,6 +4906,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       };
     }
     active.questions.delete(input.requestId);
+    active.secretQuestions.delete(input.requestId);
     active.providerQuestionnaires.delete(input.requestId);
     await Effect.runPromise(
       active.connection.answerUserInput({
@@ -5115,6 +5143,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             requestId: event.requestId,
             prompt: event.prompt,
             options: event.options,
+            ...(event.secret === true ? { secret: true } : {}),
           });
         }
       }
@@ -5573,9 +5602,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const connection = active.connection;
     // The provider session was opened with the persistence the turn started
     // with. After the person changed it, an allow is delivered for this one
-    // call, so nothing is remembered beyond what either setting allows.
+    // call, so nothing is remembered beyond what either setting allows. A
+    // driver reads the host's default persistence, not this thread's, so a
+    // thread that keeps answers only as the Project's default says so with
+    // each answer; otherwise a host default of `current-session` would let
+    // the runtime remember the allow for the session.
     const once =
       ownerCurrent !== undefined ||
+      active.thread.permissionPersistence !== "current-session" ||
       active.thread.permissionPersistence !== input.thread.permissionPersistence;
     const askedUnder = active.approvalPostures.get(input.approvalId);
     if (ownerCurrent === undefined) {
@@ -7898,6 +7932,7 @@ function normalizedOperationEvent(
   }
   if (event.category === "question" && event.requestId !== undefined) {
     active.questions.add(event.requestId);
+    if (event.secret === true) active.secretQuestions.add(event.requestId);
     if (event.questionnaire !== undefined)
       active.providerQuestionnaires.set(event.requestId, event.questionnaire);
     return {
@@ -7911,6 +7946,7 @@ function normalizedOperationEvent(
         ) ?? "Provider input requested.",
       options: boundProviderInputOptions(event.options ?? []),
       ...(event.questionnaire === undefined ? {} : { questionnaire: event.questionnaire }),
+      ...(event.secret === true ? { secret: true } : {}),
     };
   }
   if (
