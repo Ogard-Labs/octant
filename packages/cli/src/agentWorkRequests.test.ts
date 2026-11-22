@@ -265,6 +265,7 @@ describe("terminal Work requests", () => {
     expect(text).toContain("Step 7");
     expect(text).not.toContain("Step 8");
     expect(text).toContain("The plan continues. Read the whole plan in the app before allowing.");
+    expect(text.split("\n").at(-1)).toBe("Allowing moves this thread to Accept edits.");
     const wide = workLevelChangeText({ to: "auto", plan: "x".repeat(2_000) });
     expect(wide.length).toBeLessThan(700);
     expect(wide).toContain("The plan continues.");
@@ -389,6 +390,10 @@ describe("terminal Work requests", () => {
       expect(stepWorkQuestionnaire(questionnaire, first.answers, "= 12")).toMatchObject({
         kind: "complete",
         response: { answers: [{}, { customAnswer: "12" }] },
+      });
+      expect(stepWorkQuestionnaire(questionnaire, first.answers, "==12")).toMatchObject({
+        kind: "complete",
+        response: { answers: [{}, { customAnswer: "=12" }] },
       });
       expect(stepWorkQuestionnaire(questionnaire, first.answers, "=SUM(B2:B5)")).toMatchObject({
         kind: "complete",
