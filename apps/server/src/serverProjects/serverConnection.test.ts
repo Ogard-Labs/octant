@@ -481,3 +481,108 @@ describe.skipIf(!canRunThrowawaySshd)("a call on a throwaway server", () => {
     expect(() => process.kill(pid, 0)).toThrow();
   }, 20_000);
 });
+
+describe.skipIf(process.platform === "win32")("a stream to a process on a server", () => {
+  function standInSsh(greeting = "") {
+    const scratch = mkdtempSync(join(tmpdir(), "octant-stream-ssh-"));
+    const executable = join(scratch, "ssh");
+    // The last argument is the remote command, which a server's login shell
+    // runs, after printing whatever greeting its startup files print.
+    writeFileSync(
+      executable,
+      `#!/usr/bin/env node
+const { spawn } = require('node:child_process');
+process.stdout.write(${JSON.stringify(greeting)});
+const child = spawn('sh', ['-c', process.argv[process.argv.length - 1]], { stdio: 'inherit' });
+child.on('exit', (code) => process.exit(code ?? 1));`,
+    );
+    chmodSync(executable, 0o700);
+    const connection = new ServerConnection({
+      sshPath: executable,
+      agentSocket: () => undefined,
+      controlDirectory: () => scratch,
+    });
+    return { connection, scratch };
+  }
+  const server = { alias: "fixture", user: "fixture" };
+
+  it("carries a long-running program's standard streams both ways, with its arguments", async () => {
+    const { connection, scratch } = standInSsh();
+    try {
+      const stream = connection.openStream(server, {
+        script: 'printf "%s\\n" "$1"; exec cat',
+        args: ["it's ready"],
+      });
+      if (stream.status !== "open") throw new Error(stream.message);
+      const chunks: Buffer[] = [];
+      stream.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+      stream.stdin.write("first line\n");
+      stream.stdin.write("second line\n");
+      stream.stop();
+      expect(await stream.exited).toEqual({ exitCode: 0 });
+      expect(Buffer.concat(chunks).toString("utf8")).toBe("it's ready\nfirst line\nsecond line\n");
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a login shell's greeting out of the program's output", async () => {
+    const { connection, scratch } = standInSsh("Welcome to the build box\n");
+    try {
+      const stream = connection.openStream(server, { script: "exec cat" });
+      if (stream.status !== "open") throw new Error(stream.message);
+      const chunks: Buffer[] = [];
+      stream.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+      stream.stdin.write('{"id":1}\n');
+      stream.stop();
+      expect(await stream.exited).toEqual({ exitCode: 0 });
+      expect(Buffer.concat(chunks).toString("utf8")).toBe('{"id":1}\n');
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it("ends the program when the stream closes its standard input", async () => {
+    const { connection, scratch } = standInSsh();
+    try {
+      const stream = connection.openStream(server, { script: "exec cat" });
+      if (stream.status !== "open") throw new Error(stream.message);
+      stream.stop();
+      expect(await stream.exited).toEqual({ exitCode: 0 });
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it("settles its exit after stopping even when nobody reads the program's output", async () => {
+    const { connection, scratch } = standInSsh();
+    try {
+      const stream = connection.openStream(server, { script: "exec head -c 1048576 /dev/zero" });
+      if (stream.status !== "open") throw new Error(stream.message);
+      stream.stop();
+      expect((await stream.exited).exitCode).not.toBeUndefined();
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it("opens nothing for a refused server or an argument it cannot carry", () => {
+    const refused = new ServerConnection({
+      sshPath: "/nonexistent/ssh",
+      agentSocket: () => undefined,
+      refuses: () => "The machine is suspended.",
+    });
+    expect(refused.openStream(server, { script: "exec cat" })).toEqual({
+      status: "unreachable",
+      message: "The machine is suspended.",
+    });
+    const { connection, scratch } = standInSsh();
+    try {
+      expect(connection.openStream(server, { script: "exec cat", args: ["a\0b"] })).toMatchObject({
+        status: "unreachable",
+      });
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+});
