@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
-import type {
-  CanvasBlock,
-  CanvasDefinition,
-  CanvasDesignBlock,
-  CanvasId,
-  CanvasVersionId,
+import {
+  canvasImageBlockAssets,
+  type CanvasBlock,
+  type CanvasDefinition,
+  type CanvasDesignAssetResolution,
+  type CanvasDesignBlock,
+  type CanvasId,
+  type CanvasProvenance,
+  type CanvasVersionId,
 } from "@octant/contracts/canvas";
 import {
   CANVAS_EXPORT_APPROVAL_TTL_MS,
@@ -117,12 +120,21 @@ export interface CanvasExportServiceOptions {
    */
   readonly renderer?: CanvasExportRenderer;
   /**
-   * The generated images a share document carries, resolved under the
+   * The images a share document carries, resolved under the
    * version's provenance. Absent, a share document carries none.
    */
   readonly resolveShareImages?: (
     definition: CanvasDefinition,
   ) => Promise<CanvasShareResolvedImages>;
+  /**
+   * The images a block shows, resolved under the version's provenance, so a
+   * picture of the document draws them as the thread does. Absent, they draw
+   * as placeholders.
+   */
+  readonly resolveDesignAssets?: (
+    block: Pick<CanvasDesignBlock, "blockId" | "assets">,
+    provenance: CanvasProvenance,
+  ) => Promise<ReadonlyArray<CanvasDesignAssetResolution>>;
 }
 
 /**
@@ -165,6 +177,7 @@ export class CanvasExportService {
   readonly #clock: () => UtcTimestamp;
   readonly #renderer: CanvasExportRenderer | undefined;
   readonly #resolveShareImages: CanvasExportServiceOptions["resolveShareImages"];
+  readonly #resolveDesignAssets: CanvasExportServiceOptions["resolveDesignAssets"];
   readonly #pending = new Map<string, PendingExport>();
   /** Exports a restart cut off, per Canvas, oldest first; see `settleUnconfirmed`. */
   readonly #unconfirmed = new Map<string, CanvasExportRecorded[]>();
@@ -177,6 +190,7 @@ export class CanvasExportService {
     this.#clock = options.clock;
     this.#renderer = options.renderer;
     this.#resolveShareImages = options.resolveShareImages;
+    this.#resolveDesignAssets = options.resolveDesignAssets;
   }
 
   offers(canvasId: CanvasId): CanvasExportOfferList | undefined {
@@ -735,6 +749,32 @@ export class CanvasExportService {
    * none is drawn as the thread draws it. A host with no browser, a build with
    * no renderer, and a drawing that failed are each a refusal the person reads.
    */
+  /**
+   * A document picture with the images its image blocks and designs show,
+   * resolved under the version's provenance as the thread resolves them.
+   */
+  async #withDocumentImages(
+    subject: Extract<CanvasExportPictureRequest["subject"], { readonly kind: "document" }>,
+  ): Promise<CanvasExportPictureRequest["subject"]> {
+    const resolve = this.#resolveDesignAssets;
+    if (resolve === undefined) return subject;
+    const designAssets = [];
+    for (const block of subject.definition.blocks) {
+      const declaring =
+        block.kind === "design"
+          ? block
+          : block.kind === "image"
+            ? { blockId: block.blockId, assets: canvasImageBlockAssets(block) }
+            : undefined;
+      if (declaring === undefined || (declaring.assets ?? []).length === 0) continue;
+      designAssets.push({
+        blockId: String(block.blockId),
+        assets: await resolve(declaring, subject.definition.provenance),
+      });
+    }
+    return designAssets.length === 0 ? subject : { ...subject, designAssets };
+  }
+
   async #renderPictures(
     document: CanvasExportDocument,
     format: CanvasExportPictureFormat,
@@ -747,8 +787,9 @@ export class CanvasExportService {
         "This host has no browser to draw pictures with. Export as HTML or Markdown instead.",
       );
     }
-    const subject = pictureSubject(document, frameTheme);
-    if (subject.kind === "refused") return subject;
+    const picked = pictureSubject(document, frameTheme);
+    if (picked.kind === "refused") return picked;
+    const subject = picked.kind === "document" ? await this.#withDocumentImages(picked) : picked;
     const drawn = await renderer.renderPictures({
       format,
       theme: frameTheme?.scheme ?? "light",

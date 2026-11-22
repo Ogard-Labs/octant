@@ -7,8 +7,9 @@ import {
 } from "./canvasExport";
 import {
   CANVAS_SHARE_IMAGES_MAX_BYTES,
+  CANVAS_SHARE_IMAGES_SCHEMA_VERSION,
   CANVAS_SHARE_MAX_IMAGES,
-  CANVAS_SHARE_SCHEMA_VERSION,
+  CanvasShareSchemaVersion,
   CanvasShareImage,
   CanvasStaticExportBlock,
   canvasShareImagesAreConsistent,
@@ -117,15 +118,20 @@ export type CanvasPublicLinkServiceAddress = typeof CanvasPublicLinkServiceAddre
 export const CanvasPublicShareDocument = Schema.Struct({
   schemaVersion: CanvasPublicShareWireVersion,
   kind: Schema.Literal("canvas-public-share-document"),
-  /** The share schema the blocks are written in. */
-  shareSchemaVersion: Schema.Literal(CANVAS_SHARE_SCHEMA_VERSION),
+  /**
+   * The share schema the blocks are written in. A host always publishes the
+   * current version; every earlier one stays readable, because a service
+   * redeployed with a newer version still holds links published under an
+   * older one, which must keep opening until they expire.
+   */
+  shareSchemaVersion: CanvasShareSchemaVersion,
   title: safeText(256),
   /** The first reading text, shortened, for link previews. */
   summary: Schema.optional(safeText(CANVAS_PUBLIC_SHARE_SUMMARY_MAX_CHARS)),
   publishedAt: UtcTimestamp,
   blocks: Schema.Array(CanvasStaticExportBlock).pipe(Schema.maxItems(128)),
   /**
-   * The generated images the blocks show (maintainer decision, 2026-11-22).
+   * The images the blocks display (maintainer decision, 2026-11-22).
    * They count against the share image budget, not the document budget, which
    * is the text the approval card shows whole.
    */
@@ -135,6 +141,12 @@ export const CanvasPublicShareDocument = Schema.Struct({
 })
   .annotations(strict)
   .pipe(
+    Schema.filter(
+      (document) =>
+        document.shareSchemaVersion >= CANVAS_SHARE_IMAGES_SCHEMA_VERSION ||
+        document.images === undefined,
+      { message: () => "Shared images require Canvas share version 18." },
+    ),
     Schema.filter((document) => canvasShareImagesAreConsistent(document), {
       message: () =>
         "A share's images must each be named by a block, match their length, and fit the image budget.",

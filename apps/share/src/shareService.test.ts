@@ -676,7 +676,24 @@ describe("share service", () => {
     expect(frame).not.toContain("allow-same-origin");
   });
 
-  test("draws the generated images a share carries on the page and in design frames, and takes images past the document budget", async () => {
+  test("keeps opening a link published under an earlier share version after the service learns a newer one", async () => {
+    start();
+    const body = createBody([heading, prose("Published before images")]);
+    const created = await create({
+      ...body,
+      document: { ...body.document, shareSchemaVersion: 17 },
+    });
+    // The service reads the stored document back on every view and owner call.
+    const view = await fetch(created.url);
+    expect(view.status).toBe(200);
+    expect(await view.text()).toContain("Published before images");
+    const status = await fetch(`${service?.publicUrl}/api/v1/shares/${created.shareId}`, {
+      headers: owner(created.ownerSecret),
+    });
+    expect(status.status).toBe(200);
+  });
+
+  test("draws the images a share carries on the page and in design frames, and takes images past the document budget", async () => {
     start();
     // A picture larger than the whole document budget still leaves with its
     // share: images count against their own budget, not the text's.

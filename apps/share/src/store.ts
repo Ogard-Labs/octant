@@ -180,6 +180,7 @@ export class ShareStore {
       chmodSync(directory, 0o700);
     }
     mkdirSync(this.#directory("reports"), { recursive: true, mode: 0o700 });
+    mkdirSync(this.#directory("views"), { recursive: true, mode: 0o700 });
     for (const name of readdirSync(this.#directory("shares"))) {
       if (!name.endsWith(".json")) continue;
       const id = name.slice(0, -".json".length);
@@ -264,10 +265,13 @@ export class ShareStore {
     return { status: "replaced", share: next };
   }
 
+  // A view counts in a small file beside the share rather than rewriting the
+  // share: with a share's images a payload is megabytes, and rewriting it on
+  // every view would cost a full write per reader.
   recordView(id: string): void {
     const current = this.#readShare(id);
     if (current === undefined || this.#hasTombstone(id)) return;
-    this.#writeShare(id, { ...current, viewCount: current.viewCount + 1 });
+    this.#writeAtomic(this.#viewsPath(id), String(current.viewCount + 1));
   }
 
   /** Only the API calls this after verifying a nonexistent id is bound to its bearer proof. */
@@ -366,12 +370,26 @@ export class ShareStore {
     return join(this.#directory("tombstones"), `${id}.json`);
   }
 
+  #viewsPath(id: string): string {
+    return join(this.#directory("views"), `${id}.count`);
+  }
+
   #readShare(id: string): StoredShare | undefined {
+    let share: StoredShare | undefined;
     try {
-      return readStoredShare(readFileSync(this.#sharePath(id), "utf8"));
+      share = readStoredShare(readFileSync(this.#sharePath(id), "utf8"));
     } catch {
       return undefined;
     }
+    if (share === undefined) return undefined;
+    let counted = 0;
+    try {
+      const value = Number(readFileSync(this.#viewsPath(id), "utf8"));
+      if (Number.isSafeInteger(value) && value >= 0) counted = value;
+    } catch {
+      // No view has been counted beside the share yet.
+    }
+    return counted > share.viewCount ? { ...share, viewCount: counted } : share;
   }
 
   /** A tombstone is final: no later view or update writes the payload it replaced. */
@@ -411,6 +429,7 @@ export class ShareStore {
       } satisfies Tombstone),
     );
     rmSync(this.#sharePath(id), { force: true });
+    rmSync(this.#viewsPath(id), { force: true });
     this.#totalBytes = Math.max(0, this.#totalBytes - share.byteLength);
   }
 

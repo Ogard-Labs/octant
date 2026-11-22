@@ -3,6 +3,7 @@ import { eventActorForPrincipal } from "./principalEventActor";
 import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
 import type { DesignSystemList } from "@octant/contracts/design-systems";
 import { canvasImageBlockAssets, type CanvasDesignSystem } from "@octant/contracts/canvas";
+import type { CanvasShareImageStore } from "./canvas/canvasShareImageStore";
 import {
   canvasMockupsTsx,
   canvasExportStem,
@@ -210,9 +211,15 @@ export interface CanvasRouteDependencies {
     provenance: CanvasProvenance,
   ) => Promise<ReadonlyArray<CanvasDesignAssetResolution>>;
   /**
-   * The generated images a share of a Canvas version carries, resolved under
+   * The images a share of a Canvas version carries, resolved under
    * that version's provenance. Absent, a share carries none.
    */
+  /**
+   * Where a shared snapshot's image bytes are kept, apart from the journal.
+   * Absent, a snapshot is served with the images its journaled copy names
+   * but no bytes, and readers see each as missing.
+   */
+  readonly shareImages?: Pick<CanvasShareImageStore, "keep" | "withBytes" | "forget">;
   readonly resolveShareImages?: (
     definition: Pick<CanvasDefinition, "blocks" | "provenance">,
   ) => Promise<CanvasShareResolvedImages>;
@@ -1391,7 +1398,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               ? null
               : String(context.activeContext.projectId),
         };
-        // A share carries the generated images its version shows, resolved
+        // A share carries the images its version displays, resolved
         // under that version's provenance once the caller may share it.
         const shared =
           route === "share" && dependencies.resolveShareImages !== undefined
@@ -1416,6 +1423,17 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
                 images,
               )
             : shareService.revoke(body.value, authorizationContext, context.project, principal);
+        // The journaled snapshot names its images by digest; their bytes are
+        // kept for it apart from the journal, and go once it is revoked.
+        const shareImages = dependencies.shareImages;
+        if (result.kind === "accepted" && shareImages !== undefined) {
+          const snapshotId = String(result.snapshot.snapshotId);
+          if (route === "share" && images !== undefined) {
+            await shareImages.keep(snapshotId, shareService.imagesOf(snapshotId), images);
+          } else if (route === "share-revoke") {
+            await shareImages.forget(snapshotId);
+          }
+        }
         return jsonResponse(decodeCanvasShareResult(result), 200, origin);
       }
 
@@ -1459,14 +1477,28 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         // A reader allowed to open the snapshot may run a prototype it holds:
         // the page is ticketed from the snapshot's own design, after the same
         // decision and the same access-log entry as the read itself.
+        const allowed =
+          result.kind === "allowed" && dependencies.shareImages !== undefined
+            ? {
+                ...result,
+                document: await dependencies.shareImages.withBytes(
+                  String(result.event.snapshotId),
+                  result.document,
+                ),
+              }
+            : result;
         const run = result.kind === "allowed" ? sharedDesignRunAsked(body.value) : undefined;
         const designPage =
           result.kind === "allowed" && run !== undefined
-            ? issueSharedDesignRun(dependencies.designRunTickets, result.document, run)
+            ? issueSharedDesignRun(
+                dependencies.designRunTickets,
+                allowed.kind === "allowed" ? allowed.document : result.document,
+                run,
+              )
             : undefined;
         return jsonResponse(
           decodeCanvasShareAccessResult(
-            designPage === undefined ? result : { ...result, designPage },
+            designPage === undefined ? allowed : { ...allowed, designPage },
           ),
           200,
           origin,
@@ -2830,11 +2862,12 @@ async function serveDesignPage(
   const grant = dependencies.designRunTickets?.redeem(ticket);
   if (grant === undefined) return refuse(403);
   const assets =
-    (grant.block.assets ?? []).length === 0 ||
+    grant.sharedAssets ??
+    ((grant.block.assets ?? []).length === 0 ||
     grant.provenance === undefined ||
     dependencies.resolveDesignAssets === undefined
       ? []
-      : await dependencies.resolveDesignAssets(grant.block, grant.provenance);
+      : await dependencies.resolveDesignAssets(grant.block, grant.provenance));
   // A token is minted for a frame a browser on this machine is loading, and
   // for a page the desktop's main process asks for its prototype host. The
   // switch is read again here, since it may have gone off after the ticket

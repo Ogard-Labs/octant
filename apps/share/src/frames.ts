@@ -162,9 +162,9 @@ export function renderDesignFramePage(
   block: DesignBlock,
   images: ReadonlyArray<CanvasShareImage> = [],
 ): string {
-  // A generated image the share carries is written in as a data: image, which
-  // the frame policy admits; any other declared asset stayed on the host and
-  // its reference is left to load nothing.
+  // An image the share carries is written in as a data: image, which the
+  // frame policy admits; a declared image it does not carry keeps its
+  // reference, which loads nothing.
   const byRef = new Map(images.map((image) => [String(image.imageRef), image]));
   const addresses = new Map(
     (block.assets ?? []).flatMap((asset) => {

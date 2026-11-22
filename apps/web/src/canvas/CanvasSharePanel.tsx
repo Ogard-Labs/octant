@@ -431,6 +431,7 @@ function SharedSnapshotView(props: {
         <FlowBoard
           block={item.flow as CanvasFlowBlock}
           blocks={props.document.blocks as CanvasBlock[]}
+          designAssetRuntime={designAssets}
         />
       </section>
     ) : item.kind === "deck" ? (
@@ -438,6 +439,7 @@ function SharedSnapshotView(props: {
         <DeckBlock
           block={item.deck as CanvasDeckBlock}
           blocks={props.document.blocks as CanvasBlock[]}
+          designAssetRuntime={designAssets}
         />
       </section>
     ) : (
@@ -514,7 +516,7 @@ function sharedImageRuntime(document: CanvasStaticExportDocument): DesignAssetRu
   const images = new Map((document.images ?? []).map((image) => [String(image.imageRef), image]));
   const resolved = (assetId: string, imageRef: string): CanvasDesignAssetResolution => {
     const image = images.get(imageRef);
-    return image === undefined
+    return image?.data === undefined
       ? { assetId: decodeCanvasDesignAssetId(assetId), status: "unavailable", reason: "missing" }
       : {
           assetId: decodeCanvasDesignAssetId(assetId),

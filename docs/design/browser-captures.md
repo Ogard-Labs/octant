@@ -181,10 +181,9 @@ the Browser pane
   screenshot envelope (about 40 KiB); the design asset caps are far above it. A
   recording may be declared the same way: its 2 MiB bound is under a design
   asset's 3 MiB cap, and it is drawn like any other PNG asset.
-- Exports and shares never carry the picture: a share carries only a
-  document's generated images ([Canvas: Shares](canvas.md#shares)), never a
-  capture, and a Canvas export leaves captures out like every other design
-  asset.
+- A share carries a capture a design displays, as one of the share's images
+  resolved under the Canvas's own thread ([Canvas: Shares](canvas.md#shares)),
+  and a Canvas export leaves captures out like every other design asset.
 
 ## Strip
 

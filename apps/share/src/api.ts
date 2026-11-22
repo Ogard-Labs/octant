@@ -119,7 +119,7 @@ function rawDocumentTextBytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(text), "utf8");
 }
 
-// The document budget is the text; a share's generated images have their own
+// The document budget is the text; a share's images have their own
 // budget, which the contract holds when it decodes the body.
 function documentTextBytes(document: CanvasPublicShareDocument): number {
   return canvasPublicShareDocumentTextBytes(document);

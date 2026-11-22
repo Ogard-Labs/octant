@@ -63,6 +63,7 @@ import type {
   CanvasProvenance,
 } from "@octant/contracts/canvas";
 import { CanvasDesignRunTickets } from "../canvas/canvasDesignPage";
+import { CanvasShareImageStore } from "../canvas/canvasShareImageStore";
 import { CanvasNetworkAccessService } from "../canvas/canvasNetworkAccessService";
 import { CanvasNetworkProxy } from "../canvas/canvasNetworkProxy";
 import { DesignSystemFiles, designSystemFolders } from "../designSystems/designSystemFiles";
@@ -1133,6 +1134,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     // switches and interception, that the agent's preview uses.
     renderer: canvasPreviewRenderer,
     resolveShareImages,
+    resolveDesignAssets,
   });
   // Settle exports a previous run cut off mid-delivery before any new one is
   // decided: recorded as unconfirmed for the person, never sent again.
@@ -1301,6 +1303,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     },
     resolveDesignAssets,
     resolveShareImages,
+    shareImages: new CanvasShareImageStore(persistence.dataDirectory),
     designRunTickets: new CanvasDesignRunTickets(),
     ...(deps.findPublishedSnapshot === undefined
       ? {}

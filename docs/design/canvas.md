@@ -866,13 +866,26 @@ window in another mode is offered none, as it cannot open the Canvas.
 
 A public link carries the same blocks without host, Project, thread, or
 source identity; its rules are in [Canvas public links](canvas-public-links.md).
-A share carries every block kind and field a Canvas holds except source ids,
-a design's Project-file and Browser-capture assets, and the action block it
-refuses (see the `design` block). From share version 18 it carries the
-generated images the document shows, an image block's picture and a design's
-`generated-image` assets, as bytes in the document's `images` (maintainer
-decision, 2026-11-22; see [Canvas public links](canvas-public-links.md) for
-the limits and the card). A table
+A share carries every block kind and field a Canvas holds except source ids
+and the action block it refuses (see the `design` block). From share version
+18 it carries every image the document displays, an image block's generated
+image and each image a design's frames or stylesheet name (a declared image
+nothing names is never shown and never carried), as bytes in the document's
+`images`,
+resolved under the version's own authority when the share is made and named
+only by the share's own references (maintainer decision, 2026-11-22; see
+[Canvas public links](canvas-public-links.md) for the limits and the card).
+An authenticated snapshot is journaled with each image named by its SHA-256
+and no bytes: the host keeps the bytes for that snapshot in its managed
+attachment store (`canvas-share-images`, one scope per snapshot), adds them
+when an allowed reader opens it after checking them against the digest, drops
+an image whose bytes are gone or changed with every reference to it, and
+removes them when the snapshot is revoked. A snapshot's prototype, run from
+its ticketed page, draws its images from the same bytes, never from a live
+read. _Rationale:_ the journal is
+replayed and synced, so image bytes there would cost every start and every
+replica; the managed store is the existing digest-checked file store that
+generated images and captures already use. A table
 column keeps its number format and display, a table row leaves as its cells
 without the `id` comments anchor to, and a board keeps its own layout. Because
 the row id is the only Canvas version 13 field and a share drops it, a share at
@@ -888,8 +901,8 @@ share still strips: a shared chart leaves as its readings and is named as
 version 21. Share version 12 carries the flow block, so it names blocks up
 to Canvas version 23, share version 16 carries the choice block, and share
 version 17 carries a decision form's sections and notes, so it named blocks up
-to Canvas version 29. Share version 18 carries the generated images a document
-shows, which an image block draws from Canvas version 30, so it names blocks
+to Canvas version 29. Share version 18 carries the images a document
+displays, which an image block draws from Canvas version 30, so it names blocks
 up to Canvas version 30 (`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`); the share
 service must learn each before a desktop release publishes one.
 Share documents version independently of Canvas documents: a treemap, a
@@ -907,7 +920,7 @@ block with share version 14 (a deck's presenter notes stay behind, as a
 design's frame notes do), flow callouts with share version 15, and the
 choice block with share version 16 (whose blocks may name Canvas version 27),
 and a decision form's sections with share version 17 (Canvas version 29),
-and a document's generated images with share version 18 (Canvas version 30),
+and the images a document displays with share version 18 (Canvas version 30),
 so a share
 that declares an older version
 and carries one is refused as a future version.
@@ -1591,6 +1604,9 @@ to ask shows "Image unavailable" too. The agent's `preview` reports a
 `design-asset-unavailable` warning for such a block with the asset id `image`
 and no frames, and `describe` for the `image` kind explains the field.
 
+A PNG or PDF of the document draws the picture as the thread does, resolved
+under the version's provenance before the page is drawn.
+
 The **HTML file** writes the picture in as a `data:` image under the file's
 image budget (`CANVAS_HTML_FILE_IMAGES_MAX_BYTES`), or the labelled placeholder
 when it did not resolve for that reader or would pass the budget. Markdown
@@ -1683,11 +1699,10 @@ not markup, so a Canvas that holds a design is shared only when the sharer
 acknowledges that its markup is shared as written
 (`acknowledgedMarkupSharedAsWritten`); without it the share is refused as
 `consent-required`, and markup that holds a token or key in a recognisable
-shape is refused as `unsafe-payload` even then. A shared design carries its
-`generated-image` assets as the share's images from share version 18, each
-named by the share's own reference, so its frames draw them; a Project file
-or a Browser capture resolves only under this host's authority and is never
-carried, so a frame that named one draws a placeholder. The snapshot viewer draws a shared design with the same block
+shape is refused as `unsafe-payload` even then. A shared design carries the
+images it declares as the share's images from share version 18, each named by
+the share's own reference rather than its path or id, so its frames draw
+them; one that did not resolve when the share was made draws a placeholder. The snapshot viewer draws a shared design with the same block
 the live Canvas uses, so its frames get the same sandbox and page policy, and
 a reader that only knows share version 9 refuses the snapshot as a future
 version rather than drawing a frame any other way. A shared prototype runs
@@ -1739,7 +1754,7 @@ The export approval card says when the document writes design markup
 markup leaves as written. In a destination's Markdown or HTML export a
 declared image draws a placeholder; the HTML file below writes in those that
 resolve for its reader, and a public link's share document carries the
-generated images (see [Shares](#shares)). A design in
+images the document displays (see [Shares](#shares)). A design in
 the workspace theme is exported in the theme the person's window draws it
 with: an HTML export of a Canvas that holds a design carries `frameTheme`, the
 scheme and the frame's token values, because an exported file has no Octant

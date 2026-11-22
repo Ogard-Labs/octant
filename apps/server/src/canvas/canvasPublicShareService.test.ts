@@ -339,7 +339,7 @@ describe("public links", () => {
       byteLength: 8,
       sha256: "b".repeat(64),
     };
-    const resolveShareImages = vi.fn(async () => new Map([[imageId, pixel]]));
+    const resolveShareImages = vi.fn(async () => new Map([[`generated-image:${imageId}`, pixel]]));
     const doc = {
       ...canvas([
         {

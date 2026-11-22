@@ -223,7 +223,7 @@ export const CanvasExportMetadata = Schema.Struct({
 export type CanvasExportMetadata = typeof CanvasExportMetadata.Type;
 
 /**
- * The generated images a share document carries beside its body (maintainer
+ * The images a share document carries beside its body (maintainer
  * decision, 2026-11-22). The body stays the text the card shows whole; the
  * images ride here, and the card shows each one.
  */
@@ -530,7 +530,7 @@ export const CanvasExportApprovalCard = Schema.Struct({
    */
   payload: Schema.optional(exportBody),
   /**
-   * The generated images a share document sends beside its payload, each one
+   * The images a share document sends beside its payload, each one
    * exactly as it leaves, so approving the card names every image that does.
    */
   images: Schema.optional(exportShareImages),

@@ -202,8 +202,13 @@ export function createCanvasShareSnapshotRecord(input: {
       exportedAt: createdAt,
       ...(input.images === undefined ? {} : { images: input.images }),
     });
+    // The journaled snapshot names each image by its digest and never holds
+    // its bytes: the host keeps them for the snapshot and adds them when the
+    // snapshot is read.
+    const images = sanitized.images?.map(({ data: _data, ...image }) => image);
     document = {
       ...sanitized,
+      ...(images === undefined ? {} : { images }),
       channel: "authenticated-snapshot" as const,
       threatModelId: "canvas-share-authenticated-snapshot-v1" as const,
     };

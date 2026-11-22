@@ -10,6 +10,7 @@ import {
   decodeCanvasShareSnapshotRevokeRequest,
   decodeCanvasShareSnapshotSummary,
   type CanvasId,
+  type CanvasShareImageEntry,
   type CanvasVersion,
   type CanvasShareAccessLogEvent,
   type CanvasShareAccessRequest,
@@ -177,6 +178,11 @@ export class CanvasShareService {
    * `principal` is required so the compiler rejects any call site that would
    * let this host's owner identity stand in for whoever actually asked.
    */
+  /** The images a recorded snapshot names, by digest, for the host to keep their bytes. */
+  imagesOf(snapshotId: string): ReadonlyArray<CanvasShareImageEntry> {
+    return this.#records.get(snapshotId)?.document.images ?? [];
+  }
+
   /**
    * The Canvas version a share request would copy, once the caller is known to
    * be allowed to share it, so the host can resolve the generated images that

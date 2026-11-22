@@ -48,6 +48,8 @@ import {
   CANVAS_SHARE_THREAT_MODEL_ID,
   validateCanvasStaticExportRequest,
   type CanvasSharePolicyContext,
+  canvasShareImageKey,
+  canvasShareImageSources,
   type CanvasShareResolvedImages,
 } from "./canvasSharePolicy";
 
@@ -592,7 +594,7 @@ describe("Canvas share policy", () => {
     expect(JSON.stringify(shared.document)).not.toContain("screens/home.png");
   });
 
-  it("carries the generated images a document shows, once each, and never the image's id or a Project file", () => {
+  it("carries every image a document shows, once each, by the share's own name and never by a host id or path", () => {
     const imageId = "9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a";
     const missingId = "8b8b8b8b-8b8b-4b8b-8b8b-8b8b8b8b8b8b";
     const pixel = {
@@ -609,12 +611,23 @@ describe("Canvas share policy", () => {
       alt: "A lighthouse at dusk",
       caption: "Cover art",
     });
+    const unusedId = "7c7c7c7c-7c7c-4c7c-8c7c-7c7c7c7c7c7c";
     const design = {
       ...onboardingFlowExample,
       schemaVersion: CANVAS_SCHEMA_VERSION,
+      styles: ".hero { background: url(octant-asset:hero); }",
+      frames: [
+        {
+          frameId: "home",
+          title: "Home",
+          html: '<div class="hero"></div><img src="octant-asset:shot" alt="Home">',
+        },
+      ],
       assets: [
         { assetId: "hero", source: { kind: "generated-image", imageId } },
         { assetId: "shot", source: { kind: "project-file", path: "screens/home.png" } },
+        // Declared but named nowhere, so never shown and never shared.
+        { assetId: "unused", source: { kind: "generated-image", imageId: unusedId } },
       ],
     };
     const shared = exportStaticDocument({
@@ -633,20 +646,41 @@ describe("Canvas share policy", () => {
         },
       },
       context,
-      images: new Map([[imageId, pixel]]),
+      images: new Map([
+        [canvasShareImageKey({ kind: "generated-image", imageId } as never), pixel],
+        [
+          canvasShareImageKey({ kind: "project-file", path: "screens/home.png" }),
+          { ...pixel, sha256: "f".repeat(64) },
+        ],
+        [
+          canvasShareImageKey({ kind: "generated-image", imageId: unusedId } as never),
+          { ...pixel, sha256: "0".repeat(64) },
+        ],
+      ]),
     });
     const document = decodeCanvasStaticExportDocument(shared.document);
     expect(document.schemaVersion).toBe(18);
-    expect(document.images).toEqual([{ imageRef: "image-1", ...pixel }]);
+    expect(document.images).toEqual([
+      { imageRef: "image-1", ...pixel },
+      { imageRef: "image-2", ...pixel, sha256: "f".repeat(64) },
+    ]);
     expect(document.blocks[0]).toMatchObject({ kind: "image", imageRef: "image-1" });
     // An image the host could not resolve reads as its description.
     expect(document.blocks[1]).not.toHaveProperty("imageRef");
+    // The same generated image shown again is the same share image.
     expect(document.blocks[2]).toMatchObject({
       kind: "design",
-      assets: [{ assetId: "hero", imageRef: "image-1" }],
+      assets: [
+        { assetId: "hero", imageRef: "image-1" },
+        { assetId: "shot", imageRef: "image-2" },
+      ],
     });
     expect(JSON.stringify(document)).not.toContain(imageId);
     expect(JSON.stringify(document)).not.toContain("screens/home.png");
+    expect(JSON.stringify(document)).not.toContain("0".repeat(64));
+    expect(
+      canvasShareImageSources({ blocks: [design] } as never).map((source) => source.kind),
+    ).toEqual(["generated-image", "project-file"]);
   });
 
   it("shares a validated brand and richer diagram fields at the current share version, and leaves presenter notes and a captured page behind", () => {

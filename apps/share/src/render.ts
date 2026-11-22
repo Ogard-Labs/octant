@@ -616,7 +616,7 @@ function blockBody(block: Block, ctx: RenderContext): string {
     case "evidence-reference":
       return labelled(block.label, block.detail);
     case "image": {
-      // A generated image the share carries is drawn; any other image block
+      // An image the share carries is drawn; any other image block
       // names a source that stayed on the host, so its alt text stands there.
       const image = block.imageRef === undefined ? undefined : ctx.images.get(block.imageRef);
       if (image === undefined) {

@@ -112,27 +112,35 @@ uses:
 - no Canvas, version, host, Project, or thread id, no provenance labels, and
   no source manifest; no source ids on any block; no file contents; and an
   action block refuses the whole publish;
-- the generated images the document shows (maintainer decision, 2026-11-22):
-  each image block's picture and each design's `generated-image` assets, as
-  sniffed PNG, JPEG, GIF, or WebP bytes in the document's `images`, named by
-  the share's own `image-<n>` references, never by an image or job id. A
-  Project file or Browser capture a design declares is never carried and its
-  frame draws a placeholder. Each image is at most 3 MiB and all of them at
+- every image the document displays (maintainer decision, 2026-11-22): each
+  image block's generated image and each image a design declares (a generated
+  image, a Project file, or a Browser capture), resolved under the Canvas
+  version's own authority as a reader's draw resolves it, as sniffed PNG,
+  JPEG, GIF, or WebP bytes in the document's `images`, named by the share's
+  own `image-<n>` references, never by an image id, capture id, or path.
+  Nothing the document does not display leaves; an image that does not
+  resolve is not carried and its frame draws a placeholder. Each image is at
+  most 3 MiB and all of them at
   most 4 MiB (`CANVAS_SHARE_IMAGES_MAX_BYTES`), counted apart from the
   document's text budget (the export body limit), so the card still shows the
   text whole. The card lists every image that leaves, as a thumbnail with its
   size, and the approved digest covers each image's SHA-256, so approving the
   card approves exactly those images. There is no separate acknowledgement:
-  the person sees what is sent. _Rationale:_ peers show a guest the images
-  that appear in shared content, and a placeholder made a shared document look
-  broken;
+  the person sees what is sent, and the card is the safeguard. _Rationale:_
+  peers show a guest the images that appear in shared content, a placeholder
+  made a shared document look broken, and limiting the share to generated
+  images would have restricted a feature the card already makes visible;
 - a design's frames only with the card's acknowledgement.
 
 The document is self-contained: the service draws it from its typed blocks
 without calling back to the host. It is a frozen copy. Nothing syncs; a
 change to the Canvas reaches the link only when the person approves an
-update. The payload is bounded at 262,144 bytes of UTF-8, the export body
-budget, and the service refuses a larger one.
+update. The document's text, everything but its images, is bounded at
+262,144 bytes of UTF-8, the export body budget, and the service refuses a
+larger one; its images are bounded apart, at 3 MiB each and 4 MiB together,
+and the service stores them with the share, counting them toward its total
+storage cap. A view counts in a small file beside the share, so a share's
+images are never rewritten when it is read.
 
 ## Link terms
 
@@ -253,7 +261,9 @@ contact, the viewer health check, and a test publish with embedded content. It r
 through `apps/share/src/shareKit.ts`, which names exactly the modules the
 service uses — in-repo, so there is no pinned-bundle sync to redo. A host that
 publishes a share format or wire version the running service does not know is
-refused, and nothing is stored. The operator serves two origins from two
+refused, and nothing is stored. A link published under an earlier share
+version keeps opening, and its owner keeps managing it, after the service is
+redeployed with a newer one. The operator serves two origins from two
 listeners — a public origin for the API and viewer pages, and a separate
 user-content origin for design frames — configured with
 `OCTANT_SHARE_PUBLIC_ORIGIN` and `OCTANT_SHARE_USERCONTENT_ORIGIN`; the service
@@ -313,7 +323,8 @@ frame-ancestors 'none'`. The page loads one first-party stylesheet and
   expiry times, byte length, the password hash, the owner secret hash, and an
   aggregate view count. It writes no IP address, user agent, referrer, or
   access log. Rate limits count per IP in memory for the current window only.
-- Limits (configurable): a payload of 262,144 bytes; 10 creates, 60 owner
+- Limits (configurable): a document text of 262,144 bytes, with images of
+  at most 4 MiB beside it; 10 creates, 60 owner
   calls, 120 views, 5 password attempts per link, and 5 reports per IP per
   minute; and a total storage cap past which create answers `unavailable`.
 - **Abuse.** Every page links to a report form (`POST /api/v1/shares/<id>/reports`,

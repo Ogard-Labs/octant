@@ -1,5 +1,5 @@
 import { trimTrailingUrlPunctuation } from "./trimTrailing";
-import { designBrandTokenRefusal } from "./canvasDesignFrameKit";
+import { designBrandTokenRefusal, withDesignAssetAddresses } from "./canvasDesignFrameKit";
 import {
   CANVAS_SHARE_IMAGES_MAX_BYTES,
   CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION,
@@ -20,6 +20,7 @@ import {
   type CanvasChartPoint,
   type CanvasBlock,
   type CanvasDefinition,
+  type CanvasDesignAsset,
   type CanvasVersion,
 } from "@octant/contracts/canvas";
 import type { UtcTimestamp } from "@octant/contracts/events";
@@ -191,9 +192,9 @@ function assertNoSecretShape(value: unknown, path: string): void {
 }
 
 /**
- * A generated image the host resolved for a share, under the Canvas version's
- * own authority, before the share was built: the sniffed raster type, the
- * bytes as base64, their length, and their SHA-256 in hex.
+ * An image the host resolved for a share, under the Canvas version's own
+ * authority, before the share was built: the sniffed raster type, the bytes
+ * as base64, their length, and their SHA-256 in hex.
  */
 export interface CanvasShareResolvedImage {
   readonly mediaType: CanvasShareImage["mediaType"];
@@ -202,30 +203,73 @@ export interface CanvasShareResolvedImage {
   readonly sha256: string;
 }
 
-/** Resolved generated images by their attachment id. */
+/** Resolved images by the key `canvasShareImageKey` gives their source. */
 export type CanvasShareResolvedImages = ReadonlyMap<string, CanvasShareResolvedImage>;
 
+/** One image a document displays, named the way the host resolves it. */
+export type CanvasShareImageSource = CanvasDesignAsset["source"];
+
 /**
- * The generated images a document shows, which a share carries (maintainer
- * decision, 2026-11-22): each image block's picture, and the generated-image
- * assets of each design. Project files and Browser captures a design declares
- * are not among them; a share never carries a file from this computer.
+ * A key that names one image source, so an image shown twice, by an image
+ * block and a design or by two designs, is resolved and carried once.
  */
-export function canvasShareGeneratedImageIds(
+export function canvasShareImageKey(source: CanvasShareImageSource): string {
+  switch (source.kind) {
+    case "generated-image":
+      return `generated-image:${String(source.imageId)}`;
+    case "browser-capture":
+      return `browser-capture:${String(source.captureId)}`;
+    case "project-file":
+      return `project-file:${source.path}`;
+  }
+}
+
+/**
+ * The images a document displays, which a share carries (maintainer
+ * decision, 2026-11-22): each image block's generated image, and every image
+ * a design declares (generated images, Project files, Browser captures). An
+ * image is carried only when the document shows it; nothing else on this
+ * computer leaves.
+ */
+export function canvasShareImageSources(
   definition: Pick<CanvasDefinition, "blocks">,
-): ReadonlyArray<string> {
-  const ids = new Set<string>();
+): ReadonlyArray<CanvasShareImageSource> {
+  const sources = new Map<string, CanvasShareImageSource>();
+  const add = (source: CanvasShareImageSource) => {
+    const key = canvasShareImageKey(source);
+    if (!sources.has(key)) sources.set(key, source);
+  };
   for (const block of definition.blocks) {
     if (block.kind === "image" && block.generatedImageId !== undefined) {
-      ids.add(String(block.generatedImageId));
+      add({ kind: "generated-image", imageId: block.generatedImageId });
     }
     if (block.kind === "design") {
+      const shown = designAssetsShown(block);
       for (const asset of block.assets ?? []) {
-        if (asset.source.kind === "generated-image") ids.add(String(asset.source.imageId));
+        if (shown.has(String(asset.assetId))) add(asset.source);
       }
     }
   }
-  return [...ids];
+  return [...sources.values()];
+}
+
+/**
+ * The declared assets a design's frames or stylesheet actually name in an
+ * image position. A declared image nothing names is never shown, so a share
+ * never carries it.
+ */
+function designAssetsShown(
+  block: Pick<Extract<CanvasBlock, { readonly kind: "design" }>, "styles" | "frames">,
+): ReadonlySet<string> {
+  const shown = new Set<string>();
+  const collect = (markup: string) =>
+    withDesignAssetAddresses(markup, (assetId) => {
+      shown.add(assetId);
+      return "";
+    });
+  collect(block.styles ?? "");
+  for (const frame of block.frames) collect(frame.html);
+  return shown;
 }
 
 const decodeShareImageRef = Schema.decodeSync(CanvasShareImageRef);
@@ -246,10 +290,11 @@ class SharedImages {
     this.#resolved = resolved;
   }
 
-  refFor(imageId: string): CanvasShareImageRef | undefined {
-    const known = this.#refs.get(imageId);
+  refFor(source: CanvasShareImageSource): CanvasShareImageRef | undefined {
+    const key = canvasShareImageKey(source);
+    const known = this.#refs.get(key);
     if (known !== undefined) return known;
-    const image = this.#resolved.get(imageId);
+    const image = this.#resolved.get(key);
     if (image === undefined) return undefined;
     if (
       this.#images.length >= CANVAS_SHARE_MAX_IMAGES ||
@@ -258,7 +303,7 @@ class SharedImages {
       return undefined;
     }
     const imageRef = decodeShareImageRef(`image-${String(this.#images.length + 1)}`);
-    this.#refs.set(imageId, imageRef);
+    this.#refs.set(key, imageRef);
     this.#images.push({
       imageRef,
       mediaType: image.mediaType,
@@ -293,11 +338,12 @@ function sharedDesign(
   images: SharedImages,
 ): CanvasStaticExportBlock {
   const { assets: declared, ...design } = block;
-  // A frame's generated images leave with it; a Project file or a Browser
-  // capture it declares does not, and draws as a placeholder.
+  // The images a frame shows leave with it, as the host resolved them; one
+  // the host could not resolve draws as a placeholder.
+  const shown = designAssetsShown(block);
   const assets = (declared ?? []).flatMap((asset) => {
-    if (asset.source.kind !== "generated-image") return [];
-    const imageRef = images.refFor(String(asset.source.imageId));
+    if (!shown.has(String(asset.assetId))) return [];
+    const imageRef = images.refFor(asset.source);
     return imageRef === undefined ? [] : [{ assetId: asset.assetId, imageRef }];
   });
   const markup = [design.styles ?? "", ...design.frames.map((frame) => frame.html)];
@@ -355,12 +401,14 @@ function sanitizeBlock(
       return rest as CanvasStaticExportBlock;
     }
     case "image": {
-      // A generated image is host identity like a source id, so its id never
+      // A generated image's id is host identity like a source id, so it never
       // leaves; the picture itself does, as one of the share's images.
       const { sourceId: _sourceId, generatedImageId, ...rest } = block;
       assertNoSecretShape(rest, `block.${block.blockId}`);
       const imageRef =
-        generatedImageId === undefined ? undefined : images.refFor(String(generatedImageId));
+        generatedImageId === undefined
+          ? undefined
+          : images.refFor({ kind: "generated-image", imageId: generatedImageId });
       return (imageRef === undefined ? rest : { ...rest, imageRef }) as CanvasStaticExportBlock;
     }
     case "design":
