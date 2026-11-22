@@ -2930,6 +2930,8 @@ function makeConnection(
      * Windows Strict's profile for Codex's own sandbox: the session's folders
      * writable and every store the secret guard protects denied.
      */
+    /** The Windows Strict profile admitted by the last session start on this connection. */
+    let windowsStrictPrepared: CodexPermissionProfile | undefined;
     const windowsStrictProfile = (launchEnvironment: NodeJS.ProcessEnv | undefined) => {
       const sandbox = sessionSandbox({ executionPolicy: "full-access", strict: true });
       return codexWindowsStrictProfile({
@@ -2984,8 +2986,10 @@ function makeConnection(
         }
         const prepared = windowsStrictProfile(options.environment);
         if (prepared.status === "refused") {
+          windowsStrictPrepared = undefined;
           return yield* Effect.fail(failure("incompatible", prepared.reason));
         }
+        windowsStrictPrepared = prepared.profile;
       });
     /**
      * The profile a session of this posture runs Codex's own sandbox under,
@@ -3003,8 +3007,10 @@ function makeConnection(
       // This host's sign-in paths name nothing on a server; there the list
       // was resolved for the server's login when Codex started on it.
       if (windowsStrictFullAccess(input)) {
-        const prepared = windowsStrictProfile(launchEnvironment);
-        return prepared.status === "ready" ? prepared.profile : undefined;
+        // The profile admitted just before this thread started, never one
+        // rebuilt later: a rebuild that failed would leave Codex's built-in
+        // sandbox without the denials.
+        return windowsStrictPrepared;
       }
       const signIns =
         serverPlacement === undefined
@@ -3166,14 +3172,32 @@ function makeConnection(
           input.attachments,
         );
         const injects = yield* injectItems(state.threadId, carried);
+        const holdsStrict = state.sandbox.kind === "native" && state.sandbox.holdsStrict === true;
+        const reviewProfile = holdsStrict ? windowsStrictPrepared : undefined;
+        if (holdsStrict && reviewProfile === undefined) {
+          return yield* Effect.fail(
+            failure(
+              "incompatible",
+              "Codex cannot review under Windows Strict: its sandbox profile was not admitted.",
+            ),
+          );
+        }
         const reviewThread = yield* request(() =>
           client.threadStart({
             cwd: projectRoot,
             model: state.modelId,
             approvalPolicy: "never",
-            sandbox: codexReviewThreadSandbox(state),
+            // Under Windows Strict the reviewer runs in the session's own
+            // profile, so the protected files stay denied to it as well;
+            // Codex's built-in read-only sandbox has no deny list.
+            ...(reviewProfile === undefined
+              ? { sandbox: codexReviewThreadSandbox(state) }
+              : { permissions: CODEX_OCTANT_PROFILE }),
             approvalsReviewer: "user",
-            config: state.threadConfig,
+            config:
+              reviewProfile === undefined
+                ? state.threadConfig
+                : { ...state.threadConfig, permissions: { [CODEX_OCTANT_PROFILE]: reviewProfile } },
             ephemeral: true,
           }),
         );
@@ -3934,6 +3958,14 @@ function makeConnection(
               input.blockedTools,
             );
             const posture = postureConfig(input);
+            if (windowsStrictFullAccess(input) && posture.permissions === undefined) {
+              return yield* Effect.fail(
+                failure(
+                  "incompatible",
+                  "Codex cannot run under Windows Strict: its sandbox profile was not admitted. No thread was started.",
+                ),
+              );
+            }
             const config = {
               ...optionSettings.config,
               ...modeConfig,
@@ -4037,6 +4069,14 @@ function makeConnection(
               input.blockedTools,
             );
             const posture = postureConfig(input);
+            if (windowsStrictFullAccess(input) && posture.permissions === undefined) {
+              return yield* Effect.fail(
+                failure(
+                  "incompatible",
+                  "Codex cannot run under Windows Strict: its sandbox profile was not admitted. No thread was started.",
+                ),
+              );
+            }
             const resumeRequest = () =>
               Effect.tryPromise({
                 try: () =>

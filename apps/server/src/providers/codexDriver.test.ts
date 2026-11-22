@@ -3921,6 +3921,33 @@ describe("Codex execution authority and approvals", () => {
     }
   });
 
+  it("runs Codex's review under Windows Strict in the session's profile, so protected files stay denied to the reviewer", async () => {
+    const f = fixture({ version: "0.170.0" });
+    const acquired = await acquireConnection(
+      makeCodexDriver({ ...f.options({ environment: windowsEnvironment }), platform: "win32" }),
+      "code",
+    );
+    await Effect.runPromise(acquired.connection.start(windowsStrictStart));
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "/review", attachments: [], tools: [] }),
+    );
+    const review = f.calls.filter(({ method }) => method === "thread/start")[1]?.input as {
+      readonly config: { readonly permissions?: Record<string, CodexPermissionProfile> };
+    };
+    expect(review).toMatchObject({
+      approvalPolicy: "never",
+      permissions: CODEX_OCTANT_PROFILE,
+      ephemeral: true,
+    });
+    expect(review).not.toHaveProperty("sandbox");
+    expect(
+      review.config.permissions?.[CODEX_OCTANT_PROFILE]?.filesystem[
+        "C:\\users\\person\\.aws\\credentials"
+      ],
+    ).toBe("deny");
+    await acquired.close();
+  });
+
   it("refuses Windows Strict on a Codex too old to take the protected-file list", async () => {
     const f = fixture({ version: "0.168.0" });
     const acquired = await acquireConnection(

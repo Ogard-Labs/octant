@@ -66,13 +66,43 @@ export function codexWindowsStrictProfile(input: {
   if (homeForm === undefined) {
     return { status: "refused", reason: WINDOWS_STRICT_PROTECTED_LIST_REFUSAL };
   }
+  // Codex reads `*`, `?`, `[`, `]`, `{` and `}` in a filesystem key as glob
+  // syntax and refuses a `write` key that holds them (codex-rs
+  // `compile_read_write_glob_path`), with no escape on Windows. A folder named
+  // that way cannot be handed over literally, so the thread is refused.
+  const unspellable = input.writableRoots.find((root) => /[*?[\]{}]/u.test(root));
+  if (unspellable !== undefined) {
+    return {
+      status: "refused",
+      reason: `Windows Strict cannot hand Codex's sandbox the folder ${unspellable}: its name holds a character Codex reads as a pattern. Rename the folder, or turn Strict off for this thread.`,
+    };
+  }
   const filesystem: Record<string, "write" | "deny"> = {};
   for (const root of input.writableRoots) filesystem[root] = "write";
-  const deny = (path: string) => {
+  let literalDenyUnspellable = false;
+  const deny = (path: string, glob = false) => {
+    if (!glob && /[*?[\]{}]/u.test(path)) literalDenyUnspellable = true;
     filesystem[path] = "deny";
   };
   try {
     for (const entry of input.protectedEntries) {
+      // A Codex home at or inside a store the guard protects for everyone
+      // (not a runtime's own sign-in) cannot be carved around: the denial
+      // would also reach the sandbox helpers Codex's commands start from.
+      // Name patterns deny only matching files, so only a whole denied
+      // location (a path, or a folder whose pattern has an exception) counts.
+      const location =
+        entry.kind === "path"
+          ? entry.path
+          : entry.except === undefined
+            ? undefined
+            : entry.directory;
+      if (location !== undefined && !entry.ownAccountExempt && isSameOrInside(homeForm, location)) {
+        return {
+          status: "refused",
+          reason: `Codex cannot run under Windows Strict: its home lies inside ${entry.label}, which Strict keeps from commands. Move CODEX_HOME, or turn Strict off for this thread.`,
+        };
+      }
       if (entry.kind === "path") {
         denyAroundCodexHome(entry.path, homeForm, list, deny);
         continue;
@@ -89,11 +119,14 @@ export function codexWindowsStrictProfile(input: {
       if (names === undefined) {
         return { status: "refused", reason: WINDOWS_STRICT_PROTECTED_LIST_REFUSAL };
       }
-      const name = names.length === 1 ? (names[0] ?? "") : `{${names.join(",")}}`;
-      // One glob per depth rather than `**`, which Codex's Windows sandbox
-      // expands only with a scan limit set for the whole profile.
+      // One entry per name and depth: no `**`, which Codex's Windows sandbox
+      // expands only with a scan limit set for the whole profile, and no brace
+      // group, which Codex does not read as a pattern without another glob
+      // character (a top-level `{Cookies,...}` would name one literal file).
       for (let level = 0; level < entry.depth; level += 1) {
-        deny(`${directory}\\${"*\\".repeat(level)}${name}`);
+        for (const name of names) {
+          deny(`${directory}\\${"*\\".repeat(level)}${name}`, true);
+        }
       }
     }
   } catch {
@@ -102,6 +135,9 @@ export function codexWindowsStrictProfile(input: {
   // The account's own sign-in: the Codex process reads it outside the
   // sandbox, and no command it runs needs it.
   deny(`${nativeFromGuard(homeForm)}\\auth.json`);
+  if (literalDenyUnspellable) {
+    return { status: "refused", reason: WINDOWS_STRICT_PROTECTED_LIST_REFUSAL };
+  }
   return {
     status: "ready",
     profile: {

@@ -84,7 +84,11 @@ describe("Windows Strict profile for Codex's own sandbox", () => {
     const prepared = codexWindowsStrictProfile({
       writableRoots: [],
       protectedEntries: [
-        entry({ kind: "path", path: "/c:/users/ada/appdata/roaming/octant/providers" }),
+        entry({
+          kind: "path",
+          path: "/c:/users/ada/appdata/roaming/octant/providers",
+          ownAccountExempt: true,
+        }),
       ],
       codexHome: "C:\\Users\\Ada\\AppData\\Roaming\\Octant\\providers\\codex-work",
       networkOpen: false,
@@ -107,11 +111,75 @@ describe("Windows Strict profile for Codex's own sandbox", () => {
     }
   });
 
+  it("names each alternative of a store pattern on its own, top level included", () => {
+    const prepared = codexWindowsStrictProfile({
+      writableRoots: [],
+      protectedEntries: [
+        entry({
+          kind: "names",
+          directory: "/c:/users/ada/appdata/local",
+          name: "(Cookies|Web Data)",
+          depth: 2,
+        }),
+      ],
+      codexHome: "C:\\Users\\Ada\\.codex",
+      networkOpen: false,
+    });
+    expect(prepared.status === "ready" ? Object.keys(prepared.profile.filesystem) : []).toEqual([
+      "C:\\users\\ada\\appdata\\local\\Cookies",
+      "C:\\users\\ada\\appdata\\local\\Web Data",
+      "C:\\users\\ada\\appdata\\local\\*\\Cookies",
+      "C:\\users\\ada\\appdata\\local\\*\\Web Data",
+      "C:\\users\\ada\\.codex\\auth.json",
+    ]);
+  });
+
+  it("refuses a writable folder Codex would read as a pattern", () => {
+    expect(
+      codexWindowsStrictProfile({
+        writableRoots: ["C:\\Work\\Client [2026]"],
+        protectedEntries: [],
+        codexHome: "C:\\Users\\Ada\\.codex",
+        networkOpen: false,
+      }),
+    ).toMatchObject({ status: "refused", reason: expect.stringMatching(/Client \[2026\]/u) });
+  });
+
+  it("refuses a Codex home inside a store Strict denies to everyone, but not inside a pattern's folder", () => {
+    expect(
+      codexWindowsStrictProfile({
+        writableRoots: [],
+        protectedEntries: [
+          entry({ kind: "path", path: "/c:/users/ada/appdata/roaming/bitwarden" }),
+        ],
+        codexHome: "C:\\Users\\Ada\\AppData\\Roaming\\Bitwarden",
+        networkOpen: false,
+      }),
+    ).toMatchObject({ status: "refused" });
+    expect(
+      codexWindowsStrictProfile({
+        writableRoots: [],
+        protectedEntries: [
+          entry({
+            kind: "names",
+            directory: "/c:/users/ada/appdata/roaming",
+            name: "Cookies",
+            depth: 6,
+          }),
+        ],
+        codexHome: "C:\\Users\\Ada\\AppData\\Roaming\\Octant\\providers\\codex",
+        networkOpen: false,
+      }),
+    ).toMatchObject({ status: "ready" });
+  });
+
   it("refuses when a protected folder around the Codex home cannot be listed", () => {
     expect(
       codexWindowsStrictProfile({
         writableRoots: [],
-        protectedEntries: [entry({ kind: "path", path: "/c:/users/ada/providers" })],
+        protectedEntries: [
+          entry({ kind: "path", path: "/c:/users/ada/providers", ownAccountExempt: true }),
+        ],
         codexHome: "C:\\Users\\Ada\\providers\\codex",
         networkOpen: false,
         listDirectory: () => {

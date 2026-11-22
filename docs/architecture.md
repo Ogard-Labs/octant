@@ -22127,7 +22127,21 @@ folder that overlaps `CODEX_HOME` and a profile-root `CODEX_HOME` keep
 refusing: Codex leaves its home out of its commands' writable roots
 (`filter_sensitive_write_roots`) only when the home is not itself granted. A read-only
 folder beneath a writable one refuses too: the profile carries writable roots
-and denials only, so it could not stay read-only.
+and denials only, so it could not stay read-only. So does a writable folder
+whose name holds a character Codex reads as a pattern (`*?[]{}`), which Codex
+cannot take literally, and a `CODEX_HOME` at or inside a location Strict
+denies to everyone (a runtime's own sign-in folder excepted), which cannot be
+carved around without also denying the helpers Codex's commands start from.
+Codex's `/review` runs in the same profile, so the reviewer reads no protected
+file either.
+
+**Limit: Git metadata.** The profile extends Codex's built-in workspace
+profile, which keeps each writable root's `.git` read-only. Commands can edit
+the checkout but cannot stage or commit, and with no approvals that fails
+rather than asking. This is kept on purpose: a writable `.git` would let a
+confined command plant hooks that the person's own unconfined Git later runs.
+Git operations stay with the person, or with Strict off. Gate 5 confirms the
+behavior on a real machine.
 
 **Exception to the no-administrator rule.** The elevated backend runs commands
 as Codex's own local sandbox accounts, created by Codex's one-time setup, which
@@ -22218,7 +22232,11 @@ string comparison or a one-time scan is not proof of that invariant. Refuse a
 root or layout if inherited ACLs, aliases or concurrent changes cannot preserve
 it. Do not solve this by granting a broader parent directory.
 
-**Codex admission.** Admit only an explicitly verified native Codex app-server
+**Codex admission.** For a Codex thread this paragraph is superseded by
+[Codex's own sandbox](#codexs-own-sandbox-on-windows): the app-server starts
+directly, and its commands, not the process, are confined by Codex's sandbox.
+What follows still governs the confined catalog read and any later runtime
+admitted through the launcher. Admit only an explicitly verified native Codex app-server
 executable and version, told the sandbox is external as Strict tells it on other
 platforms, with no routine approvals inside the boundary beyond the asks Strict
 keeps everywhere. The admitted program must start and use shell and edit from
