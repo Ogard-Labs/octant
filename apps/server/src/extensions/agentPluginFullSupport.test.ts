@@ -2782,9 +2782,9 @@ describe("Agent Plugin MCP session manager", () => {
     const minute = 60_000;
 
     /**
-     * Two connectors selected for one Chat turn: the first's call waits for
-     * its approval, the second answers unasked. Both sessions open together,
-     * so the second's idle period runs out while the first's approval waits.
+     * Two connectors selected in one scope: the first's call waits for its
+     * approval, the second answers unasked. Both sessions open together, so
+     * the second's idle period runs out while the first's approval waits.
      */
     async function twoConnectors() {
       const initializations = new Map<string, number>();
@@ -2845,25 +2845,20 @@ describe("Agent Plugin MCP session manager", () => {
         mode: "chat",
         threadId: "15000000-0000-4000-8000-000000000004" as never,
       });
+      const pkg = single.packages[0];
+      const first = pkg?.components[0];
+      if (pkg === undefined || first === undefined)
+        throw new Error("The fixture has no first component.");
+      const second = {
+        ...first,
+        component: { ...first.component, id: "mcp-second" as never, displayName: "second" },
+      };
       const effective: ExtensionEffectiveSnapshot = {
         ...single,
-        packages: single.packages.map((pkg) => {
-          const first = pkg.components[0];
-          if (first === undefined) throw new Error("The fixture has no first component.");
-          return {
-            ...pkg,
-            components: [
-              first,
-              {
-                ...first,
-                component: { ...first.component, id: "mcp-second" as never, displayName: "second" },
-              },
-            ],
-          };
-        }),
+        packages: [{ ...pkg, components: [first, second] }],
       };
       await manager.reconcile(effective);
-      const packageId = String(effective.packages[0]?.packageId);
+      const packageId = String(pkg.packageId);
       // The tool names the turn's tool set was built with, at its start.
       const names = new Map(
         ["first", "second"].map((server) => [
@@ -2888,37 +2883,74 @@ describe("Agent Plugin MCP session manager", () => {
         firstCall,
         answer,
         invoke,
+        disableSecond: () =>
+          manager.reconcileLifecycleSnapshot({
+            packages: [
+              {
+                ...pkg,
+                components: [
+                  first,
+                  { ...second, effectiveState: { kind: "blocked", reason: "disabled" } },
+                ],
+              },
+            ],
+          } as never),
         initializations: (server: string) => initializations.get(server) ?? 0,
         toolCalls: (server: string) => toolCalls.get(server) ?? 0,
       };
     }
 
-    it("reconnects the other connector once when the turn calls it after its idle period ran out", async () => {
+    it("keeps the other connector connected while the approval waits, so its call dispatches without reconnecting", async () => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       try {
         const fixture = await twoConnectors();
-        await vi.advanceTimersByTimeAsync(6 * minute);
-        // The second connector idled out while the first's approval waited.
-        expect(fixture.manager.sessions()).toHaveLength(1);
-        fixture.answer(true);
-        expect((await fixture.firstCall).isError).not.toBe(true);
+        await vi.advanceTimersByTimeAsync(7 * minute);
+        expect(fixture.manager.sessions()).toHaveLength(2);
 
         const second = await fixture.invoke("second");
         expect(second.isError).not.toBe(true);
-        expect(fixture.initializations("second")).toBe(2);
         expect(fixture.toolCalls("second")).toBe(1);
-        expect(fixture.manager.sessions()).toHaveLength(2);
+        expect(fixture.initializations("second")).toBe(1);
+
+        fixture.answer(true);
+        expect((await fixture.firstCall).isError).not.toBe(true);
+        expect(fixture.toolCalls("first")).toBe(1);
+
+        // With no approval waiting in the scope, both idle out as usual.
+        await vi.advanceTimersByTimeAsync(6 * minute);
+        expect(fixture.manager.sessions()).toHaveLength(0);
         await fixture.manager.drainAll();
       } finally {
         vi.useRealTimers();
       }
     });
 
-    it("still refuses a call to a connector whose authentication changed after it idled out", async () => {
+    it("closes a connector Settings disables while the approval waits, and refuses its call", async () => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       try {
         const fixture = await twoConnectors();
-        await vi.advanceTimersByTimeAsync(6 * minute);
+        await vi.advanceTimersByTimeAsync(minute);
+        await fixture.disableSecond();
+        expect(fixture.manager.sessions()).toHaveLength(1);
+
+        expect(await fixture.invoke("second")).toMatchObject({
+          isError: true,
+          result: { error: "extension-tool-unavailable" },
+        });
+        expect(fixture.toolCalls("second")).toBe(0);
+        fixture.answer(false);
+        await fixture.firstCall;
+        await fixture.manager.drainAll();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("still refuses a call to a connector whose authentication changed while the approval waits", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const fixture = await twoConnectors();
+        await vi.advanceTimersByTimeAsync(minute);
         await fixture.manager.invalidateAuthentication(
           "15000000-0000-4000-8000-000000000001",
           "mcp-second",
@@ -2928,8 +2960,8 @@ describe("Agent Plugin MCP session manager", () => {
           isError: true,
           result: { error: "extension-tool-unavailable" },
         });
-        expect(fixture.initializations("second")).toBe(1);
         expect(fixture.toolCalls("second")).toBe(0);
+        expect(fixture.initializations("second")).toBe(1);
         fixture.answer(false);
         await fixture.firstCall;
         await fixture.manager.drainAll();

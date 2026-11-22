@@ -210,27 +210,14 @@ export class AgentPluginMcpSessionManager {
   >();
   readonly #idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /**
-   * Sessions with a tool call waiting for a person's approval, and how many.
-   * A waiting approval is use of that exact session: it does not idle out
-   * under the call, or the person's later approval would find it gone.
+   * Authority scopes (a scope includes its thread) with a tool call waiting
+   * for a person's approval, and how many. While one waits, none of that
+   * scope's sessions idle out: the turn's tool set was fixed at its start,
+   * so a connector that idled out under a long approval would refuse the
+   * turn's next call to it, and the person's late approval would find the
+   * asking session gone. The hold delays only idle retirement.
    */
-  readonly #awaitingAuthorization = new Map<AgentPluginMcpSessionRecord, number>();
-  /**
-   * Sessions closed only because they sat idle, with the tool names they
-   * offered. A turn's tool set is built once, at its start, so a turn that
-   * calls one of these tools after the session idled out (another connector's
-   * approval waited longer than the idle period) reconnects it instead of
-   * refusing. An authentication change or an authority reconciliation drops
-   * the entry, so a session retired for those reasons still refuses.
-   */
-  readonly #idleRetired = new Map<
-    string,
-    {
-      readonly target: AgentPluginMcpSessionTarget;
-      readonly authenticationGeneration: number;
-      readonly toolNames: ReadonlySet<string>;
-    }
-  >();
+  readonly #awaitingAuthorization = new Map<string, number>();
   readonly #toolIndex = new Map<
     string,
     { readonly sessionKey: string; readonly toolName: string }
@@ -409,7 +396,7 @@ export class AgentPluginMcpSessionManager {
         return missing ? "unavailable" : "available";
       },
       execute: async ({ windowId, thread, name, inputJson, signal }) => {
-        const indexed = this.#toolIndex.get(name) ?? (await this.#reconnectIdleRetired(name));
+        const indexed = this.#toolIndex.get(name);
         if (indexed === undefined) {
           return { result: { error: "extension-tool-unavailable" }, isError: true };
         }
@@ -677,11 +664,6 @@ export class AgentPluginMcpSessionManager {
         this.#failures.delete(key);
       }
     }
-    // This scope's authority is decided afresh: a session it still wants is
-    // connected below, and one it no longer wants must not come back on demand.
-    for (const [key, retired] of this.#idleRetired) {
-      if (authorityScopeKey(retired.target.scope) === currentScope) this.#idleRetired.delete(key);
-    }
 
     for (const [key, target] of desired) {
       const authenticationGeneration = this.#authenticationGeneration(target);
@@ -736,8 +718,6 @@ export class AgentPluginMcpSessionManager {
         if (this.#connections.get(key) === connection) this.#connections.delete(key);
       }
     for (const [key, target] of this.#desired) if (matches(target)) this.#desired.delete(key);
-    for (const [key, retired] of this.#idleRetired)
-      if (matches(retired.target)) this.#idleRetired.delete(key);
     for (const [key, failure] of this.#failures)
       if (matches(failure.target)) this.#failures.delete(key);
     const closing: Promise<void>[] = [];
@@ -762,7 +742,6 @@ export class AgentPluginMcpSessionManager {
 
   async drainAll(): Promise<void> {
     this.#desired.clear();
-    this.#idleRetired.clear();
     this.#failures.clear();
     for (const timer of this.#idleTimers.values()) clearTimeout(timer);
     this.#idleTimers.clear();
@@ -782,10 +761,7 @@ export class AgentPluginMcpSessionManager {
    */
   async reconcileLifecycleSnapshot(snapshot: ExtensionSnapshot): Promise<void> {
     const retained = new Set<string>();
-    for (const [key, target] of [
-      ...this.#desired,
-      ...[...this.#idleRetired].map(([key, retired]) => [key, retired.target] as const),
-    ]) {
+    for (const [key, target] of this.#desired) {
       const packageState = snapshot.packages.find(
         (candidate) =>
           candidate.extensionId === target.extensionId &&
@@ -804,9 +780,6 @@ export class AgentPluginMcpSessionManager {
     }
     for (const key of this.#desired.keys()) {
       if (!retained.has(key)) this.#desired.delete(key);
-    }
-    for (const key of this.#idleRetired.keys()) {
-      if (!retained.has(key)) this.#idleRetired.delete(key);
     }
     for (const key of this.#failures.keys()) {
       if (!retained.has(key)) this.#failures.delete(key);
@@ -1079,11 +1052,13 @@ export class AgentPluginMcpSessionManager {
   }
 
   /**
-   * Asks for one call's authorization while holding its session's idle
-   * retirement, and releases the hold however the ask ends: approved,
-   * refused, cancelled or failed. The hold delays only idle retirement;
-   * authentication changes and authority reconciliation still close the
-   * session, and the caller's record check refuses the call afterwards.
+   * Asks for one call's authorization while holding idle retirement for
+   * every session of its scope, and releases the hold however the ask ends:
+   * approved, refused, cancelled or failed. When the scope's last waiting
+   * approval ends, its sessions idle on as usual. The hold delays only idle
+   * retirement; a lifecycle disable, an authentication change and authority
+   * reconciliation still close a session at once, and the caller's record
+   * check refuses the call afterwards.
    */
   async #whileAuthorizing(
     key: string,
@@ -1091,53 +1066,23 @@ export class AgentPluginMcpSessionManager {
     authorize: (call: ExtensionToolCall) => Promise<boolean>,
     call: ExtensionToolCall,
   ): Promise<boolean> {
-    this.#awaitingAuthorization.set(record, (this.#awaitingAuthorization.get(record) ?? 0) + 1);
+    const scope = authorityScopeKey(record.scope);
+    this.#awaitingAuthorization.set(scope, (this.#awaitingAuthorization.get(scope) ?? 0) + 1);
     try {
       return await authorize(call).catch(() => false);
     } finally {
-      const remaining = (this.#awaitingAuthorization.get(record) ?? 1) - 1;
-      if (remaining > 0) this.#awaitingAuthorization.set(record, remaining);
-      else this.#awaitingAuthorization.delete(record);
+      const remaining = (this.#awaitingAuthorization.get(scope) ?? 1) - 1;
+      if (remaining > 0) this.#awaitingAuthorization.set(scope, remaining);
+      else {
+        this.#awaitingAuthorization.delete(scope);
+        // A sibling whose idle period ran out under the hold starts a new one.
+        for (const [siblingKey, sibling] of this.#sessions)
+          if (authorityScopeKey(sibling.scope) === scope && !this.#idleTimers.has(siblingKey))
+            this.#touchIdle(siblingKey);
+      }
       // The idle period starts over from the answer, as it does after a call.
       if (this.#sessions.get(key) === record) this.#touchIdle(key);
     }
-  }
-
-  /**
-   * Reconnects the idle-retired session that offered `name`, when its
-   * authentication has not changed since, and returns the tool's new index
-   * entry. A failed reconnect is reported like any failed connection, and the
-   * call is refused as unavailable.
-   */
-  async #reconnectIdleRetired(
-    name: string,
-  ): Promise<{ readonly sessionKey: string; readonly toolName: string } | undefined> {
-    for (const [key, retired] of this.#idleRetired) {
-      if (!retired.toolNames.has(name)) continue;
-      const { target, authenticationGeneration } = retired;
-      if (authenticationGeneration !== this.#authenticationGeneration(target)) {
-        this.#idleRetired.delete(key);
-        return undefined;
-      }
-      this.#desired.set(key, target);
-      try {
-        await this.#connectOnce(target);
-      } catch (error) {
-        if (
-          authenticationGeneration === this.#authenticationGeneration(target) &&
-          this.#desired.has(key)
-        )
-          this.#failures.set(key, {
-            target,
-            reason: error instanceof Error ? error.message : "MCP connection failed.",
-            at: this.#now().toISOString(),
-          });
-      } finally {
-        if (this.#idleRetired.get(key) === retired) this.#idleRetired.delete(key);
-      }
-      return this.#toolIndex.get(name);
-    }
-    return undefined;
   }
 
   #touchIdle(key: string): void {
@@ -1147,18 +1092,11 @@ export class AgentPluginMcpSessionManager {
       this.#idleTimers.delete(key);
       const record = this.#sessions.get(key);
       if (record === undefined) return;
-      // Held while an approval waits; releasing the hold starts a new period.
-      if (this.#awaitingAuthorization.has(record)) return;
+      // Held while an approval in its scope waits; the scope's last answer
+      // starts a new period.
+      if (this.#awaitingAuthorization.has(authorityScopeKey(record.scope))) return;
       // Retire the scope entirely so an intentional idle close cannot trigger
-      // reconnect. The next turn's authority reconciliation recreates it, and
-      // a running turn that calls one of its tools reconnects it on demand.
-      const target = this.#desired.get(key);
-      if (target !== undefined)
-        this.#idleRetired.set(key, {
-          target,
-          authenticationGeneration: record.authenticationGeneration,
-          toolNames: new Set(record.tools.map((tool) => tool.providerDefinition.name)),
-        });
+      // reconnect. The next turn's authority reconciliation recreates it.
       this.#desired.delete(key);
       void this.#close(key, record);
     }, this.#idleTimeoutMs);
