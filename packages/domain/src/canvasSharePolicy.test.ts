@@ -615,12 +615,13 @@ describe("Canvas share policy", () => {
     const design = {
       ...onboardingFlowExample,
       schemaVersion: CANVAS_SCHEMA_VERSION,
-      styles: ".hero { background: url(octant-asset:hero); }",
+      styles:
+        ".hero { background: url(octant-asset:hero); } /* .old { background: url(octant-asset:hidden); } */",
       frames: [
         {
           frameId: "home",
           title: "Home",
-          html: '<div class="hero"></div><img src="octant-asset:shot" alt="Home">',
+          html: '<div class="hero"></div><img src="octant-asset:shot" alt="Home"><!-- <img src="octant-asset:hidden"> -->',
         },
       ],
       assets: [
@@ -628,6 +629,8 @@ describe("Canvas share policy", () => {
         { assetId: "shot", source: { kind: "project-file", path: "screens/home.png" } },
         // Declared but named nowhere, so never shown and never shared.
         { assetId: "unused", source: { kind: "generated-image", imageId: unusedId } },
+        // Named only inside comments, which are never drawn.
+        { assetId: "hidden", source: { kind: "project-file", path: "private/plan.png" } },
       ],
     };
     const shared = exportStaticDocument({
@@ -656,6 +659,10 @@ describe("Canvas share policy", () => {
           canvasShareImageKey({ kind: "generated-image", imageId: unusedId } as never),
           { ...pixel, sha256: "0".repeat(64) },
         ],
+        [
+          canvasShareImageKey({ kind: "project-file", path: "private/plan.png" }),
+          { ...pixel, sha256: "1".repeat(64) },
+        ],
       ]),
     });
     const document = decodeCanvasStaticExportDocument(shared.document);
@@ -678,6 +685,7 @@ describe("Canvas share policy", () => {
     expect(JSON.stringify(document)).not.toContain(imageId);
     expect(JSON.stringify(document)).not.toContain("screens/home.png");
     expect(JSON.stringify(document)).not.toContain("0".repeat(64));
+    expect(JSON.stringify(document)).not.toContain("1".repeat(64));
     expect(
       canvasShareImageSources({ blocks: [design] } as never).map((source) => source.kind),
     ).toEqual(["generated-image", "project-file"]);

@@ -597,7 +597,7 @@ describe("canvas export service", () => {
     connection.close();
   });
 
-  it("draws a document picture with the generated image an image block shows, resolved under the version's provenance", async () => {
+  it("draws a document picture with the images its image blocks and prototypes show, resolved under the version's provenance", async () => {
     const requests: CanvasExportPictureRequest[] = [];
     const cover = {
       blockId: "cover",
@@ -606,20 +606,39 @@ describe("canvas export service", () => {
       generatedImageId: "9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a",
       alt: "A lighthouse at dusk",
     };
+    const prototype = {
+      blockId: "checkout",
+      schemaVersion: 30,
+      kind: "design",
+      title: "Checkout",
+      size: "document",
+      runsScript: true,
+      assets: [
+        {
+          assetId: "hero",
+          source: { kind: "generated-image", imageId: "9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a" },
+        },
+      ],
+      frames: [{ frameId: "cart", title: "Cart", html: '<img src="octant-asset:hero" alt="">' }],
+    };
     const provenance = { mode: "work", projectId: "p", threadId: "t" };
     const doc = {
       ...document(),
-      blocks: [cover] as unknown as ReadonlyArray<CanvasBlock>,
-      definition: { title: "Launch plan", blocks: [cover], provenance } as never,
+      blocks: [cover, prototype] as unknown as ReadonlyArray<CanvasBlock>,
+      definition: { title: "Launch plan", blocks: [cover, prototype], provenance } as never,
     };
-    const resolveDesignAssets = vi.fn(async () => [
-      {
-        assetId: "image" as never,
-        status: "resolved" as const,
-        mediaType: "image/png" as const,
-        data: "iVBORw0KGgo=",
-      },
-    ]);
+    const resolveDesignAssets = vi.fn(
+      async (block: {
+        readonly assets?: ReadonlyArray<{ readonly assetId: string }> | undefined;
+      }) => [
+        {
+          assetId: (block.assets?.[0]?.assetId ?? "image") as never,
+          status: "resolved" as const,
+          mediaType: "image/png" as const,
+          data: "iVBORw0KGgo=",
+        },
+      ],
+    );
     const { registration } = exportFolder();
     const { service, connection } = harness(
       () => canvasExportTargetBindings(registration, canvasId),
@@ -629,14 +648,14 @@ describe("canvas export service", () => {
     expect(prepared).toMatchObject({ kind: "approval" });
     const subject = requests[0]?.subject;
     if (subject?.kind !== "document") throw new Error("expected a document subject");
-    expect(subject.designAssets).toEqual([
-      {
-        blockId: "cover",
-        assets: [
-          { assetId: "image", status: "resolved", mediaType: "image/png", data: "iVBORw0KGgo=" },
-        ],
-      },
-    ]);
+    expect(subject.designAssets?.[0]).toEqual({
+      blockId: "cover",
+      assets: [
+        { assetId: "image", status: "resolved", mediaType: "image/png", data: "iVBORw0KGgo=" },
+      ],
+    });
+    // A running design's own page is built with the images it shows.
+    expect(subject.designPages?.[0]?.html).toContain("data:image/png;base64,iVBORw0KGgo=");
     expect(resolveDesignAssets).toHaveBeenCalledWith(
       expect.objectContaining({ blockId: "cover" }),
       provenance,

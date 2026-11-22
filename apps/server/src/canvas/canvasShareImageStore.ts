@@ -36,31 +36,65 @@ export class CanvasShareImageStore {
   }
 
   /**
-   * Keep the bytes of each image the snapshot names, from the images the host
-   * resolved when it was made. An image whose bytes are not among them is not
-   * kept, and the snapshot reads without it.
+   * Keep the bytes of every image the host resolved for a snapshot, once per
+   * digest, before the snapshot is recorded: a snapshot is never journaled
+   * naming bytes that are not yet kept. Keeping is idempotent, so a replayed
+   * share or two sources with the same bytes keep one verified copy.
    */
-  async keep(
-    snapshotId: string,
-    images: ReadonlyArray<CanvasShareImageEntry>,
-    resolved: CanvasShareResolvedImages,
-  ): Promise<void> {
-    const bySha = new Map([...resolved.values()].map((image) => [image.sha256, image]));
-    for (const image of images) {
-      const source = bySha.get(image.sha256);
-      if (source === undefined) continue;
+  async keepResolved(snapshotId: string, resolved: CanvasShareResolvedImages): Promise<void> {
+    const byDigest = new Map([...resolved.values()].map((image) => [image.sha256, image]));
+    for (const [sha256, image] of byDigest) {
+      if (await this.#holds(snapshotId, sha256, image.byteLength)) continue;
       const staged = await this.#store.stage({
         scopeId: snapshotId,
-        attachmentId: image.sha256,
-        displayName: String(image.imageRef),
-        bytes: Buffer.from(source.data, "base64"),
+        attachmentId: sha256,
+        displayName: "shared-image",
+        bytes: Buffer.from(image.data, "base64"),
       });
-      if (staged.hash !== image.sha256) {
-        await this.#store.remove(snapshotId, image.sha256);
+      if (staged.hash !== sha256) {
+        await this.#store.remove(snapshotId, sha256);
         continue;
       }
       await this.#store.finalize(staged);
     }
+  }
+
+  /**
+   * Remove whatever a snapshot kept beyond the images its record names: one
+   * resolved but left out by the share's budget, or kept for a share that was
+   * then refused.
+   */
+  async keepOnly(snapshotId: string, images: ReadonlyArray<CanvasShareImageEntry>): Promise<void> {
+    const named = new Set(images.map((image) => image.sha256));
+    for (const digest of this.#store.attachmentIdsInScope(snapshotId)) {
+      if (!named.has(digest)) await this.#store.remove(snapshotId, digest);
+    }
+  }
+
+  /**
+   * Remove every kept image no recorded snapshot names, as after a host that
+   * stopped between keeping a snapshot's images and recording it.
+   */
+  async reconcile(isNamed: (snapshotId: string, sha256: string) => boolean): Promise<void> {
+    await this.#store.recover({ isFinalizedAttachmentReferenced: isNamed });
+  }
+
+  async #holds(snapshotId: string, sha256: string, byteLength: number): Promise<boolean> {
+    if (!this.#store.attachmentIdsInScope(snapshotId).has(sha256)) return false;
+    return this.#read(snapshotId, sha256, byteLength)
+      .then(() => true)
+      .catch(() => false);
+  }
+
+  #read(snapshotId: string, sha256: string, byteLength: number): Promise<Uint8Array> {
+    return this.#store.read({
+      scopeId: snapshotId,
+      attachmentId: sha256,
+      displayName: "shared-image",
+      size: byteLength,
+      hash: sha256,
+      finalizedAt: "",
+    });
   }
 
   /**
@@ -77,16 +111,9 @@ export class CanvasShareImageStore {
     if (images.length === 0) return document;
     const kept: CanvasShareImageEntry[] = [];
     for (const image of images) {
-      const bytes = await this.#store
-        .read({
-          scopeId: snapshotId,
-          attachmentId: image.sha256,
-          displayName: String(image.imageRef),
-          size: image.byteLength,
-          hash: image.sha256,
-          finalizedAt: "",
-        })
-        .catch(() => undefined);
+      const bytes = await this.#read(snapshotId, image.sha256, image.byteLength).catch(
+        () => undefined,
+      );
       if (bytes !== undefined) kept.push({ ...image, data: Buffer.from(bytes).toString("base64") });
     }
     if (kept.length === images.length) return { ...document, images: kept };

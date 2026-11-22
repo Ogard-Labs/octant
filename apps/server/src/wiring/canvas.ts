@@ -1008,6 +1008,8 @@ export function wireCanvas(deps: CanvasDependencies) {
   // Canvas API to a principal this host authenticates, never uploaded or
   // linked. Lifecycle is journaled, so revocation survives restart and the
   // access log is rebuilt by replay.
+  // A shared snapshot's image bytes, kept apart from the journal.
+  const canvasShareImages = new CanvasShareImageStore(persistence.dataDirectory);
   const canvasShareService = new CanvasShareService(
     {
       projection: persistence.canvasProjection,
@@ -1023,6 +1025,17 @@ export function wireCanvas(deps: CanvasDependencies) {
     },
     { authorize: authorizeCanvas },
   );
+  // Bytes kept for a snapshot the host stopped before recording, or whose
+  // record a purge erased, are named by no snapshot and go at start.
+  void canvasShareImages
+    .reconcile((snapshotId, sha256) => canvasShareService.namesImage(snapshotId, sha256))
+    .catch(() => undefined);
+  /** Remove the images the snapshots of purged Canvases kept. */
+  const forgetCanvasShareImages = async (canvasIds: ReadonlyArray<string>): Promise<void> => {
+    for (const snapshotId of canvasShareService.snapshotIdsOf(canvasIds)) {
+      await canvasShareImages.forget(snapshotId).catch(() => undefined);
+    }
+  };
   // Where a Project's exports are written, and whether that folder is still
   // usable. Choosing one is a person's act on this machine: the host resolves
   // the browser's candidate to a path itself, and the choice is judged against
@@ -1303,7 +1316,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     },
     resolveDesignAssets,
     resolveShareImages,
-    shareImages: new CanvasShareImageStore(persistence.dataDirectory),
+    shareImages: canvasShareImages,
     designRunTickets: new CanvasDesignRunTickets(),
     ...(deps.findPublishedSnapshot === undefined
       ? {}
@@ -1343,6 +1356,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     canvasPublicShareService,
     canvasRoutes,
     canvasService,
+    forgetCanvasShareImages,
     replicaArtifactSync,
     resolveCanvasWorkspace,
     threadProjectAssetRoot,

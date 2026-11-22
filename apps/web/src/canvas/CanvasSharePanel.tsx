@@ -141,6 +141,7 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
   const [acknowledgedAudience, setAcknowledgedAudience] = useState(false);
   const [acknowledgedMarkup, setAcknowledgedMarkup] = useState(false);
   const holdsDesign = props.holdsDesign === true;
+  const sharedImages = props.overview.images ?? [];
   const newId = props.newId ?? (() => crypto.randomUUID());
   const now = props.now ?? (() => new Date());
   const consented =
@@ -211,6 +212,10 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
           acknowledgedAuthenticatedSnapshot: true,
           acknowledgedOwnerVisibleAudience: true,
           ...(holdsDesign ? { acknowledgedMarkupSharedAsWritten: true } : {}),
+          // The images shown above, and only those, may be copied.
+          ...(sharedImages.length === 0
+            ? {}
+            : { acknowledgedImages: sharedImages.map((image) => image.sha256) }),
           acknowledgedAt: at.toISOString(),
           acknowledgedBy: props.overview.owner,
         },
@@ -355,6 +360,26 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
               </span>
             </label>
           ) : null}
+          {sharedImages.length === 0 ? null : (
+            <figure className="canvas-export__images" data-testid="canvas-share-images">
+              <figcaption className="canvas-share__note">
+                {sharedImages.length === 1
+                  ? "The snapshot copies this image:"
+                  : `The snapshot copies these ${String(sharedImages.length)} images:`}
+              </figcaption>
+              <ul className="canvas-export__image-list">
+                {sharedImages.map((image) => (
+                  <li key={image.imageRef} className="canvas-export__image">
+                    <img
+                      src={`data:${image.mediaType};base64,${image.data}`}
+                      alt={`${image.imageRef}, copied into the snapshot`}
+                    />
+                    <span>{`${image.imageRef} — ${shareImageSize(image.byteLength)}`}</span>
+                  </li>
+                ))}
+              </ul>
+            </figure>
+          )}
           <OctantButton
             type="button"
             size="sm"
@@ -497,6 +522,12 @@ function SharedSnapshotView(props: {
 }
 
 type SharedBlock = CanvasStaticExportDocument["blocks"][number];
+
+function shareImageSize(byteLength: number): string {
+  return byteLength < 1024 * 1024
+    ? `${String(Math.max(1, Math.round(byteLength / 1024)))} KB`
+    : `${(byteLength / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 // A shared design is drawn by the same block the live Canvas uses, so its
 // frames get the same sandbox and page policy; there is no second frame

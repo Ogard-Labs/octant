@@ -262,11 +262,16 @@ function designAssetsShown(
   block: Pick<Extract<CanvasBlock, { readonly kind: "design" }>, "styles" | "frames">,
 ): ReadonlySet<string> {
   const shown = new Set<string>();
+  // A reference inside a comment is never drawn, so it does not show the
+  // image: comments are taken out before the markup is read.
   const collect = (markup: string) =>
-    withDesignAssetAddresses(markup, (assetId) => {
-      shown.add(assetId);
-      return "";
-    });
+    withDesignAssetAddresses(
+      markup.replace(/\/\*[\s\S]*?(?:\*\/|$)/g, "").replace(/<!--[\s\S]*?(?:-->|$)/g, ""),
+      (assetId) => {
+        shown.add(assetId);
+        return "";
+      },
+    );
   collect(block.styles ?? "");
   for (const frame of block.frames) collect(frame.html);
   return shown;
@@ -590,6 +595,26 @@ export function validateCanvasStaticExportRequest(input: {
     reject("scope-mismatch", "Canvas export Project does not match the authoritative Project.");
   }
   return request;
+}
+
+/**
+ * The images a share of this definition would carry, named and ordered as
+ * the share would name them, for a panel that shows the person exactly what
+ * leaves before they agree. A block the share would refuse adds none.
+ */
+export function canvasShareImagesFor(
+  definition: Pick<CanvasDefinition, "blocks">,
+  resolved: CanvasShareResolvedImages,
+): ReadonlyArray<CanvasShareImage> {
+  const images = new SharedImages(resolved);
+  for (const block of definition.blocks) {
+    try {
+      sanitizeBlock(block, true, images);
+    } catch {
+      // The share refuses this block; what it would have shown never leaves.
+    }
+  }
+  return images.images;
 }
 
 // A share record and its snapshot name the Project they were taken from, and

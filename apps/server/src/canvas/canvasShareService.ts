@@ -194,17 +194,44 @@ export class CanvasShareService {
     context: CanvasAuthorizationContext,
     project: CanvasProjectRecord | undefined,
     principal: ClientPrincipal,
-  ): CanvasVersion | undefined {
+  ):
+    | {
+        readonly version: CanvasVersion;
+        readonly snapshotId: string;
+        /** Whether that snapshot id already names a recorded snapshot (a replay). */
+        readonly recorded: boolean;
+      }
+    | undefined {
     if (!principalActsAsHostPerson(principal) || project === undefined) return undefined;
-    let canvasId: CanvasId;
+    let request;
     try {
-      canvasId = decodeCanvasShareSnapshotRequest(requestInput).canvasId;
+      request = decodeCanvasShareSnapshotRequest(requestInput);
     } catch {
       return undefined;
     }
-    const entry = this.#projection.getById(canvasId);
+    const entry = this.#projection.getById(request.canvasId);
     if (entry === undefined || !this.#authorize(entry, context, project)) return undefined;
-    return entry.currentVersion;
+    const snapshotId = String(request.snapshotId);
+    return {
+      version: entry.currentVersion,
+      snapshotId,
+      recorded: this.#records.has(snapshotId),
+    };
+  }
+
+  /** The snapshots recorded for these Canvases, so a purge can remove what they kept. */
+  snapshotIdsOf(canvasIds: ReadonlyArray<string>): ReadonlyArray<string> {
+    const purged = new Set(canvasIds);
+    return [...this.#records.values()]
+      .filter((record) => purged.has(String(record.canvasId)))
+      .map((record) => String(record.snapshotId));
+  }
+
+  /** Whether a recorded snapshot names an image by this digest. */
+  namesImage(snapshotId: string, sha256: string): boolean {
+    return (this.#records.get(snapshotId)?.document.images ?? []).some(
+      (image) => image.sha256 === sha256,
+    );
   }
 
   share(

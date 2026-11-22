@@ -8,6 +8,7 @@ import {
   CanvasStaticExportDocument,
   CanvasStaticExportSourceEntry,
   isCanvasShareSafeText,
+  CANVAS_SHARE_MAX_IMAGES,
 } from "./canvasShare";
 import { UtcTimestamp } from "./events";
 import { HostId } from "./host";
@@ -59,6 +60,16 @@ export const CanvasShareSnapshotRequest = Schema.Struct({
     acknowledgedAuthenticatedSnapshot: Schema.Literal(true),
     acknowledgedOwnerVisibleAudience: Schema.Literal(true),
     acknowledgedMarkupSharedAsWritten: Schema.optional(Schema.Literal(true)),
+    /**
+     * The SHA-256 of each image the person saw in the share panel and agreed
+     * to copy (maintainer decision, 2026-11-22). A snapshot that would copy
+     * any other image, or any image without it, is refused.
+     */
+    acknowledgedImages: Schema.optional(
+      Schema.Array(Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/))).pipe(
+        Schema.maxItems(CANVAS_SHARE_MAX_IMAGES),
+      ),
+    ),
     acknowledgedAt: UtcTimestamp,
     acknowledgedBy: CanvasShareLocalUserActor,
   }).annotations(strict),
@@ -162,6 +173,16 @@ const CanvasShareSnapshotRecordBase = Schema.Union(
       acknowledgedAuthenticatedSnapshot: Schema.Literal(true),
       acknowledgedOwnerVisibleAudience: Schema.Literal(true),
       acknowledgedMarkupSharedAsWritten: Schema.optional(Schema.Literal(true)),
+      /**
+       * The SHA-256 of each image the person saw in the share panel and agreed
+       * to copy (maintainer decision, 2026-11-22). A snapshot that would copy
+       * any other image, or any image without it, is refused.
+       */
+      acknowledgedImages: Schema.optional(
+        Schema.Array(Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/))).pipe(
+          Schema.maxItems(CANVAS_SHARE_MAX_IMAGES),
+        ),
+      ),
       acknowledgedAt: UtcTimestamp,
       acknowledgedBy: CanvasShareLocalUserActor,
     }).annotations(strict),
@@ -175,6 +196,16 @@ const CanvasShareSnapshotRecordBase = Schema.Union(
       acknowledgedAuthenticatedSnapshot: Schema.Literal(true),
       acknowledgedOwnerVisibleAudience: Schema.Literal(true),
       acknowledgedMarkupSharedAsWritten: Schema.optional(Schema.Literal(true)),
+      /**
+       * The SHA-256 of each image the person saw in the share panel and agreed
+       * to copy (maintainer decision, 2026-11-22). A snapshot that would copy
+       * any other image, or any image without it, is refused.
+       */
+      acknowledgedImages: Schema.optional(
+        Schema.Array(Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/))).pipe(
+          Schema.maxItems(CANVAS_SHARE_MAX_IMAGES),
+        ),
+      ),
       acknowledgedAt: UtcTimestamp,
       acknowledgedBy: CanvasShareLocalUserActor,
     }).annotations(strict),

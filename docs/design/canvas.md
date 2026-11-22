@@ -870,17 +870,24 @@ A share carries every block kind and field a Canvas holds except source ids
 and the action block it refuses (see the `design` block). From share version
 18 it carries every image the document displays, an image block's generated
 image and each image a design's frames or stylesheet name (a declared image
-nothing names is never shown and never carried), as bytes in the document's
-`images`,
+nothing names, or one named only inside a comment, is never shown and never
+carried), as bytes in the document's `images`,
 resolved under the version's own authority when the share is made and named
 only by the share's own references (maintainer decision, 2026-11-22; see
 [Canvas public links](canvas-public-links.md) for the limits and the card).
+The share panel shows each image an authenticated snapshot would copy, as
+thumbnails beside the consent ticks, and the share request names their
+digests (`acknowledgedImages`); the host refuses a snapshot that would copy an
+image the request does not name as `consent-required`, so what leaves is what
+the person saw. This is part of the existing consent, not a further tick.
 An authenticated snapshot is journaled with each image named by its SHA-256
 and no bytes: the host keeps the bytes for that snapshot in its managed
-attachment store (`canvas-share-images`, one scope per snapshot), adds them
-when an allowed reader opens it after checking them against the digest, drops
-an image whose bytes are gone or changed with every reference to it, and
-removes them when the snapshot is revoked. A snapshot's prototype, run from
+attachment store (`canvas-share-images`, one scope per snapshot, one file per
+digest) before it records the snapshot, adds them when an allowed reader opens
+it after checking them against the digest, drops an image whose bytes are gone
+or changed with every reference to it, and removes them when the snapshot is
+revoked or its Canvas is purged. A host that stops between keeping and
+recording leaves only bytes no snapshot names, which the next start removes. A snapshot's prototype, run from
 its ticketed page, draws its images from the same bytes, never from a live
 read. _Rationale:_ the journal is
 replayed and synced, so image bytes there would cost every start and every

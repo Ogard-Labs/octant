@@ -2424,11 +2424,34 @@ describe("canvas routes", () => {
           body: JSON.stringify(body),
         }),
       );
-    const shared = decodeCanvasShareResult(
+    // The share panel lists what the snapshot copies before anyone shares it.
+    const listed = await route(
+      new Request(`http://127.0.0.1/api/canvas/share?canvasId=${String(canvasId)}`, {
+        method: "GET",
+        headers: { "x-octant-window-capability": windowCapability },
+      }),
+    );
+    expect(decodeCanvasShareOverview(JSON.parse(await listed!.text())).images).toEqual([
+      { imageRef: "image-1", ...pixel },
+    ]);
+    // Consent that did not list this image does not copy it.
+    const unreviewed = decodeCanvasShareResult(
       JSON.parse(await (await post("share", shareBody()))!.text()),
     );
+    expect(unreviewed).toMatchObject({ kind: "denied", denialCode: "consent-required" });
+    expect(existsSync(join(dataDirectory, "canvas-share-images", shareBody().snapshotId))).toBe(
+      false,
+    );
+    const body = shareBody();
+    const shared = decodeCanvasShareResult(
+      JSON.parse(
+        await (await post("share", {
+          ...body,
+          consent: { ...body.consent, acknowledgedImages: [pixel.sha256] },
+        }))!.text(),
+      ),
+    );
     expect(shared.kind).toBe("accepted");
-    expect(resolveShareImages).toHaveBeenCalledTimes(1);
     const allowed = decodeCanvasShareAccessResult(
       JSON.parse(await (await post("share-access", accessBody()))!.text()),
     );

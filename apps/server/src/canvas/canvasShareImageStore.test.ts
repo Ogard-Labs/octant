@@ -54,24 +54,24 @@ afterEach(() => {
 });
 
 describe("CanvasShareImageStore", () => {
-  it("serves a snapshot exactly the bytes it kept, and drops an image whose bytes changed rather than show them", async () => {
+  it("keeps each digest once, serves a snapshot exactly the bytes it kept, and drops an image whose bytes changed rather than show them", async () => {
     directory = mkdtempSync(join(tmpdir(), "octant-share-image-store-"));
     const store = new CanvasShareImageStore(directory);
-    await store.keep(
-      snapshotId,
-      [entry as never],
-      new Map([
-        [
-          "generated-image:x",
-          {
-            mediaType: "image/png",
-            data: bytes.toString("base64"),
-            byteLength: bytes.byteLength,
-            sha256,
-          },
-        ],
-      ]),
-    );
+    const resolved = {
+      mediaType: "image/png" as const,
+      data: bytes.toString("base64"),
+      byteLength: bytes.byteLength,
+      sha256,
+    };
+    // Two sources with the same bytes, kept twice as a replayed share would:
+    // one verified copy, no failure.
+    const twice = new Map([
+      ["generated-image:x", resolved],
+      ["project-file:logo-copy.png", resolved],
+    ]);
+    await store.keepResolved(snapshotId, twice);
+    await store.keepResolved(snapshotId, twice);
+    await store.keepOnly(snapshotId, [entry as never]);
     const served = await store.withBytes(snapshotId, snapshotDocument());
     expect(served.images).toEqual([{ ...entry, data: bytes.toString("base64") }]);
 
@@ -87,6 +87,27 @@ describe("CanvasShareImageStore", () => {
     expect(() => decodeCanvasStaticExportDocument(tampered)).not.toThrow();
 
     await store.forget(snapshotId);
+    expect((await store.withBytes(snapshotId, snapshotDocument())).images).toBeUndefined();
+  });
+
+  it("removes what no recorded snapshot names, as after a host stopped before recording it", async () => {
+    directory = mkdtempSync(join(tmpdir(), "octant-share-image-store-"));
+    const store = new CanvasShareImageStore(directory);
+    await store.keepResolved(
+      snapshotId,
+      new Map([
+        [
+          "generated-image:x",
+          {
+            mediaType: "image/png" as const,
+            data: bytes.toString("base64"),
+            byteLength: bytes.byteLength,
+            sha256,
+          },
+        ],
+      ]),
+    );
+    await store.reconcile(() => false);
     expect((await store.withBytes(snapshotId, snapshotDocument())).images).toBeUndefined();
   });
 });

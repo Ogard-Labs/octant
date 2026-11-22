@@ -8,6 +8,7 @@ import {
   canvasMockupsTsx,
   canvasExportStem,
   importCanvasHtmlPage,
+  canvasShareImagesFor,
   type CanvasShareResolvedImages,
 } from "@octant/domain";
 import {
@@ -211,15 +212,18 @@ export interface CanvasRouteDependencies {
     provenance: CanvasProvenance,
   ) => Promise<ReadonlyArray<CanvasDesignAssetResolution>>;
   /**
-   * The images a share of a Canvas version carries, resolved under
-   * that version's provenance. Absent, a share carries none.
-   */
-  /**
    * Where a shared snapshot's image bytes are kept, apart from the journal.
    * Absent, a snapshot is served with the images its journaled copy names
    * but no bytes, and readers see each as missing.
    */
-  readonly shareImages?: Pick<CanvasShareImageStore, "keep" | "withBytes" | "forget">;
+  readonly shareImages?: Pick<
+    CanvasShareImageStore,
+    "keepResolved" | "keepOnly" | "withBytes" | "forget"
+  >;
+  /**
+   * The images a share of a Canvas version carries, resolved under
+   * that version's provenance. Absent, a share carries none.
+   */
   readonly resolveShareImages?: (
     definition: Pick<CanvasDefinition, "blocks" | "provenance">,
   ) => Promise<CanvasShareResolvedImages>;
@@ -1329,7 +1333,21 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         if (overview === undefined) {
           return failureResponse("Canvas sharing is not authorized for this canvas.", 403, origin);
         }
-        return jsonResponse(decodeCanvasShareOverview(overview), 200, origin);
+        // The panel shows the images a snapshot of this version would copy,
+        // exactly as they would leave, before the person agrees to share.
+        const current = dependencies.canvasProjection.getById(canvasId)?.currentVersion;
+        const images =
+          current === undefined || dependencies.resolveShareImages === undefined
+            ? []
+            : canvasShareImagesFor(
+                current.definition,
+                await dependencies.resolveShareImages(current.definition),
+              );
+        return jsonResponse(
+          decodeCanvasShareOverview(images.length === 0 ? overview : { ...overview, images }),
+          200,
+          origin,
+        );
       }
 
       if ((route === "share" || route === "share-revoke") && request.method === "POST") {
@@ -1412,7 +1430,14 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
         const images =
           shared === undefined || dependencies.resolveShareImages === undefined
             ? undefined
-            : await dependencies.resolveShareImages(shared.definition);
+            : await dependencies.resolveShareImages(shared.version.definition);
+        // The bytes are kept before the snapshot is recorded, so a recorded
+        // snapshot never names an image that was not kept; a host that stops
+        // in between leaves only unnamed bytes, which the next start removes.
+        const shareImages = dependencies.shareImages;
+        if (shared !== undefined && images !== undefined && shareImages !== undefined) {
+          await shareImages.keepResolved(shared.snapshotId, images);
+        }
         const result =
           route === "share"
             ? shareService.share(
@@ -1423,15 +1448,20 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
                 images,
               )
             : shareService.revoke(body.value, authorizationContext, context.project, principal);
-        // The journaled snapshot names its images by digest; their bytes are
-        // kept for it apart from the journal, and go once it is revoked.
-        const shareImages = dependencies.shareImages;
-        if (result.kind === "accepted" && shareImages !== undefined) {
-          const snapshotId = String(result.snapshot.snapshotId);
-          if (route === "share" && images !== undefined) {
-            await shareImages.keep(snapshotId, shareService.imagesOf(snapshotId), images);
-          } else if (route === "share-revoke") {
-            await shareImages.forget(snapshotId);
+        // The journaled snapshot names its images by digest; it keeps only
+        // those, a refused share keeps none, and a revoked one loses them.
+        if (shareImages !== undefined) {
+          if (route === "share" && shared !== undefined && images !== undefined) {
+            if (result.kind === "accepted") {
+              await shareImages.keepOnly(
+                shared.snapshotId,
+                shareService.imagesOf(shared.snapshotId),
+              );
+            } else if (!shared.recorded) {
+              await shareImages.forget(shared.snapshotId);
+            }
+          } else if (route === "share-revoke" && result.kind === "accepted") {
+            await shareImages.forget(String(result.snapshot.snapshotId));
           }
         }
         return jsonResponse(decodeCanvasShareResult(result), 200, origin);

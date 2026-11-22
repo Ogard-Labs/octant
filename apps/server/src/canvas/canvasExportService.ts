@@ -758,7 +758,10 @@ export class CanvasExportService {
   ): Promise<CanvasExportPictureRequest["subject"]> {
     const resolve = this.#resolveDesignAssets;
     if (resolve === undefined) return subject;
-    const designAssets = [];
+    const designAssets: Array<{
+      readonly blockId: string;
+      readonly assets: ReadonlyArray<CanvasDesignAssetResolution>;
+    }> = [];
     for (const block of subject.definition.blocks) {
       const declaring =
         block.kind === "design"
@@ -772,7 +775,22 @@ export class CanvasExportService {
         assets: await resolve(declaring, subject.definition.provenance),
       });
     }
-    return designAssets.length === 0 ? subject : { ...subject, designAssets };
+    if (designAssets.length === 0) return subject;
+    // A running design is drawn from its own page, so that page is built
+    // again with the images it shows, as the agent's preview builds it.
+    const designPages = subject.definition.blocks
+      .filter(
+        (block): block is CanvasDesignBlock => block.kind === "design" && block.runsScript === true,
+      )
+      .map((block) => ({
+        blockId: String(block.blockId),
+        html: renderCanvasDesignPage(
+          block,
+          String(block.frames[0]?.frameId ?? ""),
+          designAssets.find((entry) => entry.blockId === String(block.blockId))?.assets ?? [],
+        ),
+      }));
+    return { ...subject, designAssets, designPages };
   }
 
   async #renderPictures(
