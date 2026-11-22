@@ -167,7 +167,11 @@ stay healthy:
 
 A video job counts against the thread's and the Project's spend ceilings, which
 the person sets, like any turn. Before Generate is honoured, the host reserves
-the card's estimate against every ceiling that applies. If a ceiling cannot
+the card's estimate against every ceiling that applies. The estimate is the
+output price plus the input price: the prompt's token count, and for each
+reference image the token count Google publishes for an image input, at
+$1.50 per million input tokens, so a clip that fits a ceiling when approved
+still fits it when settled. If a ceiling cannot
 cover it, the job is refused with that ceiling named, and nothing is sent. When
 the job ends, the reservation settles to the cost computed from the token count
 Google reports. A job that fails before any output is billed nothing and
@@ -268,7 +272,11 @@ export type VideoAdapterPoll =
     }
   | { readonly status: "refused"; readonly safetyRefusal: string }
   | { readonly status: "failed"; readonly failure: ProviderFailure }
-  | { readonly status: "cancelled" };
+  | {
+      readonly status: "cancelled";
+      /** Google may bill a job it had already started; its count, when reported, settles it. */
+      readonly usage?: { readonly outputTokens?: number; readonly inputTokens?: number };
+    };
 
 export interface VideoGenerationDriver {
   readonly kind: ProviderDriverKind;
@@ -276,7 +284,8 @@ export interface VideoGenerationDriver {
   readonly declaredHosts: ReadonlyArray<string>;
   readonly start: (input: VideoAdapterRequest, signal: AbortSignal) => Promise<VideoAdapterStart>;
   readonly poll: (remoteId: string, signal: AbortSignal) => Promise<VideoAdapterPoll>;
-  readonly cancel: (remoteId: string) => Promise<void>;
+  /** Asks the provider to stop, then reports the job's final state with any usage it states. */
+  readonly cancel: (remoteId: string) => Promise<VideoAdapterPoll>;
   /** Removes the provider's stored copy; called after every terminal state. */
   readonly forget: (remoteId: string) => Promise<void>;
 }
