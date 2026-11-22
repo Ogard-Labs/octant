@@ -262,13 +262,8 @@ describe("terminal Work requests", () => {
 
     expect(text).toContain("Allowing moves this thread to Accept edits.");
     expect(text).toContain("Plan:\nEdit the report\nStep 1");
-    expect(text).toContain("Step 7");
-    expect(text).not.toContain("Step 8");
-    expect(text).toContain("The plan continues. Read the whole plan in the app before allowing.");
+    expect(text).toContain("Step 24");
     expect(text.split("\n").at(-1)).toBe("Allowing moves this thread to Accept edits.");
-    const wide = workLevelChangeText({ to: "auto", plan: "x".repeat(2_000) });
-    expect(wide.length).toBeLessThan(700);
-    expect(wide).toContain("The plan continues.");
     expect(workLevelChangeText({ to: "plan" })).toBe("Allowing moves this thread to Plan.");
     expect(workLevelChangeText(undefined)).toBe("");
   });
@@ -368,6 +363,13 @@ describe("terminal Work requests", () => {
       const first = stepWorkQuestionnaire(questionnaire, [], "2");
       if (first.kind !== "asking") throw new Error("The questionnaire ended early");
       expect(first.note).toBeUndefined();
+      /** Answers the last question, then the optional comment. */
+      const finish = (text: string, comment = "") => {
+        const answered = stepWorkQuestionnaire(questionnaire, first.answers, text);
+        return answered.kind === "asking" && answered.answers.length === 2
+          ? stepWorkQuestionnaire(questionnaire, answered.answers, comment)
+          : answered;
+      };
       expect(workQuestionnaireText(questionnaire, first.answers)).toContain(
         "Question 2 of 2: Which extras?",
       );
@@ -381,21 +383,21 @@ describe("terminal Work requests", () => {
       expect(
         stepWorkQuestionnaire(questionnaire, first.answers, "see https://example.com"),
       ).toMatchObject({ kind: "asking", note: expect.stringContaining("links") });
-      expect(stepWorkQuestionnaire(questionnaire, first.answers, "=2")).toMatchObject({
+      expect(finish("=2")).toMatchObject({
         kind: "complete",
         response: {
           answers: [{}, { questionId: "extras", selectedOptionIds: [], customAnswer: "2" }],
         },
       });
-      expect(stepWorkQuestionnaire(questionnaire, first.answers, "= 12")).toMatchObject({
+      expect(finish("= 12")).toMatchObject({
         kind: "complete",
         response: { answers: [{}, { customAnswer: "12" }] },
       });
-      expect(stepWorkQuestionnaire(questionnaire, first.answers, "==12")).toMatchObject({
+      expect(finish("==12")).toMatchObject({
         kind: "complete",
         response: { answers: [{}, { customAnswer: "=12" }] },
       });
-      expect(stepWorkQuestionnaire(questionnaire, first.answers, "=SUM(B2:B5)")).toMatchObject({
+      expect(finish("=SUM(B2:B5)")).toMatchObject({
         kind: "complete",
         response: { answers: [{}, { customAnswer: "=SUM(B2:B5)" }] },
       });
@@ -403,7 +405,7 @@ describe("terminal Work requests", () => {
         kind: "asking",
         answers: [],
       });
-      expect(stepWorkQuestionnaire(questionnaire, first.answers, "0")).toEqual({
+      expect(finish("0")).toEqual({
         kind: "complete",
         response: {
           version: 1,
@@ -413,7 +415,18 @@ describe("terminal Work requests", () => {
           ],
         },
       });
-      const done = stepWorkQuestionnaire(questionnaire, first.answers, "3 1");
+      const commenting = stepWorkQuestionnaire(questionnaire, first.answers, "3 1");
+      if (commenting.kind !== "asking") throw new Error("The comment was not asked for");
+      expect(workQuestionnaireText(questionnaire, commenting.answers)).toBe(
+        "Add a comment for the agent, or press Enter to send your answers.",
+      );
+      expect(
+        stepWorkQuestionnaire(questionnaire, commenting.answers, "see https://example.com"),
+      ).toMatchObject({ kind: "asking", answers: commenting.answers, note: expect.any(String) });
+      expect(
+        stepWorkQuestionnaire({ ...questionnaire, allowComment: false }, first.answers, "3 1"),
+      ).toMatchObject({ kind: "complete" });
+      const done = stepWorkQuestionnaire(questionnaire, commenting.answers, "Ship it on Friday");
       if (done.kind !== "complete") throw new Error("The questionnaire did not complete");
 
       const seen: LocalControlRequest[] = [];
@@ -450,6 +463,7 @@ describe("terminal Work requests", () => {
                   { questionId: "format", selectedOptionIds: ["md"] },
                   { questionId: "extras", selectedOptionIds: ["notes", "toc"] },
                 ],
+                comment: "Ship it on Friday",
               },
             },
           },

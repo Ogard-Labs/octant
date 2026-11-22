@@ -2561,17 +2561,20 @@ app or on the full screen. The request panel shows one question at a time with
 its numbered options, labelled recommendations, and descriptions. The person
 types option numbers, `0` where the question allows no choice, or a written
 alternative where the question allows one. A written alternative that is itself
-a number starts with `=`, because bare numbers choose options. A line the
-question cannot accept is refused and the same question is asked again. Earlier
-answers are kept only in memory and only for that request. After the last
-question the terminal submits the complete response once, through the same
-authenticated Work request route the app uses. The host validates it as it
-would an answer from the app. A refused submission starts again from the first
-question. The terminal offers no comment field because the comment is optional.
-If the terminal cannot read the request's definition, it does not offer the
-request at all. A Work approval that changes the thread's level shows, as the
-app's card does, the level it moves to and the plan the agent hands over; a plan
-too long for the panel is cut, and the panel says so and points to the app.
+a number starts with `=` (`==` for a literal leading `=`), because bare numbers
+choose options. A line the question cannot accept is refused and the same
+question is asked again. After the last question the terminal asks for the
+optional comment, as the app's form offers one, unless the ask refuses a
+comment; an empty line sends without one. Earlier answers are kept only in
+memory and only for that request. The terminal then submits the complete
+response once, through the same authenticated Work request route the app uses,
+and the host validates it as it would an answer from the app. A refused
+submission starts again from the first question. If the terminal cannot read
+the request's definition, it does not offer the request at all. A Work approval
+that changes the thread's level shows, as the app's card does, the whole plan
+the agent hands over and then the level it moves to, directly above the y/n
+line. The panel ends the bottom-pinned transcript, so a long plan scrolls above
+those two lines instead of pushing them out of view.
 
 Submitted questionnaires collapse into an expandable, readable summary of
 the questions, selected labels, written answers, and comment. The journal

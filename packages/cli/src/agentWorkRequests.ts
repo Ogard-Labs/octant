@@ -127,7 +127,8 @@ export type QuestionnaireStep =
  * question: option numbers (comma or space separated), `0` for no choice
  * where the question allows none, or a written alternative where it allows
  * one. A refused line keeps the earlier answers and asks the same question
- * again. The last answer completes the response the host validates whole.
+ * again. After the last question comes the optional comment, unless the ask
+ * refuses one; then the response is complete and the host validates it whole.
  */
 export function stepWorkQuestionnaire(
   questionnaire: Questionnaire,
@@ -135,14 +136,45 @@ export function stepWorkQuestionnaire(
   text: string,
 ): QuestionnaireStep {
   const question = questionnaire.questions[answers.length];
-  if (question === undefined)
-    return { kind: "complete", response: { version: 1, answers: [...answers] } };
+  if (question === undefined) return completeWithComment(answers, text.trim());
   const answer = readQuestionAnswer(question, text.trim());
   if (typeof answer === "string") return { kind: "asking", answers, note: answer };
   const next = [...answers, answer];
-  return next.length === questionnaire.questions.length
+  if (next.length < questionnaire.questions.length) return { kind: "asking", answers: next };
+  // The app's form offers a comment unless the ask refuses one, so the
+  // terminal asks for it last; an empty line sends the answers without one.
+  return questionnaire.allowComment === false
     ? { kind: "complete", response: { version: 1, answers: next } }
     : { kind: "asking", answers: next };
+}
+
+/** Whether every question is answered and only the optional comment is still asked. */
+export function workQuestionnaireAwaitsComment(
+  questionnaire: Questionnaire,
+  answers: ReadonlyArray<AgentQuestionnaireAnswer>,
+): boolean {
+  return questionnaire.allowComment !== false && answers.length === questionnaire.questions.length;
+}
+
+function completeWithComment(
+  answers: ReadonlyArray<AgentQuestionnaireAnswer>,
+  comment: string,
+): QuestionnaireStep {
+  const response = {
+    version: 1 as const,
+    answers: [...answers],
+    ...(comment.length === 0 ? {} : { comment }),
+  };
+  try {
+    decodeWorkQuestionnaireResponse(response);
+  } catch {
+    return {
+      kind: "asking",
+      answers,
+      note: "Work cannot deliver that comment. Keep it under 2,000 characters, without paths or links.",
+    };
+  }
+  return { kind: "complete", response };
 }
 
 function readQuestionAnswer(
@@ -246,7 +278,10 @@ export function workQuestionnaireText(
   answers: ReadonlyArray<AgentQuestionnaireAnswer>,
 ): string {
   const question = questionnaire.questions[answers.length];
-  if (question === undefined) return "";
+  if (question === undefined)
+    return workQuestionnaireAwaitsComment(questionnaire, answers)
+      ? "Add a comment for the agent, or press Enter to send your answers."
+      : "";
   const min = question.minSelections ?? 1;
   const options = question.options.map(
     (option, index) =>
@@ -276,16 +311,8 @@ const WORK_ACCESS_LABEL: Readonly<Record<WorkAccess, string>> = {
   plan: "Plan",
 };
 /**
- * A plan is cut in the panel past this many lines or characters, so the
- * target level and the y/n line stay on screen at 80x24 even when long plan
- * lines wrap; the panel says the plan continues.
- */
-const PLAN_PANEL_LINES = 8;
-const PLAN_PANEL_CHARACTERS = 480;
-
-/**
  * What a Work approval that changes the thread's level authorizes, as the
- * app's approval card shows it: the plan the agent hands over, then the level
+ * app's approval card shows it: the whole plan the agent hands over, then the level
  * the thread moves to. The level comes last, beside the y/n line, because the
  * panel sits at the bottom of the scrolled transcript: a tall task list or a
  * wrapped plan pushes the top of the panel up, never its last lines. Empty for
@@ -294,16 +321,7 @@ const PLAN_PANEL_CHARACTERS = 480;
 export function workLevelChangeText(levelChange: WorkLevelChangeRequest | undefined): string {
   if (levelChange === undefined) return "";
   const lines: string[] = [];
-  if (levelChange.plan !== undefined) {
-    const shown = levelChange.plan
-      .slice(0, PLAN_PANEL_CHARACTERS)
-      .split("\n")
-      .slice(0, PLAN_PANEL_LINES)
-      .join("\n");
-    lines.push("Plan:", shown);
-    if (shown.length < levelChange.plan.length)
-      lines.push("… The plan continues. Read the whole plan in the app before allowing.");
-  }
+  if (levelChange.plan !== undefined) lines.push("Plan:", levelChange.plan);
   lines.push(`Allowing moves this thread to ${WORK_ACCESS_LABEL[levelChange.to]}.`);
   return lines.join("\n");
 }

@@ -988,7 +988,7 @@ const workRequestId = "6c000000-0000-4000-8000-000000000003";
 let workQuestionPending = true;
 let workApprovalPending = false;
 const workApprovalId = "6c000000-0000-4000-8000-000000000005";
-// Long wrapped plan lines: the target level and the y/n line must still fit at 80x24.
+// Long wrapped plan lines: the target level and the y/n line must stay in view at 80x24.
 const workPlan = Array.from(
   { length: 30 },
   (_, i) =>
@@ -1159,6 +1159,9 @@ try {
   if (workAnswers.length !== 0) throw new Error("A partial questionnaire was submitted.");
   await workRender.mockInput.typeText("1,2");
   workRender.mockInput.pressEnter();
+  await workRender.waitForFrame((frame) => frame.includes("Add a comment for the agent"));
+  if (workAnswers.length !== 0) throw new Error("Answers were sent before the comment step.");
+  workRender.mockInput.pressEnter();
   await workRender.waitFor(() => workAnswers.length === 1);
   await workRender.waitForFrame((frame) => !frame.includes("Which extras?"));
   if (
@@ -1199,14 +1202,10 @@ try {
   await screen.refresh();
   await approvalRender.renderOnce();
   const frame = approvalRender.captureCharFrame();
-  for (const expected of [
-    "Allowing moves this thread to Accept edits.",
-    "The plan continues.",
-    "y allow · n deny",
-  ])
+  for (const expected of ["Allowing moves this thread to Accept edits.", "y allow · n deny"])
     if (!frame.includes(expected))
       throw new Error(`The Plan approval at 80x24 is missing "${expected}".\n${frame}`);
-  console.log("Rendered a Plan approval's level and cut plan at 80x24");
+  console.log("Rendered a Plan approval's level and y/n line under a long plan at 80x24");
 } finally {
   workApprovalPending = false;
   approvalRender.renderer.destroy();

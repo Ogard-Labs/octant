@@ -10,6 +10,7 @@ import {
   readWorkRequests,
   stepWorkQuestionnaire,
   workLevelChangeText,
+  workQuestionnaireAwaitsComment,
   workQuestionnaireText,
   workRequestId,
   type AgentQuestionnaireAnswer,
@@ -569,6 +570,15 @@ class AgentScreen {
     }
     this.#composerDraft =
       text.length === 0 ? undefined : (provenance ?? this.#captureComposerDraft());
+  }
+
+  #awaitsQuestionnaireComment(): boolean {
+    const request = this.#workRequest;
+    return (
+      request?.kind === "question" &&
+      request.questionnaire !== undefined &&
+      workQuestionnaireAwaitsComment(request.questionnaire, this.#answersTo(request))
+    );
   }
 
   #answersTo(request: AgentWorkRequest): ReadonlyArray<AgentQuestionnaireAnswer> {
@@ -1725,7 +1735,8 @@ class AgentScreen {
       this.#draw();
       return;
     }
-    if (text.length === 0) return;
+    // An empty line is an answer only to a questionnaire's optional comment.
+    if (text.length === 0 && !this.#awaitsQuestionnaireComment()) return;
     const pendingFollowUp = this.#pendingFollowUp;
     this.#pendingFollowUp = undefined;
     this.#note = "";
