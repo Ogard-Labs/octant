@@ -21264,7 +21264,9 @@ workspaces there):
 - **Chat.** A Chat thread keeps no folder and no shell. On Windows outside
   Strict it starts unconfined on every provider family (maintainer decision,
   2026-11-19: outside Strict, the provider's own rules apply and Octant adds
-  none of its own): Codex, whose Chat threads get no execution environment and
+  none of its own), except an ACP agent whose own setup is turned off while it
+  holds back setup in the home folder, which is refused with a reason
+  (maintainer decision, 2026-11-22): Codex, whose Chat threads get no execution environment and
   start with the shell, image, plugin and app features off on every platform;
   Pi, which starts in Chat with no built-in tool, no extension and none of the
   person's resources; Claude, whose Chat session on Windows holds no file or
