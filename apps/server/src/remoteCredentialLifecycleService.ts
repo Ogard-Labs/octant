@@ -259,19 +259,28 @@ export class RemoteCredentialLifecycleService {
     readonly reasonCode?: string;
     /** The paired device that asked. Absent, the host's own record is written. */
     readonly actor?: EventActor;
+    /** A device kept: the one that asked to sign out every other device. */
+    readonly exceptDeviceId?: string;
   }): RemoteCredentialOperationReceipt {
     const reasonCode = input.reasonCode ?? "all-devices-revoked";
     const devices = readDeviceRegistrations(this.#connection)
-      .filter((device) => device.host_id === input.hostId && device.state === "active")
+      .filter(
+        (device) =>
+          device.host_id === input.hostId &&
+          device.state === "active" &&
+          device.device_id !== input.exceptDeviceId,
+      )
       .sort((left, right) => String(left.device_id).localeCompare(String(right.device_id)));
     return this.#mutate({
       commandId: input.commandId,
       hostId: input.hostId,
       reasonCode,
       operationKind: "revoke-all",
-      operationDigest: digestOperation({
-        reasonCode,
-      }),
+      operationDigest: digestOperation(
+        input.exceptDeviceId === undefined
+          ? { reasonCode }
+          : { reasonCode, exceptDeviceId: input.exceptDeviceId },
+      ),
       devices,
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       buildEvents: (now, device) => [

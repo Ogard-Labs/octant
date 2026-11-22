@@ -1,6 +1,15 @@
 import type { RemoteClientPrincipal, WindowId } from "@octant/contracts";
-import type { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
-import { actsAsHostPerson, type PrincipalKind } from "@octant/domain/remote-access-policy";
+import type {
+  DeviceAccessLevel,
+  DeviceId,
+  RemoteSessionId,
+  StableHostId,
+} from "@octant/contracts/remote-access";
+import {
+  actsAsHostPerson,
+  admittedDeviceAuthorityKind,
+  type PrincipalKind,
+} from "@octant/domain/remote-access-policy";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
 export const WINDOW_CAPABILITY_HEADER = "x-octant-window-capability";
@@ -9,14 +18,24 @@ export type ClientPrincipal = RemoteClientPrincipal;
 
 /**
  * The authority class a principal is judged by. A device the host's own person
- * paired is that person and is judged as a local window is; every other device
- * session (hub-introduced, an agent grant, an unproved pairing) keeps the
- * restricted `remote-device` class. The principal itself is unchanged, so the
- * device stays the recorded actor.
+ * paired at Full is that person and is judged as a local window is; every
+ * other device session (one the person paired at a narrower level,
+ * hub-introduced, an agent grant, an unproved pairing) keeps the restricted
+ * `remote-device` class. The principal itself is unchanged, so the device
+ * stays the recorded actor.
  */
 export function principalAuthorityKind(principal: ClientPrincipal): PrincipalKind {
   if (principal.kind === "local-window") return "local-window";
-  return principal.admittedBy === "host-person" ? "person-paired-device" : "remote-device";
+  return admittedDeviceAuthorityKind(principal);
+}
+
+/** The narrower level a device the person paired is held to, absent at Full and for every other principal. */
+export function principalAccessLevel(
+  principal: ClientPrincipal,
+): Exclude<DeviceAccessLevel, "full"> | undefined {
+  return principal.kind === "remote-device" && principal.admittedBy === "host-person"
+    ? principal.accessLevel
+    : undefined;
 }
 
 /** Whether the request comes from the host's own person: a local window or a device they paired. */
@@ -117,6 +136,8 @@ export interface CreateRemoteDevicePrincipalInput {
   readonly capabilityDigest: string;
   readonly sessionId: RemoteSessionId;
   readonly admittedBy?: "host-person" | "hub-roster";
+  /** A device the person paired below Full; ignored for any other admission. */
+  readonly accessLevel?: DeviceAccessLevel;
 }
 
 /**
@@ -149,6 +170,13 @@ export function createRemoteDevicePrincipal(
     capabilityDigest: input.capabilityDigest,
     sessionId: input.sessionId,
     ...(input.admittedBy === undefined ? {} : { admittedBy: input.admittedBy }),
+    // Only a narrower level is marked, so a Full device's principal is the one
+    // every route already knows.
+    ...(input.admittedBy !== "host-person" ||
+    input.accessLevel === undefined ||
+    input.accessLevel === "full"
+      ? {}
+      : { accessLevel: input.accessLevel }),
   });
   if (JSON.stringify(principal).includes("local-window")) {
     throw new ClientPrincipalError("invalid", "Remote principal cannot include local-window.");

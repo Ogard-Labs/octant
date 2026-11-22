@@ -1,11 +1,14 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { EventActor } from "@octant/contracts";
-import type {
-  DeviceRegistrationV1,
-  PairingDecisionV1,
-  PairingTicketV1,
-  StableHostId,
+import {
+  isDeviceAccessLevel,
+  type DeviceAccessLevel,
+  type DeviceRegistrationV1,
+  type PairingDecisionV1,
+  type PairingTicketV1,
+  type StableHostId,
 } from "@octant/contracts/remote-access";
+import { authorizeRemoteAccessPause } from "@octant/domain/remote-access-policy";
 import type {
   CreatePairingTicketResult,
   PairingClaimResult,
@@ -51,7 +54,12 @@ export interface LocalDeviceAdministrationPort {
    * `actor` on a change is the paired device that asked for it, which the
    * journal then names; a change made at the host carries none.
    */
-  readonly approvePairing: (input: { readonly ticketId: string; readonly actor?: EventActor }) => {
+  readonly approvePairing: (input: {
+    readonly ticketId: string;
+    readonly actor?: EventActor;
+    /** Full unless the person picked a narrower level for the new device. */
+    readonly accessLevel?: DeviceAccessLevel;
+  }) => {
     readonly decision: PairingDecisionV1;
     readonly device: DeviceRegistrationV1;
   };
@@ -70,8 +78,24 @@ export interface LocalDeviceAdministrationPort {
     readonly deviceId: string;
     readonly actor?: EventActor;
   }) => RemoteCredentialOperationReceipt;
-  readonly revokeAll: (input?: { readonly actor?: EventActor }) => RemoteCredentialOperationReceipt;
+  readonly revokeAll: (input?: {
+    readonly actor?: EventActor;
+    /** The asking device, kept when it signs out every other device. */
+    readonly exceptDeviceId?: string;
+  }) => RemoteCredentialOperationReceipt;
   readonly reconcileExpired: () => RemoteCredentialOperationReceipt;
+  /** A device's level, for a device the host's person paired; absent for any other. */
+  readonly deviceAccessLevel: (deviceId: string) => DeviceAccessLevel | undefined;
+  readonly setDeviceAccessLevel: (input: {
+    readonly deviceId: string;
+    readonly accessLevel: DeviceAccessLevel;
+    readonly actor: EventActor;
+  }) => { readonly previousLevel: DeviceAccessLevel; readonly accessLevel: DeviceAccessLevel };
+  readonly remoteAccessPaused: () => boolean;
+  readonly setRemoteAccessPaused: (input: {
+    readonly paused: boolean;
+    readonly actor: EventActor;
+  }) => boolean;
 }
 
 export interface LocalDeviceAdministrationRouteOptions {
@@ -95,9 +119,19 @@ const ROUTES = {
   revoke: "/api/desktop/remote/devices/revoke",
   revokeAll: "/api/desktop/remote/devices/revoke-all",
   reconcileExpired: "/api/desktop/remote/devices/reconcile-expired",
+  accessLevel: "/api/desktop/remote/devices/access-level",
+  // A window reads the pause with GET; a device only ever sets it, since a
+  // paused host answers no device.
+  pause: "/api/desktop/remote/access-pause",
 } as const;
 
-type Route = (typeof ROUTES)[keyof typeof ROUTES];
+/**
+ * Revoking every paired device but the asking one. Only a device asks it: a
+ * window has no device of its own, so at the host it is Revoke all.
+ */
+const SIGN_OUT_OTHERS = "/api/remote/devices/sign-out-others";
+
+type Route = (typeof ROUTES)[keyof typeof ROUTES] | typeof SIGN_OUT_OTHERS;
 
 const DESKTOP_ROUTE_PREFIX = "/api/desktop/remote/";
 const PAIRED_DEVICE_ROUTE_PREFIX = "/api/remote/";
@@ -111,15 +145,20 @@ const PAIRED_DEVICE_ROUTE_PREFIX = "/api/remote/";
 export const PAIRED_DEVICE_ADMINISTRATION_ROUTES: ReadonlyArray<{
   readonly path: string;
   readonly method: "GET" | "POST";
-}> = Object.values(ROUTES).map((route) => ({
-  path: `${PAIRED_DEVICE_ROUTE_PREFIX}${route.slice(DESKTOP_ROUTE_PREFIX.length)}`,
-  method: route === ROUTES.pending || route === ROUTES.devices ? "GET" : "POST",
-}));
+}> = [
+  ...Object.values(ROUTES).map((route) => ({
+    path: `${PAIRED_DEVICE_ROUTE_PREFIX}${route.slice(DESKTOP_ROUTE_PREFIX.length)}`,
+    method:
+      route === ROUTES.pending || route === ROUTES.devices ? ("GET" as const) : ("POST" as const),
+  })),
+  { path: SIGN_OUT_OTHERS, method: "POST" },
+];
 
 function pairedDeviceRoute(pathname: string): Route | undefined {
   if (!PAIRED_DEVICE_ADMINISTRATION_ROUTES.some((route) => route.path === pathname)) {
     return undefined;
   }
+  if (pathname === SIGN_OUT_OTHERS) return SIGN_OUT_OTHERS;
   const route = `${DESKTOP_ROUTE_PREFIX}${pathname.slice(PAIRED_DEVICE_ROUTE_PREFIX.length)}`;
   return Object.values(ROUTES).find((candidate) => candidate === route);
 }
@@ -182,6 +221,9 @@ export function createLocalDeviceAdministrationRouteHandler(
       }
     }
     const actor = asking === undefined ? {} : { actor: asking.actor };
+    // Level and pause changes always name who made them: the asking device,
+    // or the local person at a window on the host.
+    const changedBy = asking?.actor ?? eventActorForPrincipal(undefined);
 
     if (route === ROUTES.pending) {
       if (request.method !== "GET") return failure("invalid", 400);
@@ -189,7 +231,17 @@ export function createLocalDeviceAdministrationRouteHandler(
     }
     if (route === ROUTES.devices) {
       if (request.method !== "GET") return failure("invalid", 400);
-      return Response.json({ devices: control.listDevices().map(toInventory) });
+      return Response.json({
+        devices: control.listDevices().map((device) => {
+          const accessLevel =
+            device.state === "active" ? control.deviceAccessLevel(device.deviceId) : undefined;
+          const entry = toInventory(device);
+          return accessLevel === undefined ? entry : Object.freeze({ ...entry, accessLevel });
+        }),
+      });
+    }
+    if (route === ROUTES.pause && request.method === "GET" && asking === undefined) {
+      return Response.json({ paused: control.remoteAccessPaused() });
     }
     if (request.method !== "POST") return failure("invalid", 400);
     if (request.headers.get("content-type")?.split(";", 1)[0]?.trim() !== "application/json") {
@@ -207,7 +259,7 @@ export function createLocalDeviceAdministrationRouteHandler(
           return Response.json({ ticket: control.createPairingTicket(body) }, { status: 201 });
         }
         case ROUTES.approve: {
-          const body = decodeTicketBody(decoded.value);
+          const body = decodeApprovalBody(decoded.value);
           // A new device is approved by a party the host already trusts. A
           // request made with the asking device's own key is that device
           // vouching for itself, so it is left for another party to decide.
@@ -247,9 +299,37 @@ export function createLocalDeviceAdministrationRouteHandler(
             { receipt: asking === undefined ? control.revokeAll() : control.revokeAll(actor) },
             { status: 201 },
           );
+        case SIGN_OUT_OTHERS:
+          requireExactKeys(decoded.value, []);
+          if (asking === undefined) return failure("invalid", 400);
+          return Response.json(
+            {
+              receipt: control.revokeAll({ actor: asking.actor, exceptDeviceId: asking.deviceId }),
+            },
+            { status: 201 },
+          );
         case ROUTES.reconcileExpired:
           requireExactKeys(decoded.value, []);
           return Response.json({ receipt: control.reconcileExpired() }, { status: 201 });
+        case ROUTES.accessLevel: {
+          const body = decodeAccessLevelBody(decoded.value);
+          return Response.json(
+            { change: control.setDeviceAccessLevel({ ...body, actor: changedBy }) },
+            { status: 201 },
+          );
+        }
+        case ROUTES.pause: {
+          const body = decodePauseBody(decoded.value);
+          const decision = authorizeRemoteAccessPause({
+            principalKind: asking === undefined ? "local-window" : "person-paired-device",
+            paused: body.paused,
+          });
+          if (decision.kind === "deny") return failure("unauthorized", 401);
+          return Response.json(
+            { paused: control.setRemoteAccessPaused({ paused: body.paused, actor: changedBy }) },
+            { status: 201 },
+          );
+        }
         default:
           return failure("invalid", 400);
       }
@@ -311,11 +391,39 @@ function decodeTicketRequestBody(value: unknown): {
   return { sourceClass };
 }
 
-function decodeTicketBody(value: unknown): { readonly ticketId: string } {
-  requireExactKeys(value, ["ticketId"]);
+function decodeApprovalBody(value: unknown): {
+  readonly ticketId: string;
+  readonly accessLevel?: DeviceAccessLevel;
+} {
+  const withLevel = typeof value === "object" && value !== null && "accessLevel" in value;
+  requireExactKeys(value, withLevel ? ["accessLevel", "ticketId"] : ["ticketId"]);
   const ticketId = value.ticketId as string;
   if (!UUID_PATTERN.test(ticketId)) throw new Error("invalid");
-  return { ticketId };
+  if (!withLevel) return { ticketId };
+  if (!isDeviceAccessLevel(value.accessLevel)) throw new Error("invalid");
+  return { ticketId, accessLevel: value.accessLevel };
+}
+
+function decodeAccessLevelBody(value: unknown): {
+  readonly deviceId: string;
+  readonly accessLevel: DeviceAccessLevel;
+} {
+  requireExactKeys(value, ["accessLevel", "deviceId"]);
+  const deviceId = value.deviceId as string;
+  if (!UUID_PATTERN.test(deviceId) || !isDeviceAccessLevel(value.accessLevel)) {
+    throw new Error("invalid");
+  }
+  return { deviceId, accessLevel: value.accessLevel };
+}
+
+function decodePauseBody(value: unknown): { readonly paused: boolean } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("invalid");
+  }
+  const keys = Object.keys(value);
+  const paused = (value as Record<string, unknown>).paused;
+  if (keys.length !== 1 || typeof paused !== "boolean") throw new Error("invalid");
+  return { paused };
 }
 
 function decodeDenialBody(value: unknown): {
