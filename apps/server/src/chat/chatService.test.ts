@@ -1531,6 +1531,35 @@ describe("ChatService", () => {
     );
   });
 
+  it("still refuses a turn nobody sent on a thread whose own Google Antigravity provider is turned off", async () => {
+    let on = true;
+    const { service, fakeDriver } = openFixture({
+      driverKindFor: () => "antigravity",
+      providerEnabledFor: () => on,
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Antigravity, turned off",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    on = false;
+
+    // Only a pool candidate or the fallback is skipped while off; the
+    // thread's own provider is judged by what it declares, on or off.
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Hello",
+      }),
+    ).rejects.toMatchObject({
+      failure: { category: "unauthorized", message: ANTIGRAVITY_UNATTENDED_REFUSAL },
+    });
+    expect(fakeDriver.sentTurns).toHaveLength(0);
+  });
+
   it("sends no turn nobody sent on a thread running on Google Antigravity, and takes the person's own", async () => {
     const window = decodeWindowId("84000000-0000-4000-8000-000000000011");
     const { service, fakeDriver } = openFixture({ driverKindFor: () => "antigravity" });
