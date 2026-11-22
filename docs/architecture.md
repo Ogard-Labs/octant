@@ -7999,6 +7999,33 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   the person a card naming the path (Auto's reviewer does not answer it), and
   Accept edits and Full access write at once; for Code the stricter of the
   journaled and running posture applies, so a session-only grant still asks.
+  On macOS the same tool's `icon-set` operation turns a finished image of the
+  thread into an icon set under a directory of that folder: an Xcode
+  `AppIcon.appiconset` for iOS (one 1024 universal icon) or macOS (ten sizes),
+  Android `mipmap-*` launcher icons and a 512 Play Store icon, or web favicons,
+  a 180 Apple touch icon and 192 and 512 manifest icons, with the asset
+  catalog's `Contents.json` where Xcode needs one. macOS's own `/usr/bin/sips`
+  resizes it (an argument array, never a shell, in a private temporary
+  directory that is always removed), so Octant adds no image library; a host
+  without `sips` is not offered the operation at all, and a portable resizer
+  is a follow-up. The source must be square and at least 1024 pixels. For
+  iOS it must show no transparency, since App Store Connect rejects an icon
+  with an alpha channel; an image whose alpha channel is opaque everywhere, as
+  image models often write, is saved without it. Every target path is checked
+  for create (inside the folder, not existing) before anything is written,
+  again after the card, and each write is still an exclusive create, so one
+  refused path writes nothing; for Android an existing launcher icon in
+  another format (`ic_launcher.webp` beside a new `ic_launcher.png`) is
+  refused too, since Android treats both as one resource. The level and the
+  turn's Stop are read again before each file: a Stop, a drop to Plan, a drop
+  to a level that asks when nobody was asked, or a failed write ends the set
+  there, and the result names the files already written so they can be
+  cleared before a retry. Nothing written is deleted again, since removing a
+  file would need proof no one changed it since. The level decides as for one save, the card naming
+  the directory (`.` is the folder itself) and the file count; a client that
+  cannot show the count is not shown the card. For web
+  the result carries the `<link>` tags and the manifest `icons` snippet for
+  the agent to place: Octant edits no HTML or manifest file.
   Generation can also take up to four reference images, including a combined
   parent image: pictures attached to the person's latest message, finished
   images of this thread, and, in Work and Code only, screenshots kept by this

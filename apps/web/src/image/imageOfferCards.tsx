@@ -21,8 +21,12 @@ interface ImageOfferCardProps {
 export function ImageSaveOfferCard({ offer: pending, busy, decide: answer }: ImageOfferCardProps) {
   if (pending.kind !== "save") return null;
   const decide = (decision: "save" | "cancel") => answer({ offerId: pending.offerId, decision });
+  const iconSet = pending.fileCount;
   return (
-    <article aria-label="Image save request" className="follow-up-card">
+    <article
+      aria-label={iconSet === undefined ? "Image save request" : "Icon set save request"}
+      className="follow-up-card"
+    >
       <div className="follow-up-card__head">
         <span className="follow-up-card__kind">
           <ImageIcon aria-hidden="true" size={12} /> Image · asked by the agent
@@ -37,11 +41,25 @@ export function ImageSaveOfferCard({ offer: pending, busy, decide: answer }: Ima
           <X aria-hidden="true" size={12} />
         </OctantIconButton>
       </div>
-      <p className="follow-up-card__title">Save this image as a new file?</p>
-      <p className="follow-up-card__summary">
-        The agent wants to save an image this thread generated in the folder it works in. An
-        existing file is never replaced.
-      </p>
+      {iconSet === undefined ? (
+        <>
+          <p className="follow-up-card__title">Save this image as a new file?</p>
+          <p className="follow-up-card__summary">
+            The agent wants to save an image this thread generated in the folder it works in. An
+            existing file is never replaced.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="follow-up-card__title">
+            Save an icon set as {iconSet} new files in this directory?
+          </p>
+          <p className="follow-up-card__summary">
+            The agent wants to resize an image this thread generated into icons in the folder it
+            works in. If any of the files already exists, nothing is written.
+          </p>
+        </>
+      )}
       <p className="follow-up-card__prompt" title={pending.relativePath}>
         {pending.relativePath}
       </p>

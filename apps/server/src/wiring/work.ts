@@ -131,6 +131,7 @@ import {
 } from "../work/workThreadBoardService";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
+import { hostIconSetsUnder } from "../image/iconSetRenderer";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import type { NarrationForTurn } from "../speech/narrationTool";
 import type { TranscriptionForTurn } from "../speech/transcriptionTool";
@@ -1010,6 +1011,9 @@ export function wireWork(deps: WorkDependencies) {
                 write: (relativePath, bytes) =>
                   saveGeneratedImageUnder({ root: input.projectRoot, relativePath, bytes }),
               },
+              // Icon sets are resized by macOS's own image tool, so a host
+              // without it is not offered them.
+              ...hostIconSetsUnder(input.projectRoot, persistence.dataDirectory),
               // Plan changes nothing on the host or outside it, and a
               // generation calls a paid provider and stores the image.
               refusal: () => runningLevel().imageRefusal,

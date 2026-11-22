@@ -34,8 +34,10 @@ import {
   type SpeechTranscriptionLanguage,
 } from "@octant/contracts";
 import {
+  MEDIA_ICON_SET_TARGETS,
   MEDIA_TOOL_CONTRIBUTION_KIND,
   type MediaDescribableImageType,
+  type MediaIconSetTarget,
   type MediaImageReferenceInput,
   type MediaToolHostPort,
   type MediaToolPluginDefinition,
@@ -113,6 +115,7 @@ export function isReservedBuiltinMediaToolName(name: string): boolean {
 const textEncoder = new TextEncoder();
 const TRANSCRIPTION_PAGE_SIZE = 32_000;
 const MAX_SAVE_PATH_CHARACTERS = 512;
+const MAX_ICON_SET_DIRECTORY_CHARACTERS = 400;
 const MAX_WORK_RELATIVE_PATH_BYTES = 4_096;
 
 const LOOK_MEDIA_BY_EXTENSION: Readonly<Record<string, MediaDescribableImageType>> = {
@@ -141,6 +144,13 @@ const LOOK_INPUT_SCHEMA = {
 
 const IMAGE_DESCRIPTION =
   "Generate or revise a picture (a photo, illustration, or rendered scene) with an image model the person set up in Octant. Call it when the person asks for an image instead of drawing one yourself as SVG, HTML, or CSS: a real image model gives a far better result. Keep SVG for logos, icons, and diagrams, or when the person asks for it. Octant shows the person a card in this thread where they pick the model and confirm, because each generation is billed to their image provider; nothing runs until they answer, unless they already said not to ask again or the thread runs at Full access, where it uses the profile the person named in Settings (else the first one set up) on its default model. Describe the image in prompt; profileInstanceId and modelId only suggest what the card preselects. To revise a generated image, pass its parentAttachmentId. Use references to include up to four images: attachment for the latest photos, generated-image by attachmentId, or in Work and Code browser-capture by captureId or file by relativePath. References always require confirmation. Never pass credentials, endpoints, or absolute paths. The result says what happened: completed with each image's attachmentId (the images are shown in this thread, and to you when you can read images; use an attachmentId to revise one, to place it in a Canvas design as a generated-image asset, or to save it), failed with the reason, generating with a jobId when it takes longer than the call waits (it appears in this thread when done; do not start another), agent-draws (the person wants you to make the visual yourself), or cancelled (do not ask again unless they do). In a Work or Code thread, operation save with an attachmentId from this thread and a relativePath stores that image as a new file in the folder you work in: it never overwrites a file, Plan refuses it, and at Ask first the person confirms the path. Never invent an image URL.";
+
+/**
+ * Said only where the host offers icon sets, so a model off macOS is never
+ * told about an operation it cannot use.
+ */
+const ICON_SET_DESCRIPTION =
+  " Operation icon-set with an attachmentId from this thread, a target (apple-ios, apple-macos, android, or web), and a directory relative to the folder you work in (for example App/Assets.xcassets, app/src/main/res, public, or . for the folder itself) resizes that image into every size the target needs, with the Xcode Contents.json where it applies; use it for an app icon or favicons instead of resizing by hand. The image must be square and at least 1024 pixels, and must show no transparency for apple-ios. It writes only new files: if any of them already exists nothing is written. Plan refuses it, and at Ask first the person confirms the directory. For web the result includes the <link> tags and manifest icons to place yourself.";
 
 const IMAGE_INPUT_SCHEMA = {
   type: "object",
@@ -171,6 +181,16 @@ const IMAGE_INPUT_SCHEMA = {
   },
 } as const;
 
+const IMAGE_WITH_ICON_SET_INPUT_SCHEMA = {
+  ...IMAGE_INPUT_SCHEMA,
+  properties: {
+    ...IMAGE_INPUT_SCHEMA.properties,
+    operation: { type: "string", enum: ["generate", "save", "icon-set"] },
+    target: { type: "string", enum: MEDIA_ICON_SET_TARGETS },
+    directory: { type: "string" },
+  },
+} as const;
+
 const FORBIDDEN_IMAGE_INPUT_KEYS = [
   "apiKey",
   "credential",
@@ -186,6 +206,10 @@ const FORBIDDEN_IMAGE_INPUT_KEYS = [
 
 function isPlainObject(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isIconSetTarget(value: unknown): value is MediaIconSetTarget {
+  return MEDIA_ICON_SET_TARGETS.some((target) => target === value);
 }
 
 function combineSignals(stopped: AbortSignal, callSignal: AbortSignal | undefined): AbortSignal {
@@ -651,6 +675,13 @@ interface ParsedImageSaveInput {
   readonly relativePath: string;
 }
 
+interface ParsedIconSetInput {
+  readonly operation: "icon-set";
+  readonly attachmentId: ImageArtifactId;
+  readonly target: MediaIconSetTarget;
+  readonly directory: string;
+}
+
 /**
  * Pre-flight POSIX relative-path check mirroring `canonicalizeWorkRelativePath`
  * in `@octant/domain`. `@octant/plugin-host` intentionally does not depend on
@@ -719,7 +750,12 @@ function parseImageReferenceInputs(
 
 function parseImageToolInput(
   inputJson: string,
-): ParsedImageGenerateInput | ParsedImageSaveInput | { readonly error: string } {
+  offersIconSets: boolean,
+):
+  | ParsedImageGenerateInput
+  | ParsedImageSaveInput
+  | ParsedIconSetInput
+  | { readonly error: string } {
   let raw: unknown;
   try {
     raw = JSON.parse(inputJson);
@@ -754,7 +790,42 @@ function parseImageToolInput(
       return { error: "A save needs the attachmentId of a finished image on this thread." };
     }
   }
-  if (operation !== "generate") return { error: "The operation is generate or save." };
+  if (operation === "icon-set" && offersIconSets) {
+    const target = raw["target"];
+    const directory = raw["directory"];
+    if (!isIconSetTarget(target)) {
+      return { error: "An icon set needs a target: apple-ios, apple-macos, android, or web." };
+    }
+    if (typeof directory !== "string" || directory.trim().length === 0) {
+      return { error: "An icon set needs directory, a folder inside this thread's folder." };
+    }
+    if (directory.length > MAX_ICON_SET_DIRECTORY_CHARACTERS) {
+      return { error: "The icon set directory is too long." };
+    }
+    const destination = directory.trim().replace(/\/+$/u, "");
+    // "." names the folder itself, for a site whose root page lives there.
+    const canonical = destination === "." ? "." : canonicalizeRelativeReferencePath(destination);
+    if (canonical === undefined) {
+      return { error: "The icon set directory must be inside this thread's folder." };
+    }
+    try {
+      return {
+        operation: "icon-set",
+        attachmentId: decodeImageArtifactId(raw["attachmentId"]),
+        target,
+        directory: canonical,
+      };
+    } catch {
+      return { error: "An icon set needs the attachmentId of a finished image on this thread." };
+    }
+  }
+  if (operation !== "generate") {
+    return {
+      error: offersIconSets
+        ? "The operation is generate, save, or icon-set."
+        : "The operation is generate or save.",
+    };
+  }
   const prompt = raw["prompt"];
   if (typeof prompt !== "string" || prompt.trim().length === 0) {
     return { error: "The image prompt must not be empty." };
@@ -816,12 +887,15 @@ export const CREATE_IMAGE_MEDIA_TOOL_PLUGIN: MediaToolPluginDefinition = {
       return undefined;
     }
     const stopped = new AbortController();
+    const iconSet = imageGeneration.iconSet;
     return {
       definitions: [
         {
           name: CREATE_IMAGE_TOOL_NAME,
-          description: IMAGE_DESCRIPTION,
-          inputSchema: IMAGE_INPUT_SCHEMA,
+          description:
+            iconSet === undefined ? IMAGE_DESCRIPTION : IMAGE_DESCRIPTION + ICON_SET_DESCRIPTION,
+          inputSchema:
+            iconSet === undefined ? IMAGE_INPUT_SCHEMA : IMAGE_WITH_ICON_SET_INPUT_SCHEMA,
         },
       ],
       taintPolicy: "none",
@@ -835,8 +909,49 @@ export const CREATE_IMAGE_MEDIA_TOOL_PLUGIN: MediaToolPluginDefinition = {
         }
         const refusal = imageGeneration.refusal?.();
         if (refusal !== undefined) return errorResult(refusal);
-        const parsed = parseImageToolInput(call.inputJson);
+        const parsed = parseImageToolInput(call.inputJson, iconSet !== undefined);
         if ("error" in parsed) return errorResult(parsed.error);
+        if (parsed.operation === "icon-set") {
+          if (iconSet === undefined) return errorResult("tool-unavailable");
+          const made = await iconSet({
+            attachmentId: parsed.attachmentId,
+            target: parsed.target,
+            directory: parsed.directory,
+            signal,
+          });
+          switch (made.status) {
+            case "saved":
+              return {
+                result: {
+                  status: "saved",
+                  directory: made.directory,
+                  files: made.files,
+                  ...(made.snippets === undefined
+                    ? {}
+                    : {
+                        html: made.snippets.html,
+                        manifestIcons: made.snippets.manifestIcons,
+                        message:
+                          "Octant did not edit any HTML or manifest file. Place the link tags and manifest icons yourself.",
+                      }),
+                },
+              };
+            case "not-saved":
+              return {
+                result: {
+                  status: "not-saved",
+                  message: "The person did not save the icon set. Do not ask again unless they do.",
+                },
+              };
+            case "refused":
+              return errorResult(made.error);
+            case "failed":
+              return {
+                result: { status: "failed", error: made.error, written: made.written },
+                isError: true,
+              };
+          }
+        }
         if (parsed.operation === "save") {
           if (imageGeneration.save === undefined) {
             return errorResult(
