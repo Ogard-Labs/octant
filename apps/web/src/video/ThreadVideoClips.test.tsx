@@ -77,8 +77,11 @@ describe("ThreadVideoClips", () => {
         expiresAt: new Date(Date.now() + 600_000).toISOString(),
       })),
     };
-    const blob = new Blob(["clip-bytes"], { type: "video/mp4" });
-    const clipFetch = vi.fn(async () => new Response(blob));
+    // A Blob body here fails Node's undici on some runtimes ("object.stream is
+    // not a function"), so the fake answer carries plain bytes.
+    const clipFetch = vi.fn(
+      async () => new Response("clip-bytes", { headers: { "content-type": "video/mp4" } }),
+    );
     const createObjectURL = vi
       .spyOn(URL, "createObjectURL")
       .mockReturnValue("blob:http://localhost/clip");
@@ -99,7 +102,11 @@ describe("ThreadVideoClips", () => {
       await userEvent.click(screen.getByRole("link", { name: "Download" }));
       await waitFor(() => expect(anchorClick).toHaveBeenCalled());
       expect(clipFetch).toHaveBeenCalledWith("http://127.0.0.1:3100/api/video/clip?ticket=t");
-      expect(createObjectURL).toHaveBeenCalledWith(blob);
+      const saved = createObjectURL.mock.calls[0]?.[0];
+      if (saved === undefined || !("text" in saved))
+        throw new Error("the download did not save a Blob");
+      expect(saved.type).toBe("video/mp4");
+      expect(await saved.text()).toBe("clip-bytes");
       expect(revokeObjectURL).toHaveBeenCalledWith("blob:http://localhost/clip");
     } finally {
       vi.unstubAllGlobals();
