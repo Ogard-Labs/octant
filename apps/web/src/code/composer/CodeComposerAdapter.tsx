@@ -86,7 +86,6 @@ import { ComposerVoiceButton } from "../../voice/ComposerVoiceButton";
 import { appendTranscript } from "../../voice/appendTranscript";
 import { HostSelector } from "../../shell/HostSelector";
 import { OctantButton } from "../../ui/base/OctantButton";
-import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { CodeBranchSelector } from "./CodeBranchSelector";
 import { threadAccessOf } from "@octant/domain/guardrail-policy";
 import { PermissionModePicker } from "../PermissionModePicker";
@@ -118,6 +117,7 @@ import type { CodeCommand, CodeCommandResult, CodeWorktreeRef } from "@octant/co
 import type { OctantHostBridge } from "../../shell/hostBridge";
 import { boundsInsideViewport } from "../../browser/useNativeBrowserSurface";
 import { observeComposerPlacement } from "../codeWorkspaceApprovals";
+import { ComposerInput, type ComposerInputElement } from "../../composer/ComposerInput";
 
 export interface CodeComposerAdapterProps {
   readonly projectId?: ProjectId;
@@ -345,7 +345,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     ...(selectedFamily === undefined ? {} : { providerFamily: selectedFamily }),
     ...(storedExtensionReceipts.length === 0 ? {} : { initialReceipts: storedExtensionReceipts }),
   });
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<ComposerInputElement>(null);
   const composerIdRef = useRef(globalThis.crypto.randomUUID());
   const launches = useContext(WorktreeLaunchContext)?.launches;
   useEffect(() => {
@@ -459,6 +459,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     executionPolicy,
   });
   const atMenu = useComposerAtMenu({
+    modelGroups: props.providerGroups,
     provider: providerMentions,
     textarea: () => textareaRef.current,
     draft: prompt,
@@ -852,7 +853,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     return images.consumePaste(items);
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function handleKeyDown(event: KeyboardEvent<ComposerInputElement>) {
     if (atMenu.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
@@ -1151,7 +1152,8 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               </>
             }
             input={
-              <OctantTextarea
+              <ComposerInput
+                renderModelChip={atMenu.renderModelChip}
                 aria-label="First message"
                 aria-autocomplete="list"
                 aria-expanded={atMenu.open || slash.open}
@@ -1184,13 +1186,12 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   if (folderDrops.onDrop(event) || attachFromTransfer(event.dataTransfer))
                     event.preventDefault();
                 }}
-                onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+                onPaste={(event: ClipboardEvent<ComposerInputElement>) => {
                   if (props.creating === true) return;
                   if (attachFromTransfer(event.clipboardData)) event.preventDefault();
                 }}
                 placeholder={draftThreadModePresentation("code").composerPlaceholder}
                 ref={textareaRef}
-                rows={3}
                 value={prompt}
               />
             }

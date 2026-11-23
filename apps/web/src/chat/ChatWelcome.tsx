@@ -30,7 +30,6 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ChatStarterIdeas } from "./ChatStarterIdeas";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
@@ -44,6 +43,7 @@ import { HomeStartList, type HomeStartModel } from "../shell/HomeStart";
 import type { HomeListContributor, HomeListRead } from "../home/homeCards";
 import { recentThreadRows } from "../home/useStartListRows";
 import { WorkKindSwitch } from "../shell/WorkKindSwitch";
+import { ComposerInput, type ComposerInputElement } from "../composer/ComposerInput";
 
 export interface ChatWelcomeProps {
   /**
@@ -112,6 +112,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
     ...(family === undefined ? {} : { providerFamily: family }),
   });
   const atMenu = useComposerAtMenu({
+    modelGroups: props.providerGroups,
     provider: composerProviderMentions(props.providerGroups, props.selectedProviderInstanceId),
     draft: prompt,
     onDraftChange: setPrompt,
@@ -125,7 +126,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
     props.selectedProviderInstanceId,
     props.selectedModelId,
   );
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<ComposerInputElement>(null);
   const trimmed = prompt.trim();
   const canSubmit = trimmed.length > 0 && ready && !props.creating && !atMenu.resolving;
   const statusMessage =
@@ -171,7 +172,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
     else props.onCreateChat(trimmed, options);
   }, [canSubmit, extensionDraft, props, trimmed, modelOptionValues, stagedFiles]);
 
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function handleKeyDown(event: KeyboardEvent<ComposerInputElement>) {
     if (atMenu.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
@@ -255,7 +256,8 @@ export function ChatWelcome(props: ChatWelcomeProps) {
               />
             }
             input={
-              <OctantTextarea
+              <ComposerInput
+                renderModelChip={atMenu.renderModelChip}
                 aria-activedescendant={
                   atMenu.active !== undefined
                     ? `${atMenu.listId}-${atMenu.active.id}`
@@ -287,7 +289,6 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                 onKeyDown={handleKeyDown}
                 placeholder="Ask anything, or pick a Project to begin…"
                 ref={textareaRef}
-                rows={3}
                 value={prompt}
               />
             }

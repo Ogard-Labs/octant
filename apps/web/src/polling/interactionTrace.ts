@@ -71,7 +71,7 @@ export function traceLaunchControl(kind: "setup" | "composer"): (() => void) | u
   const selector =
     kind === "setup"
       ? "[data-launch-control='setup']:enabled"
-      : ".workspace-layer textarea.composer-input:enabled:not([readonly])";
+      : ".workspace-layer .composer-input:not([disabled]):not([readonly])";
   const deadline = performance.now() + 45_000;
   let last: Element | undefined;
   let frame = requestAnimationFrame(check);

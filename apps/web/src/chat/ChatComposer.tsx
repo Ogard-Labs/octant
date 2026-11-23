@@ -47,7 +47,6 @@ import { markInteraction, markInteractionAfterPaint } from "../polling/interacti
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import type { ComposerNoticeItem, ComposerProgress } from "../composer/ComposerNotice";
@@ -66,6 +65,7 @@ import {
   type OctantCommand,
   type SlashCommandToken,
 } from "../palette/commandModel";
+import { ComposerInput, type ComposerInputElement } from "../composer/ComposerInput";
 
 export type ChatComposerResearchRouting = "automatic" | "searxng" | "provider-native";
 
@@ -232,7 +232,7 @@ export type ChatComposerThreadMentions = ThreadMentions;
 export type ChatComposerExtensionSelection = ComposerExtensionSelection;
 
 export function ChatComposer(props: ChatComposerProps) {
-  const messageRef = useRef<HTMLTextAreaElement>(null);
+  const messageRef = useRef<ComposerInputElement>(null);
   const [extensionResolving, setExtensionResolving] = useState(false);
   const resolveExtensionReference = useCallback(
     async (reference: string): Promise<boolean> => {
@@ -279,6 +279,7 @@ export function ChatComposer(props: ChatComposerProps) {
     ),
   ];
   const atMenu = useComposerAtMenu({
+    modelGroups: props.providerGroups,
     provider: composerProviderMentions(props.providerGroups, props.selectedProviderInstanceId),
     draft: props.draft,
     onDraftChange: props.onDraftChange,
@@ -461,13 +462,13 @@ export function ChatComposer(props: ChatComposerProps) {
     void resolveExtensionReference(command.action.reference);
   }
 
-  function onDraftKeyUp(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function onDraftKeyUp(event: KeyboardEvent<ComposerInputElement>) {
     if (event.key === "Escape") return;
     rememberCaret(event.currentTarget.selectionStart);
     syncTokens(event.currentTarget.value, event.currentTarget.selectionStart);
   }
 
-  async function onDraftKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  async function onDraftKeyDown(event: KeyboardEvent<ComposerInputElement>) {
     if (event.nativeEvent.isComposing) return;
     if (suggestionInput.takeOnTab(event)) return;
     if (atMenu.handleKeyDown(event)) return;
@@ -512,7 +513,7 @@ export function ChatComposer(props: ChatComposerProps) {
    * bytes stay unread and the caller is told why. Non-image clipboard content
    * is never consumed, so ordinary text paste keeps working.
    */
-  function onDraftPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+  function onDraftPaste(event: ClipboardEvent<ComposerInputElement>) {
     if (props.attachmentBusy === true) return;
     if (!clipboardHasImage(event.clipboardData)) return;
     if (imageAttachment.kind === "unavailable") {
@@ -661,7 +662,8 @@ export function ChatComposer(props: ChatComposerProps) {
   );
 
   const input = (
-    <OctantTextarea
+    <ComposerInput
+      renderModelChip={atMenu.renderModelChip}
       aria-activedescendant={
         atMenu.active !== undefined
           ? `${atMenu.listId}-${atMenu.active.id}`
@@ -712,7 +714,6 @@ export function ChatComposer(props: ChatComposerProps) {
       data-suggested={suggestionInput.suggested ? "true" : undefined}
       placeholder={suggestionInput.placeholder}
       ref={messageRef}
-      rows={3}
       value={props.draft}
     />
   );

@@ -612,6 +612,7 @@ describe("CodeComposerAdapter", () => {
 // Interaction coverage beyond static markup.
 import { createRoot } from "react-dom/client";
 import { act } from "react";
+import type { ComposerInputElement } from "../../composer/ComposerInput";
 
 describe("CodeComposerAdapter interactions", () => {
   it("defaults Start from origin when authoritative remote facts arrive after mount", async () => {
@@ -718,14 +719,10 @@ describe("CodeComposerAdapter interactions", () => {
         />,
       );
     });
-    const textarea = container.querySelector("textarea");
+    const textarea = container.querySelector<ComposerInputElement>(".composer-input");
     expect(textarea).not.toBeNull();
     await act(async () => {
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype,
-        "value",
-      )?.set;
-      nativeInputValueSetter?.call(textarea, "Ship the fix");
+      if (textarea !== null) textarea.value = "Ship the fix";
       textarea!.dispatchEvent(new Event("input", { bubbles: true }));
       textarea!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });
@@ -760,13 +757,9 @@ describe("CodeComposerAdapter interactions", () => {
         />,
       );
     });
-    const textarea = container.querySelector("textarea");
+    const textarea = container.querySelector<ComposerInputElement>(".composer-input");
     await act(async () => {
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype,
-        "value",
-      )?.set;
-      nativeInputValueSetter?.call(textarea, "Ship the fix");
+      if (textarea !== null) textarea.value = "Ship the fix";
       textarea!.dispatchEvent(new Event("input", { bubbles: true }));
       textarea!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });
@@ -798,13 +791,9 @@ describe("CodeComposerAdapter interactions", () => {
         />,
       );
     });
-    const textarea = container.querySelector("textarea");
+    const textarea = container.querySelector<ComposerInputElement>(".composer-input");
     await act(async () => {
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype,
-        "value",
-      )?.set;
-      nativeInputValueSetter?.call(textarea, "Ship the fix");
+      if (textarea !== null) textarea.value = "Ship the fix";
       textarea!.dispatchEvent(new Event("input", { bubbles: true }));
       textarea!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });
@@ -836,13 +825,9 @@ describe("CodeComposerAdapter interactions", () => {
         />,
       );
     });
-    const textarea = container.querySelector("textarea");
+    const textarea = container.querySelector<ComposerInputElement>(".composer-input");
     await act(async () => {
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype,
-        "value",
-      )?.set;
-      nativeInputValueSetter?.call(textarea, "Ship the fix");
+      if (textarea !== null) textarea.value = "Ship the fix";
       textarea!.dispatchEvent(new Event("input", { bubbles: true }));
       textarea!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });
@@ -909,13 +894,9 @@ describe("CodeComposerAdapter interactions", () => {
       option!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    const textarea = container.querySelector("textarea");
+    const textarea = container.querySelector<ComposerInputElement>(".composer-input");
     await act(async () => {
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype,
-        "value",
-      )?.set;
-      nativeInputValueSetter?.call(textarea, "Ship the remote branch");
+      if (textarea !== null) textarea.value = "Ship the remote branch";
       textarea!.dispatchEvent(new Event("input", { bubbles: true }));
       textarea!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });

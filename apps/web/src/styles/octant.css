@@ -4761,6 +4761,25 @@ input.switch:checked::after {
 .composer-input::placeholder {
   color: var(--oct-meta);
 }
+/* The prompt is an editable element, not a text field: it keeps typed line
+   breaks and spaces as a field would, scrolls past its max height, and draws
+   its own placeholder while empty. */
+octant-composer-input.composer-input {
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  cursor: text;
+}
+octant-composer-input.composer-input[data-empty="true"]::before {
+  position: absolute;
+  color: var(--oct-meta);
+  content: attr(placeholder);
+  pointer-events: none;
+}
+octant-composer-input.composer-input[disabled] {
+  cursor: default;
+  opacity: var(--oct-disabled-opacity);
+}
 /* The box's one line: attach, the prompt, the microphone, send. The
    controls ride the prompt's last line, so they stay put as the prompt grows
    upward. */
@@ -5364,10 +5383,12 @@ html[data-octant-reduced-motion="true"] .callout {
 .thread-composer__surface:has(.composer-input[data-suggested="true"]) {
   position: relative;
 }
-.composer-input[data-suggested="true"]:placeholder-shown {
+.composer-input[data-suggested="true"]:is(:placeholder-shown, [data-empty="true"]) {
   padding-inline-end: 52px;
 }
-.thread-composer__surface:has(.composer-input[data-suggested="true"]:placeholder-shown)::after {
+.thread-composer__surface:has(
+  .composer-input[data-suggested="true"]:is(:placeholder-shown, [data-empty="true"])
+)::after {
   position: absolute;
   top: 12px;
   /* Clear of send at the box's trailing edge. */
@@ -5383,7 +5404,7 @@ html[data-octant-reduced-motion="true"] .callout {
 }
 /* With the microphone beside send, the Tab cap keeps clear of both. */
 .thread-composer__surface:has(.composer-voice):has(
-  .composer-input[data-suggested="true"]:placeholder-shown
+  .composer-input[data-suggested="true"]:is(:placeholder-shown, [data-empty="true"])
 )::after {
   right: calc(var(--oct-space-2) * 2 + var(--oct-space-1) + 56px);
 }

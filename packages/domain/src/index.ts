@@ -276,3 +276,4 @@ export * from "./turnActivityTiming";
 export * from "./pullRequestIdentityPolicy";
 export * from "./editDiagnosticsPolicy";
 export * from "./providerFolderScanPolicy";
+export * from "./subagentModelTag";

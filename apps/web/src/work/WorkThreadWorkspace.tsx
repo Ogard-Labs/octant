@@ -115,7 +115,6 @@ import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
-import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ThreadInfo } from "../composer/ThreadInfo";
 import { ThreadAccountControl } from "../providers/ThreadAccountControl";
@@ -241,6 +240,7 @@ import {
   useThreadProviderMentions,
 } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
+import { ComposerInput, type ComposerInputElement } from "../composer/ComposerInput";
 
 /** Only the person's messages carry a time here; the rows after one share it. */
 function workRowHappenedAt(row: WorkTranscriptRow): string | undefined {
@@ -1053,7 +1053,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   } else if (String(initialThread.current?.id) !== String(props.threadId)) {
     initialThread.current = undefined;
   }
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<ComposerInputElement>(null);
   const currentThreadKeyRef = useRef(String(props.threadId));
   currentThreadKeyRef.current = String(props.threadId);
   const mentionListId = useId();
@@ -1576,6 +1576,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       thread?.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
   });
   const atMenu = useComposerAtMenu({
+    modelGroups: props.providerGroups,
     provider: providerMentions,
     textarea: () => textareaRef.current,
     draft: composerDraft.text,
@@ -2487,7 +2488,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     // Restore only when this thread's composer is shown, not on every keystroke.
   }, [props.threadId]);
 
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function handleKeyDown(event: KeyboardEvent<ComposerInputElement>) {
     if (suggestionInput.takeOnTab(event)) return;
     if (atMenu.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
@@ -3404,7 +3405,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             </>
           }
           input={
-            <OctantTextarea
+            <ComposerInput
+              renderModelChip={atMenu.renderModelChip}
               aria-label="Work prompt"
               aria-autocomplete="list"
               aria-expanded={atMenu.open || slash.open}
@@ -3434,6 +3436,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               onKeyDown={handleKeyDown}
               onKeyUp={(event) => {
                 rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
+                // Escape closed a menu on key down; re-reading the token on its
+                // release would open it again, as the Code composer knows.
+                if (event.key === "Escape") return;
                 syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
               }}
               onDragOver={(event) => event.preventDefault()}
@@ -3441,14 +3446,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 if (folderDrops.onDrop(event) || attachFromTransfer(event.dataTransfer))
                   event.preventDefault();
               }}
-              onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+              onPaste={(event: ClipboardEvent<ComposerInputElement>) => {
                 if ((creating && !preparingQueue.current) || completionLocked) return;
                 if (attachFromTransfer(event.clipboardData)) event.preventDefault();
               }}
               data-suggested={suggestionInput.suggested ? "true" : undefined}
               placeholder={suggestionInput.placeholder}
               ref={textareaRef}
-              rows={3}
               value={prompt}
             />
           }

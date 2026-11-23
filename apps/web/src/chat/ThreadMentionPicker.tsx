@@ -7,6 +7,7 @@ import {
 import { Hash, MessagesSquare, X } from "../ui/icons";
 import { useState, type KeyboardEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import type { ComposerInputElement } from "../composer/ComposerInput";
 
 /**
  * A `#thread` chip a composer is currently carrying. The chip is a structured
@@ -52,7 +53,7 @@ export interface ThreadMentionTypeaheadController {
   /** Recompute the token after every edit or caret move. */
   readonly sync: (draft: string, caretIndex: number | null) => void;
   /** Returns `true` when the typeahead consumed the key. */
-  readonly handleKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => boolean;
+  readonly handleKeyDown: (event: KeyboardEvent<ComposerInputElement>) => boolean;
   readonly choose: (candidate: ThreadMentionCandidate) => void;
 }
 
@@ -70,7 +71,7 @@ export function useThreadMentionTypeahead(input: {
   readonly draft: string;
   readonly onDraftChange: (draft: string, caretIndex: number) => void;
   /** The live textarea, so the caret lands after an inserted chip. */
-  readonly textarea: () => HTMLTextAreaElement | null;
+  readonly textarea: () => ComposerInputElement | null;
   /** Keeps the typeahead shut while the composer cannot accept a selection. */
   readonly disabled?: boolean;
 }): ThreadMentionTypeaheadController {
@@ -106,7 +107,7 @@ export function useThreadMentionTypeahead(input: {
     });
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): boolean {
+  function handleKeyDown(event: KeyboardEvent<ComposerInputElement>): boolean {
     if (open && candidates.length > 0) {
       if (event.key === "ArrowDown") {
         event.preventDefault();

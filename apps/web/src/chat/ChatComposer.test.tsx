@@ -136,7 +136,7 @@ describe("ChatComposer", () => {
   it("starts with the composer's shared prompt height and hides a redundant provider picker", () => {
     renderComposer();
 
-    expect(screen.getByRole("textbox", { name: "Message" })).toHaveAttribute("rows", "3");
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveClass("composer-input");
     expect(screen.getByRole("toolbar", { name: "Composer controls" })).toBeVisible();
     expect(screen.queryByRole("combobox", { name: "Provider" })).not.toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Model" })).toBeVisible();

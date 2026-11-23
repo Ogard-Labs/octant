@@ -331,7 +331,7 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
     const apply = () => {
       const prompt = surface.querySelector<HTMLElement>(".composer-input");
       const field = surface.querySelector<HTMLElement>(".composer-field");
-      const empty = prompt instanceof HTMLTextAreaElement && prompt.value === "";
+      const empty = prompt !== null && "value" in prompt && prompt.value === "";
       const crowded = field !== null && field.previousElementSibling !== null;
       const grown = prompt !== null && prompt.offsetHeight > COMPOSER_ONE_ROW_MAX_HEIGHT;
       const wasBox = surface.dataset["shape"] === "box";

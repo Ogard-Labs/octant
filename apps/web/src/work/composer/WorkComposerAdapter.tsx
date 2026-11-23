@@ -50,7 +50,6 @@ import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
 import { providerFamilyForThread } from "../../providers/providerFamily";
 import { HostSelector } from "../../shell/HostSelector";
 import { OctantButton } from "../../ui/base/OctantButton";
-import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { clipboardHasImage } from "../../chat/composerImagePaste";
 import { ComposerRowSlot, ComposerStartTray } from "../../composer/ComposerStartTray";
 import { ThreadComposer } from "../../composer/ThreadComposer";
@@ -70,6 +69,7 @@ import { useComposerThreadDropRegistration } from "../../chat/composerThreadDrop
 import { TrackerReferenceComposerHints } from "../../tracker/TrackerReferenceComposerHints";
 import type { MentionableThreadId } from "@octant/contracts";
 import { WorkKindSwitch } from "../../shell/WorkKindSwitch";
+import { ComposerInput, type ComposerInputElement } from "../../composer/ComposerInput";
 
 export interface WorkComposerAdapterProps {
   /** Text to start the composer with; a new revision replaces the draft once. */
@@ -162,13 +162,14 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     providerInstanceId: props.selectedProviderInstanceId,
   });
   const atMenu = useComposerAtMenu({
+    modelGroups: props.providerGroups,
     provider: providerMentions,
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
     onResolveExtensionReference: extensionDraft.resolveReference,
   });
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<ComposerInputElement>(null);
   const appliedPromptRevision = useRef<number | undefined>(undefined);
   const promptRequest = props.promptRequest;
   useEffect(() => {
@@ -319,12 +320,12 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     return images.consumePaste(items);
   }
 
-  function onDraftPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+  function onDraftPaste(event: ClipboardEvent<ComposerInputElement>) {
     if (props.creating === true) return;
     if (attachFromTransfer(event.clipboardData)) event.preventDefault();
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function handleKeyDown(event: KeyboardEvent<ComposerInputElement>) {
     if (atMenu.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
@@ -496,7 +497,8 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
               </>
             }
             input={
-              <OctantTextarea
+              <ComposerInput
+                renderModelChip={atMenu.renderModelChip}
                 aria-label="First message"
                 aria-autocomplete="list"
                 aria-expanded={atMenu.open || slash.open}
@@ -531,7 +533,6 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 onKeyDown={handleKeyDown}
                 onPaste={onDraftPaste}
                 placeholder={draftThreadModePresentation("work").composerPlaceholder}
-                rows={3}
                 value={prompt}
               />
             }

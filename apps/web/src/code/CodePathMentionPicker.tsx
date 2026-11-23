@@ -21,6 +21,7 @@ import {
   type PathMentionQuery,
 } from "./pathMentions";
 import { useCodeFileListingController } from "./useCodeFileListingController";
+import type { ComposerInputElement } from "../composer/ComposerInput";
 
 export interface CodePathMentionsOptions {
   readonly client?: CodeFileListingClient;
@@ -31,7 +32,7 @@ export interface CodePathMentionsOptions {
   readonly draft: string;
   readonly onDraftChange: (draft: string, caretIndex: number) => void;
   /** The live textarea, so the caret lands after the inserted path. */
-  readonly textarea: () => HTMLTextAreaElement | null;
+  readonly textarea: () => ComposerInputElement | null;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
 }
@@ -48,7 +49,7 @@ export interface CodePathMentionsController {
   /** Recompute the token after every edit or caret move. */
   readonly sync: (draft: string, caretIndex: number | null) => void;
   /** Returns `true` when the typeahead consumed the key. */
-  readonly handleKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => boolean;
+  readonly handleKeyDown: (event: KeyboardEvent<ComposerInputElement>) => boolean;
   readonly choose: (candidate: PathMentionCandidate) => void;
   /** Restore paths carried by a refused message. */
   readonly restore: (paths: ReadonlyArray<string>) => void;
@@ -193,7 +194,7 @@ export function useCodePathMentions(options: CodePathMentionsOptions): CodePathM
     });
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): boolean {
+  function handleKeyDown(event: KeyboardEvent<ComposerInputElement>): boolean {
     if (open && candidates.length > 0) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
