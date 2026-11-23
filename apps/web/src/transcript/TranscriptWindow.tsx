@@ -22,11 +22,7 @@ import { useTranscriptFindIndex } from "./useTranscriptFindIndex";
 import { TranscriptFindBar } from "./TranscriptFindBar";
 import { ArrowDown } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
-import {
-  resetTranscriptScrollMemory,
-  scrollMemory,
-  type TranscriptScrollMemory,
-} from "./transcriptScrollMemory";
+import { scrollMemory, type TranscriptScrollMemory } from "./transcriptScrollMemory";
 import {
   clearTranscriptMatches,
   findTranscriptMatches,
@@ -1005,5 +1001,3 @@ function computeScrollMargin(scrollParent: HTMLElement, lead: HTMLElement | null
   const leadHeight = lead === null ? 0 : lead.offsetHeight;
   return (Number.isFinite(paddingTop) ? paddingTop : 0) + leadHeight;
 }
-
-export { resetTranscriptScrollMemory };

@@ -2,14 +2,19 @@
   "$schema": "https://turbo.build/schema.json",
   "globalPassThroughEnv": ["OCTANT_DATA_DIR"],
   "tasks": {
+    "transit": {
+      "dependsOn": ["^transit"]
+    },
     "build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
     "test": {
+      "dependsOn": ["transit"],
       "outputs": []
     },
     "typecheck": {
+      "dependsOn": ["transit"],
       "outputs": []
     }
   }

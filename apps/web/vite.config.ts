@@ -89,7 +89,7 @@ export default defineConfig({
           environment: "jsdom",
           include: ["src/**/*.test.tsx", ...domTestFilesWithoutJsx],
           exclude: ["src/App.test.tsx"],
-          maxWorkers: 3,
+          maxWorkers: 2,
           sequence: { groupOrder: 1 },
           setupFiles: domSetupFiles,
         },

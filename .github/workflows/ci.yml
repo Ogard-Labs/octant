@@ -53,13 +53,16 @@ jobs:
           desktop_linux=true
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             files="$(gh api --paginate "repos/${{ github.repository }}/pulls/${PULL}/files" --jq '.[].filename')"
-            if [ -n "$files" ] && ! grep -qvE '^(docs/|[^/]+\.md$|\.coderabbit\.yaml$)' <<< "$files"; then
+            # Keep `docs/design/**` and `DESIGN.md` out of the docs-only skip:
+            # server tests read `docs/design/agent-tools.md` and visual checks
+            # cover `DESIGN.md`.
+            if [ -n "$files" ] && ! grep -qvE '^(docs/|[^/]+\.md$|\.coderabbit\.yaml$)' <<< "$files" && ! grep -qE '^(docs/design/|DESIGN\.md$)' <<< "$files"; then
               code=false
               share=false
               download_manifest=false
               desktop_linux=false
             else
-              if ! grep -qE '^(apps/share/|packages/|bun\.lock$|package\.json$|\.github/workflows/ci\.yml$)' <<< "$files"; then
+              if ! grep -qE '^(apps/share/|packages/|\.dockerignore$|bun\.lock$|package\.json$|\.github/workflows/ci\.yml$)' <<< "$files"; then
                 share=false
               fi
               if ! grep -qE '^(apps/web/|apps/server/|packages/|scripts/smoke-browser-download-manifest-ui\.ts$|bun\.lock$|package\.json$|\.github/workflows/ci\.yml$)' <<< "$files"; then
@@ -148,7 +151,9 @@ jobs:
       - run: bun run --cwd apps/server browser:uploads:smoke
       - run: bun run style:check
       - run: bun run decisions:check
-      - run: bun run typecheck --filter=!@octant/desktop --filter=!@octant/scripts
+      # Cap Turbo concurrency so parallel TypeScript 7.0 compilers do not OOM
+      # the 16 GB ubuntu-24.04 runner now that `typecheck` no longer serializes behind `^build`.
+      - run: bun run typecheck --concurrency=3 --filter=!@octant/desktop --filter=!@octant/scripts
       # Resolves the phone's Expo configuration for each release profile with
       # every config plugin applied, so a broken plugin or manifest change
       # fails on the PR rather than in a maintainer's EAS build. The release
@@ -556,10 +561,26 @@ jobs:
       - name: Nightly client smoke
         timeout-minutes: 10
         run: bun scripts/smoke-nightly-client.ts
-      # macOS-specific server probes combined into one Vitest invocation to
-      # avoid repeated startup overhead: confined O_NOFOLLOW_ANY file ports,
-      # Seatbelt language/debug services, outside provider driver escapes,
-      # `/usr/bin/id -P` home lookup, and Seatbelt/egress/secret-guard probes.
+      # Combined into one Vitest invocation to avoid repeated startup overhead;
+      # every group stays listed here for macOS-specific evidence:
+      # - Confined Code/Work opens prove O_NOFOLLOW_ANY on macOS (server shards
+      #   only exercise /proc/self/fd on Linux):
+      #     artifactMirrorFilePort, threadArtifactPurge, codeDirectoryPort,
+      #     workFilesystemPort, workConfinedWrite.
+      # - Language and debug services run under Seatbelt here; the Linux server
+      #   shards run the same tests under Bubblewrap:
+      #     codeLanguageServiceProcess, installedLanguageServersProcess,
+      #     codeDebugServiceProcess.
+      # - Outside provider drivers run under their own Seatbelt profile (Linux
+      #   refuses them), and Cua's daemon port resolves home via `/usr/bin/id -P`
+      #   on macOS vs `getent` on Linux:
+      #     outsideDriverProcess.escape, desktopDaemonPort.
+      # - Seatbelt escape probes (darwin-gated on Linux shards): Seatbelt write,
+      #   Keychain, home and egress denials, session escape cleanup, hostile
+      #   proxy-only egress, secret guard, and confined credential commands:
+      #     seatbeltProfile, sandboxLaunchPolicyProcess, sessionEscapeProcess,
+      #     secretGuard, providerRuntimeNetwork.hostile,
+      #     confinedCommandCredentialProcess.
       - name: macOS server, language-service and Seatbelt escape probes
         timeout-minutes: 12
         run: >-
