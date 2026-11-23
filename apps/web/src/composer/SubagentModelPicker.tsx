@@ -1,14 +1,10 @@
 import type { ProviderModel } from "@octant/contracts";
-import {
-  formatSubagentModelTag,
-  subagentReasoningValues,
-  type PickerGroup,
-  type SubagentModelTag,
-} from "@octant/domain";
+import { subagentReasoningValues, type PickerGroup, type SubagentModelTag } from "@octant/domain";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { hasProviderLogo, ProviderGlyph } from "../providers/ProviderGlyph";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import "./subagent-model.css";
 
 /** One provider instance serving one model, as a subagent route the person can tag. */
 export interface SubagentModelRoute {
@@ -107,18 +103,6 @@ export function resolveSubagentModelTag(
     };
   }
   return { status: "available", route };
-}
-
-/** The first tag in `draft` that needs attention before the prompt can launch it. */
-export function firstUnavailableSubagentModelTag(
-  groups: ReadonlyArray<PickerGroup>,
-  tags: ReadonlyArray<SubagentModelTag>,
-): { readonly tag: SubagentModelTag; readonly reason: string } | undefined {
-  for (const tag of tags) {
-    const resolved = resolveSubagentModelTag(groups, tag);
-    if (resolved.status === "unavailable") return { tag, reason: resolved.reason };
-  }
-  return undefined;
 }
 
 const PROVIDER_DEFAULT = "Provider default";
@@ -376,20 +360,4 @@ export function SubagentModelPicker(props: {
       </ul>
     </div>
   );
-}
-
-/** The text that replaces a `@model` token or an edited chip. */
-export function subagentModelTagInsertion(
-  draft: string,
-  range: { readonly start: number; readonly end: number },
-  tag: SubagentModelTag,
-): { readonly draft: string; readonly caret: number } {
-  const text = formatSubagentModelTag(tag);
-  const after = draft.slice(range.end);
-  const spacer = after.startsWith(" ") || after.startsWith("\n") ? "" : " ";
-  const written = `${text}${spacer}`;
-  return {
-    draft: `${draft.slice(0, range.start)}${written}${after}`,
-    caret: range.start + text.length + 1,
-  };
 }

@@ -4780,61 +4780,6 @@ octant-composer-input.composer-input[disabled] {
   cursor: default;
   opacity: var(--oct-disabled-opacity);
 }
-/* A subagent model tag sits in the prompt as one chip: provider logo, model,
-   reasoning. It is a single unit for the caret and for deletion. */
-.composer-chip {
-  display: inline-flex;
-  max-width: 100%;
-  align-items: center;
-  margin: 0 1px;
-  vertical-align: baseline;
-  user-select: all;
-}
-.composer-chip__button {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: var(--oct-space-1);
-  padding: 0 var(--oct-space-2);
-  border: 0;
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-surface-warm);
-  box-shadow: inset 0 0 0 1px var(--oct-border);
-  color: var(--oct-fg);
-  font: inherit;
-  line-height: calc(var(--oct-composer-line, 20px) - 2px);
-  cursor: pointer;
-}
-.composer-chip__button[data-unavailable="true"] {
-  box-shadow: inset 0 0 0 1px var(--oct-danger);
-}
-.composer-chip__text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.composer-chip__meta {
-  color: var(--oct-meta);
-}
-/* The @model picker's search sits at the top of the typeahead list, as a row of
-   the list rather than a form field inside it. */
-.subagent-model-picker__search,
-.subagent-model-picker__search:focus,
-.subagent-model-picker__search:focus-visible {
-  display: block;
-  width: 100%;
-  padding: var(--oct-space-1) var(--oct-space-2);
-  border: 0;
-  border-bottom: 1px solid var(--oct-border);
-  border-radius: 0;
-  background: none;
-  color: var(--oct-fg);
-  font: inherit;
-  outline: none;
-}
-.subagent-model-picker__search::placeholder {
-  color: var(--oct-meta);
-}
 /* The box's one line: attach, the prompt, the microphone, send. The
    controls ride the prompt's last line, so they stay put as the prompt grows
    upward. */

@@ -1,5 +1,7 @@
 import {
   createElement,
+  lazy,
+  Suspense,
   useEffect,
   useId,
   useMemo,
@@ -15,7 +17,7 @@ import type {
   ThreadNativeSetupRequest,
 } from "@octant/contracts";
 import {
-  findSubagentModelTags,
+  insertSubagentModelTag,
   type PickerGroup,
   type SubagentModelTag,
   type SubagentModelTagMatch,
@@ -27,12 +29,14 @@ import { readPathMentionQuery, type PathMentionCandidate } from "../code/pathMen
 import { useThreadNativeSetupServices } from "../providers/ThreadNativeSetupControl";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { ComposerInputElement } from "./ComposerInput";
-import {
-  firstUnavailableSubagentModelTag,
-  SubagentModelChip,
-  SubagentModelPicker,
-  subagentModelTagInsertion,
-} from "./SubagentModelPicker";
+// The picker and chip load the first time a prompt shows one, so the start
+// screen's initial load carries neither them nor their styles.
+const SubagentModelPicker = lazy(() =>
+  import("./SubagentModelPicker").then((module) => ({ default: module.SubagentModelPicker })),
+);
+const SubagentModelChip = lazy(() =>
+  import("./SubagentModelPicker").then((module) => ({ default: module.SubagentModelChip })),
+);
 
 /** How many skills, servers, and connectors one query lists before files. */
 const MAX_EXTENSION_ROWS = 12;
@@ -290,7 +294,7 @@ export function useComposerAtMenu(input: {
   };
   const chooseModel = (tag: SubagentModelTag) => {
     if (modelPicker === undefined) return;
-    const inserted = subagentModelTagInsertion(input.draft, modelPicker, tag);
+    const inserted = insertSubagentModelTag(input.draft, modelPicker, tag);
     setModelPicker(undefined);
     setToken(undefined);
     input.onDraftChange(inserted.draft, inserted.caret);
@@ -309,21 +313,18 @@ export function useComposerAtMenu(input: {
           match: SubagentModelTagMatch,
           locate: () => { readonly start: number; readonly end: number },
         ) =>
-          createElement(SubagentModelChip, {
-            groups: modelGroups,
-            tag: match.tag,
-            onActivate: () => {
-              const range = locate();
-              setModelPicker({ start: range.start, end: range.end, initial: match.tag });
-            },
-          });
-  const unavailableModelTag =
-    modelGroups === undefined
-      ? undefined
-      : firstUnavailableSubagentModelTag(
-          modelGroups,
-          findSubagentModelTags(input.draft).map((match) => match.tag),
-        );
+          createElement(
+            Suspense,
+            { fallback: createElement("span", { className: "composer-chip__label" }, match.text) },
+            createElement(SubagentModelChip, {
+              groups: modelGroups,
+              tag: match.tag,
+              onActivate: () => {
+                const range = locate();
+                setModelPicker({ start: range.start, end: range.end, initial: match.tag });
+              },
+            }),
+          );
 
   // `@model` is the menu's first row, not a picker that opens by itself: a
   // file mention such as `@models/schema.ts` passes through `@model` while it
@@ -500,8 +501,6 @@ export function useComposerAtMenu(input: {
     rows,
     setActiveIndex,
     sync,
-    /** A tag in the draft that names a route the person can no longer use. */
-    unavailableModelTag,
   };
 }
 
@@ -522,12 +521,16 @@ export function ComposerAtTypeahead(props: {
   if (!controller.open) return null;
   const picker = controller.modelPicker;
   if (picker !== undefined) {
-    return createElement(SubagentModelPicker, {
-      groups: picker.groups,
-      initial: picker.initial,
-      onChoose: picker.choose,
-      onDismiss: picker.dismiss,
-    });
+    return createElement(
+      Suspense,
+      { fallback: null },
+      createElement(SubagentModelPicker, {
+        groups: picker.groups,
+        initial: picker.initial,
+        onChoose: picker.choose,
+        onDismiss: picker.dismiss,
+      }),
+    );
   }
   return createElement(
     "div",

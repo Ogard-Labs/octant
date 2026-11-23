@@ -617,7 +617,7 @@ describe("@model in the composer", () => {
     await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
     expect(prompt).toHaveValue(`Review with @model(${instanceId}/gpt-5, reasoning=high) `);
     expect(
-      screen.getByRole("button", { name: "Subagent model: Team Codex, GPT-5, high" }),
+      await screen.findByRole("button", { name: "Subagent model: Team Codex, GPT-5, high" }),
     ).toBeInTheDocument();
   });
 
@@ -665,10 +665,10 @@ describe("@model in the composer", () => {
     expect(prompt).toHaveValue(`Review @model(${instanceId}/gpt-5-mini) now later`);
   });
 
-  it("lists only models that can run Octant's tools and says why another cannot", () => {
+  it("lists only models that can run Octant's tools and says why another cannot", async () => {
     render(<ModelHarness initial={`@model(${instanceId}/chat-only) x`} />);
     expect(
-      screen.getByRole("button", {
+      await screen.findByRole("button", {
         name: "Subagent model: Team Codex, Chat only, Provider default. Needs attention: Chat only cannot run Octant's tools, so it cannot take a subagent.",
       }),
     ).toBeInTheDocument();
@@ -677,7 +677,7 @@ describe("@model in the composer", () => {
   it("reopens the picker from a chip's Enter key without sending the message", async () => {
     const onSend = vi.fn();
     render(<ModelHarness initial={`@model(${instanceId}/gpt-5) b`} onSend={onSend} />);
-    const chip = screen.getByRole("button", { name: /Subagent model: Team Codex, GPT-5,/ });
+    const chip = await screen.findByRole("button", { name: /Subagent model: Team Codex, GPT-5,/ });
     chip.focus();
     await userEvent.keyboard("{Enter}");
     expect(await screen.findByRole("combobox", { name: "Search models" })).toBeInTheDocument();
@@ -687,10 +687,10 @@ describe("@model in the composer", () => {
     );
   });
 
-  it("says which choice needs attention when a tag's route is gone", () => {
+  it("says which choice needs attention when a tag's route is gone", async () => {
     render(<ModelHarness initial={`@model(${instanceId}/gpt-5, reasoning=max) please`} />);
     expect(
-      screen.getByRole("button", {
+      await screen.findByRole("button", {
         name: "Subagent model: Team Codex, GPT-5, max. Needs attention: GPT-5 does not offer reasoning “max”.",
       }),
     ).toBeInTheDocument();
@@ -699,9 +699,9 @@ describe("@model in the composer", () => {
   it("reopens the picker on a chip's current route and replaces only that tag", async () => {
     render(<ModelHarness initial={`a @model(${instanceId}/gpt-5) b`} />);
     await userEvent.click(
-      screen.getByRole("button", { name: /Subagent model: Team Codex, GPT-5,/ }),
+      await screen.findByRole("button", { name: /Subagent model: Team Codex, GPT-5,/ }),
     );
-    expect(screen.getByRole("option", { name: /^GPT-5Team Codex$/ })).toHaveAttribute(
+    expect(await screen.findByRole("option", { name: /^GPT-5Team Codex$/ })).toHaveAttribute(
       "aria-selected",
       "true",
     );

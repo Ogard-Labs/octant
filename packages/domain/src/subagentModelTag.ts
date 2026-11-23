@@ -69,3 +69,22 @@ export function subagentReasoningValues(
       : [],
   );
 }
+
+/**
+ * A draft with `tag` written over `range` (the typed `@model` token or the
+ * chip being edited), followed by a space unless one is already there, and
+ * the caret just past that space.
+ */
+export function insertSubagentModelTag(
+  draft: string,
+  range: { readonly start: number; readonly end: number },
+  tag: SubagentModelTag,
+): { readonly draft: string; readonly caret: number } {
+  const text = formatSubagentModelTag(tag);
+  const after = draft.slice(range.end);
+  const spacer = after.startsWith(" ") || after.startsWith("\n") ? "" : " ";
+  return {
+    draft: `${draft.slice(0, range.start)}${text}${spacer}${after}`,
+    caret: range.start + text.length + 1,
+  };
+}
