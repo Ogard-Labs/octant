@@ -1,7 +1,6 @@
 import {
   decodeAutomationCommand,
   automationFileActivityWindowLimit,
-  automationFileSourceReviewedBy,
   decodeAutomationDefinition,
   deriveAutomationOccurrenceKey,
   type AutomationCommand,
@@ -23,6 +22,7 @@ import type { AutomationFileActivityPorts } from "./automationFileSourceActivity
 import { isDeepStrictEqual } from "node:util";
 import {
   AutomationPolicyRejected,
+  automationFileSourceReviewedBy,
   buildAutomationWeeklyResolution,
   isAgentRunActiveStatus,
   isAutomationMutationAllowed,

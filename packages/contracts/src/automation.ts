@@ -364,23 +364,28 @@ export const AutomationFileSourceReview = Schema.Union(
 );
 export type AutomationFileSourceReview = typeof AutomationFileSourceReview.Type;
 
-/** Whether this principal is the one that reviewed the held batch. */
-export function automationFileSourceReviewedBy(
+/**
+ * The wire invariant the lifecycle schema keeps at decode: the review the
+ * event carries was made by the principal the event names as its author.
+ * Callers that need the same matching use `automationFileSourceReviewedBy`
+ * in `@octant/domain`; this stays private to the schema.
+ */
+function fileSourceReviewMatchesAuthor(
   review: AutomationFileSourceReview,
-  principal: AutomationClientPrincipal | AutomationAuthorPrincipal,
+  author: AutomationAuthorPrincipal,
 ): boolean {
   if ("reviewedDevice" in review)
     return (
-      principal.kind === "remote-device" &&
-      String(principal.hostId) === String(review.reviewedDevice.hostId) &&
-      String(principal.deviceId) === String(review.reviewedDevice.deviceId) &&
-      principal.credentialGeneration === review.reviewedDevice.credentialGeneration &&
-      String(principal.sessionId) === String(review.reviewedDevice.sessionId)
+      author.kind === "remote-device" &&
+      String(author.hostId) === String(review.reviewedDevice.hostId) &&
+      String(author.deviceId) === String(review.reviewedDevice.deviceId) &&
+      author.credentialGeneration === review.reviewedDevice.credentialGeneration &&
+      String(author.sessionId) === String(review.reviewedDevice.sessionId)
     );
   return (
-    principal.kind === "local-window" &&
-    String(principal.windowId) === review.reviewedWindowId &&
-    principal.capabilityGeneration === review.reviewedCapabilityGeneration
+    author.kind === "local-window" &&
+    String(author.windowId) === review.reviewedWindowId &&
+    author.capabilityGeneration === review.reviewedCapabilityGeneration
   );
 }
 
@@ -1691,7 +1696,7 @@ export const AutomationDefinitionLifecycleChanged = Schema.Struct({
           (event.fileSourceReview !== undefined &&
             event.automation.trigger.kind === "file-arrival" &&
             event.automation.lifecycle === "enabled" &&
-            automationFileSourceReviewedBy(event.fileSourceReview, event.automation.updatedBy) &&
+            fileSourceReviewMatchesAuthor(event.fileSourceReview, event.automation.updatedBy) &&
             event.automation.version === event.fileSourceReview.expectedDefinitionVersion + 1 &&
             event.fileSource.sourceIdentity === event.fileSourceReview.previousSourceIdentity &&
             event.fileSource.observationRevision ===
