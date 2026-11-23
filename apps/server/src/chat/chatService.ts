@@ -4317,7 +4317,17 @@ export class ChatService {
           },
         },
       );
-      return { thread: updatedThread, turn: updatedTurn, attempt: nextAttempt, prompt, prepared };
+      return {
+        thread: updatedThread,
+        turn: updatedTurn,
+        attempt: nextAttempt,
+        prompt,
+        prepared,
+        mayTitleFirstTurn:
+          view.turns.length === 1 &&
+          executionContext?.limitRecovery !== true &&
+          !turn.attempts.some((attempt) => attempt.outcome === "completed"),
+      };
     });
     await this.#runAttempt({
       thread: threadAsRoutedFor(accepted.thread, accepted.attempt),
@@ -4325,9 +4335,7 @@ export class ChatService {
       attempt: accepted.attempt,
       prompt: accepted.prompt,
       prepared: accepted.prepared,
-      mayTitleFirstTurn:
-        executionContext?.limitRecovery !== true &&
-        !accepted.turn.attempts.some((attempt) => attempt.outcome === "completed"),
+      mayTitleFirstTurn: accepted.mayTitleFirstTurn,
       ...(executionContext?.windowId === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "attempt-updated", attempt: accepted.attempt };

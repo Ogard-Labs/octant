@@ -10,17 +10,23 @@ const capabilities = { nativeBoundsAvailable: true, sidebarVibrancySupported: tr
 describe("octantSettingsRegistry", () => {
   it.each([
     ["Chat thread titles", "automatic-model-thread-title"],
-    ["ChatGPT plan title model", "automatic-model-thread-title-model"],
+    ["ChatGPT plan title model", "automatic-model-thread-title"],
+    ["API endpoint title model", "automatic-model-thread-title"],
+    ["Thread title model", "automatic-model-thread-title-model"],
   ])("finds the title control for %s", (query, settingId) => {
-    expect(
-      searchSettings(
-        listAvailableSections(octantSettingsRegistry, capabilities),
-        capabilities,
-        query,
-      ),
-    ).toContainEqual(
+    const results = searchSettings(
+      listAvailableSections(octantSettingsRegistry, capabilities),
+      capabilities,
+      query,
+    );
+    expect(results).toContainEqual(
       expect.objectContaining({ kind: "setting", sectionId: "providers", settingId }),
     );
+    if (settingId === "automatic-model-thread-title") {
+      expect(results).not.toContainEqual(
+        expect.objectContaining({ settingId: "automatic-model-thread-title-model" }),
+      );
+    }
   });
 
   it("finds the switch that stops this computer taking delegated work by its label", () => {

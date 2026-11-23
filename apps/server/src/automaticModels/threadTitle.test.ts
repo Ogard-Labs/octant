@@ -5,10 +5,13 @@ import { join } from "node:path";
 import {
   decodeAggregateVersion,
   decodeChatThread,
+  decodeProject,
   decodeProviderInstance,
   decodeProviderModel,
   decodeSpendCeilingReservationId,
   decodeUtcTimestamp,
+  decodeWorkThread,
+  type WorkProject,
 } from "@octant/contracts";
 import type { ShellSettings, ThreadTitleSettings } from "@octant/contracts/shell";
 import { defaultShellSettings } from "@octant/domain";
@@ -113,7 +116,10 @@ function planTitleStream(): Response {
   });
 }
 
-function fixture(plan?: { readonly usageGranted?: boolean; readonly plainKey?: boolean }) {
+function fixture(
+  plan?: { readonly usageGranted?: boolean; readonly plainKey?: boolean },
+  workProject?: WorkProject,
+) {
   const directory = mkdtempSync(join(tmpdir(), "octant-thread-title-"));
   const connection = openSqlite(join(directory, "journal.sqlite"));
   cleanups.push(() => {
@@ -193,13 +199,29 @@ function fixture(plan?: { readonly usageGranted?: boolean; readonly plainKey?: b
     });
   }
   writeTitle(prompt);
+  const workThreads = new WorkThreadProjection();
+  const workThread =
+    workProject === undefined
+      ? undefined
+      : decodeWorkThread({
+          id: randomUUID(),
+          projectId: workProject.id,
+          title: prompt,
+          lifecycle: "active",
+          providerInstanceId: thread.providerInstanceId,
+          modelId: thread.modelId,
+          version,
+          createdAt: now,
+          updatedAt: now,
+        });
+  if (workThread !== undefined) workThreads.apply({ kind: "thread-created", thread: workThread });
   const fetch = vi.fn<CompatibleFetch>(async () =>
     plan === undefined ? titleStream('"Fix launch retries"') : planTitleStream(),
   );
   const registry = new ProviderRuntimeRegistry();
   const broker = {
     has: async () => true,
-    resolve: async () =>
+    resolve: vi.fn(async () =>
       plan === undefined || plan.plainKey === true
         ? apiKey
         : encodeSubscriptionOAuthCredential({
@@ -208,6 +230,7 @@ function fixture(plan?: { readonly usageGranted?: boolean; readonly plainKey?: b
             descriptorId: "chatgpt-plan",
             accountLabel: "ChatGPT plan",
           }),
+    ),
   };
   const makeDriver = (requestFetch: CompatibleFetch) =>
     runOnNativeHarness(
@@ -264,9 +287,9 @@ function fixture(plan?: { readonly usageGranted?: boolean; readonly plainKey?: b
         manualModelOrder: [model.id],
         models: [model],
       }),
-      readProject: () => undefined,
+      readProject: (id) => (workProject?.id === id ? workProject : undefined),
     },
-    workThreads: new WorkThreadProjection(),
+    workThreads,
     fetch,
     resolveDriver: (id, _source, requestFetch) =>
       id === provider.id ? makeDriver(requestFetch) : undefined,
@@ -279,10 +302,20 @@ function fixture(plan?: { readonly usageGranted?: boolean; readonly plainKey?: b
 
   return {
     fetch,
-    generate: (message = prompt) => generate("chat", thread.id, message),
-    readTitle: () => readChatThread(connection, thread.id)?.title,
+    generate: (message = prompt) =>
+      workThread === undefined
+        ? generate("chat", thread.id, message)
+        : generate("work", workThread.id, message),
+    readTitle: () =>
+      workThread === undefined
+        ? readChatThread(connection, thread.id)?.title
+        : workThreads.read(workThread.id)?.title,
     writeTitle,
     readUsage: () => readAllUsageRecords(connection),
+    resolveCredentials: broker.resolve,
+    setWorkProject: (project: WorkProject) => {
+      workProject = project;
+    },
     setTokenCeiling: () =>
       spendCeiling.execute("local-window", {
         kind: "set-spend-ceiling",
@@ -385,6 +418,45 @@ describe("Model-backed thread titles", () => {
     expect(test.fetch).not.toHaveBeenCalled();
     expect(test.readTitle()).toBe(prompt);
     expect(test.readUsage()).toEqual([]);
+  });
+
+  it("rechecks Project provider policy after resolving credentials", async () => {
+    const binding = { canonicalRoot: "/tmp/title-project" };
+    const project = decodeProject({
+      id: randomUUID(),
+      type: "work",
+      name: "Title Project",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version,
+      createdAt: now,
+      updatedAt: now,
+      binding,
+      bindingHistory: [
+        {
+          revisionId: randomUUID(),
+          revision: 1,
+          currentBinding: binding,
+          actor: { kind: "local-user", actorId: randomUUID() },
+          changedAt: now,
+        },
+      ],
+    });
+    if (project.type !== "work") throw new Error("Expected a Work Project.");
+    const test = fixture(undefined, project);
+    test.resolveCredentials.mockImplementationOnce(async () => {
+      test.setWorkProject({
+        ...project,
+        providerPolicy: { mode: "eu-zdr", providerInstanceIds: [] },
+      });
+      return apiKey;
+    });
+    await test.generate();
+    expect(test.resolveCredentials).toHaveBeenCalledOnce();
+    expect(test.fetch).not.toHaveBeenCalled();
+    expect(test.readUsage()).toEqual([]);
+    expect(test.readTitle()).toBe(prompt);
   });
 
   it("replaces the first-message title from a paired to-do draft", async () => {

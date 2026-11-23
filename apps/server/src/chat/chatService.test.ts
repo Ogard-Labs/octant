@@ -1471,51 +1471,66 @@ function providerSearchComposition(tainted: ReadonlySet<string>) {
 }
 
 describe("ChatService", () => {
-  it("offers a title after retrying a first prompt that failed to send", async () => {
-    const titleFirstTurn = vi.fn(async () => undefined);
-    const { service } = openFixture({
-      turnOutcome: (index) => (index === 0 ? "failed" : "completed"),
-      nativeHarness: {
-        contextFor: () => [],
-        turnStarted: () => undefined,
-        turnCompleted: async () => undefined,
-        titleFirstTurn,
-      },
-    });
-    const windowId = decodeWindowId("84000000-0000-4000-8000-0000000000ff");
-    const prompt = "Name the release preparation thread";
-    const created = await service.execute({
-      kind: "create-chat-thread",
-      hostId: "local",
-      title: prompt,
-    });
-    if (created.kind !== "thread-created") throw new Error("Expected a Chat thread.");
-    const threadId = created.thread.id;
-    const sent = await service.execute(
-      {
-        kind: "send-chat-turn",
-        threadId,
-        expectedVersion: created.thread.version,
-        prompt,
-      },
-      { windowId },
-    );
-    if (sent.kind !== "turn-created") throw new Error("Expected the first Chat turn.");
-    const failed = service.read(threadId);
-    expect(failed.turns[0]?.attempts[0]?.outcome).toBe("failed");
-    expect(titleFirstTurn).not.toHaveBeenCalled();
-    await service.execute(
-      {
-        kind: "retry-chat-turn",
-        threadId,
-        expectedVersion: failed.thread.version,
-        turnId: sent.turn.id,
-        attemptId: sent.turn.attempts[0]!.id,
-      },
-      { windowId },
-    );
-    expect(titleFirstTurn).toHaveBeenCalledExactlyOnceWith("chat", threadId, prompt);
-  });
+  it.each([false, true])(
+    "handles title generation for a first-prompt retry with a later turn: %s",
+    async (laterTurn) => {
+      const titleFirstTurn = vi.fn(async () => undefined);
+      const { service } = openFixture({
+        turnOutcome: (index) => (index === 0 ? "failed" : "completed"),
+        nativeHarness: {
+          contextFor: () => [],
+          turnStarted: () => undefined,
+          turnCompleted: async () => undefined,
+          titleFirstTurn,
+        },
+      });
+      const windowId = decodeWindowId("84000000-0000-4000-8000-0000000000ff");
+      const prompt = "Name the release preparation thread";
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: prompt,
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected a Chat thread.");
+      const threadId = created.thread.id;
+      const sent = await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId,
+          expectedVersion: created.thread.version,
+          prompt,
+        },
+        { windowId },
+      );
+      if (sent.kind !== "turn-created") throw new Error("Expected the first Chat turn.");
+      expect(service.read(threadId).turns[0]?.attempts[0]?.outcome).toBe("failed");
+      if (laterTurn) {
+        await service.execute(
+          {
+            kind: "send-chat-turn",
+            threadId,
+            expectedVersion: service.read(threadId).thread.version,
+            prompt: "Write the release notes",
+          },
+          { windowId },
+        );
+        expect(service.read(threadId).turns[1]?.attempts[0]?.outcome).toBe("completed");
+      }
+      expect(titleFirstTurn).not.toHaveBeenCalled();
+      await service.execute(
+        {
+          kind: "retry-chat-turn",
+          threadId,
+          expectedVersion: service.read(threadId).thread.version,
+          turnId: sent.turn.id,
+          attemptId: sent.turn.attempts[0]!.id,
+        },
+        { windowId },
+      );
+      if (laterTurn) expect(titleFirstTurn).not.toHaveBeenCalled();
+      else expect(titleFirstTurn).toHaveBeenCalledExactlyOnceWith("chat", threadId, prompt);
+    },
+  );
 
   it("sends no turn nobody sent that would fall back onto Google Antigravity, and takes the person's own", async () => {
     const window = decodeWindowId("84000000-0000-4000-8000-000000000012");

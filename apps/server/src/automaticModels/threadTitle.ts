@@ -130,28 +130,33 @@ export function createThreadTitleGenerator(input: {
     )
       return;
 
-    const instance = persistence.readProviderInstance(choice.providerInstanceId);
-    if (
-      instance === undefined ||
-      threadTitleEndpointSource(instance) !== choice.source ||
-      input.accountUnavailable(instance.id) !== undefined
-    )
-      return;
-    const model = persistence
-      .readProviderCatalog?.(instance.id)
-      ?.models.find((item) => item.id === choice.modelId);
-    if (model === undefined) return;
-    if (thread.projectId !== undefined) {
-      const project = persistence.readProject(thread.projectId);
+    const projectId = thread.projectId;
+    const eligibleEndpoint = () => {
+      const instance = persistence.readProviderInstance(choice.providerInstanceId);
       if (
-        project?.lifecycle !== "active" ||
-        (project.type !== "chat" && !isProviderAllowedByProjectPolicy(project, instance, model))
+        instance === undefined ||
+        threadTitleEndpointSource(instance) !== choice.source ||
+        input.accountUnavailable(instance.id) !== undefined
       )
-        return;
-    }
+        return undefined;
+      const model = persistence
+        .readProviderCatalog?.(instance.id)
+        ?.models.find((item) => item.id === choice.modelId);
+      if (model === undefined) return undefined;
+      if (projectId !== undefined) {
+        const project = persistence.readProject(projectId);
+        if (
+          project?.lifecycle !== "active" ||
+          (project.type !== "chat" && !isProviderAllowedByProjectPolicy(project, instance, model))
+        )
+          return undefined;
+      }
+      return instance;
+    };
+    const instance = eligibleEndpoint();
+    if (instance === undefined) return;
 
     const threadType = `${mode}-thread` as const;
-    const projectId = thread.projectId;
     const unchangedThread = () => {
       const currentChoice = selectedModel();
       const current = readThread(mode, threadId);
@@ -196,9 +201,10 @@ export function createThreadTitleGenerator(input: {
     const driver = input.resolveDriver(instance.id, choice.source, async (request, init) => {
       init?.signal?.throwIfAborted();
       if (request instanceof Request) request.signal.throwIfAborted();
-      // Credential resolution can yield while a person changes a ceiling.
+      // Credential resolution can yield while a person changes endpoint access or spend limits.
       if (
         unchangedThread() === undefined ||
+        eligibleEndpoint()?.version !== instance.version ||
         hasTokenCeiling() ||
         admitSpend().status === "refused"
       ) {
