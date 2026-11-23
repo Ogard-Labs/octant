@@ -97,6 +97,28 @@ describe("API key pool", () => {
     expect(refusalOf(() => addApiKey(stored, { secret: "sk-17" }))).toBe("too-many-keys");
   });
 
+  it("still edits a pool stored close to the size bound when its keys carry no revision", () => {
+    const uuid = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+    const keys = Array.from({ length: 16 }, (_, index) => ({
+      id: uuid(index + 1),
+      label: `K${index + 1}`,
+      secret: "s".repeat(600),
+    }));
+    const pack = () =>
+      JSON.stringify({ kind: "api-key-pool", version: 1, active: keys[0]?.id, keys });
+    const last = keys[15];
+    if (last === undefined) throw new Error("the pool holds no key");
+    let stored = pack();
+    while (stored.length <= 11 * 1024 - 9) {
+      last.secret += "s";
+      stored = pack();
+    }
+    expect(stored.length).toBeLessThanOrEqual(11 * 1024);
+    expect(stored).not.toContain("rotation");
+    expect(() => setActiveApiKey(stored, keys[15]?.id ?? "")).not.toThrow();
+    expect(() => removeApiKey(stored, keys[15]?.id ?? "")).not.toThrow();
+  });
+
   it("renames a key and keeps its secret", () => {
     const { stored, ids } = poolWithTwoKeys();
     const renamed = renameApiKey(stored, ids[1] ?? "", "Client");
@@ -253,7 +275,7 @@ describe("the pool identity a change notice holds a key Undo to", () => {
     };
     const key = parsed.keys[0];
     if (key === undefined) throw new Error("the pool holds no key");
-    expect(key.rotation).toBe(1);
+    expect(key.rotation).toBeUndefined();
     const before = apiKeyPoolFingerprint(stored);
     const sameIdNextRevision = JSON.stringify({
       ...parsed,

@@ -387,7 +387,9 @@ function writePool(entries: readonly ApiKeyEntry[], activeId: string | undefined
       id,
       label,
       secret,
-      rotation: rotation ?? 1,
+      // A key's first revision is implicit; writing it on every key would
+      // grow a legacy pool near the size bound past the limit on any edit.
+      ...(rotation !== undefined && rotation > 1 ? { rotation } : {}),
     })),
   });
   if (new TextEncoder().encode(encoded).byteLength > MAX_POOL_BYTES) {
