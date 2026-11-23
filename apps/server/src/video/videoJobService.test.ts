@@ -578,6 +578,41 @@ describe("video jobs", () => {
     await expect(enqueue(service)).rejects.toThrow("Too many video jobs are queued.");
   });
 
+  it("cancels a queued clip before either occupied generation slot opens", async () => {
+    const { service, calls } = harness({ start: () => new Promise(() => undefined) });
+    await enqueue(service);
+    await enqueue(service);
+    const queued = await enqueue(service);
+    expect(service.getById(queued.id)?.status).toBe("queued");
+    service.stop(queued.id);
+    expect(service.getById(queued.id)).toMatchObject({ status: "cancelled" });
+    expect(service.getById(queued.id)?.settledCostUsdMicros).toBeUndefined();
+    expect(calls.start).toBe(2);
+  });
+
+  it("finishes startup while a recovered provider delete is still pending", async () => {
+    const first = harness({ forget: async () => "failed" });
+    const job = await enqueue(first.service);
+    await first.service.whenTerminal(job.id);
+    await vi.waitFor(() => expect(first.calls.forget).toBe(1));
+    first.service.close();
+
+    const removal = Promise.withResolvers<"removed" | "failed">();
+    const second = harness({ forget: () => removal.promise }, first.root);
+    const recovered = vi.fn();
+    const recovery = second.service.recover().then(recovered);
+    try {
+      await vi.waitFor(() => expect(recovered).toHaveBeenCalledOnce());
+      expect(second.calls.forget).toBe(1);
+      expect(second.service.getById(job.id)?.providerCopy).toBe("held");
+    } finally {
+      removal.resolve("removed");
+      await recovery;
+      await vi.waitFor(() => expect(second.service.getById(job.id)?.providerCopy).toBe("removed"));
+      second.service.close();
+    }
+  });
+
   it("recovers after a restart: unsent jobs bill nothing, sent ones resume or settle at the estimate", async () => {
     const first = harness({ start: () => new Promise(() => undefined) });
     const sending = await enqueue(first.service);

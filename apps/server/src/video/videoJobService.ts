@@ -210,7 +210,7 @@ export class VideoJobService {
   readonly #now: () => number;
   readonly #running = new Map<string, Running>();
   readonly #sends: VideoSendRecord = { reached: new WeakSet(), sent: new WeakSet() };
-  readonly #waiting: Array<() => void> = [];
+  readonly #waiting = new Map<VideoJobId, (admitted: boolean) => void>();
   readonly #terminalWaiters = new Map<string, Array<(job: VideoJob) => void>>();
   readonly #inputs = new Map<string, { readonly prompt: string } & VideoJobInputs>();
   readonly #closing = new AbortController();
@@ -437,8 +437,18 @@ export class VideoJobService {
    * job settles at its estimate, because the provider may still finish it.
    */
   stop(id: VideoJobId): void {
-    const running = this.#running.get(String(id));
+    const key = String(id);
+    const running = this.#running.get(key);
     if (running === undefined) return;
+    const job = this.getById(id);
+    if (job?.status === "queued") {
+      this.#finish(job, "cancelled", {});
+      this.#inputs.delete(key);
+      const waiting = this.#waiting.get(id);
+      this.#waiting.delete(id);
+      waiting?.(false);
+      return;
+    }
     running.stopRequested = true;
     running.controller.abort();
   }
@@ -480,7 +490,7 @@ export class VideoJobService {
       });
       void this.#schedule(job.id, () => this.#resume(job));
     }
-    await this.retryOwedRemovals();
+    void this.retryOwedRemovals();
     if (this.#removalTimer === undefined) {
       this.#removalTimer = setInterval(() => {
         void this.retryOwedRemovals();
@@ -531,22 +541,29 @@ export class VideoJobService {
   // --- running jobs ---
 
   async #schedule(id: VideoJobId, work: () => Promise<void>): Promise<void> {
-    await this.#withSlot(work);
+    await this.#withSlot(id, work);
     if (this.#closing.signal.aborted) return;
     const job = this.getById(id);
     if (job !== undefined && isTerminal(job)) await this.#forget(job);
   }
 
-  async #withSlot(work: () => Promise<void>): Promise<void> {
+  async #withSlot(id: VideoJobId, work: () => Promise<void>): Promise<void> {
     if (this.#active >= VIDEO_JOB_HOST_CONCURRENCY) {
-      await new Promise<void>((resolve) => this.#waiting.push(resolve));
+      const admitted = await new Promise<boolean>((resolve) => this.#waiting.set(id, resolve));
+      if (!admitted) return;
+    } else {
+      this.#active += 1;
     }
-    this.#active += 1;
     try {
       await work();
     } finally {
-      this.#active -= 1;
-      this.#waiting.shift()?.();
+      const next = this.#waiting.entries().next().value;
+      if (next === undefined) {
+        this.#active -= 1;
+      } else {
+        this.#waiting.delete(next[0]);
+        next[1](true);
+      }
     }
   }
 
@@ -858,7 +875,8 @@ export class VideoJobService {
    */
   readonly #removing = new Set<string>();
 
-  async #forget(job: VideoJob): Promise<void> {
+  async #forget(candidate: VideoJob): Promise<void> {
+    const job = this.#current(candidate);
     if (this.#closing.signal.aborted || job.providerCopy !== "held" || job.remoteId === undefined)
       return;
     if (this.#removing.has(String(job.id))) return;
