@@ -965,9 +965,9 @@ function assembleServices(
             ? // A pause leaves nothing remote but the person's own computers'
               // hub links, so an outside agent's claim and calls are refused
               // too; its grant is kept for when access resumes.
-              remoteAccessPaused()
+              remoteAccessPaused() || facts?.agentAccessPauseSignal?.aborted === true
               ? remoteAccessPausedResponse()
-              : options.agentAccess?.(request, facts, outsideAgentAccess.signal)
+              : options.agentAccess?.(request, facts, facts?.agentAccessPauseSignal)
             : handlePreAuthRoute(request, route, facts, protocol, auth, clockPosture),
     authenticatedProduct: async (request, route, facts) =>
       handleAuthenticatedRoute(request, route, facts, auth),
@@ -999,6 +999,11 @@ function assembleServices(
     const routeFacts: RemoteRouteFacts = {
       sourceClass: transportFacts.sourceClass,
       sourceKey: transportFacts.sourceKey,
+      // The policy can await the upload before dispatch. A resumed listener
+      // must still refuse a request whose original access period ended.
+      agentAccessPauseSignal: remoteAccessPaused()
+        ? AbortSignal.abort()
+        : outsideAgentAccess.signal,
       ...(transportFacts.privateAddress === undefined
         ? {}
         : { privateAddress: transportFacts.privateAddress }),

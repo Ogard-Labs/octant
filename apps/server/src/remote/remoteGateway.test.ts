@@ -2237,12 +2237,43 @@ describe("RemoteGateway — a paired device's access level and the pause", () =>
       const first = signals[0];
       expect(first?.aborted).toBe(false);
 
+      const uploadStarted = Promise.withResolvers<void>();
+      const finishUpload = Promise.withResolvers<void>();
+      const encoded = new TextEncoder().encode(
+        JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
+      );
+      const upload = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoded.subarray(0, 1));
+        },
+        async pull(controller) {
+          uploadStarted.resolve();
+          await finishUpload.promise;
+          controller.enqueue(encoded.subarray(1));
+          controller.close();
+        },
+      });
+      const init: RequestInit & { duplex: "half" } = {
+        method: "POST",
+        headers: {
+          host: "192.168.1.20:9443",
+          "content-type": "application/json",
+          authorization: "Bearer agent-key",
+        },
+        body: upload,
+        duplex: "half",
+      };
+      const oldCall = fetch(new Request(`${ORIGIN}/api/agent-access/mcp`, init), lanFacts);
+      await uploadStarted.promise;
+
       admin.setRemoteAccessPaused({ paused: true, actor: localPerson });
       // The epoch the in-flight call bound to ended with the pause and stays
       // ended: a resume issues a fresh one, it never reopens.
       expect(first?.aborted).toBe(true);
 
       admin.setRemoteAccessPaused({ paused: false, actor: localPerson });
+      finishUpload.resolve();
+      expect((await oldCall).status).toBe(403);
       expect((await agentCall()).status).toBe(200);
       const resumed = signals[1];
       expect(resumed).not.toBe(first);

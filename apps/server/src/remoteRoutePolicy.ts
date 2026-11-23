@@ -1851,6 +1851,8 @@ export interface RemoteRouteFacts {
   readonly sourceKey: string;
   /** The peer's private-network address, for a new-device alert only. */
   readonly privateAddress?: string;
+  /** The remote-access state when the gateway first admitted an agent request. */
+  readonly agentAccessPauseSignal?: AbortSignal;
 }
 
 export const REMOTE_SECURITY_POLICY = {
