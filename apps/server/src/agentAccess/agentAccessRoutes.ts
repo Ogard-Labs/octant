@@ -122,9 +122,11 @@ export function createAgentAccessListenerRouteHandler(
       allowed: grant.scope.tools.includes("read_thread"),
       canRead: (threadId: string) => {
         const current = options.service.readActive(String(grant.grantId));
+        if (current === undefined || !current.scope.tools.includes("read_thread")) return false;
+        const project = options.session.threadProject(threadId);
         return (
-          current !== undefined &&
-          current.scope.tools.includes("read_thread") &&
+          project !== undefined &&
+          (project.projectId === undefined || options.service.projectIsActive(project.projectId)) &&
           agentToolPolicy(current, options.session).threadAllowed(threadId)
         );
       },

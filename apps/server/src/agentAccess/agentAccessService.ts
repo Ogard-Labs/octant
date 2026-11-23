@@ -167,6 +167,10 @@ export class AgentAccessService {
       : undefined;
   }
 
+  projectIsActive(projectId: string): boolean {
+    return this.#options.projectType(projectId) !== undefined;
+  }
+
   execute(command: AgentAccessCommand, actor: AgentAccessActor): AgentAccessResult {
     switch (command.kind) {
       case "create":
