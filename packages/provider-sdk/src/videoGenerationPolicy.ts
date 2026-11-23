@@ -265,12 +265,15 @@ function tokenCost(
 
 /**
  * The cost a finished job settles at: computed from the usage the provider
- * reported where the price basis can use it, else the estimate.
+ * reported where the price basis can use it, else the estimate. A per-second
+ * model that reports `billedSeconds` settles at those seconds times its rate,
+ * never more than what was reserved.
  */
 export function settleVideoCostUsdMicros(
   price: VideoPrice,
   estimateUsdMicros: number,
   usage: VideoUsage | undefined,
+  options: Pick<VideoClipOptions, "resolution" | "audio">,
 ): number {
   if (usage === undefined) return estimateUsdMicros;
   if (price.kind === "per-token" && usage.outputTokens !== undefined) {
@@ -278,6 +281,10 @@ export function settleVideoCostUsdMicros(
       outputTokens: usage.outputTokens,
       inputTokens: usage.inputTokens ?? 0,
     });
+  }
+  if (price.kind === "per-second" && usage.billedSeconds !== undefined) {
+    const rate = perSecondRate(price, options);
+    if (rate !== undefined) return Math.min(estimateUsdMicros, rate * usage.billedSeconds);
   }
   return estimateUsdMicros;
 }

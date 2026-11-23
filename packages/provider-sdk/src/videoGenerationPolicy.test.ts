@@ -55,6 +55,21 @@ const flat: VideoModelCapabilities = decodeVideoModelCapabilities({
   job: { cancel: "none", removal: { kind: "expires", afterHours: 24 }, resumeWindowHours: 24 },
 });
 
+const timed: VideoModelCapabilities = decodeVideoModelCapabilities({
+  modelId: "timed-model",
+  displayName: "Timed Model",
+  durations: { kind: "range", min: 2, max: 15 },
+  resolutions: ["720p", "1080p"],
+  aspectRatios: [{ ratio: "16:9" }],
+  audio: "none",
+  inputs: { firstFrame: false, lastFrame: false, maxReferenceImages: 0 },
+  price: {
+    kind: "per-second",
+    rates: [{ resolution: "720p", usdMicrosPerSecond: 100_000 }],
+  },
+  job: { cancel: "running", removal: { kind: "delete" }, resumeWindowHours: 24 },
+});
+
 describe("video generation policy", () => {
   it("starts a clip at the model's declared defaults", () => {
     expect(defaultVideoClipOptions(omni)).toEqual({
@@ -141,9 +156,32 @@ describe("video generation policy", () => {
   });
 
   it("settles a token-priced job from the provider's reported tokens, else the estimate", () => {
-    expect(settleVideoCostUsdMicros(omni.price, 696_540, { outputTokens: 28_960 })).toBe(347_520);
-    expect(settleVideoCostUsdMicros(omni.price, 696_540, undefined)).toBe(696_540);
-    expect(settleVideoCostUsdMicros(flat.price, 800_000, { outputTokens: 10 })).toBe(800_000);
+    const options = { resolution: "720p", audio: true };
+    expect(settleVideoCostUsdMicros(omni.price, 696_540, { outputTokens: 28_960 }, options)).toBe(
+      347_520,
+    );
+    expect(settleVideoCostUsdMicros(omni.price, 696_540, undefined, options)).toBe(696_540);
+    expect(
+      settleVideoCostUsdMicros(flat.price, 800_000, { outputTokens: 10 }, options),
+    ).toBe(800_000);
+  });
+
+  it("settles a per-second job at the billed seconds, capped at the reservation", () => {
+    // A 10 s reservation at 100,000 µs/s whose provider billed 2 s pays for 2 s.
+    const estimate = estimateVideoCost(
+      timed.price,
+      { durationSeconds: 10, resolution: "720p", aspectRatio: "16:9", audio: false },
+      { promptTokens: 0, imageCount: 0 },
+    );
+    expect(estimate).toEqual({ kind: "estimate", usdMicros: 1_000_000 });
+    const options = { resolution: "720p", audio: false };
+    expect(
+      settleVideoCostUsdMicros(timed.price, 1_000_000, { billedSeconds: 2 }, options),
+    ).toBe(200_000);
+    expect(
+      settleVideoCostUsdMicros(timed.price, 1_000_000, { billedSeconds: 12 }, options),
+    ).toBe(1_000_000);
+    expect(settleVideoCostUsdMicros(timed.price, 1_000_000, undefined, options)).toBe(1_000_000);
   });
 
   it("treats an unpublished price as unknown spend", () => {
