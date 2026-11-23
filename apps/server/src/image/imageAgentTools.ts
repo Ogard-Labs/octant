@@ -106,7 +106,7 @@ export interface ImageAgentToolPort {
   };
   /**
    * Resizing a finished image into an icon set saved through `save`. Absent
-   * where the host cannot resize images (off macOS), and then not offered.
+   * where the host cannot resize images, and then not offered.
    */
   readonly iconSets?: ImageIconSetPort;
 }
