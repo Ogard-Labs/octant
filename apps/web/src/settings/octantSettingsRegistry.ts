@@ -2070,12 +2070,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "pairing code pair phone device single use",
         },
         {
-          id: settingId("remote-access-pause"),
-          label: "Pause remote access",
-          scope: "host",
-          keywords: "pause stop block refuse remote access paired devices resume lock out",
-        },
-        {
           id: settingId("access-activity"),
           label: "Access activity",
           scope: "host",
@@ -2094,7 +2088,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Pause remote access",
           scope: "host",
           keywords:
-            "pause resume remote access paired devices agents refuse block stop lock panic access level full approve steer read only",
+            "pause resume remote access paired devices agents refuse block stop lock out panic access level full approve steer read only",
         },
         {
           id: settingId("hub-role"),
