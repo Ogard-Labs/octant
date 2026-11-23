@@ -643,6 +643,45 @@ describe("video jobs", () => {
     expect(spend.settle).not.toHaveBeenCalled();
   });
 
+  it("settles billed seconds plus the per-image fees the estimate charged for a first frame and a reference", async () => {
+    const { service, spend } = harness({
+      model: {
+        ...capabilities({
+          cancel: "running",
+          removal: { kind: "delete" },
+          resumeWindowHours: 24,
+        }),
+        price: {
+          kind: "per-second",
+          rates: [{ resolution: "720p", usdMicrosPerSecond: 100_000 }],
+          inputUsdMicrosPerImage: 50_000,
+        },
+      },
+      polls: [
+        {
+          status: "completed",
+          video: { bytes: CONFORMANCE_MP4_BYTES, mediaType: "video/mp4" },
+          usage: { billedSeconds: 2 },
+        },
+      ],
+    });
+    const image = { bytes: new Uint8Array([1]), mediaType: "image/png" as const };
+    const queued = await service.enqueue({
+      threadKind: "work-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "A paper boat on a pond",
+      options,
+      firstFrame: image,
+      references: [image],
+    });
+    expect(queued.estimatedCostUsdMicros).toBe(1_100_000);
+    const done = await service.whenTerminal(queued.id);
+    expect(done).toMatchObject({ status: "completed", settledCostUsdMicros: 300_000 });
+    expect(spend.settle).toHaveBeenCalledTimes(1);
+  });
+
   it("settles an interrupted start at the estimate when the request may have reached the provider", async () => {
     const { service, calls, spend } = harness({
       start: async () => ({
