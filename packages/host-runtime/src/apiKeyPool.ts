@@ -358,14 +358,18 @@ function parsePool(stored: string): PoolState | undefined {
     ) {
       throw new ApiKeyPoolError("corrupt");
     }
-    if (key.rotation !== undefined && (!Number.isInteger(key.rotation) || key.rotation < 1)) {
+    const rotation = key.rotation;
+    if (
+      rotation !== undefined &&
+      (typeof rotation !== "number" || !Number.isInteger(rotation) || rotation < 1)
+    ) {
       throw new ApiKeyPoolError("corrupt");
     }
     return {
       id: key.id,
       label: key.label,
       secret: key.secret,
-      ...(key.rotation === undefined ? {} : { rotation: key.rotation }),
+      ...(rotation === undefined ? {} : { rotation }),
     };
   });
   assertPool(entries);
