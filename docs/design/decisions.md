@@ -38,7 +38,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Canvas authority](#canvas-authority)                                                 | 2         | 0       | 2            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 17        | 10      | 7            | 0                   |
-| [Agents and delegation](#agents-and-delegation)                                       | 5         | 2       | 3            | 0                   |
+| [Agents and delegation](#agents-and-delegation)                                       | 6         | 3       | 3            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 7         | 3       | 4            | 0                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 5         | 3       | 2            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **294**   | **177** | **113**      | **4**               |
+| **All areas**                                                                         | **295**   | **178** | **113**      | **4**               |
 
 ## Principles and hard lines
 
@@ -1110,6 +1110,19 @@ A child run starts only when the thread's agent delegates through `octant_agents
 - Cancelling a child tree proceeds leaves-up and completes only after each process is confirmed stopped; an ambiguous outcome becomes waiting, failed or interrupted, never completed. _Here only._
 
 Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+
+### Choosing a subagent's route in a prompt
+
+A person can name the exact route for a subagent in the prompt: `@model` opens a picker of the provider instances and models configured, then the reasoning values that route advertises, and the selection sits in the prompt as an inline chip (maintainer decision, 2026-11-23).
+
+- The prompt holds the selection as plain text, `@model(<provider instance id>/<model id>, reasoning=<value>)`, so copy keeps it and paste restores the chip; no reasoning means the provider's default.
+- The parent thread keeps its own model; the tag only qualifies the subagent the prompt asks for.
+- The launch resolves the exact provider instance and model and accepts only a reasoning value the model advertises; an explicit route never falls back to another, and the parent agent is told to report an unavailable route rather than pick another.
+- A chip whose route is unavailable says which choice needs attention before the prompt is sent; sending is not blocked.
+- Every composer's prompt is an editable element that keeps a text field's value, caret, paste, copy, undo and label behavior so the chip can sit in the text.
+- Live check owed: a maintainer runs one tagged subagent on a real provider and confirms the child's row names the tagged provider, model and reasoning.
+
+Status: Built. Since: 2026-11-23. Detail: [Thread view: Choosing a subagent model in a prompt](thread-view.md#choosing-a-subagent-model-in-a-prompt).
 
 ### Child approvals and results
 

@@ -360,6 +360,47 @@ model read, and new outside content marks it again), and the buttons Cancel
 and Clear mark. The mark stays server-owned: the renderer shows it and sends
 the existing clear.
 
+## Choosing a subagent model in a prompt
+
+Typing `@model` opens a searchable picker at the caret. It lists every model a
+configured provider that is ready (or degraded) serves; a model served by two
+configured providers appears twice, with each provider's logo and name.
+Choosing a row opens the reasoning choices advertised for that route (the
+model's `reasoning` or `effort` values), including **Provider default**; a
+model that advertises none is inserted at once. Enter inserts the selection.
+Escape dismisses the picker and preserves the draft. Typing a prefix of
+`@model` offers the picker as a row of the `@` menu.
+
+The composer renders the selection inline as **provider logo – model –
+reasoning**. The provider's name is the chip's accessible name and its tooltip,
+and stands in for the logo when the provider has none. Activating the chip
+reopens the picker with its current values. The prompt holds the selection as
+plain text, `@model(<provider instance id>/<model id>, reasoning=<value>)`,
+so copying it preserves the exact provider instance, model ID and optional
+reasoning setting, and pasting a valid tag restores the chip. Omitting
+reasoning selects the provider default. The caret and deletion treat a chip as
+one unit.
+
+A tag qualifies the subagent requested in the prompt. The parent thread keeps
+its model. At launch the host resolves the exact configured provider instance
+and model and validates any explicit reasoning setting against the values that
+model advertises; an explicit route never falls back to another one. A chip
+whose choice is unavailable (provider removed or not ready, model gone,
+reasoning no longer offered) is outlined as needing attention and says why in
+its name and tooltip, so the person can revise it before sending. Sending is
+not blocked: the launch refuses the unavailable route, and the delegation tool
+tells the parent agent to report which choice is unavailable rather than pick
+another route. The child thread identifies the selected provider, model and
+reasoning setting in its row.
+
+Every composer's prompt is an editable element rather than a text field so the
+chip can sit in the text (maintainer decision, 2026-11-23). It keeps a text
+field's behavior for callers: its value is the plain-text prompt, Enter and
+Shift+Enter, paste (as plain text), copy, cut and undo work as in a text
+field, and a label names it. Rejected: a chip row above a text field with the
+tag kept as text (not inline), and a styled highlight behind the tag text (no
+logo or names).
+
 ## Subagents in a thread
 
 A thread's subagents sit in a card attached above the composer's message
