@@ -35,9 +35,8 @@ export function subagentModelRoutes(
     for (const section of group.sections) {
       for (const picker of section.models) {
         const id = String(picker.model.id);
-        if (picker.unavailableReason !== undefined || !picker.toolCapable || seen.has(id)) {
-          continue;
-        }
+        if (picker.unavailableReason !== undefined || seen.has(id)) continue;
+        if (!picker.toolCapable || !carriesOctantTools(group, picker.model)) continue;
         seen.add(id);
         routes.push({
           group,
@@ -48,6 +47,18 @@ export function subagentModelRoutes(
     }
   }
   return routes;
+}
+
+/**
+ * The host admits a subagent only on a provider that negotiated Octant's tools
+ * or on a model it verified for them (`modelCanTakeDelegatedWork`); a model
+ * the picker marks tool-capable can still fail that on its provider.
+ */
+function carriesOctantTools(group: PickerGroup, model: ProviderModel): boolean {
+  return (
+    group.appManagedTools === "supported" ||
+    (group.verifiedToolModelIds ?? []).some((id) => String(id) === String(model.id))
+  );
 }
 
 export type SubagentModelTagResolution =

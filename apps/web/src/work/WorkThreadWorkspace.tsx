@@ -115,7 +115,6 @@ import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
-import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ThreadInfo } from "../composer/ThreadInfo";
 import { ThreadAccountControl } from "../providers/ThreadAccountControl";
@@ -3437,6 +3436,9 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               onKeyDown={handleKeyDown}
               onKeyUp={(event) => {
                 rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
+                // Escape closed a menu on key down; re-reading the token on its
+                // release would open it again, as the Code composer knows.
+                if (event.key === "Escape") return;
                 syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
               }}
               onDragOver={(event) => event.preventDefault()}

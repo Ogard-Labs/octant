@@ -558,6 +558,7 @@ describe("@model in the composer", () => {
       driverLabel: "Codex",
       endpointHost: undefined,
       executionHost: "local",
+      appManagedTools: "supported",
       sections: [
         {
           id: "all-models",
@@ -619,6 +620,18 @@ describe("@model in the composer", () => {
     expect(
       await screen.findByRole("button", { name: "Subagent model: Team Codex, GPT-5, high" }),
     ).toBeInTheDocument();
+  });
+
+  it("undoes a chosen model back to the typed @model", async () => {
+    render(<ModelHarness />);
+    const prompt = screen.getByRole("textbox", { name: "Message" });
+    await userEvent.type(prompt, "Ask @model{Enter}");
+    await screen.findByRole("combobox", { name: "Search models" });
+    await userEvent.keyboard("GPT-5 mini{Enter}");
+    await waitFor(() => expect(prompt).toHaveFocus());
+    expect(prompt).toHaveValue(`Ask @model(${instanceId}/gpt-5-mini) `);
+    await userEvent.keyboard("{Control>}z{/Control}");
+    expect(prompt).toHaveValue("Ask @model");
   });
 
   it("leaves the draft as typed when the picker is dismissed with Escape", async () => {

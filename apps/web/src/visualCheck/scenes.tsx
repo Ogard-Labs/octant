@@ -21,7 +21,6 @@ import { SettingsView } from "../shell/SettingsView";
 import { RailAccount } from "../shell/SidebarProfile";
 import { SidebarRail } from "../shell/SidebarRail";
 import type { ThemeController } from "../theme/useThemeController";
-import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
 import { SCENE_LIST, type SceneMeta } from "./sceneList";
 import {

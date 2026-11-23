@@ -537,14 +537,19 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         modelRef.current = value;
         if (external) {
           pendingRef.current = { start: value.length, end: value.length };
-          // A text field forgets its undo history when its value is replaced, so
-          // undo after a send cannot bring back text that already went.
-          historyRef.current = {
-            entries: [{ value, caret: value.length }],
-            index: 0,
-            at: 0,
-            typing: false,
-          };
+          // A cleared prompt (a send) forgets its undo history, so undo cannot
+          // bring back text that already went; any other change the caller
+          // makes (a chosen model, a command) undoes as one step.
+          if (value === "") {
+            historyRef.current = {
+              entries: [{ value, caret: 0 }],
+              index: 0,
+              at: 0,
+              typing: false,
+            };
+          } else {
+            remember({ value, caret: value.length }, false);
+          }
         }
       }
       if (composingRef.current) return;

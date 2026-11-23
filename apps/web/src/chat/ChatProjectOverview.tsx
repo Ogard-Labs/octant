@@ -209,6 +209,9 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
                 onKeyDown={(event) => {
                   atMenu.handleKeyDown(event);
                 }}
+                onSelect={(event) => {
+                  atMenu.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                }}
                 placeholder="Describe the next Chat thread…"
                 ref={input}
                 renderModelChip={atMenu.renderModelChip}
