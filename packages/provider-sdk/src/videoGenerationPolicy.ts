@@ -236,8 +236,10 @@ export function estimateVideoCost(
     case "per-second": {
       const rate = perSecondRate(price, options);
       if (rate === undefined) return { kind: "unknown" };
-      const imageCost = (price.inputUsdMicrosPerImage ?? 0) * input.imageCount;
-      return { kind: "estimate", usdMicros: rate * options.durationSeconds + imageCost };
+      return {
+        kind: "estimate",
+        usdMicros: perSecondCostUsdMicros(price, rate, options.durationSeconds, input.imageCount),
+      };
     }
     case "per-token": {
       const perSecond = price.outputTokensPerSecond.find(
@@ -264,16 +266,32 @@ function tokenCost(
 }
 
 /**
+ * Seconds at a declared per-second rate plus the fixed per-input fees the
+ * estimate charges. Shared by the estimate and the settle so a job that
+ * reports billed seconds pays the same inputs it was reserved for.
+ */
+function perSecondCostUsdMicros(
+  price: Extract<VideoPrice, { readonly kind: "per-second" }>,
+  usdMicrosPerSecond: number,
+  seconds: number,
+  imageCount: number,
+): number {
+  return usdMicrosPerSecond * seconds + (price.inputUsdMicrosPerImage ?? 0) * imageCount;
+}
+
+/**
  * The cost a finished job settles at: computed from the usage the provider
  * reported where the price basis can use it, else the estimate. A per-second
- * model that reports `billedSeconds` settles at those seconds times its rate,
- * never more than what was reserved.
+ * model that reports `billedSeconds` settles at those seconds times its rate
+ * plus the same fixed input fees the estimate charged, never more than what
+ * was reserved.
  */
 export function settleVideoCostUsdMicros(
   price: VideoPrice,
   estimateUsdMicros: number,
   usage: VideoUsage | undefined,
   options: Pick<VideoClipOptions, "resolution" | "audio">,
+  input: { readonly imageCount: number },
 ): number {
   if (usage === undefined) return estimateUsdMicros;
   if (price.kind === "per-token" && usage.outputTokens !== undefined) {
@@ -284,7 +302,12 @@ export function settleVideoCostUsdMicros(
   }
   if (price.kind === "per-second" && usage.billedSeconds !== undefined) {
     const rate = perSecondRate(price, options);
-    if (rate !== undefined) return Math.min(estimateUsdMicros, rate * usage.billedSeconds);
+    if (rate !== undefined) {
+      return Math.min(
+        estimateUsdMicros,
+        perSecondCostUsdMicros(price, rate, usage.billedSeconds, input.imageCount),
+      );
+    }
   }
   return estimateUsdMicros;
 }

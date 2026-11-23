@@ -155,14 +155,18 @@ describe("video generation policy", () => {
     expect(estimate).toEqual({ kind: "estimate", usdMicros: 696_540 });
   });
 
+  const noImages = { imageCount: 0 } as const;
+
   it("settles a token-priced job from the provider's reported tokens, else the estimate", () => {
     const options = { resolution: "720p", audio: true };
-    expect(settleVideoCostUsdMicros(omni.price, 696_540, { outputTokens: 28_960 }, options)).toBe(
-      347_520,
-    );
-    expect(settleVideoCostUsdMicros(omni.price, 696_540, undefined, options)).toBe(696_540);
     expect(
-      settleVideoCostUsdMicros(flat.price, 800_000, { outputTokens: 10 }, options),
+      settleVideoCostUsdMicros(omni.price, 696_540, { outputTokens: 28_960 }, options, noImages),
+    ).toBe(347_520);
+    expect(settleVideoCostUsdMicros(omni.price, 696_540, undefined, options, noImages)).toBe(
+      696_540,
+    );
+    expect(
+      settleVideoCostUsdMicros(flat.price, 800_000, { outputTokens: 10 }, options, noImages),
     ).toBe(800_000);
   });
 
@@ -176,12 +180,38 @@ describe("video generation policy", () => {
     expect(estimate).toEqual({ kind: "estimate", usdMicros: 1_000_000 });
     const options = { resolution: "720p", audio: false };
     expect(
-      settleVideoCostUsdMicros(timed.price, 1_000_000, { billedSeconds: 2 }, options),
+      settleVideoCostUsdMicros(timed.price, 1_000_000, { billedSeconds: 2 }, options, noImages),
     ).toBe(200_000);
     expect(
-      settleVideoCostUsdMicros(timed.price, 1_000_000, { billedSeconds: 12 }, options),
+      settleVideoCostUsdMicros(timed.price, 1_000_000, { billedSeconds: 12 }, options, noImages),
     ).toBe(1_000_000);
-    expect(settleVideoCostUsdMicros(timed.price, 1_000_000, undefined, options)).toBe(1_000_000);
+    expect(settleVideoCostUsdMicros(timed.price, 1_000_000, undefined, options, noImages)).toBe(
+      1_000_000,
+    );
+  });
+
+  it("settles billed seconds plus the input image fees the estimate charged", () => {
+    const priced = {
+      kind: "per-second" as const,
+      rates: [{ resolution: "720p", usdMicrosPerSecond: 100_000 }] as const,
+      inputUsdMicrosPerImage: 20_000,
+    };
+    // Two input images add 40,000 µs to both the reservation and the settle.
+    expect(
+      estimateVideoCost(
+        priced,
+        { durationSeconds: 10, resolution: "720p", aspectRatio: "16:9", audio: false },
+        { promptTokens: 0, imageCount: 2 },
+      ),
+    ).toEqual({ kind: "estimate", usdMicros: 1_040_000 });
+    const options = { resolution: "720p", audio: false };
+    const input = { imageCount: 2 };
+    expect(settleVideoCostUsdMicros(priced, 1_040_000, { billedSeconds: 2 }, options, input)).toBe(
+      240_000,
+    );
+    expect(settleVideoCostUsdMicros(priced, 1_040_000, { billedSeconds: 12 }, options, input)).toBe(
+      1_040_000,
+    );
   });
 
   it("treats an unpublished price as unknown spend", () => {
