@@ -730,9 +730,27 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
     }
   };
 
-  // fal's copy expires on its own (see RETENTION_HEADERS), so the host owes
-  // no removal; this answers a call that should not come.
-  const forget = async (): Promise<VideoAdapterForget> => ({ status: "removed" });
+  // The host asks once after a terminal state; where the key may not delete
+  // stored payloads, fal's own expiry (see RETENTION_HEADERS) is the fallback.
+  const forget = async (remoteId: string): Promise<VideoAdapterForget> => {
+    const [, requestId = ""] = remoteId.split("#");
+    if (!REQUEST_ID_PATTERN.test(requestId)) return invalidId();
+    try {
+      // Deletes the request's stored input/output payloads and its CDN output
+      // files, per fal's platform API:
+      // https://fal.ai/docs/platform-apis/v1/models/requests/payloads
+      const response = await ports.request({
+        url: `${PLATFORM_BASE_URL}/models/requests/${requestId}/payloads`,
+        method: "DELETE",
+        auth: AUTH,
+      });
+      // A 404 means the request is already gone, which is the same outcome.
+      if (response.ok || response.status === 404) return { status: "removed" };
+      return { status: "failed", providerFailure: classifyVideoHttpFailure(response) };
+    } catch (error) {
+      return { status: "failed", providerFailure: asFailure(error) };
+    }
+  };
 
   return {
     // A failed or partial discovery is thrown, not cached: the host keeps no

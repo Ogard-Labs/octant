@@ -243,6 +243,16 @@ export class VideoJobService {
     { readonly models: ReadonlyArray<VideoModelCapabilities>; readonly complete: boolean }
   >();
   readonly #declaring = new Set<string>();
+  /**
+   * Profile versions whose key refused a stored-payload removal, for this host
+   * run: later jobs on them go straight to the provider's own expiry.
+   */
+  readonly #removalRefused = new Set<string>();
+  /**
+   * When a provider-expiring copy is gone anyway: a removal still owed past
+   * this is dropped rather than retried.
+   */
+  readonly #removalDeadline = new Map<string, number>();
   /** When each profile's catalog was last read, bounding a retry to 60 s. */
   readonly #discoveryReadAt = new Map<string, number>();
   #active = 0;
@@ -834,7 +844,22 @@ export class VideoJobService {
     remoteId: string,
     model: VideoModelCapabilities | undefined,
   ): VideoJob {
-    const copy: VideoProviderCopy = model?.job.removal.kind === "expires" ? "expires" : "held";
+    let copy: VideoProviderCopy = "held";
+    if (model?.job.removal.kind === "expires") {
+      const instance = this.#options.readProviderInstance(job.profileInstanceId);
+      if (instance !== undefined && this.#removalRefused.has(declaredKey(instance))) {
+        // This profile's key already refused a removal: the provider's own
+        // expiry ends this copy, and no DELETE is sent.
+        copy = "expires";
+      } else {
+        // One removal is owed after the terminal state; a refusal or a copy
+        // still owed past its own expiry falls back to the provider's expiry.
+        this.#removalDeadline.set(
+          String(job.id),
+          Date.parse(job.startedAt ?? job.createdAt) + model.job.removal.afterHours * 3_600_000,
+        );
+      }
+    }
     return this.#annotate(job, { remoteId, providerCopy: copy });
   }
 
@@ -1069,6 +1094,11 @@ export class VideoJobService {
     const job = this.#current(candidate);
     if (job.providerCopy !== "held" || job.remoteId === undefined) return;
     if (this.#removing.has(String(job.id))) return;
+    const expiresAt = this.#removalDeadline.get(String(job.id));
+    if (expiresAt !== undefined && this.#now() >= expiresAt) {
+      this.#markCopy(job, "expires");
+      return;
+    }
     this.#removing.add(String(job.id));
     try {
       const instance = this.#options.readProviderInstance(job.profileInstanceId);
@@ -1085,21 +1115,36 @@ export class VideoJobService {
       // still owed; the next host's recovery retries the removal.
       if (this.#closing.signal.aborted) return;
       if (result.status === "removed") {
-        const current = this.#current(job);
-        const updatedAt = decodeUtcTimestamp(this.#options.clock());
-        const version = decodeAggregateVersion(current.version + 1);
-        this.#append(current.id, current.version, [
-          {
-            eventName: VIDEO_JOB_PROVIDER_COPY_CHANGED,
-            payload: { jobId: current.id, version, updatedAt, providerCopy: "removed" },
-            occurredAt: updatedAt,
-          },
-        ]);
-        this.#notify(this.#current(job));
+        this.#markCopy(job, "removed");
+      } else if (
+        expiresAt !== undefined &&
+        (result.providerFailure.category === "unauthenticated" ||
+          result.providerFailure.category === "unauthorized")
+      ) {
+        // This copy expires on its own and this profile's later jobs skip DELETE.
+        if (instance !== undefined) this.#removalRefused.add(declaredKey(instance));
+        this.#markCopy(job, "expires");
       }
     } finally {
       this.#removing.delete(String(job.id));
     }
+    // Any other failure stays owed: the retry loop tries again until the
+    // copy's own expiry would have ended it anyway.
+  }
+
+  #markCopy(job: VideoJob, providerCopy: VideoProviderCopy): void {
+    this.#removalDeadline.delete(String(job.id));
+    const current = this.#current(job);
+    const updatedAt = decodeUtcTimestamp(this.#options.clock());
+    const version = decodeAggregateVersion(current.version + 1);
+    this.#append(current.id, current.version, [
+      {
+        eventName: VIDEO_JOB_PROVIDER_COPY_CHANGED,
+        payload: { jobId: current.id, version, updatedAt, providerCopy },
+        occurredAt: updatedAt,
+      },
+    ]);
+    this.#notify(this.#current(job));
   }
 
   // --- journal ---

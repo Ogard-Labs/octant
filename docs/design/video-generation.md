@@ -167,12 +167,19 @@ activation ladder.
    - The driver sends `X-Fal-Store-IO: 0`, so fal keeps no 90-day copy of the
      request, and `X-Fal-Object-Lifecycle-Preference` with a two-hour
      expiry, so fal's CDN copy of the clip is gone two hours after it is made.
-   - Rationale: fal's payload delete removes stored payloads and output files,
-     but it needs a key with the `models:requests:write` and `assets:write`
-     permissions (fal's FULL preset), which an ordinary API key lacks, so
-     every removal would fail and be retried without end. The expiry header
-     works with any key. With request history off, fal keeps a queue result
-     for one hour, so the fal driver's resume window is one hour.
+   - Removal asks once, then falls back to expiry. fal's
+     [payload deletion](https://fal.ai/docs/platform-apis/v1/models/requests/payloads.md)
+     (`DELETE /models/requests/{request_id}/payloads`) removes the request's
+     stored payloads and output files, so the host sends it once after a
+     terminal state. The delete needs a key with `models:requests:write` and
+     `assets:write` (fal's FULL preset), which an ordinary API key lacks, so
+     a 401/403 is expected for some keys: the host then records that the
+     provider's own expiry ends the copy, remembers the refusal for that
+     profile version while it runs so later jobs skip the DELETE, and never
+     retries it. Any other failure stays owed on the retry loop, but only
+     until the copy's own expiry has passed. With request history off, fal
+     keeps a queue result for one hour, so the fal driver's resume window is
+     one hour.
    - Each endpoint's options are read from its published queue schema — a
      `num_frames` field at a fixed frame rate becomes the whole-second
      lengths that rate makes, and `first_frame_url`/`last_frame_url` map to

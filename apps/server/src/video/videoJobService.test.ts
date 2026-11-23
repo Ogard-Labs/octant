@@ -15,6 +15,7 @@ import {
 } from "@octant/contracts/video-generation";
 import {
   isProviderFailure,
+  type VideoAdapterForget,
   type VideoAdapterPoll,
   type VideoAdapterRequest,
   type VideoAdapterStart,
@@ -93,7 +94,7 @@ interface Script {
   poll?: (signal: AbortSignal) => Promise<VideoAdapterPoll>;
   cancel?: (signal: AbortSignal | undefined) => Promise<VideoAdapterPoll>;
   credential?: () => Promise<string>;
-  forget?: () => Promise<"removed" | "failed">;
+  forget?: () => Promise<"removed" | "failed" | VideoAdapterForget>;
   model?: VideoModelCapabilities;
   beforeModels?: (call: number) => Promise<void>;
   /** Rejects models() once, on a numbered call, or for good, as a failed discovery read can. */
@@ -152,12 +153,14 @@ function fakeDriver(script: Script) {
         forget: async () => {
           calls.forget += 1;
           const outcome = (await script.forget?.()) ?? "removed";
-          return outcome === "removed"
-            ? { status: "removed" }
-            : {
-                status: "failed",
-                providerFailure: { category: "unavailable", message: "Try later." },
-              };
+          if (outcome === "removed") return { status: "removed" };
+          if (outcome === "failed") {
+            return {
+              status: "failed",
+              providerFailure: { category: "unavailable", message: "Try later." },
+            };
+          }
+          return outcome;
         },
       };
     },
@@ -744,10 +747,12 @@ describe("video jobs", () => {
     const done = await service.whenTerminal(queued.id);
     expect(done).toMatchObject({
       status: "cancelled",
-      providerCopy: "expires",
       settledCostUsdMicros: 695_040,
     });
     expect(calls.cancel).toBe(0);
+    // One removal is asked of a provider-expiring model too.
+    await vi.waitFor(() => expect(service.getById(queued.id)?.providerCopy).toBe("removed"));
+    expect(calls.forget).toBe(1);
   });
 
   it("bills nothing for a safety refusal the provider returns before any output", async () => {
@@ -824,6 +829,63 @@ describe("video jobs", () => {
         "removed",
       ]),
     );
+  });
+
+  it("lets the provider's own expiry end a refused removal, and skips the DELETE on that profile's later jobs", async () => {
+    const model = capabilities({
+      cancel: "running",
+      removal: { kind: "expires", afterHours: 2 },
+      resumeWindowHours: 24,
+    });
+    const { service, calls } = harness({
+      model,
+      forget: async () => ({
+        status: "failed",
+        providerFailure: { category: "unauthorized", message: "The key cannot delete payloads." },
+      }),
+    });
+    const firstId = (await enqueue(service)).id;
+    await service.whenTerminal(firstId);
+    await vi.waitFor(() => expect(service.getById(firstId)?.providerCopy).toBe("expires"));
+    expect(calls.forget).toBe(1);
+
+    // A refused removal is never put on the retry loop.
+    await service.retryOwedRemovals();
+    expect(calls.forget).toBe(1);
+
+    const secondId = (await enqueue(service)).id;
+    await service.whenTerminal(secondId);
+    expect(service.getById(secondId)?.providerCopy).toBe("expires");
+    expect(calls.forget).toBe(1);
+  });
+
+  it("retries an owed removal on the loop but drops it once the provider's expiry has passed", async () => {
+    const model = capabilities({
+      cancel: "running",
+      removal: { kind: "expires", afterHours: 2 },
+      resumeWindowHours: 24,
+    });
+    const { service, calls, advance } = harness({
+      model,
+      forget: async () => ({
+        status: "failed",
+        providerFailure: { category: "provider-failed", message: "fal is down." },
+      }),
+    });
+    const doneId = (await enqueue(service)).id;
+    await service.whenTerminal(doneId);
+    // The first removal has been asked by the time the loop next runs.
+    await vi.waitFor(() => expect(calls.forget).toBe(1));
+    expect(service.getById(doneId)?.providerCopy).toBe("held");
+
+    await service.retryOwedRemovals();
+    expect(calls.forget).toBe(2);
+    expect(service.getById(doneId)?.providerCopy).toBe("held");
+
+    advance(2 * 3_600_000 + 1);
+    await service.retryOwedRemovals();
+    expect(calls.forget).toBe(2);
+    expect(service.getById(doneId)?.providerCopy).toBe("expires");
   });
 
   it("refuses a seventeenth waiting job so a runaway loop cannot queue without end", async () => {

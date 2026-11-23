@@ -140,6 +140,26 @@ describe("fal video driver", () => {
     });
   });
 
+  it("sends exactly one DELETE for the request's stored payloads when the host asks", async () => {
+    const recorder = ports((request) =>
+      request.method === "DELETE" ? new Response(null, { status: 204 }) : script()(request),
+    );
+    const adapter = falVideoDriver.create({ profile, ports: recorder.ports });
+    const started = await adapter.start({
+      modelId: veo,
+      prompt: "A boat",
+      options,
+      references: [],
+      signal: new AbortController().signal,
+    });
+    if (started.status !== "started") throw new Error("The request was not sent.");
+    expect(await adapter.forget(started.remoteId)).toEqual({ status: "removed" });
+    const deletions = recorder.sent.filter((request) => request.method === "DELETE");
+    expect(deletions).toHaveLength(1);
+    expect(deletions[0]?.url).toBe(`https://api.fal.ai/v1/models/requests/${requestId}/payloads`);
+    expect(deletions[0]?.auth).toEqual({ header: "authorization", scheme: "Key" });
+  });
+
   it("asks fal to keep no request history and to expire its copy, in the endpoint's own fields", async () => {
     const recorder = ports(script());
     const adapter = falVideoDriver.create({ profile, ports: recorder.ports });
