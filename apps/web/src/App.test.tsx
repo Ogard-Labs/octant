@@ -3,6 +3,7 @@ import {
   decodeWorkThread,
   decodeCodeThreadId,
   decodeCodeCheckoutIdentity,
+  decodeCodeEvidenceReference,
   decodeCodePlannerView,
   decodeCodeThread,
   decodeWorkspaceOperation,
@@ -679,6 +680,11 @@ describe("App", () => {
       const pendingStart = deferred<Awaited<ReturnType<CodeClient["putEvidence"]>>>();
       let view = original;
       const promptText = "Check the new branch";
+      const promptEvidence = decodeCodeEvidenceReference({
+        contentId: "90000000-0000-4000-8000-000000000002",
+        digest: "a".repeat(64),
+        byteLength: promptText.length,
+      });
       const createdWorktree = (command: CreateManagedCodeThreadCommand) => {
         const checkout = decodeCodeCheckoutIdentity({
           ...original.checkout,
@@ -751,6 +757,12 @@ describe("App", () => {
         ...base,
         thread: vi.fn(async () => view),
         putEvidence: vi.fn(() => pendingStart.promise),
+        executeOperation: vi.fn<CodeClient["executeOperation"]>(async (command, signal) =>
+          command.kind === "start-provider-turn"
+            ? { kind: "provider-turn-state", operationId: command.operationId, state: "running" }
+            : base.executeOperation(command, signal),
+        ),
+        subscribeOperation: vi.fn(async function* () {}),
         ...(source === "planner"
           ? {
               readPlanner: async () => planner,
@@ -882,6 +894,22 @@ describe("App", () => {
         source === "planner" ? "Check out filesDone" : "Done · 83 ms",
       );
       expect(prompt).toHaveTextContent(promptText);
+      await waitFor(() =>
+        expect(codeApi.putEvidence).toHaveBeenCalledExactlyOnceWith(view.thread.id, promptText),
+      );
+      pendingStart.resolve(promptEvidence);
+      await waitFor(() =>
+        expect(codeApi.executeOperation).toHaveBeenCalledWith(
+          expect.objectContaining({
+            kind: "start-provider-turn",
+            threadId: view.thread.id,
+            checkoutId: view.checkout.id,
+            prompt: promptEvidence,
+          }),
+        ),
+      );
+      const ready = await within(pane).findByText("Worktree ready");
+      expect(ready.closest("details")).not.toHaveAttribute("open");
     },
   );
 
