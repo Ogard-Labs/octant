@@ -491,4 +491,31 @@ describe("sign-in recovery advice", () => {
       "Sign in to Google Antigravity with its provider-owned login, then check the connection again.",
     );
   });
+
+  it("a missing Antigravity sign-in method tells the person to update the CLI, not to check the key", () => {
+    expect(
+      providerRefusalCopy("sign-in-not-offered", antigravity({ authentication: "api-key" })),
+    ).toEqual({
+      reason: "Your agy doesn't offer this sign-in.",
+      nextStep: "Update the Antigravity CLI, or choose another sign-in.",
+    });
+  });
+
+  it("a missing sign-in method on another driver names that provider's update", () => {
+    const kimi = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-0000000000b1",
+      displayName: "Kimi",
+      driverKind: "kimi-code",
+      configuration: { kind: "kimi-code-acp", binaryPath: "/usr/local/bin/kimi" },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-11-22T10:00:00.000Z",
+      updatedAt: "2026-11-22T10:00:00.000Z",
+    });
+    expect(providerRefusalCopy("sign-in-not-offered", kimi)).toEqual({
+      reason: "Kimi Code doesn't offer this sign-in.",
+      nextStep: "Update Kimi Code, or choose another sign-in.",
+    });
+  });
 });

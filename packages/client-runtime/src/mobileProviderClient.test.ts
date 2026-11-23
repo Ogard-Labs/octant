@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  decodeHostAnswer,
   decodeProviderInstance,
   decodeProviderModelId,
   decodeProviderRegistrySnapshot,
+  ProviderRegistrySnapshot,
   type ProviderInstanceId,
 } from "@octant/contracts";
 import {
@@ -169,5 +171,85 @@ describe("mobile provider catalog", () => {
       method: "GET",
       path: "/api/providers/bootstrap",
     });
+  });
+
+  it("an older phone still reads a catalog whose refused provider carries a sign-in detail it doesn't know", () => {
+    const catalog = decodeHostAnswer(ProviderRegistrySnapshot)({
+      instances: [
+        decodeProviderInstance({
+          id: instanceA,
+          displayName: "Alpha",
+          driverKind: "openai-compatible",
+          configuration: {
+            kind: "openai-compatible-http",
+            baseUrl: "https://alpha.example/v1/",
+            authentication: "none",
+            protocol: "responses",
+            manualModelIds: [],
+          },
+          enabled: true,
+          environmentPolicy: "inherit-host",
+          version: 1,
+          createdAt: now,
+          updatedAt: now,
+        }),
+        decodeProviderInstance({
+          id: instanceB,
+          displayName: "Bravo",
+          driverKind: "openai-compatible",
+          configuration: {
+            kind: "openai-compatible-http",
+            baseUrl: "https://bravo.example/v1/",
+            authentication: "none",
+            protocol: "responses",
+            manualModelIds: [],
+          },
+          enabled: true,
+          environmentPolicy: "inherit-host",
+          version: 1,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      ],
+      defaults: { permissionPersistence: "current-session", version: 0 },
+      observedStates: [
+        {
+          instanceId: instanceA,
+          readiness: "ready",
+          processState: "running",
+          models: [model("model-a", "Model A")],
+          capabilities,
+          observedAt: now,
+        },
+        {
+          instanceId: instanceB,
+          readiness: "unauthenticated",
+          processState: "stopped",
+          models: [],
+          capabilities,
+          message: "Provider authentication is required.",
+          reason: "authentication-required",
+          // The sign-in detail this build knows, and a detail a newer host
+          // could add later: an older phone drops both and keeps the catalog.
+          signInNotOffered: true,
+          signInNextDetail: "cli-update",
+          observedAt: now,
+        },
+      ],
+    });
+
+    expect(catalog.observedStates.find((o) => o.instanceId === instanceB)?.reason).toBe(
+      "authentication-required",
+    );
+    expect(normalizeMobileModelOptions(catalog)).toEqual([
+      {
+        id: encodeMobileModelOptionId(String(instanceA), "model-a"),
+        providerInstanceId: String(instanceA),
+        modelId: "model-a",
+        label: "Model A",
+        detail: "Alpha",
+        attachmentModalities: ["text"],
+      },
+    ]);
   });
 });

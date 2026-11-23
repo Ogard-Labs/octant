@@ -5104,6 +5104,36 @@ describe("ProviderService", () => {
     );
   });
 
+  it("carries the sign-in detail a refused probe recorded beside the refusal reason", async () => {
+    const fixture = serviceFixture({ instances: [provider()] });
+    const service = new ProviderService({
+      persistence: fixture.persistence,
+      runtimeRegistry: fixture.runtime,
+      driver: () => ({
+        kind: "opencode",
+        probe: () =>
+          Effect.fail({
+            category: "unauthenticated",
+            message: "OpenCode did not offer the configured sign-in.",
+            reason: "authentication-required",
+            signInNotOffered: true,
+          }),
+        acquire: () => Effect.die("unused"),
+      }),
+      uuid: () => crypto.randomUUID(),
+      clock: () => now,
+    });
+
+    await expect(service.probe(windowId, instanceId)).rejects.toMatchObject({
+      failure: { category: "unauthenticated", signInNotOffered: true },
+    });
+    expect(fixture.runtime.observedState(instanceId)).toMatchObject({
+      readiness: "unauthenticated",
+      reason: "authentication-required",
+      signInNotOffered: true,
+    });
+  });
+
   it("shows the minimum runtime version from a typed version check without exposing driver text", async () => {
     const fixture = serviceFixture({ instances: [mistralVibeProvider()] });
     const service = new ProviderService({

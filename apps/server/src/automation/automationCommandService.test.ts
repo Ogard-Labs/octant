@@ -17,7 +17,12 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import { AutomationCommandService } from "./automationCommandService";
-import { AutomationEventStore, registerAutomationEvents } from "./automationEventStore";
+import {
+  AUTOMATION_BLOCKED,
+  AUTOMATION_DEFINITION_AGGREGATE_TYPE,
+  AutomationEventStore,
+  registerAutomationEvents,
+} from "./automationEventStore";
 import { AutomationProjection } from "./automationProjection";
 import {
   AUTOMATION_TEST_IDS,
@@ -284,6 +289,55 @@ describe("automation command service", () => {
       definition: automationDefinitionDraftFixture(),
     } as unknown as AutomationCommand);
     expect(missing).toMatchObject({ kind: "automation-command-failed", reason: "not-found" });
+  });
+
+  it("a resume clears the pause's reason and the run that caused it", () => {
+    const harness = createHarness();
+    const { service, projection } = harness;
+    const definition = created(harness, automationId("3050"));
+
+    harness.journal.append({
+      aggregate: {
+        aggregateType: AUTOMATION_DEFINITION_AGGREGATE_TYPE,
+        aggregateId: String(definition.id),
+      },
+      expectedVersion: 1,
+      events: [
+        {
+          eventId: nextUuid(),
+          eventName: AUTOMATION_BLOCKED,
+          eventVersion: 1,
+          correlationId: nextUuid(),
+          actor,
+          occurredAt: now,
+          payload: {
+            automationId: definition.id,
+            runId: AUTOMATION_TEST_IDS.run,
+            reason: "provider-capability-mismatch",
+            recordedAt: now,
+          },
+        },
+      ],
+    });
+    expect(projection.getDefinition(definition.id)).toMatchObject({
+      lifecycle: "paused",
+      blockedReason: "provider-capability-mismatch",
+      blockedRunId: AUTOMATION_TEST_IDS.run,
+    });
+
+    const resumed = service.execute({
+      kind: "resume-automation",
+      automationId: definition.id,
+      expectedVersion: 2,
+      principal,
+      origin: interactive,
+    } as unknown as AutomationCommand);
+    expect(resumed.kind).toBe("automation-resumed");
+    if (resumed.kind !== "automation-resumed") return;
+    expect(resumed.automation.lifecycle).toBe("enabled");
+    expect(resumed.automation).not.toHaveProperty("blockedReason");
+    expect(resumed.automation).not.toHaveProperty("blockedRunId");
+    expect(projection.getDefinition(definition.id)).not.toHaveProperty("blockedRunId");
   });
 
   it("pauses, resumes, and archives without deleting history", () => {
