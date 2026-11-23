@@ -25,9 +25,9 @@ describe("the surfaces a thread offers on the phone", () => {
     expect(access.editable).toBe(false);
     expect(access.reason).toContain("Watching only");
 
-    expect(
-      conversationComposerAccess(listMobileThreadSurfaces({ mode: "chat" })).editable,
-    ).toBe(true);
+    expect(conversationComposerAccess(listMobileThreadSurfaces({ mode: "chat" })).editable).toBe(
+      true,
+    );
   });
 
   it("offers nothing this device cannot draw, however far the host would let it reach", () => {

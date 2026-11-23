@@ -80,9 +80,10 @@ export function browserSurfaceStatusNote(input: {
  * Read only watches: the thread lists, but nothing it sends would land, so
  * the composer says so rather than taking a reply the host then refuses.
  */
-export function conversationComposerAccess(
-  surfaces: ReadonlyArray<MobileThreadSurfaceOption>,
-): { readonly editable: boolean; readonly reason?: string } {
+export function conversationComposerAccess(surfaces: ReadonlyArray<MobileThreadSurfaceOption>): {
+  readonly editable: boolean;
+  readonly reason?: string;
+} {
   const reach = surfaces.find((surface) => surface.id === "chat")?.reach ?? "unavailable";
   if (reach === "interactive") return { editable: true };
   return {

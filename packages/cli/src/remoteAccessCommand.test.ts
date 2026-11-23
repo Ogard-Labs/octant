@@ -341,9 +341,7 @@ describe("pausing and resuming remote access from this computer", () => {
           },
     );
     expect(await test.run({ action: "remote-access-pause", paused: false })).toBe(1);
-    expect(test.err.join("")).toContain(
-      "octant listener enable --hostname 100.64.0.7 --port 8455",
-    );
+    expect(test.err.join("")).toContain("octant listener enable --hostname 100.64.0.7 --port 8455");
   });
 });
 
