@@ -595,6 +595,21 @@ export class VideoJobService {
         });
         return;
       }
+      // A transient failure may mean the request reached the provider after
+      // all: the job ends interrupted and settles at the estimate, since the
+      // provider may still make and bill the clip. Nothing is forgotten —
+      // there is no remote id to forget. A confirmed failure bills nothing.
+      if (isTransientVideoFailure(started.providerFailure)) {
+        this.#finish(sending, "failed", {
+          failure: videoFailure(
+            "interrupted",
+            "The provider may have started this clip; the estimate is counted.",
+          ),
+          settledCostUsdMicros: estimateOrZero(sending),
+          billed: true,
+        });
+        return;
+      }
       this.#finish(sending, "failed", { failure: started.providerFailure });
       return;
     }
@@ -654,19 +669,21 @@ export class VideoJobService {
       if (running.stopRequested && !cancelAsked) {
         cancelAsked = true;
         if (model?.job.cancel === "running") {
-          const answer = await adapter.cancel(remoteId, this.#closing.signal);
+          // Bounded by the job's deadline as well as shutdown, so the request
+          // can never hold the job past the time it would settle anyway.
+          const answer = await adapter.cancel(
+            remoteId,
+            AbortSignal.any([
+              this.#closing.signal,
+              AbortSignal.timeout(Math.max(1, deadline - this.#now())),
+            ]),
+          );
           // Shutdown aborted the cancel: the job stays running for the next
           // host to resume, never concluded from an answer the abort produced.
           if (this.#closing.signal.aborted) return;
-          // A confirmed failure is the provider's own word that the job is
-          // lost, so it concludes as the job's failure and bills nothing.
-          if (answer.status === "failed" && !isTransientVideoFailure(answer.providerFailure)) {
-            await this.#conclude(job, answer, false);
-            return;
-          }
-          // A transient failure leaves the stop unconfirmed: the provider may
-          // still be running the job, so keep polling to a terminal answer or
-          // the deadline rather than ending it cancelled and unbilled.
+          // A failed answer is a failure of the cancel REQUEST, not proof
+          // about the job: it falls through to an immediate poll, and only a
+          // terminal answer from there — or the deadline — concludes the job.
           if (answer.status !== "running" && answer.status !== "failed") {
             await this.#conclude(job, answer, true);
             return;
@@ -723,10 +740,14 @@ export class VideoJobService {
         await this.#conclude(job, poll, running.stopRequested);
         return;
       }
+      // A provider that answered with a retry-after wait is honoured before
+      // the next poll, still bounded by the job's deadline.
+      const coolDown =
+        poll.status === "failed" ? (poll.providerFailure.retryAfterMs ?? 0) : 0;
       // Once cancel is asked, Stop's signal stays aborted; waiting on it would
       // poll without any pause while the provider confirms.
       await this.#sleep(
-        Math.min(interval, Math.max(0, deadline - this.#now())),
+        Math.min(Math.max(interval, coolDown), Math.max(0, deadline - this.#now())),
         cancelAsked ? this.#closing.signal : running.controller.signal,
       );
       interval = Math.min(Math.round(interval * 1.5), MAX_POLL_MS);
@@ -1073,5 +1094,7 @@ function settleWithKnownPrice(
   price: VideoModelCapabilities["price"] | undefined,
 ): number {
   const estimate = estimateOrZero(job);
-  return price === undefined ? estimate : settleVideoCostUsdMicros(price, estimate, usage);
+  return price === undefined
+    ? estimate
+    : settleVideoCostUsdMicros(price, estimate, usage, job.options);
 }

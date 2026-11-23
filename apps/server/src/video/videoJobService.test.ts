@@ -166,6 +166,7 @@ function harness(script: Script, directory?: string) {
   }
   const fake = fakeDriver(script);
   const fetched: Array<string> = [];
+  const sleeps: Array<number> = [];
   let clockMs = Date.parse(now);
   const instance: { current: ProviderInstance | undefined } = { current: profile() };
   const spend = {
@@ -198,7 +199,10 @@ function harness(script: Script, directory?: string) {
     admittedDriverKinds: new Set(["gemini-video"]),
     spendCeiling: spend,
     resolveThreadProjectId: () => projectId,
-    sleep: () => new Promise((resolve) => setTimeout(resolve, 1)),
+    sleep: (ms: number) => {
+      sleeps.push(ms);
+      return new Promise((resolve) => setTimeout(resolve, 1));
+    },
     now: () => clockMs,
   });
   const advance = (ms: number) => {
@@ -214,6 +218,7 @@ function harness(script: Script, directory?: string) {
     journal,
     runtime,
     fetched,
+    sleeps,
     advance,
   };
 }
@@ -606,33 +611,95 @@ describe("video jobs", () => {
     expect(spend.settle).toHaveBeenCalledTimes(1);
   });
 
-  it("ends the job as failed when the provider's cancel answers a confirmed failure", async () => {
-    let release: () => void = () => undefined;
-    const started = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+  it("acts on the job's own answer after the provider's cancel request fails", async () => {
+    // A failed cancel answer says the request failed, not the job: the
+    // immediately following poll's confirmed failure ends the stopped job.
+    let releasePoll: ((answer: VideoAdapterPoll) => void) | undefined;
     const { service, calls, spend } = harness({
       cancel: async () => ({
         status: "failed",
         providerFailure: { category: "provider-failed", message: "No such job." },
       }),
-      start: async () => {
-        release();
-        return { status: "started", remoteId: "remote-1" };
-      },
+      poll: () =>
+        new Promise((resolve) => {
+          if (calls.poll === 1) resolve({ status: "running" });
+          else releasePoll = resolve;
+        }),
     });
     const queued = await enqueue(service);
-    await started;
+    await vi.waitFor(() => expect(calls.poll).toBe(2));
     service.stop(queued.id);
+    releasePoll?.({ status: "running" });
+    await vi.waitFor(() => expect(calls.poll).toBe(3));
+    releasePoll?.({
+      status: "failed",
+      providerFailure: { category: "provider-failed", message: "The job failed." },
+    });
+    const done = await service.whenTerminal(queued.id);
+    expect(done?.status).toBe("cancelled");
+    expect(done?.settledCostUsdMicros).toBeUndefined();
+    expect(calls.cancel).toBe(1);
+    expect(spend.abandon).toHaveBeenCalledTimes(1);
+    expect(spend.settle).not.toHaveBeenCalled();
+  });
+
+  it("settles an interrupted start at the estimate when the request may have reached the provider", async () => {
+    const { service, calls, spend } = harness({
+      start: async () => ({
+        status: "failed",
+        providerFailure: { category: "unavailable", message: "The connection dropped." },
+      }),
+    });
+    const queued = await enqueue(service);
+    const done = await service.whenTerminal(queued.id);
+    expect(done).toMatchObject({
+      status: "failed",
+      failure: {
+        category: "interrupted",
+        message: "The provider may have started this clip; the estimate is counted.",
+      },
+      settledCostUsdMicros: 695_040,
+    });
+    expect(spend.settle).toHaveBeenCalledTimes(1);
+    expect(calls.forget).toBe(0);
+  });
+
+  it("bills nothing when a start's confirmed failure could not have reached a job", async () => {
+    const { service, spend } = harness({
+      start: async () => ({
+        status: "failed",
+        providerFailure: { category: "provider-failed", message: "Rejected." },
+      }),
+    });
+    const queued = await enqueue(service);
     const done = await service.whenTerminal(queued.id);
     expect(done).toMatchObject({
       status: "failed",
       failure: { category: "provider-failed" },
     });
     expect(done?.settledCostUsdMicros).toBeUndefined();
-    expect(calls.cancel).toBe(1);
-    expect(spend.abandon).toHaveBeenCalledTimes(1);
     expect(spend.settle).not.toHaveBeenCalled();
+    expect(spend.abandon).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits out the provider's retry-after before polling again", async () => {
+    const { service, sleeps } = harness({
+      polls: [
+        {
+          status: "failed",
+          providerFailure: {
+            category: "rate-limited",
+            message: "Slow down.",
+            retryAfterMs: 60_000,
+          },
+        },
+        { status: "running" },
+      ],
+    });
+    const queued = await enqueue(service);
+    const done = await service.whenTerminal(queued.id);
+    expect(done?.status).toBe("completed");
+    expect(sleeps[0]).toBe(60_000);
   });
 
   it("keeps polling through a rate-limited answer until the provider completes the clip", async () => {
