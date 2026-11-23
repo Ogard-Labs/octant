@@ -618,7 +618,7 @@ describe("octant_create_video", () => {
     const result = await tools?.execute({
       name: CREATE_VIDEO_TOOL_NAME,
       inputJson: JSON.stringify({
-        prompt: "A paper boat on a pond",
+        prompt: "  A paper boat on a pond\n",
         durationSeconds: 8,
         resolution: "720p",
         firstFrame: { kind: "attachment" },

@@ -1217,7 +1217,7 @@ function parseVideoToolInput(inputJson: string): ParsedVideoInput {
   try {
     return {
       operation: "generate",
-      prompt,
+      prompt: prompt.trim(),
       references,
       ...(firstFrame === undefined ? {} : { firstFrame }),
       ...(lastFrame === undefined ? {} : { lastFrame }),
