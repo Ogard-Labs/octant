@@ -19,6 +19,8 @@ import {
   decodeCodeThreadId,
   decodeWindowId,
 } from "@octant/contracts";
+import { MonotonicRemoteClock } from "./remote/monotonicRemoteClock";
+import { isPairedDeviceSessionCurrent } from "./browser/pairedBrowserControl";
 import { createCodeRouteHandler } from "./codeRoutes";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
@@ -168,9 +170,27 @@ describe("RemoteRequestProofService", () => {
   it.each(["idleExpiresAt", "absoluteExpiresAt"] as const)(
     "recovers a signed host-paired PR watch headlessly and stops it at %s",
     async (deadline) => {
-      const { connection, service: proof, privateKey, setClock } = setup();
+      const { connection, privateKey } = setup();
+      let wall = now;
+      let elapsed = 0;
+      const sessionNow = new MonotonicRemoteClock({
+        connection,
+        hostId,
+        wallClock: () => wall,
+        monotonicSource: () => elapsed,
+      }).now();
+      const proof = new RemoteRequestProofService(connection, {
+        now: sessionNow,
+        resolveNegotiation: () => negotiation,
+      });
       try {
         const session = issueSession(proof, privateKey);
+        connection
+          .prepare(`INSERT INTO remote_security_audit_projection (
+          event_kind, host_id, device_id, protocol_version, credential_generation,
+          source_class, result_category, reason_code, correlation_id, occurred_at
+        ) VALUES ('device-approved', ?, ?, 1, 1, 'lan-private', 'ok', 'user-approved', ?, ?)`)
+          .run(hostId, deviceId, randomUUID(), new Date(now).toISOString());
         const runtime = createPhase1RuntimeRegistries();
         const clock = () => new Date(now).toISOString();
         const journal = new Journal({
@@ -241,7 +261,9 @@ describe("RemoteRequestProofService", () => {
               readOperationContent: vi.fn(),
               saveFile: vi.fn(),
               openFile: vi.fn(),
-              ...pullRequestAutoFixRoutes(switches, proof, () => true),
+              ...pullRequestAutoFixRoutes(switches, (binding, gatewayNow) =>
+                isPairedDeviceSessionCurrent(connection, binding, (gatewayNow ?? Date.now)()),
+              ),
             },
           });
           const post = async (operation: string, payload: unknown) => {
@@ -268,6 +290,7 @@ describe("RemoteRequestProofService", () => {
                 admittedBy: "host-person",
               }),
               scopeId: decodeWindowId(deviceId),
+              sessionNow,
             });
             const response = await route(request);
             expect(response?.status).toBe(200);
@@ -293,14 +316,20 @@ describe("RemoteRequestProofService", () => {
         });
         await restored.switches.tick(signal);
         expect(observe).toHaveBeenCalledTimes(1);
+        wall += 30 * 60_000;
+        expect(wall).toBeGreaterThan(Date.parse(session.idleExpiresAt));
+        expect(sessionNow()).toBeLessThan(Date.parse(session.idleExpiresAt));
+        await restored.switches.tick(signal);
+        expect(observe).toHaveBeenCalledTimes(2);
         // Isolate the absolute deadline from idle expiry on an otherwise-current session.
         if (deadline === "absoluteExpiresAt")
           connection
             .prepare("UPDATE remote_session_store SET idle_expires_at = absolute_expires_at + 1000")
             .run();
-        setClock(Date.parse(session[deadline]));
+        wall = Date.parse(session[deadline]);
+        elapsed = wall - now;
         await restored.switches.tick(signal);
-        expect(observe).toHaveBeenCalledTimes(1);
+        expect(observe).toHaveBeenCalledTimes(2);
         expect(startTurn).not.toHaveBeenCalled();
         expect(
           (await restored.switches.query(decodeWindowId(deviceId), target)).autoFix,

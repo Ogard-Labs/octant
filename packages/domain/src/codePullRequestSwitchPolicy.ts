@@ -294,6 +294,8 @@ export function decidePullRequestAutoFix(input: {
       ? { kind: "stop", reason: "needs-help" }
       : { kind: "idle" };
   }
+  // A repair may push a new head before it resolves the review. Recheck its result after the turn.
+  if (fold.babysit && input.turnActive) return { kind: "paused", reason: "turn-active" };
   if (
     fold.babysit &&
     failures.some(isReviewFeedback) &&

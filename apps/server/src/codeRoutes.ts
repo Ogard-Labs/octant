@@ -302,6 +302,10 @@ export type CodeConversationWindowAnswer =
   | { readonly status: "ok"; readonly window: CodeConversationWindow }
   | { readonly status: "anchor-not-found" };
 
+export type PullRequestPairedSession = ProjectTerminalDeviceBinding & {
+  readonly sessionNow?: () => number;
+};
+
 export interface CodeRouteService {
   readonly readProviderFileReview?: (
     windowId: WindowId,
@@ -430,7 +434,7 @@ export interface CodeRouteService {
   readonly queryProjectPullRequestSwitches?: (
     authenticatedWindowId: WindowId,
     target: CodeProjectPullRequestSwitchTarget,
-    device?: ProjectTerminalDeviceBinding,
+    device?: PullRequestPairedSession,
   ) => Promise<CodeProjectPullRequestSwitchesView>;
   readonly setProjectPullRequestMergeWhenReady?: (
     authenticatedWindowId: WindowId,
@@ -444,7 +448,7 @@ export interface CodeRouteService {
     command: CodeProjectPullRequestAutoFixCommand,
     initiator: "user" | "agent",
     actor: EventActor,
-    device?: ProjectTerminalDeviceBinding,
+    device?: PullRequestPairedSession,
   ) => Promise<CodeProjectPullRequestSwitchOutcome>;
   /** A window's person is composing in a Code thread; Auto-fix holds back. */
   readonly noteComposerActivity?: (
@@ -712,6 +716,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
     // Who the journal names for what this request changes: the device, when a
     // device asked.
     let callerActor: EventActor;
+    let sessionNow: (() => number) | undefined;
     let personPairedDeviceBinding: ProjectTerminalDeviceBinding | undefined;
     let liveAdmissionCurrent: () => boolean;
     let principalAbortSignal: AbortSignal | undefined;
@@ -738,6 +743,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
         callerAuthority === "remote-device" &&
         !agentGrantSession;
       callerActor = eventActorForPrincipal(principalContext.principal);
+      sessionNow = principalContext.sessionNow;
       personPairedDeviceBinding =
         principalContext.principal.kind === "remote-device" &&
         principalActsAsHostPerson(principalContext.principal)
@@ -784,6 +790,11 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
         origin,
       );
     }
+
+    const pullRequestSession = personPairedDeviceBinding && {
+      ...personPairedDeviceBinding,
+      ...(sessionNow && { sessionNow }),
+    };
 
     // A host may ask a hub-introduced client's merge for a fresh unlock on an
     // owner device first. A local window's click and a merge from a device the
@@ -2193,7 +2204,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               await dependencies.service.queryProjectPullRequestSwitches(
                 authenticatedWindowId,
                 target,
-                ...(personPairedDeviceBinding ? ([personPairedDeviceBinding] as const) : []),
+                ...(pullRequestSession ? ([pullRequestSession] as const) : []),
               ),
             ),
             200,
@@ -2283,7 +2294,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                 command,
                 operationInitiator,
                 callerActor,
-                ...(personPairedDeviceBinding ? ([personPairedDeviceBinding] as const) : []),
+                ...(pullRequestSession ? ([pullRequestSession] as const) : []),
               ),
             ),
             200,

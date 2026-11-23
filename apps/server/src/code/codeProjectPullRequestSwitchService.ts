@@ -74,9 +74,7 @@ import {
 
 const decodeRepositoryOwner = Schema.decodeUnknownSync(GithubRepositoryOwner);
 const decodeRepositoryName = Schema.decodeUnknownSync(GithubRepositoryName);
-import type { CodeRouteService } from "../codeRoutes";
-import type { RemoteRequestProofService } from "../remoteRequestProofService";
-import type { ProjectTerminalDeviceBinding } from "./projectTerminalService";
+import type { CodeRouteService, PullRequestPairedSession } from "../codeRoutes";
 import type { Journal } from "../persistence/journal";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type {
@@ -188,24 +186,13 @@ export interface PullRequestAutoFixThreads {
 /** Connect the switch routes to the same live session facts used to authenticate paired requests. */
 export function pullRequestAutoFixRoutes(
   switches: CodeProjectPullRequestSwitchService,
-  sessions: Pick<RemoteRequestProofService, "describeSession">,
-  deviceIsCurrent: (deviceId: string, generation: number, sessionId: string) => boolean,
+  sessionIsCurrent: (binding: PullRequestPairedSession, sessionNow?: () => number) => boolean,
 ): Required<
   Pick<CodeRouteService, "setProjectPullRequestAutoFix" | "queryProjectPullRequestSwitches">
 > {
-  const bindDevice = (scope: WindowId, binding?: ProjectTerminalDeviceBinding) => {
-    if (!binding) return undefined;
-    return () => {
-      const session = sessions.describeSession(binding.sessionId);
-      return (
-        session !== undefined &&
-        session.deviceId === binding.deviceId &&
-        session.credentialGeneration === binding.credentialGeneration &&
-        binding.deviceId === String(scope) &&
-        deviceIsCurrent(binding.deviceId, binding.credentialGeneration, binding.sessionId)
-      );
-    };
-  };
+  const bindDevice = (scope: WindowId, binding?: PullRequestPairedSession) =>
+    binding &&
+    (() => String(scope) === binding.deviceId && sessionIsCurrent(binding, binding.sessionNow));
   return {
     queryProjectPullRequestSwitches: (scope, target, device) =>
       switches.query(scope, target, bindDevice(scope, device)),

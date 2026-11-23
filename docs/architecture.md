@@ -3986,8 +3986,8 @@ CI or reviewers should be woken, not left polling; maintainer request,
   and stops the watch if it loses project authority. A host-person-paired device
   can also authorize the watch by opening its controls. Its exact device session
   must remain current, including on a host with no local window. Polling does
-  not extend the session. Idle expiry, absolute expiry or revocation stops
-  the watch.
+  not extend the session. The gateway’s guarded clock determines idle and
+  absolute expiry. Expiry or revocation stops the watch.
   Other Auto-fix sessions wait for a window
   to reopen the PR review. Turning it on again starts a fresh attempt count.
 - **Watch.** The pull-request tool's `watch` (rules above) binds the

@@ -147,7 +147,6 @@ import {
 } from "./providers";
 import type { ServerStart } from "./serverShape";
 import type { HarnessWiring } from "./harness";
-import { RemoteRequestProofService } from "../remoteRequestProofService";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
@@ -385,7 +384,6 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "simulatorInputGrants"
     | "personMemoryAccess"
     | "octantInstructions"
-    | "isPersonPairedDeviceCurrent"
     | "isPairedDeviceScope"
     | "isRestrictedDeviceScope"
     | "windowAuthorityStore"
@@ -469,6 +467,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   > &
   Pick<
     BrowserWiring,
+    | "isPairedDeviceSessionCurrent"
     | "bindTerminalBrowserSessions"
     | "terminalBrowserTools"
     | "routineBrowserTools"
@@ -2922,11 +2921,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         projectPullRequestActionService.act(windowId, command, signal, caller, actor),
       readProjectPullRequestActionContext: (windowId, query, signal, caller) =>
         projectPullRequestActionService.readContext(windowId, query, signal, caller),
-      ...pullRequestAutoFixRoutes(
-        pullRequestSwitchService,
-        new RemoteRequestProofService(persistence.connection),
-        deps.isPersonPairedDeviceCurrent,
-      ),
+      ...pullRequestAutoFixRoutes(pullRequestSwitchService, deps.isPairedDeviceSessionCurrent),
       setProjectPullRequestMergeWhenReady: (windowId, command, signal, caller, actor) =>
         pullRequestSwitchService.setMergeWhenReady(windowId, command, caller, signal, actor),
       noteComposerActivity: (_windowId, activity) =>

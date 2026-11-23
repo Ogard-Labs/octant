@@ -1,3 +1,4 @@
+import { readCurrentRemoteSession } from "../remoteRequestProofService";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -183,32 +184,11 @@ export function isPairedDeviceSessionCurrent(
     return false;
   }
 
-  const session = connection
-    .prepare(
-      `SELECT device_id, credential_generation, idle_expires_at, absolute_expires_at, state
-       FROM remote_session_store
-       WHERE session_id_digest = ?`,
-    )
-    .get(sessionIdDigest) as
-    | {
-        readonly device_id: string;
-        readonly credential_generation: number;
-        readonly idle_expires_at: number;
-        readonly absolute_expires_at: number;
-        readonly state: string;
-      }
-    | undefined;
-  if (
-    session === undefined ||
-    session.state !== "active" ||
-    session.device_id !== deviceId ||
-    session.credential_generation !== principal.credentialGeneration ||
-    session.idle_expires_at <= nowMs ||
-    session.absolute_expires_at <= nowMs
-  ) {
-    return false;
-  }
-  return true;
+  const session = readCurrentRemoteSession(connection, String(principal.sessionId), nowMs);
+  return (
+    session?.deviceId === deviceId &&
+    session.credentialGeneration === principal.credentialGeneration
+  );
 }
 
 export class PairedBrowserControlService {

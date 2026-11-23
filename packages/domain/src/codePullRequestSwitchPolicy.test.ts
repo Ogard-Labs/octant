@@ -107,6 +107,26 @@ describe("pull-request Auto-fix policy", () => {
     expect(decide(review, lint)).toEqual({ kind: "wake", attempt: 1, failures: [lint] });
   });
 
+  it("lets the last inline repair push and resolve the thread before handing off", () => {
+    const fold = replay([babysit, woke("before", [review], 1)]).autoFix;
+    const input = { fold, ...quiet, maxFeedbackWakes: 1 };
+    const observation = { state: "open", headSha: "after", failures: [review] } as const;
+    expect(decidePullRequestAutoFix({ ...input, observation, turnActive: true })).toEqual({
+      kind: "paused",
+      reason: "turn-active",
+    });
+    expect(
+      decidePullRequestAutoFix({
+        ...input,
+        observation: { ...observation, failures: [], babysitReady: true },
+      }),
+    ).toEqual({ kind: "stop", reason: "ready" });
+    expect(decidePullRequestAutoFix({ ...input, observation })).toEqual({
+      kind: "stop",
+      reason: "feedback-limit",
+    });
+  });
+
   it("hands back outstanding failures after a babysit turn finishes on the same head", () => {
     const fold = replay([babysit, woke("a1", [lint], 1)]).autoFix;
     const observation = { state: "open", headSha: "a1", failures: [lint] } as const;

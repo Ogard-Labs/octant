@@ -516,51 +516,7 @@ export class RemoteRequestProofService {
   }
 
   describeSession(sessionId: string): RemoteSessionFacts | undefined {
-    if (
-      !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
-        sessionId,
-      )
-    )
-      return undefined;
-    const now = this.#now();
-    const row = this.#connection
-      .prepare(
-        `SELECT s.host_id, s.device_id, s.credential_generation, s.origin,
-                s.protocol_version, s.capability_digest, s.idle_expires_at, s.absolute_expires_at
-         FROM remote_session_store s
-         JOIN remote_device_projection d
-           ON d.device_id = s.device_id AND d.host_id = s.host_id
-         WHERE s.session_id_digest = ?
-           AND s.state = 'active'
-           AND d.state = 'active'
-           AND d.credential_generation = s.credential_generation
-           AND d.origin = s.origin
-           AND s.idle_expires_at > ?
-           AND s.absolute_expires_at > ?`,
-      )
-      .get(digest(sessionId), now, now) as
-      | {
-          readonly host_id: string;
-          readonly device_id: string;
-          readonly credential_generation: number;
-          readonly origin: string;
-          readonly protocol_version: number;
-          readonly capability_digest: string;
-          readonly idle_expires_at: number;
-          readonly absolute_expires_at: number;
-        }
-      | undefined;
-    if (row === undefined) return undefined;
-    return {
-      hostId: row.host_id,
-      deviceId: row.device_id,
-      credentialGeneration: row.credential_generation,
-      origin: row.origin,
-      protocolVersion: row.protocol_version,
-      capabilityDigest: row.capability_digest,
-      idleExpiresAt: toUtc(row.idle_expires_at),
-      absoluteExpiresAt: toUtc(row.absolute_expires_at),
-    };
+    return readCurrentRemoteSession(this.#connection, sessionId, this.#now());
   }
 
   verifyRequest(input: unknown): RemoteAuthenticatedRequestResultV1 {
@@ -720,6 +676,56 @@ export class RemoteRequestProofService {
     }
     throw new RemoteRequestProofError("capacity");
   }
+}
+
+/** Current remote session facts at the gateway's effective time. Reading never extends a deadline. */
+export function readCurrentRemoteSession(
+  connection: SqliteConnection,
+  sessionId: string,
+  now: number,
+): RemoteSessionFacts | undefined {
+  if (
+    !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(sessionId)
+  )
+    return undefined;
+  const row = connection
+    .prepare(
+      `SELECT s.host_id, s.device_id, s.credential_generation, s.origin,
+              s.protocol_version, s.capability_digest, s.idle_expires_at, s.absolute_expires_at
+       FROM remote_session_store s
+       JOIN remote_device_projection d
+         ON d.device_id = s.device_id AND d.host_id = s.host_id
+       WHERE s.session_id_digest = ?
+         AND s.state = 'active'
+         AND d.state = 'active'
+         AND d.credential_generation = s.credential_generation
+         AND d.origin = s.origin
+         AND s.idle_expires_at > ?
+         AND s.absolute_expires_at > ?`,
+    )
+    .get(digest(sessionId), now, now) as
+    | {
+        readonly host_id: string;
+        readonly device_id: string;
+        readonly credential_generation: number;
+        readonly origin: string;
+        readonly protocol_version: number;
+        readonly capability_digest: string;
+        readonly idle_expires_at: number;
+        readonly absolute_expires_at: number;
+      }
+    | undefined;
+  if (row === undefined) return undefined;
+  return {
+    hostId: row.host_id,
+    deviceId: row.device_id,
+    credentialGeneration: row.credential_generation,
+    origin: row.origin,
+    protocolVersion: row.protocol_version,
+    capabilityDigest: row.capability_digest,
+    idleExpiresAt: toUtc(row.idle_expires_at),
+    absoluteExpiresAt: toUtc(row.absolute_expires_at),
+  };
 }
 
 function digest(value: string): string {
