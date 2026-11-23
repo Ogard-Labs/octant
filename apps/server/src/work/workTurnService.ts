@@ -127,6 +127,7 @@ import type {
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
 import { withPromptDigest, type TurnEndSummary } from "../metrics/turnEnd";
+import type { ThreadTitleRequest } from "../automaticModels/threadTitle";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import type { ThreadToolCallRecorders } from "../threadToolCallRecorder";
 import {
@@ -611,6 +612,7 @@ export interface WorkTurnServiceDependencies {
     readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
     /** The host's keyed prompt digest; absent when the host has no key. */
     readonly promptDigest?: (text: string) => string;
+    readonly titleFirstTurn?: ThreadTitleRequest;
     readonly turnCompleted: (
       input: NativeHarnessTurnScope & {
         readonly text: string;
@@ -2515,6 +2517,21 @@ export class WorkTurnService {
       if (accepted === undefined) {
         this.#settleSpendReservation(command.requestId);
         throw this.#failure("unavailable", "Work turn acceptance could not be projected.");
+      }
+      if (
+        command.delivery === undefined &&
+        !isRoutineHostScope(authenticatedWindowId) &&
+        options?.runtimeTurn !== true &&
+        externalInput === undefined &&
+        resumeCursor === undefined &&
+        handoff === undefined &&
+        this.#projection.listForThread(command.threadId).length === 1
+      ) {
+        void this.#nativeHarness?.titleFirstTurn?.(
+          "work",
+          String(command.threadId),
+          command.prompt,
+        );
       }
       if (starting.attachments.length > 0) {
         this.#attachments?.release(

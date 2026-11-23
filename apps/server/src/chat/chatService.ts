@@ -298,6 +298,7 @@ import type {
 } from "../harness/nativeHarnessTurnObserver";
 import type { RestartContinuationReadiness } from "../harness/threadRestartContinuation";
 import { withPromptDigest, type TurnEndSummary } from "../metrics/turnEnd";
+import type { ThreadTitleRequest } from "../automaticModels/threadTitle";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import type { ThreadToolCallRecorders } from "../threadToolCallRecorder";
 import type { ResearchRouteDecision, ResearchRouter } from "./research/researchRouter";
@@ -901,6 +902,7 @@ export interface ChatServiceOptions {
     readonly turnEnded?: (scope: NativeHarnessTurnScope, turn?: TurnEndSummary) => void;
     /** The host's keyed prompt digest; absent when the host has no key. */
     readonly promptDigest?: (text: string) => string;
+    readonly titleFirstTurn?: ThreadTitleRequest;
     readonly turnCompleted: (
       input: NativeHarnessTurnScope & {
         readonly text: string;
@@ -3347,6 +3349,17 @@ export class ChatService {
     });
     if (accepted.kind === "existing") return { kind: "turn-created", turn: accepted.turn };
     executionContext?.onTurnAccepted?.();
+    if (
+      accepted.turn.sequence === 1 &&
+      executionContext?.windowId !== undefined &&
+      !isRoutineHostScope(executionContext.windowId)
+    ) {
+      void this.#nativeHarness?.titleFirstTurn?.(
+        "chat",
+        String(accepted.thread.id),
+        command.prompt,
+      );
+    }
     await this.#runAttempt({
       thread: threadAsRoutedFor(accepted.thread, accepted.attempt),
       turn: accepted.turn,

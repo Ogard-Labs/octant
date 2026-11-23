@@ -315,6 +315,8 @@ describe("octantSettingsRegistry", () => {
     expect(usage?.settings.map((setting) => setting.id)).toEqual(["spend-ceiling-shown"]);
     const providers = octantSettingsRegistry.sections.find((s) => s.id === "providers");
     expect(providers?.settings.map((setting) => setting.id)).toEqual([
+      "automatic-model-thread-title",
+      "automatic-model-thread-title-model",
       "automatic-model-judge",
       "automatic-model-memory",
       "automatic-model-decision-review",

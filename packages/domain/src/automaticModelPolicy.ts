@@ -1,4 +1,22 @@
-import type { ProviderReadiness } from "@octant/contracts";
+import type { ProviderInstance, ProviderReadiness } from "@octant/contracts";
+
+/** Titles use standalone inference on a direct API endpoint or the ChatGPT plan endpoint. */
+export function threadTitleEndpointSource(
+  instance: ProviderInstance,
+): "api" | "subscription" | undefined {
+  if (instance.driverKind !== "openai-compatible" && instance.driverKind !== "anthropic-compatible")
+    return undefined;
+  const configuration = instance.configuration;
+  if (configuration.authentication === "directory-oauth") return undefined;
+  if (configuration.oauthDescriptorId === undefined) return "api";
+  if (
+    instance.driverKind === "openai-compatible" &&
+    configuration.authentication === "bearer" &&
+    configuration.oauthDescriptorId === "chatgpt-plan"
+  )
+    return "subscription";
+  return undefined;
+}
 
 /**
  * The jobs Octant runs on a model without the person typing: Octant Shield's

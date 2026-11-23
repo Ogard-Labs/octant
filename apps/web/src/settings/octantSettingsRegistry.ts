@@ -892,6 +892,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         "providers models agent runtimes provider type opencode codex kimi code acp cli login claude agent sdk subscription gemini qwen cline mistral vibe grok glm fx goose copilot antigravity agy google devin kilo pi binary path permissions permission persistence runtime capabilities connection detected installed scan opencode update managed cli version provider catalog drivers bundled installed trusted available enabled authenticated signed in ready set up setup guided add runtime endpoint find look on this host install modes chat work code agent loop harness capabilities",
       settings: [
         {
+          id: settingId("automatic-model-thread-title"),
+          label: "Thread titles",
+          scope: "host",
+          keywords:
+            "automatic model calls thread titles text generator name chat work code api key endpoint",
+        },
+        {
+          id: settingId("automatic-model-thread-title-model"),
+          label: "Thread title model",
+          scope: "host",
+          keywords: "title generator model api endpoint subscription chatgpt plan",
+        },
+        {
           id: settingId("automatic-model-judge"),
           label: "Octant Shield's Judge",
           scope: "host",

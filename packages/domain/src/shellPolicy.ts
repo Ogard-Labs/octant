@@ -774,6 +774,9 @@ export function replaceShellSettings(
 ): ShellSettings {
   return {
     ...replacement,
+    ...(replacement.threadTitles === undefined && current.threadTitles !== undefined
+      ? { threadTitles: current.threadTitles }
+      : {}),
     // An older client replacing the whole document writes order and
     // visibility but no activity section; dropping the stored choices would
     // silently reset pins the person made on a newer client.
