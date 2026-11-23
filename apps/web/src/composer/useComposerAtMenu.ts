@@ -340,7 +340,9 @@ export function useComposerAtMenu(input: {
     if (word.length > 0 && MODEL_TOKEN.startsWith(word)) {
       // Start loading the picker while the row is offered, so it is usually
       // ready by the time Enter opens it.
-      void loadSubagentModelPicker();
+      // A failed early load is retried when the picker renders, where its
+      // own error surfaces; the warm-up itself has nothing to report.
+      loadSubagentModelPicker().catch(() => undefined);
       const start = token.start;
       const end = token.start + 1 + word.length;
       rows.push({
