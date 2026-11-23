@@ -2544,7 +2544,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           </SelectionThreadScope>
         )}
         <OctantDialogPresence>
-          {canBabysit && babysitThread === props.threadId && view !== undefined ? (
+          {canBabysit && String(babysitThread) === String(props.threadId) && view !== undefined ? (
             <PullRequestBabysitDialog
               key={props.threadId}
               client={codeClient}

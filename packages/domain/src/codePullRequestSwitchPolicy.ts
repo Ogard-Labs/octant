@@ -53,6 +53,7 @@ export type PullRequestAutoFixFold =
       readonly status: "stopped";
       readonly threadId: string;
       readonly reason: CodeProjectPullRequestAutoFixStopReason;
+      readonly babysit?: PullRequestBabysitRules;
       readonly readyHeadSha?: string;
       readonly stoppedAt: string;
     };
@@ -182,6 +183,9 @@ export function applyPullRequestSwitchEvent(
         status: "stopped",
         threadId: String(threadId),
         reason: change.reason,
+        ...(fold.autoFix.status !== "off" && fold.autoFix.babysit
+          ? { babysit: fold.autoFix.babysit }
+          : {}),
         ...(change.readyHeadSha === undefined ? {} : { readyHeadSha: change.readyHeadSha }),
         stoppedAt: event.occurredAt,
       },

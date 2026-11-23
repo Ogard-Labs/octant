@@ -597,7 +597,33 @@ export const CodeProjectPullRequestFailingCheck = Schema.Struct({
 }).annotations(strict);
 export type CodeProjectPullRequestFailingCheck = typeof CodeProjectPullRequestFailingCheck.Type;
 
+/** A local watch's latest observation, joined only onto a row this window may read. */
+export const PullRequestBabysitStatus = Schema.Literal(
+  "checking",
+  "connection",
+  "draft",
+  "approval",
+  "label",
+  "checks",
+  "repair-check",
+  "repair-review",
+  "repair-branch",
+  "repository",
+  "ready",
+  "attempt-limit",
+  "thread-unavailable",
+  "authority-lost",
+);
+export type PullRequestBabysitStatus = typeof PullRequestBabysitStatus.Type;
 export const CodeProjectPullRequestRow = Schema.Struct({
+  babysit: Schema.optional(
+    Schema.Struct({
+      threadId: CodeThreadId,
+      status: PullRequestBabysitStatus,
+      requiredLabel: Schema.optional(CodeProjectPullRequestLabel),
+      readyHeadSha: Schema.optional(boundedNonEmptyText(64)),
+    }).annotations(strict),
+  ),
   projectId: ProjectId,
   projectName: boundedNonEmptyText(512),
   repositoryOwner: GithubRepositoryOwner,

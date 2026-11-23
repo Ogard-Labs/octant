@@ -66,6 +66,18 @@ describe("Babysitting a pull request", () => {
     await user.click(await screen.findByRole("option", { name: /octant\/app#42/ }));
     await waitFor(() => expect(read).toHaveBeenLastCalledWith(target));
     expect(client.setProjectPullRequestAutoFix).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: /Babysit multiple/ }));
+    const bulk = within(
+      await screen.findByRole("dialog", { name: "Babysit multiple pull requests" }),
+    );
+    await user.click(bulk.getByRole("checkbox", { name: /octant\/cli#42/ }));
+    await user.click(bulk.getByRole("button", { name: "Start selected (1)" }));
+    expect(client.setProjectPullRequestAutoFix).toHaveBeenCalledExactlyOnceWith({
+      kind: "enable",
+      target: second,
+      threadId,
+      babysit: { checks: "required" },
+    });
   });
 
   it("starts and stops from the composer with the person's checks and label on this thread's PR", async () => {

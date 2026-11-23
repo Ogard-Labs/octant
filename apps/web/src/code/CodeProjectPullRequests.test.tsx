@@ -256,6 +256,80 @@ describe("CodeProjectPullRequests", () => {
     expect(screen.queryByRole("button", { name: "Start babysitting" })).toBeNull();
   });
 
+  it("bulk-starts only chosen PRs with shared rules, preserves active watches and retries just the failure", async () => {
+    const user = userEvent.setup();
+    const base = view().rows[0]!;
+    const other = "20000000-0000-4000-8000-000000000002";
+    const snapshot = view({
+      rows: [
+        base,
+        {
+          ...base,
+          number: 13,
+          linkedThreads: [...base.linkedThreads, { threadId: other, title: "Build fixes" }],
+        },
+        { ...base, number: 14 },
+        { ...base, number: 15 },
+      ],
+    });
+    const write = vi
+      .fn()
+      .mockResolvedValueOnce({ status: "applied", alreadyActive: true })
+      .mockRejectedValueOnce(new Error("unreachable"))
+      .mockResolvedValue({ status: "applied" });
+    render(
+      <CodeProjectPullRequests
+        load={async () => snapshot}
+        refresh={async () => snapshot}
+        babysitClient={{
+          queryProjectPullRequestSwitches: vi.fn(),
+          setProjectPullRequestAutoFix: write,
+        }}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: /Babysit multiple/ }));
+    const dialog = within(screen.getByRole("dialog"));
+    for (const number of [12, 13, 14])
+      await user.click(dialog.getByRole("checkbox", { name: new RegExp("#" + number) }));
+    expect(dialog.getByRole("button", { name: /Start selected/ })).toBeDisabled();
+    await user.click(dialog.getByRole("combobox", { name: /Repairing thread/ }));
+    await user.click(await screen.findByRole("option", { name: "Build fixes" }));
+    await user.click(dialog.getByRole("checkbox", { name: /all checks/ }));
+    await user.type(dialog.getByLabelText("Required label (optional)"), "qa");
+    await user.click(dialog.getByRole("button", { name: "Start selected (3)" }));
+    expect(await dialog.findByText("Started")).toBeVisible();
+    expect(dialog.getByText("Already active")).toBeVisible();
+    expect(dialog.getByText(/Could not confirm/)).toBeVisible();
+    const calls = write.mock.calls.map(([cmd]) => [cmd.target.number, cmd.threadId, cmd.babysit]);
+    expect(calls).toHaveLength(3);
+    expect(calls).toEqual(
+      expect.arrayContaining([
+        [12, threadId, { checks: "all", requiredLabel: "qa" }],
+        [13, other, { checks: "all", requiredLabel: "qa" }],
+        [14, threadId, { checks: "all", requiredLabel: "qa" }],
+      ]),
+    );
+    await user.click(dialog.getByRole("button", { name: "Start selected (1)" }));
+    expect(write).toHaveBeenCalledTimes(4);
+    expect(write.mock.calls[3]).toEqual(write.mock.calls[1]);
+  });
+
+  it("shows the repairing thread and narrows the overview to watches needing a person", async () => {
+    const row = view().rows[0]!;
+    const snapshot = view({
+      rows: [
+        { ...row, babysit: { threadId, status: "approval" } },
+        { ...row, number: 13, title: "Second PR", babysit: { threadId, status: "checks" } },
+      ],
+    });
+    renderWorkspace({ load: async () => snapshot });
+    expect(await screen.findByText(/Waiting for approval · Manual refresh/)).toBeVisible();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^Needs me/ }));
+    expect(screen.getByText("List active pull requests")).toBeVisible();
+    expect(screen.queryByText("Second PR")).toBeNull();
+  });
+
   it("loads the cached snapshot on open and does not refresh GitHub", async () => {
     const { load, refresh } = renderWorkspace();
 

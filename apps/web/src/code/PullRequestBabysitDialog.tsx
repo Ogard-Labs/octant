@@ -11,22 +11,18 @@ import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { projectPullRequestKey } from "./projectPullRequestKey";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantDialog } from "../ui/base/OctantDialog";
-import {
-  OctantField,
-  OctantFieldLabel,
-  OctantFieldGroup,
-  OctantFieldError,
-} from "../ui/base/OctantField";
-import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { autoFixCopy, switchRefusalCopy } from "./ProjectPullRequestSupport";
 
-export type BabysitClient = Pick<
-  CodeClient,
-  "queryProjectPullRequestSwitches" | "setProjectPullRequestAutoFix"
->;
+import {
+  BulkBabysitDialog,
+  BabysitRuleFields,
+  invalidBabysitLabel,
+  targetFor,
+  type BabysitClient,
+} from "./BulkBabysitDialog";
+export type { BabysitClient } from "./BulkBabysitDialog";
 
 interface WatchChoice {
   readonly id: string;
@@ -35,22 +31,14 @@ interface WatchChoice {
   readonly threadId: CodeThreadId;
 }
 
-function targetFor({
-  projectId,
-  repositoryOwner,
-  repositoryName,
-  number,
-}: CodeProjectPullRequestRow): CodeProjectPullRequestSwitchTarget {
-  return { projectId, repositoryOwner, repositoryName, number };
-}
-
 export function PullRequestBabysitDialog(props: {
   readonly client: CodeClient;
   readonly projectId: ProjectId;
   readonly threadId: CodeThreadId;
   readonly onClose: () => void;
 }) {
-  const [choices, setChoices] = useState<ReadonlyArray<WatchChoice>>();
+  const [rows, setRows] = useState<ReadonlyArray<CodeProjectPullRequestRow>>();
+  const [bulk, setBulk] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
     let live = true;
@@ -58,21 +46,16 @@ export function PullRequestBabysitDialog(props: {
       .queryProjectPullRequests({ version: 1, threadId: props.threadId })
       .then((view) => {
         if (!live) return;
-        setChoices(
-          view.rows
-            .filter(
-              (row) =>
-                row.projectId === props.projectId &&
-                row.linkedThreads.some((thread) => thread.threadId === props.threadId) &&
-                row.state !== "merged" &&
-                row.state !== "closed",
-            )
-            .map((row) => ({
-              id: projectPullRequestKey(row),
-              label: `${row.repositoryOwner}/${row.repositoryName}#${row.number} · ${row.title}`,
-              target: targetFor(row),
-              threadId: props.threadId,
-            })),
+        setRows(
+          view.rows.filter(
+            (row) =>
+              String(row.projectId) === String(props.projectId) &&
+              row.linkedThreads.some(
+                (thread) => String(thread.threadId) === String(props.threadId),
+              ) &&
+              row.state !== "merged" &&
+              row.state !== "closed",
+          ),
         );
       })
       .catch(() => {
@@ -82,10 +65,30 @@ export function PullRequestBabysitDialog(props: {
       live = false;
     };
   }, [props.client, props.projectId, props.threadId]);
+  const choices = useMemo(
+    () =>
+      rows?.map((row) => ({
+        id: projectPullRequestKey(row),
+        label: `${row.repositoryOwner}/${row.repositoryName}#${row.number} · ${row.title}`,
+        target: targetFor(row),
+        threadId: props.threadId,
+      })),
+    [rows, props.threadId],
+  );
+  if (bulk && rows)
+    return (
+      <BulkBabysitDialog
+        rows={rows}
+        client={props.client}
+        threadId={props.threadId}
+        onClose={props.onClose}
+      />
+    );
   return (
     <WatchChoiceDialog
       client={props.client}
       choices={choices}
+      {...(choices && choices.length > 1 ? { onBulk: () => setBulk(true) } : {})}
       error={error}
       onClose={props.onClose}
       title="Babysit a pull request"
@@ -117,6 +120,7 @@ export function OverviewBabysitDialog(props: {
       client={props.client}
       choices={choices}
       onClose={props.onClose}
+      {...(row.babysit ? { initialChoice: String(row.babysit.threadId) } : {})}
       title={`Babysit ${row.repositoryOwner}/${row.repositoryName}#${row.number}`}
       field="Repairing Code thread"
       placeholder="Choose the thread for repairs"
@@ -131,13 +135,15 @@ function WatchChoiceDialog(props: {
   readonly error?: string;
   readonly onClose: () => void;
   readonly title: string;
+  readonly onBulk?: () => void;
+  readonly initialChoice?: string;
   readonly field: string;
   readonly placeholder: string;
   readonly empty: string;
 }) {
   const titleId = useId();
   const title = useRef<HTMLHeadingElement>(null);
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState(props.initialChoice ?? "");
   const choice =
     props.choices?.length === 1
       ? props.choices[0]
@@ -169,6 +175,11 @@ function WatchChoiceDialog(props: {
           options={props.choices}
         />
       )}
+      {props.onBulk && (
+        <OctantButton type="button" variant="outline" onClick={props.onBulk}>
+          Babysit multiple…
+        </OctantButton>
+      )}
       {choice ? (
         <BabysitControls
           key={choice.id}
@@ -194,7 +205,6 @@ function BabysitControls(props: {
   readonly threadId: CodeThreadId;
   readonly client: BabysitClient;
 }) {
-  const labelId = useId();
   const [state, setState] = useState<CodeProjectPullRequestAutoFixState>();
   const [all, setAll] = useState(false);
   const [label, setLabel] = useState("");
@@ -228,9 +238,9 @@ function BabysitControls(props: {
     };
   }, [props.client, props.target]);
 
-  const invalidLabel = /[,\r\n]/.test(label);
+  const invalidLabel = invalidBabysitLabel(label);
   const active = state?.status === "on";
-  const anotherThread = active && state.threadId !== props.threadId;
+  const anotherThread = active && String(state.threadId) !== String(props.threadId);
   async function change() {
     if (writing.current || !state || anotherThread || !props.client.setProjectPullRequestAutoFix)
       return;
@@ -281,29 +291,13 @@ function BabysitControls(props: {
               This thread fixes failing checks, reviews open findings, and updates the branch when
               needed. It stops when the PR can merge and its review threads are clear.
             </p>
-            <OctantFieldGroup>
-              <OctantFieldLabel>
-                <OctantCheckbox
-                  checked={all}
-                  disabled={busy}
-                  onChange={(event) => setAll(event.target.checked)}
-                />{" "}
-                Require all checks, including optional ones
-              </OctantFieldLabel>
-              <OctantField>
-                <OctantFieldLabel htmlFor={labelId}>Required label (optional)</OctantFieldLabel>
-                <OctantInput
-                  id={labelId}
-                  aria-invalid={invalidLabel}
-                  value={label}
-                  maxLength={50}
-                  disabled={busy}
-                  onChange={(event) => setLabel(event.target.value)}
-                  placeholder="e.g. qa-approved"
-                />
-                {invalidLabel && <OctantFieldError>Enter one label.</OctantFieldError>}
-              </OctantField>
-            </OctantFieldGroup>
+            <BabysitRuleFields
+              all={all}
+              label={label}
+              busy={busy}
+              setAll={setAll}
+              setLabel={setLabel}
+            />
           </>
         )
       )}

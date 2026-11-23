@@ -2744,6 +2744,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     );
     // Merge when ready and Auto-fix reuse `pullRequestSwitchForge` created above.
     const pullRequestSwitchService = new CodeProjectPullRequestSwitchService({
+      localWindows: () => deps.windowAuthorityStore.listWindowIds(),
       limits: () => {
         const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
         return {
@@ -2872,8 +2873,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         codePlannerService.execute(windowId, command, actor),
       executePlannerProposal: (windowId, command, signal, actor) =>
         codePlannerService.resolveProposal(windowId, command, signal, actor),
-      queryProjectPullRequests: (windowId, query) =>
-        projectPullRequestService.query(windowId, query),
+      queryProjectPullRequests: async (windowId, query) =>
+        pullRequestSwitchService.withBabysitProgress(
+          await projectPullRequestService.query(windowId, query),
+        ),
       refreshProjectPullRequests: async (windowId, command, signal) => {
         const view = await projectPullRequestService.refresh(
           windowId,
@@ -2886,7 +2889,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         if (view.freshness.status === "fresh") {
           projectPullRequestCadence.noteExplicitRefreshSucceeded();
         }
-        return view;
+        return pullRequestSwitchService.withBabysitProgress(view);
       },
       queryProjectPullRequestDetail: (windowId, query) =>
         projectPullRequestService.queryDetail(windowId, query),

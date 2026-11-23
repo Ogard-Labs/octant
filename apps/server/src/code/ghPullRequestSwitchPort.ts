@@ -4,6 +4,7 @@ import {
   type CodeProjectPullRequestMergeMethod,
   type CodeProjectPullRequestMergeWait,
   type PullRequestBabysitRules,
+  type PullRequestBabysitStatus,
 } from "@octant/contracts";
 import type { CoordinatorDoneWhenPullRequestFact } from "@octant/domain";
 import {
@@ -92,6 +93,7 @@ export type GhPullRequestSwitchObservation =
       state: "open" | "merged" | "closed";
       headSha: string;
       babysitReady?: boolean;
+      babysitBlocker?: PullRequestBabysitStatus;
       headBranch: string;
       baseBranch: string;
       autoMergeEnabled: boolean;
@@ -375,6 +377,7 @@ export class GhPullRequestSwitchPort {
       });
     }
     let babysitReady = false;
+    let babysitBlocker: PullRequestBabysitStatus | undefined;
     if (reads.babysit !== undefined) {
       const label = reads.babysit.requiredLabel;
       const hasLabel =
@@ -386,6 +389,12 @@ export class GhPullRequestSwitchPort {
               typeof entry.name === "string" &&
               entry.name.toLowerCase() === label.toLowerCase(),
           ));
+      if (pullRequest.isDraft === true) babysitBlocker = "draft";
+      else if (!hasLabel) babysitBlocker = "label";
+      else if (pullRequest.reviewDecision === "REVIEW_REQUIRED") babysitBlocker = "approval";
+      else if (checks.pending) babysitBlocker = "checks";
+      else if (reviewsPending && failures.length === 0) babysitBlocker = "approval";
+      else babysitBlocker = "repository";
       const candidate =
         failures.length === 0 &&
         !checks.pending &&
@@ -441,6 +450,7 @@ export class GhPullRequestSwitchPort {
       ...base,
       waitingOn,
       failures: failures.slice(0, MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_FAILURES),
+      ...(babysitBlocker && !babysitReady ? { babysitBlocker } : {}),
       ...(reads.babysit === undefined ? {} : { babysitReady }),
     };
   }

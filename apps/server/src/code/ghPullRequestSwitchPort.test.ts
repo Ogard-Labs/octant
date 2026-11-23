@@ -137,6 +137,7 @@ describe("forge switch port", () => {
   it("only reports a ready head with complete review data, passing selected checks and the person's label", async () => {
     let label = "needs-qa";
     let pending = false;
+    let reviewDecision = "APPROVED";
     let baseState = "CLEAN";
     let more = false;
     let headMoved = false;
@@ -149,6 +150,7 @@ describe("forge switch port", () => {
           exitCode: 0,
           stdout: JSON.stringify({
             state: "OPEN",
+            reviewDecision,
             headRefOid: headMoved && reads > 1 ? "b2" : "a1",
             baseRefName: "main",
             isDraft: draft,
@@ -187,7 +189,7 @@ describe("forge switch port", () => {
         activity: false,
         babysit: { checks, requiredLabel: "qa" },
       });
-    expect(await observe()).toMatchObject({ babysitReady: false });
+    expect(await observe()).toMatchObject({ babysitReady: false, babysitBlocker: "label" });
     label = "QA";
     pending = true;
     expect(await observe()).toMatchObject({ babysitReady: false });
@@ -208,6 +210,9 @@ describe("forge switch port", () => {
     expect(await observe()).toEqual({ status: "unavailable" });
     more = false;
     expect(await observe()).toMatchObject({ babysitReady: true });
+    reviewDecision = "REVIEW_REQUIRED";
+    expect(await observe()).toMatchObject({ babysitReady: false, babysitBlocker: "approval" });
+    reviewDecision = "APPROVED";
     headMoved = true;
     reads = 0;
     expect(await observe()).toEqual({ status: "unavailable" });

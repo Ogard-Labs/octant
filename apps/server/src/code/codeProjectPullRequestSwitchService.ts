@@ -31,6 +31,8 @@ import {
   type CodeProjectPullRequestAutoFixPauseReason,
   type CodeThreadId,
   type PullRequestSwitchKind,
+  type CodeProjectPullRequestView,
+  type PullRequestBabysitStatus,
   type WindowId,
 } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts/code";
@@ -206,15 +208,17 @@ export class CodeProjectPullRequestSwitchService
   /**
    * The window whose Project connection vouches for each Auto-fix and watch.
    * Not journaled: window ids do not outlive the process, so after a restart
-   * both stay quiet until a window shows the pull request again (or the
-   * thread's agent asks to watch it again), because the repository connection
-   * is a per-window fact.
+   * ordinary watches wait for a window to show the PR again. A babysitter
+   * can rediscover a current local window with the same Project and PR link.
    */
   readonly #vouchingWindows = new Map<string, WindowId>();
+  readonly #babysitProgress = new Map<string, PullRequestBabysitStatus>();
+  readonly #localWindows: (() => ReadonlyArray<WindowId>) | undefined;
   #ticking = false;
   readonly #limits: () => PullRequestSwitchLimits;
 
   constructor(options: {
+    readonly localWindows?: () => ReadonlyArray<WindowId>;
     readonly authority: PullRequestSwitchAuthority;
     readonly forge: PullRequestSwitchForge;
     readonly threads: PullRequestAutoFixThreads;
@@ -238,6 +242,7 @@ export class CodeProjectPullRequestSwitchService
         autoFixAttempts: CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS,
       }));
     this.#authority = options.authority;
+    this.#localWindows = options.localWindows;
     this.#forge = options.forge;
     this.#threads = options.threads;
     this.#journal = options.journal;
@@ -259,6 +264,35 @@ export class CodeProjectPullRequestSwitchService
       }
     }
     return false;
+  }
+
+  /** Decorate an already authorized list from local state, without a forge or per-row authority read. */
+  withBabysitProgress(view: CodeProjectPullRequestView): CodeProjectPullRequestView {
+    if (!this.#folds.size) return view;
+    return {
+      ...view,
+      rows: view.rows.map((row) => {
+        const { key } = this.#resolveIdentity(row);
+        const watch = this.#folds.get(key)?.autoFix;
+        if (!watch || watch.status === "off" || !watch.babysit) return row;
+        const thread = row.linkedThreads.find((link) => String(link.threadId) === watch.threadId);
+        if (!thread) return row;
+        const status =
+          watch.status === "on" ? (this.#babysitProgress.get(key) ?? "checking") : watch.reason;
+        if (status === "closed" || status === "merged") return row;
+        return {
+          ...row,
+          babysit: {
+            status,
+            threadId: thread.threadId,
+            ...(watch.babysit.requiredLabel ? { requiredLabel: watch.babysit.requiredLabel } : {}),
+            ...(watch.status === "stopped" && watch.readyHeadSha
+              ? { readyHeadSha: watch.readyHeadSha }
+              : {}),
+          },
+        };
+      }),
+    };
   }
 
   async query(
@@ -404,7 +438,11 @@ export class CodeProjectPullRequestSwitchService
       );
     }
     this.#vouchingWindows.set(resolved.key, windowId);
-    return { status: "applied", view: this.#view(this.#fold(canonicalTarget)) };
+    return {
+      status: "applied",
+      ...(command.babysit && fold.autoFix.status === "on" ? { alreadyActive: true as const } : {}),
+      view: this.#view(this.#fold(canonicalTarget)),
+    };
   }
 
   /**
@@ -836,6 +874,8 @@ export class CodeProjectPullRequestSwitchService
           continue;
         }
         const mayAct = await this.#threadSwitchesMayAct(current, resolved.key);
+        if (current.autoFix.status === "on" && current.autoFix.babysit && !mayAct.autoFix)
+          this.#babysitProgress.set(resolved.key, "connection");
         const failures = current.mergeWhenReady.status === "on" || mayAct.autoFix;
         if (!failures && !mayAct.watch) continue;
         const queryTarget = mayAct.canonicalTarget ?? resolved.target;
@@ -847,7 +887,15 @@ export class CodeProjectPullRequestSwitchService
             ? { babysit: current.autoFix.babysit }
             : {}),
         });
-        if (observation.status !== "observed") continue;
+        if (observation.status !== "observed") {
+          if (
+            current.autoFix.status === "on" &&
+            current.autoFix.babysit &&
+            this.#fold(resolved.target).autoFix === current.autoFix
+          )
+            this.#babysitProgress.set(resolved.key, "connection");
+          continue;
+        }
         if (
           expectedPullRequestNodeId !== undefined &&
           observation.pullRequestNodeId !== undefined &&
@@ -892,6 +940,30 @@ export class CodeProjectPullRequestSwitchService
     const quiet = { autoFix: false, watch: false };
     if (fold.autoFix.status !== "on" && fold.watch.status !== "on") return quiet;
     const windowId = this.#vouchingWindows.get(key);
+    const windows =
+      fold.autoFix.status === "on" && fold.autoFix.babysit ? this.#localWindows?.() : undefined;
+    if (windows && (windowId === undefined || !windows.includes(windowId))) {
+      // Local window IDs expire. Rediscover this PR's project and exact linked thread.
+      // A co-located ordinary watch still needs its own original window.
+      for (const candidate of windows) {
+        const found = await this.#authority
+          .authorizePullRequest(candidate, fold.target)
+          .catch(() => undefined);
+        if (
+          found?.status === "authorized" &&
+          fold.autoFix.status === "on" &&
+          found.linkedThreadIds.includes(fold.autoFix.threadId)
+        ) {
+          return {
+            autoFix: true,
+            watch: false,
+            ...(found.canonicalTarget ? { canonicalTarget: found.canonicalTarget } : {}),
+            ...(found.pullRequestNodeId ? { pullRequestNodeId: found.pullRequestNodeId } : {}),
+          };
+        }
+      }
+      return quiet;
+    }
     if (windowId === undefined) return quiet;
     const authority = await this.#authority.authorizePullRequest(windowId, fold.target);
     if (authority.status === "not-authorized") {
@@ -972,6 +1044,17 @@ export class CodeProjectPullRequestSwitchService
           failures.push({ failure, detail: `${item.author}: ${item.body}` });
         }
       }
+    }
+    if (fold.babysit) {
+      const failure = failures[0]?.failure.kind;
+      const blocker = observation.babysitBlocker;
+      let status: PullRequestBabysitStatus = blocker ?? "checking";
+      if (blocker !== "draft" && blocker !== "label" && blocker !== "approval") {
+        if (failure === "check") status = "repair-check";
+        else if (failure === "review-thread" || failure === "feedback") status = "repair-review";
+        else if (failure) status = "repair-branch";
+      }
+      this.#babysitProgress.set(key, status);
     }
     const decision = decidePullRequestAutoFix({
       fold,
@@ -1307,6 +1390,12 @@ export class CodeProjectPullRequestSwitchService
         if (!this.#waitingOn.has(canonicalKey)) this.#waitingOn.set(canonicalKey, waitingOn);
         this.#waitingOn.delete(legacyKey);
       }
+      const progress = this.#babysitProgress.get(legacyKey);
+      if (progress !== undefined) {
+        if (!this.#babysitProgress.has(canonicalKey))
+          this.#babysitProgress.set(canonicalKey, progress);
+        this.#babysitProgress.delete(legacyKey);
+      }
       const paused = this.#paused.get(legacyKey);
       if (paused !== undefined) {
         if (!this.#paused.has(canonicalKey)) this.#paused.set(canonicalKey, paused);
@@ -1628,6 +1717,7 @@ export class CodeProjectPullRequestSwitchService
     change: CodeProjectPullRequestAutoFixRecorded["change"],
     actor: EventActor,
   ): void {
+    if (change.kind !== "woke") this.#babysitProgress.delete(this.#resolveIdentity(target).key);
     const record = decodeCodeProjectPullRequestAutoFixRecorded({ target, threadId, change });
     const occurredAt = this.#append(CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED, record, actor);
     this.#apply({ kind: "auto-fix", occurredAt, record });

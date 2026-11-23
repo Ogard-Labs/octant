@@ -3941,7 +3941,11 @@ CI or reviewers should be woken, not left polling; maintainer request,
   linked pull requests. The person selects one and starts Auto-fix with a
   completion rule. From the Pull requests list, a row offers the same controls
   and a choice of repairing thread when several are linked. Each PR keeps its
-  own rules and stop state, including when several belong to the same thread. It handles required checks by default, or every reported
+  own rules and stop state, including when several belong to the same thread.
+  Either surface can start a selection with shared conditions. The host applies
+  each start independently and preserves any active owner's rules. The list
+  shows the repairing thread and latest blocker or the completed head.
+  **Needs me** narrows it to watches with a human gate or a handoff. It handles required checks by default, or every reported
   check if selected (this choice waits for at least one check to report).
   The person can also require a named GitHub label. A
   missing approval or label waits for the person. A branch GitHub requires
@@ -3971,9 +3975,10 @@ CI or reviewers should be woken, not left polling; maintainer request,
   the pull request's repository (`authority-lost`), or when the person turns
   it off. The host asks the Project check again before every pass, not only
   at the click; a revoked GitHub login or a thread that no longer links to
-  the pull request holds Auto-fix quiet, and after a host restart it stays
-  quiet until a window shows the pull request again, because the connection
-  is a per-window fact. Turning it on again starts a fresh attempt count.
+  the pull request holds Auto-fix quiet. After restart, babysitting resumes on
+  a host pass when a registered local window can authorize the saved Project,
+  repository, PR and repairing thread. Other Auto-fix sessions wait for a window
+  to reopen the PR review. Turning it on again starts a fresh attempt count.
 - **Watch.** The pull-request tool's `watch` (rules above) binds the
   thread's own open pull request, the one linked to it on the board, to that
   thread; one thread watches a pull request at a time

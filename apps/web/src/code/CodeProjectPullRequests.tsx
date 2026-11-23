@@ -34,6 +34,8 @@ import {
   writeStoredValue,
 } from "../threadBoard/threadBoardState";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
+import { BulkBabysitDialog } from "./BulkBabysitDialog";
 import { OverviewBabysitDialog, type BabysitClient } from "./PullRequestBabysitDialog";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -72,6 +74,7 @@ import {
   PULL_REQUEST_STATE_OPTIONS,
   activeFilterCount,
   activeFilterNames,
+  babysitProgress,
   blockingFact,
   filterByRepositories,
   filterPullRequests,
@@ -186,6 +189,7 @@ type WorkspaceState =
 
 export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
   const [workspace, setWorkspace] = useState<WorkspaceState>({ status: "loading" });
+  const [bulkRows, setBulkRows] = useState<ReadonlyArray<CodeProjectPullRequestRow>>();
   const [watchKey, setWatchKey] = useState<string>();
   const [search, setSearch] = useState("");
   const storage = props.storage ?? defaultBoardStorage();
@@ -217,24 +221,38 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
     loadRef.current = props.load;
   });
 
-  useEffect(() => {
-    let active = true;
-    loadRef.current({ version: 1 }).then(
-      (view) => {
-        if (active) setWorkspace({ status: "ready", view });
-      },
-      () => {
-        if (active) {
-          setWorkspace({ status: "error", message: "The pull-request list could not be read." });
-        }
-      },
-    );
-    return () => {
-      active = false;
-    };
+  const listRevision = useRef(0);
+  const refreshing = useRef(false);
+  const reloadCached = useCallback(async () => {
+    if (refreshing.current) return;
+    const revision = ++listRevision.current;
+    try {
+      const view = await loadRef.current({ version: 1 });
+      if (listRevision.current === revision) setWorkspace({ status: "ready", view });
+    } catch {
+      if (listRevision.current === revision)
+        setWorkspace((previous) =>
+          previous.status === "loading"
+            ? { status: "error", message: "The pull-request list could not be read." }
+            : previous,
+        );
+    }
   }, []);
+  useEffect(() => {
+    void reloadCached();
+    return () => {
+      listRevision.current++;
+    };
+  }, [reloadCached]);
+  const canReadWatches = props.babysitClient?.queryProjectPullRequestSwitches !== undefined;
+  useEffect(() => {
+    if (canReadWatches) return scheduleVisibleInterval(() => void reloadCached(), 20_000);
+  }, [canReadWatches, reloadCached]);
 
   async function runRefresh(command: CodeProjectPullRequestRefreshCommand): Promise<void> {
+    if (refreshing.current) return;
+    refreshing.current = true;
+    const revision = ++listRevision.current;
     setWorkspace((previous) => {
       const view =
         previous.status === "ready" || previous.status === "refreshing"
@@ -246,8 +264,10 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
     });
     try {
       const view = await props.refresh(command);
+      if (listRevision.current !== revision) return;
       setWorkspace({ status: "ready", view });
     } catch {
+      if (listRevision.current !== revision) return;
       setWorkspace((previous) => ({
         status: "error",
         message: "The pull-request list could not be refreshed.",
@@ -257,6 +277,8 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
             ? { view: previous.view }
             : {}),
       }));
+    } finally {
+      refreshing.current = false;
     }
   }
 
@@ -478,7 +500,27 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
           )}
         </div>
       ) : (
-        <div className="surface-toolbar">{searchField}</div>
+        <div className="surface-toolbar">
+          {searchField}
+          {watchAction &&
+            visibleRows.filter(
+              (row) =>
+                row.state !== "closed" && row.state !== "merged" && row.linkedThreads.length > 0,
+            ).length > 1 && (
+              <OctantButton
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setBulkRows(
+                    visibleRows.filter((row) => row.state !== "closed" && row.state !== "merged"),
+                  )
+                }
+              >
+                Babysit multiple…
+              </OctantButton>
+            )}
+        </div>
       )}
       {ready && !dock && scopedRows.length > 0 ? (
         <div aria-label="Narrow by status" className="pr-page__chips" role="group">
@@ -527,12 +569,25 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
         </>
       ) : null}
 
+      {bulkRows && props.babysitClient && (
+        <BulkBabysitDialog
+          rows={bulkRows}
+          client={props.babysitClient}
+          onClose={() => {
+            setBulkRows(undefined);
+            void reloadCached();
+          }}
+        />
+      )}
       {watchRow && props.babysitClient ? (
         <OverviewBabysitDialog
           key={watchKey}
           row={watchRow}
           client={props.babysitClient}
-          onClose={() => setWatchKey(undefined)}
+          onClose={() => {
+            setWatchKey(undefined);
+            void reloadCached();
+          }}
         />
       ) : null}
       {view === undefined ? (
@@ -1301,6 +1356,7 @@ function PullRequestRows(props: {
                 <Eye aria-hidden="true" size={16} />
               </OctantIconButton>
             )}
+            {row.babysit && <p className="pr-page__watch-progress">{babysitProgress(row)}</p>}
           </li>
         );
       })}

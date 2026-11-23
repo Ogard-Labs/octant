@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   decodeCodeProjectPullRequestSwitchTarget,
+  decodeCodeProjectPullRequestView,
   decodeWindowId,
   type CodeProjectPullRequestMergeMethod,
 } from "@octant/contracts";
@@ -16,6 +17,7 @@ import { openSqlite } from "../persistence/sqlitePort";
 import {
   CodeProjectPullRequestSwitchService,
   type PullRequestAutoFixThreads,
+  type PullRequestSwitchAuthority,
   type PullRequestSwitchForge,
 } from "./codeProjectPullRequestSwitchService";
 import type {
@@ -83,6 +85,8 @@ function fixture(
     readonly allowAutoMerge?: boolean;
     readonly methods?: Partial<Record<CodeProjectPullRequestMergeMethod, boolean>>;
     readonly linked?: ReadonlyArray<string>;
+    readonly authorize?: PullRequestSwitchAuthority["authorizePullRequest"];
+    readonly localWindows?: () => ReadonlyArray<typeof windowId>;
     readonly threadPullRequests?: ReadonlyArray<typeof target>;
   } = {},
 ) {
@@ -123,11 +127,14 @@ function fixture(
   };
   const create = () =>
     new CodeProjectPullRequestSwitchService({
+      ...(options.localWindows ? { localWindows: options.localWindows } : {}),
       authority: {
-        authorizePullRequest: async () =>
-          authority === "authorized"
-            ? { status: "authorized", linkedThreadIds: options.linked ?? [String(threadId)] }
-            : { status: authority },
+        authorizePullRequest:
+          options.authorize ??
+          (async () =>
+            authority === "authorized"
+              ? { status: "authorized", linkedThreadIds: options.linked ?? [String(threadId)] }
+              : { status: authority }),
         linkedPullRequests: async () => options.threadPullRequests ?? [target],
       },
       forge,
@@ -166,6 +173,126 @@ const MERGE_WHEN_READY = "code.project-pull-request-merge-when-ready-recorded@1"
 const AUTO_FIX = "code.project-pull-request-auto-fix-recorded@1";
 
 describe("Babysit from a Code thread", () => {
+  it("resumes only an enrolled babysitter once the local project connection returns", async () => {
+    let windows: ReadonlyArray<typeof windowId> = [];
+    const f = fixture({ localWindows: () => windows });
+    const other = { ...target, number: 13 };
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", target, threadId, babysit: { checks: "required" } },
+      "user",
+    );
+    await f.service.setAutoFix(windowId, { kind: "enable", target: other, threadId }, "user");
+    const restored = f.restart();
+    await restored.tick(signal);
+    windows = [windowId];
+    f.setAuthority("disconnected");
+    await restored.tick(signal);
+    expect(f.forge.observe).not.toHaveBeenCalled();
+    f.setAuthority("authorized");
+    f.observe(observed({ babysitReady: true }));
+    await restored.tick(signal);
+    expect(f.forge.observe).toHaveBeenCalledTimes(1);
+    expect(f.threads.notifyPerson).toHaveBeenCalledExactlyOnceWith(
+      threadId,
+      expect.stringContaining("a1"),
+    );
+    expect((await restored.query(windowId, other)).autoFix.status).toBe("on");
+  });
+
+  it("skips a stale window and refuses a project connection without the recorded thread link", async () => {
+    const stale = decodeWindowId("00000000-0000-4000-8000-000000000902");
+    let linked = true;
+    const f = fixture({
+      localWindows: () => [stale, windowId],
+      authorize: async (id) => {
+        if (String(id) === String(stale)) throw new Error("window closed");
+        return { status: "authorized", linkedThreadIds: linked ? [String(threadId)] : [] };
+      },
+    });
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", target, threadId, babysit: { checks: "all" } },
+      "user",
+    );
+    const restored = f.restart();
+    linked = false;
+    await restored.tick(signal);
+    expect(f.forge.observe).not.toHaveBeenCalled();
+    linked = true;
+    await restored.tick(signal);
+    expect(f.forge.observe).toHaveBeenCalledTimes(1);
+  });
+
+  it("projects blockers and the ready commit onto the linked row without polling GitHub on list reads", async () => {
+    const f = fixture();
+    const row = {
+      ...target,
+      projectName: "Octant",
+      title: "Change",
+      state: "open",
+      draft: false,
+      author: "dev",
+      mergeability: "mergeable",
+      baseBranch: "main",
+      headBranch: "feature/x",
+      updatedAt: "2026-10-31T10:00:00.000Z",
+      checks: "pending",
+      review: "pending",
+      linkedThreads: [{ threadId, title: "Build fixes" }],
+    };
+    const view = decodeCodeProjectPullRequestView({
+      version: 1,
+      query: { version: 1 },
+      generatedAt: row.updatedAt,
+      freshness: { status: "fresh" },
+      repositoriesTruncated: false,
+      pullRequestsTruncated: false,
+      projects: [],
+      rows: [row, { ...row, number: 13 }],
+    });
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", target, threadId, babysit: { checks: "required", requiredLabel: "qa" } },
+      "user",
+    );
+    f.observe(observed({ babysitBlocker: "label" }));
+    await f.service.tick(signal);
+    const rows = f.service.withBabysitProgress(view).rows;
+    expect(rows[0]?.babysit).toEqual({ threadId, status: "label", requiredLabel: "qa" });
+    expect(rows[1]?.babysit).toBeUndefined();
+    const unlinked = { ...view, rows: view.rows.map((r) => ({ ...r, linkedThreads: [] })) };
+    expect(f.service.withBabysitProgress(unlinked).rows[0]?.babysit).toBeUndefined();
+    expect(f.forge.observe).toHaveBeenCalledTimes(1);
+    f.observe(observed({ babysitReady: true }));
+    await f.service.tick(signal);
+    expect(f.restart().withBabysitProgress(view).rows[0]?.babysit).toMatchObject({
+      status: "ready",
+      readyHeadSha: "a1",
+    });
+  });
+
+  it("returns an idempotent result for a repeated bulk start and preserves different existing rules", async () => {
+    const f = fixture();
+    const command = {
+      kind: "enable",
+      target,
+      threadId,
+      babysit: { checks: "all", requiredLabel: "qa" },
+    } as const;
+    expect(await f.service.setAutoFix(windowId, command, "user")).not.toHaveProperty(
+      "alreadyActive",
+    );
+    expect(await f.service.setAutoFix(windowId, command, "user")).toMatchObject({
+      status: "applied",
+      alreadyActive: true,
+    });
+    expect(
+      await f.service.setAutoFix(windowId, { ...command, babysit: { checks: "required" } }, "user"),
+    ).toEqual({ status: "refused", reason: "already-active" });
+    expect(f.recorded(AUTO_FIX)).toHaveLength(1);
+  });
+
   it("keeps independent watches for two PRs owned by the same thread after replay", async () => {
     const second = { ...target, number: 13 };
     const f = fixture({ threadPullRequests: [target, second] });

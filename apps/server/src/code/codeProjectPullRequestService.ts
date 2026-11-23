@@ -2786,6 +2786,6 @@ function openRowsForThread(rows: ReadonlyArray<CodeProjectPullRequestRow>, threa
   return rows.filter(
     (row) =>
       (row.state === "open" || row.state === "unknown") &&
-      row.linkedThreads.some((thread) => thread.threadId === threadId),
+      row.linkedThreads.some((thread) => String(thread.threadId) === String(threadId)),
   );
 }

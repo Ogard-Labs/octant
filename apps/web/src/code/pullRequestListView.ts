@@ -7,7 +7,7 @@ import type { CodeProjectPullRequestRow } from "@octant/contracts";
  * placed by it, so it goes last under both, in update order.
  */
 export type PullRequestSort = "updated" | "stalest" | "newest" | "oldest" | "repository";
-export type PullRequestStateFilter = "any" | "open" | "draft";
+export type PullRequestStateFilter = "any" | "open" | "draft" | "needs-me";
 export type PullRequestReviewFilter = "any" | "approved" | "changes-requested" | "needs-review";
 export type PullRequestChecksFilter = "any" | "passing" | "failing" | "pending";
 
@@ -45,6 +45,7 @@ export const PULL_REQUEST_STATE_OPTIONS: ReadonlyArray<{
   { value: "any", label: "Any state" },
   { value: "open", label: "Open" },
   { value: "draft", label: "Draft" },
+  { value: "needs-me", label: "Needs me" },
 ];
 
 /**
@@ -199,6 +200,31 @@ function sameLogin(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
 }
 
+export function babysitProgress(row: CodeProjectPullRequestRow) {
+  const watch = row.babysit;
+  if (!watch) return undefined;
+  const statuses = {
+    checking: "Checking readiness",
+    connection: "Waiting for connection",
+    draft: "Waiting for draft to be marked ready",
+    approval: "Waiting for approval",
+    label: `Waiting for label ${watch.requiredLabel ?? ""}`.trim(),
+    checks: "Waiting for checks",
+    "repair-check": "CI needs a fix",
+    "repair-review": "Review feedback to address",
+    "repair-branch": "Branch needs an update",
+    repository: "Waiting for repository rules",
+    ready: `Ready at ${watch.readyHeadSha?.slice(0, 12) ?? "observed head"}`,
+    "attempt-limit": "Repair limit reached",
+    "thread-unavailable": "Repairing thread unavailable",
+    "authority-lost": "Project access lost",
+  };
+  const owner = row.linkedThreads.find(
+    (thread) => String(thread.threadId) === String(watch.threadId),
+  )?.title;
+  return [statuses[watch.status], owner].filter(Boolean).join(" · ");
+}
+
 export function filterPullRequests(
   rows: ReadonlyArray<CodeProjectPullRequestRow>,
   filters: PullRequestFilters,
@@ -213,6 +239,22 @@ export function filterPullRequests(
       if (filters.involvement === "review-requested" && !asked) return false;
       if (filters.involvement === "involving-me" && !authored && !asked) return false;
     }
+    if (
+      filters.state === "needs-me" &&
+      !(
+        row.babysit &&
+        [
+          "draft",
+          "approval",
+          "label",
+          "ready",
+          "attempt-limit",
+          "thread-unavailable",
+          "authority-lost",
+        ].includes(row.babysit.status)
+      )
+    )
+      return false;
     if (filters.state === "draft" && !row.draft) return false;
     if (filters.state === "open" && row.draft) return false;
     if (filters.review === "needs-review" && row.review !== "pending" && row.review !== "none") {

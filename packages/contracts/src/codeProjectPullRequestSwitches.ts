@@ -222,6 +222,7 @@ export type CodeProjectPullRequestSwitchesView = typeof CodeProjectPullRequestSw
 export const CodeProjectPullRequestSwitchOutcome = Schema.Union(
   Schema.Struct({
     status: Schema.Literal("applied"),
+    alreadyActive: Schema.optional(Schema.Literal(true)),
     view: CodeProjectPullRequestSwitchesView,
   }).annotations(strict),
   Schema.Struct({
