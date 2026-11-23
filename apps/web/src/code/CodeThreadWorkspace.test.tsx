@@ -3,7 +3,11 @@ import { nativeFolderTransfer } from "../composer/folderDrop.test-fixture";
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
 import { decodeThreadMentionCandidate, type ThreadMessageQueueResult } from "@octant/contracts";
 import type { ThreadMentionClient } from "@octant/client-runtime";
-import { decodeCodeAttachmentId, decodeCodeRelativePath } from "@octant/contracts/code";
+import {
+  decodeCodeAttachmentId,
+  decodeCodeCheckoutId,
+  decodeCodeRelativePath,
+} from "@octant/contracts/code";
 import { PlanClientFailure, type PlanClient } from "@octant/client-runtime/plan-client";
 import type { CodeBoardCard, CodeBoardView, ThreadPlan } from "@octant/contracts";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -19,6 +23,7 @@ import { CodeThreadWorkspace } from "./CodeThreadWorkspace";
 import type { CodeAttachmentClient } from "./CodeThreadWorkspace";
 import type { CodeController } from "./useCodeController";
 import type { PickerGroup } from "@octant/domain";
+import { WorktreeLaunchContext, type WorktreeLaunch } from "./worktreeLaunchContext";
 
 const threadId = "10000000-0000-4000-8000-000000000001" as never;
 const anotherThreadId = "10000000-0000-4000-8000-000000000002" as never;
@@ -829,6 +834,79 @@ describe("CodeThreadWorkspace", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
     expect(loadEarlierConversation).toHaveBeenCalledOnce();
+  });
+
+  it("keeps worktree progress visible while the first prompt is paged out", async () => {
+    const newest = { id: "newest:user", role: "user", text: "Newest prompt" } as const;
+    const first = { id: "first:user", role: "user", text: "First prompt" } as const;
+    const view = (earlier: "idle" | "none-left") =>
+      workspaceWithWorktreeLaunch({
+        conversation: earlier === "idle" ? [newest] : [first, newest],
+        earlierConversation: earlier,
+      });
+    const { rerender } = render(view("idle"));
+    const ready = await screen.findByText("Worktree ready");
+    expect(ready.closest("[data-transcript-trail]")).not.toBeNull();
+
+    rerender(view("none-left"));
+    const firstPrompt = screen.getByText("First prompt").closest("article");
+    const readyAfterPaging = screen.getByText("Worktree ready");
+    expect(firstPrompt?.nextElementSibling).toContainElement(readyAfterPaging);
+    expect(screen.getAllByText("Worktree ready")).toHaveLength(1);
+  });
+
+  it("keeps the empty thread's workspace setup options after a worktree start is refused", async () => {
+    const observedAt = "2026-11-23T10:00:00.000Z";
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/api/workspace-presets"))
+        return Response.json({
+          kind: "workspace-preset-catalog-listing",
+          observedAt,
+          presets: [
+            {
+              id: "design-studio",
+              displayName: "Design studio",
+              summary: "Open the workspace for design.",
+              mode: "code",
+              panes: ["code-overview"],
+              defaultSkills: [],
+            },
+          ],
+        });
+      if (url.endsWith("/api/scaffolds"))
+        return Response.json({
+          kind: "scaffold-catalog-listing",
+          observedAt,
+          availableTools: ["swift"],
+          entries: [
+            {
+              id: "native-apple-app",
+              displayName: "Native Swift package",
+              summary: "Create a Swift package.",
+              target: "native-apple-app",
+              generator: {
+                kind: "toolchain",
+                tool: "swift",
+                presetArguments: ["package", "init", "--type", "executable"],
+              },
+              requiresTool: "swift",
+              produces: ["Package.swift"],
+            },
+          ],
+        });
+      return new Response(null, { status: 404 });
+    });
+    try {
+      render(workspaceWithWorktreeLaunch({ pendingDraft: "Try again" }, true));
+      const log = screen.getByRole("log");
+      expect(await within(log).findByText("Agent startup paused")).toBeVisible();
+      expect(await within(log).findByRole("button", { name: "Apply Design studio" })).toBeVisible();
+      expect(within(log).getByRole("button", { name: /^Start from a template/ })).toBeVisible();
+      expect(screen.getByRole("textbox", { name: "Follow-up message" })).toHaveValue("Try again");
+    } finally {
+      fetch.mockRestore();
+    }
   });
 
   it("loads earlier pages until a search hit's turn is loaded, then brings it into view", async () => {
@@ -4153,6 +4231,36 @@ function alternateProviderGroup(): PickerGroup {
 }
 
 const checkpoint = { worktree: "c".repeat(40), index: "d".repeat(40) } as never;
+
+function workspaceWithWorktreeLaunch(overrides: Partial<CodeController>, blocked = false) {
+  const checkoutId = decodeCodeCheckoutId("20000000-0000-4000-8000-000000000002");
+  const launch: WorktreeLaunch = {
+    threadId,
+    projectId,
+    composerId: "draft",
+    startFromOrigin: false,
+    phase: "ready",
+    target: { projectId, thread: { threadId, checkoutId } },
+    blocked,
+  };
+  return (
+    <WorktreeLaunchContext.Provider
+      value={{
+        launches: new Map([[threadId, launch]]),
+        client: { execute: vi.fn().mockResolvedValue({ kind: "worktree-preparation" }) },
+        onDetails: vi.fn(),
+        detailsThreadId: undefined,
+      }}
+    >
+      <CodeThreadWorkspace
+        controller={controller(overrides)}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+        {...(blocked ? { serverUrl: "http://127.0.0.1:13773", windowCapability: "test" } : {})}
+      />
+    </WorktreeLaunchContext.Provider>
+  );
+}
 
 function controller(
   overrides: Partial<CodeController> = {},

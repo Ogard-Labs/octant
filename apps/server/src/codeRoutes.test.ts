@@ -23,6 +23,7 @@ import {
   createCodeRouteHandler,
 } from "./codeRoutes";
 import { CodeOperationSnapshotRequiredError } from "./code/codeOperationService";
+import type { CodeRouteService } from "./codeRoutes";
 
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
@@ -170,6 +171,61 @@ describe("Code routes", () => {
     expect(malformed?.status).toBe(400);
     expect(oversized?.status).toBe(413);
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("streams managed checkout stages from the authenticated command while creation is pending", async () => {
+    const gate = Promise.withResolvers<void>();
+    const failure = { category: "waiting", message: "Worktree is pending recovery." };
+    const execute = vi.fn<CodeRouteService["execute"]>(
+      async (_window, _command, _signal, context) => {
+        context?.onWorktreeProgress?.({ phase: "source" });
+        context?.onWorktreeProgress?.({ phase: "checkout", sourceMs: 420 });
+        await gate.promise;
+        throw { failure };
+      },
+    );
+    const command = {
+      kind: "create-managed-code-thread",
+      threadId,
+      projectId,
+      bindingRevisionId,
+      title: thread.title,
+      providerInstanceId,
+      modelId: thread.modelId,
+      executionPolicy: "approval-gated",
+      permissionPersistence: thread.permissionPersistence,
+      deliveryTarget: thread.deliveryTarget,
+      sourceBranch: "development",
+      startFromOrigin: true,
+      remoteName: "origin",
+    };
+    const route = routeFixture({ execute });
+    const post = (headers: Record<string, string>) =>
+      request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify(command),
+      });
+    const response = await route(post({ accept: "application/x-ndjson" }));
+    expect(response?.headers.get("content-type")).toBe("application/x-ndjson");
+    const reader = response?.body?.getReader();
+    if (reader === undefined) throw new Error("Missing response stream");
+    const read = async () => JSON.parse(new TextDecoder().decode((await reader.read()).value));
+    await expect(read()).resolves.toEqual({ kind: "progress", progress: { phase: "source" } });
+    await expect(read()).resolves.toEqual({
+      kind: "progress",
+      progress: { phase: "checkout", sourceMs: 420 },
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]?.[0]).toBe(windowId);
+    gate.resolve();
+    await expect(read()).resolves.toEqual({ kind: "failure", failure });
+    await expect(reader.read()).resolves.toMatchObject({ done: true });
+
+    const ordinary = await route(post({}));
+    expect(ordinary?.status).toBe(503);
+    await expect(ordinary?.json()).resolves.toEqual(failure);
+    expect(execute.mock.calls[1]?.[3]?.onWorktreeProgress).toBeUndefined();
   });
 
   it("routes strict Code operations through the authenticated command boundary", async () => {
