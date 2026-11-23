@@ -1,6 +1,6 @@
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { expect, it } from "vitest";
 import {
   copyValidatedWindowsNativeArtifacts,
@@ -118,13 +118,13 @@ it("reuses prebuilt Windows native artifacts only when all four fixed x64 binari
 });
 
 it("refuses prebuilt Windows native reuse on stable, release, or signing builds", () => {
-  const dir = "/tmp/prebuilt-native";
+  const dir = join(tmpdir(), "prebuilt-native");
   expect(
     resolveQaWindowsPrebuiltNativeDirectory({
       flavor: "nightly",
       environment: { [QA_WINDOWS_PREBUILT_NATIVE_DIR_ENV]: dir },
     }),
-  ).toBe(dir);
+  ).toBe(resolve(dir));
   expect(() =>
     resolveQaWindowsPrebuiltNativeDirectory({
       flavor: "stable",
