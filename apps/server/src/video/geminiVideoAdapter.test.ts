@@ -209,6 +209,34 @@ describe("Gemini video driver", () => {
     expect(recorder.sent.every((request) => request.auth.header === "x-goog-api-key")).toBe(true);
   });
 
+  it.each(["info", "bytes"])(
+    "keeps a finished clip running when its download request throws (%s)",
+    async (which) => {
+      const recorder = ports((request) => {
+        if (request.url.endsWith("/interactions/v1_abc")) {
+          return Response.json(
+            completedInteraction({
+              steps: [
+                {
+                  type: "model_output",
+                  content: [{ type: "video", mime_type: "video/mp4", uri: "files/clip-9" }],
+                },
+              ],
+            }),
+          );
+        }
+        if (which === "info" || request.url.endsWith(":download?alt=media")) {
+          throw new Error("connection reset");
+        }
+        return Response.json({ state: "ACTIVE" });
+      });
+      const adapter = geminiVideoDriver.create({ profile, ports: recorder.ports });
+      expect(await adapter.poll("v1_abc", new AbortController().signal)).toEqual({
+        status: "running",
+      });
+    },
+  );
+
   it("keeps a finished clip it could not download running, so it is tried again and stays billed", async () => {
     const recorder = ports((request) =>
       request.url.endsWith("/interactions/v1_abc")

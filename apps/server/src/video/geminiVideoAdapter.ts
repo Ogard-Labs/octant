@@ -343,36 +343,42 @@ async function downloadFile(
     };
   }
   const withSignal = signal === undefined ? {} : { signal };
-  const info = await ports.request({
-    url: `${GEMINI_VIDEO_API_BASE_URL}/files/${fileId}`,
-    method: "GET",
-    auth: AUTH,
-    ...withSignal,
-  });
-  if (!info.ok) return { status: "failed", providerFailure: classifyVideoHttpFailure(info) };
-  const state = jsonField(await readVideoJson(info), "state");
-  if (state === "PROCESSING" || state === "STATE_UNSPECIFIED") return { status: "running" };
-  if (state !== "ACTIVE") {
-    return {
-      status: "failed",
-      providerFailure: videoFailure("provider-failed", "Google could not finish this clip's file."),
-    };
+  try {
+    const info = await ports.request({
+      url: `${GEMINI_VIDEO_API_BASE_URL}/files/${fileId}`,
+      method: "GET",
+      auth: AUTH,
+      ...withSignal,
+    });
+    if (!info.ok) return { status: "failed", providerFailure: classifyVideoHttpFailure(info) };
+    const state = jsonField(await readVideoJson(info), "state");
+    if (state === "PROCESSING" || state === "STATE_UNSPECIFIED") return { status: "running" };
+    if (state !== "ACTIVE") {
+      return {
+        status: "failed",
+        providerFailure: videoFailure("provider-failed", "Google could not finish this clip's file."),
+      };
+    }
+    const file = await ports.request({
+      url: `${GEMINI_VIDEO_API_BASE_URL}/files/${fileId}:download?alt=media`,
+      method: "GET",
+      auth: AUTH,
+      ...withSignal,
+    });
+    if (!file.ok) return { status: "failed", providerFailure: classifyVideoHttpFailure(file) };
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (ports.sniffMediaType(bytes) !== "video/mp4") {
+      return {
+        status: "failed",
+        providerFailure: videoFailure("protocol", "Google returned a clip that is not an MP4."),
+      };
+    }
+    return { status: "downloaded", bytes };
+  } catch {
+    // The clip is already completed and billed; a download that throws is
+    // retried on the next poll like a download that answered an error.
+    return { status: "running" };
   }
-  const file = await ports.request({
-    url: `${GEMINI_VIDEO_API_BASE_URL}/files/${fileId}:download?alt=media`,
-    method: "GET",
-    auth: AUTH,
-    ...withSignal,
-  });
-  if (!file.ok) return { status: "failed", providerFailure: classifyVideoHttpFailure(file) };
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  if (ports.sniffMediaType(bytes) !== "video/mp4") {
-    return {
-      status: "failed",
-      providerFailure: videoFailure("protocol", "Google returned a clip that is not an MP4."),
-    };
-  }
-  return { status: "downloaded", bytes };
 }
 
 async function cancel(ports: VideoGenerationPorts, remoteId: string): Promise<VideoAdapterPoll> {
