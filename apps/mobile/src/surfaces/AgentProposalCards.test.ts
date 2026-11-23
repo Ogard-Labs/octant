@@ -305,6 +305,70 @@ describe("Routine proposal on the phone", () => {
     expect(container.querySelector('[data-testid="mobile-routine-proposal-failed"]')).toBeNull();
   });
 
+  it("keeps the card answerable when the host could not record the answer, until a retry lands", async () => {
+    const proposal = {
+      proposalId,
+      threadId,
+      projectId,
+      requestedAt: "2026-11-20T09:00:00.000Z",
+      mode: "work",
+      displayName: "Morning triage",
+      taskPrompt: "Triage new issues.",
+      trigger: { kind: "interval", intervalMinutes: 60, anchorAt: "2026-11-20T09:00:00.000Z" },
+      missedRunPolicy: "skip",
+      firstRunAt: "2026-11-20T10:00:00.000Z",
+    };
+    const answers: Array<{ readonly path: string; readonly body: unknown }> = [];
+    const transport: MobileRemoteTransport = {
+      hostId: "68000000-0000-4000-8000-0000000000ff",
+      authenticatedFetch: async ({ method, path, body }) => {
+        if (method === "POST") {
+          answers.push({ path, body: JSON.parse(String(body)) });
+          return Response.json(
+            answers.length === 1
+              ? {
+                  kind: "routine-proposal-answer-unrecorded",
+                  message: "The answer could not be saved; nothing was changed. Try again.",
+                }
+              : { kind: "routine-proposal-declined" },
+          );
+        }
+        expect(path).toBe("/api/automations/proposals");
+        // The host kept the proposal, so it still lists until an answer lands.
+        return Response.json({
+          kind: "routine-proposal-list",
+          proposals: answers.length < 2 ? [proposal] : [],
+        });
+      },
+    };
+    const container = await render(
+      createElement(RoutineProposalCard, {
+        transport,
+        threadId,
+        actsAsHostPerson: true,
+        authenticator: confirming(),
+        refreshIntervalMs: 60_000,
+      }),
+    );
+
+    await press(container, "Create routine");
+
+    expect(
+      container.querySelector('[data-testid="mobile-routine-proposal-failed"]')?.textContent,
+    ).toContain("The answer could not be saved; nothing was changed. Try again.");
+    expect(container.querySelector('[data-testid="mobile-routine-proposal"]')).not.toBeNull();
+    expect(choices(container)).toEqual(["Dismiss", "Create routine", "Decline"]);
+
+    await press(container, "Decline");
+
+    expect(answers.map((entry) => entry.body)).toEqual([
+      { proposalId, decision: "confirm" },
+      { proposalId, decision: "decline" },
+    ]);
+    expect(container.querySelector('[data-testid="mobile-routine-proposal"]')).toBeNull();
+    expect(container.querySelector('[data-testid="mobile-routine-proposal-failed"]')).toBeNull();
+  });
+
   it("names the zone a weekly routine repeats in, and the phone's own when they differ", async () => {
     const firstRunAt = "2026-11-22T20:00:00.000Z";
     const trigger = {

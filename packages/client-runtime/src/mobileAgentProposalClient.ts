@@ -19,12 +19,15 @@ const ROUTINE_PROPOSAL_DECIDE_PATH = "/api/automations/proposals/decide";
 /**
  * What came of a person's answer to a memory or routine proposal. Every
  * answer the host takes removes the proposal from its list, whatever came of
- * it; `refused` is a host that would not take an answer from this session
- * (only a device the host's own person paired may answer).
+ * it, except `unrecorded`: the host could not journal the answer, so the
+ * proposal still waits and may be answered again. `refused` is a host that
+ * would not take an answer from this session (only a device the host's own
+ * person paired may answer).
  */
 export type MobileProposalAnswer =
   | { readonly status: "answered" }
   | { readonly status: "not-applied"; readonly message: string }
+  | { readonly status: "unrecorded"; readonly message: string }
   | { readonly status: "gone" }
   | { readonly status: "refused" };
 
@@ -126,6 +129,8 @@ export async function decideMobileRoutineProposal(input: {
       return { status: "answered" };
     case "routine-proposal-gone":
       return { status: "gone" };
+    case "routine-proposal-answer-unrecorded":
+      return { status: "unrecorded", message: result.message };
     case "automation-command-failed":
       return { status: "not-applied", message: result.message };
   }

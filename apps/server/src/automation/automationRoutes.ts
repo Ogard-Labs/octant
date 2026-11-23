@@ -793,9 +793,10 @@ async function handleProposalDecision(
     // The answer could not be journaled, so nothing acts on it; the proposal
     // stays waiting and the card reports the failure instead of vanishing.
     return jsonResponse(
-      decodeRoutineProposalDecisionResult(
-        commandFailure("blocked", "The answer could not be saved; nothing was changed. Try again."),
-      ),
+      decodeRoutineProposalDecisionResult({
+        kind: "routine-proposal-answer-unrecorded",
+        message: "The answer could not be saved; nothing was changed. Try again.",
+      }),
       200,
       origin,
     );

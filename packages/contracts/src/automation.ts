@@ -1489,6 +1489,11 @@ export const RoutineProposalDecisionResult = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("routine-proposal-declined") }).annotations(strict),
   /** The proposal is no longer waiting: answered, expired, or withdrawn. */
   Schema.Struct({ kind: Schema.Literal("routine-proposal-gone") }).annotations(strict),
+  /** The answer could not be journaled, so the proposal is still waiting and may be answered again. */
+  Schema.Struct({
+    kind: Schema.Literal("routine-proposal-answer-unrecorded"),
+    message: AutomationFailureMessage,
+  }).annotations(strict),
   AutomationCommandFailure,
 );
 export type RoutineProposalDecisionResult = typeof RoutineProposalDecisionResult.Type;

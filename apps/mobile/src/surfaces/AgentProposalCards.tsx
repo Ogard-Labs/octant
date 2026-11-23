@@ -180,6 +180,7 @@ function useProposalAnswer(
     inFlight.current = true;
     setBusy(true);
     setNote(undefined);
+    setFailure(undefined);
     try {
       const deliver = () => send(proposalId, decision);
       // Declining is the safe direction, so only a confirm asks this phone first.
@@ -193,7 +194,11 @@ function useProposalAnswer(
             });
       if (outcome.status === "blocked") setNote(outcome.message);
       else if (outcome.value.status === "refused") setNote(MOBILE_COPY.proposalAnswerOnComputer);
-      else {
+      else if (outcome.value.status === "unrecorded") {
+        // The host kept the proposal, so the card stays answerable and the
+        // failure reads above it until dismissed or retried.
+        setFailure(outcome.value.message);
+      } else {
         // Every answer the host took, and a proposal already gone, leaves its
         // list. A confirmed change the host could not apply says why where the
         // card was: withdrawing the card alone would lose the reason.

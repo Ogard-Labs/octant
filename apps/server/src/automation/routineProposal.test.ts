@@ -1378,8 +1378,7 @@ describe("results a routine's run reports", () => {
       throw new Error("The journal refused the frame.");
     });
     expect(await decide(h.handler, proposalId, "confirm")).toMatchObject({
-      kind: "automation-command-failed",
-      reason: "blocked",
+      kind: "routine-proposal-answer-unrecorded",
     });
     // Nothing acted and the card stays waiting, so a later answer can record it.
     expect(await listed(h.handler)).toHaveLength(1);
