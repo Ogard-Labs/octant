@@ -395,6 +395,13 @@ async function generateVideo(
     );
     if ("error" in references) return { status: "refused", error: references.error };
     if (signal?.aborted) return { status: "cancelled", reason: "aborted" };
+    // The reads above can take seconds: the turn's standing is read once
+    // more before the paid job is queued, so a thread that moved to Plan
+    // while an image loaded spends nothing.
+    const refusalBeforeEnqueue = port.refusal?.();
+    if (refusalBeforeEnqueue !== undefined) {
+      return { status: "refused", error: refusalBeforeEnqueue };
+    }
     const input: EnqueueVideoJobInput = {
       threadKind: options.threadKind,
       scopeId: options.scopeId,

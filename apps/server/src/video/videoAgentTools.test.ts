@@ -13,6 +13,8 @@ import { createVideoAgentTools, type VideoAgentToolPort } from "./videoAgentTool
 import type { VideoQuote } from "./videoJobService";
 
 const now = "2026-11-22T12:00:00.000Z";
+// A PNG header is enough for the reference sniff: the content is never looked at.
+const PNG_FIXTURE = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
 const profileId = decodeProviderInstanceId("d4000000-0000-4000-8000-000000000001");
 const scopeId = decodeImageGenerationScopeId("d4000000-0000-4000-8000-000000000002");
 const clipId = "d4000000-0000-4000-8000-000000000004";
@@ -105,6 +107,9 @@ function harness(options: {
   readonly answer?: Awaited<ReturnType<VideoAgentToolPort["askGenerate"]>>;
   readonly pending?: boolean;
   readonly waitMs?: number;
+  readonly refusal?: () => string | undefined;
+  readonly frameRead?: () => Promise<Uint8Array | undefined>;
+  readonly readClip?: () => Promise<Uint8Array>;
 }) {
   const quote = vi.fn(
     async (input: { readonly options: { readonly resolution: string } }): Promise<VideoQuote> =>
@@ -143,7 +148,21 @@ function harness(options: {
         stop,
         whenTerminal: options.pending === true ? () => new Promise(() => {}) : async () => finished,
         listByScope: () => [finished],
-        readClip: async () => new Uint8Array(2048),
+        readClip: async () => (await options.readClip?.()) ?? new Uint8Array(2048),
+      },
+      ...(options.refusal === undefined ? {} : { refusal: options.refusal }),
+      imageSources: {
+        latestAttachments: () =>
+          options.frameRead === undefined
+            ? []
+            : [
+                {
+                  label: "photo.png",
+                  name: "photo.png",
+                  size: PNG_FIXTURE.length,
+                  read: options.frameRead,
+                },
+              ],
       },
       ...(options.waitMs === undefined ? {} : { waitMs: options.waitMs }),
       askGenerate,
@@ -271,5 +290,50 @@ describe("octant_create_video on the host", () => {
     );
     expect(cardOutcome.result).toMatchObject({ status: "not-saved" });
     expect(stoppedAtCard.write).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing when the turn stops while the clip is being read", async () => {
+    let releaseRead: ((bytes: Uint8Array) => void) | undefined;
+    const { call, write } = harness({
+      posture: "allow",
+      readClip: () =>
+        new Promise((resolve) => {
+          releaseRead = resolve;
+        }),
+    });
+    const controller = new AbortController();
+    const outcome = call(
+      { operation: "save", clipId, relativePath: "media/boat.mp4" },
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(releaseRead).toBeDefined());
+    controller.abort();
+    releaseRead?.(new Uint8Array(2048));
+    expect((await outcome).result).toMatchObject({ status: "not-saved" });
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("spends nothing when the thread moved to Plan while a frame was being read", async () => {
+    let plan = false;
+    const { call, enqueue } = harness({
+      answer: {
+        status: "video-generate",
+        options: { durationSeconds: 10, resolution: "720p", aspectRatio: "16:9", audio: true },
+        rememberForThread: false,
+      },
+      refusal: () => (plan ? "Plan mode cannot make videos." : undefined),
+      frameRead: async () => {
+        // The thread's standing dropped while the frame loaded.
+        plan = true;
+        return PNG_FIXTURE;
+      },
+    });
+    const outcome = await call({
+      prompt: "A paper boat on a pond",
+      firstFrame: { kind: "attachment", name: "photo.png" },
+    });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.result).toMatchObject({ error: "Plan mode cannot make videos." });
+    expect(enqueue).not.toHaveBeenCalled();
   });
 });

@@ -224,6 +224,7 @@ describe("ServiceOfferPrompt", () => {
     expect(card).toHaveTextContent("About $0.56 for 8 s at 720p, billed by Google.");
     await user.click(screen.getByRole("combobox", { name: "Resolution" }));
     await user.click(await screen.findByRole("option", { name: "1080p" }));
+    expect(card).toHaveTextContent("About $1.11 for 8 s at 1080p, billed by Google.");
     await user.click(screen.getByRole("button", { name: "Generate" }));
     expect(fake.decide).toHaveBeenCalledWith(
       expect.objectContaining({
