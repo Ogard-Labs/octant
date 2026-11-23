@@ -66,6 +66,12 @@ export const ProviderKeyJournalRecord = Schema.Union(
      * the pool to this list before it removes a key.
      */
     keyIds: Schema.optional(Schema.Array(ApiKeyId)),
+    /**
+     * A hash of the stored pool after the change, covering the key ids and
+     * the active key, so the same Undo refuses an edit the journal never
+     * saw. Missing on events journaled before it was recorded.
+     */
+    fingerprint: Schema.optional(Schema.String),
   }).annotations(strict),
   Schema.Struct({
     name: Schema.Literal("provider-key.change-failed"),

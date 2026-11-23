@@ -45,9 +45,14 @@ export interface ProviderKeyChangeRecorder {
   /**
    * Records the outcome. Best effort: a missing outcome is settled at the
    * next host start. `keyIds` is the pool's key ids after a `stored` change,
-   * so a change notice's Undo can hold the pool to them.
+   * and `fingerprint` its stored-value hash, so a change notice's Undo can
+   * hold the pool to them.
    */
-  readonly complete: (outcome: Completed["outcome"], keyIds?: ReadonlyArray<string>) => void;
+  readonly complete: (
+    outcome: Completed["outcome"],
+    keyIds?: ReadonlyArray<string>,
+    fingerprint?: string,
+  ) => void;
   readonly fail: (reason: Failed["reason"]) => void;
 }
 
@@ -143,7 +148,7 @@ export function providerKeyJournal(options: {
       );
       const common = { requestId, instanceId: input.instanceId, action: input.action };
       return {
-        complete: (outcome, keyIds) =>
+        complete: (outcome, keyIds, fingerprint) =>
           bestEffort(
             input.instanceId,
             {
@@ -151,6 +156,7 @@ export function providerKeyJournal(options: {
               ...common,
               outcome,
               ...(keyIds === undefined ? {} : { keyIds: [...keyIds] }),
+              ...(fingerprint === undefined ? {} : { fingerprint }),
             },
             input.actor,
           ),

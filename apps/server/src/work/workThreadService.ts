@@ -62,14 +62,20 @@ import { selectCompletionReceiptId } from "@octant/domain/finished-receipt-polic
 import {
   defaultFullAccessSandboxFor,
   fullAccessSandboxSupported,
+  guardrailLowered,
   permissionModeOf,
+  threadAccessRaised,
   workAccessOfPermissionMode,
   workLevelChangeTarget,
   workPlanReturnOf,
   workThreadAccessOf,
 } from "@octant/domain/guardrail-policy";
 import {
+  decodeGuardrailAccessRaised,
+  decodeGuardrailLevelChange,
   decodeGuardrailLevelLowered,
+  GUARDRAIL_ACCESS_RAISED,
+  GUARDRAIL_LEVEL_CHANGED,
   GUARDRAIL_LEVEL_LOWERED,
 } from "@octant/contracts/guardrail-lowering";
 import type { PermissionMode } from "@octant/contracts/providers";
@@ -2504,10 +2510,10 @@ export class WorkThreadService {
 
   /**
    * Records a guardrail change as its own single-event aggregate, so no
-   * thread or settings version waits on it. Every change is recorded —
-   * raised as well as lowered — because the access notices read raised
-   * levels from this same journal; what callers do with a lowering alone
-   * still sees only `guardrailLowered` cases.
+   * thread or settings version waits on it. Every change is recorded under
+   * the event that means it — a lowering, an access raise into a still-gated
+   * level, or any other change — because the access notices read raised
+   * levels from this same journal.
    */
   #journalLevelChange(
     change: {
@@ -2520,18 +2526,24 @@ export class WorkThreadService {
     actor: EventActor = { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
   ): void {
     if (change.from === change.to) return;
+    const payload = { surface: "work" as const, ...change };
+    const [eventName, body] = guardrailLowered(change.from, change.to)
+      ? ([GUARDRAIL_LEVEL_LOWERED, decodeGuardrailLevelLowered(payload)] as const)
+      : threadAccessRaised(change.from, change.to)
+        ? ([GUARDRAIL_ACCESS_RAISED, decodeGuardrailAccessRaised(payload)] as const)
+        : ([GUARDRAIL_LEVEL_CHANGED, decodeGuardrailLevelChange(payload)] as const);
     this.#persistence.journal.append({
       aggregate: { aggregateType: "guardrail-change", aggregateId: this.#uuid() },
       expectedVersion: 0,
       events: [
         {
           eventId: decodeEventId(this.#uuid()),
-          eventName: GUARDRAIL_LEVEL_LOWERED,
+          eventName,
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#uuid()),
           actor,
           occurredAt: decodeTimestamp(this.#clock()),
-          payload: decodeGuardrailLevelLowered({ surface: "work", ...change }),
+          payload: body,
         },
       ],
     });

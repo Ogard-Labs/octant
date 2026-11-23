@@ -250,7 +250,14 @@ export function createAccessActivityRouteHandler(dependencies: AccessActivityRou
         actor: viewer.actor,
         ...(record.expectedKeyIds === undefined
           ? {}
-          : { expected: { keyIds: record.expectedKeyIds } }),
+          : {
+              expected: {
+                keyIds: record.expectedKeyIds,
+                ...(record.expectedFingerprint === undefined
+                  ? {}
+                  : { fingerprint: record.expectedFingerprint }),
+              },
+            }),
       });
     }
     if (record.changedSince === true) {

@@ -2409,17 +2409,17 @@ describe("CodeService commands", () => {
         executionPolicy: "approval-gated",
         permissionPersistence: "current-session",
       });
-      // Raising the guard is a level change as well, so the journal keeps it:
-      // the access notices tell a raise out of Plan or Ask first from a level
-      // that simply never moved.
+      // Raising the guard is a level change as well, so the journal keeps it —
+      // but never as a lowering: the access notices tell a raise out of Plan
+      // or Ask first from a level that simply never moved.
       expect(
         guarded.persistence.journal.append.mock.calls.some(
           ([request]) => request.events[0].eventName === "guardrail.level-lowered@1",
         ),
-      ).toBe(true);
+      ).toBe(false);
       const guardedChange = guarded.persistence.journal.append.mock.calls
         .map(([request]) => request.events[0])
-        .filter((event) => event.eventName === "guardrail.level-lowered@1");
+        .filter((event) => event.eventName === "guardrail.level-changed@1");
       expect(guardedChange[0]?.payload).toMatchObject({
         scope: "thread",
         surface: "code",
@@ -2458,7 +2458,7 @@ describe("CodeService commands", () => {
       });
       const changed = fixture.persistence.journal.append.mock.calls
         .map(([request]) => request.events[0])
-        .filter((event) => event.eventName === "guardrail.level-lowered@1");
+        .filter((event) => event.eventName === "guardrail.access-raised@1");
       expect(changed[0]?.payload).toMatchObject({
         scope: "thread",
         surface: "code",

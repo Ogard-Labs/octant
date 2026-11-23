@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   decodeEventActor,
@@ -5,7 +6,7 @@ import {
   decodeWindowId,
   type ProviderInstance,
 } from "@octant/contracts";
-import { addApiKey } from "@octant/host-runtime";
+import { addApiKey, setActiveApiKey } from "@octant/host-runtime";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import type { ProviderKeyReference } from "./credentialBrokerClient";
 import type { ProviderKeyJournal } from "./providerKeyJournal";
@@ -763,6 +764,39 @@ describe("host-local provider key pool routes", () => {
       windowId,
       actor,
       expected: { keyIds: [first.key.id, noticed.key.id] },
+    });
+    expect(undone).toMatchObject({
+      status: "refused",
+      message: expect.stringContaining("changed again"),
+    });
+    expect(stored.get(GATEWAY_ID)).toContain(noticed.key.id);
+  });
+
+  it("refuses a notice's Undo when a desktop edit changed the active key the journal never saw", async () => {
+    const { handle, options, stored } = setup();
+    const first = (await (
+      await handle(keys("add", { instance: GATEWAY_ID, credential: KEY }))
+    )?.json()) as { key: { id: string } };
+    const noticed = (await (
+      await handle(keys("add", { instance: GATEWAY_ID, credential: `${KEY}-2` }))
+    )?.json()) as { key: { id: string } };
+    const actor = decodeEventActor({
+      kind: "local-user",
+      actorId: "44444444-4444-4444-8444-444444444444",
+    });
+    // The notice holds the pool to the state it recorded when the change was
+    // journaled — the same key ids under a different active key are a
+    // different pool.
+    const fingerprint = createHash("sha256")
+      .update(stored.get(GATEWAY_ID) ?? "", "utf8")
+      .digest("hex");
+    stored.set(GATEWAY_ID, setActiveApiKey(stored.get(GATEWAY_ID) ?? "", first.key.id));
+    const undone = await removeProviderApiKey(options, {
+      instanceId: GATEWAY_ID,
+      keyId: noticed.key.id,
+      windowId,
+      actor,
+      expected: { keyIds: [first.key.id, noticed.key.id], fingerprint },
     });
     expect(undone).toMatchObject({
       status: "refused",

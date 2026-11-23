@@ -23,11 +23,17 @@ import {
 import {
   defaultFullAccessSandboxFor,
   fullAccessSandboxSupported,
+  guardrailLowered,
   permissionModeOf,
+  threadAccessRaised,
 } from "@octant/domain/guardrail-policy";
 import { selectCompletionReceiptId } from "@octant/domain/finished-receipt-policy";
 import {
+  decodeGuardrailAccessRaised,
+  decodeGuardrailLevelChange,
   decodeGuardrailLevelLowered,
+  GUARDRAIL_ACCESS_RAISED,
+  GUARDRAIL_LEVEL_CHANGED,
   GUARDRAIL_LEVEL_LOWERED,
 } from "@octant/contracts/guardrail-lowering";
 import type { PermissionMode } from "@octant/contracts/providers";
@@ -4872,9 +4878,9 @@ export class CodeService {
    * Records a guardrail change as its own single-event aggregate, so no
    * other writer's version waits on it. The envelope names the local user and
    * the time; the payload names the scope and both levels. Every change is
-   * recorded — raised as well as lowered — because the access notices read
-   * raised levels from this same journal; what callers do with a lowering
-   * alone still sees only `guardrailLowered` cases.
+   * recorded under the event that means it — a lowering, an access raise
+   * into a still-gated level, or any other change — because the access
+   * notices read raised levels from this same journal.
    */
   #journalLevelChange(
     change: {
@@ -4887,14 +4893,13 @@ export class CodeService {
     actor?: EventActor,
   ): void {
     if (change.from === change.to) return;
-    this.#append(
-      "guardrail-change",
-      this.#uuid(),
-      0,
-      GUARDRAIL_LEVEL_LOWERED,
-      decodeGuardrailLevelLowered({ surface: "code", ...change }),
-      actor,
-    );
+    const payload = { surface: "code" as const, ...change };
+    const [eventName, body] = guardrailLowered(change.from, change.to)
+      ? ([GUARDRAIL_LEVEL_LOWERED, decodeGuardrailLevelLowered(payload)] as const)
+      : threadAccessRaised(change.from, change.to)
+        ? ([GUARDRAIL_ACCESS_RAISED, decodeGuardrailAccessRaised(payload)] as const)
+        : ([GUARDRAIL_LEVEL_CHANGED, decodeGuardrailLevelChange(payload)] as const);
+    this.#append("guardrail-change", this.#uuid(), 0, eventName, body, actor);
   }
 
   /**

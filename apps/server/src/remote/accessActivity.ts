@@ -151,6 +151,8 @@ export interface ChangeNoticeRecord {
   readonly keyId?: string;
   /** For a key added: the pool's key ids the change left, which Undo holds the pool to. */
   readonly expectedKeyIds?: ReadonlyArray<string>;
+  /** For a key added: the pool's fingerprint when the change was journaled, held to at Undo. */
+  readonly expectedFingerprint?: string;
   /** For a key notice: the key was changed again after this change, so Undo is refused. */
   readonly changedSince?: boolean;
 }
@@ -250,6 +252,7 @@ export function readChangeNotices(
     readonly sequence: number;
     readonly requestId: string;
     readonly keyIds: ReadonlyArray<string> | undefined;
+    readonly fingerprint: string | undefined;
   }> = [];
   const lastChange = new Map<string, number>();
   for (const row of keyRequests) {
@@ -276,9 +279,10 @@ export function readChangeNotices(
         sequence: row.global_sequence,
         requestId: record.requestId,
         keyIds: record.keyIds,
+        fingerprint: record.fingerprint,
       });
   }
-  for (const { sequence, requestId, keyIds } of stored) {
+  for (const { sequence, requestId, keyIds, fingerprint } of stored) {
     const request = requests.get(requestId);
     if (request === undefined) continue;
     const { record, row } = request;
@@ -293,7 +297,12 @@ export function readChangeNotices(
       ...(record.keyChange === "added" && record.keyId !== undefined
         ? { keyId: record.keyId }
         : {}),
-      ...(record.keyChange === "added" && keyIds !== undefined ? { expectedKeyIds: keyIds } : {}),
+      ...(record.keyChange === "added" && keyIds !== undefined
+        ? {
+            expectedKeyIds: keyIds,
+            ...(fingerprint === undefined ? {} : { expectedFingerprint: fingerprint }),
+          }
+        : {}),
       changedSince,
       notice: {
         kind: record.keyChange === "added" ? "provider-key-added" : "provider-key-replaced",

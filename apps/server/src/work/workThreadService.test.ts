@@ -978,30 +978,41 @@ describe("WorkThreadService", () => {
       expectedVersion: 2,
       access: "ask-first",
     });
-    // Every level change is recorded, so a raise out of Plan or Ask first —
-    // which is no lowering — is a guardrail-change the access notices can read.
-    const lowered = fixture.persistence.journal.append.mock.calls
+    // Every level change is recorded under the event that means it: raises
+    // to a permissive level are lowerings, and a tightening is journaled as a
+    // change, never as `guardrail.level-lowered@1`.
+    const events = fixture.persistence.journal.append.mock.calls
       .map(([request]) => request.events[0])
-      .filter((event) => event.eventName === "guardrail.level-lowered@1");
-    expect(lowered.map((event) => event.payload)).toEqual([
-      { scope: "global", surface: "work", from: "ask-first", to: "full-access" },
-      {
-        scope: "thread",
-        surface: "work",
-        from: "ask-first",
-        to: "auto",
-        projectId: ids.project,
-        threadId: ids.thread,
-      },
-      {
-        scope: "thread",
-        surface: "work",
-        from: "auto",
-        to: "ask-first",
-        projectId: ids.project,
-        threadId: ids.thread,
-      },
+      .filter((event) => event.eventName.startsWith("guardrail."));
+    expect(events.map((event) => [event.eventName, event.payload])).toEqual([
+      [
+        "guardrail.level-lowered@1",
+        { scope: "global", surface: "work", from: "ask-first", to: "full-access" },
+      ],
+      [
+        "guardrail.level-lowered@1",
+        {
+          scope: "thread",
+          surface: "work",
+          from: "ask-first",
+          to: "auto",
+          projectId: ids.project,
+          threadId: ids.thread,
+        },
+      ],
+      [
+        "guardrail.level-changed@1",
+        {
+          scope: "thread",
+          surface: "work",
+          from: "auto",
+          to: "ask-first",
+          projectId: ids.project,
+          threadId: ids.thread,
+        },
+      ],
     ]);
+    const lowered = events.filter((event) => event.eventName === "guardrail.level-lowered@1");
     expect(lowered[0]).toMatchObject({
       actor: { kind: "local-user" },
       occurredAt: expect.any(String),
@@ -1018,7 +1029,7 @@ describe("WorkThreadService", () => {
     });
     const changed = fixture.persistence.journal.append.mock.calls
       .map(([request]) => request.events[0])
-      .filter((event) => event.eventName === "guardrail.level-lowered@1");
+      .filter((event) => event.eventName === "guardrail.access-raised@1");
     expect(changed.map((event) => event.payload)).toEqual([
       {
         scope: "thread",
