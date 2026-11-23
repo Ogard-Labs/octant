@@ -69,8 +69,6 @@ import { useWorkSettings } from "./work/useWorkSettings";
 import { recordFirstRunMode } from "./onboarding/recordFirstRunMode";
 import { GuardrailDefaultsContext, guardrailDefaultsOf } from "./code/GuardrailLevelIndicator";
 import { useAppUpdateReadyNotice } from "./settings/useAppUpdateReadyNotice";
-import { useHostMemoryNotice } from "./host/useHostMemoryNotice";
-import { useHostRestartNotice } from "./host/useHostRestartNotice";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ShipClient } from "@octant/client-runtime/ship-client";
@@ -516,7 +514,7 @@ import { sidebarRowMode, threadDragSurface } from "./shell/threadDragSurface";
 import { deliverComposerThreadDrop } from "./chat/composerThreadDrop";
 import {
   CoordinatorBoundsDialog,
-  LazyChangeNoticeToast,
+  LazyHostNoticeToasts,
   RemotePairingView,
   RemoteTodoDraft,
 } from "./shell/deferredSurfaces";
@@ -754,7 +752,6 @@ const WorktreePreparationDialog = lazy(() =>
 // Matches the desktop's double-press window for ⌘Q.
 const QUIT_HINT_VISIBLE_MS = 1500;
 /** How long a notice that only reports something done stays before it leaves. */
-const TRANSIENT_NOTICE_MS = 10_000;
 
 export function App(props: AppProps) {
   const [locationLaunch] = useState(() =>
@@ -2164,9 +2161,6 @@ function LaunchedShell(
   const [updateReadyNotice, dismissUpdateReadyNotice] = useAppUpdateReadyNotice(
     props.hostBridge?.subscribeAppUpdateState,
   );
-  const [hostMemoryNotice, dismissHostMemoryNotice] = useHostMemoryNotice(
-    launchedClients.hostControlClient,
-  );
   const threadExportClient = useMemo(
     () =>
       resolveThreadExportClient({
@@ -2834,10 +2828,6 @@ function LaunchedShell(
       })),
     ],
     [chatController.navigation, codeController.navigation, workNavigation.navigation],
-  );
-  const [hostRestartNotice, dismissHostRestartNotice] = useHostRestartNotice(
-    launchedClients.hostControlClient,
-    restartNoticeThreads,
   );
   // Bringing a Code thread's tab in front is the user opening it: the thread's
   // view — or its error state — fills the workspace, so its unread dot is
@@ -9917,95 +9907,52 @@ function LaunchedShell(
           </DockModuleBoundary>
         );
       })()}
-      {/* The stack stays mounted (it takes no presses when empty) so the
-          change notice, loaded with its own chunk, joins the other notices
-          rather than drawing a second stack over them. */}
       <div className="toast-stack">
         <Suspense fallback={null}>
-          <LazyChangeNoticeToast
+          <LazyHostNoticeToasts
             changeRevision={machineChanges.changeNotices}
+            host={launchedClients.hostControlClient}
+            onOpenHost={() => void controller.openSettings({ section: "host" })}
+            onOpenThread={openCommandThread}
             onReview={() => void controller.openSettings({ section: "remote-access" })}
             port={launchedClients.accessActivityPort}
+            restartThreads={restartNoticeThreads}
           />
         </Suspense>
-        {threadExportNotice !== undefined ||
-        replyDetailNotice !== undefined ||
-        updateReadyNotice ||
-        quitHintVisible ||
-        hostMemoryNotice !== undefined ||
-        hostRestartNotice !== undefined ? (
-          <>
-            {hostRestartNotice === undefined ? null : (
-              <OctantToast
-                {...(hostRestartNotice.open === undefined
-                  ? {}
-                  : {
-                      action: {
-                        label: `Open ${hostRestartNotice.open.title}`,
-                        onSelect: () => {
-                          const open = hostRestartNotice.open;
-                          if (open === undefined) return;
-                          openCommandThread(open);
-                        },
-                      },
-                    })}
-                detail={hostRestartNotice.detail}
-                onDismiss={dismissHostRestartNotice}
-                title={hostRestartNotice.title}
-                tone={hostRestartNotice.needsYou ? "warning" : "neutral"}
-              />
-            )}
-            {hostMemoryNotice === undefined ? null : (
-              <OctantToast
-                action={{
-                  label: "View host",
-                  onSelect: () => void controller.openSettings({ section: "host" }),
-                }}
-                detail={hostMemoryNotice.detail}
-                // A new notice is a new toast: kept mounted, the one after a
-                // notice that left by itself never started its own timer.
-                key={hostMemoryNotice.id}
-                {...(hostMemoryNotice.transient ? { leavesAfterMs: TRANSIENT_NOTICE_MS } : {})}
-                onDismiss={dismissHostMemoryNotice}
-                title={hostMemoryNotice.title}
-              />
-            )}
-            {updateReadyNotice ? (
-              <OctantToast
-                action={{
-                  label: "View update",
-                  onSelect: () =>
-                    void controller.openSettings({ section: "general", setting: "app-updates" }),
-                }}
-                detail="Use Relaunch to update in Settings to install it."
-                onDismiss={dismissUpdateReadyNotice}
-                title="Update downloaded"
-                tone="success"
-              />
-            ) : null}
-            {quitHintVisible ? (
-              <OctantToast
-                detail="Press ⌘Q again to quit Octant"
-                onDismiss={() => setQuitHintVisible(false)}
-                title="Quit Octant?"
-              />
-            ) : null}
-            {replyDetailNotice === undefined ? null : (
-              <OctantToast
-                detail={`This thread: ${REPLY_DETAIL_DESCRIPTIONS[replyDetailNotice]}`}
-                onDismiss={() => setReplyDetailNotice(undefined)}
-                title={`Reply detail: ${REPLY_DETAIL_LABELS[replyDetailNotice]}`}
-              />
-            )}
-            {threadExportNotice === undefined ? null : (
-              <OctantToast
-                detail={threadExportNotice}
-                onDismiss={() => setThreadExportNotice(undefined)}
-                title="Workspace activity"
-              />
-            )}
-          </>
+        {updateReadyNotice ? (
+          <OctantToast
+            action={{
+              label: "View update",
+              onSelect: () =>
+                void controller.openSettings({ section: "general", setting: "app-updates" }),
+            }}
+            detail="Use Relaunch to update in Settings to install it."
+            onDismiss={dismissUpdateReadyNotice}
+            title="Update downloaded"
+            tone="success"
+          />
         ) : null}
+        {quitHintVisible ? (
+          <OctantToast
+            detail="Press ⌘Q again to quit Octant"
+            onDismiss={() => setQuitHintVisible(false)}
+            title="Quit Octant?"
+          />
+        ) : null}
+        {replyDetailNotice === undefined ? null : (
+          <OctantToast
+            detail={`This thread: ${REPLY_DETAIL_DESCRIPTIONS[replyDetailNotice]}`}
+            onDismiss={() => setReplyDetailNotice(undefined)}
+            title={`Reply detail: ${REPLY_DETAIL_LABELS[replyDetailNotice]}`}
+          />
+        )}
+        {threadExportNotice === undefined ? null : (
+          <OctantToast
+            detail={threadExportNotice}
+            onDismiss={() => setThreadExportNotice(undefined)}
+            title="Workspace activity"
+          />
+        )}
       </div>
       <ComputerUseActivitySurface
         changeRevision={machineChanges.computerUse}

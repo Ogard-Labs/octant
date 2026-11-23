@@ -9,8 +9,8 @@ const RemotePairingView = lazy(() =>
   import("../remote/RemotePairingView").then((module) => ({ default: module.RemotePairingView })),
 );
 // A change notice is rare, so its toast and client load after the window's first load.
-const LazyChangeNoticeToast = lazy(() =>
-  import("../host/ChangeNoticeToast").then((module) => ({ default: module.ChangeNoticeToast })),
+const LazyHostNoticeToasts = lazy(() =>
+  import("../host/HostNoticeToasts").then((module) => ({ default: module.HostNoticeToasts })),
 );
 const ZenSurface = lazy(() =>
   import("../zen/ZenSurface").then((module) => ({ default: module.ZenSurface })),
@@ -57,7 +57,7 @@ const ProjectCreateDialog = lazy(() =>
 export {
   CoordinatorBoundsDialog,
   ProjectCreateDialog,
-  LazyChangeNoticeToast,
+  LazyHostNoticeToasts,
   RemotePairingView,
   RemoteTodoDraft,
   UsageWorkspace,

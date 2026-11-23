@@ -1,5 +1,5 @@
 import type { MachineChangeClient } from "@octant/client-runtime/machine-change-client";
-import type { MachineChangeTopic } from "@octant/contracts/machine-changes";
+import { MachineChangeTopic } from "@octant/contracts/machine-changes";
 import { useEffect, useState } from "react";
 import { waitForReconnect } from "../lib/waitForReconnect";
 
@@ -96,27 +96,7 @@ async function consumeMachineChanges(
         received = true;
         cursor = frame.sequence;
         epoch = frame.epoch;
-        changed(
-          frame.kind === "snapshot-required"
-            ? [
-                "projects",
-                "chat-navigation",
-                "work-navigation",
-                "code-navigation",
-                "extensions",
-                "computer-use",
-                "image-jobs",
-                "browser-captures",
-                "tool-approvals",
-                "thread-follow-ups",
-                "thread-message-queue",
-                "todos",
-                "canvas-choice-answers",
-                "access-activity",
-                "change-notices",
-              ]
-            : frame.topics,
-        );
+        changed(frame.kind === "snapshot-required" ? MachineChangeTopic.literals : frame.topics);
       }
       retryMs = received ? 50 : Math.min(retryMs * 2, 2_000);
     } catch {
