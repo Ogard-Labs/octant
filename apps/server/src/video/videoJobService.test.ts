@@ -184,7 +184,9 @@ function harness(script: Script, directory?: string) {
   const fetched: Array<string> = [];
   const sleeps: Array<number> = [];
   let clockMs = Date.parse(now);
-  const instance: { current: ProviderInstance | undefined } = { current: profile(script.allowlist) };
+  const instance: { current: ProviderInstance | undefined } = {
+    current: profile(script.allowlist),
+  };
   const spend = {
     admit: vi.fn((_request: SpendCeilingTurnRequest) => ({
       status: "admitted" as const,
