@@ -14,13 +14,14 @@ import {
   type PathMentionCandidate,
   type PathMentionQuery,
 } from "../code/pathMentions";
+import type { ComposerInputElement } from "../composer/ComposerInput";
 
 export interface WorkFileMentionsOptions {
   readonly client?: FileMentionClient;
   readonly threadId?: WorkThreadId;
   readonly draft: string;
   readonly onDraftChange: (draft: string, caretIndex: number) => void;
-  readonly textarea: () => HTMLTextAreaElement | null;
+  readonly textarea: () => ComposerInputElement | null;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
 }
@@ -34,7 +35,7 @@ export interface WorkFileMentionsController {
   readonly selectedPaths: ReadonlyArray<string>;
   readonly setActiveIndex: (index: number) => void;
   readonly sync: (draft: string, caretIndex: number | null) => void;
-  readonly handleKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => boolean;
+  readonly handleKeyDown: (event: KeyboardEvent<ComposerInputElement>) => boolean;
   readonly choose: (candidate: PathMentionCandidate) => void;
   readonly clear: () => void;
   /** Restore paths that belonged to a send the host refused. */
@@ -145,7 +146,7 @@ export function useWorkFileMentions(options: WorkFileMentionsOptions): WorkFileM
     });
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): boolean {
+  function handleKeyDown(event: KeyboardEvent<ComposerInputElement>): boolean {
     if (open && candidates.length > 0) {
       if (event.key === "ArrowDown") {
         event.preventDefault();

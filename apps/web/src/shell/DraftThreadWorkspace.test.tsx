@@ -339,9 +339,11 @@ describe("DraftThreadWorkspace", () => {
         pendingPrompt="Work on the task Write the docs from the plan Launch."
       />,
     );
-    expect(
-      await screen.findByDisplayValue("Work on the task Write the docs from the plan Launch."),
-    ).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
+        "Work on the task Write the docs from the plan Launch.",
+      ),
+    );
     expect(onPendingPromptConsumed).toHaveBeenCalledTimes(1);
     expect(onCreateThread).not.toHaveBeenCalled();
   });

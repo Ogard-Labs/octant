@@ -3,6 +3,7 @@ import { decodeFileMentionRequestId, type FolderMentionScope } from "@octant/con
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { getInjectedHostBridge, type OctantHostBridge } from "../shell/hostBridge";
 import type { ComposerNoticeItem } from "./ComposerNotice";
+import type { ComposerInputElement } from "./ComposerInput";
 
 export function insertFolderReferences(draft: string, caret: number, paths: ReadonlyArray<string>) {
   const references = [...new Set(paths)]
@@ -75,7 +76,7 @@ export function useDroppedFolderMentions(options: {
   readonly scope: FolderMentionScope | undefined;
   readonly draft: string;
   readonly onDraftChange: (text: string, caret: number) => void;
-  readonly textarea: () => HTMLTextAreaElement | null;
+  readonly textarea: () => ComposerInputElement | null;
   readonly serverUrl?: string | undefined;
   readonly windowCapability?: string | undefined;
   readonly hostId?: string | undefined;
@@ -93,7 +94,7 @@ export function useDroppedFolderMentions(options: {
     return () => pending.current?.abort();
   }, [scopeKey, options.hostId, options.refused]);
 
-  function onDrop(event: DragEvent<HTMLTextAreaElement>) {
+  function onDrop(event: DragEvent<ComposerInputElement>) {
     let bridge = options.hostBridge;
     try {
       bridge ??= getInjectedHostBridge();

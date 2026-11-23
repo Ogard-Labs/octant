@@ -91,7 +91,6 @@ import {
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
-import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeConversationMessage, CodeController } from "./useCodeController";
@@ -222,6 +221,7 @@ import {
   useThreadProviderMentions,
 } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
+import { ComposerInput, type ComposerInputElement } from "../composer/ComposerInput";
 
 export type CodeAttachmentClient = Pick<
   CodeClient,
@@ -531,7 +531,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
   const threadVersionRef = useRef<CodeThread["version"] | undefined>(undefined);
   const [accessChanging, setAccessChanging] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<ComposerInputElement>(null);
   useEffect(() => {
     const update = props.updateApprovalAnchor;
     const activeView = view;
@@ -753,6 +753,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     executionPolicy: view?.thread.executionPolicy,
   });
   const atMenu = useComposerAtMenu({
+    modelGroups: props.providerGroups,
     provider: providerMentions,
     textarea: () => textareaRef.current,
     draft,
@@ -1326,7 +1327,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     return true;
   }
 
-  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function onKeyDown(event: KeyboardEvent<ComposerInputElement>) {
     if (suggestionInput.takeOnTab(event)) return;
     if (atMenu.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
@@ -2897,7 +2898,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             textClassName: "visually-hidden",
           }}
           input={
-            <OctantTextarea
+            <ComposerInput
+              renderModelChip={atMenu.renderModelChip}
               aria-activedescendant={
                 atMenu.active !== undefined
                   ? `${atMenu.listId}-${atMenu.active.id}`
@@ -2962,7 +2964,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               data-suggested={suggestionInput.suggested ? "true" : undefined}
               placeholder={suggestionInput.placeholder}
               ref={textareaRef}
-              rows={3}
               value={draft}
             />
           }

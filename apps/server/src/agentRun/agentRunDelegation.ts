@@ -30,6 +30,7 @@ import {
   modelCanTakeDelegatedWork,
   nativeHarnessJobForRole,
   redactDiagnosticText,
+  subagentReasoningValues,
 } from "@octant/domain";
 import type {
   ExternalContentIngestionResult,
@@ -696,14 +697,7 @@ export function agentRunTargetAvailability(input: AgentRunTargetAvailabilityInpu
       ...named,
       modelIds: models.map((model) => String(model.id)),
       reasoningByModel: Object.fromEntries(
-        models.map((model) => [
-          String(model.id),
-          model.options.flatMap((option) =>
-            option.kind === "selection" && (option.id === "reasoning" || option.id === "effort")
-              ? option.values
-              : [],
-          ),
-        ]),
+        models.map((model) => [String(model.id), subagentReasoningValues(model)]),
       ),
     });
   }

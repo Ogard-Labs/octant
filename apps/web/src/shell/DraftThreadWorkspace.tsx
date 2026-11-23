@@ -124,7 +124,6 @@ import { DockModuleBoundary } from "./DockModuleBoundary";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerStartTray } from "../composer/ComposerStartTray";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
@@ -150,6 +149,7 @@ import { WorkKindSwitch } from "./WorkKindSwitch";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { createTerminalSessionClient } from "@octant/client-runtime/terminal-session-client";
 import { TERMINAL_SESSION_TOOL_NAMES } from "../terminalSessions/CreateFromTerminalSessionPicker";
+import { ComposerInput, type ComposerInputElement } from "../composer/ComposerInput";
 
 // Cloning a repository from GitHub is a first-time step, not a start-screen
 // staple; its onboarding stays out of the first bundle.
@@ -1251,7 +1251,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 
   const presentation = draftThreadModePresentation(props.mode);
   const [prompt, setPrompt] = useNewTaskPrompt();
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<ComposerInputElement>(null);
   // A Chat draft is a first-message composer like Work's and Code's, so it
   // offers the same host command list.
   const slash = useComposerSlashCommands({
@@ -1271,6 +1271,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     ...(draftProviderFamily === undefined ? {} : { providerFamily: draftProviderFamily }),
   });
   const atMenu = useComposerAtMenu({
+    modelGroups: props.providerGroups,
     provider: composerProviderMentions(props.providerGroups, props.selectedProviderInstanceId),
     draft: prompt,
     onDraftChange: setPrompt,
@@ -1362,7 +1363,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     trimmed,
   ]);
 
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function handleKeyDown(event: KeyboardEvent<ComposerInputElement>) {
     if (atMenu.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
@@ -1451,7 +1452,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
               ) : null
             }
             input={
-              <OctantTextarea
+              <ComposerInput
+                renderModelChip={atMenu.renderModelChip}
                 aria-label="First message"
                 aria-autocomplete="list"
                 aria-expanded={atMenu.open || slash.open}
@@ -1482,7 +1484,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                 onKeyDown={handleKeyDown}
                 placeholder={presentation.composerPlaceholder}
                 ref={textareaRef}
-                rows={3}
                 value={prompt}
               />
             }

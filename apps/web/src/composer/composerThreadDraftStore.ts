@@ -13,6 +13,7 @@ import {
   markQueueDraftChanged,
   purgeQueueReceipts,
 } from "../messageQueue/threadMessageQueueReceipts";
+import type { ComposerInputElement } from "./ComposerInput";
 
 /**
  * Unsent composer drafts live on the client that typed them.
@@ -108,7 +109,7 @@ export function clampComposerCaret(caretIndex: number, textLength: number): numb
 }
 
 export function applyComposerCaret(
-  element: Pick<HTMLTextAreaElement, "setSelectionRange"> | null,
+  element: Pick<ComposerInputElement, "setSelectionRange"> | null,
   caretIndex: number,
   textLength: number,
 ): void {
