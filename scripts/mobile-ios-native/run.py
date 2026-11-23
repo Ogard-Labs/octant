@@ -150,17 +150,8 @@ ENV.update(CI="1", GITHUB_ACTIONS="true", EXPO_NO_TELEMETRY="1",
            OCTANT_MOBILE_PUSH="0")
 signal.signal(signal.SIGTERM, interrupted)
 signal.signal(signal.SIGINT, interrupted)
-runner_temp = Path(os.environ["RUNNER_TEMP"]).resolve()
-artifacts = runner_temp / "octant-ios-native-acceptance"
+artifacts = Path(os.environ["RUNNER_TEMP"]) / "octant-ios-native-acceptance"
 artifacts.mkdir(mode=0o700)
-configured_derived = os.environ.get("OCTANT_IOS_DERIVED_DATA", "").strip()
-if configured_derived:
-    derived_data = Path(configured_derived).resolve()
-    if not derived_data.is_relative_to(runner_temp) or derived_data == runner_temp:
-        raise SystemExit("OCTANT_IOS_DERIVED_DATA must stay strictly inside RUNNER_TEMP.")
-    derived_data.mkdir(parents=True, exist_ok=True)
-else:
-    derived_data = None
 versions = []
 for path in Path("/Applications").glob("Xcode*.app"):
     match = re.fullmatch(r"Xcode_(\d+)\.(\d+)(?:\.(\d+))?\.app", path.name)
@@ -170,9 +161,8 @@ if not versions:
     raise SystemExit("No supported release Xcode is installed on this runner.")
 ENV["DEVELOPER_DIR"] = str(max(versions)[1] / "Contents/Developer")
 run(["xcodebuild", "-version"])
-work = Path(tempfile.mkdtemp(prefix="octant-ios-demo-", dir=str(runner_temp)))
-if derived_data is None:
-    derived_data = work / "derived"
+work = Path(tempfile.mkdtemp(prefix="octant-ios-demo-", dir=os.environ["RUNNER_TEMP"]))
+derived_data = work / "derived"
 device = None
 creation_attempted = False
 creation_name = "Octant offline acceptance " + uuid.uuid4().hex

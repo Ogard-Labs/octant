@@ -5,6 +5,8 @@ import { expect, it } from "vitest";
 import {
   copyValidatedWindowsNativeArtifacts,
   installNodeSdk,
+  QA_WINDOWS_PREBUILT_NATIVE_DIR_ENV,
+  resolveQaWindowsPrebuiltNativeDirectory,
   validateWindowsNativeArtifacts,
   WINDOWS_NATIVE_ARTIFACTS,
 } from "./build-windows-native-artifacts";
@@ -113,4 +115,32 @@ it("reuses prebuilt Windows native artifacts only when all four fixed x64 binari
   } finally {
     await rm(stage, { recursive: true, force: true });
   }
+});
+
+it("refuses prebuilt Windows native reuse on stable, release, or signing builds", () => {
+  const dir = "/tmp/prebuilt-native";
+  expect(
+    resolveQaWindowsPrebuiltNativeDirectory({
+      flavor: "nightly",
+      environment: { [QA_WINDOWS_PREBUILT_NATIVE_DIR_ENV]: dir },
+    }),
+  ).toBe(dir);
+  expect(() =>
+    resolveQaWindowsPrebuiltNativeDirectory({
+      flavor: "stable",
+      environment: { [QA_WINDOWS_PREBUILT_NATIVE_DIR_ENV]: dir },
+    }),
+  ).toThrow("only permitted for unsigned Nightly QA");
+  expect(() =>
+    resolveQaWindowsPrebuiltNativeDirectory({
+      flavor: "nightly",
+      environment: { [QA_WINDOWS_PREBUILT_NATIVE_DIR_ENV]: dir, OCTANT_RELEASE_BUILD: "1" },
+    }),
+  ).toThrow("OCTANT_RELEASE_BUILD");
+  expect(() =>
+    resolveQaWindowsPrebuiltNativeDirectory({
+      flavor: "nightly",
+      environment: { [QA_WINDOWS_PREBUILT_NATIVE_DIR_ENV]: dir, AZURE_CLIENT_ID: "id" },
+    }),
+  ).toThrow("AZURE_CLIENT_ID");
 });

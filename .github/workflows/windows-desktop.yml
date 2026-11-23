@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   package:
-    if: github.event.pull_request.draft != true && (github.event_name != 'pull_request' || github.base_ref == 'main')
+    if: github.event.pull_request.draft != true
     name: Native Windows QA package
     runs-on: windows-2025
     timeout-minutes: 40
@@ -140,7 +140,7 @@ jobs:
           OCTANT_PACKAGE_FLAVOR: nightly
           electron_config_cache: ${{ runner.temp }}/octant-electron-cache
         run: |
-          $env:OCTANT_WINDOWS_PREBUILT_NATIVE_DIR = Join-Path $env:OCTANT_WINDOWS_QA_STABLE 'resources/native'
+          $env:OCTANT_QA_WINDOWS_PREBUILT_NATIVE_DIR = Join-Path $env:OCTANT_WINDOWS_QA_STABLE 'resources/native'
           $env:OCTANT_RELEASE_VERSION = bun -e "import { DESKTOP_PACKAGE_IDENTITY } from './scripts/package-desktop'; console.log(DESKTOP_PACKAGE_IDENTITY.version + '-preview.' + new Date().toISOString().slice(0, 10).replaceAll('-', '') + '.1')"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun run package:desktop
@@ -179,7 +179,7 @@ jobs:
   # `package:desktop` a second time in parallel.
   installer:
     needs: package
-    if: github.event.pull_request.draft != true && (github.event_name != 'pull_request' || github.base_ref == 'main')
+    if: github.event.pull_request.draft != true
     name: Per-user installer (unsigned)
     runs-on: windows-2025
     timeout-minutes: 30

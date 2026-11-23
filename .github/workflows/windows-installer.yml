@@ -9,30 +9,21 @@
 # the installer artifact is kept three days for inspection.
 name: Windows installer
 
-# Ordinary PRs targeting main exercise the installer by reusing the Stable
-# package built in `windows-desktop.yml`. This standalone workflow runs only
-# when installer scripts change or on manual dispatch.
+# Pull requests exercise the unsigned per-user installer via the `installer` job
+# in `windows-desktop.yml` (reusing the Stable package already built there), so
+# this standalone workflow is manual-dispatch only.
 on:
-  pull_request:
-    # A draft runs nothing; marking it ready for review starts the run.
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - .github/workflows/windows-installer.yml
-      - scripts/package-windows-installer.ts
-      - scripts/smoke-windows-installer*
-      - scripts/windows-installer/**
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: windows-installer-${{ github.event.pull_request.number || github.ref }}
+  group: windows-installer-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   installer:
-    if: github.event.pull_request.draft != true && (github.event_name != 'pull_request' || github.base_ref == 'main')
     name: Per-user installer (unsigned)
     runs-on: windows-2025
     timeout-minutes: 45

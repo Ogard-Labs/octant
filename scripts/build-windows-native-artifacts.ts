@@ -74,6 +74,45 @@ export async function installNodeSdk(
   }
 }
 
+const WINDOWS_SIGNING_ENV_VARS = [
+  "OCTANT_RELEASE_BUILD",
+  "AZURE_CLIENT_ID",
+  "AZURE_TENANT_ID",
+  "AZURE_SUBSCRIPTION_ID",
+  "AZURE_ARTIFACT_SIGNING_ENDPOINT",
+  "AZURE_ARTIFACT_SIGNING_ACCOUNT",
+  "AZURE_ARTIFACT_SIGNING_PROFILE",
+] as const;
+
+export const QA_WINDOWS_PREBUILT_NATIVE_DIR_ENV = "OCTANT_QA_WINDOWS_PREBUILT_NATIVE_DIR";
+
+/**
+ * Resolves the optional prebuilt Windows native artifact folder for unsigned
+ * Nightly QA packaging only. Refuses any release, signing, or non-nightly
+ * build so release artifacts always compile their own native binaries.
+ */
+export function resolveQaWindowsPrebuiltNativeDirectory(input: {
+  readonly flavor: "stable" | "nightly";
+  readonly environment: Readonly<Record<string, string | undefined>>;
+}): string | undefined {
+  const configured = input.environment[QA_WINDOWS_PREBUILT_NATIVE_DIR_ENV]?.trim();
+  if (configured === undefined || configured === "") return undefined;
+  if (input.flavor !== "nightly") {
+    throw Error(
+      `${QA_WINDOWS_PREBUILT_NATIVE_DIR_ENV} is only permitted for unsigned Nightly QA packaging.`,
+    );
+  }
+  const activeReleaseVar = WINDOWS_SIGNING_ENV_VARS.find(
+    (name) => (input.environment[name]?.trim() ?? "") !== "",
+  );
+  if (activeReleaseVar !== undefined) {
+    throw Error(
+      `${QA_WINDOWS_PREBUILT_NATIVE_DIR_ENV} cannot be used when ${activeReleaseVar} is set.`,
+    );
+  }
+  return resolve(configured);
+}
+
 /**
  * Copies prebuilt Windows native artifacts only after verifying the source
  * directory contains the exact four x64 PE runtime binaries and re-verifying
@@ -94,12 +133,14 @@ export async function copyValidatedWindowsNativeArtifacts(
 }
 
 /** Build existing native sources on their matching host; SDK integrity belongs to installed node-gyp. */
-export async function buildWindowsNativeArtifacts(destination: string): Promise<void> {
+export async function buildWindowsNativeArtifacts(
+  destination: string,
+  options?: { readonly prebuiltDirectory?: string },
+): Promise<void> {
   if (process.platform !== "win32" || process.arch !== "x64")
     throw Error("Windows native resources require a native Windows x64 build host.");
-  const prebuiltDirectory = process.env.OCTANT_WINDOWS_PREBUILT_NATIVE_DIR?.trim();
-  if (prebuiltDirectory !== undefined && prebuiltDirectory !== "") {
-    await copyValidatedWindowsNativeArtifacts(resolve(prebuiltDirectory), destination);
+  if (options?.prebuiltDirectory !== undefined) {
+    await copyValidatedWindowsNativeArtifacts(options.prebuiltDirectory, destination);
     return;
   }
   const stage = await mkdtemp(join(tmpdir(), "octant-windows-native-build-"));
@@ -152,7 +193,9 @@ export async function buildWindowsNativeArtifacts(destination: string): Promise<
       `-DOCTANT_NODE_HEADERS=${join(sdk, version, "include/node")}`,
       `-DOCTANT_NODE_IMPORT_LIB=${join(sdk, version, "x64/node.lib")}`,
     ];
-    await Promise.all([
+    // Wait for every CMake/MSBuild process to settle before `finally` removes
+    // the staging directory so a failing target does not cause cleanup races.
+    const buildResults = await Promise.allSettled([
       configureAndBuild(
         join(root, "packages/host-runtime/native/windows-host-owner"),
         ownerBuild,
@@ -176,6 +219,10 @@ export async function buildWindowsNativeArtifacts(destination: string): Promise<
         "octant-windows-confine",
       ),
     ]);
+    const firstFailure = buildResults.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (firstFailure !== undefined) throw firstFailure.reason;
     await mkdir(destination, { recursive: true });
     await Promise.all([
       cp(

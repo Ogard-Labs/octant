@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   compile:
-    if: github.event.pull_request.draft != true && (github.event_name != 'pull_request' || github.base_ref == 'main')
+    if: github.event.pull_request.draft != true
     name: Compile the Android modules
     runs-on: ubuntu-24.04
     timeout-minutes: 30

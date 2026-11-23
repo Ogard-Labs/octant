@@ -56,7 +56,10 @@ import { buildBrowserTextInput } from "./build-browser-text-input";
 import { buildDesktopPeerStatus } from "./build-desktop-peer-status";
 import { buildDesktopPeerLinux } from "./build-desktop-peer-linux";
 import { buildKeychainHelper } from "./build-keychain-helper";
-import { buildWindowsNativeArtifacts } from "./build-windows-native-artifacts";
+import {
+  buildWindowsNativeArtifacts,
+  resolveQaWindowsPrebuiltNativeDirectory,
+} from "./build-windows-native-artifacts";
 import { buildDesktopDiskImage, diskImageFileName } from "./desktop-disk-image";
 import { prepareComputerUseDriver } from "./prepare-computer-use-driver";
 import { prepareManagedTools } from "./prepare-managed-tools";
@@ -1377,7 +1380,12 @@ async function packageWindowsDesktop(
   readonly portableDirectoryPath: string;
 }> {
   const version = resolveReleaseVersion(process.env);
-  const identity = desktopIdentity(resolveDesktopPackageFlavor(process.env, version));
+  const flavor = resolveDesktopPackageFlavor(process.env, version);
+  const identity = desktopIdentity(flavor);
+  const prebuiltNativeDirectory = resolveQaWindowsPrebuiltNativeDirectory({
+    flavor,
+    environment: process.env,
+  });
   const outRoot = resolve(repositoryRoot, "out");
   const stageRoot = join(outRoot, STAGE_DIRECTORY);
   const packagerRoot = join(outRoot, PACKAGER_DIRECTORY);
@@ -1398,7 +1406,12 @@ async function packageWindowsDesktop(
   await rename(directory, packageDirectory);
   await rm(packagerRoot, { recursive: true, force: true });
   const nativeDirectory = join(packageDirectory, "resources", "native");
-  await buildWindowsNativeArtifacts(nativeDirectory);
+  await buildWindowsNativeArtifacts(
+    nativeDirectory,
+    prebuiltNativeDirectory === undefined
+      ? undefined
+      : { prebuiltDirectory: prebuiltNativeDirectory },
+  );
   const payload = join(packageDirectory, "resources", "app");
   validatePackagedPayload(await collectPayloadEntries(payload), target, identity);
   await access(join(payload, "LICENSE"));
