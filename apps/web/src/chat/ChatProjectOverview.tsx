@@ -196,7 +196,6 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
                 onChange={(event) => setDraft(event.target.value)}
                 placeholder="Describe the next Chat thread…"
                 ref={input}
-                rows={3}
                 value={draft}
               />
             }

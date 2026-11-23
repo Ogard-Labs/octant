@@ -220,6 +220,7 @@ describe("WorkComposerAdapter", () => {
 
 import { createRoot } from "react-dom/client";
 import { act } from "react";
+import type { ComposerInputElement } from "../../composer/ComposerInput";
 
 describe("WorkComposerAdapter interactions", () => {
   it("submits on Enter and cancels on Escape", async () => {
@@ -241,14 +242,10 @@ describe("WorkComposerAdapter interactions", () => {
         />,
       );
     });
-    const textarea = container.querySelector("textarea");
+    const textarea = container.querySelector<ComposerInputElement>(".composer-input");
     expect(textarea).not.toBeNull();
     await act(async () => {
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype,
-        "value",
-      )?.set;
-      nativeInputValueSetter?.call(textarea, "Draft the brief");
+      if (textarea !== null) textarea.value = "Draft the brief";
       textarea!.dispatchEvent(new Event("input", { bubbles: true }));
       textarea!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     });

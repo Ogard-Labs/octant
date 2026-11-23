@@ -289,7 +289,6 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                 onKeyDown={handleKeyDown}
                 placeholder="Ask anything, or pick a Project to begin…"
                 ref={textareaRef}
-                rows={3}
                 value={prompt}
               />
             }

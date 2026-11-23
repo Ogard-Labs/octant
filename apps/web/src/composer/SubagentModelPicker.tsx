@@ -8,6 +8,7 @@ import {
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { hasProviderLogo, ProviderGlyph } from "../providers/ProviderGlyph";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 
 /** One provider instance serving one model, as a subagent route the person can tag. */
 export interface SubagentModelRoute {
@@ -129,7 +130,7 @@ export function SubagentModelChip(props: {
   const reasoning = props.tag.reasoning ?? PROVIDER_DEFAULT;
   const problem = resolved.status === "unavailable" ? resolved.reason : undefined;
   return (
-    <button
+    <OctantButton
       aria-label={`Subagent model: ${providerName}, ${modelName}, ${reasoning}${
         problem === undefined ? "" : `. Needs attention: ${problem}`
       }`}
@@ -139,6 +140,7 @@ export function SubagentModelChip(props: {
       onMouseDown={(event) => event.preventDefault()}
       title={problem === undefined ? providerName : `${providerName}: ${problem}`}
       type="button"
+      variant="bare"
     >
       {group !== undefined && hasProviderLogo(group.instance.driverKind) ? (
         <ProviderGlyph
@@ -157,7 +159,7 @@ export function SubagentModelChip(props: {
         –
       </span>
       <span className="composer-chip__meta">{reasoning}</span>
-    </button>
+    </OctantButton>
   );
 }
 
@@ -269,9 +271,9 @@ export function SubagentModelPicker(props: {
           : `Reasoning for ${chosen.model.displayName}`
       }
       className="chat-composer__command-typeahead subagent-model-picker"
-      role="dialog"
+      role="group"
     >
-      <input
+      <OctantInput
         aria-activedescendant={rowCount === 0 ? undefined : optionId(active)}
         aria-autocomplete="list"
         aria-controls={listId}
@@ -294,6 +296,7 @@ export function SubagentModelPicker(props: {
         placeholder={chosen === undefined ? "Search models" : chosen.model.displayName}
         ref={searchRef}
         role="combobox"
+        unstyled
         value={query}
       />
       <ul

@@ -622,7 +622,7 @@ describe("@model in the composer", () => {
     await userEvent.type(prompt, "Ask @model");
     await screen.findByRole("combobox", { name: "Search models" });
     await userEvent.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("group", { name: "Choose a subagent model" })).toBeNull();
     expect(prompt).toHaveValue("Ask @model");
   });
 

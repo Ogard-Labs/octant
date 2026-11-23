@@ -4,6 +4,7 @@ import {
   forwardRef,
   useCallback,
   useEffect,
+  useId,
   useImperativeHandle,
   useLayoutEffect,
   useReducer,
@@ -12,14 +13,12 @@ import {
   type ClipboardEvent,
   type DragEvent,
   type FocusEvent,
-  type FormEvent,
   type HTMLAttributes,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
-  type SyntheticEvent,
 } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 
 /**
  * The composer prompt as its callers see it: the element, plus the text-field
@@ -29,8 +28,8 @@ import { createPortal } from "react-dom";
  */
 export interface ComposerInputElement extends HTMLElement {
   value: string;
-  readonly selectionStart: number;
-  readonly selectionEnd: number;
+  selectionStart: number;
+  selectionEnd: number;
   setSelectionRange(start: number, end: number): void;
 }
 
@@ -68,12 +67,11 @@ export interface ComposerInputProps extends ForwardedAttributes {
   readonly onPaste?: (event: ClipboardEvent<ComposerInputElement>) => void;
   readonly onDragOver?: (event: DragEvent<ComposerInputElement>) => void;
   readonly onDrop?: (event: DragEvent<ComposerInputElement>) => void;
-  readonly onSelect?: (event: SyntheticEvent<ComposerInputElement>) => void;
+  /** The caret or selection moved, by key, pointer, or code. */
+  readonly onSelect?: (event: ComposerInputChangeEvent) => void;
   readonly onFocus?: (event: FocusEvent<ComposerInputElement>) => void;
   readonly onBlur?: (event: FocusEvent<ComposerInputElement>) => void;
   readonly placeholder?: string | undefined;
-  /** The text-field row count callers pass; the prompt's CSS sets its height. */
-  readonly rows?: number;
   readonly disabled?: boolean | undefined;
   readonly readOnly?: boolean | undefined;
   readonly autoFocus?: boolean | undefined;
@@ -320,7 +318,6 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       onFocus,
       onBlur,
       placeholder,
-      rows: _rows,
       disabled,
       readOnly,
       autoFocus,
@@ -329,6 +326,9 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
     } = props;
     const rootRef = useRef<ComposerInputElement | null>(null);
     const modelRef = useRef(value);
+    // The value the caller last gave or was told; assigning `value` and then
+    // firing `input`, as code does to a text field, reports the difference.
+    const reportedRef = useRef(value);
     const pendingRef = useRef<{ start: number; end: number } | undefined>(undefined);
     const lastSelectionRef = useRef<{ start: number; end: number }>({
       start: value.length,
@@ -352,13 +352,27 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
     const [, tick] = useReducer((count: number) => count + 1, 0);
     const onChangeRef = useRef(onChange);
     onChangeRef.current = onChange;
+    const onSelectRef = useRef(onSelect);
+    onSelectRef.current = onSelect;
+    const reportedSelectionRef = useRef<string | undefined>(undefined);
+
+    // React re-renders a controlled text field synchronously after each change,
+    // so its caller's state is current before the next key arrives; the prompt
+    // reports its changes the same way, or an Enter right after typing would
+    // send the draft as it was before.
+    const report = (root: ComposerInputElement) => {
+      flushSync(() => onChangeRef.current?.({ target: root, currentTarget: root }));
+    };
 
     const nextKey = useCallback(() => {
       keyCounterRef.current += 1;
       return `chip-${keyCounterRef.current}`;
     }, []);
 
+    // A text field keeps its own selection while unfocused; the document's
+    // selection only describes the prompt while the prompt has focus.
     const readSelection = (root: HTMLElement): { start: number; end: number } | undefined => {
+      if (root.ownerDocument.activeElement !== root) return undefined;
       const selection = root.ownerDocument.getSelection();
       if (selection === null || selection.rangeCount === 0) return undefined;
       const range = selection.getRangeAt(0);
@@ -422,7 +436,8 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       pendingRef.current = { start: caret, end: caret };
       lastSelectionRef.current = { start: caret, end: caret };
       remember({ value: next, caret }, options.typing);
-      onChangeRef.current?.({ target: root, currentTarget: root });
+      reportedRef.current = next;
+      report(root);
       tick();
     };
 
@@ -442,7 +457,8 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       historyRef.current = { ...history, index, at: 0, typing: false };
       modelRef.current = snapshot.value;
       pendingRef.current = { start: snapshot.caret, end: snapshot.caret };
-      onChangeRef.current?.({ target: root, currentTarget: root });
+      reportedRef.current = snapshot.value;
+      report(root);
       tick();
     };
 
@@ -468,8 +484,24 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
             };
           },
         },
-        selectionStart: { configurable: true, get: () => currentSelection(root).start },
-        selectionEnd: { configurable: true, get: () => currentSelection(root).end },
+        selectionStart: {
+          configurable: true,
+          get: () => currentSelection(root).start,
+          set: (start: number) => {
+            const { end } = currentSelection(root);
+            pendingRef.current = undefined;
+            applySelection(root, start, Math.max(start, end));
+          },
+        },
+        selectionEnd: {
+          configurable: true,
+          get: () => currentSelection(root).end,
+          set: (end: number) => {
+            const { start } = currentSelection(root);
+            pendingRef.current = undefined;
+            applySelection(root, Math.min(start, end), end);
+          },
+        },
         setSelectionRange: {
           configurable: true,
           value: (start: number, end: number) => {
@@ -493,6 +525,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
     useLayoutEffect(() => {
       const root = rootRef.current;
       if (root === null) return;
+      reportedRef.current = value;
       if (modelRef.current !== value) {
         const external = pendingRef.current === undefined;
         modelRef.current = value;
@@ -532,21 +565,44 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
             if (event.inputType.startsWith("format")) event.preventDefault();
         }
       };
-      const onNativeInput = () => {
-        const next = serialize(root);
-        const caret = readSelection(root)?.start ?? next.length;
-        if (next === modelRef.current) return;
-        const chipsChanged =
-          findSubagentModelTags(next).length !== findSubagentModelTags(modelRef.current).length;
-        emit(next, caret, { typing: !chipsChanged });
+      // Focusing a text field brings back the selection it held, so a caret
+      // set while the prompt was unfocused survives focus. The engine places
+      // its own caret as part of focusing (jsdom after the focus event), so
+      // the held selection is applied once focusing has finished. A pointer
+      // focus keeps the caret where the person clicked.
+      let pointerFocus = false;
+      const onPointerDown = () => {
+        pointerFocus = true;
+      };
+      const onFocusIn = () => {
+        if (pointerFocus) {
+          pointerFocus = false;
+          return;
+        }
+        const { start, end } = lastSelectionRef.current;
+        queueMicrotask(() => {
+          if (root.ownerDocument.activeElement === root) applySelection(root, start, end);
+        });
       };
       // A test (or a caller) that assigns `value` and fires `change`, as it
       // would on a text field, reaches `onChange` here; browsers never fire
       // `change` on an editable element themselves.
       const onNativeChange = () => {
+        reportedRef.current = modelRef.current;
         remember({ value: modelRef.current, caret: modelRef.current.length }, false);
         onChangeRef.current?.({ target: root, currentTarget: root });
         tick();
+      };
+      // React raises `onSelect` only for elements it knows are editable, so the
+      // prompt raises it itself whenever its caret or selection moved.
+      const onSelectionMoved = () => {
+        const read = readSelection(root);
+        if (read === undefined) return;
+        const key = `${read.start}:${read.end}`;
+        if (key === reportedSelectionRef.current) return;
+        reportedSelectionRef.current = key;
+        lastSelectionRef.current = read;
+        onSelectRef.current?.({ target: root, currentTarget: root });
       };
       const onCompositionStart = () => {
         composingRef.current = true;
@@ -556,42 +612,69 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         tick();
       };
       root.addEventListener("beforeinput", onBeforeInput);
-      root.addEventListener("input", onNativeInput);
+      root.addEventListener("focus", onFocusIn);
+      root.addEventListener("pointerdown", onPointerDown);
+      root.addEventListener("mousedown", onPointerDown);
       root.addEventListener("change", onNativeChange);
       root.addEventListener("compositionstart", onCompositionStart);
       root.addEventListener("compositionend", onCompositionEnd);
+      root.addEventListener("keyup", onSelectionMoved);
+      root.addEventListener("mouseup", onSelectionMoved);
+      root.ownerDocument.addEventListener("selectionchange", onSelectionMoved);
       return () => {
+        root.removeEventListener("keyup", onSelectionMoved);
+        root.removeEventListener("mouseup", onSelectionMoved);
+        root.ownerDocument.removeEventListener("selectionchange", onSelectionMoved);
         root.removeEventListener("beforeinput", onBeforeInput);
-        root.removeEventListener("input", onNativeInput);
+        root.removeEventListener("focus", onFocusIn);
+        root.removeEventListener("pointerdown", onPointerDown);
+        root.removeEventListener("mousedown", onPointerDown);
         root.removeEventListener("change", onNativeChange);
         root.removeEventListener("compositionstart", onCompositionStart);
         root.removeEventListener("compositionend", onCompositionEnd);
       };
     }, []);
 
-    // A `<label for>` names a text field but not an editable element, so the
-    // prompt takes the label's name through `aria-labelledby` instead.
+    // A `<label>` names a text field, by `for` or by wrapping it, but not an
+    // editable element, so the prompt takes the label's text through
+    // `aria-labelledby` instead. A wrapping label also holds the prompt
+    // itself, so the name points at the label's own text, not at the label.
     const id = attributes.id;
     const named =
       attributes["aria-label"] !== undefined || attributes["aria-labelledby"] !== undefined;
+    const labelId = useId();
     useLayoutEffect(() => {
       const root = rootRef.current;
-      if (root === null || id === undefined || named) return;
-      const label = root.ownerDocument.querySelector<HTMLLabelElement>(
-        `label[for="${CSS.escape(id)}"]`,
-      );
-      if (label === null) return;
-      if (label.id === "") label.id = `${id}-label`;
-      root.setAttribute("aria-labelledby", label.id);
-    }, [id, named]);
+      if (root === null || named) return;
+      const wrapping = root.parentElement?.closest("label");
+      const pointing =
+        id === undefined
+          ? null
+          : root.ownerDocument.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`);
+      const name =
+        wrapping === null || wrapping === undefined
+          ? pointing
+          : Array.from(wrapping.children).find((child) => child !== root && !child.contains(root));
+      if (name === null || name === undefined) return;
+      if (name.id === "") name.id = labelId;
+      root.setAttribute("aria-labelledby", name.id);
+    }, [id, named, labelId]);
 
     useEffect(() => {
       if (autoFocus === true) rootRef.current?.focus();
     }, []);
 
     const editable = disabled !== true && readOnly !== true;
+    // React writes `true` on a custom element as an empty attribute, which
+    // assistive technology reads as no value; ARIA states are spelled out.
+    const ariaAttributes = Object.fromEntries(
+      Object.entries(attributes).map(([key, attribute]) => [
+        key,
+        key.startsWith("aria-") && typeof attribute === "boolean" ? String(attribute) : attribute,
+      ]),
+    );
     const element = createElement(TAG_NAME, {
-      ...attributes,
+      ...ariaAttributes,
       ref: attach,
       role: "textbox",
       "aria-multiline": "true",
@@ -629,7 +712,6 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       onClick,
       onDragOver,
       onDrop,
-      onSelect,
       onFocus,
       onBlur,
       onPaste: (event: ClipboardEvent<ComposerInputElement>) => {
@@ -657,7 +739,18 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         event.clipboardData.setData("text/plain", modelRef.current.slice(start, end));
         if (editable) replaceSelection(root, "");
       },
-      onInput: (_event: FormEvent<ComposerInputElement>) => undefined,
+      // Through React's own `onInput`, so the caller's state update lands
+      // before the next key event, as it does for a text field's `onChange`.
+      onInput: () => {
+        const root = rootRef.current;
+        if (root === null) return;
+        const next = serialize(root);
+        const caret = readSelection(root)?.start ?? next.length;
+        if (next === modelRef.current && next === reportedRef.current) return;
+        const chipsChanged =
+          findSubagentModelTags(next).length !== findSubagentModelTags(modelRef.current).length;
+        emit(next, caret, { typing: !chipsChanged });
+      },
     });
 
     return (

@@ -1174,7 +1174,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 }}
                 placeholder={draftThreadModePresentation("code").composerPlaceholder}
                 ref={textareaRef}
-                rows={3}
                 value={prompt}
               />
             }

@@ -141,7 +141,6 @@ function HomeScene() {
                 className="composer-input"
                 onChange={noop}
                 placeholder="Describe what to build"
-                rows={3}
                 value=""
               />
             }

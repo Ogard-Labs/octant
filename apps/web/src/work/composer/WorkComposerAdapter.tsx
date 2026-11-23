@@ -534,7 +534,6 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 onKeyDown={handleKeyDown}
                 onPaste={onDraftPaste}
                 placeholder={draftThreadModePresentation("work").composerPlaceholder}
-                rows={3}
                 value={prompt}
               />
             }

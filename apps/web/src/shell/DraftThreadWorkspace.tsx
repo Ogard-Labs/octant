@@ -1485,7 +1485,6 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                 onKeyDown={handleKeyDown}
                 placeholder={presentation.composerPlaceholder}
                 ref={textareaRef}
-                rows={3}
                 value={prompt}
               />
             }

@@ -2965,7 +2965,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               data-suggested={suggestionInput.suggested ? "true" : undefined}
               placeholder={suggestionInput.placeholder}
               ref={textareaRef}
-              rows={3}
               value={draft}
             />
           }

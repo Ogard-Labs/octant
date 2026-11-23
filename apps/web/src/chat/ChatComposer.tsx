@@ -714,7 +714,6 @@ export function ChatComposer(props: ChatComposerProps) {
       data-suggested={suggestionInput.suggested ? "true" : undefined}
       placeholder={suggestionInput.placeholder}
       ref={messageRef}
-      rows={3}
       value={props.draft}
     />
   );
