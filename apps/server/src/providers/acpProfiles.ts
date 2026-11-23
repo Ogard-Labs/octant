@@ -404,10 +404,11 @@ export interface AcpProviderProfile {
    */
   readonly signInMethods?: Partial<Readonly<Record<AcpAgentAuthentication, string>>>;
   /**
-   * Exact hosts the launch may reach beyond the profile's listed endpoints,
-   * derived from the instance's own launch input. Never patterns: the
-   * runtime's network allowlist merges them as exact hosts, so a host no
-   * instance configured is never reachable.
+   * Named hosts the launch may reach beyond the profile's listed endpoints,
+   * derived from the instance's own launch input. Never patterns or
+   * wildcards: the runtime's network allowlist merges them like every listed
+   * endpoint (the host and its subdomains), so a host no instance configured
+   * is never reachable.
    */
   readonly runtimeHosts?: (launch: {
     readonly googleCloud?: AcpAgentGoogleCloud;

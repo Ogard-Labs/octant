@@ -2699,7 +2699,8 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
     const gcloud = join(target.canonicalRoot, "home", ".config", "gcloud");
     mkdirSync(gcloud, { recursive: true });
     const credentials = join(gcloud, "application_default_credentials.json");
-    writeFileSync(credentials, "{}", { mode: 0o600 });
+    const marker = `octant-adc-${crypto.randomUUID()}`;
+    writeFileSync(credentials, marker, { mode: 0o600 });
     writeFileSync(join(gcloud, "credentials.db"), "", { mode: 0o600 });
     if (input.protect !== undefined) {
       applyProtectedFilesChoice({
@@ -2711,10 +2712,14 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
       // A confined Chat launch may exec nothing but the agent binary and its
       // interpreter, so the read below uses only shell builtins. The shebang
       // is bash directly: /bin/sh is a selector shim whose exec of its real
-      // shell the exec literals do not cover.
+      // shell the exec literals do not cover. The read must not fail the
+      // script: Bubblewrap hides a denied file behind an empty one, and
+      // Seatbelt makes the open fail (the error goes to stderr, which the
+      // assertion message reports) — the marker in the output, not the
+      // exit status, is what the protection removed.
       writeFileSync(
         target.binaryPath,
-        `#!/bin/bash\ncontent=$(< ${JSON.stringify(credentials)}) || exit 42\nprintf 'CREDENTIALS-READ %s\\n' "$content"\n`,
+        `#!/bin/bash\nprintf 'SANDBOX-STARTED\\n'\ncontent=$(< ${JSON.stringify(credentials)})\nprintf 'READ:%s\\n' "$content"\n`,
         { mode: 0o755 },
       );
     }
@@ -2746,7 +2751,7 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
         }),
       ),
     );
-    return { result, credentials, gcloud };
+    return { result, credentials, gcloud, marker };
   }
   const gcloudAllows = (text: string) =>
     text.split("\n").filter((line) => line.startsWith("(allow") && line.includes(".config/gcloud"));
@@ -2879,14 +2884,17 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
               encoding: "utf8",
               timeout: 10_000,
             });
+            // The child really ran inside the sandbox: a confinement that
+            // never started prints nothing and cannot pass as a denial.
+            expect(run.stdout, `${covering ?? "unprotected"}: ${run.stderr}`).toContain(
+              "SANDBOX-STARTED",
+            );
             if (covering === undefined) {
               // The grant reaches a real child: the sandbox confines, so what
               // the protections below deny is confinement, not a missing file.
-              expect(run.status, run.stderr).toBe(0);
-              expect(run.stdout).toContain("CREDENTIALS-READ");
+              expect(run.stdout).toContain(attempt.marker);
             } else {
-              expect(run.status, covering).not.toBe(0);
-              expect(run.stdout).not.toContain("CREDENTIALS-READ");
+              expect(run.stdout).not.toContain(attempt.marker);
             }
           } finally {
             applyProtectedFilesChoice(NO_PROTECTED_FILES_CHANGES);

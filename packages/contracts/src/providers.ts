@@ -2074,14 +2074,10 @@ export type ProviderProcessDiagnostic = typeof ProviderProcessDiagnostic.Type;
  * `driver-incompatible`: an outside driver agreed no protocol version with the
  * host or wrote a message the host could not read, so the host stopped it and
  * the instance contributes nothing.
- * `sign-in-not-offered`: the agent never listed the sign-in the instance is
- * configured with, so the fix is the agent's version or another sign-in, not
- * the credential.
  */
 export const ProviderRefusalReason = Schema.Literal(
   "runtime-incompatible",
   "authentication-required",
-  "sign-in-not-offered",
   "runtime-unavailable",
   "no-usable-model",
   "driver-not-admitted",
@@ -2363,6 +2359,13 @@ export const ProviderObservedState = Schema.Struct({
   integration: Schema.optional(ProviderRuntimeIntegration),
   message: Schema.optional(Schema.NonEmptyTrimmedString),
   reason: Schema.optional(ProviderRefusalReason),
+  /**
+   * The agent never listed the sign-in the instance is configured with, so
+   * the fix is the agent's version or another sign-in, not the credential.
+   * The reason stays `authentication-required`: a client that predates this
+   * field still decodes the catalog and shows the generic sign-in advice.
+   */
+  signInNotOffered: Schema.optional(Schema.Literal(true)),
   diagnostic: Schema.optional(ProviderProcessDiagnostic),
   lastSuccessfulProbeAt: Schema.optional(UtcTimestamp),
   observedAt: UtcTimestamp,
@@ -2958,6 +2961,13 @@ export type ProviderUsageLimit = typeof ProviderUsageLimit.Type;
 
 export const ProviderFailure = Schema.Struct({
   toolCatalogHandoffRequired: Schema.optional(Schema.Literal(true)),
+  /**
+   * The agent never listed the sign-in the instance is configured with, so
+   * the fix is the agent's version or another sign-in, not the credential.
+   * The reason stays `authentication-required`: a client that predates this
+   * field still decodes the catalog and shows the generic sign-in advice.
+   */
+  signInNotOffered: Schema.optional(Schema.Literal(true)),
   category: ProviderFailureCategory,
   message: Schema.NonEmptyTrimmedString,
   reason: Schema.optional(ProviderRefusalReason),

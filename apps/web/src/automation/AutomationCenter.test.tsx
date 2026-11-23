@@ -459,6 +459,7 @@ describe("AutomationCenter detail disclosure", () => {
     const blocked = automationDefinitionFixture({
       lifecycle: "paused",
       blockedReason: "delivery-target-invalid",
+      blockedRunId: refused.id,
       nextDueAt: null,
     });
     const client = fakeClient({
@@ -478,7 +479,41 @@ describe("AutomationCenter detail disclosure", () => {
     ).toBeNull();
   });
 
-  it("a paused routine with no recorded run for its reason keeps the generic label", async () => {
+  it("a paused routine's banner keeps the pausing run's message over a newer same-reason failure", async () => {
+    const pausing = automationRunFixture(definition, {
+      lifecycle: "failed",
+      failureMessage: "The run that paused it was refused its sign-in.",
+    });
+    const newer = automationRunFixture(definition, {
+      id: AUTOMATION_UI_TEST_IDS.otherRun,
+      lifecycle: "failed",
+      failureMessage: "A later retry was refused the same way.",
+    });
+    const blocked = automationDefinitionFixture({
+      lifecycle: "paused",
+      blockedReason: "delivery-target-invalid",
+      blockedRunId: pausing.id,
+      nextDueAt: null,
+    });
+    const client = fakeClient({
+      get: vi.fn(async () => ({
+        kind: "automation-detail" as const,
+        automation: blocked,
+        // The detail feed is newest-first.
+        runs: [newer, pausing],
+      })),
+    });
+    renderCenter({ client });
+    const detail = await openDetail();
+    expect(
+      within(detail).getByText("The run that paused it was refused its sign-in."),
+    ).toBeVisible();
+    expect(
+      within(detail).queryByText("A later retry was refused the same way."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("a paused routine with no recorded run for its pause keeps the generic label", async () => {
     const unrelated = automationRunFixture(definition, {
       lifecycle: "failed",
       failureMessage: "The delivery target no longer matches.",

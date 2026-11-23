@@ -235,8 +235,15 @@ export function keyProviderLabel(driverKind: KeyProviderDriverKind): string {
   return driverKind === "claude" ? "Claude Code" : driverLabel(driverKind);
 }
 
+/**
+ * What `providerRefusalCopy` reads: the wire refusal reason, or the local
+ * `sign-in-not-offered` the caller derives from `signInNotOffered`, which is a
+ * detail beside `authentication-required` rather than its own wire literal.
+ */
+type ProviderRefusalCopyReason = ProviderRefusalReason | "sign-in-not-offered";
+
 export function providerRefusalCopy(
-  reason: ProviderRefusalReason,
+  reason: ProviderRefusalCopyReason,
   instance: ProviderInstance,
 ): { readonly reason: string; readonly nextStep: string } {
   const label = driverLabel(instance.driverKind);
@@ -350,7 +357,10 @@ export function providerRefusalGuidance(
   const held = outsideDriverHoldGuidance(instance);
   if (held !== undefined) return held;
   if (observed?.reason === undefined) return undefined;
-  const copy = providerRefusalCopy(observed.reason, instance);
+  const copy = providerRefusalCopy(
+    observed.signInNotOffered === true ? "sign-in-not-offered" : observed.reason,
+    instance,
+  );
   const withheld = providerWithheldReason(instance, observed);
   return withheld === undefined ? copy : { ...copy, reason: withheld };
 }

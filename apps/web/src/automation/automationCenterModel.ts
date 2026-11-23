@@ -7,6 +7,7 @@ import {
   type AutomationAuthorityProfileReceipt,
   type AutomationBindingReceipt,
   type AutomationBlockReason,
+  type AutomationDefinition,
   type AutomationDefinitionDraft,
   type AutomationExecutionProfileReceipt,
   type AutomationLifecycle,
@@ -107,17 +108,22 @@ export function automationBlockReasonLabel(reason: AutomationBlockReason): strin
 }
 
 /**
- * What a paused routine's banner says: the newest run (`runs` arrives
- * newest-first) that recorded this reason carries the refusal the host
- * journaled, which is plainer than the generic label. With none recorded —
- * a pause from revalidation rather than a run — the label stands.
+ * What a paused routine's banner says: the run whose failure the block
+ * receipt named (`blockedRunId`) carries the refusal the host journaled,
+ * which is plainer than the generic label — a newer run that failed the same
+ * way is not what paused it. With no recorded run for the pause — one from
+ * revalidation rather than a run — the label stands.
  */
 export function automationBlockedMessage(
-  reason: AutomationBlockReason,
+  definition: AutomationDefinition,
   runs: ReadonlyArray<AutomationRun>,
 ): string {
-  const run = runs.find((candidate) => candidate.failure?.reason === reason);
-  return run?.failure?.message ?? automationBlockReasonLabel(reason);
+  if (definition.blockedReason === undefined) return "";
+  const pausingRun =
+    definition.blockedRunId === undefined
+      ? undefined
+      : runs.find((run) => String(run.id) === String(definition.blockedRunId));
+  return pausingRun?.failure?.message ?? automationBlockReasonLabel(definition.blockedReason);
 }
 
 // ── Instant and trigger formatting ───────────────────────────────────────────

@@ -1146,7 +1146,10 @@ export function validateAutomationDefinition(input: AutomationDefinition): Autom
       "Automation delivery target must be an exact confirmed template.",
     );
   }
-  if (definition.lifecycle === "enabled" && definition.blockedReason !== undefined) {
+  if (
+    definition.lifecycle === "enabled" &&
+    (definition.blockedReason !== undefined || definition.blockedRunId !== undefined)
+  ) {
     return reject(
       "invalid-definition",
       "Enabled automations cannot retain a validation block reason.",

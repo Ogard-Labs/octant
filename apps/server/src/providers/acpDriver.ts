@@ -407,6 +407,7 @@ function failure(
   extras?: {
     readonly reason?: ProviderFailure["reason"];
     readonly diagnostic?: ProviderFailure["diagnostic"];
+    readonly signInNotOffered?: ProviderFailure["signInNotOffered"];
   },
 ): ProviderFailure {
   return {
@@ -414,6 +415,7 @@ function failure(
     message,
     ...(extras?.reason === undefined ? {} : { reason: extras.reason }),
     ...(extras?.diagnostic === undefined ? {} : { diagnostic: extras.diagnostic }),
+    ...(extras?.signInNotOffered === true ? { signInNotOffered: true } : {}),
   };
 }
 
@@ -856,7 +858,7 @@ function selectSignIn(
       failure(
         "unauthenticated",
         `${name} did not offer ${label} sign-in. Update ${name}, or choose another sign-in in Settings.`,
-        { reason: "sign-in-not-offered" },
+        { reason: "authentication-required", signInNotOffered: true },
       ),
     );
   }

@@ -102,9 +102,10 @@ export function providerRuntimeDomains(input: {
   readonly profileId?: AcpProviderKind | undefined;
   readonly environment?: Readonly<Record<string, string | undefined>> | undefined;
   /**
-   * Exact hosts the launching provider profile derives from its instance
-   * configuration, such as an Agent Platform instance's regional host. Never
-   * patterns: each entry is one host the launch may reach.
+   * Named hosts the launching provider profile derives from its instance
+   * configuration, such as an Agent Platform instance's regional host,
+   * matched like every listed endpoint (the host and its subdomains). Never
+   * patterns or wildcards: each entry is one host the launch may reach.
    */
   readonly profileHosts?: ReadonlyArray<string> | undefined;
 }): ReadonlyArray<string> {

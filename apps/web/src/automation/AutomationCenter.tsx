@@ -1045,7 +1045,7 @@ function AutomationDetail(props: {
       </p>
       {automation.blockedReason === undefined ? null : (
         <p className="automation-detail__blocked" role="status">
-          {automationBlockedMessage(automation.blockedReason, runs)}
+          {automationBlockedMessage(automation, runs)}
         </p>
       )}
 

@@ -3711,7 +3711,8 @@ describe("ACP provider driver profile quirks", () => {
       );
       expect(failure).toMatchObject({
         category: "unauthenticated",
-        reason: "sign-in-not-offered",
+        reason: "authentication-required",
+        signInNotOffered: true,
         message:
           "Google Antigravity did not offer Gemini API key sign-in. Update Google Antigravity, or choose another sign-in in Settings.",
       });
@@ -3735,6 +3736,7 @@ describe("ACP provider driver profile quirks", () => {
         message:
           "Google Antigravity refused its Gemini API key sign-in. Check it in Settings, then retry.",
       });
+      expect(failure).not.toHaveProperty("signInNotOffered");
     });
 
     it("leaves a personal Google sign-in to the CLI's own cached login", async () => {

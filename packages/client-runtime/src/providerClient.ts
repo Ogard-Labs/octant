@@ -41,6 +41,7 @@ export class ProviderClientFailure extends Error {
   readonly category: ProviderFailure["category"];
   readonly reason?: ProviderFailure["reason"];
   readonly diagnostic?: ProviderFailure["diagnostic"];
+  readonly signInNotOffered?: ProviderFailure["signInNotOffered"];
 
   constructor(failure: ProviderFailure) {
     super(failure.message);
@@ -48,6 +49,7 @@ export class ProviderClientFailure extends Error {
     this.category = failure.category;
     if (failure.reason !== undefined) this.reason = failure.reason;
     if (failure.diagnostic !== undefined) this.diagnostic = failure.diagnostic;
+    if (failure.signInNotOffered === true) this.signInNotOffered = true;
   }
 }
 

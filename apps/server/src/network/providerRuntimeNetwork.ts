@@ -100,9 +100,10 @@ export interface ProviderRuntimeNetworkStartInput {
   /** The launch's environment, read for the base URLs the person configured. */
   readonly environment?: Readonly<Record<string, string | undefined>>;
   /**
-   * Exact hosts the launching provider profile derives from its instance
-   * configuration, such as an Agent Platform instance's regional host. Never
-   * patterns: each entry is one host the launch may reach.
+   * Named hosts the launching provider profile derives from its instance
+   * configuration, such as an Agent Platform instance's regional host,
+   * matched like every listed endpoint (the host and its subdomains). Never
+   * patterns or wildcards: each entry is one host the launch may reach.
    */
   readonly profileHosts?: ReadonlyArray<string>;
   /** The thread runs at Auto, so an unlisted host may go to the reviewer before it is refused. */

@@ -222,7 +222,12 @@ export class AutomationCommandService {
         "Finish the current routine and its known activity before re-arming.",
       );
     const now = this.#now();
-    const { blockedReason: _blocked, nextDueResolution: _resolution, ...base } = definition;
+    const {
+      blockedReason: _blocked,
+      blockedRunId: _blockedRun,
+      nextDueResolution: _resolution,
+      ...base
+    } = definition;
     const updated = validateAutomationDefinition(
       decodeAutomationDefinition({
         ...base,
@@ -526,7 +531,12 @@ export class AutomationCommandService {
     if (current.lifecycle === lifecycle) {
       return { kind: resultKind, automation: current };
     }
-    const { nextDueResolution: _resolution, blockedReason: _blocked, ...base } = current;
+    const {
+      nextDueResolution: _resolution,
+      blockedReason: _blocked,
+      blockedRunId: _blockedRun,
+      ...base
+    } = current;
     const changed = validateAutomationDefinition(
       decodeAutomationDefinition({
         ...base,
