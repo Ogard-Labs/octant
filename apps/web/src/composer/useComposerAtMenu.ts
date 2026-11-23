@@ -237,6 +237,8 @@ export function useComposerAtMenu(input: {
     | {
         readonly start: number;
         readonly end: number;
+        /** Where the caret was when the picker opened; Escape returns it there. */
+        readonly caret?: number | undefined;
         readonly initial?: SubagentModelTag | undefined;
       }
     | undefined
@@ -305,7 +307,7 @@ export function useComposerAtMenu(input: {
     if (modelPicker === undefined) return;
     setModelPicker(undefined);
     setToken(undefined);
-    focusPrompt(modelPicker.end);
+    focusPrompt(modelPicker.caret ?? modelPicker.end);
   };
   const renderModelChip =
     modelGroups === undefined
@@ -350,7 +352,7 @@ export function useComposerAtMenu(input: {
         title: "@model",
         meta: "Choose a subagent's provider, model, and reasoning",
         icon: "model",
-        choose: () => setModelPicker({ start, end }),
+        choose: () => setModelPicker({ start, end, caret: start + raw.length }),
       });
     }
   }

@@ -637,6 +637,20 @@ describe("@model in the composer", () => {
     await waitFor(() => expect(prompt).toHaveValue(`Ask @model(${instanceId}/gpt-5-mini) now`));
   });
 
+  it("returns the caret to where it was when the picker is dismissed from inside @model", async () => {
+    render(<ModelHarness initial="Ask @model now" />);
+    const prompt = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    prompt.focus();
+    prompt.setSelectionRange(9, 9);
+    await userEvent.keyboard("{ArrowLeft}{ArrowRight}");
+    fireEvent.keyDown(prompt, { key: "Enter" });
+    await screen.findByRole("combobox", { name: "Search models" });
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(prompt).toHaveFocus());
+    await waitFor(() => expect(prompt.selectionStart).toBe(9));
+    expect(prompt).toHaveValue("Ask @model now");
+  });
+
   it("leaves the draft as typed when the picker is dismissed with Escape", async () => {
     render(<ModelHarness />);
     const prompt = screen.getByRole("textbox", { name: "Message" });
