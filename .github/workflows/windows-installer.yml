@@ -9,19 +9,16 @@
 # the installer artifact is kept three days for inspection.
 name: Windows installer
 
+# Pull requests touching installer or desktop code exercise the unsigned
+# per-user installer via the `installer` job in `windows-desktop.yml` (reusing
+# the Stable package already built there). This standalone workflow stays
+# available for manual dispatch and only triggers on PRs that edit this
+# workflow file itself so it cannot drift untested.
 on:
   pull_request:
-    # A draft runs nothing; marking it ready for review starts the run.
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - .github/workflows/windows-installer.yml
-      - apps/desktop/**
-      - apps/server/**
-      - apps/web/**
-      - packages/**
-      - scripts/**
-      - bun.lock
-      - package.json
+      - ".github/workflows/windows-installer.yml"
   workflow_dispatch:
 
 permissions:
@@ -33,8 +30,8 @@ concurrency:
 
 jobs:
   installer:
-    if: github.event.pull_request.draft != true
     name: Per-user installer (unsigned)
+    if: github.event.pull_request.draft != true
     runs-on: windows-2025
     timeout-minutes: 45
     steps:
@@ -53,16 +50,32 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 26
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
       - run: bun install --frozen-lockfile
+      - name: Read the pinned Electron version
+        id: electron
+        run: |
+          $version = (Get-Content apps/desktop/package.json -Raw | ConvertFrom-Json).devDependencies.electron
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$version"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/octant-electron-cache
+          key: electron-binary-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
       - name: Prepare the pinned Electron runtime
         env:
           GH_TOKEN: ${{ github.token }}
+          electron_config_cache: ${{ runner.temp }}/octant-electron-cache
         run: node scripts/ensure-ci-electron.ts
       - name: Fetch the pinned NSIS
         run: ./scripts/windows-installer/install-nsis.ps1
       - name: Build the Windows package
         env:
           OCTANT_PACKAGE_TARGET: win32-x64
+          electron_config_cache: ${{ runner.temp }}/octant-electron-cache
         run: bun run package:desktop
       - name: Write the uninstaller
         run: bun scripts/package-windows-installer.ts uninstaller --package out/Octant-win32-x64 --out "out/windows-uninstaller/Uninstall Octant.exe"
