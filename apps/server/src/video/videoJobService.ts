@@ -84,6 +84,17 @@ const VIDEO_TIMEOUT_CLEANUP_MS = 15_000;
 function isTransientVideoFailure(failure: ProviderFailure): boolean {
   return failure.category === "unavailable" || failure.category === "rate-limited";
 }
+
+/**
+ * A start that fails as "unavailable" — a network error, a timeout or a 5xx
+ * answer that cannot say whether the clip began — may still have reached the
+ * provider, so it settles at the estimate. A rate limit or any other
+ * definite rejection means the provider refused before starting, and the job
+ * is billed nothing.
+ */
+function startMayHaveReachedProvider(failure: ProviderFailure): boolean {
+  return failure.category === "unavailable";
+}
 /** How often a removal the provider refused is tried again while the host runs. */
 export const VIDEO_REMOVAL_RETRY_MS = 15 * 60 * 1000;
 
@@ -595,11 +606,12 @@ export class VideoJobService {
         });
         return;
       }
-      // A transient failure may mean the request reached the provider after
-      // all: the job ends interrupted and settles at the estimate, since the
-      // provider may still make and bill the clip. Nothing is forgotten —
-      // there is no remote id to forget. A confirmed failure bills nothing.
-      if (isTransientVideoFailure(started.providerFailure)) {
+      // An unavailable answer may mean the request reached the provider
+      // after all: the job ends interrupted and settles at the estimate,
+      // since the provider may still make and bill the clip. Nothing is
+      // forgotten — there is no remote id to forget. A definite rejection,
+      // rate-limited or otherwise, bills nothing.
+      if (startMayHaveReachedProvider(started.providerFailure)) {
         this.#finish(sending, "failed", {
           failure: videoFailure(
             "interrupted",
@@ -742,8 +754,7 @@ export class VideoJobService {
       }
       // A provider that answered with a retry-after wait is honoured before
       // the next poll, still bounded by the job's deadline.
-      const coolDown =
-        poll.status === "failed" ? (poll.providerFailure.retryAfterMs ?? 0) : 0;
+      const coolDown = poll.status === "failed" ? (poll.providerFailure.retryAfterMs ?? 0) : 0;
       // Once cancel is asked, Stop's signal stays aborted; waiting on it would
       // poll without any pause while the provider confirms.
       await this.#sleep(
@@ -1096,5 +1107,7 @@ function settleWithKnownPrice(
   const estimate = estimateOrZero(job);
   return price === undefined
     ? estimate
-    : settleVideoCostUsdMicros(price, estimate, usage, job.options);
+    : settleVideoCostUsdMicros(price, estimate, usage, job.options, {
+        imageCount: job.imageCount,
+      });
 }

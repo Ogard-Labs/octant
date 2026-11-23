@@ -664,23 +664,26 @@ describe("video jobs", () => {
     expect(calls.forget).toBe(0);
   });
 
-  it("bills nothing when a start's confirmed failure could not have reached a job", async () => {
-    const { service, spend } = harness({
-      start: async () => ({
+  it.each([
+    { category: "provider-failed", message: "Rejected." },
+    { category: "rate-limited", message: "The provider rate limit was reached." },
+  ] as const)(
+    "bills nothing when a start's confirmed $category failure could not have reached a job",
+    async (providerFailure) => {
+      const { service, spend } = harness({
+        start: async () => ({ status: "failed", providerFailure }),
+      });
+      const queued = await enqueue(service);
+      const done = await service.whenTerminal(queued.id);
+      expect(done).toMatchObject({
         status: "failed",
-        providerFailure: { category: "provider-failed", message: "Rejected." },
-      }),
-    });
-    const queued = await enqueue(service);
-    const done = await service.whenTerminal(queued.id);
-    expect(done).toMatchObject({
-      status: "failed",
-      failure: { category: "provider-failed" },
-    });
-    expect(done?.settledCostUsdMicros).toBeUndefined();
-    expect(spend.settle).not.toHaveBeenCalled();
-    expect(spend.abandon).toHaveBeenCalledTimes(1);
-  });
+        failure: { category: providerFailure.category },
+      });
+      expect(done?.settledCostUsdMicros).toBeUndefined();
+      expect(spend.settle).not.toHaveBeenCalled();
+      expect(spend.abandon).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("waits out the provider's retry-after before polling again", async () => {
     const { service, sleeps } = harness({
