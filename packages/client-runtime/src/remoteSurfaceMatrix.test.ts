@@ -256,6 +256,7 @@ describe("what a session that acts as the host's own person reaches", () => {
     for (const authenticatedFetch of restrictedAnswers) {
       expect(await readRemoteSessionStanding({ authenticatedFetch })).toEqual({
         actsAsHostPerson: false,
+        accessLevel: "read-only",
       });
     }
     const olderHost = {

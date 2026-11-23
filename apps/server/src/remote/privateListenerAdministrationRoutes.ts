@@ -139,7 +139,17 @@ export function createPrivateListenerAdministrationRouteHandler(
           options.setting,
         );
       }
-      const config = decodeListenerConfig(decoded.value);
+      let config: RequestedPrivateListenerConfig;
+      if (route === ROUTES.enable && isSavedListenerRequest(decoded.value)) {
+        // A bare `octant listener enable` asks to run the remembered
+        // settings again: address, port and the certificate it kept, pasted
+        // or self-made. Nothing is invented when none were saved.
+        const saved = options.setting?.load();
+        if (saved === undefined) return failure("invalid", 400);
+        config = saved;
+      } else {
+        config = decodeListenerConfig(decoded.value);
+      }
       const status =
         route === ROUTES.enable ? await control.enable(config) : await control.restart(config);
       if (!rememberListener(options.setting, config)) {
@@ -228,6 +238,17 @@ function projectStatus(status: PrivateListenerHostStatus): PrivateListenerHostSt
     ...(status.keyTransition === undefined ? {} : { keyTransition: status.keyTransition }),
     ...(status.errorCode === undefined ? {} : { errorCode: status.errorCode }),
   });
+}
+
+/** The body a bare `octant listener enable` sends: run the saved settings again. */
+function isSavedListenerRequest(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "saved" in value &&
+    value.saved === true &&
+    Object.keys(value).length === 1
+  );
 }
 
 /**

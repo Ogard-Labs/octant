@@ -45,6 +45,8 @@ export type RemoteAccessCliCommand =
       /** Absent: the host serves the certificate it makes itself. */
       readonly pasted?: { readonly certificatePath: string; readonly privateKeyPath: string };
     }
+  /** No flags: the listener is re-enabled with the settings the host saved. */
+  | { readonly action: "listener-enable"; readonly saved: true }
   | { readonly action: "listener-disable" }
   | {
       readonly action: "listener-transition";
@@ -130,6 +132,7 @@ export function resolveListenerCliCommand(
     return action === "disable" ? { action: "listener-disable" } : { action: "listener-status" };
   }
   if (action !== "enable") return undefined;
+  if (Object.keys(flags).length === 0) return { action: "listener-enable", saved: true };
   const allowed = new Set(["hostname", "port", "cert", "key"]);
   if (Object.keys(flags).some((flag) => !allowed.has(flag))) return undefined;
   const { hostname, port, cert, key } = flags;
@@ -214,7 +217,7 @@ async function runRemoteAccessPauseCommand(
   if (response.status !== expected || typeof paused !== "boolean") {
     input.stderr.write(
       response.status === 503
-        ? await listenerOffMessage(input)
+        ? listenerOffMessage()
         : `${failureMessage(response, "Octant refused to change remote access.")}\n`,
     );
     return 1;
@@ -232,23 +235,11 @@ async function runRemoteAccessPauseCommand(
 }
 
 /**
- * The enable command the host's remembered setting would run again, or one
- * with placeholders when the host never ran it: a bare
- * `octant listener enable` refuses for want of --hostname and --port. The
- * saved setting is the source: a disabled listener's live status names no
- * address at all.
+ * The enable hint: a bare `octant listener enable` re-runs the host's saved
+ * settings, and names its own needs when none exist.
  */
-async function listenerOffMessage(input: RunRemoteAccessCliCommandInput): Promise<string> {
-  const status = await input.session.send({
-    path: "/api/desktop/private-listener/status",
-    method: "GET",
-  });
-  const saved = savedListenerEndpointOf(status.body);
-  const enable =
-    saved !== undefined
-      ? `octant listener enable --hostname ${saved.hostname} --port ${String(saved.port)}`
-      : "octant listener enable --hostname <lan-or-tailscale-address> --port <port>";
-  return `Remote access answers only while the remote listener is on. Start it with \`${enable}\`, then try again; a pause is kept until you resume it.\n`;
+function listenerOffMessage(): string {
+  return "Remote access answers only while the remote listener is on. Start it with `octant listener enable`, then try again; a pause is kept until you resume it.\n";
 }
 
 /** The endpoint the host remembers enabling, from the listener status answer. */
@@ -632,7 +623,23 @@ async function runListenerCommand(
   >,
 ): Promise<number> {
   let response: LocalControlResponse;
-  if (command.action === "listener-enable") {
+  if (command.action === "listener-enable" && "saved" in command) {
+    const status = await input.session.send({
+      path: "/api/desktop/private-listener/status",
+      method: "GET",
+    });
+    if (status.status !== 200 || savedListenerEndpointOf(status.body) === undefined) {
+      input.stderr.write(
+        "`octant listener enable` needs --hostname and --port: no listener settings are saved on this host.\n",
+      );
+      return 1;
+    }
+    response = await input.session.send({
+      path: "/api/desktop/private-listener/enable",
+      method: "POST",
+      body: { saved: true },
+    });
+  } else if (command.action === "listener-enable") {
     const read = input.readTextFile ?? ((path: string) => readFile(path, "utf8"));
     let pems: { certificatePem: string; privateKeyPem: string } | undefined;
     if (command.pasted !== undefined) {

@@ -21,8 +21,17 @@ export interface RemoteSessionStanding {
   readonly accessLevel?: DeviceAccessLevel;
 }
 
-/** A session the host has not said acts as its person, and one whose host does not say. */
-export const RESTRICTED_REMOTE_SESSION: RemoteSessionStanding = { actsAsHostPerson: false };
+/**
+ * A session the host has not said acts as its person, and one whose host
+ * does not say. Failing closed narrows it to read-only reach: an unread or
+ * unreachable answer never falls back to an editable level. An older host
+ * that answers without a level is a different case — its session is
+ * reported, not restricted.
+ */
+export const RESTRICTED_REMOTE_SESSION: RemoteSessionStanding = {
+  actsAsHostPerson: false,
+  accessLevel: "read-only",
+};
 
 /**
  * Ask the host what this session is. Anything but a plain yes reads as

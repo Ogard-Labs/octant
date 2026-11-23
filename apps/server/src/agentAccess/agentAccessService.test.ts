@@ -642,11 +642,14 @@ describe("the agent endpoint for an MCP client on this computer", () => {
       params: { name: "read_thread", arguments: { threadId: crypto.randomUUID() } },
     });
     const body = new TextEncoder().encode(text);
-    // The pause lands between the halves of the upload: whatever the gateway
-    // read before it arrived, the route judges it again once it has.
+    // The pause lands while the route pulls the rest of the body: the
+    // gateway's check ran before this request began, so only a recheck after
+    // the body read can refuse it.
     const streamed = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(body.subarray(0, 10));
+      },
+      pull(controller) {
         paused = true;
         controller.enqueue(body.subarray(10));
         controller.close();

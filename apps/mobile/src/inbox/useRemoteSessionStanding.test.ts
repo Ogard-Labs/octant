@@ -89,8 +89,8 @@ const emit = (state: string) => {
 
 describe("useRemoteSessionStanding", () => {
   it("rereads the device's standing when the app returns to the foreground", async () => {
-    const { transport: session, authenticatedFetch } = transport(() =>
-      new Response(JSON.stringify({ ...device, actsAsHostPerson: true }), { status: 200 }),
+    const { transport: session, authenticatedFetch } = transport(
+      () => new Response(JSON.stringify({ ...device, actsAsHostPerson: true }), { status: 200 }),
     );
     const harness = render(session);
     await harness.mount();
@@ -105,8 +105,8 @@ describe("useRemoteSessionStanding", () => {
   });
 
   it("does not reread while the app leaves or stays out of the foreground", async () => {
-    const { transport: session, authenticatedFetch } = transport(() =>
-      new Response(JSON.stringify({ ...device, actsAsHostPerson: false }), { status: 200 }),
+    const { transport: session, authenticatedFetch } = transport(
+      () => new Response(JSON.stringify({ ...device, actsAsHostPerson: false }), { status: 200 }),
     );
     const harness = render(session);
     await harness.mount();
@@ -128,6 +128,30 @@ describe("useRemoteSessionStanding", () => {
       emit("active");
     });
     expect(appStateListeners.size).toBe(0);
-    expect(harness.output()).toBe(JSON.stringify({ actsAsHostPerson: false }));
+    expect(harness.output()).toBe(
+      JSON.stringify({ actsAsHostPerson: false, accessLevel: "read-only" }),
+    );
+  });
+
+  it("falls back to read-only reach when a standing reread fails on wake", async () => {
+    let paused = false;
+    const { transport: session } = transport(() =>
+      paused
+        ? new Response("{}", { status: 403 })
+        : new Response(JSON.stringify({ ...device, actsAsHostPerson: true }), { status: 200 }),
+    );
+    const harness = render(session);
+    await harness.mount();
+    expect(harness.output()).toBe(JSON.stringify({ actsAsHostPerson: true }));
+
+    paused = true;
+    await act(async () => {
+      emit("background");
+      emit("active");
+    });
+    // A pause refuses the read; the session keeps nothing editable.
+    expect(harness.output()).toBe(
+      JSON.stringify({ actsAsHostPerson: false, accessLevel: "read-only" }),
+    );
   });
 });

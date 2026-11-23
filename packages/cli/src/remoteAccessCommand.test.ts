@@ -166,6 +166,13 @@ describe("resolveListenerCliCommand", () => {
     expect(resolveListenerCliCommand(["disable"], {})).toEqual({ action: "listener-disable" });
   });
 
+  it("enables with the saved settings when no flags are named", () => {
+    expect(resolveListenerCliCommand(["enable"], {})).toEqual({
+      action: "listener-enable",
+      saved: true,
+    });
+  });
+
   it("asks the host for its own certificate when neither a certificate nor a key is named", () => {
     expect(resolveListenerCliCommand(["enable"], { hostname: "100.64.0.7", port: "8455" })).toEqual(
       {
@@ -309,12 +316,10 @@ describe("pausing and resuming remote access from this computer", () => {
       body: { category: "unavailable", message: "Local device administration is unavailable." },
     }));
     expect(await test.run({ action: "remote-access-pause", paused: false })).toBe(1);
-    expect(test.err.join("")).toContain(
-      "octant listener enable --hostname <lan-or-tailscale-address> --port <port>",
-    );
+    expect(test.err.join("")).toContain("`octant listener enable`");
   });
 
-  it("names the remembered address and port in the enable command it suggests", async () => {
+  it("suggests the bare enable command, which re-runs the saved settings", async () => {
     const test = fixture((request) =>
       request.path === "/api/desktop/private-listener/status"
         ? {
@@ -342,7 +347,8 @@ describe("pausing and resuming remote access from this computer", () => {
           },
     );
     expect(await test.run({ action: "remote-access-pause", paused: false })).toBe(1);
-    expect(test.err.join("")).toContain("octant listener enable --hostname 100.64.0.7 --port 8455");
+    expect(test.err.join("")).toContain("Start it with `octant listener enable`");
+    expect(test.err.join("")).not.toContain("--hostname");
   });
 });
 
@@ -542,6 +548,35 @@ describe("runRemoteAccessCliCommand", () => {
     const printed = test.out.join("");
     expect(printed).toContain("Certificate source self-made");
     expect(printed).toContain("Key pin sha256-47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU");
+  });
+
+  it("re-enables with the saved settings when none are named", async () => {
+    const test = fixture((request) =>
+      request.path === "/api/desktop/private-listener/status"
+        ? {
+            status: 200,
+            body: {
+              status: { ...READY_STATUS, state: "disabled" },
+              saved: { hostname: "100.64.0.7", port: 8455 },
+            },
+          }
+        : { status: 200, body: { status: READY_STATUS } },
+    );
+    expect(await test.run({ action: "listener-enable", saved: true })).toBe(0);
+    expect(test.sent).toEqual([
+      { path: "/api/desktop/private-listener/status", method: "GET" },
+      { path: "/api/desktop/private-listener/enable", method: "POST", body: { saved: true } },
+    ]);
+  });
+
+  it("refuses a bare enable when the host saved no listener settings", async () => {
+    const test = fixture(() => ({
+      status: 200,
+      body: { status: { ...READY_STATUS, state: "disabled" } },
+    }));
+    expect(await test.run({ action: "listener-enable", saved: true })).toBe(1);
+    expect(test.sent).toEqual([{ path: "/api/desktop/private-listener/status", method: "GET" }]);
+    expect(test.err.join("")).toContain("needs --hostname and --port");
   });
 
   it("drops the default HTTPS port from the origin as Settings does", async () => {

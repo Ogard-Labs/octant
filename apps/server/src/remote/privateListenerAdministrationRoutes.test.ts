@@ -191,6 +191,42 @@ describe("private listener administration routes", () => {
     });
   });
 
+  it("re-enables the remembered settings, certificate and all, on a saved request", async () => {
+    const { handle, control, setting } = setup();
+    const stored = {
+      hostname: "100.64.0.7",
+      port: 8455,
+      origin: "https://100.64.0.7:8455",
+      tls: { cert: CERT, key: KEY },
+    };
+    setting.load.mockReturnValue(stored);
+    const response = await handle(
+      request("/api/desktop/private-listener/enable", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ saved: true }),
+      }),
+    );
+    expect(response?.status).toBe(200);
+    expect(control.enable).toHaveBeenCalledWith(stored);
+    const body = await response?.json();
+    expect(JSON.stringify(body)).not.toContain("PRIVATE KEY");
+  });
+
+  it("refuses a saved enable when the host remembers no settings", async () => {
+    const { handle, control, setting } = setup();
+    setting.load.mockReturnValue(undefined);
+    const response = await handle(
+      request("/api/desktop/private-listener/enable", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ saved: true }),
+      }),
+    );
+    expect(response?.status).toBe(400);
+    expect(control.enable).not.toHaveBeenCalled();
+  });
+
   it("asks the host for its own certificate when neither PEM is sent and remembers no key", async () => {
     const { handle, control, setting } = setup();
     const response = await handle(
