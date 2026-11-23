@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { encode as encodeJpeg } from "jpeg-js";
 import { GifWriter } from "omggif";
+import { PNG } from "pngjs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
@@ -44,10 +45,12 @@ function pngHeader(width: number, height: number): Uint8Array {
 
 /** A valid PNG of one colour: RGB, or RGBA with every pixel at `alpha`. */
 function solidPng(
-  size: number,
+  size: number | { readonly width: number; readonly height: number },
   alpha?: number,
   extra?: ReadonlyArray<{ readonly type: string; readonly data: Uint8Array }>,
 ): Uint8Array {
+  const width = typeof size === "number" ? size : size.width;
+  const height = typeof size === "number" ? size : size.height;
   const channels = alpha === undefined ? 3 : 4;
   const crcTable = Array.from({ length: 256 }, (_, n) => {
     let c = n;
@@ -70,14 +73,14 @@ function solidPng(
   };
   const header = new Uint8Array(13);
   const headerView = new DataView(header.buffer);
-  headerView.setUint32(0, size);
-  headerView.setUint32(4, size);
+  headerView.setUint32(0, width);
+  headerView.setUint32(4, height);
   header.set([8, alpha === undefined ? 2 : 6, 0, 0, 0], 8);
-  const row = new Uint8Array(1 + size * channels);
+  const row = new Uint8Array(1 + width * channels);
   const pixel = alpha === undefined ? [30, 120, 200] : [30, 120, 200, alpha];
-  for (let x = 0; x < size; x += 1) row.set(pixel, 1 + x * channels);
-  const raw = new Uint8Array(row.byteLength * size);
-  for (let y = 0; y < size; y += 1) raw.set(row, y * row.byteLength);
+  for (let x = 0; x < width; x += 1) row.set(pixel, 1 + x * channels);
+  const raw = new Uint8Array(row.byteLength * height);
+  for (let y = 0; y < height; y += 1) raw.set(row, y * row.byteLength);
   const parts = [
     Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", header),
@@ -402,6 +405,20 @@ describe("icon set rendering in pure JavaScript", () => {
     });
   });
 
+  it("refuses a non-square source whose prescaled raster would read as square", async () => {
+    // 2049×2048 averages down to a 1024×1024 raster the sizes render from;
+    // the square check still reads the decoded source's own dimensions.
+    const rendered = await render()({
+      bytes: solidPng({ width: 2049, height: 2048 }),
+      mime: "image/png",
+      target: "web",
+    });
+    expect(rendered).toEqual({
+      status: "refused",
+      reason: expect.stringMatching(/square/),
+    });
+  });
+
   it("refuses a source whose bytes are no image it reads", async () => {
     const rendered = await render()({
       bytes: new Uint8Array([1, 2, 3, 4]),
@@ -417,6 +434,23 @@ describe("icon set rendering in pure JavaScript", () => {
   it("refuses an iOS icon whose decoded source shows even faint transparency", async () => {
     const rendered = await render()({
       bytes: solidPng(1024, 254),
+      mime: "image/png",
+      target: "apple-ios",
+    });
+    expect(rendered).toEqual({
+      status: "refused",
+      reason: expect.stringMatching(/must not be transparent/),
+    });
+  });
+
+  it("refuses an iOS icon whose one faint pixel would average to opaque in the prescale", async () => {
+    // A single alpha-254 pixel in a 2048 source rounds to fully opaque in the
+    // 1024 raster the outputs render from; the check reads the source.
+    const png = new PNG({ width: 2048, height: 2048 });
+    png.data.fill(255);
+    png.data[3] = 254;
+    const rendered = await render()({
+      bytes: new Uint8Array(PNG.sync.write(png)),
       mime: "image/png",
       target: "apple-ios",
     });
@@ -469,19 +503,21 @@ describe("icon set rendering in pure JavaScript", () => {
   });
 
   it("stops a large source's render when the caller's stop lands between outputs", async () => {
-    let checks = 0;
+    let stopped = false;
     const rendered = await render()({
       bytes: solidPng(2048),
       mime: "image/png",
       target: "web",
       beforeOutput: () => {
-        checks += 1;
-        return checks === 1 ? undefined : "The turn was stopped.";
+        if (stopped) return "The turn was stopped.";
+        // The stop can only be observed if the render yields to the event
+        // loop before the next output is asked for.
+        setImmediate(() => {
+          stopped = true;
+        });
+        return undefined;
       },
     });
-    // The first size rendered; the stop refused the second, so nothing more
-    // was made and no file is handed back.
-    expect(checks).toBe(2);
     expect(rendered).toEqual({ status: "refused", reason: "The turn was stopped." });
   });
 });

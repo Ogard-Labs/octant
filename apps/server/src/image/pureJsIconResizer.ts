@@ -20,18 +20,23 @@ export function pureJsIconResizer(input: {
   readonly bytes: Uint8Array;
   readonly mime: string;
 }): IconSetResizer {
-  let decoded: Promise<RgbaImage | undefined> | undefined;
-  const raster = () =>
-    (decoded ??= decodeIconSource(input.bytes, input.mime).then((image) =>
+  let decodedSource: Promise<RgbaImage | undefined> | undefined;
+  const source = () => (decodedSource ??= decodeIconSource(input.bytes, input.mime));
+  let decodedScaled: Promise<RgbaImage | undefined> | undefined;
+  const scaled = () =>
+    (decodedScaled ??= source().then((image) =>
       image === undefined ? undefined : shrinkOversize(image),
     ));
   return {
+    // The size and opacity checks read the decoded source, not the prescaled
+    // raster: rounding would call a 2049×2048 source square, and averaging
+    // would dilute a transparent speck below the refusal.
     measure: async () => {
-      const image = await raster();
+      const image = await source();
       return image === undefined ? undefined : { width: image.width, height: image.height };
     },
     opaque: async () => {
-      const image = await raster();
+      const image = await source();
       if (image === undefined) return undefined;
       for (let index = 3; index < image.data.byteLength; index += 4) {
         if ((image.data[index] ?? 0) < 255) return false;
@@ -42,7 +47,7 @@ export function pureJsIconResizer(input: {
       // An awaited boundary before the resample lets a queued Stop or a level
       // drop land between outputs instead of after the whole set.
       await new Promise<void>((resolve) => setImmediate(resolve));
-      const image = await raster();
+      const image = await scaled();
       if (image === undefined) return undefined;
       const resized = await resampleRgbaYielding(image, pixels, pixels);
       const png = new PNG({ width: pixels, height: pixels });

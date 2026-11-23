@@ -1,6 +1,6 @@
 import { deflateSync, inflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { pngWithoutAlpha } from "./pngOpacity";
+import { carryPngColour, pngWithoutAlpha } from "./pngOpacity";
 
 /**
  * A 10×10 RGBA PNG whose rows use every filter in turn (row y uses filter
@@ -97,6 +97,24 @@ describe("PNG opacity", () => {
     // The same 16 bytes, CRC included, straight after the RGB IHDR.
     expect(out.subarray(33, 49).equals(gama)).toBe(true);
     expect(out[25]).toBe(2);
+  });
+
+  it("carries an indexed source's colour chunks into a re-encode without reading its pixels", () => {
+    const source = Buffer.from(EVERY_FILTER_RGBA, "base64");
+    // A colourType-3 (palette) header: the opacity parser refuses its pixels,
+    // but the colour description a re-encode carries is read from chunks alone.
+    const ihdr = Buffer.from(source.subarray(0, 33));
+    ihdr[25] = 3;
+    const body = Buffer.from([0x67, 0x41, 0x4d, 0x41, 0, 1, 0x86, 0xa0]);
+    const gama = Buffer.alloc(12 + 4);
+    gama.writeUInt32BE(4, 0);
+    body.copy(gama, 4);
+    gama.writeUInt32BE(crc32(body), 12);
+    const indexed = Buffer.concat([ihdr, gama, source.subarray(33)]);
+    const reencoded = pngWithoutAlpha(new Uint8Array(source));
+    if (reencoded.status !== "opaque") throw new Error(reencoded.status);
+    const carried = carryPngColour(new Uint8Array(indexed), reencoded.png);
+    expect(Buffer.from(carried).subarray(33, 49).equals(gama)).toBe(true);
   });
 });
 
