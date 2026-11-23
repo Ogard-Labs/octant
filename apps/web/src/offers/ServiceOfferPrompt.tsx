@@ -5,9 +5,10 @@ import type {
   ServiceOfferDecision,
   ServiceOffersResponse,
 } from "@octant/contracts";
-import { lazy, Suspense, useCallback, useEffect, useState, type ComponentType } from "react";
+import { useCallback, useEffect, useState, type ComponentType } from "react";
 import "../followUps/follow-up-suggestions.css";
 import { ImageGenerateOfferCard, ImageSaveOfferCard } from "../image/imageOfferCards";
+import { VideoGenerateOfferCard, VideoSaveOfferCard } from "../video/videoOfferCards";
 import {
   THREAD_ACTIVITY_RECOVERY_MS,
   useThreadActivityRevision,
@@ -20,19 +21,6 @@ import { TranscriptionOfferCard } from "./TranscriptionOfferCard";
 
 const ACTIVE_OFFER_POLL_MS = 500;
 const IDLE_OFFER_POLL_MS = 5_000;
-
-// A video offer arrives rarely enough that a window that never sees one never
-// loads its cards.
-const VideoGenerateOfferCard = lazy(() =>
-  import("../video/videoOfferCards").then((module) => ({
-    default: module.VideoGenerateOfferCard,
-  })),
-);
-const VideoSaveOfferCard = lazy(() =>
-  import("../video/videoOfferCards").then((module) => ({
-    default: module.VideoSaveOfferCard,
-  })),
-);
 
 interface OfferCardProps {
   readonly offer: ServiceOffer;
@@ -139,16 +127,14 @@ export function ServiceOfferPrompt(props: {
 
   return (
     <section aria-label="Asked by the agent" className={`follow-up-cards ${props.className ?? ""}`}>
-      <Suspense fallback={null}>
-        <Card
-          key={pending.offerId}
-          offer={pending}
-          profiles={listed?.imageProfiles ?? props.profiles}
-          keptIn={props.keptIn}
-          busy={busy}
-          decide={(answer) => void decide(answer)}
-        />
-      </Suspense>
+      <Card
+        key={pending.offerId}
+        offer={pending}
+        profiles={listed?.imageProfiles ?? props.profiles}
+        keptIn={props.keptIn}
+        busy={busy}
+        decide={(answer) => void decide(answer)}
+      />
       {message === undefined ? null : (
         <OctantAlert className="follow-up-cards__error" tone="danger">
           {message}

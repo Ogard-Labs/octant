@@ -1,6 +1,6 @@
 import { decodeVideoGenerateOffer } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
-import { describeVideoOffer, videoOfferChoices } from "./videoOfferDescription";
+import { describeVideoOffer, videoOfferChoices } from "./serviceOfferClient";
 
 const offer = (job: Record<string, unknown>, price: Record<string, unknown>) =>
   decodeVideoGenerateOffer({

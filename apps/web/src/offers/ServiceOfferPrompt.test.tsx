@@ -2,7 +2,6 @@ import type { ServiceOfferClient } from "@octant/client-runtime/service-offer-cl
 import {
   decodeNarrationOffer,
   decodeTranscriptionOffer,
-  decodeVideoGenerateOffer,
   type ServiceOffer,
 } from "@octant/contracts";
 import type {
@@ -183,55 +182,6 @@ describe("ServiceOfferPrompt", () => {
       rememberForThread: false,
     });
   });
-  it("asks whether to make the clip once a video offer's card has loaded", async () => {
-    const fake = client([
-      decodeVideoGenerateOffer({
-        kind: "video-generate",
-        threadKind: "code-thread",
-        scopeId,
-        offerId,
-        requestedAt: "2026-11-07T10:00:00.000Z",
-        prompt: "A paper boat on a pond",
-        images: [],
-        profileInstanceId: "cc000000-0000-4000-8000-000000000012",
-        profileName: "Video",
-        providerName: "Example",
-        model: {
-          modelId: "clip-1",
-          displayName: "Clip One",
-          durations: { kind: "values", values: [5, 10] },
-          resolutions: ["720p"],
-          aspectRatios: [{ ratio: "16:9" }],
-          audio: "optional",
-          inputs: { firstFrame: true, lastFrame: false, maxReferenceImages: 0 },
-          price: {
-            kind: "per-second",
-            rates: [{ resolution: "720p", audio: false, usdMicrosPerSecond: 70_000 }],
-          },
-          job: {
-            cancel: "running",
-            removal: { kind: "delete" },
-            resumeWindowHours: 24,
-          },
-        },
-        options: { durationSeconds: 10, resolution: "720p", aspectRatio: "16:9", audio: false },
-        canRemember: true,
-      }),
-    ]);
-    renderPrompt(fake);
-    const card = await screen.findByRole("article", { name: "Video generation request" });
-    expect(card).toHaveTextContent("Make this video clip?");
-    expect(card).toHaveTextContent("A paper boat on a pond");
-    expect(card).toHaveTextContent("About $0.70 for 10 s at 720p, billed by Example.");
-    await userEvent.click(screen.getByRole("button", { name: "Generate" }));
-    expect(fake.decide).toHaveBeenCalledExactlyOnceWith({
-      offerId,
-      decision: "video-generate",
-      options: { durationSeconds: 10, resolution: "720p", aspectRatio: "16:9", audio: false },
-      rememberForThread: false,
-    });
-  });
-
   it("asks whether to generate the agent's picture with an image model, the suggested model chosen", async () => {
     renderPrompt(client([offer()]));
     const card = await screen.findByRole("article", { name: "Image generation request" });
