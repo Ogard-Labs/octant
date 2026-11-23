@@ -751,7 +751,6 @@ const WorktreePreparationDialog = lazy(() =>
 
 // Matches the desktop's double-press window for ⌘Q.
 const QUIT_HINT_VISIBLE_MS = 1500;
-/** How long a notice that only reports something done stays before it leaves. */
 
 export function App(props: AppProps) {
   const [locationLaunch] = useState(() =>

@@ -8,7 +8,7 @@ const UsageWorkspace = lazy(() =>
 const RemotePairingView = lazy(() =>
   import("../remote/RemotePairingView").then((module) => ({ default: module.RemotePairingView })),
 );
-// A change notice is rare, so its toast and client load after the window's first load.
+// Host notices load after the window first renders.
 const LazyHostNoticeToasts = lazy(() =>
   import("../host/HostNoticeToasts").then((module) => ({ default: module.HostNoticeToasts })),
 );
