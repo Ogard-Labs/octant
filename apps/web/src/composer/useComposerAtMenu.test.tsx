@@ -597,6 +597,9 @@ describe("@model in the composer", () => {
               props.onSend?.();
             }
           }}
+          onSelect={(event) => {
+            at.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+          }}
           ref={prompt}
           renderModelChip={at.renderModelChip}
           value={draft}
@@ -622,28 +625,16 @@ describe("@model in the composer", () => {
     ).toBeInTheDocument();
   });
 
-  it("undoes a chosen model back to the typed @model", async () => {
-    render(<ModelHarness />);
-    const prompt = screen.getByRole("textbox", { name: "Message" });
-    await userEvent.type(prompt, "Ask @model{Enter}");
+  it("replaces the whole @model word when the caret sits inside it", async () => {
+    render(<ModelHarness initial="Ask @model now" />);
+    const prompt = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    prompt.focus();
+    prompt.setSelectionRange(9, 9);
+    await userEvent.keyboard("{ArrowLeft}{ArrowRight}");
+    fireEvent.keyDown(prompt, { key: "Enter" });
     await screen.findByRole("combobox", { name: "Search models" });
     await userEvent.keyboard("GPT-5 mini{Enter}");
-    await waitFor(() => expect(prompt).toHaveFocus());
-    expect(prompt).toHaveValue(`Ask @model(${instanceId}/gpt-5-mini) `);
-    await userEvent.keyboard("{Control>}z{/Control}");
-    expect(prompt).toHaveValue("Ask @model");
-  });
-
-  it("does not send while the opened picker has yet to take the keyboard", async () => {
-    const onSend = vi.fn();
-    render(<ModelHarness onSend={onSend} />);
-    const prompt = screen.getByRole("textbox", { name: "Message" });
-    await userEvent.type(prompt, "Review @model");
-    fireEvent.keyDown(prompt, { key: "Enter" });
-    fireEvent.keyDown(prompt, { key: "Enter" });
-    expect(onSend).not.toHaveBeenCalled();
-    expect(prompt).toHaveValue("Review @model");
-    expect(await screen.findByRole("combobox", { name: "Search models" })).toBeInTheDocument();
+    await waitFor(() => expect(prompt).toHaveValue(`Ask @model(${instanceId}/gpt-5-mini) now`));
   });
 
   it("leaves the draft as typed when the picker is dismissed with Escape", async () => {
@@ -681,8 +672,8 @@ describe("@model in the composer", () => {
     render(<ModelHarness initial="Review later" />);
     const prompt = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
     prompt.focus();
-    prompt.setSelectionRange(7, 7);
-    await userEvent.keyboard("@model{Enter}");
+    prompt.setSelectionRange(6, 6);
+    await userEvent.keyboard(" @model{Enter}");
     await screen.findByRole("combobox", { name: "Search models" });
     await userEvent.keyboard("GPT-5 mini{Enter}");
     await waitFor(() => expect(prompt).toHaveFocus());

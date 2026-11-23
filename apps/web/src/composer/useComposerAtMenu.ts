@@ -332,13 +332,17 @@ export function useComposerAtMenu(input: {
   // is typed, and must keep the keyboard. Enter on the row opens the picker.
   const rows: Array<AtMenuRow> = [];
   if (tokenIsCurrent && modelGroups !== undefined) {
-    const query = token.query.toLowerCase();
-    if (query.length > 0 && MODEL_TOKEN.startsWith(query)) {
+    // The token runs past the caret when the caret sits inside it; the row
+    // is offered only when the whole word is `@model` or its prefix, and the
+    // chosen tag replaces all of it, not only the part before the caret.
+    const rest = input.draft.slice(token.start + raw.length).match(/^\S*/)?.[0] ?? "";
+    const word = `${token.query}${rest}`.toLowerCase();
+    if (word.length > 0 && MODEL_TOKEN.startsWith(word)) {
       // Start loading the picker while the row is offered, so it is usually
       // ready by the time Enter opens it.
       void loadSubagentModelPicker();
       const start = token.start;
-      const end = token.start + raw.length;
+      const end = token.start + 1 + word.length;
       rows.push({
         id: "subagent-model",
         title: "@model",

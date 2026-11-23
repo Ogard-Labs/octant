@@ -39,9 +39,7 @@
 }
 /* The @model picker's search sits at the top of the typeahead list, as a row of
    the list rather than a form field inside it. */
-.subagent-model-picker__search,
-.subagent-model-picker__search:focus,
-.subagent-model-picker__search:focus-visible {
+.subagent-model-picker__search {
   display: block;
   width: 100%;
   padding: var(--oct-space-1) var(--oct-space-2);
@@ -51,7 +49,6 @@
   background: none;
   color: var(--oct-fg);
   font: inherit;
-  outline: none;
 }
 .subagent-model-picker__search::placeholder {
   color: var(--oct-meta);
