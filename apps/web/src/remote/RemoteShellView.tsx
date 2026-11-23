@@ -210,6 +210,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
           connected={connected}
           extensionClient={extensionClient}
           mode={activeMode}
+          readOnly={standing.accessLevel === "read-only"}
         />
       </ContinuityScreenContext.Provider>
 

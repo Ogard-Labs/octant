@@ -337,6 +337,20 @@ describe("RemoteWorkspace", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: /^Stop/ })).toBeNull());
   });
 
+  it("opens a Code conversation for a watching device without a composer or a worker decision", async () => {
+    const { clients, code } = coordinatorFixture();
+    render(<RemoteWorkspace clients={clients} connected mode="code" readOnly />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Backlog coordinator" }));
+    await screen.findByText("No messages yet");
+    const workspace = await screen.findByRole("region", { name: "Code thread" });
+    expect(within(workspace).queryByRole("textbox")).not.toBeInTheDocument();
+    expect(
+      within(workspace).queryByRole("button", { name: "Approve and start" }),
+    ).not.toBeInTheDocument();
+    expect(code.readPlanner).not.toHaveBeenCalled();
+  });
+
   it("provides ThreadNativeSetupProvider to a paired browser so @ loads and labels Project Codex skills", async () => {
     const user = userEvent.setup();
     const projectId = "30000000-0000-4000-8000-000000000011";

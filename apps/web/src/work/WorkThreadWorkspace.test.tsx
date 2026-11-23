@@ -208,6 +208,22 @@ describe("Work host queue", () => {
 });
 
 describe("WorkThreadWorkspace", () => {
+  it("keeps the Work transcript available to a watching device without a composer", async () => {
+    const thread = workThread();
+    render(
+      <WorkThreadWorkspace
+        initialThread={thread}
+        projects={[]}
+        readOnly
+        threadId={thread.id}
+        title={thread.title}
+      />,
+    );
+
+    expect(await screen.findByRole("log", { name: "Work transcript" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
   it("shows the thread's guardrail level in its info panel", async () => {
     const thread = workThread();
     render(

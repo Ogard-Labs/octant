@@ -244,6 +244,7 @@ const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
 };
 
 export interface CodeThreadWorkspaceProps {
+  readonly readOnly?: boolean;
   readonly onOpenReview?: (request?: CodeReviewFileRequest) => void;
   readonly controller: CodeController;
   /**
@@ -381,6 +382,7 @@ export interface CodeThreadWorkspaceProps {
  * Overview/Git/Terminal remain secondary surfaces opened from the thread toolbar.
  */
 export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
+  const readOnly = props.readOnly === true;
   const worktreeLaunch = useContext(WorktreeLaunchContext)?.launches.get(props.threadId);
   const continuation = useContinuationInputPolicy("code", String(props.threadId), props.serverUrl);
   const view =
@@ -1812,13 +1814,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               <UsageLimitNotice
                 limit={props.controller.turnUsageLimit}
                 provider={providerModelLabel(providerGroups, thread)}
-                resumable={providerTurnOperationId !== undefined}
+                resumable={!readOnly && providerTurnOperationId !== undefined}
                 {...(thread.usageResume === undefined ? {} : { usageResume: thread.usageResume })}
-                {...(scheduleUsageResume === undefined
+                {...(readOnly || scheduleUsageResume === undefined
                   ? {}
                   : { onScheduleResume: scheduleUsageResume })}
-                onCancelResume={cancelUsageResume}
-                {...(snoozeAtUsageReset === undefined
+                {...(readOnly ? {} : { onCancelResume: cancelUsageResume })}
+                {...(readOnly || snoozeAtUsageReset === undefined
                   ? {}
                   : { onSnoozeAtReset: snoozeAtUsageReset })}
               />
@@ -1845,7 +1847,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           </OctantAlert>
         )}
 
-        {props.controller.turnErrorCategory === "tools-changed" ? (
+        {!readOnly && props.controller.turnErrorCategory === "tools-changed" ? (
           <ToolCatalogContinuation
             disabled={!canSend || queueFollowUp}
             onContinue={() => void submitFollowUp(true)}
@@ -1867,11 +1869,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               // either here could only be refused.
               resumable={false}
               {...(thread.usageResume === undefined ? {} : { usageResume: thread.usageResume })}
-              {...(scheduleUsageResume === undefined
+              {...(readOnly || scheduleUsageResume === undefined
                 ? {}
                 : { onScheduleResume: scheduleUsageResume })}
-              onCancelResume={cancelUsageResume}
-              {...(snoozeAtUsageReset === undefined ? {} : { onSnoozeAtReset: snoozeAtUsageReset })}
+              {...(readOnly ? {} : { onCancelResume: cancelUsageResume })}
+              {...(readOnly || snoozeAtUsageReset === undefined
+                ? {}
+                : { onSnoozeAtReset: snoozeAtUsageReset })}
             />
           </div>
         ) : null}
@@ -1899,6 +1903,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   state="loading"
                   title="Loading conversation"
                 />
+              ) : readOnly ? (
+                <OctantEmpty state="neutral" title="No messages yet" />
               ) : showEmptyConversation ? (
                 <>
                   {/* A thread on an empty checkout has nothing to talk about yet.
@@ -2185,49 +2191,53 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       className={`code-thread-workspace__message ${delivered ? "turn-child-result" : message.role === "user" ? "turn-user" : "turn-agent"}`}
                     >
                       <TurnActionMenu
-                        actions={codeTurnActions({
-                          // A person's message forks through the reply before it.
-                          canFork:
-                            !serverCheckout &&
-                            props.onOpenCodeThread !== undefined &&
-                            forkPoint?.operationId !== undefined &&
-                            forkPoint.status === "completed",
-                          canRewind:
-                            rewindFrom !== undefined &&
-                            !busy &&
-                            props.operationClient !== undefined &&
-                            props.nextUuid !== undefined,
-                          // A fork's own finished replies; inherited ones are the source's.
-                          canMergeBack:
-                            !serverCheckout &&
-                            view?.thread.forkedFrom !== undefined &&
-                            message.sourceThreadId === undefined &&
-                            message.role === "assistant" &&
-                            message.operationId !== undefined &&
-                            message.status === "completed",
-                          merging,
-                          canCopyMarkdown:
-                            message.role === "assistant" &&
-                            message.status === "completed" &&
-                            message.text.trim().length > 0,
-                          canCheckpoint:
-                            !serverCheckout &&
-                            message.sourceThreadId === undefined &&
-                            message.role === "assistant" &&
-                            message.operationId !== undefined &&
-                            message.status === "completed" &&
-                            checkpoints.available,
-                          canRestoreFiles:
-                            !serverCheckout &&
-                            message.sourceThreadId === undefined &&
-                            message.role === "user" &&
-                            message.checkpoint !== undefined &&
-                            mayRestore,
-                          checkpointBusy: checkpoints.busy,
-                          forking,
-                          marked: markedCheckpoint !== undefined,
-                          restoring,
-                        })}
+                        actions={
+                          readOnly
+                            ? []
+                            : codeTurnActions({
+                                // A person's message forks through the reply before it.
+                                canFork:
+                                  !serverCheckout &&
+                                  props.onOpenCodeThread !== undefined &&
+                                  forkPoint?.operationId !== undefined &&
+                                  forkPoint.status === "completed",
+                                canRewind:
+                                  rewindFrom !== undefined &&
+                                  !busy &&
+                                  props.operationClient !== undefined &&
+                                  props.nextUuid !== undefined,
+                                // A fork's own finished replies; inherited ones are the source's.
+                                canMergeBack:
+                                  !serverCheckout &&
+                                  view?.thread.forkedFrom !== undefined &&
+                                  message.sourceThreadId === undefined &&
+                                  message.role === "assistant" &&
+                                  message.operationId !== undefined &&
+                                  message.status === "completed",
+                                merging,
+                                canCopyMarkdown:
+                                  message.role === "assistant" &&
+                                  message.status === "completed" &&
+                                  message.text.trim().length > 0,
+                                canCheckpoint:
+                                  !serverCheckout &&
+                                  message.sourceThreadId === undefined &&
+                                  message.role === "assistant" &&
+                                  message.operationId !== undefined &&
+                                  message.status === "completed" &&
+                                  checkpoints.available,
+                                canRestoreFiles:
+                                  !serverCheckout &&
+                                  message.sourceThreadId === undefined &&
+                                  message.role === "user" &&
+                                  message.checkpoint !== undefined &&
+                                  mayRestore,
+                                checkpointBusy: checkpoints.busy,
+                                forking,
+                                marked: markedCheckpoint !== undefined,
+                                restoring,
+                              })
+                        }
                         onAction={(value) => {
                           if (value === "fork" && forkPoint !== undefined) void forkFrom(forkPoint);
                           else if (value === "rewind" && rewindFrom !== undefined)
@@ -2313,10 +2323,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                 message.status === "incomplete" &&
                                 props.controller.turnStatus === "running"
                               }
-                              onStop={() => {
-                                forceStop.requestStop();
-                                void props.controller.cancelTurn();
-                              }}
+                              {...(readOnly
+                                ? {}
+                                : {
+                                    onStop: () => {
+                                      forceStop.requestStop();
+                                      void props.controller.cancelTurn();
+                                    },
+                                  })}
                             />
                             {activity?.retrying === undefined ? null : (
                               <HarnessRetryStatus
@@ -2443,7 +2457,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                 })}
                           />
                         ) : null}
-                        {(markedCheckpoint !== undefined ||
+                        {!readOnly &&
+                        (markedCheckpoint !== undefined ||
                           checkpointDraft?.messageId === message.id) &&
                         message.role === "assistant" &&
                         message.operationId !== undefined &&
@@ -2497,6 +2512,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         {message.role === "user" &&
                         message.checkpoint !== undefined &&
                         mayRestore &&
+                        !readOnly &&
                         confirmingRestore === message.id ? (
                           <RestoreFilesConfirm
                             onKeep={() => setConfirmingRestore(undefined)}
@@ -2513,6 +2529,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             forkDisabled={forking}
                             latest={message === lastReply}
                             onFork={
+                              !readOnly &&
                               message.operationId !== undefined &&
                               message.status === "completed" &&
                               props.onOpenCodeThread !== undefined
@@ -2588,7 +2605,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           ) : null}
         </OctantDialogPresence>
         <OctantDialogPresence>
-          {rewind !== undefined ? (
+          {!readOnly && rewind !== undefined ? (
             <RewindDialog
               busy={rewind?.busy === true}
               files={rewind?.files ?? { kind: "loading" }}
@@ -2641,7 +2658,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             threadId={decodeBrowserThreadId(String(thread.id))}
           />
         )}
-        {props.controller.providerRequests.length === 0 ? null : (
+        {readOnly || props.controller.providerRequests.length === 0 ? null : (
           <div
             aria-label="Pending provider requests"
             className="code-thread-workspace__provider-requests thread-column"
@@ -2703,7 +2720,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         )}
         <ExtensionToolApprovalPrompt
           className="thread-column"
-          client={props.extensionClient}
+          client={readOnly ? undefined : props.extensionClient}
           threadId={String(props.threadId)}
           turnActive={busy}
         />
@@ -2730,6 +2747,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           turnActive={busy}
         />
         <ThreadComposer
+          readOnly={readOnly}
           queue={
             <>
               <ThreadWakeups
