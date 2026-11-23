@@ -247,4 +247,29 @@ describe("octant_create_video on the host", () => {
     await plan.call({ operation: "save", clipId, relativePath: "media/boat.mp4" });
     expect(plan.write).not.toHaveBeenCalled();
   });
+
+  it("writes nothing when the turn is stopped once the clip is read or the card answered", async () => {
+    const stoppedWhileReading = harness({ posture: "allow" });
+    const readController = new AbortController();
+    readController.abort();
+    const readOutcome = await stoppedWhileReading.call(
+      { operation: "save", clipId, relativePath: "media/boat.mp4" },
+      readController.signal,
+    );
+    expect(readOutcome.result).toMatchObject({ status: "not-saved" });
+    expect(stoppedWhileReading.write).not.toHaveBeenCalled();
+
+    const stoppedAtCard = harness({ posture: "ask" });
+    const cardController = new AbortController();
+    stoppedAtCard.askSave.mockImplementation(async () => {
+      cardController.abort();
+      return { status: "video-save" as const };
+    });
+    const cardOutcome = await stoppedAtCard.call(
+      { operation: "save", clipId, relativePath: "media/boat.mp4" },
+      cardController.signal,
+    );
+    expect(cardOutcome.result).toMatchObject({ status: "not-saved" });
+    expect(stoppedAtCard.write).not.toHaveBeenCalled();
+  });
 });

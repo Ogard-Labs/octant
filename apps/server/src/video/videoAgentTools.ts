@@ -506,6 +506,8 @@ async function saveVideo(
     return { status: "refused", error: "Plan mode cannot save files." };
   const bytes = await port.jobs.readClip(job).catch(() => undefined);
   if (bytes === undefined) return { status: "refused", error: "The clip is unavailable." };
+  const aborted = (): boolean => request.signal?.aborted === true;
+  if (aborted()) return { status: "not-saved" };
   // The level is read again after every wait, so a thread lowered while the
   // clip was read or the card was open is refused or asked, never written on
   // the level it had when the call began.
@@ -531,6 +533,7 @@ async function saveVideo(
     if (answer.status !== "video-save") return { status: "not-saved" };
     confirmed = true;
   }
+  if (aborted()) return { status: "not-saved" };
   const saved = await save.write(request.relativePath, bytes);
   return saved.status === "saved"
     ? { status: "saved", relativePath: saved.relativePath }
