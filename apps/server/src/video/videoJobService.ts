@@ -339,32 +339,15 @@ export class VideoJobService {
     }
     const estimatedCostUsdMicros =
       quote.estimate.kind === "estimate" ? quote.estimate.usdMicros : ("unknown" as const);
-    let reservationId: SpendCeilingReservationId | undefined;
-    if (this.#options.spendCeiling !== undefined) {
-      const candidate = decodeSpendCeilingReservationId(this.#options.uuid());
-      const projectId = this.#options.resolveThreadProjectId?.({
-        threadType: input.threadKind,
-        threadId: String(input.scopeId),
-      });
-      const admission = this.#options.spendCeiling.admit({
-        reservationId: candidate,
-        threadId: String(input.scopeId),
-        threadType: input.threadKind,
-        ...(projectId === undefined ? {} : { projectId }),
-        countsAsTurn: false,
-        skipTurnAndRunTimeCeiling: true,
-        skipTokenCeiling: true,
-        estimatedCostUsdMicros,
-      });
-      if (admission.status !== "admitted") {
-        throw new VideoJobServiceError(
-          "spend-ceiling",
-          "A spend ceiling cannot cover this clip.",
-          admission.refusal,
-        );
-      }
-      reservationId = candidate;
+    const reserved = this.#reserve(input.threadKind, input.scopeId, estimatedCostUsdMicros);
+    if (reserved?.status === "refused") {
+      throw new VideoJobServiceError(
+        "spend-ceiling",
+        "A spend ceiling cannot cover this clip.",
+        reserved.refusal,
+      );
     }
+    const reservationId = reserved?.status === "admitted" ? reserved.reservationId : undefined;
     const now = decodeUtcTimestamp(this.#options.clock());
     const job: VideoJob = {
       id: decodeVideoJobId(this.#options.uuid()),
@@ -466,9 +449,13 @@ export class VideoJobService {
         });
         continue;
       }
+      // A job sent before the restart is resumed under a fresh reservation so
+      // its estimate still counts against the ceiling until it settles.
+      const reserved = this.#reserve(job.threadKind, job.scopeId, job.estimatedCostUsdMicros);
       this.#running.set(String(job.id), {
         controller: new AbortController(),
         stopRequested: false,
+        ...(reserved?.status === "admitted" ? { reservationId: reserved.reservationId } : {}),
       });
       void this.#withSlot(() => this.#resume(job));
     }
@@ -550,10 +537,16 @@ export class VideoJobService {
       return;
     }
     const instance = this.#options.readProviderInstance(job.profileInstanceId);
-    const adapter = instance === undefined ? undefined : this.#adapterFor(instance);
+    const adapter =
+      instance === undefined || instance.enabled === false ? undefined : this.#adapterFor(instance);
     if (instance === undefined || adapter === undefined) {
       this.#finish(job, "failed", {
-        failure: videoFailure("unsupported", "That video profile is no longer available."),
+        failure: videoFailure(
+          "unsupported",
+          instance?.enabled === false
+            ? "That video profile was turned off before the clip started."
+            : "That video profile is no longer available.",
+        ),
       });
       return;
     }
@@ -655,7 +648,10 @@ export class VideoJobService {
           // Shutdown aborted the cancel: the job stays running for the next
           // host to resume, never concluded from an answer the abort produced.
           if (this.#closing.signal.aborted) return;
-          if (answer.status !== "running") {
+          // A failed cancel leaves the stop unconfirmed: the provider may
+          // still be running the job, so keep polling to a terminal answer or
+          // the deadline rather than ending it cancelled and unbilled.
+          if (answer.status !== "running" && answer.status !== "failed") {
             await this.#conclude(job, answer, true);
             return;
           }
@@ -974,6 +970,39 @@ export class VideoJobService {
 
   #notify(job: VideoJob): void {
     this.#options.onChanged?.(job);
+  }
+
+  /**
+   * Reserves a job's estimate under the same shape a new admission uses, so a
+   * resumed job counts against the ceiling for as long as it is unfinished.
+   */
+  #reserve(
+    threadKind: VideoJobThreadKind,
+    scopeId: VideoJob["scopeId"],
+    estimatedCostUsdMicros: VideoJob["estimatedCostUsdMicros"],
+  ):
+    | { readonly status: "admitted"; readonly reservationId: SpendCeilingReservationId }
+    | { readonly status: "refused"; readonly refusal: SpendCeilingRefusal }
+    | undefined {
+    if (this.#options.spendCeiling === undefined) return undefined;
+    const candidate = decodeSpendCeilingReservationId(this.#options.uuid());
+    const projectId = this.#options.resolveThreadProjectId?.({
+      threadType: threadKind,
+      threadId: String(scopeId),
+    });
+    const admission = this.#options.spendCeiling.admit({
+      reservationId: candidate,
+      threadId: String(scopeId),
+      threadType: threadKind,
+      ...(projectId === undefined ? {} : { projectId }),
+      countsAsTurn: false,
+      skipTurnAndRunTimeCeiling: true,
+      skipTokenCeiling: true,
+      estimatedCostUsdMicros,
+    });
+    return admission.status === "admitted"
+      ? { status: "admitted", reservationId: candidate }
+      : { status: "refused", refusal: admission.refusal };
   }
 
   #adapterFor(instance: ProviderInstance): VideoGenerationAdapter | undefined {

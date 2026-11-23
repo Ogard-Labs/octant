@@ -165,6 +165,7 @@ function harness(script: Script, directory?: string) {
   const fake = fakeDriver(script);
   const fetched: Array<string> = [];
   let clockMs = Date.parse(now);
+  const instance: { current: ProviderInstance | undefined } = { current: profile() };
   const spend = {
     admit: vi.fn(() => ({ status: "admitted" as const, reservedTokens: 0, reservations: [] })),
     settle: vi.fn(),
@@ -174,8 +175,8 @@ function harness(script: Script, directory?: string) {
     journal,
     projection: runtime.videoJobProjection,
     clips: new VideoClipStore(root),
-    readProviderInstance: (id) => (String(id) === String(profileId) ? profile() : undefined),
-    listProviderInstances: () => [profile()],
+    readProviderInstance: (id) => (String(id) === String(profileId) ? instance.current : undefined),
+    listProviderInstances: () => (instance.current === undefined ? [] : [instance.current]),
     credentialResolver: {
       has: async () => true,
       resolve: async () => (await script.credential?.()) ?? "key",
@@ -200,6 +201,7 @@ function harness(script: Script, directory?: string) {
     service,
     calls: fake.calls,
     spend,
+    instance,
     root,
     connection,
     journal,
@@ -569,5 +571,92 @@ describe("video jobs", () => {
       status: "failed",
       settledCostUsdMicros: 695_040,
     });
+  });
+
+  it("keeps polling when the provider's cancel fails, and completes billed with its clip", async () => {
+    let release: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { service, calls, spend } = harness({
+      cancel: async () => ({
+        status: "failed",
+        providerFailure: { category: "unavailable", message: "Could not reach the provider." },
+      }),
+      start: async () => {
+        release();
+        return { status: "started", remoteId: "remote-1" };
+      },
+    });
+    const queued = await enqueue(service);
+    await started;
+    service.stop(queued.id);
+    const done = await service.whenTerminal(queued.id);
+    expect(done).toMatchObject({ status: "completed" });
+    expect(done?.clip?.clipId).toBeDefined();
+    expect(done?.settledCostUsdMicros).toBeGreaterThan(0);
+    expect(calls.cancel).toBe(1);
+    expect(spend.settle).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts a resumed job's estimate against the ceiling after a restart", async () => {
+    const first = harness({
+      polls: Array.from({ length: 50 }, () => ({ status: "running" as const })),
+    });
+    const queued = await enqueue(first.service);
+    await vi.waitFor(() => expect(first.service.getById(queued.id)?.remoteId).toBe("remote-1"));
+    first.service.close();
+
+    const second = harness(
+      { polls: Array.from({ length: 50 }, () => ({ status: "running" as const })) },
+      first.root,
+    );
+    await second.service.recover();
+    // Recovery re-reserved the resumed job's estimate.
+    expect(second.spend.admit).toHaveBeenCalledTimes(1);
+    // A new admission the ceiling cannot cover alongside it is refused.
+    second.spend.admit.mockReturnValueOnce({
+      status: "refused",
+      refusal: { kind: "monetary" },
+    } as never);
+    await expect(enqueue(second.service)).rejects.toThrow(
+      "A spend ceiling cannot cover this clip.",
+    );
+    // The reservation settles when the resumed job ends.
+    second.service.stop(queued.id);
+    const done = await second.service.whenTerminal(queued.id);
+    expect(done?.status).toBe("cancelled");
+    expect(second.spend.settle).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a queued clip whose profile was turned off before it sent", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { service, calls, spend, instance } = harness({
+      start: async () => {
+        await gate;
+        return { status: "started", remoteId: "remote-1" };
+      },
+    });
+    // Both run slots stay busy until the gate opens, so the third job is
+    // still queued when the profile is turned off.
+    const held = [await enqueue(service), await enqueue(service)];
+    const queued = await enqueue(service);
+    instance.current = { ...profile(), enabled: false };
+    release();
+    const done = await service.whenTerminal(queued.id);
+    expect(done).toMatchObject({
+      status: "failed",
+      failure: {
+        category: "unsupported",
+        message: "That video profile was turned off before the clip started.",
+      },
+    });
+    expect(done?.settledCostUsdMicros).toBeUndefined();
+    expect(calls.start).toBe(2);
+    expect(spend.abandon).toHaveBeenCalledTimes(1);
+    for (const job of held) await service.whenTerminal(job.id);
   });
 });
