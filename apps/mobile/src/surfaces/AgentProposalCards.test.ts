@@ -4,6 +4,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MobileRemoteTransport } from "@octant/client-runtime";
+import { decodeAutomationTrigger } from "@octant/contracts/automation";
+import { routineScheduleLabel } from "@octant/domain";
 import type { BiometricAuthenticator } from "../security/BiometricGate";
 import { ThemeProvider } from "../../design-system/theme";
 import { MemoryProposalCard, RoutineProposalCard } from "./AgentProposalCards";
@@ -167,6 +169,44 @@ describe("Project memory proposal on the phone", () => {
     expect(container.querySelector('[data-testid="mobile-memory-proposal"]')).toBeNull();
   });
 
+  it("keeps the host's reason where the card was when a confirmed save is not applied, until dismissed", async () => {
+    const { transport, answers } = hostHolding(
+      "/api/projects/memory/proposals",
+      "project-memory-proposal-list",
+      {
+        proposalId,
+        projectId,
+        mode: "work",
+        threadId,
+        change: { kind: "create", memoryKind: "decision", content: "Ship on Tuesdays." },
+        expectedVersion: 2,
+        requestedAt: "2026-11-20T09:00:00.000Z",
+      },
+      { kind: "project-memory-proposal-not-applied", message: "Memory moved on." },
+    );
+    const container = await render(
+      createElement(MemoryProposalCard, {
+        transport,
+        threadId,
+        actsAsHostPerson: true,
+        authenticator: confirming(),
+        refreshIntervalMs: 60_000,
+      }),
+    );
+
+    await press(container, "Save to memory");
+
+    expect(answers.map((entry) => entry.body)).toEqual([{ proposalId, decision: "confirm" }]);
+    expect(container.querySelector('[data-testid="mobile-memory-proposal"]')).toBeNull();
+    expect(
+      container.querySelector('[data-testid="mobile-memory-proposal-failed"]')?.textContent,
+    ).toContain("Not saved: Memory moved on. Nothing was changed.");
+
+    await press(container, "Dismiss");
+
+    expect(container.querySelector('[data-testid="mobile-memory-proposal-failed"]')).toBeNull();
+  });
+
   it("tells a session the host would not take an answer from to answer on the computer", async () => {
     const { transport } = memoryHost();
     const container = await render(
@@ -218,6 +258,92 @@ describe("Routine proposal on the phone", () => {
       },
     ]);
     expect(container.querySelector('[data-testid="mobile-routine-proposal"]')).toBeNull();
+  });
+
+  it("keeps the host's reason where the card was when a confirmed routine is not applied, until dismissed", async () => {
+    const { transport, answers } = hostHolding(
+      "/api/automations/proposals",
+      "routine-proposal-list",
+      {
+        proposalId,
+        threadId,
+        projectId,
+        requestedAt: "2026-11-20T09:00:00.000Z",
+        mode: "work",
+        displayName: "Morning triage",
+        taskPrompt: "Triage new issues.",
+        trigger: { kind: "interval", intervalMinutes: 60, anchorAt: "2026-11-20T09:00:00.000Z" },
+        missedRunPolicy: "skip",
+        firstRunAt: "2026-11-20T10:00:00.000Z",
+      },
+      {
+        kind: "automation-command-failed",
+        reason: "invalid",
+        message: "A routine with this name already exists.",
+      },
+    );
+    const container = await render(
+      createElement(RoutineProposalCard, {
+        transport,
+        threadId,
+        actsAsHostPerson: true,
+        authenticator: confirming(),
+        refreshIntervalMs: 60_000,
+      }),
+    );
+
+    await press(container, "Create routine");
+
+    expect(answers.map((entry) => entry.body)).toEqual([{ proposalId, decision: "confirm" }]);
+    expect(container.querySelector('[data-testid="mobile-routine-proposal"]')).toBeNull();
+    expect(
+      container.querySelector('[data-testid="mobile-routine-proposal-failed"]')?.textContent,
+    ).toContain("Not saved: A routine with this name already exists. Nothing was changed.");
+
+    await press(container, "Dismiss");
+
+    expect(container.querySelector('[data-testid="mobile-routine-proposal-failed"]')).toBeNull();
+  });
+
+  it("names the zone a weekly routine repeats in, and the phone's own when they differ", async () => {
+    const firstRunAt = "2026-11-22T20:00:00.000Z";
+    const trigger = {
+      kind: "weekly-local",
+      weekdays: [1],
+      localTime: "09:00",
+      timeZone: "Pacific/Auckland",
+    } as const;
+    const { transport } = routineHost({
+      mode: "work",
+      displayName: "Monday digest",
+      taskPrompt: "Summarise the week.",
+      trigger,
+      missedRunPolicy: "skip",
+      firstRunAt,
+    });
+    const container = await render(
+      createElement(RoutineProposalCard, {
+        transport,
+        threadId,
+        actsAsHostPerson: true,
+        authenticator: confirming(),
+        refreshIntervalMs: 60_000,
+      }),
+    );
+
+    const shortZone = (timeZone: string | undefined) =>
+      new Intl.DateTimeFormat("en-US", {
+        ...(timeZone === undefined ? {} : { timeZone }),
+        timeZoneName: "short",
+      })
+        .formatToParts(new Date(firstRunAt))
+        .find((part) => part.type === "timeZoneName")?.value;
+    expect(container.textContent).toContain(
+      `${routineScheduleLabel(decodeAutomationTrigger(trigger))} ${shortZone("Pacific/Auckland")}`,
+    );
+    expect(container.textContent).toContain(
+      `First run ${new Date(firstRunAt).toLocaleString()} ${shortZone(undefined)}`,
+    );
   });
 
   it("asks before pausing a routine and keeps it when the person declines", async () => {

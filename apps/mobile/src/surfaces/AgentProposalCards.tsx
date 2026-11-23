@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import {
   decideMobileMemoryProposal,
   decideMobileRoutineProposal,
@@ -52,29 +52,47 @@ export function MemoryProposalCard(props: AgentProposalCardProps) {
   const answer = useProposalAnswer(props, resource, (proposalId, decision) =>
     decideMobileMemoryProposal({ transport, proposalId, decision }),
   );
-  if (pending === undefined || answer.answeredId === String(pending.proposalId)) return null;
+  const showCard = pending !== undefined && answer.answeredId !== String(pending.proposalId);
+  if (!showCard) {
+    return answer.failure === undefined ? null : (
+      <ProposalFailureNote
+        message={answer.failure}
+        onDismiss={answer.dismissFailure}
+        testID="mobile-memory-proposal-failed"
+      />
+    );
+  }
   const { change } = pending;
   return (
-    <ProposalFrame
-      allowLabel={change.kind === "retract" ? "Retract" : "Save to memory"}
-      answer={answer}
-      denyLabel="Decline"
-      detail="Every later thread in this Project starts with this memory. It is marked as written by an agent."
-      onDecide={(decision) => void answer.decide(String(pending.proposalId), decision)}
-      props={props}
-      stale={resource.error !== undefined}
-      summary={memorySummary(change)}
-      testID="mobile-memory-proposal"
-    >
-      {change.kind === "supersede" ? (
-        <ProposalText>Replaces: {change.previousContent}</ProposalText>
-      ) : null}
-      {change.kind === "retract" ? <ProposalText>Reason: {change.reason}</ProposalText> : null}
-      <ProposalText strong>{change.content}</ProposalText>
-      {pending.outsideContent === undefined ? null : (
-        <OutsideContentNote outsideContent={pending.outsideContent} />
+    <>
+      {answer.failure === undefined ? null : (
+        <ProposalFailureNote
+          message={answer.failure}
+          onDismiss={answer.dismissFailure}
+          testID="mobile-memory-proposal-failed"
+        />
       )}
-    </ProposalFrame>
+      <ProposalFrame
+        allowLabel={change.kind === "retract" ? "Retract" : "Save to memory"}
+        answer={answer}
+        denyLabel="Decline"
+        detail="Every later thread in this Project starts with this memory. It is marked as written by an agent."
+        onDecide={(decision) => void answer.decide(String(pending.proposalId), decision)}
+        props={props}
+        stale={resource.error !== undefined}
+        summary={memorySummary(change)}
+        testID="mobile-memory-proposal"
+      >
+        {change.kind === "supersede" ? (
+          <ProposalText>Replaces: {change.previousContent}</ProposalText>
+        ) : null}
+        {change.kind === "retract" ? <ProposalText>Reason: {change.reason}</ProposalText> : null}
+        <ProposalText strong>{change.content}</ProposalText>
+        {pending.outsideContent === undefined ? null : (
+          <OutsideContentNote outsideContent={pending.outsideContent} />
+        )}
+      </ProposalFrame>
+    </>
   );
 }
 
@@ -94,23 +112,41 @@ export function RoutineProposalCard(props: AgentProposalCardProps) {
   const answer = useProposalAnswer(props, resource, (proposalId, decision) =>
     decideMobileRoutineProposal({ transport, proposalId, decision }),
   );
-  if (pending === undefined || answer.answeredId === String(pending.proposalId)) return null;
+  const showCard = pending !== undefined && answer.answeredId !== String(pending.proposalId);
+  if (!showCard) {
+    return answer.failure === undefined ? null : (
+      <ProposalFailureNote
+        message={answer.failure}
+        onDismiss={answer.dismissFailure}
+        testID="mobile-routine-proposal-failed"
+      />
+    );
+  }
   const words = routineWords(pending);
   return (
-    <ProposalFrame
-      allowLabel={words.allowLabel}
-      answer={answer}
-      denyLabel={words.denyLabel}
-      detail={words.detail}
-      onDecide={(decision) => void answer.decide(String(pending.proposalId), decision)}
-      props={props}
-      stale={resource.error !== undefined}
-      summary={words.summary}
-      testID="mobile-routine-proposal"
-    >
-      <ProposalText strong>{pending.displayName}</ProposalText>
-      {words.body === undefined ? null : <ProposalText>{words.body}</ProposalText>}
-    </ProposalFrame>
+    <>
+      {answer.failure === undefined ? null : (
+        <ProposalFailureNote
+          message={answer.failure}
+          onDismiss={answer.dismissFailure}
+          testID="mobile-routine-proposal-failed"
+        />
+      )}
+      <ProposalFrame
+        allowLabel={words.allowLabel}
+        answer={answer}
+        denyLabel={words.denyLabel}
+        detail={words.detail}
+        onDecide={(decision) => void answer.decide(String(pending.proposalId), decision)}
+        props={props}
+        stale={resource.error !== undefined}
+        summary={words.summary}
+        testID="mobile-routine-proposal"
+      >
+        <ProposalText strong>{pending.displayName}</ProposalText>
+        {words.body === undefined ? null : <ProposalText>{words.body}</ProposalText>}
+      </ProposalFrame>
+    </>
   );
 }
 
@@ -119,6 +155,12 @@ interface ProposalAnswerState {
   readonly note: string | undefined;
   /** The proposal this card answered, hidden until the host's list drops it. */
   readonly answeredId: string | undefined;
+  /**
+   * A change the host could not apply, said where the card was until the
+   * person dismisses it or leaves the screen.
+   */
+  readonly failure: string | undefined;
+  readonly dismissFailure: () => void;
   readonly decide: (proposalId: string, decision: MobileProposalDecision) => Promise<void>;
 }
 
@@ -132,6 +174,7 @@ function useProposalAnswer(
   const inFlight = useRef(false);
   const [note, setNote] = useState<string>();
   const [answeredId, setAnsweredId] = useState<string>();
+  const [failure, setFailure] = useState<string>();
   const decide = async (proposalId: string, decision: MobileProposalDecision) => {
     if (inFlight.current) return;
     inFlight.current = true;
@@ -152,9 +195,12 @@ function useProposalAnswer(
       else if (outcome.value.status === "refused") setNote(MOBILE_COPY.proposalAnswerOnComputer);
       else {
         // Every answer the host took, and a proposal already gone, leaves its
-        // list; a confirmed change the host could not apply says why.
+        // list. A confirmed change the host could not apply says why where the
+        // card was: withdrawing the card alone would lose the reason.
         setAnsweredId(proposalId);
-        if (outcome.value.status === "not-applied") setNote(outcome.value.message);
+        if (outcome.value.status === "not-applied") {
+          setFailure(MOBILE_COPY.proposalNotSaved(outcome.value.message));
+        }
       }
     } catch {
       setNote(MOBILE_COPY.approvalSendFailed);
@@ -164,7 +210,7 @@ function useProposalAnswer(
       void resource.reload();
     }
   };
-  return { busy, note, answeredId, decide };
+  return { busy, note, answeredId, failure, dismissFailure: () => setFailure(undefined), decide };
 }
 
 function ProposalFrame(props: {
@@ -202,6 +248,36 @@ function ProposalFrame(props: {
           {props.stale ? MOBILE_COPY.approvalReconnecting : props.answer.note}
         </Text>
       ) : null}
+    </View>
+  );
+}
+
+/** Where a withdrawn card was: why the host saved nothing, until dismissed. */
+function ProposalFailureNote(props: {
+  readonly message: string;
+  readonly onDismiss: () => void;
+  readonly testID: string;
+}) {
+  const { colors } = useTheme();
+  return (
+    <View style={[styles.card, { borderColor: colors.border }]} testID={props.testID}>
+      <Text
+        accessibilityLiveRegion="polite"
+        style={[mobileTypography.body, { color: colors.textPrimary }]}
+      >
+        {props.message}
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        hitSlop={8}
+        onPress={props.onDismiss}
+        style={styles.quiet}
+        testID={`${props.testID}-dismiss`}
+      >
+        <Text style={[mobileTypography.body, { color: colors.textSecondary }]}>
+          {MOBILE_COPY.proposalFailureDismiss}
+        </Text>
+      </Pressable>
     </View>
   );
 }
@@ -259,16 +335,48 @@ function routineWords(request: RoutineAgentRequest): {
       denyLabel: "Keep it",
     };
   }
-  const firstRun = new Date(request.firstRunAt).toLocaleString();
+  const firstRunAt = new Date(request.firstRunAt);
+  const firstRun = firstRunAt.toLocaleString();
+  // A weekly routine repeats in its trigger's zone, which can be a country
+  // away from the phone: name it, and name the phone's zone on the first run
+  // when it is another zone's clock the time is shown in.
+  const scheduleZone =
+    request.trigger.kind === "weekly-local"
+      ? ` ${shortZoneName(request.trigger.timeZone, firstRunAt)}`
+      : "";
+  const firstRunZone =
+    request.trigger.kind === "weekly-local" &&
+    resolvedTimeZone(request.trigger.timeZone) !== resolvedTimeZone(undefined)
+      ? ` ${shortZoneName(undefined, firstRunAt)}`
+      : "";
   return {
     summary: followUp ? "Schedule a follow-up here?" : "Create this routine?",
     body: request.taskPrompt,
     detail: followUp
       ? `Once, ${firstRun}. It sends this prompt as a new turn in this thread.`
-      : `${routineScheduleLabel(request.trigger)} · First run ${firstRun}. Each run starts a new thread in this Project with this prompt, and asks before it changes anything.`,
+      : `${routineScheduleLabel(request.trigger)}${scheduleZone} · First run ${firstRun}${firstRunZone}. Each run starts a new thread in this Project with this prompt, and asks before it changes anything.`,
     allowLabel: followUp ? "Schedule follow-up" : "Create routine",
     denyLabel: "Decline",
   };
+}
+
+/** The zone a clock time is read in, as people see it ("CET", "GMT+1"). */
+function shortZoneName(timeZone: string | undefined, at: Date): string {
+  const part = new Intl.DateTimeFormat("en-US", {
+    ...(timeZone === undefined ? {} : { timeZone }),
+    timeZoneName: "short",
+  })
+    .formatToParts(at)
+    .find((entry) => entry.type === "timeZoneName");
+  return part?.value ?? timeZone ?? "";
+}
+
+/** Canonical IANA id, so a routine's zone and the phone's still compare as one. */
+function resolvedTimeZone(timeZone: string | undefined): string {
+  return new Intl.DateTimeFormat(
+    "en-US",
+    timeZone === undefined ? {} : { timeZone },
+  ).resolvedOptions().timeZone;
 }
 
 const styles = StyleSheet.create({
@@ -280,4 +388,5 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     gap: mobileSpacing.xs,
   },
+  quiet: { minHeight: 44, alignItems: "center", justifyContent: "center" },
 });
