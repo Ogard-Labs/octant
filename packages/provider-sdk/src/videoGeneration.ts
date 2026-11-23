@@ -8,6 +8,7 @@ import { checkVideoClipOptions } from "./videoGenerationPolicy";
 import {
   imageFailure,
   isImageEndpointAllowed,
+  isProviderFailure,
   parseRetryAfter,
   type ImageAdapterReference,
   type ImageHttpAuth,
@@ -249,8 +250,18 @@ export function classifyVideoHttpFailure(response: Response, now = Date.now()): 
 }
 
 export async function readVideoJson(response: Response): Promise<unknown> {
+  // A body that never finished reading is a transport break, not bad JSON:
+  // typed as unavailable so the host retries it, while an invalid but fully
+  // received body stays a protocol failure.
+  let text: string;
   try {
-    return JSON.parse(await response.text()) as unknown;
+    text = await response.text();
+  } catch (error) {
+    if (isProviderFailure(error)) throw error;
+    throw videoFailure("unavailable", "The provider response could not be read.");
+  }
+  try {
+    return JSON.parse(text) as unknown;
   } catch {
     throw videoFailure("protocol", "The provider returned an invalid video response.");
   }

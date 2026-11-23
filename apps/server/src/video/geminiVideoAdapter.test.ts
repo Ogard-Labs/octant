@@ -258,6 +258,37 @@ describe("Gemini video driver", () => {
     });
   });
 
+  it("retries a poll body that breaks mid-read, while bad JSON stays a protocol failure", async () => {
+    let calls = 0;
+    const recorder = ports(() => {
+      calls += 1;
+      // Headers arrive, then the stream dies: a transport break, not bad JSON.
+      if (calls === 1) {
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"id":'));
+              controller.error(new Error("stream reset"));
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (calls === 2) return new Response("{not json", { status: 200 });
+      return Response.json(completedInteraction());
+    });
+    const adapter = geminiVideoDriver.create({ profile, ports: recorder.ports });
+    expect(await adapter.poll("v1_abc", new AbortController().signal)).toMatchObject({
+      status: "failed",
+      providerFailure: { category: "unavailable" },
+    });
+    expect(await adapter.poll("v1_abc", new AbortController().signal)).toMatchObject({
+      status: "failed",
+      providerFailure: { category: "protocol" },
+    });
+    expect((await adapter.poll("v1_abc", new AbortController().signal)).status).toBe("completed");
+  });
+
   it("calls a completed interaction with no clip a safety refusal", async () => {
     const adapter = geminiVideoDriver.create({
       profile,
