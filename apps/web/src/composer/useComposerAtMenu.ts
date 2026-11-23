@@ -31,11 +31,12 @@ import { OctantButton } from "../ui/base/OctantButton";
 import type { ComposerInputElement } from "./ComposerInput";
 // The picker and chip load the first time a prompt shows one, so the start
 // screen's initial load carries neither them nor their styles.
+const loadSubagentModelPicker = () => import("./SubagentModelPicker");
 const SubagentModelPicker = lazy(() =>
-  import("./SubagentModelPicker").then((module) => ({ default: module.SubagentModelPicker })),
+  loadSubagentModelPicker().then((module) => ({ default: module.SubagentModelPicker })),
 );
 const SubagentModelChip = lazy(() =>
-  import("./SubagentModelPicker").then((module) => ({ default: module.SubagentModelChip })),
+  loadSubagentModelPicker().then((module) => ({ default: module.SubagentModelChip })),
 );
 
 /** How many skills, servers, and connectors one query lists before files. */
@@ -333,6 +334,9 @@ export function useComposerAtMenu(input: {
   if (tokenIsCurrent && modelGroups !== undefined) {
     const query = token.query.toLowerCase();
     if (query.length > 0 && MODEL_TOKEN.startsWith(query)) {
+      // Start loading the picker while the row is offered, so it is usually
+      // ready by the time Enter opens it.
+      void loadSubagentModelPicker();
       const start = token.start;
       const end = token.start + raw.length;
       rows.push({
@@ -457,7 +461,22 @@ export function useComposerAtMenu(input: {
       }
       return false;
     }
-    if (!open || modelPicker !== undefined) return false;
+    // Until the picker's search takes focus (its code may still be loading),
+    // the prompt keeps the keyboard: Enter must not fall through to the
+    // composer's send, and Escape cancels the picker.
+    if (modelPicker !== undefined) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        dismissModelPicker();
+        return true;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        return true;
+      }
+      return false;
+    }
+    if (!open) return false;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setActiveIndex((current) => (current + 1) % rows.length);

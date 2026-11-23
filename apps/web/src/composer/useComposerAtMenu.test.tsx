@@ -634,6 +634,18 @@ describe("@model in the composer", () => {
     expect(prompt).toHaveValue("Ask @model");
   });
 
+  it("does not send while the opened picker has yet to take the keyboard", async () => {
+    const onSend = vi.fn();
+    render(<ModelHarness onSend={onSend} />);
+    const prompt = screen.getByRole("textbox", { name: "Message" });
+    await userEvent.type(prompt, "Review @model");
+    fireEvent.keyDown(prompt, { key: "Enter" });
+    fireEvent.keyDown(prompt, { key: "Enter" });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(prompt).toHaveValue("Review @model");
+    expect(await screen.findByRole("combobox", { name: "Search models" })).toBeInTheDocument();
+  });
+
   it("leaves the draft as typed when the picker is dismissed with Escape", async () => {
     render(<ModelHarness />);
     const prompt = screen.getByRole("textbox", { name: "Message" });
