@@ -4,9 +4,14 @@ import type {
   VideoClipOptions,
   VideoGenerateOffer,
 } from "@octant/contracts";
-import { describeVideoOffer, videoOfferChoices } from "@octant/client-runtime/service-offer-client";
+import {
+  describeVideoOffer,
+  videoOfferChoices,
+} from "@octant/client-runtime/video-offer-description";
 import { useId, useState } from "react";
-import { Video as VideoIcon, X } from "../ui/icons";
+import VideoGlyph from "lucide-react/icons/video";
+import { X } from "../ui/icons";
+import { makeIcon } from "../ui/icons/makeIcon";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -17,6 +22,8 @@ interface VideoOfferCardProps {
   readonly busy: boolean;
   readonly decide: (answer: ServiceOfferDecision) => void;
 }
+
+const VideoIcon = makeIcon("video", VideoGlyph);
 
 const ROLE_LABELS: Record<VideoGenerateOffer["images"][number]["role"], string> = {
   "first-frame": "First frame",

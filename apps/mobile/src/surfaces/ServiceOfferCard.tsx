@@ -3,11 +3,13 @@ import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import type { MobileRemoteTransport } from "@octant/client-runtime";
 import {
   createMobileServiceOfferClient,
-  describeVideoOffer,
   imageOfferModelChoices,
-  videoOfferChoices,
   type ServiceOfferClient,
 } from "@octant/client-runtime/service-offer-client";
+import {
+  describeVideoOffer,
+  videoOfferChoices,
+} from "@octant/client-runtime/video-offer-description";
 import {
   decodeImageGenerationScopeId,
   type ServiceOffer,
