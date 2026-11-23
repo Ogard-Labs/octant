@@ -571,7 +571,7 @@ describe("@model in the composer", () => {
     },
   ];
 
-  function ModelHarness(props: { readonly initial?: string }) {
+  function ModelHarness(props: { readonly initial?: string; readonly onSend?: () => void }) {
     const [draft, setDraft] = useState(props.initial ?? "");
     const prompt = useRef<ComposerInputElement>(null);
     const at = useComposerAtMenu({
@@ -589,7 +589,11 @@ describe("@model in the composer", () => {
             at.sync(event.currentTarget.value, event.currentTarget.selectionStart);
           }}
           onKeyDown={(event) => {
-            at.handleKeyDown(event);
+            if (at.handleKeyDown(event)) return;
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              props.onSend?.();
+            }
           }}
           ref={prompt}
           renderModelChip={at.renderModelChip}
@@ -624,6 +628,31 @@ describe("@model in the composer", () => {
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("group", { name: "Choose a subagent model" })).toBeNull();
     expect(prompt).toHaveValue("Ask @model");
+  });
+
+  it("opens again for a newly typed @model after an earlier one was dismissed", async () => {
+    render(<ModelHarness />);
+    const prompt = screen.getByRole("textbox", { name: "Message" });
+    await userEvent.type(prompt, "@model");
+    await screen.findByRole("combobox", { name: "Search models" });
+    await userEvent.keyboard("{Escape}");
+    await userEvent.type(prompt, "{Backspace>6/}");
+    expect(prompt).toHaveValue("");
+    await userEvent.type(prompt, "@model");
+    expect(await screen.findByRole("combobox", { name: "Search models" })).toHaveFocus();
+  });
+
+  it("reopens the picker from a chip's Enter key without sending the message", async () => {
+    const onSend = vi.fn();
+    render(<ModelHarness initial={`@model(${instanceId}/gpt-5) b`} onSend={onSend} />);
+    const chip = screen.getByRole("button", { name: /Subagent model: Team Codex, GPT-5,/ });
+    chip.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(await screen.findByRole("combobox", { name: "Search models" })).toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue(
+      `@model(${instanceId}/gpt-5) b`,
+    );
   });
 
   it("says which choice needs attention when a tag's route is gone", () => {

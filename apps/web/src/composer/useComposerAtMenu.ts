@@ -286,7 +286,11 @@ export function useComposerAtMenu(input: {
   const typedModelToken =
     tokenIsCurrent && modelGroups !== undefined && token.query.toLowerCase() === MODEL_TOKEN;
   useEffect(() => {
-    if (!typedModelToken || token === undefined) return;
+    if (!typedModelToken || token === undefined) {
+      // The dismissed token is gone, so a newly typed `@model` opens again.
+      dismissedTokenRef.current = undefined;
+      return;
+    }
     if (dismissedTokenRef.current === token.start) return;
     setModelPicker({ start: token.start, end: token.start + 1 + MODEL_TOKEN.length });
   }, [typedModelToken, token]);
