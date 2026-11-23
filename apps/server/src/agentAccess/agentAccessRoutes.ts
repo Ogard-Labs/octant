@@ -61,8 +61,9 @@ export function createAgentAccessListenerRouteHandler(
 ): (
   request: Request,
   facts?: Pick<RemoteRouteFacts, "sourceClass">,
+  pauseSignal?: AbortSignal,
 ) => Promise<Response | undefined> {
-  return async (request, facts) => {
+  return async (request, facts, pauseSignal) => {
     const url = new URL(request.url);
     if (
       url.pathname !== AGENT_ACCESS_LISTENER_ROUTES.claim &&
@@ -83,7 +84,10 @@ export function createAgentAccessListenerRouteHandler(
     // Judged again now the upload has arrived, before the request's grant is
     // read and any tool runs: a pause made while this body streamed refuses
     // it here, the same answer the gateway would have given.
-    if (sourceClass !== "loopback" && options.remoteAccessPaused?.() === true) {
+    if (
+      sourceClass !== "loopback" &&
+      (options.remoteAccessPaused?.() === true || pauseSignal?.aborted === true)
+    ) {
       return remoteAccessPausedResponse();
     }
 
@@ -194,7 +198,11 @@ export function createAgentAccessListenerRouteHandler(
     // A grant revoked while the body uploaded, or since it was read, aborts
     // the signal the tool run binds to; refuse before the tool runs.
     if (authenticated.signal.aborted) return unauthorized();
-    const signal = AbortSignal.any([authenticated.signal, request.signal]);
+    const signal = AbortSignal.any([
+      authenticated.signal,
+      request.signal,
+      ...(pauseSignal === undefined || sourceClass === "loopback" ? [] : [pauseSignal]),
+    ]);
     const call = callAgentTool(name, asObject(params?.["arguments"]) ?? {}, {
       openSession: async () => createAgentSession({ grant, signal, deps: options.session }),
       signal,

@@ -2195,6 +2195,66 @@ describe("RemoteGateway — a paired device's access level and the pause", () =>
     }
   });
 
+  it("ends an in-flight outside agent call's pause epoch, and issues a fresh one on resume", async () => {
+    const signals: Array<AbortSignal | undefined> = [];
+    const agentAccess: NonNullable<RemoteGatewayOptions["agentAccess"]> = async (
+      _request,
+      _facts,
+      pauseSignal,
+    ) => {
+      signals.push(pauseSignal);
+      return Response.json({ jsonrpc: "2.0", id: 1, result: {} });
+    };
+    const hubLink = vi.fn(async () => Response.json({ ok: true }));
+    const capturing = createCapturingServe();
+    const { gateway } = setup({ serve: capturing.serve, agentAccess, hubLink });
+    await gateway.start();
+    try {
+      const fetch = capturing.getFetch();
+      if (fetch === undefined) throw new Error("Expected captured gateway fetch");
+      const admin = gateway.localDeviceAdministration();
+      if (admin === undefined) throw new Error("Expected device administration");
+      const agentCall = () =>
+        fetch(
+          new Request(`${ORIGIN}/api/agent-access/mcp`, {
+            method: "POST",
+            headers: {
+              host: "192.168.1.20:9443",
+              "content-type": "application/json",
+              authorization: "Bearer agent-key",
+            },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+          }),
+          lanFacts,
+        );
+      const hubCall = () =>
+        fetch(
+          new Request(`${ORIGIN}/api/hub/status`, { headers: { host: "192.168.1.20:9443" } }),
+          lanFacts,
+        );
+
+      expect((await agentCall()).status).toBe(200);
+      const first = signals[0];
+      expect(first?.aborted).toBe(false);
+
+      admin.setRemoteAccessPaused({ paused: true, actor: localPerson });
+      // The epoch the in-flight call bound to ended with the pause and stays
+      // ended: a resume issues a fresh one, it never reopens.
+      expect(first?.aborted).toBe(true);
+
+      admin.setRemoteAccessPaused({ paused: false, actor: localPerson });
+      expect((await agentCall()).status).toBe(200);
+      const resumed = signals[1];
+      expect(resumed).not.toBe(first);
+      expect(resumed?.aborted).toBe(false);
+      expect(first?.aborted).toBe(true);
+      expect((await hubCall()).status).toBe(200);
+      expect(hubLink).toHaveBeenCalledTimes(1);
+    } finally {
+      await gateway.stop();
+    }
+  });
+
   it("signs out every other device and keeps the one that asked", async () => {
     const { gateway, connection } = setup();
     await gateway.start();

@@ -2,7 +2,7 @@ import { generateKeyPairSync, randomUUID, sign, createHash, type KeyObject } fro
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AGENT_CONNECTION_CODE_PREFIX,
   DEFAULT_AGENT_GRANT_LIMITS,
@@ -677,5 +677,125 @@ describe("the agent endpoint for an MCP client on this computer", () => {
     });
     expect(response?.status).toBe(403);
     expect(dispatched).toEqual([]);
+  });
+
+  it("refuses a call whose pause epoch ended while its body uploaded, before any session opens", async () => {
+    const { service, clock } = harness();
+    const grantId = created(
+      service.execute(
+        { kind: "create", draft: { name: "Editor", scope: scope(), days: 30 } },
+        AGENT_ACCESS_LOCAL_ACTOR,
+      ),
+    );
+    const { pair, fingerprint } = confirmedKey(service, grantId);
+    // No remoteAccessPaused port: the request's own epoch alone refuses it.
+    const { routes, dispatched } = endpoint(service);
+    const epoch = new AbortController();
+
+    const text = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 10,
+      method: "tools/call",
+      params: { name: "read_thread", arguments: { threadId: crypto.randomUUID() } },
+    });
+    const body = new TextEncoder().encode(text);
+    // The epoch ends while the route pulls the rest of the body: the signal
+    // handed in at the call's entry is the check that refuses it.
+    const streamed = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(body.subarray(0, 10));
+      },
+      pull(controller) {
+        epoch.abort();
+        controller.enqueue(body.subarray(10));
+        controller.close();
+      },
+    });
+    nonce += 1;
+    const init: RequestInit & { duplex: "half" } = {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-agent-proof": proof({
+          grantId,
+          fingerprint,
+          privateKey: pair.privateKey,
+          at: clock.now,
+          nonce: `paused-epoch-${String(nonce).padStart(4, "0")}`,
+          body,
+        }),
+      },
+      body: streamed,
+      duplex: "half",
+    };
+    const response = await routes(
+      new Request("http://127.0.0.1:4800/api/agent-access/mcp", init),
+      { sourceClass: "lan-private" },
+      epoch.signal,
+    );
+    expect(response?.status).toBe(403);
+    expect(dispatched).toEqual([]);
+  });
+
+  it("ends a call's held step when its pause epoch ends, and nothing further runs", async () => {
+    const { service, clock } = harness();
+    const grantId = created(
+      service.execute(
+        { kind: "create", draft: { name: "Editor", scope: scope(), days: 30 } },
+        AGENT_ACCESS_LOCAL_ACTOR,
+      ),
+    );
+    const { pair, fingerprint } = confirmedKey(service, grantId);
+    const threadId = crypto.randomUUID();
+    service.recordThreadStarted({ grantId, threadId, mode: "code" });
+    const epoch = new AbortController();
+    const dispatched: Array<string> = [];
+    let abortReached = false;
+    const session: AgentSessionDependencies = {
+      service,
+      // The step a signed call is waiting on when the epoch ends: the epoch
+      // reaches it through the signal the session passes every dispatch.
+      dispatch: async (handoff) => {
+        dispatched.push(new URL(handoff.request.url).pathname);
+        const abortSignal = handoff.abortSignal;
+        if (abortSignal === undefined) return undefined;
+        await new Promise<void>((resolve) => {
+          abortSignal.addEventListener(
+            "abort",
+            () => {
+              abortReached = true;
+              resolve();
+            },
+            { once: true },
+          );
+        });
+        return undefined;
+      },
+      hostId: () => hostId,
+      threadProject: () => ({ projectId: codeProject }),
+      threadAccess: () => undefined,
+      markOutsideContent: () => undefined,
+    };
+    const routes = createAgentAccessListenerRouteHandler({ service, session, version: "test" });
+
+    const call = routes(
+      loopbackCall({ grantId, fingerprint, privateKey: pair.privateKey }, clock.now, {
+        id: 11,
+        method: "tools/call",
+        params: { name: "read_thread", arguments: { threadId } },
+      }),
+      { sourceClass: "lan-private" },
+      epoch.signal,
+    );
+    await vi.waitFor(() => expect(dispatched).toHaveLength(1));
+    epoch.abort();
+    const response = await call;
+    expect(abortReached).toBe(true);
+    expect(response?.status).toBe(200);
+    const answer = (await response?.json()) as {
+      readonly result?: { readonly isError?: boolean };
+    };
+    expect(answer.result?.isError).toBe(true);
+    expect(dispatched).toHaveLength(1);
   });
 });

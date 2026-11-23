@@ -196,6 +196,7 @@ export interface RemoteGatewayServices {
   readonly agentAccess?: (
     request: Request,
     facts?: RemoteRouteFacts,
+    pauseSignal?: AbortSignal,
   ) => Promise<Response | undefined>;
   /** The origin of the hub's web app, when this host holds a roster naming one; see the route policy. */
   readonly hubWebOrigin?: () => string | undefined;
@@ -754,6 +755,12 @@ function assembleServices(
     return level;
   };
   let paused: boolean | undefined;
+  /**
+   * The pause epoch an outside agent's in-flight work binds to: a committed
+   * pause aborts the current signal and a fresh one is handed to calls that
+   * arrive after it. Loopback MCP traffic never binds to it.
+   */
+  let outsideAgentAccess = new AbortController();
   const remoteAccessPaused = (): boolean => {
     paused ??= readRemoteAccessPaused(options.connection);
     return paused;
@@ -799,6 +806,8 @@ function assembleServices(
     setRemoteAccessPaused: (input) => {
       paused = lifecycle.setRemoteAccessPaused({ paused: input.paused, actor: input.actor });
       if (paused) {
+        outsideAgentAccess.abort();
+        outsideAgentAccess = new AbortController();
         cancelDeviceWork(
           readDeviceRegistrations(options.connection)
             .filter((device) => device.state === "active")
@@ -958,7 +967,7 @@ function assembleServices(
               // too; its grant is kept for when access resumes.
               remoteAccessPaused()
               ? remoteAccessPausedResponse()
-              : options.agentAccess?.(request, facts)
+              : options.agentAccess?.(request, facts, outsideAgentAccess.signal)
             : handlePreAuthRoute(request, route, facts, protocol, auth, clockPosture),
     authenticatedProduct: async (request, route, facts) =>
       handleAuthenticatedRoute(request, route, facts, auth),

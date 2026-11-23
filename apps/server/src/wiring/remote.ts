@@ -710,7 +710,8 @@ export function wireRemote(deps: RemoteDependencies) {
             })),
         remoteServerGrants: services.remoteServerGrants ?? remoteServerGrantGatewayPort,
         remotePortForwards: services.remotePortForwards ?? remotePortForwards,
-        agentAccess: (request, facts) => agentAccessListenerRoutes(request, facts),
+        agentAccess: (request, facts, pauseSignal) =>
+          agentAccessListenerRoutes(request, facts, pauseSignal),
         serve: options.remoteServe ?? serve,
         config,
       });
