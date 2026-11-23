@@ -3,6 +3,7 @@ import {
   decodeWorkThread,
   decodeCodeThreadId,
   decodeCodeCheckoutIdentity,
+  decodeCodePlannerView,
   decodeCodeThread,
   decodeWorkspaceOperation,
   decodeThreadBoardPullRequestSummary,
@@ -12,6 +13,7 @@ import {
   decodeProviderModelId,
   LOCAL_HOST_ID,
   type CodeBoardView,
+  type CreateManagedCodeThreadCommand,
   type NavigatorAssistantSnapshot,
   type ShellBootstrap,
   type ProjectBootstrap,
@@ -660,40 +662,28 @@ describe("App", () => {
     expect(screen.queryByText("Starting the first turn…")).not.toBeInTheDocument();
   });
 
-  it("moves managed-worktree progress from the draft to below the first prompt", async () => {
-    await Promise.all([
-      import("./environment/CodeThreadEnvironment"),
-      import("./code/CodeWorkspaceTab"),
-      import("./code/CodeWorkspace"),
-    ]);
-    const user = userEvent.setup();
-    const base = codes();
-    const original = await base.thread(codeThreadId);
-    const releaseCheckout = deferred<void>();
-    const pendingStart = deferred<Awaited<ReturnType<CodeClient["putEvidence"]>>>();
-    let view = original;
-    const codeApi: CodeClient = {
-      ...base,
-      thread: vi.fn(async () => view),
-      putEvidence: vi.fn(() => pendingStart.promise),
-      execute: vi.fn<CodeClient["execute"]>(async (command, signal, progress) => {
-        if (command.kind === "prepare-code-project-checkout") {
-          return {
-            kind: "checkout-prepared",
-            bindingRevisionId: original.thread.bindingRevisionId,
-            checkout: original.checkout,
-          };
-        }
-        if (command.kind !== "create-managed-code-thread") return base.execute(command, signal);
-        progress?.({ phase: "source" });
-        progress?.({ phase: "checkout", sourceMs: 42 });
-        await releaseCheckout.promise;
-        const receiptId = "90000000-0000-4000-8000-000000000001";
-        const resolvedHead = "a".repeat(40);
+  it.each(["composer", "planner"] as const)(
+    "moves managed-worktree progress below the first prompt from the %s",
+    async (source) => {
+      await Promise.all([
+        import("./environment/CodeThreadEnvironment"),
+        import("./code/CodeWorkspaceTab"),
+        import("./code/CodeWorkspace"),
+        import("./code/CodeOverview"),
+        import("./projects/ProjectOverview"),
+      ]);
+      const user = userEvent.setup();
+      const base = codes();
+      const original = await base.thread(codeThreadId);
+      const releaseCheckout = deferred<void>();
+      const pendingStart = deferred<Awaited<ReturnType<CodeClient["putEvidence"]>>>();
+      let view = original;
+      const promptText = "Check the new branch";
+      const createdWorktree = (command: CreateManagedCodeThreadCommand) => {
         const checkout = decodeCodeCheckoutIdentity({
           ...original.checkout,
           kind: "managed-worktree",
-          ownershipReceiptId: receiptId,
+          ownershipReceiptId: "90000000-0000-4000-8000-000000000001",
         });
         if (checkout.kind !== "managed-worktree") throw new Error("Expected a managed checkout");
         const thread = decodeCodeThread({
@@ -702,53 +692,198 @@ describe("App", () => {
           title: command.title,
         });
         view = { ...original, thread, checkout };
-        progress?.({ phase: "ready", checkoutMs: 83 });
         return {
-          kind: "managed-thread-created",
+          kind: "managed-thread-created" as const,
           thread,
           checkout,
           provenance: {
             receiptId: checkout.ownershipReceiptId,
-            mode: "local",
+            mode: "local" as const,
             branch: "main",
-            resolvedHead,
+            resolvedHead: "a".repeat(40),
           },
         };
-      }),
-    };
-    render(
-      <App
-        codeClient={codeApi}
-        contextClient={contextClient()}
-        hostClient={hostClient() as never}
-        isNarrow={false}
-        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
-        projectClient={projects()}
-        projectWindowCapability={projectWindowCapability}
-        providerClient={providersWithToolModel()}
-        shellClient={client(codeDraftShellBootstrap(projectId))}
-      />,
-    );
-    await user.click(await screen.findByRole("button", { name: /^Where this thread works/ }));
-    await user.click(await screen.findByRole("radio", { name: /New worktree/ }));
-    await user.keyboard("{Escape}");
-    await user.type(screen.getByRole("textbox", { name: "First message" }), "Check the new branch");
-    await user.click(screen.getByRole("button", { name: "Create thread" }));
-    const draftProgress = await screen.findByRole("list", { name: "Worktree setup stages" });
-    expect(draftProgress).toHaveTextContent("Done · 42 ms");
-    expect(draftProgress).toHaveTextContent("Check out filesRunning");
+      };
+      const observedAt = original.checkout.observedAt;
+      const planner = decodeCodePlannerView({
+        designation: { kind: "none", projectId, updatedAt: observedAt },
+        designationVersion: 0,
+        proposals: [
+          {
+            proposal: {
+              id: "70000000-0000-4000-8000-000000000003",
+              projectId,
+              plannerThreadId: codeThreadId,
+              title: promptText,
+              intent: promptText,
+              proposedAt: observedAt,
+              status: "pending",
+            },
+            proposalVersion: 2,
+          },
+        ],
+      });
+      const executePlannerProposal = vi.fn<NonNullable<CodeClient["executePlannerProposal"]>>(
+        async (command) => {
+          if (
+            command.kind !== "confirm-planner-work-proposal" ||
+            command.creation.kind !== "create-managed-code-thread"
+          ) {
+            throw new Error("Expected a managed worktree planner approval");
+          }
+          const review = planner.proposals[0];
+          if (review === undefined) throw new Error("Expected a proposal");
+          await releaseCheckout.promise;
+          const creation = createdWorktree(command.creation);
+          return {
+            status: "confirmed",
+            proposal: {
+              ...review.proposal,
+              status: "confirmed",
+              resolvedAt: observedAt,
+              createdThreadId: creation.thread.id,
+            },
+            creation,
+          };
+        },
+      );
+      const codeApi: CodeClient = {
+        ...base,
+        thread: vi.fn(async () => view),
+        putEvidence: vi.fn(() => pendingStart.promise),
+        ...(source === "planner"
+          ? {
+              readPlanner: async () => planner,
+              executePlannerProposal,
+              bootstrap: async () => {
+                const result = await base.bootstrap();
+                return {
+                  ...result,
+                  settings: {
+                    ...result.settings,
+                    defaultModel: {
+                      providerInstanceId: decodeProviderInstanceId(
+                        "90000000-0000-4000-8000-000000000001",
+                      ),
+                      modelId: decodeProviderModelId("gpt-5"),
+                    },
+                  },
+                };
+              },
+            }
+          : {}),
+        execute: vi.fn<CodeClient["execute"]>(async (command, signal, progress) => {
+          if (command.kind === "get-worktree-remote-facts")
+            return { kind: "worktree-remote-facts-retrieved", projectId, facts: { remotes: [] } };
+          if (command.kind === "list-code-worktree-refs")
+            return { kind: "worktree-refs-listed", projectId, refs: [] };
+          if (command.kind === "prepare-code-project-checkout") {
+            return {
+              kind: "checkout-prepared",
+              bindingRevisionId: original.thread.bindingRevisionId,
+              checkout: original.checkout,
+            };
+          }
+          if (command.kind !== "create-managed-code-thread") return base.execute(command, signal);
+          progress?.({ phase: "source" });
+          progress?.({ phase: "checkout", sourceMs: 42 });
+          await releaseCheckout.promise;
+          progress?.({ phase: "ready", checkoutMs: 83 });
+          return createdWorktree(command);
+        }),
+      };
+      const initial = codeDraftShellBootstrap(projectId);
+      let shell = initial;
+      let projectApi = projects();
+      if (source === "planner") {
+        const workspace = applyWorkspaceOperation(
+          initial.workspace,
+          decodeWorkspaceOperation({
+            kind: "open-surface",
+            mode: "code",
+            paneId: String(initial.workspace.activePaneIds.code),
+            surface: {
+              kind: "project",
+              id: "00000000-0000-4000-8000-000000000630",
+              projectId,
+              mode: "code",
+              title: "Octant",
+            },
+          }),
+        );
+        shell = { ...initial, workspace, workspaceVersion: workspace.version };
+        const projectFacts = projectBootstrap();
+        projectApi = projects({
+          ...projectFacts,
+          active: projectFacts.active.map((project) =>
+            project.type === "code"
+              ? { ...project, newThreadWorkspace: "managed-worktree" }
+              : project,
+          ),
+          availability: [{ projectId, status: "available", observedAt }],
+        });
+        vi.mocked(projectApi.environment).mockResolvedValue(readyEnvironment);
+      }
+      render(
+        <App
+          codeClient={codeApi}
+          contextClient={contextClient()}
+          hostClient={hostClient() as never}
+          isNarrow={false}
+          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+          projectClient={projectApi}
+          projectWindowCapability={projectWindowCapability}
+          providerClient={providersWithToolModel()}
+          shellClient={client(shell)}
+        />,
+      );
+      if (source === "planner") {
+        await user.click(
+          await screen.findByRole("button", { name: "Review and approve" }, { timeout: 8000 }),
+        );
+        const composer = within(
+          await screen.findByRole("dialog", { name: "Approve planner proposal" }),
+        );
+        expect(
+          composer.getByRole("button", { name: /^Where this thread works: New worktree/ }),
+        ).toBeVisible();
+        const approve = composer.getByRole("button", { name: "Approve and start described task" });
+        await waitFor(() => expect(approve).toBeEnabled());
+        await user.click(approve);
+        await waitFor(() => expect(executePlannerProposal).toHaveBeenCalledOnce());
+        const pending = await composer.findByRole("list", { name: "Worktree setup stages" });
+        expect(pending).toHaveTextContent("Check out filesPending");
+        expect(codeApi.putEvidence).not.toHaveBeenCalled();
+      } else {
+        await user.click(await screen.findByRole("button", { name: /^Where this thread works/ }));
+        await user.click(await screen.findByRole("radio", { name: /New worktree/ }));
+        await user.keyboard("{Escape}");
+        await user.type(screen.getByRole("textbox", { name: "First message" }), promptText);
+        await user.click(screen.getByRole("button", { name: "Create thread" }));
+        const draftProgress = await screen.findByRole("list", { name: "Worktree setup stages" });
+        expect(draftProgress).toHaveTextContent("Done · 42 ms");
+        expect(draftProgress).toHaveTextContent("Check out filesRunning");
+      }
 
-    releaseCheckout.resolve();
-    const pane = await screen.findByRole("region", {
-      name: "Workspace pane: Check the new branch",
-    });
-    const prompt = await within(pane).findByRole("article", { name: "Your message" });
-    const progress = await within(pane).findByRole("list", { name: "Worktree setup stages" });
-    expect(
-      prompt.compareDocumentPosition(progress) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(progress).toHaveTextContent("Done · 83 ms");
-  });
+      releaseCheckout.resolve();
+      const pane = await screen.findByRole("region", {
+        name: "Workspace pane: Check the new branch",
+      });
+      const prompt = await within(pane).findByRole(
+        "article",
+        { name: "Your message" },
+        { timeout: 8000 },
+      );
+      const progress = await within(pane).findByRole("list", { name: "Worktree setup stages" });
+      expect(
+        prompt.compareDocumentPosition(progress) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(progress).toHaveTextContent(
+        source === "planner" ? "Check out filesDone" : "Done · 83 ms",
+      );
+      expect(prompt).toHaveTextContent(promptText);
+    },
+  );
 
   it("restores the first prompt after evidence storage throws in an opened Code task", async () => {
     await Promise.all([
