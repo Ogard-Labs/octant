@@ -36,7 +36,7 @@ import { UsageResumeThreadState } from "./usageResume";
 import { ThreadUsageLimitHandoff } from "./usageLimitHandoff";
 import { BrowserProfileChoice } from "./projectBrowser";
 import { ThreadDocumentDelivery } from "./threadToolSteps";
-import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
+import { ThreadNavigationPullRequestSummaries } from "./threadBoardPullRequests";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -1679,7 +1679,7 @@ export const CodeNavigationRuntime = Schema.Struct({
       label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
     }).annotations(strict),
   ),
-  pullRequestSummaries: Schema.optional(ThreadBoardPullRequestSummaries),
+  pullRequestSummaries: Schema.optional(ThreadNavigationPullRequestSummaries),
   /** The latest turn's start and latest step while it runs; absent otherwise. */
   ...ThreadLiveTurnFields,
 }).annotations(strict);

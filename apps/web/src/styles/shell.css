@@ -2213,57 +2213,124 @@ html[data-octant-density="compact"]
   border-top: 1px solid var(--oct-border-soft);
 }
 
+/* One line per pull request, so a thread that worked through dozens still
+   reads at a glance; past ten lines the list scrolls inside the card and the
+   header above it stays put. */
+.thread-row-info-card__pr-list {
+  --thread-row-info-card-pr-line: 26px;
+
+  display: flex;
+  flex-direction: column;
+  max-height: calc(10 * var(--thread-row-info-card-pr-line));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .thread-row-info-card__pr {
   display: flex;
+  flex: 0 0 var(--thread-row-info-card-pr-line);
   align-items: center;
   gap: 2px;
   min-width: 0;
 }
 
-/* Number and title on the first line, repository and facts on the second,
-   with the glyph spanning both. The reference is a card-shaped control, so
-   it drops the button recipe's fixed height rather than clipping its second
-   line. */
+/* The state glyph, checks dot, number, title and (when the pull requests span
+   repositories) the repository share one line. The reference is a
+   card-shaped control, so it drops the button recipe's fixed height. */
 .thread-row-info-card__pr-reference {
-  display: grid;
+  display: flex;
   flex: 1 1 auto;
-  grid-template-columns: auto minmax(0, 1fr);
-  column-gap: 8px;
-  row-gap: 1px;
   align-items: center;
+  gap: 6px;
   min-width: 0;
   height: auto;
   min-height: 0;
-  padding: 4px var(--oct-space-2);
-  text-align: left;
-  font-weight: 400;
-}
-
-.thread-row-info-card__pr-reference > svg {
-  grid-row: span 2;
-  color: var(--oct-meta);
-}
-
-.thread-row-info-card__pr-title,
-.thread-row-info-card__pr-meta {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  padding: 3px var(--oct-space-2);
   font-size: var(--oct-text-xs);
+  font-weight: 400;
   line-height: 1.35;
+  text-align: left;
+}
+
+.thread-row-info-card__pr-state {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.thread-row-info-card__pr-state[data-pr-state="open"] {
+  color: var(--oct-pr-open);
+}
+
+.thread-row-info-card__pr-state[data-pr-state="merged"] {
+  color: var(--oct-pr-merged);
+}
+
+.thread-row-info-card__pr-state[data-pr-state="closed"] {
+  color: var(--oct-pr-closed);
+}
+
+.thread-row-info-card__pr-state[data-pr-state="draft"],
+.thread-row-info-card__pr-state[data-pr-state="unknown"] {
+  color: var(--oct-pr-draft);
+}
+
+/* Checks as a dot beside the glyph, only while the pull request can still
+   merge; the words are in the line's tooltip and accessible name. */
+.thread-row-info-card__pr-checks {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin-inline-start: -2px;
+  border-radius: 50%;
+  background: var(--oct-meta);
+}
+
+.thread-row-info-card__pr-checks[data-checks="none"] {
+  background: transparent;
+}
+
+.thread-row-info-card__pr-checks[data-checks="passing"] {
+  background: var(--octant-success-text);
+}
+
+.thread-row-info-card__pr-checks[data-checks="failing"] {
+  background: var(--octant-danger-text);
+}
+
+.thread-row-info-card__pr-checks[data-checks="pending"] {
+  background: var(--octant-warning-text);
+}
+
+.thread-row-info-card__pr-number {
+  flex: 0 0 auto;
+  color: var(--oct-meta);
+  font-variant-numeric: tabular-nums;
 }
 
 .thread-row-info-card__pr-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
   color: var(--oct-fg);
-  font-weight: var(--oct-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.thread-row-info-card__pr-meta {
+/* The repository keeps its width (up to a third of the line) and the title
+   gives way first: squeezed together, both truncated to a letter or two. */
+.thread-row-info-card__pr-repository {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 33%;
+  overflow: hidden;
   color: var(--oct-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+/* The GitHub control appears with its line's hover or focus, so titles keep
+   the width the rest of the time; it stays in the layout, so revealing it
+   moves nothing. */
 .thread-row-info-card__pr-github {
   flex: 0 0 auto;
   width: 24px;
@@ -2272,6 +2339,18 @@ html[data-octant-density="compact"]
   padding: 0;
   color: var(--oct-meta);
   border-radius: var(--oct-radius-sm);
+  opacity: 0;
+}
+
+.thread-row-info-card__pr:hover .thread-row-info-card__pr-github,
+.thread-row-info-card__pr:focus-within .thread-row-info-card__pr-github {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .thread-row-info-card__pr-github {
+    opacity: 1;
+  }
 }
 
 .thread-row-info-card__pr-more {
@@ -4087,6 +4166,12 @@ form > .work-composer-adapter__attachments {
 .sidebar-navigation__thread-pr-mark {
   display: inline-flex;
   flex: none;
+  color: var(--oct-meta);
+}
+
+/* The thread's other pull requests, counted after the first in the same quiet
+   ink, so a thread that worked through many is not read as having one. */
+.sidebar-navigation__thread-pr-more {
   color: var(--oct-meta);
 }
 

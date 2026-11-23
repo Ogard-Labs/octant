@@ -86,6 +86,33 @@ describe("ProjectThreadRows", () => {
     expect(row).toHaveAccessibleName(/^Controller foundation, pull request #12 open, Updated .+\d/);
   });
 
+  it("shows how many more pull requests a thread has beside its first one", () => {
+    render(
+      <ProjectThreadRows
+        actions={{}}
+        onSelectThread={vi.fn()}
+        threads={[
+          {
+            ...thread,
+            pullRequests: {
+              items: [pullRequest(327), pullRequest(326), pullRequest(325)],
+              hiddenCount: 13,
+            },
+          },
+        ]}
+      />,
+    );
+
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    const chip = within(row).getByTitle(
+      "Pull request #327 · open · checks passing and 15 more pull requests",
+    );
+    expect(chip).toHaveTextContent(/^#327 open\+15$/);
+    expect(row).toHaveAccessibleName(
+      "Controller foundation, pull request #327 open and 15 more pull requests",
+    );
+  });
+
   it("keeps a long thread list bounded to the visible window", async () => {
     const threads = Array.from({ length: 80 }, (_, index) => ({
       threadId: `thread-${String(index)}`,
@@ -779,6 +806,21 @@ describe("ProjectThreadRows", () => {
     );
   });
 
+  it("names the thread's model beside its provider in the info card", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, modelId: "claude-opus-5-5" }]}
+      />,
+    );
+
+    await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
+
+    const card = await screen.findByRole("group", { name: "Thread details" });
+    expect(card).toHaveTextContent("Claude · Opus 5.5");
+  });
+
   it("names a thread on the shelf Put away in its info card", async () => {
     const user = userEvent.setup();
     render(
@@ -1154,6 +1196,110 @@ describe("ProjectThreadRows", () => {
     expect(within(list).getAllByRole("button")).toHaveLength(3);
     expect(list).toHaveTextContent("+2 more");
     expect(within(list).queryByRole("button", { name: /on GitHub/ })).toBeNull();
+  });
+
+  it("lists fifty pull requests of a thread in its hover card, one line each with its state", async () => {
+    const user = userEvent.setup();
+    const items = Array.from({ length: 50 }, (_, index) =>
+      pullRequest(index + 1, index % 2 === 0 ? {} : { state: "merged", readyToMerge: false }),
+    );
+    render(
+      <ProjectThreadRows
+        actions={{ onOpenPullRequest: vi.fn(), onOpenPullRequestOnGithub: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, pullRequests: { items, hiddenCount: 4 } }]}
+      />,
+    );
+
+    await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
+    const card = await screen.findByRole("group", { name: "Thread details" });
+    const list = within(card).getByRole("group", { name: "Linked pull requests" });
+
+    expect(within(list).getAllByRole("button", { name: /^Open pull request #/ })).toHaveLength(50);
+    expect(list).toHaveTextContent("+4 more");
+    const merged = within(list).getByRole("button", { name: /^Open pull request #2:/ });
+    expect(merged.querySelector("[data-pr-state]")).toHaveAttribute("data-pr-state", "merged");
+    expect(merged).toHaveAttribute(
+      "title",
+      "#2 Sidebar pull request 2\noctant/octant · Merged · Checks passing · Approved\nOpens in Review. Cmd-click opens on GitHub.",
+    );
+    // One repository: the line spends its width on the title instead.
+    expect(merged).not.toHaveTextContent("octant/octant");
+    expect(merged).toHaveTextContent("#2Sidebar pull request 2");
+  });
+
+  it("names the repository on each line only when the pull requests span repositories", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProjectThreadRows
+        actions={{ onOpenPullRequest: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[
+          {
+            ...thread,
+            pullRequests: {
+              items: [
+                pullRequest(12),
+                pullRequest(7, {
+                  identity: {
+                    projectId,
+                    repositoryOwner: "octant",
+                    repositoryName: "site",
+                    number: 7,
+                  },
+                }),
+              ],
+              hiddenCount: 0,
+            },
+          },
+        ]}
+      />,
+    );
+
+    await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
+    const card = await screen.findByRole("group", { name: "Thread details" });
+
+    expect(within(card).getByRole("button", { name: /^Open pull request #7:/ })).toHaveTextContent(
+      "site",
+    );
+  });
+
+  it("folds more than three pull requests into one Pull requests submenu of the row's menu", async () => {
+    const user = userEvent.setup();
+    const onOpenPullRequest = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{ onArchiveThread: vi.fn(), onOpenPullRequest, onPinThread: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[
+          {
+            ...thread,
+            pullRequests: {
+              items: [pullRequest(12), pullRequest(13), pullRequest(14), pullRequest(15)],
+              hiddenCount: 0,
+            },
+          },
+        ]}
+      />,
+    );
+
+    await user.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+    await screen.findByRole("menu");
+    expect(screen.queryByRole("menuitem", { name: "Open pull request #12" })).toBeNull();
+    // The submenu opens on hover, as Snooze does; the right arrow reaches it by keyboard.
+    await userEvent.hover(screen.getByRole("menuitem", { name: "Pull requests" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Open pull request #15" }));
+    expect(onOpenPullRequest).toHaveBeenCalledWith({ ...identity12, number: 15 });
+    await user.keyboard("{Escape}");
+
+    const overflow = screen.getByRole("button", { name: "Thread actions" });
+    overflow.focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("menuitem", { name: "Open pull request #14" })).toBeVisible();
+    expect(screen.queryByRole("menuitem", { name: "Open pull request #15" })).toBeNull();
   });
 
   it("offers both pull-request destinations from the row menus for keyboard and coarse pointers", async () => {

@@ -48,7 +48,14 @@ import {
 import type { SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
 import { describePullRequestSummary } from "../threadBoard/ThreadBoardPullRequestSummaries";
 import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
-import { pullRequestKey, threadRowPullRequestDestinations } from "./threadRowPullRequests";
+import { pullRequestStateMark } from "../code/pullRequestState";
+import { readableModelId } from "../providers/providerModelLabel";
+import {
+  morePullRequestsThanTheFirst,
+  pullRequestKey,
+  THREAD_ROW_MENU_INLINE_PULL_REQUESTS,
+  threadRowPullRequestDestinations,
+} from "./threadRowPullRequests";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
 import { SidebarThreadTabsContext } from "../shell/sidebarThreadTabs";
 import { useSidebarRowProperties } from "../shell/sidebarRowProperties";
@@ -305,8 +312,21 @@ function threadRowFacts(props: {
   if (props.thread.checkoutChip !== undefined) {
     facts.push({ icon: GitBranch, key: "checkout", label: props.thread.checkoutChip.label });
   }
-  if (props.thread.provider !== undefined) {
-    facts.push({ icon: Cpu, key: "provider", label: props.thread.provider.displayName });
+  // The model rides beside its provider ("Claude · Opus 5.5"). The card has
+  // no model catalogue to ask, so it reads the id the way the composer does
+  // for a model no catalogue described, without repeating the provider's name.
+  const providerName = props.thread.provider?.displayName;
+  const readable =
+    props.thread.modelId === undefined ? undefined : readableModelId(props.thread.modelId);
+  const model =
+    readable !== undefined && providerName !== undefined && readable.startsWith(`${providerName} `)
+      ? readable.slice(providerName.length + 1)
+      : readable;
+  const engine = [providerName, model].filter(
+    (part): part is string => part !== undefined && part !== "",
+  );
+  if (engine.length > 0) {
+    facts.push({ icon: Cpu, key: "provider", label: engine.join(" · ") });
   }
   if (props.lineageParentTitle !== undefined) {
     facts.push({ icon: GitFork, key: "lineage", label: `Forked from ${props.lineageParentTitle}` });
@@ -320,8 +340,22 @@ function threadRowFacts(props: {
   return facts;
 }
 
+type ThreadRowPullRequestSummary = ThreadBoardPullRequestSummaries["items"][number];
+
+/** How a pull request's checks read beside its number, while it can still merge. */
+function checksMark(summary: ThreadRowPullRequestSummary): string | undefined {
+  if (summary.state !== "open" && summary.state !== "draft") return undefined;
+  return summary.checks === "unknown" ? undefined : summary.checks;
+}
+
 /**
- * Compact references to the row's exact linked pull requests, inside the card.
+ * Every pull request the thread worked on, one line each, inside the card.
+ *
+ * A line is the state glyph in its colour, a checks dot while the pull request
+ * can still merge, the number and the title; the remaining facts (checks,
+ * review, conflicts, freshness) are in its tooltip and accessible name, so a
+ * thread with dozens of pull requests still reads at a glance. The repository
+ * is named only when the thread's pull requests span more than one.
  *
  * A click opens the pull request in Octant's Review dock; Cmd-click (Ctrl on
  * other platforms) and the trailing control go to github.com, so both
@@ -337,64 +371,100 @@ function ThreadRowPullRequests(props: {
 }) {
   const openInReview = props.actions.onOpenPullRequest;
   const openOnGithub = props.actions.onOpenPullRequestOnGithub;
+  const repositories = new Set(
+    props.summaries.items.map(
+      (summary) => `${summary.identity.repositoryOwner}/${summary.identity.repositoryName}`,
+    ),
+  );
+  const namesRepository = repositories.size > 1;
   return (
     <span aria-label="Linked pull requests" className="thread-row-info-card__prs" role="group">
-      {props.summaries.items.map((summary) => {
-        const number = String(summary.identity.number);
-        const repo = `${summary.identity.repositoryOwner}/${summary.identity.repositoryName}`;
-        const meta = [repo, ...describePullRequestSummary(summary)].join(" · ");
-        const externalUrl =
-          openOnGithub === undefined ? undefined : githubPullRequestUrl(summary.identity);
-        const reference = (
-          <>
-            <GitPullRequest aria-hidden="true" size={14} />
-            <span className="thread-row-info-card__pr-title">
-              #{number} {summary.title}
-            </span>
-            <span className="thread-row-info-card__pr-meta">{meta}</span>
-          </>
-        );
-        return (
-          <span className="thread-row-info-card__pr" key={pullRequestKey(summary.identity)}>
-            {openInReview === undefined ? (
-              <span className="thread-row-info-card__pr-reference">{reference}</span>
-            ) : (
-              <OctantButton
-                aria-label={`Open pull request #${number}: ${summary.title} · ${meta}`}
-                className="thread-row-info-card__pr-reference thread-row-info-card__pr-open"
-                onClick={(event) => {
-                  if (event.metaKey || event.ctrlKey) {
-                    if (externalUrl !== undefined) openOnGithub?.(summary.identity);
-                    return;
-                  }
-                  openInReview(summary.identity);
-                }}
-                title={
+      <span className="thread-row-info-card__pr-list">
+        {props.summaries.items.map((summary) => {
+          const number = String(summary.identity.number);
+          const repo = `${summary.identity.repositoryOwner}/${summary.identity.repositoryName}`;
+          const meta = [repo, ...describePullRequestSummary(summary)].join(" · ");
+          const externalUrl =
+            openOnGithub === undefined ? undefined : githubPullRequestUrl(summary.identity);
+          const mark = pullRequestStateMark(summary.state);
+          const checks = checksMark(summary);
+          const reference = (
+            <>
+              <span className="thread-row-info-card__pr-state" data-pr-state={mark.tone}>
+                <mark.Icon aria-hidden="true" size={14} />
+              </span>
+              {/* The dot's slot is kept on every line so numbers align down
+                  the list whether or not a pull request still has checks. */}
+              <span
+                aria-hidden="true"
+                className="thread-row-info-card__pr-checks"
+                data-checks={checks ?? "none"}
+              />
+              <span className="thread-row-info-card__pr-number">#{number}</span>
+              <span className="thread-row-info-card__pr-title">{summary.title}</span>
+              {namesRepository ? (
+                <span className="thread-row-info-card__pr-repository">
+                  {summary.identity.repositoryName}
+                </span>
+              ) : null}
+            </>
+          );
+          const tooltip = [
+            `#${number} ${summary.title}`,
+            meta,
+            ...(openInReview === undefined
+              ? []
+              : [
                   externalUrl === undefined
-                    ? "Opens in Review"
-                    : "Opens in Review. Cmd-click opens on GitHub."
-                }
-                type="button"
-                variant="ghost"
-              >
-                {reference}
-              </OctantButton>
-            )}
-            {externalUrl === undefined ? null : (
-              <OctantIconButton
-                className="thread-row-info-card__pr-github"
-                label={`Open #${number} on GitHub`}
-                onClick={() => openOnGithub?.(summary.identity)}
-                title={`Open #${number} on GitHub`}
-                type="button"
-                variant="bare"
-              >
-                <ExternalLink aria-hidden="true" size={14} />
-              </OctantIconButton>
-            )}
-          </span>
-        );
-      })}
+                    ? "Opens in Review."
+                    : "Opens in Review. Cmd-click opens on GitHub.",
+                ]),
+          ].join("\n");
+          return (
+            <span className="thread-row-info-card__pr" key={pullRequestKey(summary.identity)}>
+              {openInReview === undefined ? (
+                <span
+                  aria-label={`Pull request #${number}: ${summary.title} · ${meta}`}
+                  className="thread-row-info-card__pr-reference"
+                  role="img"
+                  title={tooltip}
+                >
+                  {reference}
+                </span>
+              ) : (
+                <OctantButton
+                  aria-label={`Open pull request #${number}: ${summary.title} · ${meta}`}
+                  className="thread-row-info-card__pr-reference thread-row-info-card__pr-open"
+                  onClick={(event) => {
+                    if (event.metaKey || event.ctrlKey) {
+                      if (externalUrl !== undefined) openOnGithub?.(summary.identity);
+                      return;
+                    }
+                    openInReview(summary.identity);
+                  }}
+                  title={tooltip}
+                  type="button"
+                  variant="ghost"
+                >
+                  {reference}
+                </OctantButton>
+              )}
+              {externalUrl === undefined ? null : (
+                <OctantIconButton
+                  className="thread-row-info-card__pr-github"
+                  label={`Open #${number} on GitHub`}
+                  onClick={() => openOnGithub?.(summary.identity)}
+                  title={`Open #${number} on GitHub`}
+                  type="button"
+                  variant="bare"
+                >
+                  <ExternalLink aria-hidden="true" size={14} />
+                </OctantIconButton>
+              )}
+            </span>
+          );
+        })}
+      </span>
       {props.summaries.hiddenCount === 0 ? null : (
         <span className="thread-row-info-card__pr-more">
           +{String(props.summaries.hiddenCount)} more
@@ -510,7 +580,13 @@ export function ThreadRowActionsGutter(props: {
   const threadId = props.thread.navigationId ?? props.thread.threadId;
   const pinned = props.thread.pinned === true;
   const pinLabel = pinned ? "Unpin thread" : "Pin thread";
-  const pullRequestDestinations = threadRowPullRequestDestinations(props.thread, props.actions);
+  // The overflow menu is flat, so it lists only the first few pull requests;
+  // the right-click menu and the hover card reach the rest.
+  const pullRequestDestinations = threadRowPullRequestDestinations(
+    props.thread,
+    props.actions,
+    THREAD_ROW_MENU_INLINE_PULL_REQUESTS,
+  );
   // The overflow menu is flat, so each wake time is its own row here; the
   // right-click menu folds the same times under one Snooze item.
   const snoozePresets =
@@ -874,6 +950,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
     );
   }
   const rowPullRequest = shows.pullRequest ? props.thread.pullRequests?.items[0] : undefined;
+  const morePullRequests = morePullRequestsThanTheFirst(props.thread.pullRequests);
   const rowCheckout =
     shows.branch && props.hideCheckoutFact !== true ? props.thread.checkoutChip : undefined;
   // A snoozed row says when it comes back, not when it was last touched; a row
@@ -897,7 +974,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
       aria-label={sidebarThreadRowLabel({
         title: props.thread.title,
         ...(rowCheckout === undefined ? {} : { branch: rowCheckout.label }),
-        ...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest }),
+        ...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest, morePullRequests }),
         ...(rowState.label === undefined ? {} : { state: rowState.label }),
         ...(rowAge === undefined ? {} : { age: rowAge.title ?? rowAge.label }),
       })}
@@ -940,7 +1017,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
           ? {}
           : { workerOf: props.thread.coordinatorTitle })}
         {...(props.thread.provider === undefined ? {} : { provider: props.thread.provider })}
-        {...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest })}
+        {...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest, morePullRequests })}
         {...(rowState.state === undefined ? {} : { state: rowState.state })}
         threadId={props.thread.threadId}
         unread={rowState.unread}

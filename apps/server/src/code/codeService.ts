@@ -170,7 +170,7 @@ import type { CodeTranscriptSearchRows } from "../persistence/codeTranscriptSear
 import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import {
-  joinCodeThreadBoardPullRequests,
+  joinCodeThreadNavigationPullRequests,
   type ThreadBoardPullRequestSnapshot,
 } from "./threadBoardPullRequestJoin";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -1513,7 +1513,7 @@ export class CodeService {
       const pullRequestSummaries =
         pullRequests === undefined
           ? undefined
-          : joinCodeThreadBoardPullRequests({ threadId: thread.id, snapshot: pullRequests });
+          : joinCodeThreadNavigationPullRequests({ threadId: thread.id, snapshot: pullRequests });
       const hasPullRequests =
         pullRequestSummaries !== undefined &&
         (pullRequestSummaries.items.length > 0 || pullRequestSummaries.hiddenCount > 0);
