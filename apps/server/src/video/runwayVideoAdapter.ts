@@ -225,11 +225,9 @@ async function poll(
       case "RUNNING":
         return { status: "running" };
       case "CANCELLED":
-        // Runway refunds a cancelled task's credits; where it still reports a
-        // charge, that charge stands.
         return {
           status: "cancelled",
-          usage: usage ?? { costUsdMicros: 0 },
+          ...(usage === undefined ? {} : { usage }),
         };
       case "FAILED": {
         const code = jsonField(payload, "failureCode");
@@ -311,9 +309,9 @@ async function cancel(
   try {
     const response = await remove(ports, remoteId, signal);
     if (response === undefined) return invalidId();
-    // A cancelled task's credits are refunded, so the job settles at nothing.
-    if (response.ok || response.status === 404)
-      return { status: "cancelled", usage: { costUsdMicros: 0 } };
+    // DELETE gives no billing evidence. The task may have started or finished
+    // before Runway handled the cancellation, so the host keeps its estimate.
+    if (response.ok || response.status === 404) return { status: "cancelled" };
     return { status: "failed", providerFailure: classifyVideoHttpFailure(response) };
   } catch (error) {
     return { status: "failed", providerFailure: asFailure(error) };

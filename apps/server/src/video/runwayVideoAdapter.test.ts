@@ -192,23 +192,22 @@ describe("Runway video driver", () => {
     expect(recorder.sent).toHaveLength(0);
   });
 
-  it("settles a cancelled task at nothing, since Runway refunds its credits", async () => {
+  it("keeps the estimate for a cancellation without usage and uses a reported charge", async () => {
     const adapter = runwayVideoDriver.create({
       profile,
       ports: ports(() => new Response(null, { status: 204 })).ports,
     });
-    expect(await adapter.cancel(taskId)).toEqual({
-      status: "cancelled",
-      usage: { costUsdMicros: 0 },
-    });
+    const cancelled = await adapter.cancel(taskId);
+    expect(cancelled).toEqual({ status: "cancelled" });
 
     const polled = runwayVideoDriver.create({
       profile,
-      ports: ports(() => Response.json({ id: taskId, status: "CANCELLED" })).ports,
+      ports: ports(() => Response.json({ id: taskId, status: "CANCELLED", cost: { credits: 60 } }))
+        .ports,
     });
     expect(await polled.poll(taskId, new AbortController().signal)).toEqual({
       status: "cancelled",
-      usage: { costUsdMicros: 0 },
+      usage: { costUsdMicros: 600_000 },
     });
   });
 
