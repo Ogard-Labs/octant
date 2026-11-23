@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { BrowserDownloadSource } from "@octant/contracts";
 import {
   decodeBrowserToolApproval,
@@ -12,7 +13,25 @@ import {
   type ToolActionAuthority,
   type WindowId,
 } from "@octant/contracts";
-import { whileAwaitingToolApproval } from "../toolEffects/toolEffectLedger";
+import { whileApprovalWaited, whileAwaitingToolApproval } from "../toolEffects/toolEffectLedger";
+
+/**
+ * The operations one browser `steps` or `flow-run` call has already run, held
+ * per call so an approval asked after an earlier operation ran is not marked
+ * replay-safe for the whole call.
+ */
+const sequence = new AsyncLocalStorage<{ operations: number }>();
+
+/** Runs one `steps` batch or `flow-run` as a sequence its operations count into. */
+export function inBrowserOperationSequence<T>(work: () => Promise<T>): Promise<T> {
+  return sequence.run({ operations: 0 }, work);
+}
+
+/** Marks the entry of one operation inside the current sequence. */
+export function beginBrowserOperation(): void {
+  const state = sequence.getStore();
+  if (state !== undefined) state.operations += 1;
+}
 
 /**
  * An approval waits until it is answered or withdrawn, never for a fixed
@@ -218,8 +237,13 @@ export class BrowserToolApprovalService {
     // the call acts, so while it waits the call's record says nothing ran and
     // a restart continues the turn and asks again. A download's question can
     // follow the click that started the download in the same call, so it
-    // keeps the call's first frame and still holds.
-    return input.download === undefined ? whileAwaitingToolApproval(wait) : wait();
+    // keeps the call's first frame and still holds. The same is true inside
+    // a steps batch or a flow replay only while it is still the first
+    // operation: an approval asked after an earlier step already acted keeps
+    // only its timing on the call's record.
+    return input.download === undefined && (sequence.getStore()?.operations ?? 1) <= 1
+      ? whileAwaitingToolApproval(wait)
+      : whileApprovalWaited(wait);
   }
 
   #wait(

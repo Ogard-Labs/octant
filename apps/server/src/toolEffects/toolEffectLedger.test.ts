@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Schema } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   EventActor,
   TOOL_EFFECT_AGGREGATE_TYPE,
@@ -15,6 +15,7 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import { RoutineProposalService } from "../automation/routineProposalService";
+import { createBrowserAppManagedTools } from "../browser/browserAppManagedTools";
 import { BrowserToolApprovalService } from "../browser/browserToolApprovalService";
 import { NativeHarnessQuestionStore } from "../harness/nativeHarnessQuestions";
 import { ImageGenerationOfferService } from "../image/imageGenerationOfferService";
@@ -1024,5 +1025,109 @@ describe("asks that wait for a person's answer", () => {
       "tool-effect-awaiting-approval@1",
       "tool-effect-intended@1",
     ]);
+  });
+
+  it("keeps a steps batch's certainty uncertain while a later step's approval is still open", async () => {
+    const connection = openConnection();
+    const before = hostOn(connection);
+    const browserAuthority = {
+      hostId: "30000000-0000-4000-8000-000000000001",
+      mode: "chat",
+      providerInstanceId: "40000000-0000-4000-8000-000000000001",
+      extension: { kind: "core" },
+    };
+    const context = (contextId: string) => ({
+      contextId,
+      threadId,
+      actionId: "60000000-0000-4000-8000-000000000001",
+      correlationId: "70000000-0000-4000-8000-000000000001",
+      authority: browserAuthority,
+      policy: {
+        profileMode: "isolated",
+        profile: { kind: "personal" },
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 8,
+        sessionTimeoutMs: 600_000,
+      },
+      state: "active",
+      createdAt: "2026-09-09T10:00:00.000Z",
+    });
+    const first = {
+      status: "running",
+      threadId,
+      evidence: [],
+      context: context("50000000-0000-4000-8000-000000000001"),
+      observation: { url: "https://example.com/a", revision: 1 },
+    } as never;
+    const second = {
+      status: "running",
+      threadId,
+      evidence: [],
+      context: context("50000000-0000-4000-8000-000000000002"),
+      observation: { url: "https://example.com/b", revision: 2 },
+    } as never;
+    const act = vi.fn(async () => first);
+    const answers: Array<(decision: "approved") => void> = [];
+    const approval = vi.fn(
+      () =>
+        new Promise<"approved">((resolve) => {
+          answers.push(resolve);
+        }),
+    );
+    const browserTools = createBrowserAppManagedTools({
+      windowId: "10000000-0000-4000-8000-000000000001" as never,
+      threadId: threadId as never,
+      mode: "chat",
+      modelId: "model-a",
+      resolveModelId: () => "model-a",
+      modelBindings: new Map([
+        [
+          "50000000-0000-4000-8000-000000000001",
+          { modelId: "model-a", authority: browserAuthority as never },
+        ],
+      ]),
+      executionPolicy: "approval-gated",
+      resolveAuthority: () => browserAuthority as never,
+      browser: {
+        inspectThread: vi.fn().mockReturnValueOnce(first).mockReturnValue(second),
+        create: vi.fn(async () => second),
+        act,
+        releaseThread: vi.fn(async () => second),
+      },
+      approvals: { request: approval } as never,
+      uuid: () => "80000000-0000-4000-8000-000000000001",
+    });
+    const tools = before.ledger.forTurn({ threadId, turnId }).tools(browserTools);
+    const pending = tools.execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({
+        operation: "steps",
+        steps: [
+          { operation: "click", selector: "#go" },
+          { operation: "navigate", url: "https://example.com" },
+        ],
+      }),
+      toolCallId: "call-1",
+    });
+    try {
+      // The click ran; the site approval the second step raises is still open.
+      const early = await Promise.race([
+        pending,
+        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 1500)),
+      ]);
+      if (early !== undefined) throw new Error(`call settled early: ${JSON.stringify(early)}`);
+      expect(approval).toHaveBeenCalledOnce();
+      expect(act).toHaveBeenCalledOnce();
+      // An approval after an earlier step's effect must not mark the whole
+      // call replay-safe: the restart answer stays uncertain.
+      expect(hostOn(connection).ledger.certainty(turnId)).toEqual({
+        kind: "uncertain",
+        toolName: "octant_browser",
+      });
+    } finally {
+      while (answers.length > 0) answers.pop()?.("approved");
+      await pending.catch(() => undefined);
+    }
   });
 });
