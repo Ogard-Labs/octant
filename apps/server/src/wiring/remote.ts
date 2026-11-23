@@ -129,6 +129,9 @@ import {
   type AgentGrantRoutes,
 } from "../agentAccess/agentGrantRoutes";
 import { createAgentAccessListenerRouteHandler } from "../agentAccess/agentAccessRoutes";
+import { AgentEventRoutes } from "../agentAccess/agentEventRoutes";
+import { AgentEventWebhooks, webhookOrigins } from "../agentAccess/agentEventWebhooks";
+import { AgentMilestoneEvents, milestoneCursorKey } from "../agentAccess/agentMilestoneEvents";
 import {
   chatTurnProviders,
   createAgentSession,
@@ -2517,7 +2520,20 @@ export function wireRemote(deps: RemoteDependencies) {
       });
     },
   };
+  const milestones = new AgentMilestoneEvents(
+    persistence.journal,
+    milestoneCursorKey(join(providerDataDirectory, "agent-event-cursor.key")),
+  );
+  const agentEventWebhooks = new AgentEventWebhooks(
+    milestones,
+    webhookOrigins(process.env.OCTANT_AGENT_MCP_WEBHOOK_ORIGINS),
+  );
   const agentAccessListenerRoutes = createAgentAccessListenerRouteHandler({
+    events: new AgentEventRoutes(
+      milestones,
+      agentEventWebhooks,
+      process.env.OCTANT_AGENT_MCP_LEGACY_EVENTS === "1",
+    ),
     service: agentAccessService,
     session: agentSessionDependencies,
     version,

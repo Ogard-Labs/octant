@@ -157,6 +157,20 @@ export class AgentAccessService {
     return readAgentGrantRecord(this.#options.connection, grantId)?.grant;
   }
 
+  /** Recheck standing while a subscribed client holds no open MCP request. */
+  readActive(grantId: string): AgentGrant | undefined {
+    const grant = this.read(grantId);
+    return grant?.state === "active" &&
+      Date.parse(grant.expiresAt) > this.#now() &&
+      this.#options.listener() !== undefined
+      ? grant
+      : undefined;
+  }
+
+  projectIsActive(projectId: string): boolean {
+    return this.#options.projectType(projectId) !== undefined;
+  }
+
   execute(command: AgentAccessCommand, actor: AgentAccessActor): AgentAccessResult {
     switch (command.kind) {
       case "create":

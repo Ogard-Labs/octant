@@ -185,11 +185,21 @@ export const AGENT_MCP_TOOLS: ReadonlyArray<JsonObject> = [
     name: "read_thread",
     title: "Read an Octant thread",
     description:
-      "Where an Octant thread got to: running, waiting for an answer, waiting on the person in Octant, or idle; its newest turns; the questions you may answer with answer_question; and what only the person answers in Octant.",
+      "Where an Octant thread got to: running, waiting for an answer, waiting on the person in Octant, or idle; its newest turns; the questions you may answer with answer_question; and what only the person answers in Octant. Set wait to follow a running turn until it ends or needs attention.",
     inputSchema: {
       type: "object",
       properties: {
         threadId: { type: "string" },
+        wait: {
+          type: "boolean",
+          description: "Wait for the current running turn to end or need attention.",
+        },
+        timeoutSeconds: {
+          type: "integer",
+          minimum: 1,
+          maximum: 120,
+          description: "Maximum wait (default 25 seconds).",
+        },
         turns: {
           type: "integer",
           minimum: 1,
@@ -523,7 +533,13 @@ type ToolCall =
       readonly wait: boolean;
       readonly timeoutSeconds: number;
     }
-  | { readonly tool: "read_thread"; readonly threadId: string; readonly turns: number }
+  | {
+      readonly tool: "read_thread";
+      readonly threadId: string;
+      readonly turns: number;
+      readonly wait: boolean;
+      readonly timeoutSeconds: number;
+    }
   | {
       readonly tool: "answer_question";
       readonly threadId: string;
@@ -650,6 +666,8 @@ export function parseToolArguments(
             tool: "read_thread",
             threadId: required("threadId"),
             turns: integer("turns", 1, 20),
+            wait: flag("wait"),
+            timeoutSeconds: integer("timeoutSeconds", 25, 120),
           },
         };
       case "answer_question":
@@ -729,8 +747,34 @@ async function runTool(
       return await sendAndFollow(session, thread, call.prompt, call, poll, signal, policy);
     }
     case "read_thread": {
-      const read = await openAndReadAgentThread(session, call.threadId, { turns: call.turns });
-      return read.kind === "refused" ? refused(read) : answered(stateAnswer(read.state));
+      if (!call.wait) {
+        const read = await openAndReadAgentThread(session, call.threadId, { turns: call.turns });
+        return read.kind === "refused" ? refused(read) : answered(stateAnswer(read.state));
+      }
+      const opened = await openAgentThreadById(session, call.threadId);
+      if (opened.kind === "refused") return refused(opened);
+      const followed = await waitForAgentTurn(
+        session,
+        {
+          threadId: call.threadId,
+          mode: opened.mode,
+          ...(opened.projectName === undefined ? {} : { projectName: opened.projectName }),
+        },
+        {
+          timeoutMs: call.timeoutSeconds * 1_000,
+          signal,
+          turns: call.turns,
+          ...poll,
+        },
+      );
+      return followed.kind === "refused"
+        ? refused(followed)
+        : answered({
+            ...stateAnswer(followed.state),
+            ...(followed.timedOut
+              ? { waitEnded: "The wait ended; the turn is still running." }
+              : {}),
+          });
     }
     case "answer_question": {
       const done = await answerAgentQuestion(session, call);

@@ -2652,6 +2652,8 @@ An agent on another machine on the person's own network starts and follows work 
 - Revocation voids its credentials at once and ends its sessions and in-flight requests; running turns continue unless the person also stops them.
 - Reach stays on the person's own network (maintainer decision, 2026-11-11); hosted bots on the public internet are not supported, and nothing Octant operates is involved.
 
+- A grant that can read a thread can follow its committed, metadata-only milestones over MCP Events. Poll and push use the same grant and journal. Webhooks require explicit host-side HTTPS origin approval for the grant and receiver verification. A host can enable the older webhook profile for clients that need it. [Milestone subscriptions](agent-access.md#milestone-subscriptions) specifies the event catalog and setup. Hosted and vendor-client receipt require live verification.
+
 Status: Partly built. Since: 2026-11-11. Detail: [Agent access from other machines](agent-access.md) and [Architecture: Security and authority, Remote clients](../architecture.md#security-and-authority).
 
 ### Local MCP clients use an agent grant

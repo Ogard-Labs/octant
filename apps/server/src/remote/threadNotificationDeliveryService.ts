@@ -80,6 +80,8 @@ interface ThreadNotificationFact {
   readonly threadId: string;
   readonly kind: RemotePushNotificationKind;
   readonly runId: string;
+  readonly turnId?: string;
+  readonly input?: { readonly requestId: string; readonly kind: "approval" | "question" };
 }
 
 /** A move a window holds here until an owner phone confirms it. */
@@ -142,7 +144,15 @@ interface CommittedFact {
 // the rest of it.
 const Id = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
 const ChatAttemptUpdated = Schema.Struct({
-  attempt: Schema.Struct({ id: Id, threadId: Id, outcome: Schema.String }),
+  attempt: Schema.Struct({
+    id: Id,
+    turnId: Schema.optional(Id),
+    threadId: Id,
+    outcome: Schema.String,
+    pendingQuestion: Schema.optional(
+      Schema.Struct({ requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)) }),
+    ),
+  }),
 });
 const WorkTurnUpdated = Schema.Struct({
   threadId: Id,
@@ -198,17 +208,35 @@ function fact(
   threadId: string,
   kind: RemotePushNotificationKind | undefined,
   runId: string,
+  inputKind?: "approval" | "question",
 ): ThreadNotificationFact | undefined {
-  return kind === undefined ? undefined : { threadId, kind, runId };
+  return kind === undefined
+    ? undefined
+    : {
+        threadId,
+        kind,
+        runId,
+        ...(inputKind === undefined ? {} : { input: { requestId: runId, kind: inputKind } }),
+      };
 }
 
 /** The notification a committed event calls for, if any. */
-function threadNotificationFactOf(event: CommittedFact): ThreadNotificationFact | undefined {
+export function threadNotificationFactOf(event: CommittedFact): ThreadNotificationFact | undefined {
   switch (event.eventName) {
     case "chat.attempt-updated@1": {
       const attempt = read(ChatAttemptUpdated, event.payload)?.attempt;
       if (attempt === undefined) return undefined;
-      return fact(attempt.threadId, lifecycleKind(attempt.outcome), attempt.id);
+      const kind = lifecycleKind(attempt.outcome);
+      if (kind === undefined) return undefined;
+      const requestId = kind === "waiting" ? attempt.pendingQuestion?.requestId : undefined;
+      // Phone notifications deduplicate on the attempt. MCP clients read the turn or question.
+      return {
+        threadId: attempt.threadId,
+        kind,
+        runId: attempt.id,
+        ...(attempt.turnId === undefined ? {} : { turnId: attempt.turnId }),
+        ...(requestId === undefined ? {} : { input: { requestId, kind: "question" } }),
+      };
     }
     case "work.turn-updated@1": {
       const turn = read(WorkTurnUpdated, event.payload);
@@ -225,7 +253,12 @@ function threadNotificationFactOf(event: CommittedFact): ThreadNotificationFact 
           : frame.request.detail.kind === "user-input"
             ? "waiting"
             : undefined;
-      return fact(frame.request.threadId, kind, frame.request.requestId);
+      return fact(
+        frame.request.threadId,
+        kind,
+        frame.request.requestId,
+        kind === "approval-needed" ? "approval" : "question",
+      );
     }
     case "code.runtime-work-updated@1": {
       const work = read(CodeRuntimeWorkUpdated, event.payload)?.work;
@@ -236,22 +269,27 @@ function threadNotificationFactOf(event: CommittedFact): ThreadNotificationFact 
       const frame = read(CodeOperationEventRecorded, event.payload);
       if (frame === undefined) return undefined;
       if (frame.event.kind === "input-requested") {
-        return fact(frame.threadId, "waiting", frame.event.requestId);
+        return fact(frame.threadId, "waiting", frame.event.requestId, "question");
       }
       return {
         threadId: frame.threadId,
         kind: "approval-needed",
         runId: frame.event.approvalId,
+        input: { requestId: frame.event.approvalId, kind: "approval" },
       };
     }
     // The harness session aggregate is keyed by its thread.
     case "native-harness-approval-asked@1": {
       const asked = read(HarnessAsked, event.payload);
-      return asked === undefined ? undefined : fact(event.aggregateId, "approval-needed", asked.id);
+      return asked === undefined
+        ? undefined
+        : fact(event.aggregateId, "approval-needed", asked.id, "approval");
     }
     case "native-harness-question-asked@1": {
       const asked = read(HarnessAsked, event.payload);
-      return asked === undefined ? undefined : fact(event.aggregateId, "waiting", asked.id);
+      return asked === undefined
+        ? undefined
+        : fact(event.aggregateId, "waiting", asked.id, "question");
     }
     default:
       return undefined;
