@@ -157,7 +157,7 @@ function WatchChoiceDialog(props: {
       className="octant-confirmation"
       onClose={props.onClose}
     >
-      <h2 ref={title} tabIndex={-1} className="octant-confirmation__title mb-2" id={titleId}>
+      <h2 ref={title} tabIndex={-1} className="octant-confirmation__title" id={titleId}>
         {props.title}
       </h2>
       {props.error ? (

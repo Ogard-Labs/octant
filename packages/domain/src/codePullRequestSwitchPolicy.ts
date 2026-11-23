@@ -122,6 +122,10 @@ export function failureIdentity(failure: CodeProjectPullRequestAutoFixFailure): 
   return `${failure.kind}:${failure.key}`;
 }
 
+function isReviewFeedback(failure: CodeProjectPullRequestAutoFixFailure): boolean {
+  return failure.kind === "feedback" || failure.kind === "review-thread";
+}
+
 function failureSignature(failures: ReadonlyArray<CodeProjectPullRequestAutoFixFailure>): string {
   return failures.map(failureIdentity).toSorted().join("\n");
 }
@@ -203,7 +207,9 @@ export function applyPullRequestSwitchEvent(
       : undefined;
   // Only a wake that started a turn spent an attempt; a refused one never
   // reached the agent.
+  let feedbackWakes = fold.autoFix.feedbackWakes;
   if (change.result === "started") {
+    if (fold.autoFix.babysit && change.failures.some(isReviewFeedback)) feedbackWakes++;
     for (const failure of change.failures) {
       const identity = failureIdentity(failure);
       attempts.set(identity, (attempts.get(identity) ?? 0) + 1);
@@ -215,13 +221,7 @@ export function applyPullRequestSwitchEvent(
     autoFix: {
       ...fold.autoFix,
       attempts,
-      feedbackWakes:
-        fold.autoFix.feedbackWakes +
-        (fold.autoFix.babysit &&
-        change.result === "started" &&
-        change.failures.some((failure) => failure.kind === "feedback")
-          ? 1
-          : 0),
+      feedbackWakes,
       ...(handled ? { handled: { headSha: change.headSha, failures: handled } } : {}),
       lastWake: {
         at: event.occurredAt,
@@ -296,7 +296,7 @@ export function decidePullRequestAutoFix(input: {
   }
   if (
     fold.babysit &&
-    failures.some((failure) => failure.kind === "feedback") &&
+    failures.some(isReviewFeedback) &&
     fold.feedbackWakes >= (input.maxFeedbackWakes ?? CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES)
   ) {
     return { kind: "stop", reason: "feedback-limit" };

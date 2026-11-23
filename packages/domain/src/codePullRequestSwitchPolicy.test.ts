@@ -90,6 +90,23 @@ describe("pull-request Auto-fix policy", () => {
     });
   });
 
+  it("shares the feedback budget between inline threads and top-level comments while leaving CI repairs eligible", () => {
+    const comment: CodeProjectPullRequestAutoFixFailure = { kind: "feedback", key: "comment" };
+    const decide = (
+      previous: CodeProjectPullRequestAutoFixFailure,
+      next: CodeProjectPullRequestAutoFixFailure,
+    ) =>
+      decidePullRequestAutoFix({
+        fold: replay([babysit, woke("old", [previous], 1)]).autoFix,
+        observation: { state: "open", headSha: "new", failures: [next] },
+        ...quiet,
+        maxFeedbackWakes: 1,
+      });
+    expect(decide(review, comment)).toEqual({ kind: "stop", reason: "feedback-limit" });
+    expect(decide(comment, review)).toEqual({ kind: "stop", reason: "feedback-limit" });
+    expect(decide(review, lint)).toEqual({ kind: "wake", attempt: 1, failures: [lint] });
+  });
+
   it("hands back outstanding failures after a babysit turn finishes on the same head", () => {
     const fold = replay([babysit, woke("a1", [lint], 1)]).autoFix;
     const observation = { state: "open", headSha: "a1", failures: [lint] } as const;

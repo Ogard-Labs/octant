@@ -3951,8 +3951,8 @@ CI or reviewers should be woken, not left polling; maintainer request,
   missing approval or label waits for the person. A branch GitHub requires
   to be up to date receives a follow-up to merge its base. New top-level
   comments and submitted review notes from people or bots go to the same
-  thread for triage once per GitHub ID. Each started turn carrying new feedback
-  spends one of the **Wakes per pull-request watch** set in Settings for this
+  thread for triage once per GitHub ID. Each started turn carrying review feedback, including an inline
+  review thread, spends one of the **Wakes per pull-request watch** set in Settings for this
   enrollment, including after restart. When more feedback arrives at the limit,
   or a finished repair leaves only previously handled failures on the same head,
   the watch stops and requests a human follow-up in **Needs me**. The host stops
@@ -3985,7 +3985,9 @@ CI or reviewers should be woken, not left polling; maintainer request,
   repository, PR and repairing thread. The host remembers the recovered scope
   and stops the watch if it loses project authority. A host-person-paired device
   can also authorize the watch by opening its controls. Its exact device session
-  must remain current, including on a host with no local window.
+  must remain current, including on a host with no local window. Polling does
+  not extend the session. Idle expiry, absolute expiry or revocation stops
+  the watch.
   Other Auto-fix sessions wait for a window
   to reopen the PR review. Turning it on again starts a fresh attempt count.
 - **Watch.** The pull-request tool's `watch` (rules above) binds the

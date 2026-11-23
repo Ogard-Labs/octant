@@ -49,7 +49,10 @@ import {
 } from "../code/codeOperationRuntime";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { CodePlannerService } from "../code/codePlannerService";
-import { CodeProjectPullRequestSwitchService } from "../code/codeProjectPullRequestSwitchService";
+import {
+  CodeProjectPullRequestSwitchService,
+  pullRequestAutoFixRoutes,
+} from "../code/codeProjectPullRequestSwitchService";
 import { PullRequestReviewerRegistry } from "../pullRequestReviewers/pullRequestReviewerRegistry";
 import { createPullRequestReviewHostRuntime } from "../pullRequestReviewers/pullRequestReviewHostRuntime";
 import { createPullRequestReviewRouteHandler } from "../pullRequestReviewers/pullRequestReviewRoutes";
@@ -144,7 +147,7 @@ import {
 } from "./providers";
 import type { ServerStart } from "./serverShape";
 import type { HarnessWiring } from "./harness";
-import type { ProjectTerminalDeviceBinding } from "../code/projectTerminalService";
+import { RemoteRequestProofService } from "../remoteRequestProofService";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
@@ -2745,15 +2748,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       },
     );
     // Merge when ready and Auto-fix reuse `pullRequestSwitchForge` created above.
-    const babysitDeviceCurrent = (windowId: WindowId, binding?: ProjectTerminalDeviceBinding) =>
-      binding &&
-      (() =>
-        String(windowId) === binding.deviceId &&
-        deps.isPersonPairedDeviceCurrent(
-          binding.deviceId,
-          binding.credentialGeneration,
-          binding.sessionId,
-        ));
     const pullRequestSwitchService = new CodeProjectPullRequestSwitchService({
       localWindows: () => deps.windowAuthorityStore.listWindowIds(),
       limits: () => {
@@ -2928,18 +2922,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         projectPullRequestActionService.act(windowId, command, signal, caller, actor),
       readProjectPullRequestActionContext: (windowId, query, signal, caller) =>
         projectPullRequestActionService.readContext(windowId, query, signal, caller),
-      queryProjectPullRequestSwitches: (windowId, target, device) =>
-        pullRequestSwitchService.query(windowId, target, babysitDeviceCurrent(windowId, device)),
+      ...pullRequestAutoFixRoutes(
+        pullRequestSwitchService,
+        new RemoteRequestProofService(persistence.connection),
+        deps.isPersonPairedDeviceCurrent,
+      ),
       setProjectPullRequestMergeWhenReady: (windowId, command, signal, caller, actor) =>
         pullRequestSwitchService.setMergeWhenReady(windowId, command, caller, signal, actor),
-      setProjectPullRequestAutoFix: (windowId, command, initiator, actor, device) =>
-        pullRequestSwitchService.setAutoFix(
-          windowId,
-          command,
-          initiator,
-          actor,
-          babysitDeviceCurrent(windowId, device),
-        ),
       noteComposerActivity: (_windowId, activity) =>
         pullRequestSwitchService.noteComposerActivity(activity.threadId),
       // A person's Stop that interrupts a Code turn is told to hosts composed

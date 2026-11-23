@@ -74,6 +74,9 @@ import {
 
 const decodeRepositoryOwner = Schema.decodeUnknownSync(GithubRepositoryOwner);
 const decodeRepositoryName = Schema.decodeUnknownSync(GithubRepositoryName);
+import type { CodeRouteService } from "../codeRoutes";
+import type { RemoteRequestProofService } from "../remoteRequestProofService";
+import type { ProjectTerminalDeviceBinding } from "./projectTerminalService";
 import type { Journal } from "../persistence/journal";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type {
@@ -182,11 +185,40 @@ export interface PullRequestAutoFixThreads {
   notifyPerson(threadId: CodeThreadId, reason: string): Promise<void>;
 }
 
+/** Connect the switch routes to the same live session facts used to authenticate paired requests. */
+export function pullRequestAutoFixRoutes(
+  switches: CodeProjectPullRequestSwitchService,
+  sessions: Pick<RemoteRequestProofService, "describeSession">,
+  deviceIsCurrent: (deviceId: string, generation: number, sessionId: string) => boolean,
+): Required<
+  Pick<CodeRouteService, "setProjectPullRequestAutoFix" | "queryProjectPullRequestSwitches">
+> {
+  const bindDevice = (scope: WindowId, binding?: ProjectTerminalDeviceBinding) => {
+    if (!binding) return undefined;
+    return () => {
+      const session = sessions.describeSession(binding.sessionId);
+      return (
+        session !== undefined &&
+        session.deviceId === binding.deviceId &&
+        session.credentialGeneration === binding.credentialGeneration &&
+        binding.deviceId === String(scope) &&
+        deviceIsCurrent(binding.deviceId, binding.credentialGeneration, binding.sessionId)
+      );
+    };
+  };
+  return {
+    queryProjectPullRequestSwitches: (scope, target, device) =>
+      switches.query(scope, target, bindDevice(scope, device)),
+    setProjectPullRequestAutoFix: (scope, command, initiator, actor, device) =>
+      switches.setAutoFix(scope, command, initiator, actor, bindDevice(scope, device)),
+  };
+}
+
 /**
  * Merge when ready, Auto-fix, and a thread's watch on its own pull request.
  *
- * The two switches are turned on only by the person at a local window: the
- * click is the approval. Merge when ready hands the merge to the forge's own
+ * A person starts Auto-fix from a local window or a host-paired device.
+ * Merge when ready hands the merge to the forge's own
  * auto-merge and only watches it. Auto-fix watches the pull request on the
  * host and, on a new failure, wakes the linked thread with one turn that
  * carries the forge's text as outside content. A watch is asked for by the

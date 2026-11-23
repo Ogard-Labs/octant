@@ -1,8 +1,8 @@
-import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { createHash, generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildRemoteChallengeProofPayload,
   buildRemoteRequestProofPayload,
@@ -13,6 +13,22 @@ import {
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { openSqlite, type SqliteConnection } from "./persistence/sqlitePort";
 import { RemoteRequestProofError, RemoteRequestProofService } from "./remoteRequestProofService";
+
+import {
+  decodeCodeProjectPullRequestSwitchTarget,
+  decodeCodeThreadId,
+  decodeWindowId,
+} from "@octant/contracts";
+import { createCodeRouteHandler } from "./codeRoutes";
+import { createRemoteDevicePrincipal } from "./clientPrincipal";
+import { bindPrincipalRouteContext } from "./principalRouteContext";
+import { WindowAuthorityStore } from "./windowAuthorityStore";
+import { Journal } from "./persistence/journal";
+import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
+import {
+  CodeProjectPullRequestSwitchService,
+  pullRequestAutoFixRoutes,
+} from "./code/codeProjectPullRequestSwitchService";
 
 const hostId = "11111111-1111-4111-8111-111111111111";
 const deviceId = "22222222-2222-4222-8222-222222222222";
@@ -148,6 +164,152 @@ describe("RemoteRequestProofService", () => {
     expect(session.authenticationVersion).toBe(1);
     connection.close();
   });
+
+  it.each(["idleExpiresAt", "absoluteExpiresAt"] as const)(
+    "recovers a signed host-paired PR watch headlessly and stops it at %s",
+    async (deadline) => {
+      const { connection, service: proof, privateKey, setClock } = setup();
+      try {
+        const session = issueSession(proof, privateKey);
+        const runtime = createPhase1RuntimeRegistries();
+        const clock = () => new Date(now).toISOString();
+        const journal = new Journal({
+          connection,
+          registry: runtime.events,
+          projections: runtime.projections,
+          clock,
+        });
+        const threadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000001");
+        const target = decodeCodeProjectPullRequestSwitchTarget({
+          projectId: "10000000-0000-4000-8000-000000000001",
+          repositoryOwner: "octant",
+          repositoryName: "octant",
+          number: 12,
+        });
+        const observe = vi.fn(
+          async () =>
+            ({
+              status: "observed",
+              state: "open",
+              headSha: "a1",
+              headBranch: "test",
+              baseBranch: "main",
+              autoMergeEnabled: false,
+              waitingOn: [],
+              failures: [],
+            }) as const,
+        );
+        const windows = new WindowAuthorityStore();
+        const startTurn = vi.fn(async () => true);
+        const startHost = () => {
+          const switches = new CodeProjectPullRequestSwitchService({
+            journal,
+            clock,
+            uuid: randomUUID,
+            localWindows: () => windows.listWindowIds(),
+            authority: {
+              authorizePullRequest: async () => ({
+                status: "authorized",
+                linkedThreadIds: [String(threadId)],
+              }),
+              linkedPullRequests: async () => [target],
+            },
+            forge: {
+              observe,
+              readAutoMergeSettings: vi.fn(),
+              enableAutoMerge: vi.fn(),
+              disableAutoMerge: vi.fn(),
+            },
+            threads: {
+              inspect: () => ({ status: "available", turnActive: false }),
+              markOutsideContent: () => true,
+              startTurn,
+              notifyPerson: vi.fn(),
+            },
+          });
+          const route = createCodeRouteHandler({
+            windowAuthorityStore: windows,
+            service: {
+              bootstrap: vi.fn(),
+              navigation: vi.fn(),
+              read: vi.fn(),
+              execute: vi.fn(),
+              executeOperation: vi.fn(),
+              subscribeOperation: vi.fn(),
+              subscribe: vi.fn(),
+              readContent: vi.fn(),
+              readOperationContent: vi.fn(),
+              saveFile: vi.fn(),
+              openFile: vi.fn(),
+              ...pullRequestAutoFixRoutes(switches, proof, () => true),
+            },
+          });
+          const post = async (operation: string, payload: unknown) => {
+            const path = "/api/code/project-pull-requests/" + operation;
+            const body = JSON.stringify(payload);
+            const verified = proof.verifyRequest(
+              makeFacts(session, privateKey, {
+                proof: {
+                  canonicalPathQuery: path,
+                  bodyDigest: createHash("sha256").update(body).digest("hex"),
+                  nonce: randomUUID(),
+                },
+              }),
+            );
+            const request = new Request("http://localhost" + path, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body,
+            });
+            bindPrincipalRouteContext(request, {
+              principal: createRemoteDevicePrincipal({
+                ...verified,
+                capabilityDigest,
+                admittedBy: "host-person",
+              }),
+              scopeId: decodeWindowId(deviceId),
+            });
+            const response = await route(request);
+            expect(response?.status).toBe(200);
+            return response?.json();
+          };
+          return { switches, post };
+        };
+        const first = startHost();
+        expect(
+          await first.post("auto-fix", {
+            kind: "enable",
+            target,
+            threadId,
+            babysit: { checks: "required" },
+          }),
+        ).toMatchObject({ status: "applied" });
+        const restored = startHost();
+        const signal = new AbortController().signal;
+        await restored.switches.tick(signal);
+        expect(observe).not.toHaveBeenCalled();
+        expect(await restored.post("switches", target)).toMatchObject({
+          autoFix: { status: "on" },
+        });
+        await restored.switches.tick(signal);
+        expect(observe).toHaveBeenCalledTimes(1);
+        // Isolate the absolute deadline from idle expiry on an otherwise-current session.
+        if (deadline === "absoluteExpiresAt")
+          connection
+            .prepare("UPDATE remote_session_store SET idle_expires_at = absolute_expires_at + 1000")
+            .run();
+        setClock(Date.parse(session[deadline]));
+        await restored.switches.tick(signal);
+        expect(observe).toHaveBeenCalledTimes(1);
+        expect(startTurn).not.toHaveBeenCalled();
+        expect(
+          (await restored.switches.query(decodeWindowId(deviceId), target)).autoFix,
+        ).toMatchObject({ status: "stopped", reason: "authority-lost" });
+      } finally {
+        connection.close();
+      }
+    },
+  );
 
   it.each(["expired", "revoked"] as const)(
     "preserves the %s device lifecycle reason when issuing a challenge",
