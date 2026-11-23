@@ -86,27 +86,33 @@ export function milestoneCursorKey(path: string): () => Buffer {
   };
 }
 
+type MilestoneJournal = Pick<Journal, "headSequence" | "replay"> & {
+  readonly subscribeCommitted: (wake: () => void) => () => void;
+};
+
 export class AgentMilestoneEvents {
-  constructor(
-    private readonly journal: Pick<Journal, "headSequence" | "replay"> & {
-      readonly subscribeCommitted: (wake: () => void) => () => void;
-    },
-    private readonly key: () => Buffer,
-    private readonly clock: () => number = Date.now,
-  ) {}
+  readonly #journal: MilestoneJournal;
+  readonly #key: () => Buffer;
+  readonly #clock: () => number;
+
+  constructor(journal: MilestoneJournal, key: () => Buffer, clock: () => number = Date.now) {
+    this.#journal = journal;
+    this.#key = key;
+    this.#clock = clock;
+  }
 
   position(filter: MilestoneFilter, cursor: string | null, maxAgeMs?: number) {
-    const head = this.journal.headSequence();
+    const head = this.#journal.headSequence();
     if (cursor === null) return { sequence: head, truncated: false };
     const sequence = this.#readCursor(filter, cursor);
     if (sequence === undefined || sequence > head || head - sequence > MAX_REPLAY_ROWS) {
       return { sequence: head, truncated: true };
     }
     if (maxAgeMs === undefined || sequence === head) return { sequence, truncated: false };
-    const cutoff = this.clock() - maxAgeMs;
+    const cutoff = this.#clock() - maxAgeMs;
     let seek = sequence;
     while (seek < head && seek - sequence < MAX_AGE_SCAN) {
-      const rows = this.journal.replay(decodeReplay({ afterSequence: seek, limit: SCAN_LIMIT }));
+      const rows = this.#journal.replay(decodeReplay({ afterSequence: seek, limit: SCAN_LIMIT }));
       if (rows.length === 0) return { sequence: head, truncated: true };
       for (const row of rows) {
         if (row.globalSequence > head || Date.parse(row.occurredAt) >= cutoff) {
@@ -120,7 +126,7 @@ export class AgentMilestoneEvents {
 
   cursor(filter: MilestoneFilter, sequence: number): string {
     const iv = randomBytes(CURSOR_IV_BYTES);
-    const cipher = createCipheriv("aes-256-gcm", this.key(), iv);
+    const cipher = createCipheriv("aes-256-gcm", this.#key(), iv);
     cipher.setAAD(Buffer.from(JSON.stringify([filter.grantId, filter.name, filter.threadId])));
     const position = Buffer.alloc(8);
     position.writeBigUInt64BE(BigInt(sequence));
@@ -131,7 +137,7 @@ export class AgentMilestoneEvents {
   #readCursor(filter: MilestoneFilter, cursor: string): number | undefined {
     const bytes = Buffer.from(cursor, "base64url");
     if (bytes.length !== CURSOR_IV_BYTES + CURSOR_TAG_BYTES + 8) return undefined;
-    const key = this.key();
+    const key = this.#key();
     try {
       const tagEnd = CURSOR_IV_BYTES + CURSOR_TAG_BYTES;
       const decipher = createDecipheriv("aes-256-gcm", key, bytes.subarray(0, CURSOR_IV_BYTES));
@@ -147,13 +153,13 @@ export class AgentMilestoneEvents {
 
   /** Bounded work per call, including when unrelated threads fill the journal. */
   batch(filter: MilestoneFilter, after: number, maxEvents: number) {
-    const head = this.journal.headSequence();
+    const head = this.#journal.headSequence();
     if (head < after || head - after > MAX_REPLAY_ROWS) {
       return { entries: [], sequence: head, hasMore: false, truncated: true };
     }
     const entries: Array<{ readonly event: Milestone; readonly sequence: number }> = [];
     let sequence = after;
-    for (const row of this.journal.replay(
+    for (const row of this.#journal.replay(
       decodeReplay({ afterSequence: after, limit: SCAN_LIMIT }),
     )) {
       sequence = row.globalSequence;
@@ -169,7 +175,7 @@ export class AgentMilestoneEvents {
   }
 
   onCommit(wake: () => void): () => void {
-    return this.journal.subscribeCommitted(wake);
+    return this.#journal.subscribeCommitted(wake);
   }
 }
 
@@ -178,11 +184,12 @@ function milestoneOf(filter: MilestoneFilter, row: EventEnvelope): Milestone | u
   if (fact?.threadId !== filter.threadId) return undefined;
   const data =
     filter.name === "thread.input_required"
-      ? fact.inputKind === undefined
-        ? undefined
-        : { requestId: fact.runId, kind: fact.inputKind }
+      ? fact.input
       : fact.kind === "completion" || fact.kind === "failure"
-        ? { turnId: fact.runId, status: fact.kind === "completion" ? "completed" : "failed" }
+        ? {
+            turnId: fact.turnId ?? fact.runId,
+            status: fact.kind === "completion" ? "completed" : "failed",
+          }
         : undefined;
   if (data === undefined) return undefined;
   // Providers can repeat the same settled state or request across journal writes.

@@ -127,19 +127,29 @@ export class AgentEventWebhooks {
   readonly #verifying = new Set<string>();
   readonly #lastVerification = new Map<string, number>();
 
+  readonly #events: AgentMilestoneEvents;
+  readonly #origins: ReadonlyMap<string, ReadonlySet<string>>;
+  readonly #post: CallbackPost;
+  readonly #clock: () => number;
+
   constructor(
-    private readonly events: AgentMilestoneEvents,
-    private readonly origins: ReadonlyMap<string, ReadonlySet<string>>,
-    private readonly post: CallbackPost = postToCallback,
-    private readonly clock: () => number = Date.now,
-  ) {}
+    events: AgentMilestoneEvents,
+    origins: ReadonlyMap<string, ReadonlySet<string>>,
+    post: CallbackPost = postToCallback,
+    clock: () => number = Date.now,
+  ) {
+    this.#events = events;
+    this.#origins = origins;
+    this.#post = post;
+    this.#clock = clock;
+  }
 
   available(grantId: string): boolean {
-    return this.origins.has(grantId);
+    return this.#origins.has(grantId);
   }
 
   allows(grantId: string, url: URL): boolean {
-    return this.origins.get(grantId)?.has(url.origin) === true;
+    return this.#origins.get(grantId)?.has(url.origin) === true;
   }
 
   async subscribe(
@@ -155,7 +165,7 @@ export class AgentEventWebhooks {
     if (!input.authorized() || !this.allows(input.filter.grantId, input.delivery.url))
       return { kind: "refused" };
     const id = subscriptionId(input.filter, input.delivery.url);
-    const now = this.clock();
+    const now = this.#clock();
     const ttl = Math.min(ttlMs ?? REFRESH_MS, MAX_TTL_MS);
     let current = this.#subscriptions.get(id);
     if (current !== undefined && (current.expires <= now || !current.authorized())) {
@@ -223,7 +233,7 @@ export class AgentEventWebhooks {
       return { kind: "callback", reason: "challenge_failed" };
     }
 
-    subscription.expires = this.clock() + ttl;
+    subscription.expires = this.#clock() + ttl;
     const result = this.#result(subscription, position.truncated);
     this.#subscriptions.set(id, subscription);
     const wake = () => {
@@ -231,7 +241,7 @@ export class AgentEventWebhooks {
     };
     const timer = setInterval(wake, CHECK_MS);
     timer.unref();
-    const unsubscribe = this.events.onCommit(() => {
+    const unsubscribe = this.#events.onCommit(() => {
       setImmediate(wake);
     });
     const revoked = () => {
@@ -258,7 +268,7 @@ export class AgentEventWebhooks {
     return {
       id: subscription.id,
       refreshBefore: new Date(subscription.expires).toISOString(),
-      cursor: this.events.cursor(subscription.filter, subscription.sequence),
+      cursor: this.#events.cursor(subscription.filter, subscription.sequence),
       truncated,
     };
   }
@@ -291,20 +301,20 @@ export class AgentEventWebhooks {
       await this.#terminate(subscription);
       return;
     }
-    if (subscription.expires <= this.clock()) {
+    if (subscription.expires <= this.#clock()) {
       this.#end(subscription);
       return;
     }
     subscription.busy = true;
     try {
-      const batch = this.events.batch(subscription.filter, subscription.sequence, 1);
+      const batch = this.#events.batch(subscription.filter, subscription.sequence, 1);
       const entry = batch.entries[0];
       if (batch.truncated) {
         await this.#deliver(
           subscription,
           {
             type: "gap",
-            cursor: this.events.cursor(subscription.filter, batch.sequence),
+            cursor: this.#events.cursor(subscription.filter, batch.sequence),
           },
           messageId("gap"),
         );
@@ -315,7 +325,7 @@ export class AgentEventWebhooks {
           subscription,
           {
             ...entry.event,
-            cursor: this.events.cursor(subscription.filter, subscription.sequence),
+            cursor: this.#events.cursor(subscription.filter, subscription.sequence),
           },
           id,
         );
@@ -339,7 +349,7 @@ export class AgentEventWebhooks {
       }
       if (
         subscription.stop.signal.aborted ||
-        subscription.expires <= this.clock() ||
+        subscription.expires <= this.#clock() ||
         !subscription.authorized()
       )
         return;
@@ -368,17 +378,17 @@ export class AgentEventWebhooks {
     challenge: boolean,
   ): Promise<PostResult> {
     const body = JSON.stringify(payload);
-    const timestamp = String(Math.floor(this.clock() / 1000));
+    const timestamp = String(Math.floor(this.#clock() / 1000));
     const previous = subscription.previousSecret;
     const keys =
-      previous !== undefined && previous.until > this.clock()
+      previous !== undefined && previous.until > this.#clock()
         ? [subscription.secret, previous.key]
         : [subscription.secret];
     const signatures = keys.map(
       (key) =>
         "v1," + createHmac("sha256", key).update(`${id}.${timestamp}.${body}`).digest("base64"),
     );
-    return this.post(
+    return this.#post(
       subscription.url,
       body,
       {

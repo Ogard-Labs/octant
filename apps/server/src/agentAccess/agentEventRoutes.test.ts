@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto";
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { EventEnvelope } from "@octant/contracts";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
+import { nodeServe } from "../nodeServe";
 import { AgentEventRoutes, type AgentEventAccess } from "./agentEventRoutes";
 import { AgentEventWebhooks, webhookOrigins } from "./agentEventWebhooks";
 import { AGENT_EVENTS_VERSION, AgentMilestoneEvents } from "./agentMilestoneEvents";
@@ -67,33 +67,56 @@ function setup(
     allowed: true,
     canRead: (id) => id === threadId,
   };
-  const record = (thread: string, state = "completed") => {
+  const append = (
+    thread: string,
+    eventName: string,
+    payload: unknown,
+    occurredAt = time,
+    aggregateType = "code-thread",
+  ) => {
     const sequence = rows.length + 1;
     rows.push(
       decode({
         eventId: randomUUID(),
         globalSequence: sequence,
-        aggregateType: "code-thread",
+        aggregateType,
         aggregateId: thread,
         aggregateVersion: sequence,
-        eventName: "code.runtime-work-updated@1",
+        eventName,
         eventVersion: 1,
         hostId: "local",
         correlationId: randomUUID(),
         actor: { kind: "system", actorId: randomUUID() },
-        occurredAt: new Date(time).toISOString(),
-        payload: {
-          work: {
-            kind: "provider-turn",
-            threadId: thread,
-            state,
-            id: "turn-" + sequence,
-            transcript: "private",
-          },
-        },
+        occurredAt: new Date(occurredAt).toISOString(),
+        payload,
       }),
     );
     for (const wake of listeners) wake();
+  };
+  const record = (thread: string, state = "completed", occurredAt = time) => {
+    append(
+      thread,
+      "code.runtime-work-updated@1",
+      {
+        work: {
+          kind: "provider-turn",
+          threadId: thread,
+          state,
+          id: "turn-" + (rows.length + 1),
+          transcript: "private",
+        },
+      },
+      occurredAt,
+    );
+  };
+  const recordChat = (attempt: Record<string, unknown>) => {
+    append(
+      threadId,
+      "chat.attempt-updated@1",
+      { attempt: { threadId, ...attempt } },
+      time,
+      "chat-thread",
+    );
   };
   const call = (
     method: string,
@@ -105,7 +128,12 @@ function setup(
     } = {},
   ) => {
     const headers = new Headers({ accept: "application/json, text/event-stream" });
-    const selectedName = tweaks.eventName === undefined ? name : tweaks.eventName;
+    const selectedName =
+      tweaks.eventName === undefined
+        ? typeof args.name === "string"
+          ? args.name
+          : name
+        : tweaks.eventName;
     if (!tweaks.stdioDraft) {
       headers.set("mcp-protocol-version", AGENT_EVENTS_VERSION);
       headers.set("mcp-method", method);
@@ -126,7 +154,7 @@ function setup(
       compatibility: routes.compatibility(chosenAccess),
     });
   };
-  return { call, record, grant, posts, access, listeners, journal };
+  return { call, record, recordChat, grant, posts, access, listeners, journal, routes };
 }
 
 async function frame(reader: ReadableStreamDefaultReader<Uint8Array>) {
@@ -178,6 +206,56 @@ describe("Octant MCP Events", () => {
     expect(forbidden.error.code).toBe(-32024);
   });
 
+  it("delivers fresh milestones in the poll that skips rows older than the age limit", async () => {
+    const host = setup();
+    const first = await (await host.call("events/poll")).json();
+    host.record(threadId, "completed", time - 4_000);
+    host.record(threadId, "failed", time - 1_000);
+    const next = await (
+      await host.call("events/poll", {
+        cursor: first.result.cursor,
+        maxAgeMs: 2_000,
+      })
+    ).json();
+    expect(next.result).toMatchObject({
+      truncated: true,
+      hasMore: false,
+      events: [{ data: { threadId, turnId: "turn-2", status: "failed" } }],
+    });
+  });
+
+  it("publishes the Chat question's request id and omits waiting attempts without a question", async () => {
+    const host = setup();
+    const event = { name: "thread.input_required" };
+    const first = await (await host.call("events/poll", event)).json();
+    const attempt = { id: randomUUID(), turnId: randomUUID(), outcome: "waiting" };
+    host.recordChat(attempt);
+    host.recordChat({
+      ...attempt,
+      pendingQuestion: { requestId: "provider-question-1", prompt: "Which test runner?" },
+    });
+    const next = await (
+      await host.call("events/poll", { ...event, cursor: first.result.cursor })
+    ).json();
+    expect(next.result.events).toEqual([
+      {
+        eventId: expect.stringMatching(/^evt_/),
+        name: event.name,
+        timestamp: new Date(time).toISOString(),
+        data: { threadId, requestId: "provider-question-1", kind: "question" },
+      },
+    ]);
+  });
+
+  it("uses the Chat turn id from the transcript for settled milestones", async () => {
+    const host = setup();
+    const first = await (await host.call("events/poll")).json();
+    const turnId = randomUUID();
+    host.recordChat({ id: randomUUID(), turnId, outcome: "completed" });
+    const next = await (await host.call("events/poll", { cursor: first.result.cursor })).json();
+    expect(next.result.events).toMatchObject([{ data: { threadId, turnId, status: "completed" } }]);
+  });
+
   it("rejects missing or mismatched routing headers on the strict route", async () => {
     const host = setup();
     for (const eventName of [null, "other"]) {
@@ -213,6 +291,81 @@ describe("Octant MCP Events", () => {
     expect(await frame(reader)).toMatchObject({ id: 1, result: { resultType: "complete" } });
     expect((await reader.read()).done).toBe(true);
     expect(host.listeners.size).toBe(0);
+  });
+
+  it("reclaims slots from revoked streams even when their readers are stalled", async () => {
+    const host = setup();
+    const streams = await Promise.all(Array.from({ length: 8 }, () => host.call("events/stream")));
+    const replacement = new AbortController();
+    try {
+      const access = { ...host.access, grantSignal: replacement.signal };
+      const atLimit = await host.call("events/stream", {}, { access });
+      expect((await atLimit.json()).error.code).toBe(-32025);
+      host.grant.abort();
+      const reopened = await host.call("events/stream", {}, { access });
+      try {
+        expect(reopened.headers.get("content-type")).toBe("text/event-stream");
+      } finally {
+        await reopened.body?.cancel();
+      }
+    } finally {
+      replacement.abort();
+      await Promise.all(streams.map((response) => response.body?.cancel()));
+    }
+  });
+
+  it("reuses a subscription slot when an HTTP client disconnects", async () => {
+    const host = setup();
+    const occupying = await Promise.all(
+      Array.from({ length: 7 }, () => host.call("events/stream")),
+    );
+    const abort = new AbortController();
+    const server = await nodeServe({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (request) =>
+        host.routes.handle({
+          request,
+          id: 1,
+          method: "events/stream",
+          params: {
+            name,
+            arguments: { threadId },
+            _meta: { [versionMeta]: AGENT_EVENTS_VERSION },
+          },
+          access: host.access,
+          compatibility: false,
+        }),
+    });
+    try {
+      const response = await fetch(server.url, {
+        method: "POST",
+        headers: {
+          accept: "text/event-stream",
+          "mcp-protocol-version": AGENT_EVENTS_VERSION,
+          "mcp-method": "events/stream",
+          "mcp-name": name,
+        },
+        signal: AbortSignal.any([abort.signal, AbortSignal.timeout(3_000)]),
+      });
+      const reader = response.body?.getReader();
+      if (reader === undefined) throw new Error("Expected an event stream");
+      expect(await frame(reader)).toMatchObject({ method: "notifications/events/active" });
+      const atLimit = await host.call("events/stream");
+      expect((await atLimit.json()).error.code).toBe(-32025);
+      abort.abort();
+      await expect
+        .poll(async () => {
+          const reopened = await host.call("events/stream");
+          await reopened.body?.cancel();
+          return reopened.headers.get("content-type");
+        })
+        .toBe("text/event-stream");
+    } finally {
+      abort.abort();
+      await server.stop(true);
+      await Promise.all(occupying.map((response) => response.body?.cancel()));
+    }
   });
 
   it.each([false, true])(

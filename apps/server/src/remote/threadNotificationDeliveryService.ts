@@ -80,7 +80,8 @@ interface ThreadNotificationFact {
   readonly threadId: string;
   readonly kind: RemotePushNotificationKind;
   readonly runId: string;
-  readonly inputKind?: "approval" | "question";
+  readonly turnId?: string;
+  readonly input?: { readonly requestId: string; readonly kind: "approval" | "question" };
 }
 
 /** A move a window holds here until an owner phone confirms it. */
@@ -143,7 +144,15 @@ interface CommittedFact {
 // the rest of it.
 const Id = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
 const ChatAttemptUpdated = Schema.Struct({
-  attempt: Schema.Struct({ id: Id, threadId: Id, outcome: Schema.String }),
+  attempt: Schema.Struct({
+    id: Id,
+    turnId: Schema.optional(Id),
+    threadId: Id,
+    outcome: Schema.String,
+    pendingQuestion: Schema.optional(
+      Schema.Struct({ requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)) }),
+    ),
+  }),
 });
 const WorkTurnUpdated = Schema.Struct({
   threadId: Id,
@@ -203,7 +212,12 @@ function fact(
 ): ThreadNotificationFact | undefined {
   return kind === undefined
     ? undefined
-    : { threadId, kind, runId, ...(inputKind === undefined ? {} : { inputKind }) };
+    : {
+        threadId,
+        kind,
+        runId,
+        ...(inputKind === undefined ? {} : { input: { requestId: runId, kind: inputKind } }),
+      };
 }
 
 /** The notification a committed event calls for, if any. */
@@ -212,7 +226,17 @@ export function threadNotificationFactOf(event: CommittedFact): ThreadNotificati
     case "chat.attempt-updated@1": {
       const attempt = read(ChatAttemptUpdated, event.payload)?.attempt;
       if (attempt === undefined) return undefined;
-      return fact(attempt.threadId, lifecycleKind(attempt.outcome), attempt.id);
+      const kind = lifecycleKind(attempt.outcome);
+      if (kind === undefined) return undefined;
+      const requestId = kind === "waiting" ? attempt.pendingQuestion?.requestId : undefined;
+      // Phone notifications deduplicate on the attempt. MCP clients read the turn or question.
+      return {
+        threadId: attempt.threadId,
+        kind,
+        runId: attempt.id,
+        ...(attempt.turnId === undefined ? {} : { turnId: attempt.turnId }),
+        ...(requestId === undefined ? {} : { input: { requestId, kind: "question" } }),
+      };
     }
     case "work.turn-updated@1": {
       const turn = read(WorkTurnUpdated, event.payload);
@@ -251,7 +275,7 @@ export function threadNotificationFactOf(event: CommittedFact): ThreadNotificati
         threadId: frame.threadId,
         kind: "approval-needed",
         runId: frame.event.approvalId,
-        inputKind: "approval",
+        input: { requestId: frame.event.approvalId, kind: "approval" },
       };
     }
     // The harness session aggregate is keyed by its thread.

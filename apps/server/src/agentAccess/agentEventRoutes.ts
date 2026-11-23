@@ -118,14 +118,18 @@ export class AgentEventRoutes {
   readonly #streamsByGrant = new Map<string, number>();
   #streams = 0;
 
-  constructor(
-    private readonly events: AgentMilestoneEvents,
-    private readonly webhooks: AgentEventWebhooks,
-    private readonly legacyWebhooks: boolean,
-  ) {}
+  readonly #events: AgentMilestoneEvents;
+  readonly #webhooks: AgentEventWebhooks;
+  readonly #legacyWebhooks: boolean;
+
+  constructor(events: AgentMilestoneEvents, webhooks: AgentEventWebhooks, legacyWebhooks: boolean) {
+    this.#events = events;
+    this.#webhooks = webhooks;
+    this.#legacyWebhooks = legacyWebhooks;
+  }
 
   compatibility(access: AgentEventAccess): boolean {
-    return access.allowed && this.legacyWebhooks && this.webhooks.available(access.grantId);
+    return access.allowed && this.#legacyWebhooks && this.#webhooks.available(access.grantId);
   }
 
   discover(id: RpcId, access: AgentEventAccess, version: string): Response {
@@ -166,7 +170,7 @@ export class AgentEventRoutes {
     if (invalidHeaders !== undefined) return invalidHeaders;
     if (!access.allowed) return eventFailure(id, FORBIDDEN.code, FORBIDDEN.message);
     if (method === "events/list") {
-      return rpc(id, { events: milestoneCatalog(this.webhooks.available(access.grantId)) });
+      return rpc(id, { events: milestoneCatalog(this.#webhooks.available(access.grantId)) });
     }
 
     const name = params?.["name"];
@@ -197,19 +201,19 @@ export class AgentEventRoutes {
     if (!authorized()) return eventFailure(id, FORBIDDEN.code, FORBIDDEN.message);
 
     if (method === "events/poll") {
-      const position = this.events.position(filter, cursor, maxAgeMs);
+      const position = this.#events.position(filter, cursor, maxAgeMs);
       const batch =
-        position.truncated || cursor === null
+        cursor === null
           ? {
               entries: [],
               sequence: position.sequence,
-              hasMore: position.truncated,
+              hasMore: false,
               truncated: false,
             }
-          : this.events.batch(filter, position.sequence, Math.min(maxEvents ?? 20, 64));
+          : this.#events.batch(filter, position.sequence, Math.min(maxEvents ?? 20, 64));
       return rpc(id, {
         events: batch.entries.map(({ event }) => event),
-        cursor: this.events.cursor(filter, batch.sequence),
+        cursor: this.#events.cursor(filter, batch.sequence),
         truncated: position.truncated || batch.truncated,
         hasMore: batch.hasMore,
         nextPollMs: NEXT_POLL_MS,
@@ -223,7 +227,7 @@ export class AgentEventRoutes {
       return this.#stream(input, filter, authorized, cursor, maxAgeMs, heartbeatMs);
     }
 
-    if (!this.webhooks.available(access.grantId)) {
+    if (!this.#webhooks.available(access.grantId)) {
       return eventFailure(id, -32026, "Webhook delivery is disabled for this grant", 200, {
         feature: "deliveryMode",
         value: "webhook",
@@ -239,17 +243,17 @@ export class AgentEventRoutes {
     ) {
       return eventFailure(id, -32602, "Invalid webhook delivery parameters");
     }
-    if (!this.webhooks.allows(access.grantId, url)) {
+    if (!this.#webhooks.allows(access.grantId, url)) {
       return eventFailure(id, FORBIDDEN.code, FORBIDDEN.message);
     }
     if (method === "events/unsubscribe") {
-      return this.webhooks.unsubscribe(filter, url)
+      return this.#webhooks.unsubscribe(filter, url)
         ? rpc(id, {})
         : eventFailure(id, -32023, "Unknown subscription", 200, { kind: "subscription" });
     }
     const secret = webhookSecret(delivery?.["secret"]);
     if (secret === undefined) return eventFailure(id, -32602, "Invalid webhook signing secret");
-    const subscription = await this.webhooks.subscribe(
+    const subscription = await this.#webhooks.subscribe(
       {
         filter,
         delivery: { url, secret },
@@ -257,7 +261,7 @@ export class AgentEventRoutes {
         authorized,
         grantSignal: access.grantSignal,
       },
-      this.events.position(filter, cursor, maxAgeMs),
+      this.#events.position(filter, cursor, maxAgeMs),
       ttlMs,
       request.signal,
     );
@@ -286,8 +290,8 @@ export class AgentEventRoutes {
     suggestedHeartbeat: number | undefined,
   ): Response {
     const heartbeatMs = Math.min(10_000, Math.max(1_000, suggestedHeartbeat ?? 5_000));
-    const position = this.events.position(filter, cursor, maxAgeMs);
-    const initialCursor = this.events.cursor(filter, position.sequence);
+    const position = this.#events.position(filter, cursor, maxAgeMs);
+    const initialCursor = this.#events.cursor(filter, position.sequence);
     const byGrant = this.#streamsByGrant.get(filter.grantId) ?? 0;
     if (this.#streams >= MAX_STREAMS || byGrant >= MAX_GRANT_STREAMS) {
       return eventFailure(input.id, -32025, "Stream limit reached", 200, {
@@ -297,9 +301,10 @@ export class AgentEventRoutes {
     this.#streams += 1;
     this.#streamsByGrant.set(filter.grantId, byGrant + 1);
     const stop = new AbortController();
-    const events = this.events;
-    const connection = AbortSignal.any([input.request.signal, stop.signal]);
-    const wakeSignal = AbortSignal.any([connection, input.access.grantSignal]);
+    const events = this.#events;
+    const requestSignal = input.request.signal;
+    const grantSignal = input.access.grantSignal;
+    let removeListeners = () => {};
     const release = () => {
       if (stop.signal.aborted) return;
       stop.abort();
@@ -307,10 +312,8 @@ export class AgentEventRoutes {
       const remaining = (this.#streamsByGrant.get(filter.grantId) ?? 1) - 1;
       if (remaining === 0) this.#streamsByGrant.delete(filter.grantId);
       else this.#streamsByGrant.set(filter.grantId, remaining);
-      input.request.signal.removeEventListener("abort", release);
+      removeListeners();
     };
-    input.request.signal.addEventListener("abort", release, { once: true });
-    if (input.request.signal.aborted) release();
 
     const encoder = new TextEncoder();
     const frame = (message: JsonObject) =>
@@ -322,13 +325,31 @@ export class AgentEventRoutes {
         method: "notifications/events/" + type,
         params: { ...params, _meta },
       });
+    const finish = (controller: ReadableStreamDefaultController<Uint8Array>, revoked: boolean) => {
+      if (stop.signal.aborted) return;
+      if (revoked) {
+        controller.enqueue(notice("terminated", { error: FORBIDDEN }));
+        controller.enqueue(
+          frame({ jsonrpc: "2.0", id: input.id, result: { resultType: "complete", _meta } }),
+        );
+      }
+      controller.close();
+      release();
+    };
     let sequence = position.sequence;
-    let cancelled = false;
     let heartbeatAt = Date.now() + heartbeatMs;
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        if (connection.aborted) {
-          controller.close();
+        // A backpressured stream can stop calling pull, so close and release it
+        // directly when its grant or transport ends.
+        const disconnect = () => finish(controller, false);
+        const revoke = () => finish(controller, true);
+        removeListeners = () => {
+          requestSignal.removeEventListener("abort", disconnect);
+          grantSignal.removeEventListener("abort", revoke);
+        };
+        if (requestSignal.aborted) {
+          disconnect();
           return;
         }
         controller.enqueue(
@@ -338,10 +359,20 @@ export class AgentEventRoutes {
             heartbeatMs,
           }),
         );
+        if (grantSignal.aborted) {
+          revoke();
+          return;
+        }
+        requestSignal.addEventListener("abort", disconnect, { once: true });
+        grantSignal.addEventListener("abort", revoke, { once: true });
       },
       async pull(controller) {
         try {
-          while (!connection.aborted && authorized()) {
+          while (!stop.signal.aborted) {
+            if (!authorized()) {
+              finish(controller, true);
+              return;
+            }
             const batch = events.batch(filter, sequence, 1);
             sequence = batch.sequence;
             const entry = batch.entries[0];
@@ -365,26 +396,16 @@ export class AgentEventRoutes {
               await yieldToEvents();
               continue;
             }
-            await waitForCommit(events, remaining, wakeSignal);
+            await waitForCommit(events, remaining, stop.signal);
           }
-          if (!connection.aborted) {
-            controller.enqueue(notice("terminated", { error: FORBIDDEN }));
-            controller.enqueue(
-              frame({ jsonrpc: "2.0", id: input.id, result: { resultType: "complete", _meta } }),
-            );
-          }
-          if (!cancelled) controller.close();
-          release();
         } catch {
-          if (!connection.aborted)
+          if (!stop.signal.aborted) {
             controller.error(new Error("Octant could not read thread milestones"));
-          release();
+            release();
+          }
         }
       },
-      cancel() {
-        cancelled = true;
-        release();
-      },
+      cancel: release,
     });
     return new Response(stream, {
       headers: {
