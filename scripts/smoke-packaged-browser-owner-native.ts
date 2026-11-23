@@ -956,7 +956,8 @@ end run`;
             // picker offers the same Project root chooser.
             await native("click", "Project: Choose a Project");
             await wait("work-folder-picker", (s) => s.includes("New Project from folder…"));
-            await native("reveal", "New Project from folder…");
+            // The owned fixture has no saved Projects, so the create row is
+            // already on screen. Native click still proves its exact bounds.
             await native("click", "New Project from folder…");
             await wait(
               "project-choose-folder",
