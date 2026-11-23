@@ -133,7 +133,20 @@ describe("pull-request Auto-fix policy", () => {
     expect(decidePullRequestAutoFix({ fold, observation, ...quiet, turnActive: true }).kind).toBe(
       "idle",
     );
-    expect(decidePullRequestAutoFix({ fold, observation, ...quiet })).toEqual({
+    const first = decidePullRequestAutoFix({ fold, observation, ...quiet });
+    expect(first.kind).toBe("confirm-stall");
+    if (first.kind !== "confirm-stall") throw new Error("Expected a second poll");
+    expect(
+      decidePullRequestAutoFix({
+        fold,
+        observation: { ...observation, headSha: "after-push", failures: [], babysitReady: true },
+        ...quiet,
+        priorStall: first.signature,
+      }),
+    ).toEqual({ kind: "stop", reason: "ready" });
+    expect(
+      decidePullRequestAutoFix({ fold, observation, ...quiet, priorStall: first.signature }),
+    ).toEqual({
       kind: "stop",
       reason: "needs-help",
     });

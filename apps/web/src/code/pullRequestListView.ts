@@ -211,6 +211,7 @@ export function babysitProgress(row: CodeProjectPullRequestRow) {
     label: `Waiting for label ${watch.requiredLabel ?? ""}`.trim(),
     checks: "Waiting for checks",
     "repair-check": "CI needs a fix",
+    "outside-review": "Review thread needs a person",
     "repair-review": "Review feedback to address",
     "repair-branch": "Branch needs an update",
     repository: "Waiting for repository rules",
@@ -224,7 +225,11 @@ export function babysitProgress(row: CodeProjectPullRequestRow) {
   const owner = row.linkedThreads.find(
     (thread) => String(thread.threadId) === String(watch.threadId),
   )?.title;
-  return [statuses[watch.status], owner].filter(Boolean).join(" · ");
+  const budget =
+    watch.feedbackTurns !== undefined && watch.feedbackLimit !== undefined
+      ? `${watch.feedbackTurns} of ${watch.feedbackLimit} feedback turns`
+      : undefined;
+  return [watch.blockerDetail ?? statuses[watch.status], owner, budget].filter(Boolean).join(" · ");
 }
 
 export function filterPullRequests(
@@ -246,6 +251,7 @@ export function filterPullRequests(
       !(
         row.babysit &&
         [
+          "outside-review",
           "draft",
           "approval",
           "label",

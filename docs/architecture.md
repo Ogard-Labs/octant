@@ -3950,19 +3950,25 @@ CI or reviewers should be woken, not left polling; maintainer request,
   The person can also require a named GitHub label. A
   missing approval or label waits for the person. A branch GitHub requires
   to be up to date receives a follow-up to merge its base. New top-level
-  comments and submitted review notes from people or bots go to the same
-  thread for triage once per GitHub ID. Each started turn carrying review feedback, including an inline
-  review thread, spends one of the **Wakes per pull-request watch** set in Settings for this
-  enrollment, including after restart. When more feedback arrives at the limit,
-  or a finished repair leaves only previously handled failures on the same head,
-  the watch stops and requests a human follow-up in **Needs me**. The host stops
-  babysitting when it observes an open, non-draft, mergeable head with
-  passing selected checks, cleared repository gates, no current unresolved
-  review threads and the requested label. It confirms the head after the
-  detail reads and records completion with a thread follow-up naming that
-  head. A thread's open PR follow-up keeps the latest handoff for each repository
-  and PR until acknowledged. The person's rules replay with the Auto-fix switch. A person can
-  reopen the command to inspect or stop it. Merging uses its own controls.
+  comments and submitted review notes from owners, members, collaborators, or GitHub bot
+  accounts go to the same thread for triage once per GitHub ID. An open inline thread from
+  another author waits for a person to resolve it. Its comments cannot spend the repair
+  budget. Each started turn carrying review feedback, including an inline review thread,
+  spends one of the **Wakes per pull-request watch** set in Settings for this enrollment,
+  including after restart. When more feedback arrives at the limit, or two consecutive quiet
+  polls after a repair see the same head and the same previously handled failures, the watch
+  stops and requests a human follow-up in **Needs me**. The host stops babysitting when it
+  observes an open, non-draft, mergeable head with passing selected checks, cleared
+  repository gates, no current unresolved review threads and the requested label. It
+  confirms the head after the detail reads and records completion with a thread follow-up
+  naming that head. A thread's open PR follow-up keeps the latest handoff for each
+  repository and PR until acknowledged. The overview shows feedback turns used and the
+  limit, and names a requested reviewer, code owner or required deployment when GitHub
+  supplies the evidence. After a repair or feedback handoff, **Resume** starts a new
+  enrollment with its saved rules. Reopening the watch dialog also restores those rules for
+  editing. The ready follow-up and overview offer a separate **Merge** action that requires
+  the person to confirm the recorded head and method. The host checks the head and merge
+  requirements again.
 - **Auto-fix limits.** A failure is a check name, a review thread id, or the
   base conflict. Each started wake spends one attempt on every failure it
   carried; at most three attempts per failure, or the number in Settings ›

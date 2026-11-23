@@ -1,3 +1,4 @@
+import { isPairedDeviceSessionCurrent as checkPairedDeviceSessionCurrent } from "../remoteRequestProofService";
 import { ThreadNarration } from "../speech/narrationTool";
 import { ThreadTranscription } from "../speech/transcriptionTool";
 import { createSpeechGates } from "../speech/speechGates";
@@ -247,6 +248,15 @@ export function wireAuthority(deps: AuthorityDependencies) {
   const isRestrictedDeviceScope = (scopeId: WindowId): boolean =>
     isPairedDeviceScope(scopeId) &&
     !readDeviceApprovedByPerson(persistence.connection, String(scopeId));
+  const isPairedDeviceSessionCurrent = (
+    principal: {
+      readonly deviceId: unknown;
+      readonly sessionId: unknown;
+      readonly credentialGeneration: number;
+    },
+    sessionNow?: () => number,
+  ): boolean =>
+    checkPairedDeviceSessionCurrent(persistence.connection, principal, (sessionNow ?? Date.now)());
   const isPersonPairedDeviceCurrent = (
     deviceId: string,
     credentialGeneration: number,
@@ -558,6 +568,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     threadTranscription,
     isPairedDeviceScope,
     isRestrictedDeviceScope,
+    isPairedDeviceSessionCurrent,
     isPersonPairedDeviceCurrent,
     liveTurns,
     machineChangeFeed,

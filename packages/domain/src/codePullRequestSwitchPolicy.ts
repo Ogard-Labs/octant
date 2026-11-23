@@ -17,6 +17,11 @@ import {
   type CodeProjectPullRequestWatchStopReason,
 } from "@octant/contracts";
 
+export const PULL_REQUEST_HANDOFF_HEADING = "Pull request updates\n";
+export function readyPullRequestNotice(headSha: string): string {
+  return `ready to merge at ${headSha}`;
+}
+
 export type PullRequestMergeWhenReadyFold =
   | { readonly status: "off" }
   | {
@@ -56,6 +61,7 @@ export type PullRequestAutoFixFold =
       readonly reason: CodeProjectPullRequestAutoFixStopReason;
       readonly babysit?: PullRequestBabysitRules;
       readonly readyHeadSha?: string;
+      readonly feedbackWakes?: number;
       readonly stoppedAt: string;
     };
 
@@ -190,7 +196,7 @@ export function applyPullRequestSwitchEvent(
         threadId: String(threadId),
         reason: change.reason,
         ...(fold.autoFix.status !== "off" && fold.autoFix.babysit
-          ? { babysit: fold.autoFix.babysit }
+          ? { babysit: fold.autoFix.babysit, feedbackWakes: fold.autoFix.feedbackWakes }
           : {}),
         ...(change.readyHeadSha === undefined ? {} : { readyHeadSha: change.readyHeadSha }),
         stoppedAt: event.occurredAt,
@@ -242,6 +248,7 @@ export interface PullRequestAutoFixObservation {
 }
 
 export type PullRequestAutoFixDecision =
+  | { readonly kind: "confirm-stall"; readonly signature: string }
   | { readonly kind: "idle" }
   | { readonly kind: "paused"; readonly reason: CodeProjectPullRequestAutoFixPauseReason }
   | { readonly kind: "stop"; readonly reason: CodeProjectPullRequestAutoFixStopReason }
@@ -257,7 +264,7 @@ export type PullRequestAutoFixDecision =
  * - A merged or closed pull request stops it.
  * - No failure, or the same failures on the same head it already woke a turn
  *   for, is idle in ordinary Auto-fix. A babysitter hands remaining failures
- *   to the person once the repairing thread is quiet. A wake that
+ *   to the person after two quiet observations of the same head and failures. A wake that
  *   never started a turn (refused, or never sent) is tried again, because
  *   the reason is usually transient.
  * - A failure that already spent the attempt limit stops it, so a fix that
@@ -273,6 +280,7 @@ export function decidePullRequestAutoFix(input: {
   /** Attempts per failure from Settings; absent is the default three. */
   readonly maxAttempts?: number;
   readonly maxFeedbackWakes?: number;
+  readonly priorStall?: string;
 }): PullRequestAutoFixDecision {
   const { fold, observation } = input;
   if (fold.status !== "on") return { kind: "idle" };
@@ -290,9 +298,14 @@ export function decidePullRequestAutoFix(input: {
       ? observation.failures.filter((failure) => !handled.failures.has(failureIdentity(failure)))
       : observation.failures;
   if (failures.length === 0) {
-    return fold.babysit && !input.turnActive && !input.personTyping
+    if (!fold.babysit || input.turnActive || input.personTyping) return { kind: "idle" };
+    const signature = JSON.stringify([
+      observation.headSha,
+      ...observation.failures.map(failureIdentity).toSorted(),
+    ]);
+    return input.priorStall === signature
       ? { kind: "stop", reason: "needs-help" }
-      : { kind: "idle" };
+      : { kind: "confirm-stall", signature };
   }
   // A repair may push a new head before it resolves the review. Recheck its result after the turn.
   if (fold.babysit && input.turnActive) return { kind: "paused", reason: "turn-active" };

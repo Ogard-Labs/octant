@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   decodeCodeProjectPullRequestSwitchTarget,
   decodeCodeProjectPullRequestView,
+  decodeUtcTimestamp,
   decodeWindowId,
   type CodeProjectPullRequestMergeMethod,
 } from "@octant/contracts";
@@ -316,7 +317,14 @@ describe("Babysit from a Code thread", () => {
     f.observe(observed({ babysitBlocker: "label" }));
     await f.service.tick(signal);
     const rows = f.service.withBabysitProgress(view).rows;
-    expect(rows[0]?.babysit).toEqual({ threadId, status: "label", requiredLabel: "qa" });
+    expect(rows[0]?.babysit).toEqual({
+      threadId,
+      status: "label",
+      requiredLabel: "qa",
+      checks: "required",
+      feedbackTurns: 0,
+      feedbackLimit: 10,
+    });
     expect(rows[1]?.babysit).toBeUndefined();
     const unlinked = { ...view, rows: view.rows.map((r) => ({ ...r, linkedThreads: [] })) };
     expect(f.service.withBabysitProgress(unlinked).rows[0]?.babysit).toBeUndefined();
@@ -432,6 +440,8 @@ describe("Babysit from a Code thread", () => {
     expect(f.threads.notifyPerson).not.toHaveBeenCalled();
     f.setTurnActive(false);
     await f.service.tick(signal);
+    expect(f.threads.notifyPerson).not.toHaveBeenCalled();
+    await f.service.tick(signal);
     await f.restart().tick(signal);
     expect(f.threads.notifyPerson).toHaveBeenCalledExactlyOnceWith(
       threadId,
@@ -440,6 +450,49 @@ describe("Babysit from a Code thread", () => {
     expect((await f.service.query(windowId, target)).autoFix).toMatchObject({
       status: "stopped",
       reason: "needs-help",
+    });
+  });
+
+  it("keeps watching through a stale head and resumes only the stopped enrollment the person saw", async () => {
+    const f = fixture();
+    const rules = { checks: "all", requiredLabel: "qa" } as const;
+    const enable = { kind: "enable", threadId, target, babysit: rules } as const;
+    await f.service.setAutoFix(windowId, enable, "user");
+    f.observe(observed({ failures: [lint] }));
+    await f.service.tick(signal);
+    await f.service.tick(signal);
+    expect(f.threads.notifyPerson).not.toHaveBeenCalled();
+    const head = "b".repeat(40);
+    f.observe(observed({ headSha: head, babysitReady: true }));
+    await f.service.tick(signal);
+    expect(f.threads.notifyPerson).toHaveBeenCalledExactlyOnceWith(
+      threadId,
+      expect.stringContaining(head),
+    );
+    const restored = f.restart();
+    const stopped = (await restored.query(windowId, target)).autoFix;
+    expect(stopped).toMatchObject({
+      status: "stopped",
+      reason: "ready",
+      readyHeadSha: head,
+      babysit: rules,
+    });
+    if (stopped.status !== "stopped") throw new Error("Watch should be ready");
+    expect(
+      await restored.setAutoFix(
+        windowId,
+        { ...enable, expectedStoppedAt: decodeUtcTimestamp("2025-01-01T00:00:00.000Z") },
+        "user",
+      ),
+    ).toEqual({ status: "refused", reason: "stale" });
+    const command = { ...enable, expectedStoppedAt: stopped.stoppedAt };
+    expect(await restored.setAutoFix(windowId, command, "user")).toMatchObject({
+      status: "applied",
+      view: { autoFix: { status: "on", babysit: rules } },
+    });
+    expect(await restored.setAutoFix(windowId, command, "user")).toEqual({
+      status: "refused",
+      reason: "stale",
     });
   });
 
@@ -458,10 +511,30 @@ describe("Babysit from a Code thread", () => {
           conflicting: false,
           reviews: [],
           comments: [
-            { author: "bot", id, at: "2026-10-31T10:00:10Z", body: "Review this change." },
+            {
+              author: "bot",
+              trustedFeedback: true,
+              id,
+              at: "2026-10-31T10:00:10Z",
+              body: "Review this change.",
+            },
           ],
         },
       });
+    const outside = observed({
+      activity: {
+        checks: "passed",
+        failedChecks: [],
+        conflicting: false,
+        reviews: [],
+        comments: [
+          { author: "passerby", id: "outside", at: "2026-10-31T10:00:10Z", body: "Try my idea." },
+        ],
+      },
+    });
+    f.observe(outside);
+    await f.service.tick(signal);
+    expect(f.threads.startTurn).not.toHaveBeenCalled();
     f.observe(feedback("first"));
     await f.service.tick(signal);
     const restored = f.restart();
@@ -523,6 +596,7 @@ describe("Babysit from a Code thread", () => {
       comments: [
         {
           author: "ci-bot",
+          trustedFeedback: true,
           id: "comment-5",
           at: "2026-10-31T10:00:10Z",
           body: "Review the cache key.",

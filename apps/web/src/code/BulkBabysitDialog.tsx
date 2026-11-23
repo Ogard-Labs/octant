@@ -20,7 +20,7 @@ import {
 import { OctantInput } from "../ui/base/OctantInput";
 export type BabysitClient = Pick<
   CodeClient,
-  "queryProjectPullRequestSwitches" | "setProjectPullRequestAutoFix"
+  "queryProjectPullRequestSwitches" | "setProjectPullRequestAutoFix" | "mergeProjectPullRequest"
 >;
 
 export function targetFor({

@@ -210,6 +210,7 @@ function BabysitControls(props: {
   const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const seededStop = useRef<string | undefined>(undefined);
   const revision = useRef(0);
   const writing = useRef(false);
   const [readError, setReadError] = useState(false);
@@ -222,7 +223,18 @@ function BabysitControls(props: {
         .queryProjectPullRequestSwitches?.(props.target)
         .then((view) => {
           if (live && revision.current === pendingRead) {
-            setState(view.autoFix);
+            const watch = view.autoFix;
+            if (
+              watch.status === "stopped" &&
+              watch.threadId === props.threadId &&
+              watch.babysit &&
+              seededStop.current !== watch.stoppedAt
+            ) {
+              setAll(watch.babysit.checks === "all");
+              setLabel(watch.babysit.requiredLabel ?? "");
+              seededStop.current = watch.stoppedAt;
+            }
+            setState(watch);
             setReadError(false);
           }
         })
@@ -236,10 +248,11 @@ function BabysitControls(props: {
       live = false;
       cancel();
     };
-  }, [props.client, props.target]);
+  }, [props.client, props.target, props.threadId]);
 
   const invalidLabel = invalidBabysitLabel(label);
   const active = state?.status === "on";
+  const saved = state?.status === "stopped" && state.threadId === props.threadId && state.babysit;
   const anotherThread = active && String(state.threadId) !== String(props.threadId);
   async function change() {
     if (writing.current || !state || anotherThread || !props.client.setProjectPullRequestAutoFix)
@@ -255,6 +268,7 @@ function BabysitControls(props: {
           ? { kind: "disable", target: props.target, threadId: props.threadId }
           : {
               kind: "enable",
+              ...(saved && { expectedStoppedAt: state.stoppedAt }),
               target: props.target,
               threadId: props.threadId,
               babysit: {
@@ -317,7 +331,13 @@ function BabysitControls(props: {
             disabled={busy || (!active && invalidLabel)}
             onClick={() => void change()}
           >
-            {active ? (state.babysit ? "Stop babysitting" : "Stop Auto-fix") : "Start babysitting"}
+            {active
+              ? state.babysit
+                ? "Stop babysitting"
+                : "Stop Auto-fix"
+              : saved
+                ? "Resume babysitting"
+                : "Start babysitting"}
           </OctantButton>
         )}
       </div>

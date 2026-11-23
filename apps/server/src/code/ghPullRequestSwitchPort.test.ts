@@ -218,6 +218,153 @@ describe("forge switch port", () => {
     expect(await observe()).toEqual({ status: "unavailable" });
   });
 
+  it("uses GitHub associations for repair feedback and keeps an outside review thread as a human gate", async () => {
+    const person = (login: string, association: string, type = "User") => ({
+      author: { login, __typename: type },
+      authorAssociation: association,
+      id: login,
+      body: login,
+      createdAt: "2026-10-31T10:00:10Z",
+    });
+    const outsider = person("outside-bot", "NONE");
+    const member = person("member", "MEMBER");
+    const bot = person("automation", "NONE", "Bot");
+    let includeMember = true;
+    const { port: forge } = port((args) => {
+      const json = (value: unknown) => ({ exitCode: 0, stdout: JSON.stringify(value) });
+      if (args[1] === "view")
+        return json({
+          state: "OPEN",
+          headRefOid: "a1",
+          isDraft: false,
+          baseRefName: "main",
+          mergeable: "MERGEABLE",
+          mergeStateStatus: "CLEAN",
+        });
+      if (args[1] === "checks") return json([]);
+      if (args.some((arg) => arg.includes("reviews(last:")))
+        return json({ comments: [outsider, member, bot], reviews: [] });
+      const thread = (id: string, nodes: unknown[]) => ({
+        id,
+        isResolved: false,
+        isOutdated: false,
+        comments: { nodes },
+      });
+      const nodes = [
+        thread("outside-thread", [outsider]),
+        ...(includeMember ? [thread("member-thread", [member, outsider, bot])] : []),
+      ];
+      return json({
+        data: {
+          repository: {
+            pullRequest: { reviewThreads: { nodes, pageInfo: { hasNextPage: false } } },
+          },
+        },
+      });
+    });
+    const observe = () =>
+      forge.observe(request, signal, {
+        activity: false,
+        failures: true,
+        babysit: { checks: "required" },
+      });
+    const observation = await observe();
+    if (observation.status !== "observed") throw new Error("Expected an observation");
+    expect(observation.activity?.comments.map((c) => [c.id, c.trustedFeedback])).toEqual([
+      ["outside-bot", undefined],
+      ["member", true],
+      ["automation", true],
+    ]);
+    expect(observation.failures.map((f) => f.failure.key)).toEqual(["member-thread"]);
+    expect(observation.failures[0]?.detail).not.toContain("outside-bot");
+    includeMember = false;
+    expect(await observe()).toMatchObject({
+      babysitReady: false,
+      babysitBlocker: "outside-review",
+      failures: [],
+    });
+  });
+
+  it("names requested code owners and only identifies deployments that still block this head", async () => {
+    let reviewDecision = "REVIEW_REQUIRED";
+    let deployment = "PENDING";
+    let readable = true;
+    const head = "b".repeat(40);
+    const json = (value: unknown) => ({ exitCode: 0, stdout: JSON.stringify(value) });
+    const { port: forge } = port((args) => {
+      if (args[1] === "view")
+        return json({
+          state: "OPEN",
+          reviewDecision,
+          headRefOid: head,
+          baseRefName: "main",
+          isDraft: false,
+          mergeable: "MERGEABLE",
+          mergeStateStatus: "BLOCKED",
+        });
+      if (args[1] === "checks") return json([{ name: "lint", bucket: "pass" }]);
+      if (args.some((arg) => arg.includes("reviews(last:")))
+        return json({
+          comments: [],
+          reviews: [],
+          reviewRequests: [
+            { asCodeOwner: true, requestedReviewer: { combinedSlug: "octant/release" } },
+          ],
+        });
+      if (args.some((arg) => arg.includes("rules/branches/")))
+        return readable
+          ? json([
+              {
+                type: "required_deployments",
+                parameters: { required_deployment_environments: ["staging"] },
+              },
+            ])
+          : { exitCode: 1, stdout: "" };
+      if (args.some((arg) => arg.includes("deployments(first:"))) {
+        expect(args).toContain("head=" + head);
+        expect(args).toContain("env[]=staging");
+        return json({
+          data: {
+            repository: {
+              object: {
+                deployments: {
+                  nodes: [{ environment: "staging", latestStatus: { state: deployment } }],
+                  pageInfo: { hasNextPage: false },
+                },
+              },
+            },
+          },
+        });
+      }
+      return json({
+        data: {
+          repository: {
+            pullRequest: { reviewThreads: { nodes: [], pageInfo: { hasNextPage: false } } },
+          },
+        },
+      });
+    });
+    const observe = () =>
+      forge.observe(request, signal, {
+        activity: false,
+        failures: true,
+        babysit: { checks: "required" },
+      });
+    expect(await observe()).toMatchObject({
+      babysitBlocker: "approval",
+      babysitBlockerDetail: "Approval required · Code owner review requested from @octant/release",
+    });
+    reviewDecision = "APPROVED";
+    expect(await observe()).toMatchObject({
+      babysitBlocker: "repository",
+      babysitBlockerDetail: "Waiting for required deployment to staging",
+    });
+    deployment = "SUCCESS";
+    expect(await observe()).not.toHaveProperty("babysitBlockerDetail");
+    readable = false;
+    expect(await observe()).toMatchObject({ babysitReady: false, babysitBlocker: "repository" });
+  });
+
   it("reads failed CI jobs on a GitHub CLI that lacks JSON check output", async () => {
     const { port: forge, run } = port((args) => {
       if (args[1] === "checks") return { exitCode: 1, stdout: "", stderr: "unknown flag: --json" };

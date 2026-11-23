@@ -94,6 +94,7 @@ import {
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
+import { ThreadWatchHandoff } from "./PullRequestHandoff";
 import { PullRequestBabysitDialog } from "./PullRequestBabysitDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
@@ -2565,6 +2566,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               role="region"
             />
           </SelectionThreadScope>
+        )}
+        {canBabysit && view && (
+          <ThreadWatchHandoff
+            key={String(props.threadId)}
+            client={codeClient}
+            projectId={view.thread.projectId}
+            threadId={props.threadId}
+            followUp={props.controller.followUps?.get(String(props.threadId))?.followUp}
+          />
         )}
         <OctantDialogPresence>
           {canBabysit && String(babysitThread) === String(props.threadId) && view !== undefined ? (

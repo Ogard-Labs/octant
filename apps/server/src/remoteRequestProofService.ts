@@ -19,7 +19,11 @@ import {
   sessionExpiry,
 } from "@octant/domain";
 import { SESSION_IDLE_TTL_MS } from "@octant/domain";
-import { readDeviceRegistration } from "./persistence/remoteAccessProjection";
+import {
+  readDeviceApprovedByPerson,
+  readDeviceRegistration,
+  readRemoteSessionInvalidation,
+} from "./persistence/remoteAccessProjection";
 import type { SqliteConnection } from "./persistence/sqlitePort";
 
 const CHALLENGE_TTL_MS = 60_000;
@@ -676,6 +680,40 @@ export class RemoteRequestProofService {
     }
     throw new RemoteRequestProofError("capacity");
   }
+}
+
+export function isPairedDeviceSessionCurrent(
+  connection: SqliteConnection,
+  principal: {
+    readonly deviceId: unknown;
+    readonly sessionId: unknown;
+    readonly credentialGeneration: number;
+  },
+  nowMs: number,
+): boolean {
+  const deviceId = String(principal.deviceId);
+  const registration = readDeviceRegistration(connection, deviceId);
+  if (
+    registration === undefined ||
+    registration.state !== "active" ||
+    registration.revokedAt !== null ||
+    (registration.expiresAt !== null && Date.parse(registration.expiresAt) <= nowMs)
+  ) {
+    return false;
+  }
+  if (registration.credentialGeneration !== principal.credentialGeneration) return false;
+  if (!readDeviceApprovedByPerson(connection, deviceId)) return false;
+
+  const sessionIdDigest = digest(String(principal.sessionId));
+  if (readRemoteSessionInvalidation(connection, sessionIdDigest) !== undefined) {
+    return false;
+  }
+
+  const session = readCurrentRemoteSession(connection, String(principal.sessionId), nowMs);
+  return (
+    session?.deviceId === deviceId &&
+    session.credentialGeneration === principal.credentialGeneration
+  );
 }
 
 /** Current remote session facts at the gateway's effective time. Reading never extends a deadline. */

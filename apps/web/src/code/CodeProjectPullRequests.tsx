@@ -35,6 +35,7 @@ import {
 } from "../threadBoard/threadBoardState";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
+import { RowWatchHandoff } from "./PullRequestHandoff";
 import { BulkBabysitDialog } from "./BulkBabysitDialog";
 import { OverviewBabysitDialog, type BabysitClient } from "./PullRequestBabysitDialog";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
@@ -356,10 +357,21 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
     watchKey === undefined
       ? undefined
       : scopedRows.find((row) => projectPullRequestKey(row) === watchKey);
+  const babysitClient = props.babysitClient;
   const watchAction =
-    props.babysitClient?.queryProjectPullRequestSwitches &&
-    props.babysitClient.setProjectPullRequestAutoFix
-      ? setWatchKey
+    babysitClient?.queryProjectPullRequestSwitches && babysitClient.setProjectPullRequestAutoFix
+      ? (row: CodeProjectPullRequestRow) => (
+          <div>
+            <RowWatchHandoff row={row} client={babysitClient} onUpdated={reloadCached} />
+            <OctantIconButton
+              type="button"
+              label={`Babysit ${row.repositoryOwner}/${row.repositoryName}#${row.number}`}
+              onClick={() => setWatchKey(projectPullRequestKey(row))}
+            >
+              <Eye aria-hidden="true" size={16} />
+            </OctantIconButton>
+          </div>
+        )
       : undefined;
   const selectedKey = props.renderDetail === undefined ? props.selectedRowKey : pickedKey;
   const selectedRow =
@@ -1247,7 +1259,7 @@ function RepositoryGroup(props: {
   readonly onRefresh: () => void;
   readonly emptyCopy?: string;
   readonly selectedRowKey: string | undefined;
-  readonly onBabysit: ((key: string) => void) | undefined;
+  readonly onBabysit: ((row: CodeProjectPullRequestRow) => ReactNode) | undefined;
   readonly onSelectRow: ((row: CodeProjectPullRequestRow) => void) | undefined;
   readonly backgroundRefresh?: ProjectSetting;
   readonly backgroundRefreshState?: CodeProjectPullRequestBackgroundRefreshState;
@@ -1319,7 +1331,7 @@ function RepositoryGroup(props: {
 function PullRequestRows(props: {
   readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
   readonly selectedRowKey: string | undefined;
-  readonly onBabysit: ((key: string) => void) | undefined;
+  readonly onBabysit: ((row: CodeProjectPullRequestRow) => ReactNode) | undefined;
   readonly onSelectRow: ((row: CodeProjectPullRequestRow) => void) | undefined;
   /** Name the owner too: the list spans repositories and no group head says it. */
   readonly qualifyRepository: boolean;
@@ -1347,15 +1359,10 @@ function PullRequestRows(props: {
               rowKey={rowKey}
               selected={props.selectedRowKey === rowKey}
             />
-            {props.onBabysit && row.state !== "closed" && row.state !== "merged" && (
-              <OctantIconButton
-                type="button"
-                label={`Babysit ${row.repositoryOwner}/${row.repositoryName}#${row.number}`}
-                onClick={() => props.onBabysit?.(rowKey)}
-              >
-                <Eye aria-hidden="true" size={16} />
-              </OctantIconButton>
-            )}
+            {props.onBabysit &&
+              row.state !== "closed" &&
+              row.state !== "merged" &&
+              props.onBabysit(row)}
             {row.babysit && <p className="pr-page__watch-progress">{babysitProgress(row)}</p>}
           </li>
         );

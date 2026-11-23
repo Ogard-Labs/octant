@@ -12,7 +12,11 @@ import {
 } from "@octant/domain";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { openSqlite, type SqliteConnection } from "./persistence/sqlitePort";
-import { RemoteRequestProofError, RemoteRequestProofService } from "./remoteRequestProofService";
+import {
+  isPairedDeviceSessionCurrent,
+  RemoteRequestProofError,
+  RemoteRequestProofService,
+} from "./remoteRequestProofService";
 
 import {
   decodeCodeProjectPullRequestSwitchTarget,
@@ -20,7 +24,6 @@ import {
   decodeWindowId,
 } from "@octant/contracts";
 import { MonotonicRemoteClock } from "./remote/monotonicRemoteClock";
-import { isPairedDeviceSessionCurrent } from "./browser/pairedBrowserControl";
 import { createCodeRouteHandler } from "./codeRoutes";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import { bindPrincipalRouteContext } from "./principalRouteContext";

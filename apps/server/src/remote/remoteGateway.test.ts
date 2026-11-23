@@ -36,7 +36,7 @@ vi.mock("./remoteRequestRegistry", async (importOriginal) => {
 });
 import { decodeStableHostId, type PairedDeviceLifetime } from "@octant/contracts/remote-access";
 import { buildHostHelloSignaturePayload, buildRemoteRequestProofPayload } from "@octant/domain";
-import { isPairedDeviceSessionCurrent } from "../browser/pairedBrowserControl";
+import { isPairedDeviceSessionCurrent } from "../remoteRequestProofService";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { Journal } from "../persistence/journal";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";

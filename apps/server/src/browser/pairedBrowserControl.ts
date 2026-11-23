@@ -1,15 +1,7 @@
-import { readCurrentRemoteSession } from "../remoteRequestProofService";
-import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { UtcTimestamp, type BrowserContextId, type BrowserThreadId } from "@octant/contracts";
-import {
-  readDeviceApprovedByPerson,
-  readDeviceRegistration,
-  readRemoteSessionInvalidation,
-} from "../persistence/remoteAccessProjection";
-import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
   MAX_PAIRED_BROWSER_FILE_BYTES,
   MAX_PAIRED_BROWSER_FPS,
@@ -154,42 +146,6 @@ export type PairedBrowserStreamOpenResult =
 
 const encoder = new TextEncoder();
 const MAX_PAIRED_STAGED_UPLOADS = 16;
-
-export function isPairedDeviceSessionCurrent(
-  connection: SqliteConnection,
-  principal: {
-    readonly deviceId: unknown;
-    readonly sessionId: unknown;
-    readonly credentialGeneration: number;
-  },
-  nowMs: number,
-): boolean {
-  const deviceId = String(principal.deviceId);
-  const registration = readDeviceRegistration(connection, deviceId);
-  if (
-    registration === undefined ||
-    registration.state !== "active" ||
-    registration.revokedAt !== null ||
-    (registration.expiresAt !== null && Date.parse(registration.expiresAt) <= nowMs)
-  ) {
-    return false;
-  }
-  if (registration.credentialGeneration !== principal.credentialGeneration) return false;
-  if (!readDeviceApprovedByPerson(connection, deviceId)) return false;
-
-  const sessionIdDigest = createHash("sha256")
-    .update(String(principal.sessionId), "utf8")
-    .digest("hex");
-  if (readRemoteSessionInvalidation(connection, sessionIdDigest) !== undefined) {
-    return false;
-  }
-
-  const session = readCurrentRemoteSession(connection, String(principal.sessionId), nowMs);
-  return (
-    session?.deviceId === deviceId &&
-    session.credentialGeneration === principal.credentialGeneration
-  );
-}
 
 export class PairedBrowserControlService {
   readonly #options: PairedBrowserControlOptions;

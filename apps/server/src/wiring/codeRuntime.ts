@@ -369,6 +369,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<HarnessWiring, "shieldServerStore"> &
   Pick<
     AuthorityWiring,
+    | "isPairedDeviceSessionCurrent"
     | "browserCaptures"
     | "browserModelBindings"
     | "agentRunPersistence"
@@ -467,7 +468,6 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   > &
   Pick<
     BrowserWiring,
-    | "isPairedDeviceSessionCurrent"
     | "bindTerminalBrowserSessions"
     | "terminalBrowserTools"
     | "routineBrowserTools"

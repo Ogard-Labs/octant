@@ -1,4 +1,5 @@
 import {
+  decodeUtcTimestamp,
   CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS,
   CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED,
   MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_FAILURES,
@@ -38,6 +39,8 @@ import {
 } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import {
+  PULL_REQUEST_HANDOFF_HEADING,
+  readyPullRequestNotice,
   applyPullRequestSwitchEvent,
   decidePullRequestAutoFix,
   decidePullRequestWatch,
@@ -239,7 +242,12 @@ export class CodeProjectPullRequestSwitchService
     string,
     { windowId: WindowId; deviceCurrent?: () => boolean }
   >();
-  readonly #babysitProgress = new Map<string, PullRequestBabysitStatus>();
+  readonly #babysitProgress = new Map<
+    string,
+    { status: PullRequestBabysitStatus; detail?: string }
+  >();
+  // Confirmation is local to this enrollment. A restart requires two fresh quiet observations.
+  readonly #stallCandidates = new WeakMap<PullRequestSwitchFold["autoFix"], string>();
   readonly #localWindows: (() => ReadonlyArray<WindowId>) | undefined;
   #ticking = false;
   readonly #limits: () => PullRequestSwitchLimits;
@@ -296,6 +304,7 @@ export class CodeProjectPullRequestSwitchService
   /** Decorate an already authorized list from local state, without a forge or per-row authority read. */
   withBabysitProgress(view: CodeProjectPullRequestView): CodeProjectPullRequestView {
     if (!this.#folds.size) return view;
+    const feedbackLimit = this.#limits().watchWakes;
     return {
       ...view,
       rows: view.rows.map((row) => {
@@ -304,13 +313,18 @@ export class CodeProjectPullRequestSwitchService
         if (!watch || watch.status === "off" || !watch.babysit) return row;
         const thread = row.linkedThreads.find((link) => String(link.threadId) === watch.threadId);
         if (!thread) return row;
-        const status =
-          watch.status === "on" ? (this.#babysitProgress.get(key) ?? "checking") : watch.reason;
+        const progress = this.#babysitProgress.get(key);
+        const status = watch.status === "on" ? (progress?.status ?? "checking") : watch.reason;
         if (status === "closed" || status === "merged") return row;
         return {
           ...row,
           babysit: {
             status,
+            checks: watch.babysit.checks,
+            ...(watch.status === "stopped" && { stoppedAt: decodeUtcTimestamp(watch.stoppedAt) }),
+            ...(watch.status === "on" && progress?.detail && { blockerDetail: progress.detail }),
+            feedbackTurns: watch.feedbackWakes ?? 0,
+            feedbackLimit,
             threadId: thread.threadId,
             ...(watch.babysit.requiredLabel ? { requiredLabel: watch.babysit.requiredLabel } : {}),
             ...(watch.status === "stopped" && watch.readyHeadSha
@@ -453,6 +467,14 @@ export class CodeProjectPullRequestSwitchService
       }
       return { status: "applied", view: this.#view(this.#fold(canonicalTarget)) };
     }
+    if (
+      command.expectedStoppedAt &&
+      (fold.autoFix.status !== "stopped" ||
+        fold.autoFix.stoppedAt !== command.expectedStoppedAt ||
+        fold.autoFix.threadId !== String(command.threadId) ||
+        !fold.autoFix.babysit)
+    )
+      return { status: "refused", reason: "stale" };
     if (!authority.linkedThreadIds.includes(String(command.threadId))) {
       return { status: "refused", reason: "thread-not-linked" };
     }
@@ -929,9 +951,11 @@ export class CodeProjectPullRequestSwitchService
         ) {
           continue;
         }
+        const priorStall = this.#stallCandidates.get(current.autoFix);
+        this.#stallCandidates.delete(current.autoFix);
         const mayAct = await this.#threadSwitchesMayAct(current, resolved.key);
         if (current.autoFix.status === "on" && current.autoFix.babysit && !mayAct.autoFix)
-          this.#babysitProgress.set(resolved.key, "connection");
+          this.#babysitProgress.set(resolved.key, { status: "connection" });
         const failures = current.mergeWhenReady.status === "on" || mayAct.autoFix;
         if (!failures && !mayAct.watch) continue;
         const queryTarget = mayAct.canonicalTarget ?? resolved.target;
@@ -949,7 +973,7 @@ export class CodeProjectPullRequestSwitchService
             current.autoFix.babysit &&
             this.#fold(resolved.target).autoFix === current.autoFix
           )
-            this.#babysitProgress.set(resolved.key, "connection");
+            this.#babysitProgress.set(resolved.key, { status: "connection" });
           continue;
         }
         if (
@@ -967,7 +991,7 @@ export class CodeProjectPullRequestSwitchService
         this.#observeMergeWhenReady(effectiveTarget, observation);
         // A stop or new choice during a forge read invalidates that pass.
         if (mayAct.autoFix && this.#fold(effectiveTarget).autoFix === current.autoFix) {
-          await this.#observeAutoFix(effectiveTarget, observation);
+          await this.#observeAutoFix(effectiveTarget, observation, priorStall);
         }
         // After Auto-fix: a turn it just started holds the watch's wake.
         if (mayAct.watch) await this.#observeWatch(effectiveTarget, observation);
@@ -1088,6 +1112,7 @@ export class CodeProjectPullRequestSwitchService
   async #observeAutoFix(
     target: CodeProjectPullRequestSwitchTarget,
     observation: Extract<GhPullRequestSwitchObservation, { status: "observed" }>,
+    priorStall?: string,
   ): Promise<void> {
     const { key, target: canonicalTarget } = this.#resolveIdentity(target);
     const fold = this.#fold(canonicalTarget).autoFix;
@@ -1109,12 +1134,15 @@ export class CodeProjectPullRequestSwitchService
       const feedback = [
         ...observation.activity.reviews.filter(
           (review) =>
+            review.trustedFeedback &&
             !review.viewerDidAuthor &&
             (Date.parse(review.at) >= since ||
               (review.state === "changes requested" &&
                 observation.activity?.reviewDecision === "changes-requested")),
         ),
-        ...observation.activity.comments.filter((comment) => Date.parse(comment.at) >= since),
+        ...observation.activity.comments.filter(
+          (comment) => comment.trustedFeedback && Date.parse(comment.at) >= since,
+        ),
       ];
       for (const item of feedback) {
         if (failures.length >= MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_FAILURES) break;
@@ -1133,7 +1161,12 @@ export class CodeProjectPullRequestSwitchService
         else if (failure === "review-thread" || failure === "feedback") status = "repair-review";
         else if (failure) status = "repair-branch";
       }
-      this.#babysitProgress.set(key, status);
+      this.#babysitProgress.set(key, {
+        status,
+        ...(status === blocker && observation.babysitBlockerDetail
+          ? { detail: observation.babysitBlockerDetail }
+          : {}),
+      });
     }
     const decision = decidePullRequestAutoFix({
       fold,
@@ -1149,12 +1182,17 @@ export class CodeProjectPullRequestSwitchService
       personTyping: this.#personTyping(threadId),
       maxAttempts: this.#limits().autoFixAttempts,
       maxFeedbackWakes: this.#limits().watchWakes,
+      ...(priorStall && { priorStall }),
     });
     if (decision.kind === "paused") {
       this.#paused.set(key, decision.reason);
       return;
     }
     this.#paused.delete(key);
+    if (decision.kind === "confirm-stall") {
+      this.#stallCandidates.set(fold, decision.signature);
+      return;
+    }
     if (decision.kind === "idle") return;
     if (decision.kind === "stop") {
       this.#stopAutoFix(
@@ -1165,8 +1203,7 @@ export class CodeProjectPullRequestSwitchService
       );
       const ref = `${canonicalTarget.repositoryOwner}/${canonicalTarget.repositoryName}#${canonicalTarget.number}`;
       let notice: string | undefined;
-      if (decision.reason === "ready")
-        notice = `ready to merge at ${observation.headSha.slice(0, 12)}`;
+      if (decision.reason === "ready") notice = readyPullRequestNotice(observation.headSha);
       if (decision.reason === "needs-help")
         notice =
           "the repair turn finished with unresolved failures on the same commit. Review the thread before restarting.";
@@ -1177,7 +1214,7 @@ export class CodeProjectPullRequestSwitchService
         notice = `Auto-fix stopped after ${this.#limits().autoFixAttempts} attempts on the same failure.`;
       if (notice) {
         // One durable follow-up per thread. Keep each PR's most recent handoff until acknowledged.
-        const heading = "Pull request updates\n";
+        const heading = PULL_REQUEST_HANDOFF_HEADING;
         const previous = this.#threads.readFollowUp?.(threadId);
         const lines =
           previous?.state === "open" &&
@@ -1901,6 +1938,7 @@ export class CodeProjectPullRequestSwitchService
               status: "stopped",
               threadId: fold.autoFix.threadId,
               reason: fold.autoFix.reason,
+              ...(fold.autoFix.babysit && { babysit: fold.autoFix.babysit }),
               ...(fold.autoFix.readyHeadSha === undefined
                 ? {}
                 : { readyHeadSha: fold.autoFix.readyHeadSha }),

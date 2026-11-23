@@ -94,6 +94,7 @@ export const CodeProjectPullRequestAutoFixCommand = Schema.Union(
     target: CodeProjectPullRequestSwitchTarget,
     threadId: CodeThreadId,
     babysit: Schema.optional(PullRequestBabysitRules),
+    expectedStoppedAt: Schema.optional(UtcTimestamp),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("disable"),
@@ -195,6 +196,7 @@ export const CodeProjectPullRequestAutoFixState = Schema.Union(
     status: Schema.Literal("stopped"),
     threadId: CodeThreadId,
     reason: CodeProjectPullRequestAutoFixStopReason,
+    babysit: Schema.optional(PullRequestBabysitRules),
     readyHeadSha: Schema.optional(boundedNonEmptyText(64)),
     stoppedAt: UtcTimestamp,
   }).annotations(strict),

@@ -1,5 +1,6 @@
 import {
   decodeCodeProjectPullRequestView,
+  decodeUtcTimestamp,
   type CodeProjectPullRequestQuery,
   type CodeProjectPullRequestRefreshCommand,
   type CodeProjectPullRequestView,
@@ -10,6 +11,8 @@ import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { ThreadWatchHandoff } from "./PullRequestHandoff";
+import type { CodeClient } from "@octant/client-runtime";
 import { CodeProjectPullRequests } from "./CodeProjectPullRequests";
 
 const projectA = "10000000-0000-4000-8000-000000000001";
@@ -254,6 +257,123 @@ describe("CodeProjectPullRequests", () => {
     await user.click(screen.getByRole("button", { name: "Babysit octant/octant#13" }));
     expect(await screen.findByText(/Link a Code thread to this pull request/)).toBeVisible();
     expect(screen.queryByRole("button", { name: "Start babysitting" })).toBeNull();
+  });
+
+  it("restores saved rules in the dialog and resumes directly from Needs me with the displayed budget", async () => {
+    const user = userEvent.setup();
+    const base = view().rows[0]!;
+    const rules = { checks: "all", requiredLabel: "release" };
+    const watch = {
+      threadId,
+      status: "feedback-limit",
+      stoppedAt: generatedAt,
+      ...rules,
+      feedbackTurns: 3,
+      feedbackLimit: 3,
+    };
+    const snapshot = view({ rows: [{ ...base, babysit: watch }] });
+    const read = vi.fn().mockResolvedValue({
+      autoFix: {
+        status: "stopped",
+        reason: "feedback-limit",
+        stoppedAt: generatedAt,
+        threadId,
+        babysit: rules,
+      },
+    });
+    const write = vi.fn().mockResolvedValue({
+      status: "applied",
+      view: { autoFix: { status: "on", threadId, babysit: rules } },
+    });
+    render(
+      <CodeProjectPullRequests
+        load={async () => snapshot}
+        refresh={async () => snapshot}
+        babysitClient={{
+          queryProjectPullRequestSwitches: read,
+          setProjectPullRequestAutoFix: write,
+        }}
+      />,
+    );
+    expect(await screen.findByText(/3 of 3 feedback turns/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /^Needs me/ }));
+    await user.click(screen.getByRole("button", { name: "Babysit octant/octant#12" }));
+    expect(await screen.findByRole("checkbox", { name: /Require all checks/ })).toBeChecked();
+    expect(screen.getByLabelText("Required label (optional)")).toHaveValue("release");
+    expect(screen.getByRole("button", { name: "Resume babysitting" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "Resume babysitting octant/octant#12" }));
+    expect(write).toHaveBeenCalledExactlyOnceWith({
+      kind: "enable",
+      threadId,
+      target: {
+        projectId: projectA,
+        repositoryOwner: "octant",
+        repositoryName: "octant",
+        number: 12,
+      },
+      babysit: rules,
+      expectedStoppedAt: generatedAt,
+    });
+  });
+
+  it("confirms the exact ready commit for the chosen PR in a multi-PR thread notice", async () => {
+    const user = userEvent.setup();
+    const heads = ["a".repeat(40), "b".repeat(40)];
+    const base = view().rows[0]!;
+    const rows = view({
+      rows: heads.map((sha, i) => ({
+        ...base,
+        number: 12 + i,
+        babysit: { threadId, status: "ready", readyHeadSha: sha },
+      })),
+    }).rows;
+    const selected = base.linkedThreads[0]!.threadId;
+    const reason = [
+      "Pull request updates",
+      ...heads.map((sha, i) => `octant/octant#${12 + i} ready to merge at ${sha}`),
+      "octant/octant#14 ready to merge at " + heads[0],
+    ].join("\n");
+    const merge = vi.fn().mockResolvedValue({ status: "refused", reason: "stale" });
+    const query = vi.fn().mockResolvedValue({ rows });
+    render(
+      <ThreadWatchHandoff
+        client={
+          {
+            queryProjectPullRequests: query,
+            mergeProjectPullRequest: merge,
+          } as unknown as CodeClient
+        }
+        projectId={projectAId}
+        threadId={selected}
+        followUp={{
+          state: "open",
+          origin: "automatic",
+          reason,
+          threadId: selected,
+          createdAt: decodeUtcTimestamp(generatedAt),
+          triggerSequence: 1,
+          acknowledgedThroughSequence: 0,
+        }}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Merge octant/octant#13" }));
+    expect(query).toHaveBeenCalledWith({ version: 1, threadId });
+    expect(screen.queryByRole("button", { name: "Merge octant/octant#14" })).toBeNull();
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText(heads[1]!)).toBeVisible();
+    expect(merge).not.toHaveBeenCalled();
+    await user.click(dialog.getByRole("button", { name: "Confirm merge" }));
+    expect(merge).toHaveBeenCalledExactlyOnceWith({
+      projectId: projectA,
+      repositoryOwner: "octant",
+      repositoryName: "octant",
+      number: 13,
+      method: "squash",
+      headSha: heads[1],
+      confirmed: true,
+    });
+    expect(await screen.findByText(/changed since this review/)).toBeVisible();
   });
 
   it("bulk-starts only chosen PRs with shared rules, preserves active watches and retries just the failure", async () => {
