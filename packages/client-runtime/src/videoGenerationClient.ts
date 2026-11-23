@@ -1,4 +1,5 @@
 import {
+  MAX_VIDEO_CLIP_BYTES,
   VideoClipTicketResponse,
   VideoJob,
   VideoJobsResponse,
@@ -7,6 +8,7 @@ import {
   type VideoJobId,
   type VideoJobThreadKind,
 } from "@octant/contracts";
+import type { MobileRemoteTransport } from "./mobileInboxClient";
 
 export interface VideoGenerationClientOptions {
   readonly baseUrl: string;
@@ -117,6 +119,78 @@ async function requestJson<T>(
 
 /** A paired client can list and watch a thread's clips; it does not stop jobs. */
 export type ThreadVideoResults = Pick<VideoGenerationClient, "list" | "clipUrl">;
+
+export interface MobileThreadVideos {
+  readonly list: VideoGenerationClient["list"];
+  readonly readClip: (input: {
+    readonly jobId: VideoJobId;
+    readonly size: number;
+    readonly signal: AbortSignal;
+    readonly write: (bytes: Uint8Array) => void;
+  }) => Promise<void>;
+}
+
+const MOBILE_VIDEO_RANGE_BYTES = 4 * 1024 * 1024;
+
+/** The native player reads a local file. Only this client uses the clip ticket. */
+export function createMobileThreadVideos(transport: MobileRemoteTransport): MobileThreadVideos {
+  return {
+    async list({ threadKind, scopeId }) {
+      const query = new URLSearchParams({ threadKind, scopeId: String(scopeId) });
+      const response = await transport.authenticatedFetch({
+        method: "GET",
+        path: "/api/video/jobs",
+        query: `?${query.toString()}`,
+      });
+      if (!response.ok)
+        throw new VideoGenerationClientFailure("Video clips are unavailable.", response.status);
+      return decodeHostAnswer(VideoJobsResponse)(await response.json());
+    },
+    async readClip({ jobId, size, signal, write }) {
+      if (!Number.isSafeInteger(size) || size < 1 || size > MAX_VIDEO_CLIP_BYTES)
+        throw new VideoGenerationClientFailure("The clip has an invalid size.", 0);
+      const checkOpen = () => {
+        if (signal.aborted) throw new Error("The clip was closed.");
+      };
+      checkOpen();
+      const path = "/api/video/clip";
+      const ticket = await transport.authenticatedFetch({
+        method: "POST",
+        path,
+        body: JSON.stringify({ jobId }),
+        contentType: "application/json",
+        signal,
+      });
+      if (!ticket.ok)
+        throw new VideoGenerationClientFailure("The clip is unavailable.", ticket.status);
+      const { url } = decodeHostAnswer(VideoClipTicketResponse)(await ticket.json());
+      const query = url.slice(path.length);
+      for (let start = 0; start < size; start += MOBILE_VIDEO_RANGE_BYTES) {
+        checkOpen();
+        const end = Math.min(start + MOBILE_VIDEO_RANGE_BYTES, size) - 1;
+        const response = await transport.authenticatedFetch({
+          method: "GET",
+          path,
+          query,
+          headers: { range: `bytes=${start}-${end}` },
+          signal,
+        });
+        if (!response.ok)
+          throw new VideoGenerationClientFailure("The clip is unavailable.", response.status);
+        if (
+          response.status !== 206 ||
+          response.headers.get("content-range") !== `bytes ${start}-${end}/${size}`
+        )
+          throw new VideoGenerationClientFailure("The clip range is incomplete.", response.status);
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        checkOpen();
+        if (bytes.length !== end - start + 1)
+          throw new VideoGenerationClientFailure("The clip range is incomplete.", response.status);
+        write(bytes);
+      }
+    },
+  };
+}
 
 /** At most this many bytes in one remote clip; a larger clip is refused, not truncated. */
 const MAX_REMOTE_CLIP_BYTES = 512 * 1024 * 1024;

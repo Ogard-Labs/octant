@@ -350,7 +350,9 @@ which the person sets, like any turn.
   cards. A client that cannot show the card's price cannot approve it. A
   paired client does not stop jobs. A paired browser reads the clip through
   its remote session in byte ranges, up to 512 MB, and plays it from memory.
-  Playing a clip on the phone needs a native player the app does not ship yet.
+  The phone reads authenticated byte ranges into a disposable app-cache file and
+  opens it in the native Expo Video player without autoplay. Closing the clip,
+  leaving or deleting its thread, or losing host access discards the cached copy.
 - A clip can be placed in a Canvas design as a `generated-video` asset in a
   later change. This design does not add the asset kind.
 
