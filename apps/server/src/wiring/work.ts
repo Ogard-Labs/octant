@@ -1554,6 +1554,7 @@ export function wireWork(deps: WorkDependencies) {
     const threadExportRoutes = createThreadExportRouteHandler({
       service: threadExportService,
       windowAuthorityStore,
+      videoJobs: videoJobService,
     });
     // One bounded, tool-free request to a thread's own provider, shared with
     // the agent's summary turn in a handover note.

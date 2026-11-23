@@ -1,4 +1,14 @@
-import { THREAD_EXPORT_FORMAT, type ThreadExportOutcome } from "@octant/contracts/thread-export";
+import { createHash } from "node:crypto";
+import { Archive } from "bun";
+import { decodeVideoJob, decodeWindowId } from "@octant/contracts";
+import {
+  decodeThreadExportBundle,
+  decodeThreadVideoArchiveManifest,
+  decodeThreadVideoArchiveOffer,
+  THREAD_EXPORT_FORMAT,
+  THREAD_VIDEO_ARCHIVE_PATH,
+  type ThreadExportOutcome,
+} from "@octant/contracts/thread-export";
 import { describe, expect, it, vi } from "vitest";
 import {
   createThreadExportRouteHandler,
@@ -13,6 +23,33 @@ const nowMs = Date.parse("2026-08-19T12:00:00.000Z");
 const windowId = "70000000-0000-4000-8000-000000000001";
 const capability = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop0";
 const threadId = "00000000-0000-4000-8000-000000000901";
+
+function exportBundle() {
+  return decodeThreadExportBundle({
+    octant: {
+      format: THREAD_EXPORT_FORMAT,
+      threadId,
+      mode: "chat",
+      title: "Launch plan",
+      hostId: "local",
+      version: 1,
+      sequence: 1,
+      generatedAt: "2026-08-19T12:00:00.000Z",
+    },
+    transcript: { entries: [], activeCount: 0, revisedCount: 0 },
+    evidence: { artifacts: [], attachments: [], citations: [] },
+    provenance: {
+      mode: "chat",
+      threadId,
+      hostId: "local",
+      providerInstanceId: "10000000-0000-4000-8000-000000000001",
+      modelId: "model-a",
+      createdAt: "2026-08-19T12:00:00.000Z",
+      updatedAt: "2026-08-19T12:00:00.000Z",
+    },
+    omissions: [],
+  });
+}
 
 function setup(outcome: ThreadExportOutcome) {
   const windowAuthorityStore = new WindowAuthorityStore();
@@ -96,30 +133,7 @@ describe("thread export routes", () => {
   it("returns the bundle for an authenticated local window", async () => {
     const { handler } = setup({
       kind: "exported",
-      bundle: {
-        octant: {
-          format: THREAD_EXPORT_FORMAT,
-          threadId,
-          mode: "chat",
-          title: "Launch plan",
-          hostId: "local" as never,
-          version: 1,
-          sequence: 1,
-          generatedAt: "2026-08-19T12:00:00.000Z" as never,
-        },
-        transcript: { entries: [], activeCount: 0, revisedCount: 0 },
-        evidence: { artifacts: [], attachments: [], citations: [] },
-        provenance: {
-          mode: "chat",
-          threadId,
-          hostId: "local" as never,
-          providerInstanceId: "10000000-0000-4000-8000-000000000001" as never,
-          modelId: "model-a" as never,
-          createdAt: "2026-08-19T12:00:00.000Z" as never,
-          updatedAt: "2026-08-19T12:00:00.000Z" as never,
-        },
-        omissions: [],
-      },
+      bundle: exportBundle(),
     });
     const response = await handler(
       makeRequest("/api/threads/export", {
@@ -223,5 +237,102 @@ describe("thread export routes", () => {
       "local-window",
       "remote-device",
     ]);
+  });
+});
+
+describe("thread exports with video files", () => {
+  const bytes = Uint8Array.from({ length: 701 }, (_, index) => index % 256);
+  const clipId = "e4000000-0000-4000-8000-000000000004";
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  const job = decodeVideoJob({
+    id: "e4000000-0000-4000-8000-000000000003",
+    status: "completed",
+    threadKind: "chat-thread",
+    scopeId: threadId,
+    profileInstanceId: "e4000000-0000-4000-8000-000000000001",
+    driverKind: "gemini-video",
+    modelId: "gemini-omni-1.2-flash",
+    promptHash: "a".repeat(64),
+    options: { durationSeconds: 10, resolution: "720p", aspectRatio: "16:9", audio: true },
+    imageCount: 0,
+    estimatedCostUsdMicros: 695_040,
+    clip: {
+      clipId,
+      hash,
+      size: bytes.length,
+      durationSeconds: 10,
+      resolution: "720p",
+      aspectRatio: "16:9",
+    },
+    providerCopy: "removed",
+    version: 2,
+    createdAt: "2026-11-22T12:00:00.000Z",
+    updatedAt: "2026-11-22T12:00:00.000Z",
+  });
+
+  function archiveFixture() {
+    const windowAuthorityStore = new WindowAuthorityStore();
+    windowAuthorityStore.register({ windowId: decodeWindowId(windowId), capability, now: nowMs });
+    const exportThread = vi
+      .fn<ThreadExportService["exportThread"]>()
+      .mockResolvedValue({ kind: "exported", bundle: exportBundle() });
+    const streamClip = vi.fn(async () => ({
+      body: new Blob([bytes]).stream(),
+      size: bytes.length,
+    }));
+    const handler = createThreadExportRouteHandler({
+      service: { exportThread, readToolCallRecords: vi.fn() },
+      windowAuthorityStore,
+      now: () => nowMs,
+      videoJobs: { listByScope: () => [job], getById: () => job, streamClip },
+    });
+    const prepare = async () => {
+      const response = await handler(
+        makeRequest(THREAD_VIDEO_ARCHIVE_PATH, {
+          capability,
+          body: { mode: "chat", threadId },
+        }),
+      );
+      expect(response?.status).toBe(200);
+      const offer = decodeThreadVideoArchiveOffer(await response?.json());
+      expect(offer.kind).toBe("archive-ready");
+      if (offer.kind !== "archive-ready") throw new Error("Expected a video archive.");
+      return offer;
+    };
+    return { handler, prepare, exportThread, streamClip };
+  }
+
+  it("quotes the archive size before reading video bytes and exports the transcript and clip as files", async () => {
+    const { handler, prepare, streamClip } = archiveFixture();
+    const offer = await prepare();
+    expect(streamClip).not.toHaveBeenCalled();
+    const result = await handler(makeRequest(offer.url, { method: "GET" }));
+    expect(result?.status).toBe(200);
+    expect(result?.headers.get("content-length")).toBe(String(offer.size));
+    const contents = await result?.blob();
+    if (contents === undefined) throw new Error("Expected an archive body.");
+    expect(contents.size).toBe(offer.size);
+    const files = await new Archive(contents).files();
+    expect([...files.keys()]).toEqual(["manifest.json", `video/${clipId}.mp4`]);
+    const manifest = decodeThreadVideoArchiveManifest(
+      JSON.parse((await files.get("manifest.json")?.text()) ?? ""),
+    );
+    expect(manifest.thread).toEqual(exportBundle());
+    expect(manifest.clips).toEqual([{ jobId: job.id, clipId, size: bytes.length, hash }]);
+    expect(await files.get(`video/${clipId}.mp4`)?.bytes()).toEqual(bytes);
+    expect((await handler(makeRequest(offer.url, { method: "GET" })))?.status).toBe(404);
+  });
+
+  it("refuses to prepare without window authority or to download after thread access is lost", async () => {
+    const { handler, prepare, exportThread, streamClip } = archiveFixture();
+    const unauthorized = await handler(
+      makeRequest(THREAD_VIDEO_ARCHIVE_PATH, { body: { mode: "chat", threadId } }),
+    );
+    expect(unauthorized?.status).toBe(401);
+    expect(exportThread).not.toHaveBeenCalled();
+    const offer = await prepare();
+    exportThread.mockResolvedValue({ kind: "refused", reason: "not-found" });
+    expect((await handler(makeRequest(offer.url, { method: "GET" })))?.status).toBe(404);
+    expect(streamClip).not.toHaveBeenCalled();
   });
 });

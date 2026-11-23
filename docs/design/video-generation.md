@@ -322,6 +322,14 @@ which the person sets, like any turn.
 - Clips are deleted with their thread. They are included in a thread export
   as files, with the export's size shown before it starts, because a person
   exporting a thread expects its results in it.
+  A local window exports a thread with completed clips as an uncompressed
+  `.octant-thread.tar`. Its `manifest.json` identifies `octant.thread-bundle/2`,
+  contains the usual JSON thread bundle, and records each clip's size and
+  digest. The MP4s live at `video/<clip-id>.mp4`. Opening the confirmation
+  prepares the manifest and exact archive size without reading the videos.
+  Confirming streams the archive from the host after checking that the window
+  can still open the thread. The older `.octant-thread.json` format stays
+  readable and remains the response for threads without clips and older hosts.
 - Saving a clip as a file uses the same confined, create-only write as an
   image save, at the turn's level. Plan refuses; Ask first and Auto show a card
   naming the path; Accept edits and Full access write at once.

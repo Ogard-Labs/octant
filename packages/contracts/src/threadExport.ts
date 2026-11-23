@@ -16,6 +16,7 @@ import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 import { ThreadExportToolCall } from "./threadToolCallRecords";
+import { VideoClipRecord, VideoJobId } from "./videoGeneration";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
@@ -220,6 +221,43 @@ export const ThreadExportOutcome = Schema.Union(
 );
 export type ThreadExportOutcome = typeof ThreadExportOutcome.Type;
 
+export const THREAD_VIDEO_ARCHIVE_PATH = "/api/threads/export/video-archive";
+export const THREAD_VIDEO_ARCHIVE_FORMAT = "octant.thread-bundle/2";
+
+export const ThreadVideoArchiveManifest = Schema.Struct({
+  format: Schema.Literal(THREAD_VIDEO_ARCHIVE_FORMAT),
+  thread: ThreadExportBundle,
+  clips: Schema.NonEmptyArray(
+    Schema.Struct({
+      clipId: VideoClipRecord.fields.clipId,
+      jobId: VideoJobId,
+      size: VideoClipRecord.fields.size,
+      hash: VideoClipRecord.fields.hash,
+    }).annotations(strict),
+  ),
+}).annotations(strict);
+export type ThreadVideoArchiveManifest = typeof ThreadVideoArchiveManifest.Type;
+
+export const ThreadVideoArchiveDownload = Schema.Struct({
+  kind: Schema.Literal("archive-ready"),
+  url: Schema.String.pipe(
+    Schema.pattern(/^\/api\/threads\/export\/video-archive\?ticket=[A-Za-z0-9_-]{43}$/),
+  ),
+  size: PositiveInt,
+  clipCount: PositiveInt,
+}).annotations(strict);
+export type ThreadVideoArchiveDownload = typeof ThreadVideoArchiveDownload.Type;
+
+export const ThreadVideoArchiveOffer = Schema.Union(
+  ThreadVideoArchiveDownload,
+  ThreadExportOutcome,
+);
+export type ThreadVideoArchiveOffer = typeof ThreadVideoArchiveOffer.Type;
+
 export const decodeThreadExportRequest = Schema.decodeUnknownSync(ThreadExportRequest);
 export const decodeThreadExportBundle = Schema.decodeUnknownSync(ThreadExportBundle);
 export const decodeThreadExportOutcome = Schema.decodeUnknownSync(ThreadExportOutcome);
+export const decodeThreadVideoArchiveManifest = Schema.decodeUnknownSync(
+  ThreadVideoArchiveManifest,
+);
+export const decodeThreadVideoArchiveOffer = Schema.decodeUnknownSync(ThreadVideoArchiveOffer);
