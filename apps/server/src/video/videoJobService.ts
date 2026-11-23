@@ -408,7 +408,7 @@ export class VideoJobService {
       ...(reservationId === undefined ? {} : { reservationId }),
     });
     this.#notify(job);
-    void this.#schedule(job.id);
+    void this.#schedule(job.id, () => this.#run(job.id));
     return job;
   }
 
@@ -478,7 +478,7 @@ export class VideoJobService {
         stopRequested: false,
         ...(reserved?.status === "admitted" ? { reservationId: reserved.reservationId } : {}),
       });
-      void this.#withSlot(() => this.#resume(job));
+      void this.#schedule(job.id, () => this.#resume(job));
     }
     await this.retryOwedRemovals();
     if (this.#removalTimer === undefined) {
@@ -530,8 +530,11 @@ export class VideoJobService {
 
   // --- running jobs ---
 
-  async #schedule(id: VideoJobId): Promise<void> {
-    await this.#withSlot(() => this.#run(id));
+  async #schedule(id: VideoJobId, work: () => Promise<void>): Promise<void> {
+    await this.#withSlot(work);
+    if (this.#closing.signal.aborted) return;
+    const job = this.getById(id);
+    if (job !== undefined && isTerminal(job)) await this.#forget(job);
   }
 
   async #withSlot(work: () => Promise<void>): Promise<void> {
@@ -707,7 +710,6 @@ export class VideoJobService {
             settledCostUsdMicros: estimateOrZero(job),
             billed: true,
           });
-          await this.#forget(this.#current(job));
           return;
         }
       }
@@ -726,7 +728,6 @@ export class VideoJobService {
             AbortSignal.any([this.#closing.signal, AbortSignal.timeout(VIDEO_TIMEOUT_CLEANUP_MS)]),
           );
         }
-        await this.#forget(this.#current(job));
         return;
       }
       // Bounded by the job time too, so a hung poll or download cannot hold
@@ -838,7 +839,6 @@ export class VideoJobService {
         });
         break;
     }
-    await this.#forget(this.#current(job));
   }
 
   #settled(job: VideoJob, usage: VideoAdapterUsage | undefined): number {
@@ -851,24 +851,40 @@ export class VideoJobService {
 
   readonly #priceCache = new Map<string, VideoModelCapabilities["price"]>();
 
+  /**
+   * Job ids a provider delete is in flight for, so a removal sweep and a
+   * finished job's cleanup never send the same DELETE twice. Released in
+   * `finally`: a rejected delete leaves the copy owed for the next sweep.
+   */
+  readonly #removing = new Set<string>();
+
   async #forget(job: VideoJob): Promise<void> {
     if (job.providerCopy !== "held" || job.remoteId === undefined) return;
-    const instance = this.#options.readProviderInstance(job.profileInstanceId);
-    const adapter = instance === undefined ? undefined : this.#adapterFor(instance);
-    if (adapter === undefined) return;
-    const result = await adapter.forget(job.remoteId);
-    if (result.status === "removed") {
-      const current = this.#current(job);
-      const updatedAt = decodeUtcTimestamp(this.#options.clock());
-      const version = decodeAggregateVersion(current.version + 1);
-      this.#append(current.id, current.version, [
-        {
-          eventName: VIDEO_JOB_PROVIDER_COPY_CHANGED,
-          payload: { jobId: current.id, version, updatedAt, providerCopy: "removed" },
-          occurredAt: updatedAt,
-        },
-      ]);
-      this.#notify(this.#current(job));
+    if (this.#removing.has(String(job.id))) return;
+    this.#removing.add(String(job.id));
+    try {
+      const instance = this.#options.readProviderInstance(job.profileInstanceId);
+      const adapter = instance === undefined ? undefined : this.#adapterFor(instance);
+      if (adapter === undefined) return;
+      const result = await adapter.forget(job.remoteId);
+      // A shutdown during the request leaves the journal closed and the copy
+      // still owed; the next host's recovery retries the removal.
+      if (this.#closing.signal.aborted) return;
+      if (result.status === "removed") {
+        const current = this.#current(job);
+        const updatedAt = decodeUtcTimestamp(this.#options.clock());
+        const version = decodeAggregateVersion(current.version + 1);
+        this.#append(current.id, current.version, [
+          {
+            eventName: VIDEO_JOB_PROVIDER_COPY_CHANGED,
+            payload: { jobId: current.id, version, updatedAt, providerCopy: "removed" },
+            occurredAt: updatedAt,
+          },
+        ]);
+        this.#notify(this.#current(job));
+      }
+    } finally {
+      this.#removing.delete(String(job.id));
     }
   }
 

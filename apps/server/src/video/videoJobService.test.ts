@@ -519,6 +519,42 @@ describe("video jobs", () => {
     expect(service.getById(done!.id)?.providerCopy).toBe("removed");
   });
 
+  it("holds no slot for a pending provider delete, and never asks the same delete twice", async () => {
+    // Two finished jobs wait on deferred provider deletes while a third still
+    // runs to the end, because a delete holds no concurrency slot; and a
+    // sweep while one is in flight does not send the same DELETE again.
+    const deferreds: Array<(outcome: "removed" | "failed") => void> = [];
+    const { service, calls } = harness({
+      forget: () =>
+        new Promise<"removed" | "failed">((resolve) => {
+          deferreds.push(resolve);
+        }),
+    });
+    const jobs = await Promise.all([enqueue(service), enqueue(service), enqueue(service)]);
+    const done = await Promise.all(jobs.map((job) => service.whenTerminal(job.id, 5_000)));
+    expect(done.map((job) => job?.status)).toEqual(["completed", "completed", "completed"]);
+    await vi.waitFor(() => expect(calls.forget).toBe(3));
+    await service.retryOwedRemovals();
+    expect(calls.forget).toBe(3);
+    // A failed delete leaves the copy owed, so the sweep sends it again: the
+    // in-flight marker was released when the first answer arrived.
+    deferreds[0]?.("failed");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const retry = service.retryOwedRemovals();
+    await vi.waitFor(() => expect(calls.forget).toBe(4));
+    deferreds[3]?.("removed");
+    await retry;
+    deferreds[1]?.("removed");
+    deferreds[2]?.("removed");
+    await vi.waitFor(() =>
+      expect(jobs.map((job) => service.getById(job.id)?.providerCopy)).toEqual([
+        "removed",
+        "removed",
+        "removed",
+      ]),
+    );
+  });
+
   it("refuses a seventeenth waiting job so a runaway loop cannot queue without end", async () => {
     const { service } = harness({ start: () => new Promise(() => undefined) });
     for (let index = 0; index < 18; index += 1) await enqueue(service);
