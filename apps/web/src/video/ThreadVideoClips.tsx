@@ -80,6 +80,7 @@ function VideoClipCard(props: {
   const [src, setSrc] = useState<string>();
   const [failed, setFailed] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [downloadFailed, setDownloadFailed] = useState(false);
   const ready = job.status === "completed" && job.clip !== undefined;
 
   useEffect(() => {
@@ -118,16 +119,40 @@ function VideoClipCard(props: {
   // The ticket URL is cross-origin from a packaged window (a file:// page on
   // the loopback host), where the `download` attribute is ignored; the clip
   // is fetched into a same-origin blob first, as the image card's Download
-  // does. A remote session's URL is already a same-origin blob.
+  // does. A remote session's URL is already a same-origin blob. A refused
+  // answer is never written out: the ticket is renewed once and tried again,
+  // then the card says the download failed.
+  async function saveFromTicket(url: string): Promise<boolean> {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return false;
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = "clip.mp4";
+      link.click();
+      URL.revokeObjectURL(objectUrl);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function download() {
     if (src === undefined) return;
-    const blob = await fetch(src).then((response) => response.blob());
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "clip.mp4";
-    link.click();
-    URL.revokeObjectURL(url);
+    setDownloadFailed(false);
+    if (await saveFromTicket(src)) return;
+    try {
+      const renewed = await client.clipUrl(job.id);
+      const saved = await saveFromTicket(renewed.url);
+      // The retry's ticket serves the download only; a blob one is released.
+      if (renewed.url.startsWith("blob:")) URL.revokeObjectURL(renewed.url);
+      if (saved) return;
+    } catch {
+      // Falls through to the failure note.
+    }
+    setDownloadFailed(true);
   }
 
   const label = `${String(job.options.durationSeconds)} s · ${job.options.resolution} · ${job.options.aspectRatio}`;
@@ -158,18 +183,25 @@ function VideoClipCard(props: {
             )}
           </span>
         ) : ready && src !== undefined ? (
-          <a
-            className="thread-video-clips__download"
-            download="clip.mp4"
-            href={src}
-            onClick={(event) => {
-              if (src.startsWith("blob:")) return;
-              event.preventDefault();
-              void download();
-            }}
-          >
-            Download
-          </a>
+          <span className="thread-video-clips__actions">
+            <a
+              className="thread-video-clips__download"
+              download="clip.mp4"
+              href={src}
+              onClick={(event) => {
+                if (src.startsWith("blob:")) return;
+                event.preventDefault();
+                void download();
+              }}
+            >
+              Download
+            </a>
+            {downloadFailed ? (
+              <span className="thread-video-clips__note" role="alert">
+                The clip could not be downloaded.
+              </span>
+            ) : null}
+          </span>
         ) : null}
       </div>
       {ready ? (

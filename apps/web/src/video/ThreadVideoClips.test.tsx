@@ -114,6 +114,87 @@ describe("ThreadVideoClips", () => {
     }
   });
 
+  it("renews a refused ticket once for the download and saves the retry", async () => {
+    const finished = job("completed", "f4000000-0000-4000-8000-000000000003");
+    const tickets = [
+      { url: "http://127.0.0.1:3100/api/video/clip?ticket=stale", expiresAt: "" },
+      { url: "http://127.0.0.1:3100/api/video/clip?ticket=fresh", expiresAt: "" },
+    ];
+    const client = {
+      list: vi.fn(async () => ({ jobs: [finished] })),
+      clipUrl: vi.fn(async () => ({
+        ...(tickets.shift() ?? tickets[0])!,
+        expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      })),
+    };
+    let first = true;
+    const clipFetch = vi.fn(async () => {
+      if (first) {
+        first = false;
+        return new Response(null, { status: 410 });
+      }
+      return new Response("clip-bytes");
+    });
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", clipFetch);
+    try {
+      render(
+        <VideoClientContext.Provider value={client}>
+          <ThreadVideoClips scopeId={scopeId} threadKind="work-thread" />
+        </VideoClientContext.Provider>,
+      );
+      await waitFor(() =>
+        expect(screen.getByRole("link", { name: "Download" })).toBeInTheDocument(),
+      );
+      await userEvent.click(screen.getByRole("link", { name: "Download" }));
+      await waitFor(() => expect(anchorClick).toHaveBeenCalled());
+      expect(client.clipUrl).toHaveBeenCalledTimes(2);
+      expect(clipFetch).toHaveBeenLastCalledWith(
+        "http://127.0.0.1:3100/api/video/clip?ticket=fresh",
+      );
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("says the download failed when the renewed ticket also refuses, and saves nothing", async () => {
+    const finished = job("completed", "f4000000-0000-4000-8000-000000000003");
+    const client = {
+      list: vi.fn(async () => ({ jobs: [finished] })),
+      clipUrl: vi.fn(async () => ({
+        url: "http://127.0.0.1:3100/api/video/clip?ticket=t",
+        expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      })),
+    };
+    const clipFetch = vi.fn(async () => new Response(null, { status: 410 }));
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", clipFetch);
+    try {
+      render(
+        <VideoClientContext.Provider value={client}>
+          <ThreadVideoClips scopeId={scopeId} threadKind="work-thread" />
+        </VideoClientContext.Provider>,
+      );
+      await waitFor(() =>
+        expect(screen.getByRole("link", { name: "Download" })).toBeInTheDocument(),
+      );
+      await userEvent.click(screen.getByRole("link", { name: "Download" }));
+      await waitFor(() =>
+        expect(screen.getByText("The clip could not be downloaded.")).toBeInTheDocument(),
+      );
+      expect(anchorClick).not.toHaveBeenCalled();
+      expect(client.clipUrl).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
   it("revokes a blob clip that resolves after the card unmounts", async () => {
     const finished = job("completed", "f4000000-0000-4000-8000-000000000003");
     let resolveTicket: (ticket: { url: string; expiresAt: string }) => void = () => undefined;
