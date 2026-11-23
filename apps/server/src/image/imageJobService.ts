@@ -166,6 +166,7 @@ export interface OutsideImageDrivers {
   readonly adapter: (
     instance: OutsideImageProviderInstance,
     ports: Pick<ImageGenerationPorts, "fetchApprovedImageUrl" | "sniffMediaType">,
+    providerAnswered: () => void,
   ) => ImageGenerationAdapter;
 }
 
@@ -677,7 +678,7 @@ export class ImageJobService {
       providerAnswered();
       return response;
     };
-    return this.#defaultAdapter(instance, fetch);
+    return this.#defaultAdapter(instance, fetch, providerAnswered);
   }
 
   /**
@@ -709,7 +710,11 @@ export class ImageJobService {
     };
   }
 
-  #defaultAdapter(instance: ProviderInstance, fetch: ImageHttpFetch): ImageGenerationAdapter {
+  #defaultAdapter(
+    instance: ProviderInstance,
+    fetch: ImageHttpFetch,
+    providerAnswered: () => void,
+  ): ImageGenerationAdapter {
     if (instance.driverKind === "outside-image") {
       if (this.#outsideImageDrivers === undefined) return unavailableImageAdapter;
       // The driver reaches its provider only through the brokered call; the
@@ -721,10 +726,14 @@ export class ImageJobService {
         fetch,
         ...this.#approvedFetch(instance.configuration.baseUrl, fetch),
       });
-      return this.#outsideImageDrivers.adapter(instance, {
-        fetchApprovedImageUrl: ports.fetchApprovedImageUrl,
-        sniffMediaType: ports.sniffMediaType,
-      });
+      return this.#outsideImageDrivers.adapter(
+        instance,
+        {
+          fetchApprovedImageUrl: ports.fetchApprovedImageUrl,
+          sniffMediaType: ports.sniffMediaType,
+        },
+        providerAnswered,
+      );
     }
     if (
       isImageProfileDriverKind(instance.driverKind) &&

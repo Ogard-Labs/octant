@@ -136,6 +136,9 @@ Rules, each taking the fail-closed option:
   returned, never more than the reservation. A model declared without a price
   is unpriced, so an active spend limit refuses it before anything is sent.
   Nothing a running driver says is a price.
+  When the provider answers a brokered request owned by a job and that job
+  fails without usable images, the host records an unreported usage row for
+  that job. Other jobs on the same driver process keep their own evidence.
   _Rationale:_ a driver that named its own price at run time could reserve
   nothing and bill anything; the declaration is reviewed, digest-bound and
   signed, as bundled drivers' checked-in rates are.

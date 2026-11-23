@@ -20,7 +20,6 @@ import type {
   ImageAdapterImage,
   ImageAdapterRequest,
   ImageAdapterResult,
-  ImageGenerationAdapter,
   ImageGenerationPorts,
 } from "@octant/provider-sdk/image-generation";
 import { lookup } from "node:dns/promises";
@@ -58,6 +57,11 @@ import {
  * - a safety refusal carries no driver text; the host writes the sentence.
  */
 
+export type OutsideImageJobPorts = Pick<
+  ImageGenerationPorts,
+  "fetchApprovedImageUrl" | "sniffMediaType"
+>;
+
 export interface OutsideImageGenerationProxyOptions {
   readonly instanceId: ProviderInstanceId;
   readonly channel: OutsideDriverChannel;
@@ -66,8 +70,6 @@ export interface OutsideImageGenerationProxyOptions {
   readonly key: OutsideDriverKeyPlacement | undefined;
   /** The models the person listed, each one the package declares. */
   readonly modelIds: ReadonlyArray<ProviderModelId>;
-  /** The host's own image fetch and sniffing, as every image driver receives them. */
-  readonly ports: Pick<ImageGenerationPorts, "fetchApprovedImageUrl" | "sniffMediaType">;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: OutsideDriverFetch;
   readonly limits?: Partial<OutsideDriverLimits>;
@@ -116,9 +118,7 @@ const tooLarge = () =>
 const tooManyImages = () =>
   outsideDriverFailure("protocol", "The provider returned more images than requested.");
 
-export function makeOutsideImageGenerationProxy(
-  options: OutsideImageGenerationProxyOptions,
-): ImageGenerationAdapter {
+export function makeOutsideImageGenerationProxy(options: OutsideImageGenerationProxyOptions) {
   const limits: OutsideDriverLimits = { ...OUTSIDE_DRIVER_DEFAULT_LIMITS, ...options.limits };
   const origin = outsideDriverConfiguredOrigin(options.baseUrl);
   let handshake: Promise<void> | undefined;
@@ -176,6 +176,7 @@ export function makeOutsideImageGenerationProxy(
     relayed: ReadonlyArray<string>,
     streamed: ReadonlyArray<string> | undefined,
     signal: AbortSignal | undefined,
+    ports: OutsideImageJobPorts,
   ): Promise<ImageAdapterImage> => {
     let bytes: Uint8Array;
     let named: ImageArtifactMediaType | undefined;
@@ -202,7 +203,7 @@ export function makeOutsideImageGenerationProxy(
           "The image driver named an image address on a private network.",
         );
       }
-      const fetched = await options.ports.fetchApprovedImageUrl({
+      const fetched = await ports.fetchApprovedImageUrl({
         url: image.url,
         ...(signal === undefined ? {} : { signal }),
       });
@@ -211,12 +212,16 @@ export function makeOutsideImageGenerationProxy(
       }
       bytes = fetched.bytes;
     }
-    const sniffed = options.ports.sniffMediaType(bytes);
+    const sniffed = ports.sniffMediaType(bytes);
     if (sniffed === undefined || (named !== undefined && named !== sniffed)) throw imageInvalid();
     return { bytes, mediaType: sniffed };
   };
 
-  const generate = async (request: ImageAdapterRequest): Promise<ImageAdapterResult> => {
+  const generate = async (
+    request: ImageAdapterRequest,
+    ports: OutsideImageJobPorts,
+    onProviderResponse: () => void,
+  ): Promise<ImageAdapterResult> => {
     await ensureInitialized();
     if (request.signal?.aborted === true) {
       throw outsideDriverFailure("interrupted", "The provider request was cancelled.");
@@ -243,6 +248,7 @@ export function makeOutsideImageGenerationProxy(
     const call = link.call(OUTSIDE_DRIVER_METHODS.imageGenerate, params, {
       timeoutMs: limits.sendTimeoutMs,
       keepRelayed: true,
+      onProviderResponse,
       onImageChunk: (image, data) => {
         if (oversized) return;
         const total = (chunkCharacters.get(image) ?? 0) + data.length;
@@ -275,7 +281,7 @@ export function makeOutsideImageGenerationProxy(
       if (result.images.length > variantCount) throw tooManyImages();
       const images: Array<ImageAdapterImage> = [];
       for (const [index, image] of result.images.entries()) {
-        images.push(await accept(image, call.relayed, chunks.get(index), request.signal));
+        images.push(await accept(image, call.relayed, chunks.get(index), request.signal, ports));
       }
       return { status: "completed", images };
     } finally {
@@ -285,9 +291,13 @@ export function makeOutsideImageGenerationProxy(
 
   return {
     // `generate` never rejects: a broken driver ends as a recorded failure.
-    generate: async (request) => {
+    generate: async (
+      request: ImageAdapterRequest,
+      ports: OutsideImageJobPorts,
+      onProviderResponse: () => void,
+    ): Promise<ImageAdapterResult> => {
       try {
-        return await generate(request);
+        return await generate(request, ports, onProviderResponse);
       } catch (error) {
         return { status: "failed", providerFailure: outsideDriverClosedFailure(error) };
       }

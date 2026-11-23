@@ -223,11 +223,13 @@ interface PendingCall {
   readonly relayed: Array<string> | undefined;
   /** Receives each `image/chunk` the driver streams for this call; absent refuses them. */
   readonly onImageChunk: ((image: number, data: string) => void) | undefined;
+  readonly onProviderResponse: (() => void) | undefined;
 }
 
 type BrokeredRequest = (
   params: OutsideDriverHttpRequestParams,
   signal: AbortSignal,
+  onProviderResponse?: () => void,
 ) => Promise<Response>;
 
 /**
@@ -281,6 +283,7 @@ class OutsideDriverLink {
       readonly cloudPorts?: CloudSessionPorts;
       readonly keepRelayed?: boolean;
       readonly onImageChunk?: (image: number, data: string) => void;
+      readonly onProviderResponse?: () => void;
     },
   ): {
     readonly id: number;
@@ -326,6 +329,7 @@ class OutsideDriverLink {
         cancelMethod,
         relayed: options.keepRelayed === true ? relayed : undefined,
         onImageChunk: options.onImageChunk,
+        onProviderResponse: options.onProviderResponse,
       });
       this.#write({ jsonrpc: "2.0", id, method, params });
     });
@@ -447,21 +451,19 @@ class OutsideDriverLink {
     const controller = new AbortController();
     this.#http.set(httpId, controller);
     owner?.brokered.add(controller);
-    void this.#relayHttp(httpId, params, controller, owner?.cloudPorts, owner?.relayed).finally(
-      () => {
-        if (this.#http.get(httpId) === controller) this.#http.delete(httpId);
-        owner?.brokered.delete(controller);
-      },
-    );
+    void this.#relayHttp(httpId, params, controller, owner).finally(() => {
+      if (this.#http.get(httpId) === controller) this.#http.delete(httpId);
+      owner?.brokered.delete(controller);
+    });
   }
 
   async #relayHttp(
     httpId: OutsideDriverMessageId,
     params: OutsideDriverHttpRequestParams,
     controller: AbortController,
-    cloudPorts?: CloudSessionPorts,
-    relayed?: Array<string>,
+    owner?: PendingCall,
   ): Promise<void> {
+    const cloudPorts = owner?.cloudPorts;
     let response: Response;
     try {
       if (cloudPorts !== undefined) {
@@ -483,7 +485,7 @@ class OutsideDriverLink {
           ...(params.headers === undefined ? {} : { headers: Object.fromEntries(params.headers) }),
           signal: controller.signal,
         });
-      } else response = await this.#broker(params, controller.signal);
+      } else response = await this.#broker(params, controller.signal, owner?.onProviderResponse);
     } catch (error) {
       this.#refuseHttp(httpId, closed(error));
       return;
@@ -493,7 +495,7 @@ class OutsideDriverLink {
       id: httpId,
       result: { status: response.status, headers: relayedHeaders(response.headers, params) },
     });
-    const outcome = await this.#relayBody(httpId, response, controller.signal, relayed);
+    const outcome = await this.#relayBody(httpId, response, controller.signal, owner?.relayed);
     this.notify(
       OUTSIDE_DRIVER_METHODS.httpEnd,
       outcome === undefined
@@ -659,7 +661,7 @@ function makeBroker(input: {
   readonly fetch: OutsideDriverFetch;
   readonly limits: OutsideDriverLimits;
 }): BrokeredRequest {
-  return async (params, signal) => {
+  return async (params, signal, onProviderResponse) => {
     if (input.origin === undefined) {
       throw failure("invalid-configuration", "The provider address is not a valid endpoint.");
     }
@@ -749,6 +751,7 @@ function makeBroker(input: {
     } finally {
       clearTimeout(connecting);
     }
+    onProviderResponse?.();
     if (response.status >= 300 && response.status < 400) {
       response.body?.cancel().catch(() => undefined);
       throw failure("invalid-configuration", "The configured endpoint returned a redirect.");

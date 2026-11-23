@@ -2713,7 +2713,8 @@ export function wireProviders(deps: ProvidersDependencies) {
           outsideDriverAdmission
             .imageDriverModels(instance.configuration.driver)
             ?.find((model) => model.modelId === String(modelId)),
-        adapter: (instance, ports) => outsideDriverAdmission.imageAdapter(instance, ports),
+        adapter: (instance, ports, providerAnswered) =>
+          outsideDriverAdmission.imageAdapter(instance, ports, providerAnswered),
       },
       resolveThreadProjectId: ({ threadType, threadId }) => {
         if (threadType === "chat-thread") {

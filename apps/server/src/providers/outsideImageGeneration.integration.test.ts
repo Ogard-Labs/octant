@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  IMAGE_JOB_AGGREGATE_TYPE,
   IMAGE_JOB_RESTART_INTERRUPTION_MESSAGE,
   decodeAggregateVersion,
   decodeImageGenerationScopeId,
@@ -241,7 +242,8 @@ function harness(
         admission
           .imageDriverModels(instance.configuration.driver)
           ?.find((model) => model.modelId === String(modelId)),
-      adapter: (instance, ports) => admission.imageAdapter(instance, ports),
+      adapter: (instance, ports, providerAnswered) =>
+        admission.imageAdapter(instance, ports, providerAnswered),
     },
   });
   const setCeiling = (cents: number) =>
@@ -305,6 +307,55 @@ describe("an outside image driver in the image job service", () => {
     );
     expect(generate?.params).toMatchObject({ modelId: "example-image-1", variantCount: 2 });
     expect(JSON.stringify(generate?.params)).not.toContain("sk-outside");
+  });
+
+  it("records potentially billed usage only for the failed job that received the provider response", async () => {
+    let calls = 0;
+    const { enqueue, service, journal, drivers, brokered } = harness({
+      handlers: {
+        ...imageHandlers,
+        "image/generate": async (_params, context) => {
+          calls += 1;
+          if (calls === 2) {
+            await context.http({
+              requestId: context.id,
+              url: "https://images.example.test/v1/generate",
+              method: "POST",
+            });
+          }
+          throw new FixtureDriverError("invalid provider output", { category: "protocol" });
+        },
+      },
+    });
+    const jobs = [];
+    for (let index = 0; index < 3; index += 1) {
+      const queued = await enqueue({});
+      const job = await service.whenTerminal(queued.id);
+      expect(job.status).toBe("failed");
+      jobs.push(job);
+    }
+    expect(drivers).toHaveLength(1);
+    expect(brokered).toHaveLength(1);
+    const usage = jobs.map((job) =>
+      journal
+        .replayAggregate({
+          aggregateType: IMAGE_JOB_AGGREGATE_TYPE,
+          aggregateId: job.id,
+          afterVersion: 0,
+          limit: 10,
+        })
+        .filter((event) => event.eventName === "context.usage-reconciled@1")
+        .map((event) => event.payload),
+    );
+    expect(usage).toEqual([
+      [],
+      [
+        expect.objectContaining({
+          reconciliation: expect.objectContaining({ providerReported: false }),
+        }),
+      ],
+      [],
+    ]);
   });
 
   it("refuses an untrusted or switched-off driver before anything is reserved or any process starts", async () => {

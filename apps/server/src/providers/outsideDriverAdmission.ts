@@ -23,10 +23,7 @@ import {
   type OutsideDriverActivationTarget,
 } from "@octant/plugin-host/activation";
 import type { HarnessEndpointDriver } from "@octant/provider-sdk/harness-endpoint";
-import type {
-  ImageGenerationAdapter,
-  ImageGenerationPorts,
-} from "@octant/provider-sdk/image-generation";
+import type { ImageGenerationAdapter } from "@octant/provider-sdk/image-generation";
 import { Effect, Schema } from "effect";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import {
@@ -46,7 +43,10 @@ import {
   type OutsideDriverFetch,
   type OutsideDriverLimits,
 } from "./outsideHarnessEndpointProxy";
-import { makeOutsideImageGenerationProxy } from "./outsideImageGenerationProxy";
+import {
+  makeOutsideImageGenerationProxy,
+  type OutsideImageJobPorts,
+} from "./outsideImageGenerationProxy";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 
 /**
@@ -150,10 +150,10 @@ function asFailure(error: unknown): ProviderFailure {
 /** What the host runs over one driver process, by the family of its instance. */
 type RunningProxy =
   | { readonly family: "harness-endpoint"; readonly driver: HarnessEndpointDriver }
-  | { readonly family: "image"; readonly adapter: ImageGenerationAdapter };
-
-/** The host's own image fetch and sniffing, which an image driver's proxy uses. */
-type ImageDriverPorts = Pick<ImageGenerationPorts, "fetchApprovedImageUrl" | "sniffMediaType">;
+  | {
+      readonly family: "image";
+      readonly adapter: ReturnType<typeof makeOutsideImageGenerationProxy>;
+    };
 
 interface RunningDriver {
   readonly instanceId: ProviderInstanceId;
@@ -324,7 +324,7 @@ export class OutsideDriverAdmission {
   endpoint(instance: OutsideHarnessEndpointProviderInstance): HarnessEndpointDriver {
     const instanceId = instance.id;
     const ensure = async () => {
-      const running = await this.#ensure(instance, undefined);
+      const running = await this.#ensure(instance);
       if (running.family !== "harness-endpoint") throw notAdmitted();
       return running.driver;
     };
@@ -398,7 +398,8 @@ export class OutsideDriverAdmission {
    */
   imageAdapter(
     instance: OutsideImageProviderInstance,
-    ports: ImageDriverPorts,
+    ports: OutsideImageJobPorts,
+    onProviderResponse: () => void,
   ): ImageGenerationAdapter {
     return {
       generate: async (request) => {
@@ -413,14 +414,14 @@ export class OutsideDriverAdmission {
         }
         let running: RunningProxy;
         try {
-          running = await this.#ensure(instance, ports);
+          running = await this.#ensure(instance);
         } catch (error) {
           return { status: "failed", providerFailure: asFailure(error) };
         }
         if (running.family !== "image") {
           return { status: "failed", providerFailure: notAdmitted() };
         }
-        return running.adapter.generate(request);
+        return running.adapter.generate(request, ports, onProviderResponse);
       },
     };
   }
@@ -467,10 +468,7 @@ export class OutsideDriverAdmission {
     );
   }
 
-  #ensure(
-    instance: OutsideDriverProviderInstance,
-    imagePorts: ImageDriverPorts | undefined,
-  ): Promise<RunningProxy> {
+  #ensure(instance: OutsideDriverProviderInstance): Promise<RunningProxy> {
     const key = String(instance.id);
     const binding = JSON.stringify(instance.configuration);
     const existing = this.#running.get(key);
@@ -500,7 +498,7 @@ export class OutsideDriverAdmission {
     };
     // Claimed before the first await, so concurrent first uses share one start.
     this.#running.set(key, running);
-    const proxy = this.#start(instance, running, imagePorts);
+    const proxy = this.#start(instance, running);
     running.proxy = proxy;
     proxy.catch(() => this.#forget(key, running));
     return proxy;
@@ -509,7 +507,6 @@ export class OutsideDriverAdmission {
   async #start(
     instance: OutsideDriverProviderInstance,
     running: RunningDriver,
-    imagePorts: ImageDriverPorts | undefined,
   ): Promise<RunningProxy> {
     // Decided again before any folder or process exists.
     if (!this.isAdmitted(instance)) throw notAdmitted();
@@ -573,18 +570,11 @@ export class OutsideDriverAdmission {
     };
     let proxy: RunningProxy;
     if (instance.driverKind === "outside-image") {
-      // The image job service's own fetch and sniffing; an image process is
-      // only ever started for a job, which brings them.
-      if (imagePorts === undefined) {
-        owned.stop();
-        throw notAdmitted();
-      }
       proxy = {
         family: "image",
         adapter: makeOutsideImageGenerationProxy({
           ...shared,
           modelIds: instance.configuration.modelAllowlist,
-          ports: imagePorts,
           ...(this.#resolve === undefined ? {} : { resolve: this.#resolve }),
         }),
       };
