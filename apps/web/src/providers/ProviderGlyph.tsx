@@ -29,6 +29,11 @@ export function providerGlyphColor(driverKind: string): string {
   return providerGlyphColorForKind(driverKind);
 }
 
+/** Whether a provider has a drawn logo rather than a monogram. */
+export function hasProviderLogo(driverKind: string): boolean {
+  return PROVIDER_LOGOS[driverKind] !== undefined || GLYPHS[driverKind] !== undefined;
+}
+
 export function ProviderGlyph(props: ProviderGlyphProps) {
   const size = props.size ?? 16;
   const spec = PROVIDER_LOGOS[props.driverKind] ?? GLYPHS[props.driverKind];

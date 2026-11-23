@@ -77,8 +77,17 @@ export interface ComposerInputProps extends ForwardedAttributes {
   readonly disabled?: boolean | undefined;
   readonly readOnly?: boolean | undefined;
   readonly autoFocus?: boolean | undefined;
-  /** Draws one tag's chip. Without it a tag shows as its text in a chip. */
-  readonly renderModelChip?: (match: SubagentModelTagMatch) => ReactNode;
+  /**
+   * Draws one tag's chip. `locate` reads the tag's range in the value now, as
+   * typing before the chip moves it. Without a renderer a tag shows as its
+   * text in a chip.
+   */
+  readonly renderModelChip?:
+    | ((
+        match: SubagentModelTagMatch,
+        locate: () => { readonly start: number; readonly end: number },
+      ) => ReactNode)
+    | undefined;
 }
 
 const TAG_NAME = "octant-composer-input";
@@ -646,7 +655,11 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         {element}
         {chipHosts.map((host) =>
           createPortal(
-            renderModelChip?.(host.match) ?? (
+            renderModelChip?.(host.match, () => {
+              const root = rootRef.current;
+              const start = root === null ? host.match.start : offsetOf(root, host.node, 0);
+              return { start, end: start + host.match.text.length };
+            }) ?? (
               <span className="composer-chip__label">{host.match.text}</span>
             ),
             host.node,

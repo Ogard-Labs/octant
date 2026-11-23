@@ -14,19 +14,33 @@ import type {
   ProviderMention,
   ThreadNativeSetupRequest,
 } from "@octant/contracts";
-import type { PickerGroup } from "@octant/domain";
-import { File, Folder, Globe2, Monitor, Plug, Sparkles } from "../ui/icons";
+import {
+  findSubagentModelTags,
+  type PickerGroup,
+  type SubagentModelTag,
+  type SubagentModelTagMatch,
+} from "@octant/domain";
+import { Bot, File, Folder, Globe2, Monitor, Plug, Sparkles } from "../ui/icons";
 import { filterOctantCommands } from "../palette/commandModel";
 import { useOctantCommands } from "../palette/CommandRegistry";
 import { readPathMentionQuery, type PathMentionCandidate } from "../code/pathMentions";
 import { useThreadNativeSetupServices } from "../providers/ThreadNativeSetupControl";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { ComposerInputElement } from "./ComposerInput";
+import {
+  firstUnavailableSubagentModelTag,
+  SubagentModelChip,
+  SubagentModelPicker,
+  subagentModelTagInsertion,
+} from "./SubagentModelPicker";
 
 /** How many skills, servers, and connectors one query lists before files. */
 const MAX_EXTENSION_ROWS = 12;
 
-type AtMenuIcon = "skill" | "server" | "computer" | "browser" | "file" | "folder";
+type AtMenuIcon = "skill" | "server" | "computer" | "browser" | "file" | "folder" | "model";
+
+/** The token that opens the subagent model picker. */
+const MODEL_TOKEN = "model";
 
 export interface AtMenuRow {
   readonly id: string;
@@ -203,12 +217,29 @@ export function useComposerAtMenu(input: {
   readonly apps?: ReadonlyArray<AtMenuApp>;
   readonly files?: AtMenuFiles;
   readonly provider?: ComposerProviderMentions | undefined;
+  /**
+   * The provider catalog `@model` chooses a subagent's route from. Without it
+   * the composer offers no model picker and tags show their raw ids.
+   */
+  readonly modelGroups?: ReadonlyArray<PickerGroup> | undefined;
 }) {
   const listId = useId();
   const commands = useOctantCommands();
   const [token, setToken] = useState<ReturnType<typeof readPathMentionQuery>>();
   const [activeIndex, setActiveIndex] = useState(0);
   const [resolving, setResolving] = useState(false);
+  const [modelPicker, setModelPicker] = useState<
+    | {
+        readonly start: number;
+        readonly end: number;
+        readonly initial?: SubagentModelTag | undefined;
+      }
+    | undefined
+  >(undefined);
+  // The `@model` token the person dismissed the picker on, so it does not
+  // reopen until they type a different token.
+  const dismissedTokenRef = useRef<number | undefined>(undefined);
+  const modelGroups = input.modelGroups;
   const [loadedMentions, setLoadedMentions] = useState<
     { readonly scopeKey: string; readonly mentions: ReadonlyArray<ProviderMention> } | undefined
   >(undefined);
@@ -252,7 +283,74 @@ export function useComposerAtMenu(input: {
       ? loadedMentions.mentions
       : (input.provider?.mentions ?? []);
 
+  const typedModelToken =
+    tokenIsCurrent && modelGroups !== undefined && token.query.toLowerCase() === MODEL_TOKEN;
+  useEffect(() => {
+    if (!typedModelToken || token === undefined) return;
+    if (dismissedTokenRef.current === token.start) return;
+    setModelPicker({ start: token.start, end: token.start + 1 + MODEL_TOKEN.length });
+  }, [typedModelToken, token]);
+
+  const focusPrompt = (caret: number) => {
+    queueMicrotask(() => {
+      const textarea = input.textarea?.();
+      if (textarea?.isConnected !== true) return;
+      textarea.focus();
+      textarea.setSelectionRange(caret, caret);
+    });
+  };
+  const chooseModel = (tag: SubagentModelTag) => {
+    if (modelPicker === undefined) return;
+    const inserted = subagentModelTagInsertion(input.draft, modelPicker, tag);
+    setModelPicker(undefined);
+    setToken(undefined);
+    input.onDraftChange(inserted.draft, inserted.caret);
+    focusPrompt(inserted.caret);
+  };
+  const dismissModelPicker = () => {
+    if (modelPicker === undefined) return;
+    dismissedTokenRef.current = modelPicker.start;
+    setModelPicker(undefined);
+    focusPrompt(modelPicker.end);
+  };
+  const renderModelChip =
+    modelGroups === undefined
+      ? undefined
+      : (
+          match: SubagentModelTagMatch,
+          locate: () => { readonly start: number; readonly end: number },
+        ) =>
+          createElement(SubagentModelChip, {
+            groups: modelGroups,
+            tag: match.tag,
+            onActivate: () => {
+              const range = locate();
+              setModelPicker({ start: range.start, end: range.end, initial: match.tag });
+            },
+          });
+  const unavailableModelTag =
+    modelGroups === undefined
+      ? undefined
+      : firstUnavailableSubagentModelTag(
+          modelGroups,
+          findSubagentModelTags(input.draft).map((match) => match.tag),
+        );
+
   const rows: Array<AtMenuRow> = [];
+  if (tokenIsCurrent && modelGroups !== undefined) {
+    const query = token.query.toLowerCase();
+    if (query.length > 0 && query !== MODEL_TOKEN && MODEL_TOKEN.startsWith(query)) {
+      const start = token.start;
+      const end = token.start + raw.length;
+      rows.push({
+        id: "subagent-model",
+        title: "@model",
+        meta: "Choose a subagent's provider, model, and reasoning",
+        icon: "model",
+        choose: () => setModelPicker({ start, end }),
+      });
+    }
+  }
   if (tokenIsCurrent) {
     for (const app of input.apps ?? []) {
       if (!app.controller.open) continue;
@@ -342,7 +440,7 @@ export function useComposerAtMenu(input: {
       }
     }
   }
-  const open = rows.length > 0;
+  const open = rows.length > 0 || modelPicker !== undefined;
   const active = open ? rows[Math.min(activeIndex, rows.length - 1)] : undefined;
 
   const sync = (draft: string, caret: number | null) => {
@@ -366,7 +464,7 @@ export function useComposerAtMenu(input: {
       }
       return false;
     }
-    if (!open) return false;
+    if (!open || modelPicker !== undefined) return false;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setActiveIndex((current) => (current + 1) % rows.length);
@@ -395,11 +493,23 @@ export function useComposerAtMenu(input: {
     choose,
     handleKeyDown,
     listId,
+    modelPicker:
+      modelPicker === undefined || modelGroups === undefined
+        ? undefined
+        : {
+            groups: modelGroups,
+            initial: modelPicker.initial,
+            choose: chooseModel,
+            dismiss: dismissModelPicker,
+          },
     open,
+    renderModelChip,
     resolving,
     rows,
     setActiveIndex,
     sync,
+    /** A tag in the draft that names a route the person can no longer use. */
+    unavailableModelTag,
   };
 }
 
@@ -410,6 +520,7 @@ const ICONS = {
   browser: Globe2,
   file: File,
   folder: Folder,
+  model: Bot,
 } as const;
 
 export function ComposerAtTypeahead(props: {
@@ -417,6 +528,15 @@ export function ComposerAtTypeahead(props: {
 }) {
   const { controller } = props;
   if (!controller.open) return null;
+  const picker = controller.modelPicker;
+  if (picker !== undefined) {
+    return createElement(SubagentModelPicker, {
+      groups: picker.groups,
+      initial: picker.initial,
+      onChoose: picker.choose,
+      onDismiss: picker.dismiss,
+    });
+  }
   return createElement(
     "div",
     { className: "chat-composer__command-typeahead" },

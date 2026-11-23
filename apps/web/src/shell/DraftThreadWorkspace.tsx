@@ -1272,6 +1272,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     ...(draftProviderFamily === undefined ? {} : { providerFamily: draftProviderFamily }),
   });
   const atMenu = useComposerAtMenu({
+    modelGroups: props.providerGroups,
     provider: composerProviderMentions(props.providerGroups, props.selectedProviderInstanceId),
     draft: prompt,
     onDraftChange: setPrompt,
@@ -1453,6 +1454,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             }
             input={
               <ComposerInput
+                renderModelChip={atMenu.renderModelChip}
                 aria-label="First message"
                 aria-autocomplete="list"
                 aria-expanded={atMenu.open || slash.open}

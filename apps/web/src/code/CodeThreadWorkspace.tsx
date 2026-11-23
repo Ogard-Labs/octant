@@ -754,6 +754,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     executionPolicy: view?.thread.executionPolicy,
   });
   const atMenu = useComposerAtMenu({
+    modelGroups: props.providerGroups,
     provider: providerMentions,
     textarea: () => textareaRef.current,
     draft,
@@ -2899,6 +2900,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           }}
           input={
             <ComposerInput
+              renderModelChip={atMenu.renderModelChip}
               aria-activedescendant={
                 atMenu.active !== undefined
                   ? `${atMenu.listId}-${atMenu.active.id}`

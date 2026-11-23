@@ -163,6 +163,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     providerInstanceId: props.selectedProviderInstanceId,
   });
   const atMenu = useComposerAtMenu({
+    modelGroups: props.providerGroups,
     provider: providerMentions,
     textarea: () => textareaRef.current,
     draft: prompt,
@@ -498,6 +499,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
             }
             input={
               <ComposerInput
+                renderModelChip={atMenu.renderModelChip}
                 aria-label="First message"
                 aria-autocomplete="list"
                 aria-expanded={atMenu.open || slash.open}

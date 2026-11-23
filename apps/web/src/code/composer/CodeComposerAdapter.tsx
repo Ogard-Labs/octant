@@ -451,6 +451,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     executionPolicy,
   });
   const atMenu = useComposerAtMenu({
+    modelGroups: props.providerGroups,
     provider: providerMentions,
     textarea: () => textareaRef.current,
     draft: prompt,
@@ -1134,6 +1135,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             }
             input={
               <ComposerInput
+                renderModelChip={atMenu.renderModelChip}
                 aria-label="First message"
                 aria-autocomplete="list"
                 aria-expanded={atMenu.open || slash.open}

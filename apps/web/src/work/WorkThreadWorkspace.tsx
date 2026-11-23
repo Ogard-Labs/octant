@@ -1577,6 +1577,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
       thread?.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
   });
   const atMenu = useComposerAtMenu({
+    modelGroups: props.providerGroups,
     provider: providerMentions,
     textarea: () => textareaRef.current,
     draft: composerDraft.text,
@@ -3406,6 +3407,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           }
           input={
             <ComposerInput
+              renderModelChip={atMenu.renderModelChip}
               aria-label="Work prompt"
               aria-autocomplete="list"
               aria-expanded={atMenu.open || slash.open}

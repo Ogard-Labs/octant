@@ -113,6 +113,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
     ...(family === undefined ? {} : { providerFamily: family }),
   });
   const atMenu = useComposerAtMenu({
+    modelGroups: props.providerGroups,
     provider: composerProviderMentions(props.providerGroups, props.selectedProviderInstanceId),
     draft: prompt,
     onDraftChange: setPrompt,
@@ -257,6 +258,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             }
             input={
               <ComposerInput
+                renderModelChip={atMenu.renderModelChip}
                 aria-activedescendant={
                   atMenu.active !== undefined
                     ? `${atMenu.listId}-${atMenu.active.id}`
