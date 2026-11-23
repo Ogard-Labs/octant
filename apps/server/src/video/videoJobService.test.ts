@@ -25,6 +25,7 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { catchUpProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
+import type { SpendCeilingTurnRequest } from "../spendCeilingService";
 import { VideoClipStore } from "./videoClipStore";
 import { VideoJobService } from "./videoJobService";
 
@@ -32,6 +33,7 @@ const now = "2026-11-22T12:00:00.000Z";
 const directories: Array<string> = [];
 const profileId = decodeProviderInstanceId("b4000000-0000-4000-8000-000000000001");
 const scopeId = decodeImageGenerationScopeId("b4000000-0000-4000-8000-000000000002");
+const projectId = "b4000000-0000-4000-8000-000000000003";
 const modelId = decodeProviderModelId("gemini-omni-1.2-flash");
 const actor = { kind: "system" as const, actorId: "00000000-0000-4000-8000-000000000002" as never };
 const options = { durationSeconds: 10, resolution: "720p", aspectRatio: "16:9", audio: true };
@@ -167,7 +169,11 @@ function harness(script: Script, directory?: string) {
   let clockMs = Date.parse(now);
   const instance: { current: ProviderInstance | undefined } = { current: profile() };
   const spend = {
-    admit: vi.fn(() => ({ status: "admitted" as const, reservedTokens: 0, reservations: [] })),
+    admit: vi.fn((_request: SpendCeilingTurnRequest) => ({
+      status: "admitted" as const,
+      reservedTokens: 0,
+      reservations: [],
+    })),
     settle: vi.fn(),
     abandon: vi.fn(),
   };
@@ -191,6 +197,7 @@ function harness(script: Script, directory?: string) {
     drivers: [fake.driver],
     admittedDriverKinds: new Set(["gemini-video"]),
     spendCeiling: spend,
+    resolveThreadProjectId: () => projectId,
     sleep: () => new Promise((resolve) => setTimeout(resolve, 1)),
     now: () => clockMs,
   });
@@ -599,6 +606,70 @@ describe("video jobs", () => {
     expect(spend.settle).toHaveBeenCalledTimes(1);
   });
 
+  it("ends the job as failed when the provider's cancel answers a confirmed failure", async () => {
+    let release: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { service, calls, spend } = harness({
+      cancel: async () => ({
+        status: "failed",
+        providerFailure: { category: "provider-failed", message: "No such job." },
+      }),
+      start: async () => {
+        release();
+        return { status: "started", remoteId: "remote-1" };
+      },
+    });
+    const queued = await enqueue(service);
+    await started;
+    service.stop(queued.id);
+    const done = await service.whenTerminal(queued.id);
+    expect(done).toMatchObject({
+      status: "failed",
+      failure: { category: "provider-failed" },
+    });
+    expect(done?.settledCostUsdMicros).toBeUndefined();
+    expect(calls.cancel).toBe(1);
+    expect(spend.abandon).toHaveBeenCalledTimes(1);
+    expect(spend.settle).not.toHaveBeenCalled();
+  });
+
+  it("keeps polling through a rate-limited answer until the provider completes the clip", async () => {
+    const { service, calls } = harness({
+      polls: [
+        {
+          status: "failed",
+          providerFailure: { category: "rate-limited", message: "Slow down." },
+        },
+      ],
+    });
+    const queued = await enqueue(service);
+    const done = await service.whenTerminal(queued.id);
+    expect(calls.poll).toBeGreaterThanOrEqual(2);
+    expect(done).toMatchObject({ status: "completed" });
+    expect(done?.settledCostUsdMicros).toBeGreaterThan(0);
+  });
+
+  it("ends a job on the provider's own failure answer, billed nothing", async () => {
+    const { service, spend } = harness({
+      polls: [
+        {
+          status: "failed",
+          providerFailure: { category: "provider-failed", message: "The clip failed." },
+        },
+      ],
+    });
+    const queued = await enqueue(service);
+    const done = await service.whenTerminal(queued.id);
+    expect(done).toMatchObject({
+      status: "failed",
+      failure: { category: "provider-failed" },
+    });
+    expect(done?.settledCostUsdMicros).toBeUndefined();
+    expect(spend.abandon).toHaveBeenCalledTimes(1);
+  });
+
   it("counts a resumed job's estimate against the ceiling after a restart", async () => {
     const first = harness({
       polls: Array.from({ length: 50 }, () => ({ status: "running" as const })),
@@ -611,9 +682,22 @@ describe("video jobs", () => {
       { polls: Array.from({ length: 50 }, () => ({ status: "running" as const })) },
       first.root,
     );
+    let admitted: unknown;
+    second.spend.admit.mockImplementation((request) => {
+      admitted = request;
+      return { status: "admitted" as const, reservedTokens: 0, reservations: [] };
+    });
     await second.service.recover();
-    // Recovery re-reserved the resumed job's estimate.
+    // Recovery re-reserved the resumed job's estimate, under the same thread
+    // and Project shape a fresh admission uses.
     expect(second.spend.admit).toHaveBeenCalledTimes(1);
+    expect(admitted).toMatchObject({
+      threadId: String(scopeId),
+      threadType: "work-thread",
+      projectId,
+      estimatedCostUsdMicros: 695_040,
+      countsAsTurn: false,
+    });
     // A new admission the ceiling cannot cover alongside it is refused.
     second.spend.admit.mockReturnValueOnce({
       status: "refused",

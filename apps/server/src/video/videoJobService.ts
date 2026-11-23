@@ -74,6 +74,16 @@ const FIRST_POLL_MS = 5_000;
 const MAX_POLL_MS = 30_000;
 /** How long the host waits on a provider's stop once a job's time has run out. */
 const VIDEO_TIMEOUT_CLEANUP_MS = 15_000;
+
+/**
+ * Whether a failed provider answer leaves the job's real state unknown. A
+ * network, timeout, rate-limit or server answer may never have reached the
+ * job, so the service asks again; every other answer is the provider's own
+ * word and concludes the job.
+ */
+function isTransientVideoFailure(failure: ProviderFailure): boolean {
+  return failure.category === "unavailable" || failure.category === "rate-limited";
+}
 /** How often a removal the provider refused is tried again while the host runs. */
 export const VIDEO_REMOVAL_RETRY_MS = 15 * 60 * 1000;
 
@@ -648,7 +658,13 @@ export class VideoJobService {
           // Shutdown aborted the cancel: the job stays running for the next
           // host to resume, never concluded from an answer the abort produced.
           if (this.#closing.signal.aborted) return;
-          // A failed cancel leaves the stop unconfirmed: the provider may
+          // A confirmed failure is the provider's own word that the job is
+          // lost, so it concludes as the job's failure and bills nothing.
+          if (answer.status === "failed" && !isTransientVideoFailure(answer.providerFailure)) {
+            await this.#conclude(job, answer, false);
+            return;
+          }
+          // A transient failure leaves the stop unconfirmed: the provider may
           // still be running the job, so keep polling to a terminal answer or
           // the deadline rather than ending it cancelled and unbilled.
           if (answer.status !== "running" && answer.status !== "failed") {
@@ -697,7 +713,13 @@ export class VideoJobService {
       // to resume, never concluded from an answer the abort produced.
       if (this.#closing.signal.aborted) return;
       if (poll.status === "failed" && this.#now() >= deadline) continue;
-      if (poll.status !== "running") {
+      // A failed poll is only the provider's word when the failure is
+      // confirmed: a transient one may never have reached the job, so it is
+      // asked again until the deadline settles the clip.
+      if (
+        poll.status !== "running" &&
+        !(poll.status === "failed" && isTransientVideoFailure(poll.providerFailure))
+      ) {
         await this.#conclude(job, poll, running.stopRequested);
         return;
       }
