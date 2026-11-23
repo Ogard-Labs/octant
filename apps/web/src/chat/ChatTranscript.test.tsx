@@ -1316,6 +1316,7 @@ describe("ChatTranscript", () => {
     render(<ChatTranscript view={view} />);
 
     expect(screen.getByText("Waiting for your answer")).toBeVisible();
+    expect(screen.getByText("Proceed?")).toBeVisible();
     expect(screen.queryByLabelText("Provider question")).not.toBeInTheDocument();
   });
 

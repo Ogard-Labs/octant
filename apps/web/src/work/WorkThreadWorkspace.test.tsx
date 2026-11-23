@@ -215,6 +215,13 @@ describe("WorkThreadWorkspace", () => {
         initialThread={thread}
         projects={[]}
         readOnly
+        threadClient={{
+          searchTranscript: vi.fn(),
+          bootstrap: vi.fn(),
+          navigation: vi.fn(),
+          execute: vi.fn(),
+          queryBoard: vi.fn(),
+        }}
         threadId={thread.id}
         title={thread.title}
       />,

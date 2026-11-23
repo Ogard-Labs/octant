@@ -600,9 +600,9 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
                   (checkout) => String(checkout.id) === String(activeThread.checkoutId),
                 ),
               )}
-          {activeThread === undefined || props.readOnly === true ? null : (
+          {activeThread === undefined ? null : (
             <RemoteCoordinatorProposals
-              actsAsHostPerson={props.actsAsHostPerson}
+              actsAsHostPerson={props.actsAsHostPerson && props.readOnly !== true}
               client={props.clients.code}
               connected={props.connected}
               thread={activeThread}

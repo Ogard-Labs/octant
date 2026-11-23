@@ -1112,8 +1112,12 @@ const AttemptBlock = memo(function AttemptBlock(props: {
           <SupportCorrelationControl correlationId={String(props.attempt.id)} />
         ) : null}
         {props.citations.length > 0 ? <CitationList citations={props.citations} /> : null}
-        {props.attempt.pendingQuestion === undefined ||
-        props.onAnswerQuestion === undefined ? null : (
+        {props.attempt.pendingQuestion === undefined ? null : props.onAnswerQuestion ===
+          undefined ? (
+          <p className="approval-row approval-row--request">
+            <span className="approval-row__text">{props.attempt.pendingQuestion.prompt}</span>
+          </p>
+        ) : (
           <ProviderQuestionCard
             key={props.attempt.pendingQuestion.requestId}
             draftIdentity={{
