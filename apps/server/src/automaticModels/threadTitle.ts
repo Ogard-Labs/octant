@@ -95,6 +95,7 @@ export function createThreadTitleGenerator(input: {
 }): ThreadTitleRequest {
   const { persistence, workThreads } = input;
   const providerFetch = input.fetch ?? globalThis.fetch;
+  const inFlight = new Set<string>();
   const selectedModel = () => {
     const setting = persistence.readShellSettings()?.settings.threadTitles;
     if (setting === undefined || setting.source === "first-message") return undefined;
@@ -122,6 +123,12 @@ export function createThreadTitleGenerator(input: {
       return;
     const thread = readThread(mode, threadId);
     if (thread?.lifecycle !== "active" || !isPromptTitle(thread.title, prompt)) return;
+    // A retry of the first Chat prompt can still supply the title if the
+    // original send failed. A previously dispatched call leaves a usage event.
+    if (
+      readAggregateVersion(persistence.connection, THREAD_TITLE_USAGE_AGGREGATE_TYPE, threadId) > 0
+    )
+      return;
 
     const instance = persistence.readProviderInstance(choice.providerInstanceId);
     if (
@@ -181,6 +188,8 @@ export function createThreadTitleGenerator(input: {
         // The selected gateway can set its own prices for any model ID.
         estimatedCostUsdMicros: "unknown",
         countsAsTurn: false,
+        // The person's turn already passed these checks and holds its allowance.
+        skipTurnAndRunTimeCeiling: true,
       });
 
     let dispatched = false;
@@ -274,7 +283,14 @@ export function createThreadTitleGenerator(input: {
   }
 
   // An optional title never fails the person's turn.
-  return (mode, threadId, prompt) => generate(mode, threadId, prompt).catch(() => undefined);
+  return async (mode, threadId, prompt) => {
+    const key = `${mode}:${threadId}`;
+    if (inFlight.has(key)) return;
+    inFlight.add(key);
+    await generate(mode, threadId, prompt)
+      .catch(() => undefined)
+      .finally(() => inFlight.delete(key));
+  };
 }
 
 function isPromptTitle(title: string, prompt: string): boolean {

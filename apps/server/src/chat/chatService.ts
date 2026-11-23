@@ -3349,22 +3349,14 @@ export class ChatService {
     });
     if (accepted.kind === "existing") return { kind: "turn-created", turn: accepted.turn };
     executionContext?.onTurnAccepted?.();
-    const titleFirstTurn =
-      accepted.turn.sequence === 1 &&
-      executionContext?.windowId !== undefined &&
-      !isRoutineHostScope(executionContext.windowId)
-        ? this.#nativeHarness?.titleFirstTurn
-        : undefined;
     await this.#runAttempt({
       thread: threadAsRoutedFor(accepted.thread, accepted.attempt),
       turn: accepted.turn,
       attempt: accepted.attempt,
       prompt: command.prompt,
       prepared: accepted.prepared,
+      mayTitleFirstTurn: true,
       ...(executionContext?.windowId === undefined ? {} : { windowId: executionContext.windowId }),
-      ...(titleFirstTurn === undefined
-        ? {}
-        : { onPromptSent: () => void titleFirstTurn("chat", accepted.thread.id, command.prompt) }),
     });
     return { kind: "turn-created", turn: accepted.turn };
   }
@@ -4333,6 +4325,9 @@ export class ChatService {
       attempt: accepted.attempt,
       prompt: accepted.prompt,
       prepared: accepted.prepared,
+      mayTitleFirstTurn:
+        executionContext?.limitRecovery !== true &&
+        !accepted.turn.attempts.some((attempt) => attempt.outcome === "completed"),
       ...(executionContext?.windowId === undefined ? {} : { windowId: executionContext.windowId }),
     });
     return { kind: "attempt-updated", attempt: accepted.attempt };
@@ -7225,7 +7220,7 @@ export class ChatService {
     readonly prepared: PreparedChatTurn;
     readonly mode?: "send" | "resume";
     readonly windowId?: WindowId;
-    readonly onPromptSent?: () => void;
+    readonly mayTitleFirstTurn?: boolean;
   }): Promise<void> {
     const controller = new AbortController();
     this.#activeAttempts.set(String(input.attempt.id), controller);
@@ -7482,6 +7477,14 @@ export class ChatService {
       // Chat has no Full access, so the attempt keeps the person's number
       // for the levels below it.
       const toolStepLimit = this.#toolStepsPerTurn();
+      const titleFirstTurn =
+        input.mayTitleFirstTurn === true &&
+        input.turn.sequence === 1 &&
+        input.turn.delivery === undefined &&
+        input.windowId !== undefined &&
+        !isRoutineHostScope(input.windowId)
+          ? this.#nativeHarness?.titleFirstTurn
+          : undefined;
       try {
         await Effect.runPromise(
           Effect.scoped(
@@ -7489,7 +7492,11 @@ export class ChatService {
               thread: input.thread,
               attempt: input.attempt,
               prompt: input.prompt,
-              ...(input.onPromptSent === undefined ? {} : { onPromptSent: input.onPromptSent }),
+              ...(titleFirstTurn === undefined
+                ? {}
+                : {
+                    onPromptSent: () => void titleFirstTurn("chat", input.thread.id, input.prompt),
+                  }),
               ...(this.#outsideContentMarks === undefined
                 ? {}
                 : { outsideContentMarks: this.#outsideContentMarks }),

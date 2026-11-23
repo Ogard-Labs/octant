@@ -880,13 +880,14 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("automatic-model-thread-title"),
           label: "Thread titles",
           scope: "host",
-          keywords: "text generator automatic naming",
+          keywords:
+            "automatic model calls thread titles text generator name chat work code api key endpoint",
         },
         {
           id: settingId("automatic-model-thread-title-model"),
           label: "Thread title model",
           scope: "host",
-          keywords: "api endpoint subscription",
+          keywords: "title generator model api endpoint subscription chatgpt plan",
         },
         {
           id: settingId("automatic-model-judge"),

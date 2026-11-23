@@ -7,6 +7,7 @@ import {
   decodeChatThread,
   decodeProviderInstance,
   decodeProviderModel,
+  decodeSpendCeilingReservationId,
   decodeUtcTimestamp,
 } from "@octant/contracts";
 import type { ShellSettings, ThreadTitleSettings } from "@octant/contracts/shell";
@@ -290,6 +291,21 @@ function fixture(plan?: { readonly usageGranted?: boolean; readonly plainKey?: b
         policy: { tokenBudget: 100_000, maxTokensPerTurn: 10_000 },
         window: { kind: "lifetime" },
       }),
+    admitLastTurn: () => {
+      const scope = { kind: "thread", threadType: "chat-thread", threadId: thread.id } as const;
+      spendCeiling.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope,
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { turnBudget: 1 },
+        window: { kind: "lifetime" },
+      });
+      return spendCeiling.admit({
+        reservationId: decodeSpendCeilingReservationId(randomUUID()),
+        threadId: scope.threadId,
+        threadType: scope.threadType,
+      });
+    },
     setSource: (source: ThreadTitleSettings["source"]) => {
       settings = {
         ...settings,
@@ -378,6 +394,24 @@ describe("Model-backed thread titles", () => {
     test.writeTitle(message.slice(0, 60));
     await test.generate(message);
     expect(test.readTitle()).toBe("Fix launch retries");
+  });
+
+  it("names the thread when its active turn uses the last turn allowance", async () => {
+    const test = fixture();
+    expect(test.admitLastTurn().status).toBe("admitted");
+    await test.generate();
+    expect(test.readTitle()).toBe("Fix launch retries");
+    expect(test.readUsage()).toHaveLength(1);
+  });
+
+  it("allows one endpoint request across concurrent calls and an explicit retry", async () => {
+    const test = fixture();
+    test.fetch.mockResolvedValue(new Response(null, { status: 401 }));
+    await Promise.all([test.generate(), test.generate()]);
+    await test.generate();
+    expect(test.readTitle()).toBe(prompt);
+    expect(test.fetch).toHaveBeenCalledOnce();
+    expect(test.readUsage()).toHaveLength(1);
   });
 
   it("keeps a manual rename made while the endpoint is answering", async () => {
