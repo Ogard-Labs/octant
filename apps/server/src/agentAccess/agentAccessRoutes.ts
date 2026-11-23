@@ -131,6 +131,10 @@ export function createAgentAccessListenerRouteHandler(
       return new Response(null, { status: 202 });
     }
     const grant = authenticated.grant;
+    const requestSignal =
+      pauseSignal === undefined || sourceClass === "loopback"
+        ? request.signal
+        : AbortSignal.any([request.signal, pauseSignal]);
     const policy = agentToolPolicy(grant, options.session);
     const modern = modernAgentMcp(request, params);
     const events = options.events;
@@ -152,7 +156,15 @@ export function createAgentAccessListenerRouteHandler(
     const compatibility = events?.compatibility(access) ?? false;
     if (typeof method === "string" && method.startsWith("events/") && events !== undefined) {
       try {
-        return await events.handle({ request, id, method, params, access, compatibility });
+        return await events.handle({
+          request,
+          requestSignal,
+          id,
+          method,
+          params,
+          access,
+          compatibility,
+        });
       } catch {
         return eventFailure(id, -32603, "Octant could not read thread milestones");
       }
@@ -198,11 +210,7 @@ export function createAgentAccessListenerRouteHandler(
     // A grant revoked while the body uploaded, or since it was read, aborts
     // the signal the tool run binds to; refuse before the tool runs.
     if (authenticated.signal.aborted) return unauthorized();
-    const signal = AbortSignal.any([
-      authenticated.signal,
-      request.signal,
-      ...(pauseSignal === undefined || sourceClass === "loopback" ? [] : [pauseSignal]),
-    ]);
+    const signal = AbortSignal.any([authenticated.signal, requestSignal]);
     const call = callAgentTool(name, asObject(params?.["arguments"]) ?? {}, {
       openSession: async () => createAgentSession({ grant, signal, deps: options.session }),
       signal,

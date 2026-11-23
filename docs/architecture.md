@@ -18584,8 +18584,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
     misses an upload still in flight, and the request that made the change is
     the only one of the asking device's left to finish its reply. Pausing means nothing remote reaches the host except the
     person's own computers, so an outside agent's key claim and MCP calls
-    (`/api/agent-access/claim`, `/api/agent-access/mcp`) get the same refusal
-    and its grant is kept for when access resumes. Only the hub's
+    (`/api/agent-access/claim`, `/api/agent-access/mcp`) get the same refusal.
+    Pausing ends their in-flight calls and milestone streams, and keeps their
+    grants for when access resumes. Only the hub's
     member-to-member routes between this person's own computers, which each
     member signs with its identity key, keep working. **Sign out all
     other devices** (`/api/remote/devices/sign-out-others`) revokes every other

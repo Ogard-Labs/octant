@@ -425,6 +425,7 @@ describe("the agent endpoint for an MCP client on this computer", () => {
   function endpoint(
     service: AgentAccessService,
     options?: Pick<AgentAccessListenerRouteOptions, "remoteAccessPaused" | "events">,
+    threadProject: AgentSessionDependencies["threadProject"] = () => undefined,
   ) {
     const dispatched: Array<string> = [];
     const session: AgentSessionDependencies = {
@@ -434,7 +435,7 @@ describe("the agent endpoint for an MCP client on this computer", () => {
         return undefined;
       },
       hostId: () => hostId,
-      threadProject: () => undefined,
+      threadProject,
       threadAccess: () => undefined,
       markOutsideContent: () => undefined,
     };
@@ -492,10 +493,9 @@ describe("the agent endpoint for an MCP client on this computer", () => {
   it("advertises milestones only to a confirmed grant with thread-read access", async () => {
     const { service, clock, journal } = harness();
     const source = new AgentMilestoneEvents(journal, () => Buffer.alloc(32, 7));
-    const { routes } = endpoint(
-      service,
-      new AgentEventRoutes(source, new AgentEventWebhooks(source, new Map()), false),
-    );
+    const { routes } = endpoint(service, {
+      events: new AgentEventRoutes(source, new AgentEventWebhooks(source, new Map()), false),
+    });
     for (const canRead of [true, false]) {
       const grantId = created(
         service.execute(
@@ -797,5 +797,63 @@ describe("the agent endpoint for an MCP client on this computer", () => {
     };
     expect(answer.result?.isError).toBe(true);
     expect(dispatched).toHaveLength(1);
+  });
+
+  it("closes a remote milestone stream on pause while leaving the grant active", async () => {
+    const { service, clock, journal } = harness();
+    const grantId = created(
+      service.execute(
+        { kind: "create", draft: { name: "Reader", scope: scope(), days: 30 } },
+        AGENT_ACCESS_LOCAL_ACTOR,
+      ),
+    );
+    const { pair, fingerprint } = confirmedKey(service, grantId);
+    const threadId = crypto.randomUUID();
+    service.recordThreadStarted({ grantId, threadId, mode: "code" });
+    const source = new AgentMilestoneEvents(journal, () => Buffer.alloc(32, 7));
+    const { routes } = endpoint(
+      service,
+      { events: new AgentEventRoutes(source, new AgentEventWebhooks(source, new Map()), false) },
+      () => ({ projectId: codeProject }),
+    );
+    const epoch = new AbortController();
+    const response = await routes(
+      loopbackCall(
+        { grantId, fingerprint, privateKey: pair.privateKey },
+        clock.now,
+        {
+          id: 12,
+          method: "events/stream",
+          params: {
+            name: "thread.turn_settled",
+            arguments: { threadId },
+            _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" },
+          },
+        },
+        {
+          accept: "text/event-stream",
+          "mcp-method": "events/stream",
+          "mcp-name": "thread.turn_settled",
+          "mcp-protocol-version": "2026-07-28",
+        },
+      ),
+      { sourceClass: "lan-private" },
+      epoch.signal,
+    );
+    expect(response?.headers.get("content-type")).toBe("text/event-stream");
+    const reader = response?.body?.getReader();
+    if (reader === undefined) throw new Error("Expected an event stream");
+    try {
+      expect(new TextDecoder().decode((await reader.read()).value)).toContain(
+        "notifications/events/active",
+      );
+      epoch.abort();
+      const closed = vi.fn();
+      void reader.read().then(closed);
+      await vi.waitFor(() => expect(closed).toHaveBeenCalledWith({ done: true, value: undefined }));
+      expect(service.readActive(grantId)).toBeDefined();
+    } finally {
+      await reader.cancel();
+    }
   });
 });
