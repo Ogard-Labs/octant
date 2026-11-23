@@ -258,6 +258,17 @@ describe("video generation policy", () => {
     );
   });
 
+  it("rounds a fractional billed-second cost up to a whole micro-dollar", () => {
+    const fractional = {
+      kind: "per-second" as const,
+      rates: [{ resolution: "720p", usdMicrosPerSecond: 3 }] as const,
+    };
+    const options = { resolution: "720p", audio: false };
+    expect(settleVideoCostUsdMicros(fractional, 6, { billedSeconds: 1.5 }, options, noImages)).toBe(
+      5,
+    );
+  });
+
   it("settles at a cost the provider reports, and a single-rate clip from its billed seconds", () => {
     const perSecond = {
       kind: "per-second" as const,

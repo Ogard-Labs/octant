@@ -295,7 +295,9 @@ function perSecondCostUsdMicros(
   seconds: number,
   imageCount: number,
 ): number {
-  return usdMicrosPerSecond * seconds + (price.inputUsdMicrosPerImage ?? 0) * imageCount;
+  // A fractional second rate times a fractional clip length bills a whole
+  // micro-dollar, rounded up so the estimate and the settle never undercharge.
+  return Math.ceil(usdMicrosPerSecond * seconds + (price.inputUsdMicrosPerImage ?? 0) * imageCount);
 }
 
 /**
