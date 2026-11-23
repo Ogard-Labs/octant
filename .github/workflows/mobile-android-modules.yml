@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   compile:
-    if: github.event.pull_request.draft != true
+    if: github.event.pull_request.draft != true && (github.event_name != 'pull_request' || github.base_ref == 'main')
     name: Compile the Android modules
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -49,6 +49,18 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-gradle-${{ runner.os }}-${{ hashFiles('bun.lock', 'apps/mobile/package.json', 'apps/mobile/modules/**', 'apps/mobile/plugins/**') }}
+          restore-keys: android-gradle-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       - name: Generate the native Android project
         working-directory: apps/mobile

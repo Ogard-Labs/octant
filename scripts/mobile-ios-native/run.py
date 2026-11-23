@@ -150,8 +150,17 @@ ENV.update(CI="1", GITHUB_ACTIONS="true", EXPO_NO_TELEMETRY="1",
            OCTANT_MOBILE_PUSH="0")
 signal.signal(signal.SIGTERM, interrupted)
 signal.signal(signal.SIGINT, interrupted)
-artifacts = Path(os.environ["RUNNER_TEMP"]) / "octant-ios-native-acceptance"
+runner_temp = Path(os.environ["RUNNER_TEMP"]).resolve()
+artifacts = runner_temp / "octant-ios-native-acceptance"
 artifacts.mkdir(mode=0o700)
+configured_derived = os.environ.get("OCTANT_IOS_DERIVED_DATA", "").strip()
+if configured_derived:
+    derived_data = Path(configured_derived).resolve()
+    if not derived_data.is_relative_to(runner_temp) or derived_data == runner_temp:
+        raise SystemExit("OCTANT_IOS_DERIVED_DATA must stay strictly inside RUNNER_TEMP.")
+    derived_data.mkdir(parents=True, exist_ok=True)
+else:
+    derived_data = None
 versions = []
 for path in Path("/Applications").glob("Xcode*.app"):
     match = re.fullmatch(r"Xcode_(\d+)\.(\d+)(?:\.(\d+))?\.app", path.name)
@@ -161,7 +170,9 @@ if not versions:
     raise SystemExit("No supported release Xcode is installed on this runner.")
 ENV["DEVELOPER_DIR"] = str(max(versions)[1] / "Contents/Developer")
 run(["xcodebuild", "-version"])
-work = Path(tempfile.mkdtemp(prefix="octant-ios-demo-", dir=os.environ["RUNNER_TEMP"]))
+work = Path(tempfile.mkdtemp(prefix="octant-ios-demo-", dir=str(runner_temp)))
+if derived_data is None:
+    derived_data = work / "derived"
 device = None
 creation_attempted = False
 creation_name = "Octant offline acceptance " + uuid.uuid4().hex
@@ -198,6 +209,12 @@ try:
     device = created
     run(["xcrun", "simctl", "boot", device])
     run(["xcrun", "simctl", "bootstatus", device, "-b"], timeout=180)
+    # Build once for both text-size scenarios so the second pass does not
+    # re-run the Release JS bundle and Xcode build-phase scripts.
+    run(["xcodebuild", "build-for-testing", "-workspace", str(ios / "Octant.xcworkspace"),
+         "-scheme", "OctantOfflineNativeTests", "-configuration", "Release",
+         "-destination", "id=" + device, "-derivedDataPath", str(derived_data),
+         "CODE_SIGNING_ALLOWED=NO"], timeout=1800)
     for label, size, method in (
         ("standard", "large", "testColdDemoReplyForegroundAndReset"),
         ("large-text", "accessibility-extra-large", "testLargeTextEntryAndReply"),
@@ -206,9 +223,9 @@ try:
         observed_size = run(["xcrun", "simctl", "ui", device, "content_size"], capture=True).strip()
         if observed_size != size:
             raise RuntimeError("The owned Simulator did not adopt the requested system text size.")
-        run(["xcodebuild", "test", "-workspace", str(ios / "Octant.xcworkspace"),
+        run(["xcodebuild", "test-without-building", "-workspace", str(ios / "Octant.xcworkspace"),
              "-scheme", "OctantOfflineNativeTests", "-configuration", "Release",
-             "-destination", "id=" + device, "-derivedDataPath", str(work / "derived"),
+             "-destination", "id=" + device, "-derivedDataPath", str(derived_data),
              "-resultBundlePath", str(artifacts / (label + ".xcresult")),
              "-parallel-testing-enabled", "NO", "-test-timeouts-enabled", "YES",
              "-maximum-test-execution-time-allowance", "180",

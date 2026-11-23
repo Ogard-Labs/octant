@@ -74,10 +74,34 @@ export async function installNodeSdk(
   }
 }
 
+/**
+ * Copies prebuilt Windows native artifacts only after verifying the source
+ * directory contains the exact four x64 PE runtime binaries and re-verifying
+ * the copied destination.
+ */
+export async function copyValidatedWindowsNativeArtifacts(
+  sourceDirectory: string,
+  destination: string,
+): Promise<void> {
+  await validateWindowsNativeArtifacts(sourceDirectory);
+  await mkdir(destination, { recursive: true });
+  await Promise.all(
+    WINDOWS_NATIVE_ARTIFACTS.map((name) =>
+      cp(join(sourceDirectory, name), join(destination, name)),
+    ),
+  );
+  await validateWindowsNativeArtifacts(destination);
+}
+
 /** Build existing native sources on their matching host; SDK integrity belongs to installed node-gyp. */
 export async function buildWindowsNativeArtifacts(destination: string): Promise<void> {
   if (process.platform !== "win32" || process.arch !== "x64")
     throw Error("Windows native resources require a native Windows x64 build host.");
+  const prebuiltDirectory = process.env.OCTANT_WINDOWS_PREBUILT_NATIVE_DIR?.trim();
+  if (prebuiltDirectory !== undefined && prebuiltDirectory !== "") {
+    await copyValidatedWindowsNativeArtifacts(resolve(prebuiltDirectory), destination);
+    return;
+  }
   const stage = await mkdtemp(join(tmpdir(), "octant-windows-native-build-"));
   try {
     const node = await run("node", ["-p", "process.versions.node"], { cwd: root });
@@ -111,88 +135,66 @@ export async function buildWindowsNativeArtifacts(destination: string): Promise<
     const credentialBuild = join(stage, "credentials");
     const peerBuild = join(stage, "desktop-peer");
     const confineBuild = join(stage, "windows-confine");
-    await run(
-      "cmake",
-      [
-        "-S",
+    const configureAndBuild = async (
+      sourcePath: string,
+      buildDirectory: string,
+      target: string,
+      extraArgs: ReadonlyArray<string> = [],
+    ): Promise<void> => {
+      await run("cmake", ["-S", sourcePath, "-B", buildDirectory, "-A", "x64", ...extraArgs], {
+        cwd: root,
+      });
+      await run("cmake", ["--build", buildDirectory, "--config", "Release", "--target", target], {
+        cwd: root,
+      });
+    };
+    const nodeSdkArgs = [
+      `-DOCTANT_NODE_HEADERS=${join(sdk, version, "include/node")}`,
+      `-DOCTANT_NODE_IMPORT_LIB=${join(sdk, version, "x64/node.lib")}`,
+    ];
+    await Promise.all([
+      configureAndBuild(
         join(root, "packages/host-runtime/native/windows-host-owner"),
-        "-B",
         ownerBuild,
-        "-A",
-        "x64",
-        `-DOCTANT_NODE_HEADERS=${join(sdk, version, "include/node")}`,
-        `-DOCTANT_NODE_IMPORT_LIB=${join(sdk, version, "x64/node.lib")}`,
-      ],
-      { cwd: root },
-    );
-    await run(
-      "cmake",
-      ["--build", ownerBuild, "--config", "Release", "--target", "octant-windows-host-owner"],
-      { cwd: root },
-    );
-    await run(
-      "cmake",
-      [
-        "-S",
+        "octant-windows-host-owner",
+        nodeSdkArgs,
+      ),
+      configureAndBuild(
         join(root, "apps/desktop/native/windows-credential-helper"),
-        "-B",
         credentialBuild,
-        "-A",
-        "x64",
-      ],
-      { cwd: root },
-    );
-    await run(
-      "cmake",
-      ["--build", credentialBuild, "--config", "Release", "--target", "octant-credential-helper"],
-      { cwd: root },
-    );
-    await run(
-      "cmake",
-      [
-        "-S",
+        "octant-credential-helper",
+      ),
+      configureAndBuild(
         join(root, "apps/desktop/native/windows-desktop-peer"),
-        "-B",
         peerBuild,
-        "-A",
-        "x64",
-        `-DOCTANT_NODE_HEADERS=${join(sdk, version, "include/node")}`,
-        `-DOCTANT_NODE_IMPORT_LIB=${join(sdk, version, "x64/node.lib")}`,
-      ],
-      { cwd: root },
-    );
-    await run(
-      "cmake",
-      ["--build", peerBuild, "--config", "Release", "--target", "octant-desktop-peer-windows"],
-      { cwd: root },
-    );
-    await run(
-      "cmake",
-      ["-S", join(root, "apps/desktop/native/windows-confine"), "-B", confineBuild, "-A", "x64"],
-      { cwd: root },
-    );
-    await run(
-      "cmake",
-      ["--build", confineBuild, "--config", "Release", "--target", "octant-windows-confine"],
-      { cwd: root },
-    );
+        "octant-desktop-peer-windows",
+        nodeSdkArgs,
+      ),
+      configureAndBuild(
+        join(root, "apps/desktop/native/windows-confine"),
+        confineBuild,
+        "octant-windows-confine",
+      ),
+    ]);
     await mkdir(destination, { recursive: true });
-    await cp(
-      join(ownerBuild, "Release", WINDOWS_NATIVE_ARTIFACTS[0]),
-      join(destination, WINDOWS_NATIVE_ARTIFACTS[0]),
-    );
-    await cp(
-      join(credentialBuild, "Release", WINDOWS_NATIVE_ARTIFACTS[1]),
-      join(destination, WINDOWS_NATIVE_ARTIFACTS[1]),
-    );
-    await cp(
-      join(peerBuild, "Release", WINDOWS_NATIVE_ARTIFACTS[2]),
-      join(destination, WINDOWS_NATIVE_ARTIFACTS[2]),
-    );
-    await cp(
-      join(confineBuild, "Release", WINDOWS_NATIVE_ARTIFACTS[3]),
-      join(destination, WINDOWS_NATIVE_ARTIFACTS[3]),
-    );
+    await Promise.all([
+      cp(
+        join(ownerBuild, "Release", WINDOWS_NATIVE_ARTIFACTS[0]),
+        join(destination, WINDOWS_NATIVE_ARTIFACTS[0]),
+      ),
+      cp(
+        join(credentialBuild, "Release", WINDOWS_NATIVE_ARTIFACTS[1]),
+        join(destination, WINDOWS_NATIVE_ARTIFACTS[1]),
+      ),
+      cp(
+        join(peerBuild, "Release", WINDOWS_NATIVE_ARTIFACTS[2]),
+        join(destination, WINDOWS_NATIVE_ARTIFACTS[2]),
+      ),
+      cp(
+        join(confineBuild, "Release", WINDOWS_NATIVE_ARTIFACTS[3]),
+        join(destination, WINDOWS_NATIVE_ARTIFACTS[3]),
+      ),
+    ]);
     await validateWindowsNativeArtifacts(destination);
   } finally {
     await rm(stage, { recursive: true, force: true });

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import {
+  copyValidatedWindowsNativeArtifacts,
   installNodeSdk,
   validateWindowsNativeArtifacts,
   WINDOWS_NATIVE_ARTIFACTS,
@@ -89,6 +90,26 @@ it("fails naming the Node SDK install after three failed attempts", async () => 
     );
     await expect(failed).rejects.toMatchObject({ cause: { message: "attempt 3 failed" } });
     expect(attempts).toBe(3);
+  } finally {
+    await rm(stage, { recursive: true, force: true });
+  }
+});
+
+it("reuses prebuilt Windows native artifacts only when all four fixed x64 binaries validate", async () => {
+  const stage = await mkdtemp(join(tmpdir(), "octant-native-reuse-test-"));
+  const source = join(stage, "source");
+  const destination = join(stage, "destination");
+  try {
+    await expect(copyValidatedWindowsNativeArtifacts(source, destination)).rejects.toThrow();
+    await rm(destination, { recursive: true, force: true });
+    const fs = await import("node:fs/promises");
+    await fs.mkdir(source, { recursive: true });
+    await writeFile(join(source, WINDOWS_NATIVE_ARTIFACTS[0]), pe(true));
+    await writeFile(join(source, WINDOWS_NATIVE_ARTIFACTS[1]), pe(false));
+    await writeFile(join(source, WINDOWS_NATIVE_ARTIFACTS[2]), pe(true));
+    await writeFile(join(source, WINDOWS_NATIVE_ARTIFACTS[3]), pe(false));
+    await copyValidatedWindowsNativeArtifacts(source, destination);
+    expect((await readdir(destination)).sort()).toEqual([...WINDOWS_NATIVE_ARTIFACTS].sort());
   } finally {
     await rm(stage, { recursive: true, force: true });
   }
