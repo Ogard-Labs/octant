@@ -246,7 +246,8 @@ export function estimateVideoCost(
         (entry) => entry.resolution === options.resolution,
       );
       if (perSecond === undefined) return { kind: "unknown" };
-      const outputTokens = perSecond.tokens * options.durationSeconds;
+      const outputTokens =
+        perSecond.tokens * options.durationSeconds + (price.reservedOutputTokenAllowance ?? 0);
       const inputTokens = input.promptTokens + (price.inputTokensPerImage ?? 0) * input.imageCount;
       return {
         kind: "estimate",

@@ -60,6 +60,13 @@ export const GEMINI_OMNI_FLASH: VideoModelCapabilities = decodeVideoModelCapabil
     inputUsdMicrosPerMillionTokens: 1_500_000,
     // A conservative ceiling for one image input, so the reservation covers it.
     inputTokensPerImage: 1290,
+    // Google publishes no per-clip thinking budget for Omni video (its
+    // thinking guide bounds text models:
+    // https://ai.google.dev/gemini-api/docs/thinking). Billed thought tokens
+    // run in the tens per clip — the adapter's own usage fixture reports 40
+    // for 8 s — so 1,024, well above the largest observed and about $0.012
+    // at the output rate, is reserved without inflating the ceiling.
+    reservedOutputTokenAllowance: 1024,
   },
   job: { cancel: "running", removal: { kind: "delete" }, resumeWindowHours: 55 * 24 },
 });

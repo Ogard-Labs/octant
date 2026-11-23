@@ -31,6 +31,7 @@ const omni: VideoModelCapabilities = decodeVideoModelCapabilities({
     ],
     outputUsdMicrosPerMillionTokens: 12_000_000,
     inputUsdMicrosPerMillionTokens: 1_500_000,
+    reservedOutputTokenAllowance: 1024,
   },
   job: { cancel: "running", removal: { kind: "delete" }, resumeWindowHours: 1320 },
 });
@@ -151,8 +152,31 @@ describe("video generation policy", () => {
       { durationSeconds: 10, resolution: "720p", aspectRatio: "16:9", audio: true },
       { promptTokens: 1000, imageCount: 0 },
     );
-    // 57,920 output tokens at $12/M plus 1,000 input tokens at $1.50/M.
-    expect(estimate).toEqual({ kind: "estimate", usdMicros: 696_540 });
+    // 57,920 video tokens plus the 1,024-token reserved allowance at $12/M,
+    // and 1,000 input tokens at $1.50/M.
+    expect(estimate).toEqual({ kind: "estimate", usdMicros: 708_828 });
+  });
+
+  it("reserves enough for the thinking tokens a token-priced job bills", () => {
+    const options = { durationSeconds: 8, resolution: "720p", aspectRatio: "16:9", audio: true };
+    const estimate = estimateVideoCost(omni.price, options, {
+      promptTokens: 12,
+      imageCount: 0,
+    });
+    // 46,336 video tokens plus the 1,024 reserved at $12/M, and 12 input
+    // tokens at $1.50/M.
+    expect(estimate).toEqual({ kind: "estimate", usdMicros: 568_338 });
+    const settleOptions = { resolution: "720p", audio: true };
+    const settled = settleVideoCostUsdMicros(
+      omni.price,
+      568_338,
+      // The provider's reported usage carries 40 billed thinking tokens on
+      // top of the video's tokens.
+      { outputTokens: 46_336 + 40, inputTokens: 12 },
+      settleOptions,
+      { imageCount: 0 },
+    );
+    expect(settled).toBeLessThanOrEqual(568_338);
   });
 
   const noImages = { imageCount: 0 } as const;

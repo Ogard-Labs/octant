@@ -61,6 +61,13 @@ export const VideoPrice = Schema.Union(
     inputUsdMicrosPerMillionTokens: Schema.optional(NonNegativeInt),
     /** Input tokens one reference image costs, where the provider publishes it. */
     inputTokensPerImage: Schema.optional(NonNegativeInt),
+    /**
+     * Extra output tokens a job may bill beyond the resolution's video
+     * tokens — Gemini's billed thinking tokens, for example — reserved at
+     * the output price so billed usage still fits the ceiling it was
+     * approved under.
+     */
+    reservedOutputTokenAllowance: Schema.optional(NonNegativeInt),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("per-clip"),

@@ -273,8 +273,11 @@ which the person sets, like any turn.
 - **Reserve.** Before Generate is honoured, the host reserves the card's
   estimate against every ceiling that applies. The estimate is the model's
   declared output price for the chosen duration, resolution and audio, plus its
-  declared input price for the prompt and reference images where it has one.
-  So a clip that fits a ceiling when approved still fits it when settled.
+  declared input price for the prompt and reference images where it has one. A
+  token-priced model also reserves its declared output-token allowance, so
+  billed usage beyond the clip's video tokens — Gemini's thinking tokens —
+  still fits the reservation. So a clip that fits a ceiling when approved
+  still fits it when settled.
 - **Refuse.** If a ceiling cannot cover it, the job is refused with that
   ceiling named, and nothing is sent.
 - **Settle.** When the job ends, the reservation settles to the cost the
