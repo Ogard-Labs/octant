@@ -9,6 +9,9 @@ import {
   type ProviderModelId,
 } from "@octant/contracts";
 import {
+  decodeVideoJobId,
+  decodeVideoJobQueued,
+  decodeVideoJobStatusChanged,
   decodeVideoModelCapabilities,
   VIDEO_JOB_TIMEOUT_MS,
   type VideoModelCapabilities,
@@ -129,12 +132,10 @@ interface Script {
 }
 
 function fakeDriver(script: Script) {
-  const calls = { start: 0, poll: 0, cancel: 0, forget: 0 };
+  const calls = { start: 0, poll: 0, cancel: 0, forget: 0, models: 0 };
   const model =
     script.model ??
     capabilities({ cancel: "running", removal: { kind: "delete" }, resumeWindowHours: 24 });
-  // Read counts persist across adapters: the service creates one per call.
-  let modelsCalls = 0;
   let modelsFailOnce = script.modelsFail === "once";
   const driver: VideoGenerationDriver = {
     driverKind: script.driverKind ?? "gemini-video",
@@ -143,14 +144,14 @@ function fakeDriver(script: Script) {
     create: ({ ports }) => {
       return {
         models: async () => {
-          modelsCalls += 1;
-          const call = modelsCalls;
+          calls.models += 1;
+          const call = calls.models;
           if (script.beforeModels !== undefined) await script.beforeModels(call);
           if (modelsFailOnce || script.modelsFail === "always" || script.modelsFail === call) {
             modelsFailOnce = false;
             throw { category: "unavailable", message: "Discovery failed." };
           }
-          return script.modelsRead?.(modelsCalls) ?? [model];
+          return script.modelsRead?.(call) ?? [model];
         },
         start: async (request) => {
           calls.start += 1;
@@ -1018,6 +1019,107 @@ describe("video jobs", () => {
     await second.service.retryOwedRemovals();
     expect(second.calls.forget).toBe(asked);
     expect(second.service.getById(doneId)?.providerCopy).toBe("expires");
+  });
+
+  it("keeps retrying an owed removal without ever reading the catalog again", async () => {
+    const { service, calls } = harness({
+      // Admission and the job read the catalog once each; every later read fails.
+      modelsFail: 3,
+      forget: async () => ({
+        status: "failed",
+        providerFailure: { category: "provider-failed", message: "The provider is down." },
+      }),
+    });
+    const doneId = (await enqueue(service)).id;
+    await service.whenTerminal(doneId);
+    await vi.waitFor(() => expect(calls.forget).toBe(1));
+    expect(service.getById(doneId)?.providerCopy).toBe("held");
+    const reads = calls.models;
+
+    await service.retryOwedRemovals();
+    expect(calls.forget).toBe(2);
+    expect(calls.models).toBe(reads);
+    expect(service.getById(doneId)?.providerCopy).toBe("held");
+  });
+
+  it("drops an expired owed copy from the job's own record before any read or call", async () => {
+    const model = capabilities({
+      cancel: "running",
+      removal: { kind: "expires", afterHours: 2 },
+      resumeWindowHours: 24,
+    });
+    const { service, calls, advance } = harness({
+      model,
+      // Discovery stops answering once the job is admitted and read.
+      modelsFail: 3,
+      forget: async () => ({
+        status: "failed",
+        providerFailure: { category: "provider-failed", message: "fal is down." },
+      }),
+    });
+    const doneId = (await enqueue(service)).id;
+    await service.whenTerminal(doneId);
+    await vi.waitFor(() => expect(calls.forget).toBe(1));
+    expect(service.getById(doneId)?.providerCopy).toBe("held");
+    const reads = calls.models;
+
+    advance(2 * 3_600_000 + 1);
+    await service.retryOwedRemovals();
+    expect(service.getById(doneId)?.providerCopy).toBe("expires");
+    expect(calls.forget).toBe(1);
+    expect(calls.models).toBe(reads);
+  });
+
+  it("keeps a copy journaled before its cleanup was recorded owed past any expiry", async () => {
+    const model = capabilities({
+      cancel: "running",
+      removal: { kind: "expires", afterHours: 2 },
+      resumeWindowHours: 24,
+    });
+    const { service, calls, runtime, advance } = harness({
+      model,
+      forget: async () => ({
+        status: "failed",
+        providerFailure: { category: "provider-failed", message: "fal is down." },
+      }),
+    });
+    const doneId = (await enqueue(service)).id;
+    await service.whenTerminal(doneId);
+    const done = service.getById(doneId);
+    expect(done?.providerRemoval).toEqual({ kind: "expires", afterHours: 2 });
+    await vi.waitFor(() => expect(calls.forget).toBe(1));
+
+    // A job the journal wrote before cleanup kept the declaration: its
+    // events still decode, and nothing on it says the copy expires.
+    const legacyId = decodeVideoJobId(crypto.randomUUID());
+    const { providerRemoval: _kept, remoteId, providerCopy: _copy, ...legacyJob } = done!;
+    runtime.videoJobProjection.applyQueued(
+      decodeVideoJobQueued({
+        job: { ...legacyJob, id: legacyId, status: "queued", providerCopy: "none" },
+      }).job,
+    );
+    runtime.videoJobProjection.applyStatusChanged(
+      decodeVideoJobStatusChanged({
+        jobId: legacyId,
+        fromStatus: "queued",
+        toStatus: "completed",
+        version: legacyJob.version + 1,
+        updatedAt: legacyJob.updatedAt,
+        remoteId,
+        providerCopy: "held",
+      }),
+    );
+    expect(service.getById(legacyId)?.providerRemoval).toBeUndefined();
+
+    // Past the expiry the recorded copy is dropped without a call, while the
+    // copy without a declaration keeps its safe default: still owed, still
+    // asked, never written off.
+    const asked = calls.forget;
+    advance(2 * 3_600_000 + 1);
+    await service.retryOwedRemovals();
+    expect(service.getById(doneId)?.providerCopy).toBe("expires");
+    expect(service.getById(legacyId)?.providerCopy).toBe("held");
+    expect(calls.forget).toBe(asked + 1);
   });
 
   it("refuses a seventeenth waiting job so a runaway loop cannot queue without end", async () => {

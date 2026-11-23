@@ -713,17 +713,22 @@ function createFalAdapter(profile: VideoGenerationProfile, ports: VideoGeneratio
     }
   };
 
-  const cancel = async (remoteId: string): Promise<VideoAdapterPoll> => {
+  const cancel = async (remoteId: string, signal?: AbortSignal): Promise<VideoAdapterPoll> => {
     const urls = urlsFor(remoteId);
     if (urls === undefined) return invalidId();
     try {
-      const response = await ports.request({ url: urls.cancel, method: "PUT", auth: AUTH });
+      const response = await ports.request({
+        url: urls.cancel,
+        method: "PUT",
+        auth: AUTH,
+        ...(signal === undefined ? {} : { signal }),
+      });
       // 200: removed from the queue, which fal bills nothing for. 202: fal
       // signalled the runner, which decides whether to stop, so the job keeps
       // polling. 400: already done.
       if (response.status === 200) return { status: "cancelled", usage: { costUsdMicros: 0 } };
       if (response.status === 202) return { status: "running" };
-      if (response.status === 400) return await poll(remoteId);
+      if (response.status === 400) return await poll(remoteId, signal);
       return { status: "failed", providerFailure: classifyVideoHttpFailure(response) };
     } catch (error) {
       return { status: "failed", providerFailure: asFailure(error) };

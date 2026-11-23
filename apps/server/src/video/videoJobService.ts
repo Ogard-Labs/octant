@@ -251,13 +251,15 @@ export class VideoJobService {
   /**
    * When a provider-expiring copy is gone anyway: a removal still owed past
    * this is dropped rather than retried. It is derived from the journaled
-   * job, not kept in memory, so a restart keeps the cutoff.
+   * job's own record, not the catalog, so a restart — and a profile whose
+   * endpoint has since been removed — keeps the cutoff. A job journaled
+   * before the declaration was kept has none, and stays owed.
    */
-  #owedCopyExpiry(job: VideoJob, model: VideoModelCapabilities | undefined): number | undefined {
-    if (model?.job.removal.kind !== "expires") return undefined;
+  #owedCopyExpiry(job: VideoJob): number | undefined {
+    if (job.providerRemoval?.kind !== "expires") return undefined;
     // Owed copies only exist on terminal jobs, so updatedAt is when the clip
     // was made — the expiry counts from then, not from when the job started.
-    return Date.parse(job.updatedAt) + model.job.removal.afterHours * 3_600_000;
+    return Date.parse(job.updatedAt) + job.providerRemoval.afterHours * 3_600_000;
   }
   /** When each profile's catalog was last read, bounding a retry to 60 s. */
   readonly #discoveryReadAt = new Map<string, number>();
@@ -861,7 +863,14 @@ export class VideoJobService {
       // Otherwise one removal is owed after the terminal state; a refusal or
       // a copy still owed past its own expiry falls back to that expiry.
     }
-    return this.#annotate(job, { remoteId, providerCopy: copy });
+    return this.#annotate(job, {
+      remoteId,
+      providerCopy: copy,
+      // Cleanup runs long after discovery and without its model: what it
+      // needs is journaled on the job itself, so a profile change or a lost
+      // endpoint can never change what this copy is owed.
+      ...(model?.job.removal === undefined ? {} : { providerRemoval: model.job.removal }),
+    });
   }
 
   async #pollToEnd(
@@ -1095,20 +1104,17 @@ export class VideoJobService {
     const job = this.#current(candidate);
     if (job.providerCopy !== "held" || job.remoteId === undefined) return;
     if (this.#removing.has(String(job.id))) return;
+    // The journaled expiry can settle a copy even when the profile is gone.
+    const expiresAt = this.#owedCopyExpiry(job);
+    if (expiresAt !== undefined && this.#now() >= expiresAt) {
+      this.#markCopy(job, "expires");
+      return;
+    }
     this.#removing.add(String(job.id));
     try {
       const instance = this.#options.readProviderInstance(job.profileInstanceId);
       const adapter = instance === undefined ? undefined : this.#adapterFor(instance);
       if (adapter === undefined) return;
-      const model = (await this.#modelsOf(adapter))?.find(
-        (candidate) => String(candidate.modelId) === String(job.modelId),
-      );
-      if (this.#closing.signal.aborted) return;
-      const expiresAt = this.#owedCopyExpiry(job, model);
-      if (expiresAt !== undefined && this.#now() >= expiresAt) {
-        this.#markCopy(job, "expires");
-        return;
-      }
       let result;
       try {
         result = await adapter.forget(job.remoteId);
@@ -1160,7 +1166,9 @@ export class VideoJobService {
   #transition(
     job: VideoJob,
     toStatus: VideoJob["status"],
-    extras: Partial<Pick<VideoJobStatusChanged, "startedAt" | "remoteId" | "providerCopy">>,
+    extras: Partial<
+      Pick<VideoJobStatusChanged, "startedAt" | "remoteId" | "providerCopy" | "providerRemoval">
+    >,
   ): VideoJob {
     const updatedAt = decodeUtcTimestamp(this.#options.clock());
     const version = decodeAggregateVersion(job.version + 1);
@@ -1179,7 +1187,8 @@ export class VideoJobService {
   /** Records the provider job id and copy state on a running job without changing its status. */
   #annotate(
     job: VideoJob,
-    extras: Pick<VideoJobStatusChanged, "remoteId" | "providerCopy">,
+    extras: Pick<VideoJobStatusChanged, "remoteId" | "providerCopy"> &
+      Partial<Pick<VideoJobStatusChanged, "providerRemoval">>,
   ): VideoJob {
     return this.#transition(job, job.status, extras);
   }

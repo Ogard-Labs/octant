@@ -7,7 +7,7 @@ import {
   looksLikeMp4,
   runVideoGenerationConformance,
 } from "@octant/provider-sdk/video-generation-conformance";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { falPrice, falVideoDriver } from "./falVideoAdapter";
 
 const veo = decodeProviderModelId("fal-ai/veo3.1");
@@ -232,6 +232,37 @@ describe("fal video driver", () => {
         .ports,
     });
     expect(await adapter.cancel(`fal-ai/veo3.1#${requestId}`)).toEqual({ status: "running" });
+  });
+
+  it("passes the caller's signal through the PUT and the follow-up poll", async () => {
+    const sent: Array<VideoHttpRequest> = [];
+    const adapter = falVideoDriver.create({
+      profile,
+      ports: {
+        request: async (request) => {
+          sent.push(request);
+          const signal = request.signal;
+          if (signal?.aborted === true) throw signal.reason;
+          // A 400 means the runner is already done, so cancel reads the job's
+          // status — a read the network never answers until the caller aborts.
+          if (request.method === "PUT") return new Response(null, { status: 400 });
+          await new Promise<never>((_resolve, reject) =>
+            signal?.addEventListener("abort", () => reject(signal.reason)),
+          );
+          return Response.json({});
+        },
+        fetchApprovedVideoUrl: async () => ({ bytes: CONFORMANCE_MP4_BYTES }),
+        sniffMediaType: (bytes) => (looksLikeMp4(bytes) ? "video/mp4" : undefined),
+      },
+    });
+    const control = new AbortController();
+    const pending = adapter.cancel(`fal-ai/veo3.1#${requestId}`, control.signal);
+    await vi.waitFor(() => expect(sent).toHaveLength(2));
+    control.abort();
+    const answer = await pending;
+    expect(sent[0]?.signal).toBe(control.signal);
+    expect(sent[1]?.signal).toBe(control.signal);
+    expect(answer.status).toBe("failed");
   });
 
   it("never puts an id fal did not shape into a URL path", async () => {

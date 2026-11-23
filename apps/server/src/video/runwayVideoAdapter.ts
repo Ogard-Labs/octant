@@ -290,15 +290,26 @@ async function poll(
 async function remove(
   ports: VideoGenerationPorts,
   remoteId: string,
+  signal?: AbortSignal,
 ): Promise<Response | undefined> {
   const url = taskUrl(remoteId);
   if (url === undefined) return undefined;
-  return ports.request({ url, method: "DELETE", auth: AUTH, headers: VERSION_HEADERS });
+  return ports.request({
+    url,
+    method: "DELETE",
+    auth: AUTH,
+    headers: VERSION_HEADERS,
+    ...(signal === undefined ? {} : { signal }),
+  });
 }
 
-async function cancel(ports: VideoGenerationPorts, remoteId: string): Promise<VideoAdapterPoll> {
+async function cancel(
+  ports: VideoGenerationPorts,
+  remoteId: string,
+  signal?: AbortSignal,
+): Promise<VideoAdapterPoll> {
   try {
-    const response = await remove(ports, remoteId);
+    const response = await remove(ports, remoteId, signal);
     if (response === undefined) return invalidId();
     // A cancelled task's credits are refunded, so the job settles at nothing.
     if (response.ok || response.status === 404)
@@ -338,7 +349,7 @@ export const runwayVideoDriver: VideoGenerationDriver = {
     models: async () => declaredFor(profile),
     start: (request) => start(ports, profile, request),
     poll: (remoteId, signal) => poll(ports, remoteId, signal),
-    cancel: (remoteId) => cancel(ports, remoteId),
+    cancel: (remoteId, signal) => cancel(ports, remoteId, signal),
     forget: (remoteId) => forget(ports, remoteId),
   }),
 };

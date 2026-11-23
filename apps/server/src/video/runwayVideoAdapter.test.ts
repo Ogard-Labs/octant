@@ -131,9 +131,9 @@ describe("Runway video driver", () => {
     });
     const completed = await done.poll(taskId, new AbortController().signal);
     expect(completed).toMatchObject({ status: "completed", usage: { costUsdMicros: 600_000 } });
-    expect(settleVideoCostUsdMicros(RUNWAY_GEN45.price, 999_999, { costUsdMicros: 600_000 })).toBe(
-      600_000,
-    );
+    expect(
+      settleVideoCostUsdMicros(RUNWAY_GEN45.price, 999_999, { costUsdMicros: 600_000 }, options),
+    ).toBe(600_000);
 
     const refused = runwayVideoDriver.create({
       profile,
@@ -208,6 +208,34 @@ describe("Runway video driver", () => {
       status: "cancelled",
       usage: { costUsdMicros: 0 },
     });
+  });
+
+  it("passes the caller's signal to the DELETE so an abort ends a stuck request", async () => {
+    const sent: Array<VideoHttpRequest> = [];
+    const adapter = runwayVideoDriver.create({
+      profile,
+      ports: {
+        request: async (request) => {
+          sent.push(request);
+          const signal = request.signal;
+          if (signal?.aborted === true) throw signal.reason;
+          // A request the network never answers, until the caller gives up.
+          await new Promise<never>((_resolve, reject) =>
+            signal?.addEventListener("abort", () => reject(signal.reason)),
+          );
+          return new Response(null, { status: 204 });
+        },
+        fetchApprovedVideoUrl: async () => ({ bytes: CONFORMANCE_MP4_BYTES }),
+        sniffMediaType: (bytes) => (looksLikeMp4(bytes) ? "video/mp4" : undefined),
+      },
+    });
+    const control = new AbortController();
+    const pending = adapter.cancel(taskId, control.signal);
+    control.abort();
+    const answer = await pending;
+    expect(sent[0]?.method).toBe("DELETE");
+    expect(sent[0]?.signal).toBe(control.signal);
+    expect(answer.status).toBe("failed");
   });
 
   it("keeps to the imports a third-party video plugin could make", () => {
