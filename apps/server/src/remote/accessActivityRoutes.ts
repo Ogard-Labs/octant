@@ -129,21 +129,24 @@ export function createAccessActivityRouteHandler(dependencies: AccessActivityRou
         { headers: corsHeaders(origin) },
       );
     }
+    let noticeId: string | undefined;
+    if (isAction) {
+      try {
+        noticeId = decodeChangeNoticeRequest(await request.json()).noticeId;
+      } catch {
+        return refuse(400, "Name the notice to act on.", origin);
+      }
+    }
+    // Journal history can change while the action body is uploading.
     const visible = noticesFor(
       readChangeNotices(dependencies.connection, dependencies.names),
       viewer.deviceId,
     );
-    if (path === CHANGE_NOTICES_PATH) {
+    if (noticeId === undefined) {
       return Response.json(
         { notices: visible.map((record) => record.notice) },
         { headers: corsHeaders(origin) },
       );
-    }
-    let noticeId: string;
-    try {
-      noticeId = decodeChangeNoticeRequest(await request.json()).noticeId;
-    } catch {
-      return refuse(400, "Name the notice to act on.", origin);
     }
     const record = visible.find((candidate) => candidate.notice.noticeId === noticeId);
     if (record === undefined) {

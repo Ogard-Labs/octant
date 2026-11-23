@@ -548,6 +548,36 @@ describe("change notices", () => {
     expect(calls.setLevel).toEqual([]);
   });
 
+  it("refuses Undo when the thread level changed again during the action upload", async () => {
+    const target = host();
+    pair(target, phone, "Ada's phone", local);
+    const noticeId = raise(target, byDevice(phone), "ask-first", "full-access");
+    const { handler, calls } = routes(target);
+    const payload = new TextEncoder().encode(JSON.stringify({ noticeId }));
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(payload.subarray(0, 1));
+      },
+      pull(controller) {
+        raise(target, local, "full-access", "ask-first");
+        raise(target, local, "ask-first", "full-access");
+        controller.enqueue(payload.subarray(1));
+        controller.close();
+      },
+    });
+    const init: RequestInit & { duplex: "half" } = {
+      method: "POST",
+      headers: { "x-octant-window-capability": capability, "content-type": "application/json" },
+      body,
+      duplex: "half",
+    };
+    const response = await handler(
+      new Request(`http://127.0.0.1${CHANGE_NOTICE_ACTION_PATHS.undo}`, init),
+    );
+    expect(response?.status).toBe(409);
+    expect(calls.setLevel).toEqual([]);
+  });
+
   it("holds a key Undo to the pool the notice recorded", async () => {
     const target = host();
     pair(target, phone, "Ada's phone", local);
