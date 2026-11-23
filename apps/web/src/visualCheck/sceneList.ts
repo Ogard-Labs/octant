@@ -7,13 +7,23 @@ export interface SceneMeta {
   readonly id: string;
   /** A selector for the control to click once the scene has drawn, for a popup. */
   readonly open?: string;
+  /** A selector for the part of a long scene the picture should show, scrolled into view. */
+  readonly scrollTo?: string;
   /** The scene is also drawn at 760 wide, where its table or panel reflows. */
   readonly narrow?: boolean;
 }
 
 export const SCENE_LIST: ReadonlyArray<SceneMeta> = [
-  { id: "qa-remote-access", narrow: true },
-  { id: "qa-remote-access-paused", narrow: true },
+  {
+    id: "qa-remote-access",
+    narrow: true,
+    scrollTo: '[aria-label="Pause remote access"]',
+  },
+  {
+    id: "qa-remote-access-paused",
+    narrow: true,
+    scrollTo: '[aria-label="Pause remote access"]',
+  },
   { id: "qa-paired-devices", narrow: true },
   {
     id: "qa-paired-devices-confirm",
@@ -22,8 +32,6 @@ export const SCENE_LIST: ReadonlyArray<SceneMeta> = [
   },
   { id: "qa-device-self-read-only", narrow: true },
   { id: "qa-device-self-full", narrow: true },
-];
-export const ORIGINAL_SCENE_LIST: ReadonlyArray<SceneMeta> = [
   { id: "home" },
   { id: "code-side-panel", narrow: true },
   { id: "settings-appearance" },
