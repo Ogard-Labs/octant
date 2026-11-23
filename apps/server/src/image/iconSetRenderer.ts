@@ -5,11 +5,12 @@ import { join } from "node:path";
 import type { MediaIconSetTarget } from "@octant/plugin-api/media-tools";
 import { checkNewFileUnder } from "./generatedImageSave";
 import { pngWithoutAlpha } from "./pngOpacity";
+import { pureJsIconResizer } from "./pureJsIconResizer";
 
 /**
- * macOS's own image tool. Icon sets are resized by it rather than by a bundled
- * image library, so no dependency is added; a host without it is not offered
- * icon sets at all.
+ * macOS's own image tool, still the resizer there. Hosts without it use the
+ * pure-JavaScript renderer instead, so the operation is offered on every
+ * platform and no host is told about a tool it cannot use.
  */
 export const SIPS_PATH = "/usr/bin/sips";
 
@@ -144,34 +145,81 @@ const SOURCE_EXTENSION: Readonly<Record<string, string>> = {
 };
 
 /**
+ * What a resizer owes the shared render: the source's dimensions up front
+ * (undefined where they cannot be read, which the caller refuses), then PNG
+ * bytes at exactly the asked square size for each size the target needs.
+ */
+export interface IconSetResizer {
+  measure(): Promise<{ readonly width: number; readonly height: number } | undefined>;
+  png(pixels: number): Promise<Uint8Array | undefined>;
+}
+
+/** Prepares the resizer for one render; `scratch` is that render's private directory. */
+export type IconSetResizerFactory = (input: {
+  readonly bytes: Uint8Array;
+  readonly mime: string;
+  readonly scratch: string;
+}) => Promise<IconSetResizer>;
+
+/** The `sips` resizer: writes the source beside its outputs and shells out, never a shell. */
+export function sipsIconResizer(run: SipsRun): IconSetResizerFactory {
+  return async ({ bytes, mime, scratch }) => {
+    const source = join(scratch, `source.${SOURCE_EXTENSION[mime] ?? "png"}`);
+    await writeFile(source, bytes, { mode: 0o600 });
+    return {
+      measure: async () => {
+        const probed = await run(["-g", "pixelWidth", "-g", "pixelHeight", source]);
+        return {
+          width: Number(sipsProperty(probed.stdout, "pixelWidth")),
+          height: Number(sipsProperty(probed.stdout, "pixelHeight")),
+        };
+      },
+      png: async (pixels) => {
+        const output = join(scratch, `${String(pixels)}.png`);
+        const size = String(pixels);
+        await run(["-s", "format", "png", "-z", size, size, source, "--out", output]);
+        return new Uint8Array(await readFile(output));
+      },
+    };
+  };
+}
+
+/**
  * Resizes one finished image into every file a target needs, in a private
  * temporary directory that is always removed. The source is checked first:
  * square and at least 1024 pixels. For iOS, App Store Connect rejects an icon
  * with an alpha channel, so a source that shows any transparency is refused
- * and an opaque one is saved without its alpha channel. Each output is read back and its PNG header
- * checked against the size it was asked for, so a file `sips` got wrong is
- * refused rather than saved.
+ * and an opaque one is saved without its alpha channel. Each output's PNG
+ * header is checked against the size it was asked for, so a file the resizer
+ * got wrong is refused rather than saved.
  */
-export async function renderIconSet(input: {
+export async function renderIconSetWithResizer(input: {
   readonly bytes: Uint8Array;
   readonly mime: string;
   readonly target: MediaIconSetTarget;
   /** A private directory the host owns; each render uses its own child. */
   readonly workDirectory: string;
-  readonly run: SipsRun;
+  readonly resizer: IconSetResizerFactory;
 }): Promise<IconSetRenderOutcome> {
   let scratch: string | undefined;
   try {
     await mkdir(input.workDirectory, { recursive: true, mode: 0o700 });
     scratch = await mkdtemp(join(input.workDirectory, "icon-set-"));
-    const source = join(scratch, `source.${SOURCE_EXTENSION[input.mime] ?? "png"}`);
-    await writeFile(source, input.bytes, { mode: 0o600 });
-    const probed = await input.run(["-g", "pixelWidth", "-g", "pixelHeight", source]);
-    const width = Number(sipsProperty(probed.stdout, "pixelWidth"));
-    const height = Number(sipsProperty(probed.stdout, "pixelHeight"));
-    if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0) {
+    const resizer = await input.resizer({
+      bytes: input.bytes,
+      mime: input.mime,
+      scratch,
+    });
+    const measured = await resizer.measure();
+    if (
+      measured === undefined ||
+      !Number.isSafeInteger(measured.width) ||
+      !Number.isSafeInteger(measured.height) ||
+      measured.width <= 0
+    ) {
       return { status: "refused", reason: "The image's size could not be read." };
     }
+    const { width, height } = measured;
     if (width !== height) {
       return {
         status: "refused",
@@ -190,10 +238,12 @@ export async function renderIconSet(input: {
     for (const spec of ICON_SET_SPECS[input.target]) {
       let bytes = rendered.get(spec.pixels);
       if (bytes === undefined) {
-        const output = join(scratch, `${String(spec.pixels)}.png`);
         const size = String(spec.pixels);
-        await input.run(["-s", "format", "png", "-z", size, size, source, "--out", output]);
-        bytes = new Uint8Array(await readFile(output));
+        const png = await resizer.png(spec.pixels);
+        if (png === undefined) {
+          return { status: "refused", reason: `The ${size}-pixel icon could not be made.` };
+        }
+        bytes = png;
         const dimensions = pngDimensions(bytes);
         if (dimensions?.width !== spec.pixels || dimensions.height !== spec.pixels) {
           return { status: "refused", reason: `The ${size}-pixel icon could not be made.` };
@@ -234,6 +284,18 @@ export async function renderIconSet(input: {
   }
 }
 
+/** The `sips` render, used on macOS. */
+export async function renderIconSet(input: {
+  readonly bytes: Uint8Array;
+  readonly mime: string;
+  readonly target: MediaIconSetTarget;
+  /** A private directory the host owns; each render uses its own child. */
+  readonly workDirectory: string;
+  readonly run: SipsRun;
+}): Promise<IconSetRenderOutcome> {
+  return renderIconSetWithResizer({ ...input, resizer: sipsIconResizer(input.run) });
+}
+
 /** The file count a target writes, `Contents.json` included. */
 export function iconSetFileCount(target: MediaIconSetTarget): number {
   return ICON_SET_SPECS[target].length + (iconSetContentsJson(target) === undefined ? 0 : 1);
@@ -260,24 +322,27 @@ export function pngDimensions(
 }
 
 /**
- * The host's renderer, or undefined where `sips` is missing: off macOS the
- * operation is not offered, so no model is told about a tool it cannot use.
+ * The host's renderer: `sips` on macOS, the pure-JavaScript resizer on every
+ * other platform, so icon sets are offered wherever the thread has a folder.
  */
 export function hostIconSetRenderer(input: {
   readonly workDirectory: string;
   readonly platform?: NodeJS.Platform;
   readonly sipsExists?: () => boolean;
-}):
-  | ((source: {
-      readonly bytes: Uint8Array;
-      readonly mime: string;
-      readonly target: MediaIconSetTarget;
-    }) => Promise<IconSetRenderOutcome>)
-  | undefined {
+}): (source: {
+  readonly bytes: Uint8Array;
+  readonly mime: string;
+  readonly target: MediaIconSetTarget;
+}) => Promise<IconSetRenderOutcome> {
   const platform = input.platform ?? process.platform;
   const sipsExists = input.sipsExists ?? (() => existsSync(SIPS_PATH));
-  if (platform !== "darwin" || !sipsExists()) return undefined;
-  return (source) => renderIconSet({ ...source, workDirectory: input.workDirectory, run: runSips });
+  if (platform === "darwin" && sipsExists()) {
+    return (source) =>
+      renderIconSet({ ...source, workDirectory: input.workDirectory, run: runSips });
+  }
+  const resizer: IconSetResizerFactory = async (source) => pureJsIconResizer(source);
+  return (source) =>
+    renderIconSetWithResizer({ ...source, workDirectory: input.workDirectory, resizer });
 }
 
 function runSips(args: ReadonlyArray<string>): Promise<{ readonly stdout: string }> {
@@ -295,17 +360,14 @@ function runSips(args: ReadonlyArray<string>): Promise<{ readonly stdout: string
 }
 
 /**
- * The image tool's icon-set port for a turn's folder, spread into its options:
- * empty where this host cannot resize images, so the operation is not offered.
+ * The image tool's icon-set port for a turn's folder, spread into its options.
  */
 export function hostIconSetsUnder(root: string, dataDirectory: string) {
   const render = hostIconSetRenderer({ workDirectory: join(dataDirectory, "icon-sets") });
-  return render === undefined
-    ? {}
-    : {
-        iconSets: {
-          render,
-          check: (relativePath: string) => checkNewFileUnder({ root, relativePath }),
-        },
-      };
+  return {
+    iconSets: {
+      render,
+      check: (relativePath: string) => checkNewFileUnder({ root, relativePath }),
+    },
+  };
 }

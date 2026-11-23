@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
@@ -262,27 +262,31 @@ describe("icon set rendering", () => {
     expect(rendered).toMatchObject({ status: "refused" });
   });
 
-  it("is not offered off macOS or without sips", () => {
-    const directory = workDirectory();
-    expect(hostIconSetRenderer({ workDirectory: directory, platform: "linux" })).toBeUndefined();
-    expect(hostIconSetRenderer({ workDirectory: directory, platform: "win32" })).toBeUndefined();
+  it("resizes in pure JavaScript off macOS and in sips on it", async () => {
+    // The pure-JavaScript renderer answers on every platform without sips.
+    for (const platform of ["linux", "win32", "darwin"] as const) {
+      const render = hostIconSetRenderer({
+        workDirectory: workDirectory(),
+        platform,
+        sipsExists: () => false,
+      });
+      const rendered = await render({ bytes: solidPng(1024), mime: "image/png", target: "web" });
+      expect(rendered.status).toBe("rendered");
+    }
     expect(
       hostIconSetRenderer({
-        workDirectory: directory,
+        workDirectory: workDirectory(),
         platform: "darwin",
-        sipsExists: () => false,
+        sipsExists: () => true,
       }),
-    ).toBeUndefined();
-    expect(
-      hostIconSetRenderer({ workDirectory: directory, platform: "darwin", sipsExists: () => true }),
     ).toBeTypeOf("function");
   });
 });
 
 describe.runIf(process.platform === "darwin")("icon set rendering with macOS's sips", () => {
   it.each(targets)("makes every %s icon at its size", async (target) => {
+    if (!existsSync(SIPS_PATH)) throw new Error(`${SIPS_PATH} is missing on this Mac.`);
     const render = hostIconSetRenderer({ workDirectory: workDirectory() });
-    if (render === undefined) throw new Error(`${SIPS_PATH} is missing on this Mac.`);
     const rendered = await render({ bytes: solidPng(1024), mime: "image/png", target });
     if (rendered.status !== "rendered") throw new Error(rendered.reason);
     const check = workDirectory();
@@ -299,8 +303,8 @@ describe.runIf(process.platform === "darwin")("icon set rendering with macOS's s
   });
 
   it("saves an opaque RGBA source as an iOS icon with no alpha channel", async () => {
+    if (!existsSync(SIPS_PATH)) throw new Error(`${SIPS_PATH} is missing on this Mac.`);
     const render = hostIconSetRenderer({ workDirectory: workDirectory() });
-    if (render === undefined) throw new Error(`${SIPS_PATH} is missing on this Mac.`);
     const rendered = await render({
       bytes: solidPng(1024, 255),
       mime: "image/png",

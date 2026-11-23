@@ -33,6 +33,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "catalog:",
+    "@jsquash/webp": "1.5.0",
     "@modelcontextprotocol/sdk": "1.31.0",
     "@octant/cli": "workspace:*",
     "@octant/contracts": "workspace:*",
@@ -46,15 +47,18 @@
     "ajv": "8.20.0",
     "better-sqlite3": "catalog:",
     "effect": "catalog:",
+    "jpeg-js": "0.4.4",
     "katex": "0.18.9",
     "node-pty": "catalog:",
     "playwright-core": "catalog:",
+    "pngjs": "7.0.0",
     "yaml": "catalog:"
   },
   "devDependencies": {
     "@octant/client-runtime": "workspace:*",
     "@types/better-sqlite3": "catalog:",
     "@types/bun": "catalog:",
+    "@types/pngjs": "6.0.5",
     "tsdown": "0.22.5",
     "typescript": "catalog:",
     "unrun": "0.3.1",
