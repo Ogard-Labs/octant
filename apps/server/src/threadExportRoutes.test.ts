@@ -6,7 +6,8 @@ import {
   decodeThreadVideoArchiveManifest,
   decodeThreadVideoArchiveOffer,
   THREAD_EXPORT_FORMAT,
-  THREAD_VIDEO_ARCHIVE_PATH,
+  THREAD_EXPORT_PATH,
+  THREAD_VIDEO_ARCHIVE_QUERY,
   type ThreadExportOutcome,
 } from "@octant/contracts/thread-export";
 import { describe, expect, it, vi } from "vitest";
@@ -23,6 +24,7 @@ const nowMs = Date.parse("2026-08-19T12:00:00.000Z");
 const windowId = "70000000-0000-4000-8000-000000000001";
 const capability = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop0";
 const threadId = "00000000-0000-4000-8000-000000000901";
+const videoOfferPath = `${THREAD_EXPORT_PATH}?${THREAD_VIDEO_ARCHIVE_QUERY}=1`;
 
 function exportBundle() {
   return decodeThreadExportBundle({
@@ -288,7 +290,7 @@ describe("thread exports with video files", () => {
     });
     const prepare = async () => {
       const response = await handler(
-        makeRequest(THREAD_VIDEO_ARCHIVE_PATH, {
+        makeRequest(videoOfferPath, {
           capability,
           body: { mode: "chat", threadId },
         }),
@@ -326,7 +328,7 @@ describe("thread exports with video files", () => {
   it("refuses to prepare without window authority or to download after thread access is lost", async () => {
     const { handler, prepare, exportThread, streamClip } = archiveFixture();
     const unauthorized = await handler(
-      makeRequest(THREAD_VIDEO_ARCHIVE_PATH, { body: { mode: "chat", threadId } }),
+      makeRequest(videoOfferPath, { body: { mode: "chat", threadId } }),
     );
     expect(unauthorized?.status).toBe(401);
     expect(exportThread).not.toHaveBeenCalled();
@@ -334,5 +336,26 @@ describe("thread exports with video files", () => {
     exportThread.mockResolvedValue({ kind: "refused", reason: "not-found" });
     expect((await handler(makeRequest(offer.url, { method: "GET" })))?.status).toBe(404);
     expect(streamClip).not.toHaveBeenCalled();
+  });
+
+  it("preflights and reads the same export path on a host without an archive service", async () => {
+    const { handler } = setup({ kind: "exported", bundle: exportBundle() });
+    const origin = "http://localhost:5173";
+    const preflight = await handler(
+      new Request(`http://127.0.0.1:3100${videoOfferPath}`, {
+        method: "OPTIONS",
+        headers: {
+          origin,
+          "access-control-request-method": "POST",
+          "access-control-request-headers": "content-type,x-octant-window-capability",
+        },
+      }),
+    );
+    expect(preflight?.status).toBe(204);
+    expect(preflight?.headers.get("access-control-allow-origin")).toBe(origin);
+    const response = await handler(
+      makeRequest(videoOfferPath, { capability, body: { mode: "chat", threadId } }),
+    );
+    expect(await response?.json()).toEqual({ kind: "exported", bundle: exportBundle() });
   });
 });

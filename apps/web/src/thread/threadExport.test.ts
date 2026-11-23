@@ -74,16 +74,19 @@ describe("exporting a thread", () => {
 
   it("keeps the JSON export available when an older host has no archive route", async () => {
     const fetch = vi.spyOn(globalThis, "fetch");
-    fetch.mockResolvedValueOnce(new Response("Not found", { status: 404 }));
-    fetch.mockResolvedValueOnce(Response.json(exported()));
+    fetch.mockImplementation(async (input) => {
+      if (new URL(String(input)).pathname !== "/api/threads/export")
+        throw new TypeError("Failed to fetch");
+      return Response.json(exported());
+    });
     try {
       const legacy = resolveThreadExportClient({
         serverUrl: "http://127.0.0.1:3100",
         windowCapability: "fixture",
       });
       if (legacy?.offerArchive === undefined) throw new Error("Expected an export client.");
-      await expect(legacy.offerArchive({ mode: "chat", threadId })).resolves.toBeUndefined();
-      await expect(legacy.exportThread({ mode: "chat", threadId })).resolves.toEqual(exported());
+      await expect(legacy.offerArchive({ mode: "chat", threadId })).resolves.toEqual(exported());
+      expect(fetch).toHaveBeenCalledTimes(1);
     } finally {
       fetch.mockRestore();
     }

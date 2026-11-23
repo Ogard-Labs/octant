@@ -221,7 +221,9 @@ export const ThreadExportOutcome = Schema.Union(
 );
 export type ThreadExportOutcome = typeof ThreadExportOutcome.Type;
 
+export const THREAD_EXPORT_PATH = "/api/threads/export";
 export const THREAD_VIDEO_ARCHIVE_PATH = "/api/threads/export/video-archive";
+export const THREAD_VIDEO_ARCHIVE_QUERY = "videoArchive";
 export const THREAD_VIDEO_ARCHIVE_FORMAT = "octant.thread-bundle/2";
 
 export const ThreadVideoArchiveManifest = Schema.Struct({

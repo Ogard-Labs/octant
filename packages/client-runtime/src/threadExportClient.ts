@@ -1,5 +1,6 @@
 import {
-  THREAD_VIDEO_ARCHIVE_PATH,
+  THREAD_EXPORT_PATH,
+  THREAD_VIDEO_ARCHIVE_QUERY,
   ThreadExportOutcome,
   ThreadVideoArchiveOffer,
   type ThreadExportRequest,
@@ -19,8 +20,8 @@ export interface ThreadExportClientOptions {
 
 export interface ThreadExportClient {
   exportThread(request: ThreadExportRequest): Promise<ThreadExportOutcome>;
-  /** Undefined means the host predates video archives. */
-  offerArchive?(request: ThreadExportRequest): Promise<ThreadVideoArchiveOffer | undefined>;
+  /** An older host ignores archive negotiation and answers with its usual JSON bundle. */
+  offerArchive?(request: ThreadExportRequest): Promise<ThreadVideoArchiveOffer>;
   /** One turn's kept tool-call records. A refusal is an answer, not a thrown error. */
   readToolCallRecords(request: ThreadToolCallRecordsRequest): Promise<ThreadToolCallRecordsResult>;
 }
@@ -37,7 +38,7 @@ const EXPORT_TIMEOUT_MS = 30_000;
 export function createThreadExportClient(options: ThreadExportClientOptions): ThreadExportClient {
   const resolvedFetch = bindFetchPort(options.fetch);
   /** Both commands answer a refusal as a 401 or 404 body the caller decodes. */
-  const post = async (path: string, label: string, request: unknown) => {
+  const post = async (path: string, label: string, request: unknown): Promise<unknown> => {
     let response: Response;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), EXPORT_TIMEOUT_MS);
@@ -62,18 +63,14 @@ export function createThreadExportClient(options: ThreadExportClientOptions): Th
     }
 
     try {
-      const body: unknown = await response.json();
-      return { status: response.status, body };
+      return await response.json();
     } catch {
-      if (path === THREAD_VIDEO_ARCHIVE_PATH && response.status === 404) {
-        return { status: response.status, body: undefined };
-      }
       throw new ThreadExportClientError(`${label} returned an invalid response.`);
     }
   };
   return {
     async exportThread(request) {
-      const { body } = await post("/api/threads/export", "Thread export", request);
+      const body = await post(THREAD_EXPORT_PATH, "Thread export", request);
       try {
         return decodeHostAnswer(ThreadExportOutcome)(body);
       } catch {
@@ -81,9 +78,9 @@ export function createThreadExportClient(options: ThreadExportClientOptions): Th
       }
     },
     async offerArchive(request) {
-      const { status, body } = await post(
-        THREAD_VIDEO_ARCHIVE_PATH,
-        "Thread video archive",
+      const body = await post(
+        `${THREAD_EXPORT_PATH}?${THREAD_VIDEO_ARCHIVE_QUERY}=1`,
+        "Thread export",
         request,
       );
       try {
@@ -92,12 +89,11 @@ export function createThreadExportClient(options: ThreadExportClientOptions): Th
           ? { ...offer, url: new URL(offer.url, options.baseUrl).toString() }
           : offer;
       } catch {
-        if (status === 404) return undefined;
         throw new ThreadExportClientError("Thread video archive returned an invalid response.");
       }
     },
     async readToolCallRecords(request) {
-      const { body } = await post("/api/threads/tool-call-records", "Tool-call records", request);
+      const body = await post("/api/threads/tool-call-records", "Tool-call records", request);
       try {
         return decodeHostAnswer(ThreadToolCallRecordsResult)(body);
       } catch {

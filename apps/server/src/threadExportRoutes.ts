@@ -1,7 +1,9 @@
 import {
   decodeThreadExportOutcome,
   decodeThreadVideoArchiveOffer,
+  THREAD_EXPORT_PATH,
   THREAD_VIDEO_ARCHIVE_PATH,
+  THREAD_VIDEO_ARCHIVE_QUERY,
   type ThreadExportOutcome,
 } from "@octant/contracts/thread-export";
 import {
@@ -55,7 +57,7 @@ export function createThreadExportRouteHandler(dependencies: ThreadExportRouteDe
   const exportThread = createThreadCommandRouteHandler({
     ...shared,
     label: "Thread export",
-    path: "/api/threads/export",
+    path: THREAD_EXPORT_PATH,
     execute: (windowId, actorKind, body) =>
       dependencies.service.exportThread(windowId, actorKind, body),
     status: (outcome: ThreadExportOutcome) =>
@@ -77,7 +79,7 @@ export function createThreadExportRouteHandler(dependencies: ThreadExportRouteDe
       : createThreadCommandRouteHandler({
           ...shared,
           label: "Thread video archive",
-          path: THREAD_VIDEO_ARCHIVE_PATH,
+          path: THREAD_EXPORT_PATH,
           localWindowOnly: true,
           execute: (windowId, _actorKind, body) => archives.offer(windowId, body),
           status: (outcome) =>
@@ -99,7 +101,8 @@ export function createThreadExportRouteHandler(dependencies: ThreadExportRouteDe
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     if (archives !== undefined && url.pathname === THREAD_VIDEO_ARCHIVE_PATH) {
-      if (request.method !== "GET") return prepareArchive?.(request);
+      if (request.method !== "GET")
+        return failureResponse("Thread archive download requires GET.", 405, null);
       const origin = request.headers.get("origin");
       const bound = readPrincipalRouteContext(request);
       if (
@@ -113,6 +116,13 @@ export function createThreadExportRouteHandler(dependencies: ThreadExportRouteDe
         (await archives.take(url.searchParams.get("ticket") ?? "")) ??
         failureResponse("The thread archive is unavailable or has expired.", 404, origin)
       );
+    }
+    if (
+      prepareArchive !== undefined &&
+      url.pathname === THREAD_EXPORT_PATH &&
+      url.searchParams.get(THREAD_VIDEO_ARCHIVE_QUERY) === "1"
+    ) {
+      return prepareArchive(request);
     }
     return (await exportThread(request)) ?? (await toolCallRecords(request));
   };

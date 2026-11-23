@@ -328,8 +328,11 @@ which the person sets, like any turn.
   digest. The MP4s live at `video/<clip-id>.mp4`. Opening the confirmation
   prepares the manifest and exact archive size without reading the videos.
   Confirming streams the archive from the host after checking that the window
-  can still open the thread. The older `.octant-thread.json` format stays
-  readable and remains the response for threads without clips and older hosts.
+  can still open the thread. The desktop asks its native download surface to
+  start that ticket on its own loopback host, keeping the renderer on the
+  current thread. Archive negotiation uses the original export route. The
+  older `.octant-thread.json` format stays readable and remains the response
+  for threads without clips and older hosts.
 - Saving a clip as a file uses the same confined, create-only write as an
   image save, at the turn's level. Plan refuses; Ask first and Auto show a card
   naming the path; Accept edits and Full access write at once.
