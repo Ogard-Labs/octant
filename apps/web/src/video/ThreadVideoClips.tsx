@@ -79,6 +79,7 @@ function VideoClipCard(props: {
   const { job, client } = props;
   const [src, setSrc] = useState<string>();
   const [failed, setFailed] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [stopping, setStopping] = useState(false);
   const [downloadFailed, setDownloadFailed] = useState(false);
   const ready = job.status === "completed" && job.clip !== undefined;
@@ -114,7 +115,7 @@ function VideoClipCard(props: {
         return undefined;
       });
     };
-  }, [client, job.id, ready]);
+  }, [client, job.id, ready, loadAttempt]);
 
   // The ticket URL is cross-origin from a packaged window (a file:// page on
   // the loopback host), where the `download` attribute is ignored; the clip
@@ -206,10 +207,23 @@ function VideoClipCard(props: {
         ) : null}
       </div>
       {ready ? (
-        src === undefined ? (
-          <p className="thread-video-clips__note">
-            {failed ? "The clip could not be loaded." : "Loading the clip…"}
-          </p>
+        failed ? (
+          <div className="thread-video-clips__note">
+            The clip could not be loaded.{" "}
+            <OctantButton
+              onClick={() => {
+                setFailed(false);
+                setLoadAttempt((attempt) => attempt + 1);
+              }}
+              size="xs"
+              type="button"
+              variant="ghost"
+            >
+              Try again
+            </OctantButton>
+          </div>
+        ) : src === undefined ? (
+          <p className="thread-video-clips__note">Loading the clip…</p>
         ) : (
           // Providers return no text track, so there is no caption to offer.
           <video

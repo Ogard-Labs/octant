@@ -39,6 +39,25 @@ function job(status: VideoJob["status"], id: string): VideoJob {
 }
 
 describe("ThreadVideoClips", () => {
+  it("lets a person try again after a clip fails to load", async () => {
+    const finished = job("completed", "f4000000-0000-4000-8000-000000000003");
+    const url = "http://127.0.0.1:3100/api/video/clip?ticket=fresh";
+    const client = {
+      list: vi.fn(async () => ({ jobs: [finished] })),
+      clipUrl: vi
+        .fn(async () => ({ url, expiresAt: new Date(Date.now() + 600_000).toISOString() }))
+        .mockRejectedValueOnce(new Error("The connection closed")),
+    };
+    const { container } = render(
+      <VideoClientContext.Provider value={client}>
+        <ThreadVideoClips scopeId={scopeId} threadKind="work-thread" />
+      </VideoClientContext.Provider>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(container.querySelector("video")).toHaveAttribute("src", url));
+    expect(client.clipUrl).toHaveBeenCalledTimes(2);
+  });
+
   it("plays a finished clip on demand from its ticket and lets the person stop a running one", async () => {
     const finished = job("completed", "f4000000-0000-4000-8000-000000000003");
     const running = job("running", "f4000000-0000-4000-8000-000000000004");
