@@ -57,6 +57,7 @@ import type { ImageHttpFetch } from "../image/imageHttp";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
+import { redactHostSecrets } from "../process/secretRedaction";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
 import type { SpendCeilingService } from "../spendCeilingService";
 import { geminiVideoDriver } from "./geminiVideoAdapter";
@@ -194,6 +195,13 @@ function sanitizedFailure(failure: ProviderFailure): ProviderFailure {
     message: failure.message.slice(0, 2_000),
     ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
   };
+}
+
+function reportVideoRemovalFailure(error: unknown): void {
+  console.error(
+    "Could not finish a video provider copy removal. The host will retry.",
+    error instanceof Error ? redactHostSecrets(error.message) : "Unknown failure.",
+  );
 }
 
 /**
@@ -490,11 +498,12 @@ export class VideoJobService {
       });
       void this.#schedule(job.id, () => this.#resume(job));
     }
-    void this.retryOwedRemovals();
+    const retryRemovals = () => {
+      void this.retryOwedRemovals().catch(reportVideoRemovalFailure);
+    };
+    retryRemovals();
     if (this.#removalTimer === undefined) {
-      this.#removalTimer = setInterval(() => {
-        void this.retryOwedRemovals();
-      }, VIDEO_REMOVAL_RETRY_MS);
+      this.#removalTimer = setInterval(retryRemovals, VIDEO_REMOVAL_RETRY_MS);
       this.#removalTimer.unref?.();
     }
   }
@@ -544,7 +553,8 @@ export class VideoJobService {
     await this.#withSlot(id, work);
     if (this.#closing.signal.aborted) return;
     const job = this.getById(id);
-    if (job !== undefined && isTerminal(job)) await this.#forget(job);
+    if (job !== undefined && isTerminal(job))
+      await this.#forget(job).catch(reportVideoRemovalFailure);
   }
 
   async #withSlot(id: VideoJobId, work: () => Promise<void>): Promise<void> {

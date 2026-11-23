@@ -613,6 +613,34 @@ describe("video jobs", () => {
     }
   });
 
+  it("reports a recovered deletion whose journal write fails and keeps it owed", async () => {
+    const first = harness({ forget: async () => "failed" });
+    const job = await enqueue(first.service);
+    await first.service.whenTerminal(job.id);
+    await vi.waitFor(() => expect(first.calls.forget).toBe(1));
+    first.service.close();
+
+    const second = harness({}, first.root);
+    const error = new Error("Journal is busy");
+    const append = vi.spyOn(second.journal, "append").mockImplementationOnce(() => {
+      throw error;
+    });
+    const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await second.service.recover();
+      await vi.waitFor(() =>
+        expect(report).toHaveBeenCalledWith(expect.any(String), error.message),
+      );
+      expect(second.service.getById(job.id)?.providerCopy).toBe("held");
+      await second.service.retryOwedRemovals();
+      expect(second.service.getById(job.id)?.providerCopy).toBe("removed");
+    } finally {
+      second.service.close();
+      append.mockRestore();
+      report.mockRestore();
+    }
+  });
+
   it("recovers after a restart: unsent jobs bill nothing, sent ones resume or settle at the estimate", async () => {
     const first = harness({ start: () => new Promise(() => undefined) });
     const sending = await enqueue(first.service);
