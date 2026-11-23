@@ -6546,7 +6546,10 @@ or .zip>` write the same files, built by one host command
     of `NativeHarnessApprovalStore`) and a selected MCP server's tool
     approval;
   - a Browser site, sign-in, upload, page-script or page-tool question
-    (`BrowserToolApprovalService`);
+    (`BrowserToolApprovalService`) before the first operation of the call.
+    A later operation in a batch or saved-flow replay keeps the restart hold
+    because an earlier operation may have taken effect. A download question
+    also keeps the hold because it can follow the action that started it;
   - a routine proposal or change request and a Project memory proposal. A
     confirm creates or changes the routine, or writes the memory, before the
     tool hears it, so the service calls the wrapper's `answered` as the answer

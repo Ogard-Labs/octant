@@ -1068,15 +1068,13 @@ describe("asks that wait for a person's answer", () => {
       observation: { url: "https://example.com/b", revision: 2 },
     } as never;
     const act = vi.fn(async () => first);
-    const answers: Array<(decision: "approved") => void> = [];
-    const approval = vi.fn(
-      () =>
-        new Promise<"approved">((resolve) => {
-          answers.push(resolve);
-        }),
-    );
+    const approvals = new BrowserToolApprovalService({
+      uuid,
+      now: () => Date.parse(now),
+      authorityIsCurrent: () => true,
+    });
     const browserTools = createBrowserAppManagedTools({
-      windowId: "10000000-0000-4000-8000-000000000001" as never,
+      windowId,
       threadId: threadId as never,
       mode: "chat",
       modelId: "model-a",
@@ -1095,7 +1093,7 @@ describe("asks that wait for a person's answer", () => {
         act,
         releaseThread: vi.fn(async () => second),
       },
-      approvals: { request: approval } as never,
+      approvals,
       uuid: () => "80000000-0000-4000-8000-000000000001",
     });
     const tools = before.ledger.forTurn({ threadId, turnId }).tools(browserTools);
@@ -1111,13 +1109,11 @@ describe("asks that wait for a person's answer", () => {
       toolCallId: "call-1",
     });
     try {
-      // The click ran; the site approval the second step raises is still open.
-      const early = await Promise.race([
-        pending,
-        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 1500)),
-      ]);
-      if (early !== undefined) throw new Error(`call settled early: ${JSON.stringify(early)}`);
-      expect(approval).toHaveBeenCalledOnce();
+      await vi.waitFor(() =>
+        expect(approvals.list(windowId)).toEqual([
+          expect.objectContaining({ threadId, origin: "https://example.com" }),
+        ]),
+      );
       expect(act).toHaveBeenCalledOnce();
       // An approval after an earlier step's effect must not mark the whole
       // call replay-safe: the restart answer stays uncertain.
@@ -1126,8 +1122,8 @@ describe("asks that wait for a person's answer", () => {
         toolName: "octant_browser",
       });
     } finally {
-      while (answers.length > 0) answers.pop()?.("approved");
-      await pending.catch(() => undefined);
+      approvals.close();
+      await pending;
     }
   });
 });
