@@ -36,7 +36,24 @@ const domTestFilesWithoutJsx = [
 export default defineConfig({
   base: "./",
   plugins: [react(), tailwindcss()],
-  build: { assetsInlineLimit: keepFontsAsFiles },
+  build: {
+    assetsInlineLimit: keepFontsAsFiles,
+    rollupOptions: {
+      treeshake: {
+        // The contract schemas are top-level `Schema` calls Rolldown cannot
+        // prove pure, and the workspace packages' barrels re-export every
+        // module, so a single import kept every schema a touched file
+        // defines. This marks those calls pure and every workspace package's
+        // sources side-effect-free for the window build only — the server
+        // and desktop bundles read package.json and are unchanged — saving
+        // about 108 KiB of initial gzip. Any package module the window
+        // imports must therefore do no work at import time; entry scripts
+        // that do (the CLI's) are never imported here.
+        manualPureFunctions: ["Schema"],
+        moduleSideEffects: (id) => !/[\\/]packages[\\/][^\\/]+[\\/]src[\\/]/.test(id),
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(rootDir, "src"),

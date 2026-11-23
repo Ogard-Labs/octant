@@ -623,7 +623,10 @@ Status: Partly built. Since: 2026-11-16. Detail: [Architecture: Current Release 
   [Process topology](../architecture.md#process-topology).
 - The renderer's first load stays within an exact byte budget for the main
   entry, the initial CSS and the initial gzip graph. CI refuses growth. The
-  gzip budget was re-baselined on 2026-11-22. Detail:
+  window build treats `Schema` calls and workspace package sources as free of
+  import-time side effects, so a package module the window imports must do no
+  work at import time. The budget
+  was re-baselined on 2026-11-23. Detail:
   [Process topology](../architecture.md#process-topology).
 - Crash recovery retains desktop lifetime through replacement-window preparation;
   last-window quit must not race it. Explicit quit wins and recovery is bounded

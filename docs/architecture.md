@@ -449,17 +449,22 @@ initial load.
 The renderer's first load has a byte budget, recorded in
 `scripts/initial-renderer-budget.json` and enforced by `bun run renderer:check`
 in CI. The budget counts the static graph Vite loads for `index.html`: the main
-entry is at most 964,380 B (942 KiB), the initial CSS at most 665,334 B
-(650 KiB), and the initial JavaScript and CSS at most 1,337,467 B after gzip
+entry is at most 1,624,354 B (1,586 KiB), the initial CSS at most 665,282 B
+(650 KiB), and the initial JavaScript and CSS at most 1,226,413 B after gzip
 level 6. A change that grows any measure past its budget fails. A change that
 shrinks one lowers the recorded budget. Raising a budget is a maintainer
-decision. The gzip budget is a baseline, not a raise: by maintainer decision on
-2026-11-22 it is the measurement of the startup change as it merged, including
-its last fixes. The original 1.25 MiB target was set against an older main, and
-ordinary shared-code growth since then left it about 25 KB over, with no
-deferred surface left in the first load. The budgets are exact bytes with no
-headroom, because the same source measures identically on macOS and Linux
-with Bun 1.4.4.
+decision. The budgets are exact bytes with no headroom, because the same
+source measures identically on macOS and Linux with Bun 1.4.4.
+
+The window build marks every `Schema` call pure and treats every workspace
+package's `src` as free of import-time side effects, so the package barrels do
+not pull whole files into a load that needs only one export; this re-baseline
+(measured 2026-11-23) cut initial gzip by about 108 KiB, while more of the
+remaining startup code now lands in the main entry. The rule applies to the
+renderer build only — server and desktop bundles read `package.json` — and it
+is a contract on the packages: a package module the window imports must not
+run work at import time. Entry scripts that do, such as the CLI's, stay out of
+the window's graph.
 
 The sandbox restrictions notice and Settings share one poll per client and
 scope while the document is visible. A successful change publishes the host's
