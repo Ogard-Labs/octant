@@ -197,6 +197,7 @@ function VideoClipCard(props: {
               Download
             </a>
             {downloadFailed ? (
+              /* ui-boundary-exception: inline-field-error */
               <span className="thread-video-clips__note" role="alert">
                 The clip could not be downloaded.
               </span>
