@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
@@ -6,10 +6,12 @@ import { decodeProjectTerminalCommand, decodeProjectTerminalResult } from "@octa
 import { WorktreeLaunchProgress } from "./WorktreeLaunchProgress";
 import { WorktreeLaunchContext, type WorktreeLaunch } from "./worktreeLaunchContext";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
-it("opens setup details and cancels the running recipe on this checkout", async () => {
-  const user = userEvent.setup();
+function progressFixture() {
   const target = decodeProjectTerminalCommand({
     kind: "worktree-preparation",
     projectId: "90000000-0000-4000-8000-000000000001",
@@ -21,9 +23,9 @@ it("opens setup details and cancels the running recipe on this checkout", async 
   });
   if (target.kind !== "worktree-preparation") throw new Error("Expected worktree preparation");
   const { kind: _kind, action: _action, ...binding } = target;
-  let cancelled = false;
+  let state: "running" | "cancelled" | "succeeded" = "running";
   const execute = vi.fn<ProjectTerminalClient["execute"]>(async (command) => {
-    if (command.kind === "worktree-preparation" && command.action === "cancel") cancelled = true;
+    if (command.kind === "worktree-preparation" && command.action === "cancel") state = "cancelled";
     return decodeProjectTerminalResult({
       kind: "worktree-preparation",
       receiptId: "90000000-0000-4000-8000-000000000004",
@@ -36,9 +38,9 @@ it("opens setup details and cancels the running recipe on this checkout", async 
           command: "bun install",
           directory: ".",
         },
-        state: cancelled ? "cancelled" : "running",
+        state,
         startedAt: "2026-11-23T10:00:00.000Z",
-        ...(cancelled ? { completedAt: "2026-11-23T10:00:00.850Z" } : {}),
+        ...(state === "running" ? {} : { completedAt: "2026-11-23T10:00:00.850Z" }),
       },
     });
   });
@@ -54,18 +56,25 @@ it("opens setup details and cancels the running recipe on this checkout", async 
     target: binding,
     turn: "starting",
   };
-  render(
+  const panel = (initial: WorktreeLaunch, detailsOpen = false) => (
     <WorktreeLaunchContext.Provider
       value={{
         client: { execute },
         launches: new Map([[launch.threadId, launch]]),
-        detailsThreadId: undefined,
+        detailsThreadId: detailsOpen ? initial.threadId : undefined,
         onDetails,
       }}
     >
-      <WorktreeLaunchProgress launch={launch} />
-    </WorktreeLaunchContext.Provider>,
+      <WorktreeLaunchProgress launch={initial} />
+    </WorktreeLaunchContext.Provider>
   );
+  return { binding, execute, launch, onDetails, panel, finish: () => (state = "succeeded") };
+}
+
+it("opens setup details and cancels the running recipe on this checkout", async () => {
+  const user = userEvent.setup();
+  const { binding, execute, launch, onDetails, panel } = progressFixture();
+  render(panel(launch));
   const list = screen.getByRole("list", { name: "Worktree setup stages" });
   expect(within(list).getByText("Done · 80 ms")).toBeVisible();
   await user.click(await screen.findByRole("button", { name: "Setup details" }));
@@ -77,4 +86,24 @@ it("opens setup details and cancels the running recipe on this checkout", async 
     action: "cancel",
   });
   expect(await within(list).findByText("Cancelled · 850 ms")).toBeVisible();
+});
+
+it("updates until a retry finishes after closing setup details on a refused start", async () => {
+  vi.useFakeTimers();
+  const { execute, finish, launch, panel } = progressFixture();
+  const refused: WorktreeLaunch = { ...launch, blocked: true };
+  const { rerender } = render(panel(refused, true));
+  expect(execute).not.toHaveBeenCalled();
+
+  await act(async () => rerender(panel(refused)));
+  expect(screen.getByRole("button", { name: "Cancel setup" })).toBeVisible();
+  expect(screen.getByText("Setting up worktree")).toBeVisible();
+  finish();
+  await act(async () => vi.advanceTimersByTimeAsync(1000));
+
+  expect(screen.getByText("Done · 850 ms")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Cancel setup" })).not.toBeInTheDocument();
+  expect(execute).toHaveBeenCalledTimes(2);
+  await act(async () => vi.advanceTimersByTimeAsync(1000));
+  expect(execute).toHaveBeenCalledTimes(2);
 });

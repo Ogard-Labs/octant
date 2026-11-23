@@ -504,8 +504,8 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       }
       const progress =
         validated.kind === "create-managed-code-thread" ? onWorktreeProgress : undefined;
-      const stream =
-        progress === undefined ? undefined : await import("./codeWorktreeCreationStream");
+      const readWorktreeCreation =
+        progress === undefined ? undefined : (await import("./codeWorktreeCreationStream")).default;
       const response = await requestRaw(
         fetch,
         new URL("/api/code/commands", options.baseUrl).toString(),
@@ -521,17 +521,20 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         },
       );
       if (
-        stream !== undefined &&
+        readWorktreeCreation !== undefined &&
         progress !== undefined &&
         validated.kind === "create-managed-code-thread" &&
         response.ok &&
         response.headers.get("content-type")?.split(";", 1)[0] === "application/x-ndjson"
       ) {
-        const frame = await stream
-          .readWorktreeCreation(response, validated.threadId, progress, MAX_CODE_NDJSON_LINE_BYTES)
-          .catch(() => {
-            throw malformedResponse();
-          });
+        const frame = await readWorktreeCreation(
+          response,
+          validated.threadId,
+          progress,
+          MAX_CODE_NDJSON_LINE_BYTES,
+        ).catch(() => {
+          throw malformedResponse();
+        });
         if (frame.kind === "failure") throw new CodeClientFailure(frame.failure);
         return frame.result;
       }

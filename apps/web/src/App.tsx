@@ -8051,7 +8051,6 @@ function LaunchedShell(
       const command = plan.command;
       let created: Awaited<ReturnType<typeof codeController.execute>>;
       if (
-        plannerReview === undefined &&
         serverProject === undefined &&
         command.kind === "create-managed-code-thread" &&
         input.presentation !== undefined
@@ -8066,8 +8065,9 @@ function LaunchedShell(
           },
           setWorktreeLaunches,
         );
-        created = await codeController.execute(command, undefined, worktreeLaunch.update);
-      } else if (plannerReview === undefined) created = await codeController.execute(command);
+      }
+      if (plannerReview === undefined)
+        created = await codeController.execute(command, undefined, worktreeLaunch?.update);
       else {
         if (
           command.kind !== "create-code-thread" &&

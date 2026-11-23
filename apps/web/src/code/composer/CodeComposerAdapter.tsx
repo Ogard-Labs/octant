@@ -956,7 +956,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       : Array.from(launches.values()).findLast(
           (launch) =>
             launch.composerId === composerIdRef.current &&
-            launch.projectId === props.projectId &&
+            String(launch.projectId) === String(props.projectId) &&
             launch.target === undefined &&
             (props.creating === true ? launch.blocked !== true : launch.blocked === true),
         );

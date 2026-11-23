@@ -1170,17 +1170,20 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // The first prompt can be in flight before this surface reads its journal
   // entry. Keep it visible without adding queued messages to the transcript.
   const awaitedPrompt = messages.length === 0 ? firstPromptInFlight : undefined;
-  const earlier = props.controller.earlierConversation;
-  const firstUserMessage =
-    worktreeLaunch === undefined || (earlier !== undefined && earlier !== "none-left")
+  const firstLoadedUserMessage =
+    worktreeLaunch === undefined
       ? undefined
       : messages.find((message) => message.role === "user" && message.sourceThreadId === undefined);
+  const firstUserMessage =
+    earlierConversation === undefined || earlierConversation === "none-left" || ownTurnsExhausted
+      ? firstLoadedUserMessage
+      : undefined;
   const launchProgress =
     worktreeLaunch?.target === undefined ? null : (
       <WorktreeLaunchProgress
-        key={worktreeLaunch.threadId}
+        key={`worktree:${worktreeLaunch.threadId}`}
         launch={worktreeLaunch}
-        firstMessageSent={firstUserMessage !== undefined}
+        firstMessageSent={firstLoadedUserMessage !== undefined}
       />
     );
   const pendingMessage =
@@ -1191,13 +1194,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         </div>
       </article>
     );
-  const transcriptTrail =
-    messages.length === 0 && (pendingMessage !== null || launchProgress !== null) ? (
-      <>
-        {pendingMessage}
-        {launchProgress}
-      </>
-    ) : null;
   // An unreachable history is not an empty thread. Treating it as one puts the
   // new-thread copy and the project scaffolds under a banner that says this
   // thread's own turns are missing, and offers to scaffold into a checkout that
@@ -1870,7 +1866,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           </OctantAlert>
         ) : null}
 
-        {messages.length === 0 && transcriptTrail === null ? (
+        {messages.length === 0 && pendingMessage === null ? (
           <div
             className="code-thread-workspace__conversation transcript-scroll"
             role="log"
@@ -1913,6 +1909,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   </EmptyThreadStart>
                 </>
               ) : null}
+              {launchProgress}
             </div>
           </div>
         ) : (
@@ -1920,7 +1917,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             <TranscriptWindow
               trail={
                 <>
-                  {transcriptTrail}
+                  {pendingMessage}
+                  {firstUserMessage === undefined ? launchProgress : null}
                   <CredentialRequests
                     key={String(props.threadId)}
                     threadId={String(props.threadId)}

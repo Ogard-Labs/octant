@@ -5,7 +5,7 @@ import {
   type CodeWorktreeCreationProgress,
 } from "@octant/contracts";
 
-export async function readWorktreeCreation(
+export default async function readWorktreeCreation(
   response: Response,
   threadId: CodeThreadId,
   progress: (progress: CodeWorktreeCreationProgress) => void,
@@ -31,7 +31,8 @@ export async function readWorktreeCreation(
         const frame = decodeFrame(JSON.parse(line));
         if (frame.kind === "failure") return frame;
         if (frame.kind === "result") {
-          if (frame.result.thread.id !== threadId) throw new Error("Worktree thread mismatch");
+          if (String(frame.result.thread.id) !== String(threadId))
+            throw new Error("Worktree thread mismatch");
           return frame;
         }
         progress(frame.progress);

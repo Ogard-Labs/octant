@@ -21,7 +21,7 @@ export function trackWorktreeLaunch(
         if (
           previous.composerId === next.composerId &&
           previous.target === undefined &&
-          id !== next.threadId
+          String(id) !== String(next.threadId)
         ) {
           launches.delete(id);
         }
@@ -114,7 +114,9 @@ export function WorktreeLaunchProgress(props: {
   const { launch } = props;
   const { target } = launch;
   const client = context?.client;
-  const detailsOpen = context?.detailsThreadId === launch.threadId;
+  const detailsThreadId = context?.detailsThreadId;
+  const detailsOpen =
+    detailsThreadId !== undefined && String(detailsThreadId) === String(launch.threadId);
   const [setup, setSetup] = useState<SetupRead>();
   const [cancelling, setCancelling] = useState(false);
   const [cancelFailure, setCancelFailure] = useState(false);
@@ -136,7 +138,7 @@ export function WorktreeLaunchProgress(props: {
         if (result.kind === "worktree-preparation") {
           const preparation = result.preparation;
           setSetup({ kind: "observed", ...(preparation === undefined ? {} : { preparation }) });
-          if (waiting && (preparation?.state === "pending" || preparation?.state === "running")) {
+          if (preparation?.state === "running" || (waiting && preparation?.state === "pending")) {
             timer = setTimeout(() => void inspect(), 1000);
           }
         } else {
@@ -221,7 +223,7 @@ export function WorktreeLaunchProgress(props: {
   const heading = started
     ? "Worktree ready"
     : (recipeHeading ??
-      (blocked
+      (blocked && recipeStatus !== "Running"
         ? ready
           ? "Agent startup paused"
           : "Worktree setup incomplete"
