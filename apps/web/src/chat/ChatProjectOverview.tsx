@@ -30,6 +30,7 @@ import { appendTranscript } from "../voice/appendTranscript";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { ChatController } from "./useChatController";
 import { ComposerInput, type ComposerInputElement } from "../composer/ComposerInput";
+import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 
 export type ChatOverviewSectionStatus =
   | "loading"
@@ -120,6 +121,14 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
   const drafts = useContext(NewTaskDraftsContext);
   const draftScope = useContext(NewTaskDraftScopeContext);
   const [draft, setDraft] = useNewTaskPrompt();
+  // The quick start offers `@model` as every thread composer does, so the
+  // first message can name a subagent's route; it has no other `@` mentions.
+  const atMenu = useComposerAtMenu({
+    modelGroups: props.providerGroups,
+    draft,
+    onDraftChange: (next) => setDraft(next),
+    textarea: () => input.current,
+  });
   const { modelKey, modelOptionValues, setModelChoice } = useDraftModelOptions(
     props.providerGroups ?? [],
     props.selectedProviderInstanceId,
@@ -193,12 +202,20 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
                 className="composer-input"
                 disabled={!createAvailable || submitting}
                 id={inputId}
-                onChange={(event) => setDraft(event.target.value)}
+                onChange={(event) => {
+                  setDraft(event.target.value);
+                  atMenu.sync(event.target.value, event.currentTarget.selectionStart);
+                }}
+                onKeyDown={(event) => {
+                  atMenu.handleKeyDown(event);
+                }}
                 placeholder="Describe the next Chat thread…"
                 ref={input}
+                renderModelChip={atMenu.renderModelChip}
                 value={draft}
               />
             }
+            typeahead={atMenu.open ? <ComposerAtTypeahead controller={atMenu} /> : undefined}
             row={{
               trailing: (
                 <>

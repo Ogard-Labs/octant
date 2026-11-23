@@ -330,6 +330,9 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
     // firing `input`, as code does to a text field, reports the difference.
     const reportedRef = useRef(value);
     const pendingRef = useRef<{ start: number; end: number } | undefined>(undefined);
+    // Bumped by every explicit selection, so a focus restore queued before it
+    // never overwrites it.
+    const selectionGenerationRef = useRef(0);
     const lastSelectionRef = useRef<{ start: number; end: number }>({
       start: value.length,
       end: value.length,
@@ -490,6 +493,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
           set: (start: number) => {
             const { end } = currentSelection(root);
             pendingRef.current = undefined;
+            selectionGenerationRef.current += 1;
             applySelection(root, start, Math.max(start, end));
           },
         },
@@ -499,6 +503,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
           set: (end: number) => {
             const { start } = currentSelection(root);
             pendingRef.current = undefined;
+            selectionGenerationRef.current += 1;
             applySelection(root, Math.min(start, end), end);
           },
         },
@@ -506,6 +511,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
           configurable: true,
           value: (start: number, end: number) => {
             pendingRef.current = undefined;
+            selectionGenerationRef.current += 1;
             applySelection(root, start, end);
           },
         },
@@ -531,7 +537,14 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         modelRef.current = value;
         if (external) {
           pendingRef.current = { start: value.length, end: value.length };
-          remember({ value, caret: value.length }, false);
+          // A text field forgets its undo history when its value is replaced, so
+          // undo after a send cannot bring back text that already went.
+          historyRef.current = {
+            entries: [{ value, caret: value.length }],
+            index: 0,
+            at: 0,
+            typing: false,
+          };
         }
       }
       if (composingRef.current) return;
@@ -580,7 +593,9 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
           return;
         }
         const { start, end } = lastSelectionRef.current;
+        const generation = selectionGenerationRef.current;
         queueMicrotask(() => {
+          if (generation !== selectionGenerationRef.current) return;
           if (root.ownerDocument.activeElement === root) applySelection(root, start, end);
         });
       };
@@ -720,7 +735,10 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         const root = rootRef.current;
         if (root === null) return;
         event.preventDefault();
-        replaceSelection(root, event.clipboardData.getData("text/plain").replace(/\r\n?/g, "\n"));
+        const text = event.clipboardData.getData("text/plain");
+        // A paste with no text (an image the caller did not take) changes nothing.
+        if (text === "") return;
+        replaceSelection(root, text.replace(/\r\n?/g, "\n"));
       },
       onCopy: (event: ClipboardEvent<ComposerInputElement>) => {
         const root = rootRef.current;

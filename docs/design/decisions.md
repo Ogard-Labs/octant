@@ -1113,7 +1113,7 @@ Status: Partly built. Since: —. Detail: [Architecture: Modes: Chat, Work, and 
 
 ### Choosing a subagent's route in a prompt
 
-A person can name the exact route for a subagent in the prompt: `@model` opens a picker of the provider instances and models configured, then the reasoning values that route advertises, and the selection sits in the prompt as an inline chip (maintainer decision, 2026-11-23).
+A person can name the exact route for a subagent in the prompt: the `@model` row of the `@` menu opens a picker of the configured provider instances' models that can run Octant's tools, then the reasoning values that route advertises, and the selection sits in the prompt as an inline chip (maintainer decision, 2026-11-23).
 
 - The prompt holds the selection as plain text, `@model(<provider instance id>/<model id>, reasoning=<value>)`, so copy keeps it and paste restores the chip; no reasoning means the provider's default.
 - The parent thread keeps its own model; the tag only qualifies the subagent the prompt asks for.

@@ -50,7 +50,6 @@ import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
 import { providerFamilyForThread } from "../../providers/providerFamily";
 import { HostSelector } from "../../shell/HostSelector";
 import { OctantButton } from "../../ui/base/OctantButton";
-import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { clipboardHasImage } from "../../chat/composerImagePaste";
 import { ComposerRowSlot, ComposerStartTray } from "../../composer/ComposerStartTray";
 import { ThreadComposer } from "../../composer/ThreadComposer";

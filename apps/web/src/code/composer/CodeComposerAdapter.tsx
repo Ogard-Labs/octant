@@ -83,7 +83,6 @@ import { ComposerVoiceButton } from "../../voice/ComposerVoiceButton";
 import { appendTranscript } from "../../voice/appendTranscript";
 import { HostSelector } from "../../shell/HostSelector";
 import { OctantButton } from "../../ui/base/OctantButton";
-import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { CodeBranchSelector } from "./CodeBranchSelector";
 import { threadAccessOf } from "@octant/domain/guardrail-policy";
 import { PermissionModePicker } from "../PermissionModePicker";

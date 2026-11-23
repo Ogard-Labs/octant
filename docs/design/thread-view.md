@@ -362,14 +362,19 @@ the existing clear.
 
 ## Choosing a subagent model in a prompt
 
-Typing `@model` opens a searchable picker at the caret. It lists every model a
-configured provider that is ready (or degraded) serves; a model served by two
-configured providers appears twice, with each provider's logo and name.
+Typing `@model` (or a prefix of it) offers **@model** as the first row of the
+`@` menu at the caret, and Enter on it opens a searchable picker. The row does
+not open the picker by itself, so a file mention that passes through `@model`
+while it is typed (`@models/schema.ts`) keeps the keyboard. The picker lists
+every model a ready (or degraded) configured provider serves that can run
+Octant's tools, the rule the host applies to a subagent's target; a model
+served by two configured providers appears twice, with each provider's logo
+and name.
 Choosing a row opens the reasoning choices advertised for that route (the
 model's `reasoning` or `effort` values), including **Provider default**; a
 model that advertises none is inserted at once. Enter inserts the selection.
-Escape dismisses the picker and preserves the draft. Typing a prefix of
-`@model` offers the picker as a row of the `@` menu.
+Escape dismisses the picker and preserves the draft. Every thread composer
+and the Chat Project quick start offer it.
 
 The composer renders the selection inline as **provider logo – model –
 reasoning**. The provider's name is the chip's accessible name and its tooltip,

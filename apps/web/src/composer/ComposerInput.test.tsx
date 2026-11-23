@@ -69,6 +69,40 @@ describe("ComposerInput", () => {
     expect(screen.getByTestId("chip")).toHaveTextContent("gpt-5 · high");
   });
 
+  it("keeps selected text when a paste carries no text", () => {
+    render(<Prompt initial="keep me" />);
+    const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    input.focus();
+    input.setSelectionRange(0, 4);
+    fireEvent.paste(input, { clipboardData: { getData: () => "" } });
+    expect(input).toHaveValue("keep me");
+  });
+
+  it("forgets its undo history when the caller replaces the value, as after a send", async () => {
+    function Sent() {
+      const [value, setValue] = useState("");
+      return (
+        <>
+          <ComposerInput
+            aria-label="Message"
+            onChange={(event) => setValue(event.currentTarget.value)}
+            value={value}
+          />
+          <button onClick={() => setValue("")} type="button">
+            Send
+          </button>
+        </>
+      );
+    }
+    render(<Sent />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+    await userEvent.type(input, "sent text");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    input.focus();
+    await userEvent.keyboard("{Control>}z{/Control}");
+    expect(input).toHaveValue("");
+  });
+
   it("copies a selected chip as its tag text", () => {
     render(<Prompt initial={tag} />);
     const input = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });

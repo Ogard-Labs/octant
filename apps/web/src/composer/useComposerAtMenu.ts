@@ -236,9 +236,6 @@ export function useComposerAtMenu(input: {
       }
     | undefined
   >(undefined);
-  // The `@model` token the person dismissed the picker on, so it does not
-  // reopen until they type a different token.
-  const dismissedTokenRef = useRef<number | undefined>(undefined);
   const modelGroups = input.modelGroups;
   const [loadedMentions, setLoadedMentions] = useState<
     { readonly scopeKey: string; readonly mentions: ReadonlyArray<ProviderMention> } | undefined
@@ -283,18 +280,6 @@ export function useComposerAtMenu(input: {
       ? loadedMentions.mentions
       : (input.provider?.mentions ?? []);
 
-  const typedModelToken =
-    tokenIsCurrent && modelGroups !== undefined && token.query.toLowerCase() === MODEL_TOKEN;
-  useEffect(() => {
-    if (!typedModelToken || token === undefined) {
-      // The dismissed token is gone, so a newly typed `@model` opens again.
-      dismissedTokenRef.current = undefined;
-      return;
-    }
-    if (dismissedTokenRef.current === token.start) return;
-    setModelPicker({ start: token.start, end: token.start + 1 + MODEL_TOKEN.length });
-  }, [typedModelToken, token]);
-
   const focusPrompt = (caret: number) => {
     queueMicrotask(() => {
       const textarea = input.textarea?.();
@@ -313,8 +298,8 @@ export function useComposerAtMenu(input: {
   };
   const dismissModelPicker = () => {
     if (modelPicker === undefined) return;
-    dismissedTokenRef.current = modelPicker.start;
     setModelPicker(undefined);
+    setToken(undefined);
     focusPrompt(modelPicker.end);
   };
   const renderModelChip =
@@ -340,10 +325,13 @@ export function useComposerAtMenu(input: {
           findSubagentModelTags(input.draft).map((match) => match.tag),
         );
 
+  // `@model` is the menu's first row, not a picker that opens by itself: a
+  // file mention such as `@models/schema.ts` passes through `@model` while it
+  // is typed, and must keep the keyboard. Enter on the row opens the picker.
   const rows: Array<AtMenuRow> = [];
   if (tokenIsCurrent && modelGroups !== undefined) {
     const query = token.query.toLowerCase();
-    if (query.length > 0 && query !== MODEL_TOKEN && MODEL_TOKEN.startsWith(query)) {
+    if (query.length > 0 && MODEL_TOKEN.startsWith(query)) {
       const start = token.start;
       const end = token.start + raw.length;
       rows.push({

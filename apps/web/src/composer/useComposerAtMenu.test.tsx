@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -565,6 +565,7 @@ describe("@model in the composer", () => {
           models: [
             { model: model("gpt-5", "GPT-5", ["low", "high"]), badges: [], toolCapable: true },
             { model: model("gpt-5-mini", "GPT-5 mini", []), badges: [], toolCapable: true },
+            { model: model("chat-only", "Chat only", []), badges: [], toolCapable: false },
           ],
         },
       ],
@@ -607,7 +608,7 @@ describe("@model in the composer", () => {
   it("inserts the chosen provider, model and reasoning as a tag the prompt shows as a chip", async () => {
     render(<ModelHarness />);
     const prompt = screen.getByRole("textbox", { name: "Message" });
-    await userEvent.type(prompt, "Review with @model");
+    await userEvent.type(prompt, "Review with @model{Enter}");
     const search = await screen.findByRole("combobox", { name: "Search models" });
     expect(search).toHaveFocus();
     expect(screen.getByRole("option", { name: /GPT-5 mini/ })).toBeInTheDocument();
@@ -623,23 +624,54 @@ describe("@model in the composer", () => {
   it("leaves the draft as typed when the picker is dismissed with Escape", async () => {
     render(<ModelHarness />);
     const prompt = screen.getByRole("textbox", { name: "Message" });
-    await userEvent.type(prompt, "Ask @model");
+    await userEvent.type(prompt, "Ask @model{Enter}");
     await screen.findByRole("combobox", { name: "Search models" });
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("group", { name: "Choose a subagent model" })).toBeNull();
     expect(prompt).toHaveValue("Ask @model");
   });
 
-  it("opens again for a newly typed @model after an earlier one was dismissed", async () => {
+  it("offers @model as the first row and keeps typing in the prompt for a longer mention", async () => {
     render(<ModelHarness />);
     const prompt = screen.getByRole("textbox", { name: "Message" });
     await userEvent.type(prompt, "@model");
+    expect(screen.getByRole("option", { name: /@model/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("combobox", { name: "Search models" })).toBeNull();
+    await userEvent.type(prompt, "s/schema.ts");
+    expect(prompt).toHaveValue("@models/schema.ts");
+    expect(prompt).toHaveFocus();
+  });
+
+  it("opens again for a newly typed @model after an earlier one was dismissed", async () => {
+    render(<ModelHarness />);
+    const prompt = screen.getByRole("textbox", { name: "Message" });
+    await userEvent.type(prompt, "@model{Enter}");
     await screen.findByRole("combobox", { name: "Search models" });
     await userEvent.keyboard("{Escape}");
-    await userEvent.type(prompt, "{Backspace>6/}");
-    expect(prompt).toHaveValue("");
-    await userEvent.type(prompt, "@model");
+    await userEvent.type(prompt, "{Backspace>6/}@model{Enter}");
     expect(await screen.findByRole("combobox", { name: "Search models" })).toHaveFocus();
+  });
+
+  it("leaves the caret after an inserted chip when text follows it", async () => {
+    render(<ModelHarness initial="Review later" />);
+    const prompt = screen.getByRole<ComposerInputElement>("textbox", { name: "Message" });
+    prompt.focus();
+    prompt.setSelectionRange(7, 7);
+    await userEvent.keyboard("@model{Enter}");
+    await screen.findByRole("combobox", { name: "Search models" });
+    await userEvent.keyboard("GPT-5 mini{Enter}");
+    await waitFor(() => expect(prompt).toHaveFocus());
+    await userEvent.keyboard("now ");
+    expect(prompt).toHaveValue(`Review @model(${instanceId}/gpt-5-mini) now later`);
+  });
+
+  it("lists only models that can run Octant's tools and says why another cannot", () => {
+    render(<ModelHarness initial={`@model(${instanceId}/chat-only) x`} />);
+    expect(
+      screen.getByRole("button", {
+        name: "Subagent model: Team Codex, Chat only, Provider default. Needs attention: Chat only cannot run Octant's tools, so it cannot take a subagent.",
+      }),
+    ).toBeInTheDocument();
   });
 
   it("reopens the picker from a chip's Enter key without sending the message", async () => {

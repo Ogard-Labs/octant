@@ -22,9 +22,12 @@ function usable(group: PickerGroup): boolean {
 }
 
 /**
- * Every model a configured, usable provider serves. A model two providers
- * serve is two routes, so the person chooses the provider as well as the
- * model. The launch still checks each route against the host's own list.
+ * Every model a configured, usable provider serves that can carry Octant's
+ * tools, the rule the host applies to a subagent's target. A model two
+ * providers serve is two routes, so the person chooses the provider as well
+ * as the model. The launch still checks each route against the host's own
+ * list, which can refuse more (a Project's policy, a sign-in that runs no
+ * helpers).
  */
 export function subagentModelRoutes(
   groups: ReadonlyArray<PickerGroup>,
@@ -36,7 +39,9 @@ export function subagentModelRoutes(
     for (const section of group.sections) {
       for (const picker of section.models) {
         const id = String(picker.model.id);
-        if (picker.unavailableReason !== undefined || seen.has(id)) continue;
+        if (picker.unavailableReason !== undefined || !picker.toolCapable || seen.has(id)) {
+          continue;
+        }
         seen.add(id);
         routes.push({
           group,
@@ -80,10 +85,17 @@ export function resolveSubagentModelTag(
     (candidate) => String(candidate.model.id) === tag.modelId,
   );
   if (route === undefined) {
+    const listed = group.sections
+      .flatMap((section) => section.models)
+      .find((picker) => String(picker.model.id) === tag.modelId);
     return {
       status: "unavailable",
-      reason: `${group.instance.displayName} no longer offers this model.`,
+      reason:
+        listed === undefined
+          ? `${group.instance.displayName} no longer offers this model.`
+          : `${listed.model.displayName} cannot run Octant's tools, so it cannot take a subagent.`,
       group,
+      ...(listed === undefined ? {} : { model: listed.model }),
     };
   }
   if (tag.reasoning !== undefined && !route.reasoningValues.includes(tag.reasoning)) {
