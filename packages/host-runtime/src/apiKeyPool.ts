@@ -165,7 +165,7 @@ export function replaceApiKeySecret(stored: string, keyId: string, secret: strin
           id: newId,
           label: entry.label,
           secret: secret.trim(),
-          rotation: (entry.rotation ?? 0) + 1,
+          rotation: (entry.rotation ?? 1) + 1,
         }
       : entry,
   );

@@ -133,6 +133,18 @@ describe("API key pool", () => {
     expect(listApiKeys(replaced).map((key) => key.label)).toEqual(["Work", "Personal"]);
   });
 
+  it("marks each secret replacement with a revision one above the stored one", () => {
+    const added = addApiKey(undefined, { secret: FIRST, label: "Work" });
+    const first = replaceApiKeySecret(added.stored, added.key.id, "sk-rotated-1111");
+    expect(readApiKeyPool(first).map((key) => key.rotation)).toEqual([2]);
+    const second = replaceApiKeySecret(
+      first,
+      readApiKeyPool(first)[0]?.id ?? "",
+      "sk-rotated-2222",
+    );
+    expect(readApiKeyPool(second).map((key) => key.rotation)).toEqual([3]);
+  });
+
   it("removes one key and keeps the others in order", () => {
     const { stored, ids } = poolWithTwoKeys();
     const removed = removeApiKey(stored, ids[0] ?? "");
