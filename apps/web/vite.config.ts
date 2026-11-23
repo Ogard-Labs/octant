@@ -6,6 +6,15 @@ import { defineConfig } from "vitest/config";
 import { keepFontsAsFiles } from "./vite.fonts";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
+const workspacePackagesDir = path.resolve(rootDir, "../../packages");
+
+/** Whether a module is a workspace package's own source, judged from this checkout's root. */
+function isWorkspacePackageSource(id: string): boolean {
+  const relative = path.relative(workspacePackagesDir, id);
+  return (
+    !relative.startsWith("..") && !path.isAbsolute(relative) && relative.split(/[\\/]/)[1] === "src"
+  );
+}
 
 // OCTANT_TEST_ASYNC_STRESS=1 makes tests that read async-rendered state too
 // early fail far more often; see src/asyncStress.test-support.ts. Diagnostic only.
@@ -36,7 +45,24 @@ const domTestFilesWithoutJsx = [
 export default defineConfig({
   base: "./",
   plugins: [react(), tailwindcss()],
-  build: { assetsInlineLimit: keepFontsAsFiles },
+  build: {
+    assetsInlineLimit: keepFontsAsFiles,
+    rollupOptions: {
+      treeshake: {
+        // The contract schemas are top-level `Schema` calls Rolldown cannot
+        // prove pure, and the workspace packages' barrels re-export every
+        // module, so a single import kept every schema a touched file
+        // defines. This marks those calls pure and every workspace package's
+        // sources side-effect-free for the window build only — the server
+        // and desktop bundles read package.json and are unchanged — saving
+        // about 108 KiB of initial gzip. Any package module the window
+        // imports must therefore do no work at import time; entry scripts
+        // that do (the CLI's) are never imported here.
+        manualPureFunctions: ["Schema"],
+        moduleSideEffects: (id) => !isWorkspacePackageSource(id),
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(rootDir, "src"),
