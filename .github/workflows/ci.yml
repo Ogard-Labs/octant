@@ -53,10 +53,10 @@ jobs:
           desktop_linux=true
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             files="$(gh api --paginate "repos/${{ github.repository }}/pulls/${PULL}/files" --jq '.[].filename')"
-            # Keep `docs/design/**` and `DESIGN.md` out of the docs-only skip:
-            # server tests read `docs/design/agent-tools.md` and visual checks
-            # cover `DESIGN.md`.
-            if [ -n "$files" ] && ! grep -qvE '^(docs/|[^/]+\.md$|\.coderabbit\.yaml$)' <<< "$files" && ! grep -qE '^(docs/design/|DESIGN\.md$)' <<< "$files"; then
+            # Keep `docs/design/**` out of the docs-only skip: server tests read
+            # `docs/design/agent-tools.md`. Root `DESIGN.md` is checked by
+            # `static` (`decisions:check`) and independently by `visual-check.yml`.
+            if [ -n "$files" ] && ! grep -qvE '^(docs/|[^/]+\.md$|\.coderabbit\.yaml$)' <<< "$files" && ! grep -qE '^docs/design/' <<< "$files"; then
               code=false
               share=false
               download_manifest=false
@@ -68,7 +68,7 @@ jobs:
               if ! grep -qE '^(apps/web/|apps/server/|packages/|scripts/smoke-browser-download-manifest-ui\.ts$|bun\.lock$|package\.json$|\.github/workflows/ci\.yml$)' <<< "$files"; then
                 download_manifest=false
               fi
-              if ! grep -qE '^(apps/desktop/|apps/server/|packages/host-runtime/|packages/domain/|packages/contracts/|scripts/|bun\.lock$|package\.json$|\.github/workflows/ci\.yml$)' <<< "$files"; then
+              if ! grep -qE '^(apps/desktop/|apps/server/|packages/cli/|packages/client-runtime/|packages/host-runtime/|packages/domain/|packages/contracts/|scripts/|bun\.lock$|package\.json$|\.github/workflows/ci\.yml$)' <<< "$files"; then
                 desktop_linux=false
               fi
             fi
@@ -567,8 +567,8 @@ jobs:
       #   only exercise /proc/self/fd on Linux):
       #     artifactMirrorFilePort, threadArtifactPurge, codeDirectoryPort,
       #     workFilesystemPort, workConfinedWrite.
-      # - Language and debug services run under Seatbelt here; the Linux server
-      #   shards run the same tests under Bubblewrap:
+      # - Language and debug services run under Seatbelt here (Linux runs the
+      #   Bubblewrap assertions when `/usr/bin/bwrap` is present):
       #     codeLanguageServiceProcess, installedLanguageServersProcess,
       #     codeDebugServiceProcess.
       # - Outside provider drivers run under their own Seatbelt profile (Linux
