@@ -1243,6 +1243,7 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
 // Read named controls, never text-field values or static page text. The owned
 // process has already been identified above; this is not a system-wide tree.
 let controlRoles = Set(["AXButton", "AXCheckBox", "AXSwitch", "AXRadioButton", "AXPopUpButton", "AXMenuButton", "AXTextField", "AXTextArea", "AXDisclosureTriangle", "AXComboBox", "AXMenuItem"])
+let workFolderOption = "New Project from folder…"
 var pending = (treeIdentityMatched ? (windows as? [AXUIElement] ?? []) : []).map { ($0, 0, false, false) }
 var visited = Set<CFHashCode>()
 var controls: [[String: Any]] = []
@@ -1342,8 +1343,15 @@ while next < pending.count, next < treeNodeLimit, Date() < treeDeadline {
         if text == "Press ⌘Q again to quit Octant" { quitHintDetailSeen = true }
     }
     if controlRoles.contains(nodeRole) {
-        let title = label(node, kAXTitleAttribute as CFString)
+        var title = label(node, kAXTitleAttribute as CFString)
         let description = label(node, kAXDescriptionAttribute as CFString)
+        // Electron's listbox option exposes its accessible name in AXValue
+        // while mapped to AXMenuItem. Only the fixed fixture action may escape
+        // the comparison: another option can include a person's folder path.
+        if nodeRole == "AXMenuItem", title.isEmpty, description.isEmpty,
+           label(node, kAXValueAttribute as CFString) == workFolderOption {
+            title = workFolderOption
+        }
         var fieldLabel = ""
         if isEndpointDialog, nodeRole == "AXTextField" {
             var associated: CFTypeRef?
