@@ -82,6 +82,8 @@ available behavior, while Linear tracks delivery progress.
    its corresponding specification update. Resolve routine implementation choices
    within the approved scope.
 3. Edit the owning specification in place in the same PR as the implementation.
+   Before implementation starts, draft and discuss the proposed rule in the
+   Linear issue that owns the outcome; do not open a spec-only PR.
    State the effective rule and the reason for a consequential tradeoff. Update
    conflicting summaries or replace them with links to the owner.
 4. Update the decision's entry in Decisions and requirements in that same PR:

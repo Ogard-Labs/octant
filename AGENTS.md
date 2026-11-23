@@ -15,7 +15,9 @@ Product behavior is defined by the specifications, not by this file:
 [DESIGN.md](DESIGN.md), and the topic specifications indexed in
 [docs/design/README.md](docs/design/README.md). Implementations follow them.
 Changing a product rule means editing the owning specification, which the
-precedence list below already allows on a direct maintainer request.
+precedence list below already allows on a direct maintainer request. That edit
+ships in the implementation's pull request; until then, the proposed rule lives
+in the Linear issue (see [Delivery And Completion](#delivery-and-completion)).
 
 Apply sources in this order:
 
@@ -350,8 +352,18 @@ satisfy it. Ordinary issues do not acquire a blanket human-signoff gate.
   next change cannot land without the unmerged parent (a real stack).
 - Do not open a sibling `fix/*` or `feature/*` off `main` for work that belongs
   on an in-flight pull request.
-- A report, assessment, or audit is not a reason to open a GitHub pull request.
-  Keep it in chat or the tracker.
+- A report, assessment, audit, or design proposal is not a reason to open a
+  GitHub pull request. Keep it in chat or the tracker.
+- A design proposal, spec draft, or open design question lives in the Linear
+  issue that owns the outcome, not in a pull request or a GitHub issue. Spec
+  files change only in the implementation's pull request, once the maintainer
+  has approved the design on the issue; a direct maintainer request counts as
+  that approval when the issue records it. A public feature request filed
+  through the GitHub form is intake: move its design discussion to Linear once
+  it is accepted. A correction that changes no rule (a broken link, a typo, a
+  stale summary) may still go in its own pull request. (In November 2026 agents opened a
+  GitHub issue plus a spec-only draft pull request for a single design
+  proposal, adding a pull request with nothing to implement.)
 - Choose the smallest delivery shape that preserves reviewability:
   - Keep one outcome on one pull request. This is the default, including when
     the work has several internally reviewable parts: reviewers read it commit
