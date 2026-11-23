@@ -98,9 +98,7 @@ describe("ThreadVideoClips", () => {
       );
       await userEvent.click(screen.getByRole("link", { name: "Download" }));
       await waitFor(() => expect(anchorClick).toHaveBeenCalled());
-      expect(clipFetch).toHaveBeenCalledWith(
-        "http://127.0.0.1:3100/api/video/clip?ticket=t",
-      );
+      expect(clipFetch).toHaveBeenCalledWith("http://127.0.0.1:3100/api/video/clip?ticket=t");
       expect(createObjectURL).toHaveBeenCalledWith(blob);
       expect(revokeObjectURL).toHaveBeenCalledWith("blob:http://localhost/clip");
     } finally {
@@ -129,7 +127,9 @@ describe("ThreadVideoClips", () => {
       await waitFor(() => expect(client.clipUrl).toHaveBeenCalled());
       view.unmount();
       resolveTicket({ url: "blob:http://localhost/late", expiresAt: "2027-01-01T00:00:00Z" });
-      await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:http://localhost/late"));
+      await waitFor(() =>
+        expect(revokeObjectURL).toHaveBeenCalledWith("blob:http://localhost/late"),
+      );
     } finally {
       vi.restoreAllMocks();
     }
