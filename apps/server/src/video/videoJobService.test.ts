@@ -90,12 +90,13 @@ function fakeDriver(script: Script) {
   const model =
     script.model ??
     capabilities({ cancel: "running", removal: { kind: "delete" }, resumeWindowHours: 24 });
+  // Read counts persist across adapters: the service creates one per call.
+  let modelsCalls = 0;
+  let modelsFailOnce = script.modelsFail === "once";
   const driver: VideoGenerationDriver = {
     driverKind: "gemini-video",
     providerHosts: ["video.example.test"],
     create: ({ ports }) => {
-      let modelsCalls = 0;
-      let modelsFailOnce = script.modelsFail === "once";
       return {
         models: async () => {
           modelsCalls += 1;
