@@ -1297,6 +1297,9 @@ describe("ChatTranscript", () => {
     expect(screen.getByRole("radio", { name: "PDF" })).not.toBeChecked();
     expect(screen.getByRole("textbox", { name: /Anything to add/ })).toHaveValue("");
     expect(submit).not.toHaveBeenCalled();
+    rerender(wrap(<ChatTranscript readOnly view={pending(ids.firstAttempt)} />));
+    expect(screen.getByText("Which format?")).toBeVisible();
+    expect(screen.queryByRole("radio", { name: "PDF" })).not.toBeInTheDocument();
   });
   it("keeps an unanswered question read-only when the host serves no answer route", () => {
     const view = viewFixture({

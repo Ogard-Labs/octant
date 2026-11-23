@@ -1114,9 +1114,17 @@ const AttemptBlock = memo(function AttemptBlock(props: {
         {props.citations.length > 0 ? <CitationList citations={props.citations} /> : null}
         {props.attempt.pendingQuestion === undefined ? null : props.onAnswerQuestion ===
           undefined ? (
-          <p className="approval-row approval-row--request">
-            <span className="approval-row__text">{props.attempt.pendingQuestion.prompt}</span>
-          </p>
+          <div className="approval-row approval-row--request">
+            <div className="approval-row__text">
+              {props.attempt.pendingQuestion.questionnaire === undefined ? (
+                <p>{props.attempt.pendingQuestion.prompt}</p>
+              ) : (
+                props.attempt.pendingQuestion.questionnaire.questions.map((question) => (
+                  <p key={question.id}>{question.prompt}</p>
+                ))
+              )}
+            </div>
+          </div>
         ) : (
           <ProviderQuestionCard
             key={props.attempt.pendingQuestion.requestId}
