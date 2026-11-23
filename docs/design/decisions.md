@@ -2532,6 +2532,7 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Projec
 - The first task waits for setup or the person's explicit Skip. Setup uses admitted task access and the existing confined process lifecycle, with bounded output, a ten minute timeout, cancellation and no parent environment or secret copying. Plan refuses execution.
 - Failure needs an explicit Retry or Skip. Host restart reconciles owned processes and exposes interruption without replay; uncertain cleanup refuses a new execution.
 - Worktrees → Setup stays beside the task and can inspect its child checkouts. Existing worktrees keep their recorded recipe when Project actions change.
+- A local managed-worktree launch shows source, checkout, recipe and first-agent progress inline. Setup details opens the same Worktrees dialog, and a running recipe can be cancelled from the inline view. See [Thread view](thread-view.md#draft-continuity-and-composer-notices).
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Worktree setup](../architecture.md#security-and-authority).
 

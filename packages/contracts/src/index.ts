@@ -1,6 +1,7 @@
 export * from "./questionnaire";
 export * from "./chat";
 export * from "./code";
+export * from "./codeWorktreeCreation";
 export * from "./attachmentMediaType";
 export * from "./codePlanner";
 export * from "./codeFileListing";

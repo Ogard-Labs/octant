@@ -947,6 +947,21 @@ Authority confirmations appear beside the owning composer in a trusted surface
 owned by the desktop main process;
 ordinary notice content cannot issue an approval receipt.
 
+When a local Code composer creates a managed worktree, show a compact
+disclosure below the composer. Move it below the first prompt when the
+thread opens. The rows show resolving the base (or fetching it), checking
+out files, running the optional Project setup, and starting the agent. The
+host supplies Git durations and the recorded recipe supplies its duration.
+An absent recipe is skipped. **Setup details** opens the thread's Worktrees
+dialog, and **Cancel setup** stops a running recipe through the same control.
+A planner approval uses the same disclosure. Its confirmation reports the
+checkout complete when it returns, with no intermediate Git timing.
+A successful start folds the stages into **Worktree ready** for the rest of
+the window session. When earlier messages are still paged out, the disclosure
+stays at the end of the loaded transcript. A refusal leaves the stages visible
+beside the draft or thread, with the existing composer error, prompt recovery,
+and empty-thread setup options.
+
 ### Project trust prompt
 
 Adding a Project, or an extra folder, is the person's trust decision for every
