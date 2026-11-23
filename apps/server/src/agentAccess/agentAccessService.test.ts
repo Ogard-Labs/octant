@@ -16,6 +16,9 @@ import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { agentProofPayload } from "@octant/domain";
 import { createAgentAccessListenerRouteHandler } from "./agentAccessRoutes";
+import { AgentEventRoutes } from "./agentEventRoutes";
+import { AgentEventWebhooks } from "./agentEventWebhooks";
+import { AgentMilestoneEvents } from "./agentMilestoneEvents";
 import { AGENT_ACCESS_LOCAL_ACTOR, AgentAccessService } from "./agentAccessService";
 import type { AgentSessionDependencies } from "./agentAccessSession";
 
@@ -51,7 +54,7 @@ function harness(options: { readonly listenerOn?: boolean } = {}) {
     listener: () => (options.listenerOn === false ? undefined : { origin, pin, hostId }),
     projectType: (id) => (id === codeProject ? "code" : undefined),
   });
-  return { service, clock };
+  return { service, clock, journal };
 }
 
 function scope(overrides: Partial<AgentGrantScope> = {}): AgentGrantScope {
@@ -416,7 +419,7 @@ describe("agent grants", () => {
 });
 
 describe("the agent endpoint for an MCP client on this computer", () => {
-  function endpoint(service: AgentAccessService) {
+  function endpoint(service: AgentAccessService, events?: AgentEventRoutes) {
     const dispatched: Array<string> = [];
     const session: AgentSessionDependencies = {
       service,
@@ -429,7 +432,12 @@ describe("the agent endpoint for an MCP client on this computer", () => {
       threadAccess: () => undefined,
       markOutsideContent: () => undefined,
     };
-    const routes = createAgentAccessListenerRouteHandler({ service, session, version: "test" });
+    const routes = createAgentAccessListenerRouteHandler({
+      service,
+      session,
+      version: "test",
+      ...(events === undefined ? {} : { events }),
+    });
     return { routes, dispatched };
   }
 
@@ -454,6 +462,7 @@ describe("the agent endpoint for an MCP client on this computer", () => {
     key: { readonly grantId: string; readonly fingerprint: string; readonly privateKey: KeyObject },
     at: number,
     message: Readonly<Record<string, unknown>>,
+    headers: Readonly<Record<string, string>> = {},
   ): Request {
     const text = JSON.stringify({ jsonrpc: "2.0", ...message });
     const body = new TextEncoder().encode(text);
@@ -462,6 +471,7 @@ describe("the agent endpoint for an MCP client on this computer", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        ...headers,
         "x-octant-agent-proof": proof({
           ...key,
           at,
@@ -472,6 +482,48 @@ describe("the agent endpoint for an MCP client on this computer", () => {
       body: text,
     });
   }
+
+  it("advertises milestones only to a confirmed grant with thread-read access", async () => {
+    const { service, clock, journal } = harness();
+    const source = new AgentMilestoneEvents(journal, () => Buffer.alloc(32, 7));
+    const { routes } = endpoint(
+      service,
+      new AgentEventRoutes(source, new AgentEventWebhooks(source, new Map()), false),
+    );
+    for (const canRead of [true, false]) {
+      const grantId = created(
+        service.execute(
+          {
+            kind: "create",
+            draft: {
+              name: "Editor",
+              scope: scope({ tools: canRead ? ["read_thread"] : ["list_projects"] }),
+              days: 30,
+            },
+          },
+          AGENT_ACCESS_LOCAL_ACTOR,
+        ),
+      );
+      const { pair, fingerprint } = confirmedKey(service, grantId);
+      const request = loopbackCall(
+        { grantId, fingerprint, privateKey: pair.privateKey },
+        clock.now,
+        {
+          id: 4,
+          method: "server/discover",
+          params: {
+            _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" },
+          },
+        },
+        { "mcp-method": "server/discover", "mcp-protocol-version": "2026-07-28" },
+      );
+      const result = await (await routes(request, { sourceClass: "loopback" }))?.json();
+      expect(result?.result?.capabilities).toEqual({
+        tools: {},
+        ...(canRead ? { extensions: { "io.modelcontextprotocol/events": {} } } : {}),
+      });
+    }
+  });
 
   it("lists only the tools the grant ticks to a client that reaches it over loopback", async () => {
     const { service, clock } = harness();

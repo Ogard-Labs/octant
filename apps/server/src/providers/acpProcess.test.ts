@@ -2690,12 +2690,17 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
     readonly agentPlatformSignIn?: boolean;
     readonly octantSignIn?: boolean;
     readonly protect?: "file" | "folder";
+    /** The real confinement binary, for runs that launch a child for real. */
+    readonly sandboxPath?: string;
+    /** Replace the agent binary with a shell-builtin reader of the credentials file. */
+    readonly reader?: boolean;
   }) {
     const target = fixture(antigravity);
     const gcloud = join(target.canonicalRoot, "home", ".config", "gcloud");
     mkdirSync(gcloud, { recursive: true });
     const credentials = join(gcloud, "application_default_credentials.json");
-    writeFileSync(credentials, "{}", { mode: 0o600 });
+    const marker = `octant-adc-${crypto.randomUUID()}`;
+    writeFileSync(credentials, marker, { mode: 0o600 });
     writeFileSync(join(gcloud, "credentials.db"), "", { mode: 0o600 });
     if (input.protect !== undefined) {
       applyProtectedFilesChoice({
@@ -2703,11 +2708,28 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
         removed: [],
       });
     }
+    if (input.reader === true) {
+      // A confined Chat launch may exec nothing but the agent binary and its
+      // interpreter, so the read below uses only shell builtins. The shebang
+      // is bash directly: /bin/sh is a selector shim whose exec of its real
+      // shell the exec literals do not cover. The read must not fail the
+      // script: Bubblewrap hides a denied file behind an empty one, and
+      // Seatbelt makes the open fail (the error goes to stderr, which the
+      // assertion message reports) — the marker in the output, not the
+      // exit status, is what the protection removed.
+      writeFileSync(
+        target.binaryPath,
+        `#!/bin/bash\nprintf 'SANDBOX-STARTED\\n'\ncontent=$(< ${JSON.stringify(credentials)})\nprintf 'READ:%s\\n' "$content"\n`,
+        { mode: 0o755 },
+      );
+    }
     const result = await Effect.runPromise(
       Effect.either(
         makeAcpConfinementLive({
           platform: input.platform ?? "darwin",
-          sandboxPath: input.platform === "linux" ? target.bwrapPath : target.sandboxPath,
+          sandboxPath:
+            input.sandboxPath ??
+            (input.platform === "linux" ? target.bwrapPath : target.sandboxPath),
           temporaryDirectory: join(target.canonicalRoot, "tmp"),
           hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
           applicationDefaultCredentialsPath: credentials,
@@ -2729,7 +2751,7 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
         }),
       ),
     );
-    return { result, credentials, gcloud };
+    return { result, credentials, gcloud, marker };
   }
   const gcloudAllows = (text: string) =>
     text.split("\n").filter((line) => line.startsWith("(allow") && line.includes(".config/gcloud"));
@@ -2832,6 +2854,54 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
     } finally {
       applyProtectedFilesChoice(NO_PROTECTED_FILES_CHANGES);
     }
+  });
+
+  // A real confined child, not the profile text. The readiness check is the
+  // one Agent Platform launch under the full protected list — outside Strict
+  // a session launch keeps only the provider sign-ins list — so it is the
+  // launch where the person's own protection must beat the credentials read.
+  // Real Bubblewrap only where this host carries it; elsewhere the args-level
+  // test above is the evidence, and the confinement is skipped by name.
+  describe.each([
+    { name: "Seatbelt", platform: "darwin", sandboxPath: "/usr/bin/sandbox-exec" },
+    { name: "Bubblewrap", platform: "linux", sandboxPath: "/usr/bin/bwrap" },
+  ] as const)("under $name", ({ platform, sandboxPath }) => {
+    it.runIf(process.platform === platform && existsSync(sandboxPath))(
+      "a protection covering the credentials file or its folder makes the child's read fail",
+      async () => {
+        for (const covering of [undefined, "file", "folder"] as const) {
+          const attempt = await prepared({
+            platform,
+            purpose: "probe",
+            agentPlatformSignIn: true,
+            sandboxPath,
+            reader: true,
+            ...(covering === undefined ? {} : { protect: covering }),
+          });
+          try {
+            if (Either.isLeft(attempt.result)) throw new Error(attempt.result.left.message);
+            const run = spawnSync(attempt.result.right.command, [...attempt.result.right.args], {
+              encoding: "utf8",
+              timeout: 10_000,
+            });
+            // The child really ran inside the sandbox: a confinement that
+            // never started prints nothing and cannot pass as a denial.
+            expect(run.stdout, `${covering ?? "unprotected"}: ${run.stderr}`).toContain(
+              "SANDBOX-STARTED",
+            );
+            if (covering === undefined) {
+              // The grant reaches a real child: the sandbox confines, so what
+              // the protections below deny is confinement, not a missing file.
+              expect(run.stdout).toContain(attempt.marker);
+            } else {
+              expect(run.stdout).not.toContain(attempt.marker);
+            }
+          } finally {
+            applyProtectedFilesChoice(NO_PROTECTED_FILES_CHANGES);
+          }
+        }
+      },
+    );
   });
 
   it("a personal-sign-in or API-key launch gets no gcloud read", async () => {

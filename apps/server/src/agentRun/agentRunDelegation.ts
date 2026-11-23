@@ -79,9 +79,11 @@ export interface AgentsToolUnavailableTarget {
  * Why a helper never runs on this provider instance, or undefined. A personal
  * sign-in keeps the runs its vendor does not cover. An Agent Platform sign-in
  * reads the host's Application Default Credentials, which only a launch
- * outside Strict may read (maintainer decision, 2026-11-22), and a helper
- * child always launches under Strict: nothing hands it the parent's Strict
- * setting, so Check connection's Ready does not mean a child could sign in.
+ * outside Strict may read (maintainer decision, 2026-11-22). A helper child
+ * launches with no Strict override of its own — nothing hands it the parent's
+ * setting — and admitting unsandboxed helpers would widen helper authority,
+ * which needs its own decision; so Check connection's Ready does not mean a
+ * child could sign in.
  */
 export function helperRunRefusalOf(instance: ProviderSignInFacts | undefined): string | undefined {
   const personal = personalSignInRefusals(instance)?.refusesHelperRuns;
@@ -94,7 +96,7 @@ export function helperRunRefusalOf(instance: ProviderSignInFacts | undefined): s
     configuration.authentication !== "agent-platform"
   )
     return undefined;
-  return `${acpAgentProfile(instance.driverKind).name} can't run as a helper on Agent Platform: helpers launch under Strict, which doesn't let it read your Application Default Credentials. Use a Gemini API key account for helper work.`;
+  return `${acpAgentProfile(instance.driverKind).name} can't run as a helper on Agent Platform: helpers can't read your Application Default Credentials. Use a Gemini API key account for helper work.`;
 }
 
 export interface AgentRunDelegationInput {
