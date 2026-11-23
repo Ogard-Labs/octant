@@ -356,7 +356,10 @@ async function downloadFile(
     if (state !== "ACTIVE") {
       return {
         status: "failed",
-        providerFailure: videoFailure("provider-failed", "Google could not finish this clip's file."),
+        providerFailure: videoFailure(
+          "provider-failed",
+          "Google could not finish this clip's file.",
+        ),
       };
     }
     const file = await ports.request({
