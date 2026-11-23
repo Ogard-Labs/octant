@@ -649,6 +649,12 @@ export const AutomationDefinition = Schema.Struct({
   nextDueAt: Schema.NullOr(UtcTimestamp),
   nextDueResolution: Schema.optional(AutomationWeeklyResolution),
   blockedReason: Schema.optional(AutomationBlockReason),
+  /**
+   * The run whose failure paused this routine, when the block receipt named
+   * one: its recorded message is what a paused banner shows, not a newer
+   * run's. Absent for a pause that came from revalidation rather than a run.
+   */
+  blockedRunId: Schema.optional(AutomationRunId),
   createdBy: AutomationAuthorPrincipal,
   updatedBy: AutomationAuthorPrincipal,
   /**
@@ -696,7 +702,8 @@ function automationPersistedDefinitionMatchesPolicy(definition: AutomationDefini
     (definition.targetPolicy !== "same-thread" || definition.originThreadId !== undefined) &&
     dueEvidenceMatches &&
     enabledDueMatches &&
-    (definition.lifecycle !== "enabled" || definition.blockedReason === undefined) &&
+    (definition.lifecycle !== "enabled" ||
+      (definition.blockedReason === undefined && definition.blockedRunId === undefined)) &&
     !(
       (definition.lifecycle === "archived" || definition.lifecycle === "exhausted") &&
       definition.nextDueAt !== null

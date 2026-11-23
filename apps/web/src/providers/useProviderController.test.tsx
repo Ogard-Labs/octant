@@ -779,6 +779,24 @@ describe("useProviderController", () => {
     await expect(check).resolves.toBe(true);
   });
 
+  it("names the sign-in the provider never offered when a check is refused that way", async () => {
+    const api = client();
+    vi.mocked(api.probe).mockRejectedValueOnce({
+      category: "unauthenticated",
+      message: "private provider diagnostic",
+      reason: "authentication-required",
+      signInNotOffered: true,
+    });
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(result.current.probe(id)).resolves.toBe(false);
+    });
+
+    expect(result.current.message).toBe("Provider doesn't offer this sign-in.");
+  });
+
   it("keeps prior discovery cleared when probe failure refresh is unavailable", async () => {
     const pending = deferred<Awaited<ReturnType<ProviderClient["probe"]>>>();
     const api = client();

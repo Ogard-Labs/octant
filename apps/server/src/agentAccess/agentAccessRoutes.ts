@@ -13,6 +13,13 @@ import {
   type AgentSessionDependencies,
 } from "./agentAccessSession";
 
+import {
+  eventFailure,
+  modernAgentMcp,
+  validateEventHeaders,
+  type AgentEventRoutes,
+} from "./agentEventRoutes";
+
 export const AGENT_ACCESS_LISTENER_ROUTES = {
   claim: "/api/agent-access/claim",
   mcp: "/api/agent-access/mcp",
@@ -29,6 +36,7 @@ export interface AgentAccessListenerRouteOptions {
   readonly session: AgentSessionDependencies;
   readonly version: string;
   readonly pollIntervalMs?: number;
+  readonly events?: AgentEventRoutes;
 }
 
 /**
@@ -106,10 +114,64 @@ export function createAgentAccessListenerRouteHandler(
     }
     const grant = authenticated.grant;
     const policy = agentToolPolicy(grant, options.session);
-    if (method === "initialize") return rpc(result(id, initializeResult(params, options.version)));
-    if (method === "ping") return rpc(result(id, {}));
-    if (method === "tools/list") return rpc(result(id, { tools: agentToolList(policy) }));
-    if (method !== "tools/call") return rpc(failure(id, -32601, "Method not found"));
+    const modern = modernAgentMcp(request, params);
+    const events = options.events;
+    const access = {
+      grantId: String(grant.grantId),
+      grantSignal: authenticated.signal,
+      allowed: grant.scope.tools.includes("read_thread"),
+      canRead: (threadId: string) => {
+        const current = options.service.readActive(String(grant.grantId));
+        if (current === undefined || !current.scope.tools.includes("read_thread")) return false;
+        const project = options.session.threadProject(threadId);
+        return (
+          project !== undefined &&
+          (project.projectId === undefined || options.service.projectIsActive(project.projectId)) &&
+          agentToolPolicy(current, options.session).threadAllowed(threadId)
+        );
+      },
+    };
+    const compatibility = events?.compatibility(access) ?? false;
+    if (typeof method === "string" && method.startsWith("events/") && events !== undefined) {
+      try {
+        return await events.handle({ request, id, method, params, access, compatibility });
+      } catch {
+        return eventFailure(id, -32603, "Octant could not read thread milestones");
+      }
+    }
+    if (modern && typeof method === "string") {
+      const invalid = validateEventHeaders(
+        request,
+        id,
+        method,
+        params,
+        method === "server/discover" && compatibility,
+        method === "tools/call",
+      );
+      if (invalid !== undefined) return invalid;
+    }
+    if (method === "server/discover" && events !== undefined) {
+      if (!modern && !compatibility) return eventFailure(id, -32020, "HeaderMismatch", 400);
+      return events.discover(id, access, options.version);
+    }
+    if (method === "initialize" && !modern) {
+      const initialized = initializeResult(params, options.version);
+      return rpc(
+        result(
+          id,
+          compatibility ? { ...initialized, capabilities: { tools: {}, events: {} } } : initialized,
+        ),
+      );
+    }
+    const complete = (value: JsonObject) =>
+      result(id, modern ? { resultType: "complete", ...value } : value);
+    if (method === "ping") return rpc(complete({}));
+    if (method === "tools/list") return rpc(complete({ tools: agentToolList(policy) }));
+    if (method !== "tools/call") {
+      return modern
+        ? eventFailure(id, -32601, "Method not found", 404)
+        : rpc(failure(id, -32601, "Method not found"));
+    }
 
     const name = params?.["name"];
     if (typeof name !== "string" || !agentToolList(policy).some((tool) => tool["name"] === name)) {
@@ -128,7 +190,7 @@ export function createAgentAccessListenerRouteHandler(
       }),
     );
     const answer = (value: ToolAnswer) =>
-      result(id, {
+      complete({
         content: [
           {
             type: "text",

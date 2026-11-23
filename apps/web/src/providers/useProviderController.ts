@@ -2995,6 +2995,7 @@ function redactedProbeFailureMessage(error: unknown): string {
             message: error.message,
             ...(error.reason === undefined ? {} : { reason: error.reason }),
             ...(error.diagnostic === undefined ? {} : { diagnostic: error.diagnostic }),
+            ...(error.signInNotOffered === true ? { signInNotOffered: true } : {}),
           }
         : error,
     );
@@ -3006,6 +3007,7 @@ function redactedProbeFailureMessage(error: unknown): string {
     return `Provider CLI update failed: ${diagnostic}`;
   }
   if (failure.reason === "runtime-incompatible") return "Provider runtime is incompatible.";
+  if (failure.signInNotOffered === true) return "Provider doesn't offer this sign-in.";
   if (failure.reason === "authentication-required") return "Provider authentication is required.";
   if (failure.reason === "runtime-unavailable") return "Provider runtime is unavailable.";
   if (failure.reason === "no-usable-model") return "No usable model is available.";

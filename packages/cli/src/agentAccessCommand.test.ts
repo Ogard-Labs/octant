@@ -181,6 +181,75 @@ describe("the agent bridge", () => {
     expect(answers.find((answer) => answer.id === 2)?.error?.code).toBe(-32001);
   });
 
+  it("closes a live HTTP event stream when its stdio request is cancelled", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-agent-bridge-"));
+    directories.push(directory);
+    const out = join(directory, "agent.json");
+    await runAgentAccessJoin({
+      command: { action: "join", code: connectionCode, out, label: "laptop" },
+      fetch: async () => ({ status: 202, contentType: "application/json", body: "{}" }),
+      stdout: sink(),
+      stderr: sink(),
+    });
+    const connection = decodeAgentConnectionFile(JSON.parse(readFileSync(out, "utf8")));
+    const stdout = sink();
+    let headers: IncomingHttpHeaders | undefined;
+    let closed = false;
+    const server = createServer((request, response) => {
+      headers = request.headers;
+      request.resume();
+      response.on("close", () => {
+        closed = true;
+      });
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write(
+        'event: message\ndata: {"jsonrpc":"2.0","method":"notifications/events/active"}\n\n',
+      );
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("no port");
+      async function* requests() {
+        yield (
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 9,
+            method: "events/stream",
+            params: {
+              name: "thread.turn_settled",
+              _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" },
+            },
+          }) + "\n"
+        );
+        await expect.poll(() => stdout.text()).toContain("notifications/events/active");
+        expect(headers).toMatchObject({
+          "mcp-protocol-version": "2026-07-28",
+          "mcp-method": "events/stream",
+          "mcp-name": "thread.turn_settled",
+        });
+        yield '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":9}}\n';
+        // Keep stdin open until the server observes the disconnect so bridge
+        // shutdown cannot satisfy the cancellation check.
+        await expect.poll(() => closed).toBe(true);
+      }
+      await expect(
+        runAgentMcpBridge({
+          connection,
+          input: requests(),
+          stdout,
+          stderr: sink(),
+          fetch: agentLoopbackFetch(`http://127.0.0.1:${String(address.port)}`),
+        }),
+      ).resolves.toBe(0);
+    } finally {
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      });
+    }
+  });
+
   it("reaches the host on this computer over loopback with only the signed proof, and refuses any other address", async () => {
     const received: Array<{ readonly url: string; readonly headers: IncomingHttpHeaders }> = [];
     const server = createServer((request, response) => {

@@ -2353,6 +2353,7 @@ export class ProviderService implements ProviderServiceApi {
             endpointMessage ??
             probeFailureMessage(readiness, failure?.reason)),
       ...(failure?.reason === undefined ? {} : { reason: failure.reason }),
+      ...(failure?.signInNotOffered === true ? { signInNotOffered: true } : {}),
       ...(diagnostic === undefined ? {} : { diagnostic }),
       observedAt: decodeTimestamp(this.#clock()),
     });

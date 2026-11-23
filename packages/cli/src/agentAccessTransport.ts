@@ -19,6 +19,7 @@ export type AgentListenerFetch = (input: {
   readonly headers: Readonly<Record<string, string>>;
   readonly body: string;
   readonly signal?: AbortSignal;
+  readonly onEvent?: (frame: string) => void;
 }) => Promise<AgentListenerResponse>;
 
 /**
@@ -37,18 +38,14 @@ export function agentListenerFetch(target: AgentListenerTarget): AgentListenerFe
         target.pin === undefined ? { kind: "platform" } : { kind: "pinned", pin: target.pin },
     },
   });
-  return async ({ path, headers, body, signal }) => {
+  return async ({ path, headers, body, signal, onEvent }) => {
     const response = await listenerFetch(new URL(path, target.origin), {
       method: "POST",
       headers,
       body,
       ...(signal === undefined ? {} : { signal }),
     });
-    return {
-      status: response.status,
-      contentType: response.headers.get("content-type") ?? "",
-      body: await boundedText(response),
-    };
+    return await readResponse(response, onEvent, signal);
   };
 }
 
@@ -66,7 +63,7 @@ export function agentLoopbackFetch(origin: string): AgentListenerFetch {
     (target.hostname === "127.0.0.1" ||
       target.hostname === "localhost" ||
       target.hostname === "[::1]");
-  return async ({ path, headers, body, signal }) => {
+  return async ({ path, headers, body, signal, onEvent }) => {
     if (!loopback) throw new Error("Octant's address on this computer is not a loopback address.");
     const response = await fetch(new URL(path, target.origin), {
       method: "POST",
@@ -75,12 +72,61 @@ export function agentLoopbackFetch(origin: string): AgentListenerFetch {
       redirect: "error",
       ...(signal === undefined ? {} : { signal }),
     });
-    return {
-      status: response.status,
-      contentType: response.headers.get("content-type") ?? "",
-      body: await boundedText(response),
-    };
+    return await readResponse(response, onEvent, signal);
   };
+}
+
+async function readResponse(
+  response: Response,
+  onEvent?: (frame: string) => void,
+  signal?: AbortSignal,
+): Promise<AgentListenerResponse> {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (
+    onEvent !== undefined &&
+    response.status === 200 &&
+    contentType.includes("text/event-stream") &&
+    response.body !== null
+  ) {
+    await streamEvents(response.body, onEvent, signal);
+    return { status: response.status, contentType, body: "" };
+  }
+  return { status: response.status, contentType, body: await boundedText(response) };
+}
+
+async function streamEvents(
+  body: ReadableStream<Uint8Array>,
+  onEvent: (frame: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const cancel = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  if (signal?.aborted === true) cancel();
+  else signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      buffer += decoder.decode(value, { stream: true });
+      for (;;) {
+        const boundary = /\r?\n\r?\n/.exec(buffer);
+        if (boundary === null) break;
+        if (boundary.index > MAX_RESPONSE_BYTES)
+          throw new Error("The listener's event was too large.");
+        onEvent(buffer.slice(0, boundary.index));
+        buffer = buffer.slice(boundary.index + boundary[0].length);
+      }
+      if (buffer.length > MAX_RESPONSE_BYTES)
+        throw new Error("The listener's event was too large.");
+    }
+  } finally {
+    signal?.removeEventListener("abort", cancel);
+    await reader.cancel().catch(() => undefined);
+  }
 }
 
 async function boundedText(response: Response): Promise<string> {

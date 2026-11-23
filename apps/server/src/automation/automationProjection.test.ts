@@ -827,13 +827,15 @@ describe("automation projection occurrence ledger", () => {
     ).toBe(true);
   });
 
-  it("pauses the definition with a typed reason when a blocked receipt is journaled", () => {
+  it("pauses the definition with a typed reason and the run that blocked it", () => {
     const harness = createHarness();
     const definition = intervalDefinitionFixture(automationId("1103"));
     harness.store.appendDefinitionCreated({ automation: definition });
 
+    const pausingRunId = runId("1103");
     appendDefinitionEvent(harness, definition, 1, AUTOMATION_BLOCKED, {
       automationId: definition.id,
+      runId: pausingRunId,
       reason: "missed-run-cap-exceeded",
       examinedFrom: INTERVAL_ANCHOR,
       examinedThrough: INTERVAL_NEXT,
@@ -844,6 +846,7 @@ describe("automation projection occurrence ledger", () => {
     const projected = harness.projection.getDefinition(definition.id);
     expect(projected?.lifecycle).toBe("paused");
     expect(projected?.blockedReason).toBe("missed-run-cap-exceeded");
+    expect(projected?.blockedRunId).toBe(pausingRunId);
     expect(projected?.nextDueAt).toBeNull();
     expect(projected?.version).toBe(2);
   });

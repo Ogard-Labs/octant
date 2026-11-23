@@ -209,6 +209,7 @@ export async function waitForAgentTurn(
   opened: { readonly threadId: string; readonly mode: OctantMode; readonly projectName?: string },
   options: {
     readonly timeoutMs: number;
+    readonly turns?: number;
     readonly pollIntervalMs?: number;
     readonly signal?: AbortSignal;
   },
@@ -219,7 +220,11 @@ export async function waitForAgentTurn(
   const deadline = Date.now() + options.timeoutMs;
   const interval = options.pollIntervalMs ?? 1_000;
   for (;;) {
-    const read = await readAgentThreadState(session, opened);
+    const read = await readAgentThreadState(
+      session,
+      opened,
+      options.turns === undefined ? undefined : { turns: options.turns },
+    );
     if (read.kind === "refused") return read;
     if (read.state.status !== "running") return { ...read, timedOut: false };
     if (Date.now() >= deadline || options.signal?.aborted === true) {

@@ -298,7 +298,7 @@ describe("agentRunTargetAvailability", () => {
       isTargetAllowed: () => true,
     });
     const refusal =
-      "Google Antigravity can't run as a helper on Agent Platform: helpers launch under Strict, which doesn't let it read your Application Default Credentials. Use a Gemini API key account for helper work.";
+      "Google Antigravity can't run as a helper on Agent Platform: helpers can't read your Application Default Credentials. Use a Gemini API key account for helper work.";
     expect(availability.targets).toEqual([]);
     expect(availability.unavailable).toEqual([
       {
