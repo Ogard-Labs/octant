@@ -250,9 +250,15 @@ export class VideoJobService {
   readonly #removalRefused = new Set<string>();
   /**
    * When a provider-expiring copy is gone anyway: a removal still owed past
-   * this is dropped rather than retried.
+   * this is dropped rather than retried. It is derived from the journaled
+   * job, not kept in memory, so a restart keeps the cutoff.
    */
-  readonly #removalDeadline = new Map<string, number>();
+  #owedCopyExpiry(job: VideoJob, model: VideoModelCapabilities | undefined): number | undefined {
+    if (model?.job.removal.kind !== "expires") return undefined;
+    // Owed copies only exist on terminal jobs, so updatedAt is when the clip
+    // was made — the expiry counts from then, not from when the job started.
+    return Date.parse(job.updatedAt) + model.job.removal.afterHours * 3_600_000;
+  }
   /** When each profile's catalog was last read, bounding a retry to 60 s. */
   readonly #discoveryReadAt = new Map<string, number>();
   #active = 0;
@@ -851,14 +857,9 @@ export class VideoJobService {
         // This profile's key already refused a removal: the provider's own
         // expiry ends this copy, and no DELETE is sent.
         copy = "expires";
-      } else {
-        // One removal is owed after the terminal state; a refusal or a copy
-        // still owed past its own expiry falls back to the provider's expiry.
-        this.#removalDeadline.set(
-          String(job.id),
-          Date.parse(job.startedAt ?? job.createdAt) + model.job.removal.afterHours * 3_600_000,
-        );
       }
+      // Otherwise one removal is owed after the terminal state; a refusal or
+      // a copy still owed past its own expiry falls back to that expiry.
     }
     return this.#annotate(job, { remoteId, providerCopy: copy });
   }
@@ -1094,16 +1095,20 @@ export class VideoJobService {
     const job = this.#current(candidate);
     if (job.providerCopy !== "held" || job.remoteId === undefined) return;
     if (this.#removing.has(String(job.id))) return;
-    const expiresAt = this.#removalDeadline.get(String(job.id));
-    if (expiresAt !== undefined && this.#now() >= expiresAt) {
-      this.#markCopy(job, "expires");
-      return;
-    }
     this.#removing.add(String(job.id));
     try {
       const instance = this.#options.readProviderInstance(job.profileInstanceId);
       const adapter = instance === undefined ? undefined : this.#adapterFor(instance);
       if (adapter === undefined) return;
+      const model = (await this.#modelsOf(adapter))?.find(
+        (candidate) => String(candidate.modelId) === String(job.modelId),
+      );
+      if (this.#closing.signal.aborted) return;
+      const expiresAt = this.#owedCopyExpiry(job, model);
+      if (expiresAt !== undefined && this.#now() >= expiresAt) {
+        this.#markCopy(job, "expires");
+        return;
+      }
       let result;
       try {
         result = await adapter.forget(job.remoteId);
@@ -1133,7 +1138,6 @@ export class VideoJobService {
   }
 
   #markCopy(job: VideoJob, providerCopy: VideoProviderCopy): void {
-    this.#removalDeadline.delete(String(job.id));
     const current = this.#current(job);
     const updatedAt = decodeUtcTimestamp(this.#options.clock());
     const version = decodeAggregateVersion(current.version + 1);

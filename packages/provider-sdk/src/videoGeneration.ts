@@ -97,6 +97,9 @@ export interface VideoGenerationAdapter {
   /**
    * Removes the provider's stored copy. Called after every terminal state when
    * the model declares `removal: delete`; the job service retries a failure.
+   * For a model that declares `removal: expires` the host also calls it once,
+   * best-effort: a refusal there falls back to the declared expiry, and any
+   * other failure is retried only until that expiry has passed.
    */
   readonly forget: (remoteId: string) => Promise<VideoAdapterForget>;
 }

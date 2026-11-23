@@ -69,22 +69,43 @@ function capabilities(
   });
 }
 
-function profile(allowlist: ReadonlyArray<ProviderModelId> = [modelId]): ProviderInstance {
-  return {
+function profile(
+  allowlist: ReadonlyArray<ProviderModelId> = [modelId],
+  driverKind: "gemini-video" | "runway-video" | "fal-video" = "gemini-video",
+): ProviderInstance {
+  const base = {
     id: profileId,
-    displayName: "Gemini Video",
+    displayName: "Video Provider",
     enabled: true,
-    environmentPolicy: "inherit-host",
+    environmentPolicy: "inherit-host" as const,
     version: 1 as ProviderInstance["version"],
     createdAt: now as ProviderInstance["createdAt"],
     updatedAt: now as ProviderInstance["updatedAt"],
-    driverKind: "gemini-video",
-    configuration: {
-      kind: "gemini-video-http",
-      modelAllowlist: [...allowlist],
-      defaultModel: allowlist[0] ?? modelId,
-    },
   };
+  const models = {
+    modelAllowlist: [...allowlist],
+    defaultModel: allowlist[0] ?? modelId,
+  };
+  switch (driverKind) {
+    case "runway-video":
+      return {
+        ...base,
+        driverKind,
+        configuration: { kind: "runway-video-http", ...models },
+      };
+    case "fal-video":
+      return {
+        ...base,
+        driverKind,
+        configuration: { kind: "fal-video-http", ...models },
+      };
+    default:
+      return {
+        ...base,
+        driverKind,
+        configuration: { kind: "gemini-video-http", ...models },
+      };
+  }
 }
 
 interface Script {
@@ -103,6 +124,8 @@ interface Script {
   modelsRead?: (call: number) => ReadonlyArray<VideoModelCapabilities>;
   /** The profile's configured models; a shorter answer is a partial read. */
   allowlist?: ReadonlyArray<ProviderModelId>;
+  /** Which video driver the profile and adapter pose as; Gemini by default. */
+  driverKind?: "gemini-video" | "runway-video" | "fal-video";
 }
 
 function fakeDriver(script: Script) {
@@ -114,7 +137,7 @@ function fakeDriver(script: Script) {
   let modelsCalls = 0;
   let modelsFailOnce = script.modelsFail === "once";
   const driver: VideoGenerationDriver = {
-    driverKind: "gemini-video",
+    driverKind: script.driverKind ?? "gemini-video",
     providerName: "Example Video",
     providerHosts: ["video.example.test"],
     create: ({ ports }) => {
@@ -188,7 +211,7 @@ function harness(script: Script, directory?: string) {
   const sleeps: Array<number> = [];
   let clockMs = Date.parse(now);
   const instance: { current: ProviderInstance | undefined } = {
-    current: profile(script.allowlist),
+    current: profile(script.allowlist, script.driverKind),
   };
   const spend = {
     admit: vi.fn((_request: SpendCeilingTurnRequest) => ({
@@ -218,7 +241,7 @@ function harness(script: Script, directory?: string) {
     clock: () => new Date(clockMs++).toISOString(),
     actor,
     drivers: [fake.driver],
-    admittedDriverKinds: new Set(["gemini-video"]),
+    admittedDriverKinds: new Set([script.driverKind ?? "gemini-video"]),
     spendCeiling: spend,
     resolveThreadProjectId: () => projectId,
     sleep: (ms: number) => {
@@ -886,6 +909,115 @@ describe("video jobs", () => {
     await service.retryOwedRemovals();
     expect(calls.forget).toBe(2);
     expect(service.getById(doneId)?.providerCopy).toBe("expires");
+  });
+
+  it("keeps a refused Runway removal owed so a restored key retries it", async () => {
+    let refuse = true;
+    const { service, calls } = harness({
+      driverKind: "runway-video",
+      forget: async () =>
+        refuse
+          ? {
+              status: "failed" as const,
+              providerFailure: {
+                category: "unauthorized" as const,
+                message: "The key cannot delete tasks.",
+              },
+            }
+          : "removed",
+    });
+    const doneId = (await enqueue(service)).id;
+    await service.whenTerminal(doneId);
+    // A model that deletes for real gets no expiry fallback for a 403: the
+    // copy stays owed and the loop keeps asking.
+    await vi.waitFor(() => expect(calls.forget).toBe(1));
+    expect(service.getById(doneId)?.providerCopy).toBe("held");
+    await service.retryOwedRemovals();
+    expect(calls.forget).toBe(2);
+    expect(service.getById(doneId)?.providerCopy).toBe("held");
+
+    refuse = false;
+    await service.retryOwedRemovals();
+    expect(service.getById(doneId)?.providerCopy).toBe("removed");
+  });
+
+  it("counts a provider-expiring copy's window from when the clip was made", async () => {
+    const model = capabilities({
+      cancel: "running",
+      removal: { kind: "expires", afterHours: 2 },
+      resumeWindowHours: 24,
+    });
+    let polls = 0;
+    const { service, calls, advance } = harness({
+      model,
+      poll: async () => {
+        polls += 1;
+        // The clip takes 25 minutes to make, still inside the job's deadline.
+        if (polls === 1) advance(25 * 60_000);
+        return polls === 1
+          ? { status: "running" as const }
+          : {
+              status: "completed" as const,
+              video: { bytes: CONFORMANCE_MP4_BYTES, mediaType: "video/mp4" },
+              usage: { outputTokens: 28_960 },
+            };
+      },
+      forget: async () => ({
+        status: "failed",
+        providerFailure: { category: "provider-failed", message: "fal is down." },
+      }),
+    });
+    const doneId = (await enqueue(service)).id;
+    await service.whenTerminal(doneId);
+    await vi.waitFor(() => expect(calls.forget).toBe(1));
+    expect(service.getById(doneId)?.providerCopy).toBe("held");
+
+    // Two hours from the job's start have passed, but only 100 minutes from
+    // when the clip was made: the copy is still owed and still asked.
+    advance(100 * 60_000);
+    await service.retryOwedRemovals();
+    expect(calls.forget).toBe(2);
+    expect(service.getById(doneId)?.providerCopy).toBe("held");
+
+    advance(25 * 60_000);
+    await service.retryOwedRemovals();
+    expect(calls.forget).toBe(2);
+    expect(service.getById(doneId)?.providerCopy).toBe("expires");
+  });
+
+  it("drops a recovered owed removal past the provider's expiry after a restart", async () => {
+    const model = capabilities({
+      cancel: "running",
+      removal: { kind: "expires", afterHours: 2 },
+      resumeWindowHours: 24,
+    });
+    const down = {
+      forget: async () => ({
+        status: "failed" as const,
+        providerFailure: { category: "provider-failed" as const, message: "fal is down." },
+      }),
+    };
+    const first = harness({ model, ...down });
+    const doneId = (await enqueue(first.service)).id;
+    await first.service.whenTerminal(doneId);
+    await vi.waitFor(() => expect(first.calls.forget).toBe(1));
+    first.service.close();
+
+    const second = harness({ model, ...down }, first.root);
+    await second.service.recover();
+    expect(second.service.getById(doneId)?.providerCopy).toBe("held");
+
+    // Inside the expiry window the restarted host still asks; the cutoff is
+    // read back from the journaled job, not remembered in memory.
+    await second.service.retryOwedRemovals();
+    expect(second.calls.forget).toBeGreaterThanOrEqual(1);
+    expect(second.service.getById(doneId)?.providerCopy).toBe("held");
+
+    second.advance(2 * 3_600_000 + 60_000);
+    const asked = second.calls.forget;
+    await second.service.retryOwedRemovals();
+    expect(second.calls.forget).toBe(asked);
+    expect(second.service.getById(doneId)?.providerCopy).toBe("expires");
   });
 
   it("refuses a seventeenth waiting job so a runaway loop cannot queue without end", async () => {

@@ -364,8 +364,11 @@ which the person sets, like any turn.
 - The host keeps no copy at the provider where the driver can remove one. As
   soon as the clip is stored, or the job fails or is cancelled, the host calls
   the driver's `forget`, and again during restart recovery. A model that
-  declares it cannot remove its copy says on the card how long the provider
-  keeps it.
+  declares `removal: expires` also gets one best-effort `forget` after the
+  terminal state: a refusal falls back to the declared expiry, and any other
+  failure is retried only until that expiry — counted from when the clip was
+  made — has passed. A model that declares it cannot remove its copy says on
+  the card how long the provider keeps it.
 
 ### Watching a clip
 
@@ -633,7 +636,10 @@ export interface VideoGenerationAdapter {
    * Removes the provider's stored copy, called after every terminal state when
    * the model declares `removal: delete`. A failed `forget` is journaled and
    * retried every 15 minutes while the host runs and at every startup, until
-   * the provider confirms the copy is gone.
+   * the provider confirms the copy is gone. For a model that declares
+   * `removal: expires` the host also calls it once, best-effort: a refusal
+   * there falls back to the declared expiry, and any other failure is
+   * retried only until that expiry has passed.
    */
   readonly forget: (remoteId: string) => Promise<{ readonly status: "removed" | "failed" }>;
 }
