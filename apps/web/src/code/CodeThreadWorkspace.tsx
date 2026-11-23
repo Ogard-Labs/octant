@@ -222,6 +222,7 @@ import {
   useThreadProviderMentions,
 } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
+import { ComposerInput, type ComposerInputElement } from "../composer/ComposerInput";
 
 export type CodeAttachmentClient = Pick<
   CodeClient,
@@ -531,7 +532,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
   const threadVersionRef = useRef<CodeThread["version"] | undefined>(undefined);
   const [accessChanging, setAccessChanging] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<ComposerInputElement>(null);
   useEffect(() => {
     const update = props.updateApprovalAnchor;
     const activeView = view;
@@ -1326,7 +1327,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     return true;
   }
 
-  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function onKeyDown(event: KeyboardEvent<ComposerInputElement>) {
     if (suggestionInput.takeOnTab(event)) return;
     if (atMenu.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
@@ -2897,7 +2898,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             textClassName: "visually-hidden",
           }}
           input={
-            <OctantTextarea
+            <ComposerInput
               aria-activedescendant={
                 atMenu.active !== undefined
                   ? `${atMenu.listId}-${atMenu.active.id}`

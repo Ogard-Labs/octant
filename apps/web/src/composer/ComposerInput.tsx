@@ -113,8 +113,12 @@ function isElement(node: Node): node is HTMLElement {
   return node.nodeType === Node.ELEMENT_NODE;
 }
 
-function isChip(node: Node): node is HTMLElement {
+function isChip(node: Node): boolean {
   return isElement(node) && node.hasAttribute(CHIP_ATTRIBUTE);
+}
+
+function chipText(node: Node): string {
+  return isElement(node) ? (node.getAttribute(CHIP_ATTRIBUTE) ?? "") : "";
 }
 
 const BLOCK_TAGS = new Set(["DIV", "P", "LI", "PRE", "BLOCKQUOTE"]);
@@ -127,7 +131,7 @@ const BLOCK_TAGS = new Set(["DIV", "P", "LI", "PRE", "BLOCKQUOTE"]);
 function textOf(node: Node): string {
   if (node.nodeType === Node.TEXT_NODE) return node.nodeValue ?? "";
   if (!isElement(node)) return "";
-  if (isChip(node)) return node.getAttribute(CHIP_ATTRIBUTE) ?? "";
+  if (isChip(node)) return chipText(node);
   if (node.tagName === "BR") return node.hasAttribute(FILLER_ATTRIBUTE) ? "" : "\n";
   let text = "";
   for (const child of node.childNodes) text += textOf(child);
@@ -219,7 +223,7 @@ function isCanonical(root: HTMLElement, value: string): boolean {
     if (node === undefined) return false;
     if (segment.kind === "text") {
       if (node.nodeType !== Node.TEXT_NODE || node.nodeValue !== segment.text) return false;
-    } else if (!isChip(node) || node.getAttribute(CHIP_ATTRIBUTE) !== segment.match.text) {
+    } else if (!isChip(node) || chipText(node) !== segment.match.text) {
       return false;
     }
   }
@@ -245,8 +249,8 @@ function render(
 ): ReadonlyArray<ChipHost> {
   const reusable = new Map<string, Array<HTMLElement>>();
   for (const child of Array.from(root.childNodes)) {
-    if (!isChip(child)) continue;
-    const text = child.getAttribute(CHIP_ATTRIBUTE) ?? "";
+    if (!isElement(child) || !isChip(child)) continue;
+    const text = chipText(child);
     reusable.set(text, [...(reusable.get(text) ?? []), child]);
   }
   const document = root.ownerDocument;
@@ -410,7 +414,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       });
     };
 
-    const restore = (root: HTMLElement, direction: -1 | 1) => {
+    const restore = (root: ComposerInputElement, direction: -1 | 1) => {
       const history = historyRef.current;
       const index = history.index + direction;
       const snapshot = history.entries[index];

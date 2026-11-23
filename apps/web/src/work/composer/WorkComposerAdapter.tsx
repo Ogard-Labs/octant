@@ -70,6 +70,7 @@ import { useComposerThreadDropRegistration } from "../../chat/composerThreadDrop
 import { TrackerReferenceComposerHints } from "../../tracker/TrackerReferenceComposerHints";
 import type { MentionableThreadId } from "@octant/contracts";
 import { WorkKindSwitch } from "../../shell/WorkKindSwitch";
+import { ComposerInput, type ComposerInputElement } from "../../composer/ComposerInput";
 
 export interface WorkComposerAdapterProps {
   /** Text to start the composer with; a new revision replaces the draft once. */
@@ -168,7 +169,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     onDraftChange: setPrompt,
     onResolveExtensionReference: extensionDraft.resolveReference,
   });
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<ComposerInputElement>(null);
   const appliedPromptRevision = useRef<number | undefined>(undefined);
   const promptRequest = props.promptRequest;
   useEffect(() => {
@@ -319,12 +320,12 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     return images.consumePaste(items);
   }
 
-  function onDraftPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+  function onDraftPaste(event: ClipboardEvent<ComposerInputElement>) {
     if (props.creating === true) return;
     if (attachFromTransfer(event.clipboardData)) event.preventDefault();
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function handleKeyDown(event: KeyboardEvent<ComposerInputElement>) {
     if (atMenu.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
@@ -496,7 +497,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
               </>
             }
             input={
-              <OctantTextarea
+              <ComposerInput
                 aria-label="First message"
                 aria-autocomplete="list"
                 aria-expanded={atMenu.open || slash.open}

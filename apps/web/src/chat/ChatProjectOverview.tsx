@@ -30,6 +30,7 @@ import { appendTranscript } from "../voice/appendTranscript";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import type { ChatController } from "./useChatController";
+import { ComposerInput, type ComposerInputElement } from "../composer/ComposerInput";
 
 export type ChatOverviewSectionStatus =
   | "loading"
@@ -115,7 +116,7 @@ function isVisibleOverviewSection(section: ChatOverviewSection): boolean {
 export function ChatProjectOverview(props: ChatProjectOverviewProps) {
   const loadedModel = useChatProjectOverviewModel(props);
   const model = props.model ?? loadedModel;
-  const input = useRef<HTMLTextAreaElement>(null);
+  const input = useRef<ComposerInputElement>(null);
   const inputId = useId();
   const drafts = useContext(NewTaskDraftsContext);
   const draftScope = useContext(NewTaskDraftScopeContext);
@@ -189,7 +190,7 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
                   ]
             }
             input={
-              <OctantTextarea
+              <ComposerInput
                 className="composer-input"
                 disabled={!createAvailable || submitting}
                 id={inputId}

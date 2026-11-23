@@ -241,6 +241,7 @@ import {
   useThreadProviderMentions,
 } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
+import { ComposerInput, type ComposerInputElement } from "../composer/ComposerInput";
 
 /** Only the person's messages carry a time here; the rows after one share it. */
 function workRowHappenedAt(row: WorkTranscriptRow): string | undefined {
@@ -1053,7 +1054,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   } else if (String(initialThread.current?.id) !== String(props.threadId)) {
     initialThread.current = undefined;
   }
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<ComposerInputElement>(null);
   const currentThreadKeyRef = useRef(String(props.threadId));
   currentThreadKeyRef.current = String(props.threadId);
   const mentionListId = useId();
@@ -2487,7 +2488,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     // Restore only when this thread's composer is shown, not on every keystroke.
   }, [props.threadId]);
 
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function handleKeyDown(event: KeyboardEvent<ComposerInputElement>) {
     if (suggestionInput.takeOnTab(event)) return;
     if (atMenu.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
@@ -3404,7 +3405,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             </>
           }
           input={
-            <OctantTextarea
+            <ComposerInput
               aria-label="Work prompt"
               aria-autocomplete="list"
               aria-expanded={atMenu.open || slash.open}
@@ -3441,7 +3442,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 if (folderDrops.onDrop(event) || attachFromTransfer(event.dataTransfer))
                   event.preventDefault();
               }}
-              onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+              onPaste={(event: ClipboardEvent<ComposerInputElement>) => {
                 if ((creating && !preparingQueue.current) || completionLocked) return;
                 if (attachFromTransfer(event.clipboardData)) event.preventDefault();
               }}

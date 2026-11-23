@@ -46,6 +46,7 @@ import {
   USAGE_LEDGER,
   VISUAL_NOW,
 } from "./fixtures";
+import { ComposerInput } from "../composer/ComposerInput";
 
 export interface VisualScene extends SceneMeta {
   readonly render: () => ReactNode;
@@ -135,7 +136,7 @@ function HomeScene() {
         <div className="composer-stack">
           <ThreadComposer
             input={
-              <OctantTextarea
+              <ComposerInput
                 aria-label="First message"
                 className="composer-input"
                 onChange={noop}

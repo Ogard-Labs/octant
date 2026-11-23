@@ -21,6 +21,7 @@ import { useOctantCommands } from "../palette/CommandRegistry";
 import { readPathMentionQuery, type PathMentionCandidate } from "../code/pathMentions";
 import { useThreadNativeSetupServices } from "../providers/ThreadNativeSetupControl";
 import { OctantButton } from "../ui/base/OctantButton";
+import type { ComposerInputElement } from "./ComposerInput";
 
 /** How many skills, servers, and connectors one query lists before files. */
 const MAX_EXTENSION_ROWS = 12;
@@ -198,7 +199,7 @@ export function useComposerAtMenu(input: {
   readonly draft: string;
   readonly onDraftChange: (draft: string, caret?: number) => void;
   readonly onResolveExtensionReference?: (reference: string) => Promise<boolean>;
-  readonly textarea?: () => HTMLTextAreaElement | null;
+  readonly textarea?: () => ComposerInputElement | null;
   readonly apps?: ReadonlyArray<AtMenuApp>;
   readonly files?: AtMenuFiles;
   readonly provider?: ComposerProviderMentions | undefined;
@@ -356,7 +357,7 @@ export function useComposerAtMenu(input: {
     setActiveIndex(0);
     row.choose();
   };
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+  const handleKeyDown = (event: KeyboardEvent<ComposerInputElement>): boolean => {
     if (event.nativeEvent.isComposing) return false;
     if (resolving) {
       if (event.key === "Enter" && !event.shiftKey) {

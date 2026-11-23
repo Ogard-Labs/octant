@@ -1,5 +1,6 @@
 import type { KeyboardEvent } from "react";
 import { suggestionPlaceholder, useComposerSuggestion } from "../followUps/FollowUpSuggestionChips";
+import type { ComposerInputElement } from "./ComposerInput";
 
 export interface ComposerSuggestionInput {
   /** "Reply…", or the suggested next message while the composer is empty. */
@@ -7,7 +8,7 @@ export interface ComposerSuggestionInput {
   /** The empty composer is showing a suggestion it takes on Tab. */
   readonly suggested: boolean;
   /** Takes the suggestion on a bare Tab; answers whether it did. */
-  readonly takeOnTab: (event: KeyboardEvent<HTMLTextAreaElement>) => boolean;
+  readonly takeOnTab: (event: KeyboardEvent<ComposerInputElement>) => boolean;
 }
 
 /**
