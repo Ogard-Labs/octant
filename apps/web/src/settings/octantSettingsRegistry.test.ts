@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { octantSettingsCommandPages } from "./octantSettingsNavigation";
 import { octantSettingsRegistry } from "./octantSettingsRegistry";
 import { listAvailableSections, resolveDeepLink, searchSettings } from "./registry";
 
@@ -120,6 +121,9 @@ describe("octantSettingsRegistry", () => {
       "host",
       "usage",
     ]);
+    expect(octantSettingsCommandPages.map(({ id, label }) => ({ id, label }))).toEqual(
+      octantSettingsRegistry.sections.map(({ id, label }) => ({ id, label })),
+    );
   });
 
   it("registers the GitHub section as a host-scoped connection destination", () => {

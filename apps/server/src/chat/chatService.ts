@@ -3349,17 +3349,12 @@ export class ChatService {
     });
     if (accepted.kind === "existing") return { kind: "turn-created", turn: accepted.turn };
     executionContext?.onTurnAccepted?.();
-    if (
+    const titleFirstTurn =
       accepted.turn.sequence === 1 &&
       executionContext?.windowId !== undefined &&
       !isRoutineHostScope(executionContext.windowId)
-    ) {
-      void this.#nativeHarness?.titleFirstTurn?.(
-        "chat",
-        String(accepted.thread.id),
-        command.prompt,
-      );
-    }
+        ? this.#nativeHarness?.titleFirstTurn
+        : undefined;
     await this.#runAttempt({
       thread: threadAsRoutedFor(accepted.thread, accepted.attempt),
       turn: accepted.turn,
@@ -3367,6 +3362,9 @@ export class ChatService {
       prompt: command.prompt,
       prepared: accepted.prepared,
       ...(executionContext?.windowId === undefined ? {} : { windowId: executionContext.windowId }),
+      ...(titleFirstTurn === undefined
+        ? {}
+        : { onPromptSent: () => void titleFirstTurn("chat", accepted.thread.id, command.prompt) }),
     });
     return { kind: "turn-created", turn: accepted.turn };
   }
@@ -7227,6 +7225,7 @@ export class ChatService {
     readonly prepared: PreparedChatTurn;
     readonly mode?: "send" | "resume";
     readonly windowId?: WindowId;
+    readonly onPromptSent?: () => void;
   }): Promise<void> {
     const controller = new AbortController();
     this.#activeAttempts.set(String(input.attempt.id), controller);
@@ -7490,6 +7489,7 @@ export class ChatService {
               thread: input.thread,
               attempt: input.attempt,
               prompt: input.prompt,
+              ...(input.onPromptSent === undefined ? {} : { onPromptSent: input.onPromptSent }),
               ...(this.#outsideContentMarks === undefined
                 ? {}
                 : { outsideContentMarks: this.#outsideContentMarks }),

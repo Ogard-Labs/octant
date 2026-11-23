@@ -404,6 +404,8 @@ export interface ChatTurnRunnerInput {
   readonly clock?: () => string;
   readonly ambiguousRecovery?: ChatAttemptOutcome;
   readonly signal?: AbortSignal;
+  /** Runs after spend admission and the provider accepting the prompt. */
+  readonly onPromptSent?: () => void;
   /** Observes a completed reply with its full text, the tool calls it made, and how the turn ran. */
   readonly onTurnCompleted?: (input: {
     readonly text: string;
@@ -1994,6 +1996,7 @@ export class ChatTurnRunner {
               ...providerWebSearchAtSend(input.appManagedTools, input.attempt.providerSessionId),
             })
             .pipe(Effect.catchAll(persistProviderFailure));
+          input.onPromptSent?.();
         }),
       });
 

@@ -18,7 +18,10 @@ import {
   type ProviderInstanceId,
   type WorkThread,
 } from "@octant/contracts";
-import { threadTitleEndpointSource } from "@octant/domain/automatic-model-policy";
+import {
+  pairedTodoThreadTitle,
+  threadTitleEndpointSource,
+} from "@octant/domain/automatic-model-policy";
 import type { ThreadTitleSource } from "@octant/contracts/shell";
 import { isProviderAllowedByProjectPolicy } from "@octant/domain/project-provider-policy";
 import { redactSecretsAndPrivateKeys } from "@octant/domain/secret-shaped-text-policy";
@@ -28,7 +31,9 @@ import { Schema } from "effect";
 import { completeOnceOutcome } from "../harness/nativeHarnessSingleShot";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import type { PersistenceService } from "../persistence/persistenceService";
+import { readSpendCeiling } from "../persistence/spendCeilingProjection";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
+import type { CompatibleFetch } from "../providers/openAiCompatibleEndpoint";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { recordOneShotUsage } from "../shield/shieldUsageLedger";
 import type { SpendCeilingService } from "../spendCeilingService";
@@ -41,7 +46,6 @@ const TITLE_INSTRUCTIONS =
 const TIMEOUT_MS = 8_000;
 const MAX_PROMPT_LENGTH = 2_000;
 const MAX_TITLE_LENGTH = 80;
-const TOKEN_RESERVATION = 8_192;
 
 export type ThreadTitleRequest = (
   mode: OctantMode,
@@ -77,9 +81,11 @@ export function createThreadTitleGenerator(input: {
     | "readProviderCatalog"
   >;
   readonly workThreads: Pick<WorkThreadProjection, "read" | "apply">;
+  readonly fetch?: CompatibleFetch;
   readonly resolveDriver: (
     id: ProviderInstanceId,
     source: Exclude<ThreadTitleSource, "first-message">,
+    fetch: CompatibleFetch,
   ) => ProviderDriver | undefined;
   readonly accountUnavailable: (id: ProviderInstanceId) => string | undefined;
   readonly isHeld: (thread: TitleThread) => boolean;
@@ -88,6 +94,7 @@ export function createThreadTitleGenerator(input: {
   readonly scratchRoot: string;
 }): ThreadTitleRequest {
   const { persistence, workThreads } = input;
+  const providerFetch = input.fetch ?? globalThis.fetch;
   const selectedModel = () => {
     const setting = persistence.readShellSettings()?.settings.threadTitles;
     if (setting === undefined || setting.source === "first-message") return undefined;
@@ -136,21 +143,62 @@ export function createThreadTitleGenerator(input: {
         return;
     }
 
-    const driver = input.resolveDriver(instance.id, choice.source);
-    if (driver === undefined) return;
-    const reservationId = decodeSpendCeilingReservationId(randomUUID());
     const threadType = `${mode}-thread` as const;
-    const admission = input.spendCeiling.admit({
-      reservationId,
-      threadId,
-      threadType,
-      ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
-      turnUpperBoundTokens: TOKEN_RESERVATION,
-      // The selected gateway can set its own prices for any model ID.
-      estimatedCostUsdMicros: "unknown",
-      countsAsTurn: false,
+    const projectId = thread.projectId;
+    const unchangedThread = () => {
+      const currentChoice = selectedModel();
+      const current = readThread(mode, threadId);
+      if (
+        current?.lifecycle !== "active" ||
+        current.title !== thread.title ||
+        current.projectId !== projectId ||
+        currentChoice?.source !== choice.source ||
+        currentChoice.providerInstanceId !== choice.providerInstanceId ||
+        currentChoice.modelId !== choice.modelId ||
+        input.leavesNoTrace(scope) ||
+        input.isHeld(scope)
+      )
+        return undefined;
+      return current;
+    };
+    // The supported endpoints don't share a verifiable output bound. Keep
+    // first-message titles anywhere a token ceiling applies.
+    const hasTokenCeiling = () =>
+      readSpendCeiling(persistence.connection, { kind: "thread", threadType, threadId })?.policy
+        .tokenBudget !== undefined ||
+      (projectId !== undefined &&
+        readSpendCeiling(persistence.connection, { kind: "project", projectId })?.policy
+          .tokenBudget !== undefined);
+    if (hasTokenCeiling()) return;
+
+    const reservationId = decodeSpendCeilingReservationId(randomUUID());
+    const admitSpend = () =>
+      input.spendCeiling.admit({
+        reservationId,
+        threadId,
+        threadType,
+        ...(projectId === undefined ? {} : { projectId }),
+        // The selected gateway can set its own prices for any model ID.
+        estimatedCostUsdMicros: "unknown",
+        countsAsTurn: false,
+      });
+
+    let dispatched = false;
+    const driver = input.resolveDriver(instance.id, choice.source, async (request, init) => {
+      init?.signal?.throwIfAborted();
+      if (request instanceof Request) request.signal.throwIfAborted();
+      // Credential resolution can yield while a person changes a ceiling.
+      if (
+        unchangedThread() === undefined ||
+        hasTokenCeiling() ||
+        admitSpend().status === "refused"
+      ) {
+        throw new Error("The thread is no longer eligible for a title request.");
+      }
+      dispatched = true;
+      return providerFetch(request, init);
     });
-    if (admission.status === "refused") return;
+    if (driver === undefined || admitSpend().status === "refused") return;
 
     const outcome = await completeOnceOutcome({
       driver,
@@ -162,7 +210,7 @@ export function createThreadTitleGenerator(input: {
       instructions: TITLE_INSTRUCTIONS,
       timeoutMs: TIMEOUT_MS,
     });
-    if (outcome.status === "unreached") {
+    if (!dispatched) {
       input.spendCeiling.abandon({ reservationId });
       return;
     }
@@ -193,21 +241,8 @@ export function createThreadTitleGenerator(input: {
     if (outcome.status !== "completed") return;
 
     const title = cleanTitle(outcome.text);
-    const currentChoice = selectedModel();
-    const current = readThread(mode, threadId);
-    if (
-      title === "" ||
-      current?.lifecycle !== "active" ||
-      current.title !== thread.title ||
-      current.title === title ||
-      current.projectId !== thread.projectId ||
-      currentChoice?.source !== choice.source ||
-      currentChoice.providerInstanceId !== choice.providerInstanceId ||
-      currentChoice.modelId !== choice.modelId ||
-      input.leavesNoTrace(scope) ||
-      input.isHeld(scope)
-    )
-      return;
+    const current = unchangedThread();
+    if (title === "" || current === undefined || current.title === title) return;
 
     // Chat also journals turns on this aggregate, so its journal head may
     // have advanced while the thread row still carries the same metadata.
@@ -247,7 +282,7 @@ function isPromptTitle(title: string, prompt: string): boolean {
   const desktop = trimmed.length > 60 ? `${trimmed.slice(0, 57)}…` : trimmed;
   const line = trimmed.replace(/\s+/g, " ");
   const mobile = line.length > 72 ? `${line.slice(0, 71).trimEnd()}…` : line;
-  return title === desktop || title === mobile;
+  return title === desktop || title === mobile || title === pairedTodoThreadTitle(trimmed);
 }
 
 function cleanTitle(text: string): string {

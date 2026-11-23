@@ -4,6 +4,7 @@ import {
   type PersonMemoryView,
 } from "@octant/contracts/person-memory";
 import type { ThreadTitleSettings } from "@octant/contracts/shell";
+import { decodeProviderInstanceId, decodeProviderModelId } from "@octant/contracts/providers";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -117,7 +118,7 @@ describe("Automatic model calls", () => {
     );
   });
 
-  it("opens endpoint setup when no model is connected for thread titles", async () => {
+  it("opens endpoint setup when the remembered title endpoint was removed", async () => {
     const open = vi.fn();
     render(
       <AutomaticModelSettings
@@ -126,11 +127,19 @@ describe("Automatic model calls", () => {
         personMemoryClient={undefined}
         onThreadTitlesChange={vi.fn()}
         onOpenModelEndpoints={open}
-        threadTitles={{ source: "subscription" }}
+        providerSnapshot={{ instances: [], catalogs: [], observedStates: [] } as never}
+        threadTitles={{
+          source: "subscription",
+          subscriptionModel: {
+            providerInstanceId: decodeProviderInstanceId(PLAN),
+            modelId: decodeProviderModelId("plan-mini"),
+          },
+        }}
       />,
     );
     await userEvent.setup().click(screen.getByRole("button", { name: "Open Model endpoints" }));
     expect(open).toHaveBeenCalledOnce();
+    expect(screen.getByText(/the account you chose was removed/i)).toBeVisible();
   });
 
   it("shows a failed title-model save and keeps the saved choice", async () => {

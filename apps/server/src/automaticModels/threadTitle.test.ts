@@ -208,28 +208,30 @@ function fixture(plan?: { readonly usageGranted?: boolean; readonly plainKey?: b
             accountLabel: "ChatGPT plan",
           }),
   };
-  const driver = runOnNativeHarness(
-    makeOpenAiCompatibleDriver({
-      instanceId: provider.id,
-      configuration: provider.configuration,
-      runtimeRegistry: registry,
-      fetch,
-      credentialResolver: plan === undefined ? broker : threadTitleSubscriptionCredentials(broker),
-      ...(plan === undefined
-        ? {}
-        : {
-            subscriptionOAuth: {
-              refresh: async () => ({ kind: "refreshed" as const }),
-              access: async () => ({
-                kind: "granted" as const,
-                accessToken: "plan-access-token",
-                subscriptionUsageGranted: plan.usageGranted ?? true,
-              }),
-            },
-          }),
-    }),
-    { instanceId: provider.id, runtimeRegistry: registry },
-  );
+  const makeDriver = (requestFetch: CompatibleFetch) =>
+    runOnNativeHarness(
+      makeOpenAiCompatibleDriver({
+        instanceId: provider.id,
+        configuration: provider.configuration,
+        runtimeRegistry: registry,
+        fetch: requestFetch,
+        credentialResolver:
+          plan === undefined ? broker : threadTitleSubscriptionCredentials(broker),
+        ...(plan === undefined
+          ? {}
+          : {
+              subscriptionOAuth: {
+                refresh: async () => ({ kind: "refreshed" as const }),
+                access: async () => ({
+                  kind: "granted" as const,
+                  accessToken: "plan-access-token",
+                  subscriptionUsageGranted: plan.usageGranted ?? true,
+                }),
+              },
+            }),
+      }),
+      { instanceId: provider.id, runtimeRegistry: registry },
+    );
   const choice = { providerInstanceId: provider.id, modelId: model.id };
   const startingSettings: ShellSettings = {
     ...defaultShellSettings(),
@@ -239,6 +241,12 @@ function fixture(plan?: { readonly usageGranted?: boolean; readonly plainKey?: b
         : { source: "subscription", subscriptionModel: choice },
   };
   let settings: ShellSettings = startingSettings;
+  const spendCeiling = new SpendCeilingService({
+    connection,
+    journal,
+    clock: () => now,
+    uuid: randomUUID,
+  });
   const generate = createThreadTitleGenerator({
     persistence: {
       connection,
@@ -258,25 +266,30 @@ function fixture(plan?: { readonly usageGranted?: boolean; readonly plainKey?: b
       readProject: () => undefined,
     },
     workThreads: new WorkThreadProjection(),
-    resolveDriver: (id) => (id === provider.id ? driver : undefined),
+    fetch,
+    resolveDriver: (id, _source, requestFetch) =>
+      id === provider.id ? makeDriver(requestFetch) : undefined,
     accountUnavailable: () => undefined,
     isHeld: () => false,
     leavesNoTrace: () => false,
-    spendCeiling: new SpendCeilingService({
-      connection,
-      journal,
-      clock: () => now,
-      uuid: randomUUID,
-    }),
+    spendCeiling,
     scratchRoot: "/tmp",
   });
 
   return {
     fetch,
-    generate: () => generate("chat", thread.id, prompt),
+    generate: (message = prompt) => generate("chat", thread.id, message),
     readTitle: () => readChatThread(connection, thread.id)?.title,
     writeTitle,
     readUsage: () => readAllUsageRecords(connection),
+    setTokenCeiling: () =>
+      spendCeiling.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "chat-thread", threadId: thread.id },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { tokenBudget: 100_000, maxTokensPerTurn: 10_000 },
+        window: { kind: "lifetime" },
+      }),
     setSource: (source: ThreadTitleSettings["source"]) => {
       settings = {
         ...settings,
@@ -345,8 +358,27 @@ describe("Model-backed thread titles", () => {
       await test.generate();
       expect(test.fetch).not.toHaveBeenCalled();
       expect(test.readTitle()).toBe(prompt);
+      expect(test.readUsage()).toEqual([]);
     },
   );
+
+  it("keeps the first-message title when the thread has a token ceiling", async () => {
+    const test = fixture();
+    expect(test.setTokenCeiling().kind).toBe("set");
+    await test.generate();
+    expect(test.fetch).not.toHaveBeenCalled();
+    expect(test.readTitle()).toBe(prompt);
+    expect(test.readUsage()).toEqual([]);
+  });
+
+  it("replaces the first-message title from a paired to-do draft", async () => {
+    const test = fixture();
+    const message =
+      "Please investigate the launch retries and add regression coverage for reconnecting.";
+    test.writeTitle(message.slice(0, 60));
+    await test.generate(message);
+    expect(test.readTitle()).toBe("Fix launch retries");
+  });
 
   it("keeps a manual rename made while the endpoint is answering", async () => {
     const test = fixture();
@@ -369,5 +401,6 @@ describe("Model-backed thread titles", () => {
     await test.generate();
     expect(test.fetch).toHaveBeenCalledTimes(1);
     expect(test.readTitle()).toBe(prompt);
+    expect(test.readUsage()).toHaveLength(1);
   });
 });

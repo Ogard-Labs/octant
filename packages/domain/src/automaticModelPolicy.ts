@@ -1,5 +1,10 @@
 import type { ProviderInstance, ProviderReadiness } from "@octant/contracts";
 
+/** The first-message title used when starting a thread from a paired to-do. */
+export function pairedTodoThreadTitle(prompt: string): string {
+  return prompt.slice(0, 60);
+}
+
 /** Titles use standalone inference on a direct API endpoint or the ChatGPT plan endpoint. */
 export function threadTitleEndpointSource(
   instance: ProviderInstance,

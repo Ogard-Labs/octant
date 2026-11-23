@@ -47,6 +47,13 @@ export const modelValue = (choice: ShieldModelChoice | undefined) =>
     ? THREAD_PROVIDER_MODEL
     : `${String(choice.providerInstanceId)}/${String(choice.modelId)}`;
 
+type ModelOption = {
+  readonly id: string;
+  readonly label: string;
+  readonly choice?: ShieldModelChoice;
+  readonly unavailable?: true;
+};
+
 /**
  * The accounts an automatic job may use: each enabled provider account's
  * catalogued models, local ones and API-key accounts included, an API-key
@@ -59,14 +66,8 @@ export function shieldModelOptions(
   /** What the first option, which stands for no choice, is called. */
   defaultLabel: string = DEFAULT_LABEL,
   eligible: (instance: ProviderInstance) => boolean = () => true,
-): ReadonlyArray<{
-  readonly id: string;
-  readonly label: string;
-  readonly choice?: ShieldModelChoice;
-}> {
-  const options: Array<{ id: string; label: string; choice?: ShieldModelChoice }> = [
-    { id: THREAD_PROVIDER_MODEL, label: defaultLabel },
-  ];
+): ReadonlyArray<ModelOption> {
+  const options: ModelOption[] = [{ id: THREAD_PROVIDER_MODEL, label: defaultLabel }];
   for (const instance of snapshot?.instances ?? []) {
     if (!instance.enabled || !eligible(instance)) continue;
     const catalog = snapshot?.catalogs?.find(
@@ -87,7 +88,12 @@ export function shieldModelOptions(
   // A stored choice whose provider is gone is still shown, so the select
   // never claims a choice the host does not hold.
   if (current !== undefined && !options.some((option) => option.id === modelValue(current))) {
-    options.push({ id: modelValue(current), label: String(current.modelId), choice: current });
+    options.push({
+      id: modelValue(current),
+      label: current.modelId,
+      choice: current,
+      unavailable: true,
+    });
   }
   return options;
 }
@@ -376,7 +382,11 @@ function ThreadTitleRows(props: {
     (instance) => threadTitleEndpointSource(instance) === source,
   );
   const value = modelValue(choice);
-  const unavailable = accountProblem(props.snapshot, choice);
+  const hasModel = options.some((option) => option.choice !== undefined && !option.unavailable);
+  const missingModel = props.snapshot !== undefined && options.some((option) => option.unavailable);
+  const unavailable =
+    accountProblem(props.snapshot, choice) ??
+    (missingModel ? "The saved model is unavailable." : undefined);
   const focusModel = props.focusedSetting === "automatic-model-thread-title-model";
 
   async function save(next: ThreadTitleSettings) {
@@ -440,7 +450,7 @@ function ThreadTitleRows(props: {
           scope="host"
           settingId="automatic-model-thread-title-model"
         >
-          {options.length === 1 && props.onOpenModelEndpoints !== undefined ? (
+          {!hasModel && props.onOpenModelEndpoints !== undefined ? (
             <OctantButton
               onClick={props.onOpenModelEndpoints}
               size="sm"
@@ -454,17 +464,19 @@ function ThreadTitleRows(props: {
               aria-label={modelLabel}
               aria-describedby="automatic-model-thread-title-model-description"
               className="settings-view__select window-no-drag"
-              disabled={busy || options.length === 1}
+              disabled={busy || !hasModel}
               onValueChange={(next) => {
-                const selected = options.find(({ id }) => id === next)?.choice;
+                const selected = options.find(
+                  (option) => option.id === next && !option.unavailable,
+                )?.choice;
                 if (selected !== undefined && next !== value) {
                   void save({ ...props.settings, [modelKey]: selected });
                 }
               }}
-              options={options.map(({ id, label, choice: model }) => ({
+              options={options.map(({ id, label, choice: model, unavailable }) => ({
                 id,
                 label,
-                disabled: model === undefined,
+                disabled: model === undefined || unavailable === true,
               }))}
               value={value}
             />

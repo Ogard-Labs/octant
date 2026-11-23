@@ -950,11 +950,12 @@ export function wireHarness(deps: HarnessDependencies) {
   const titleFirstTurn = createThreadTitleGenerator({
     persistence,
     workThreads: workThreadProjection,
-    resolveDriver: (id, source) =>
-      resolveConfiguredDriver(
-        id,
-        source === "subscription" ? subscriptionTitleDriverOptions : titleDriverOptions,
-      ),
+    ...(titleDriverOptions.fetch === undefined ? {} : { fetch: titleDriverOptions.fetch }),
+    resolveDriver: (id, source, fetch) =>
+      resolveConfiguredDriver(id, {
+        ...(source === "subscription" ? subscriptionTitleDriverOptions : titleDriverOptions),
+        fetch,
+      }),
     accountUnavailable: automaticModelAccountUnavailable,
     isHeld: (thread) => deps.threadMoveHolds.isHeld(thread),
     leavesNoTrace: (thread) => personMemory.leavesNoTrace(thread),

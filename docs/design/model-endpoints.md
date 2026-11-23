@@ -493,8 +493,9 @@ message. The request contains at most 2,000 characters of the message, with
 recognizable secrets redacted. It includes no attachments or thread history.
 The chosen endpoint can be different from the thread's model, satisfies any
 Project provider policy, and accounts for spend under the thread. Requests
-appear in Usage. Threads that leave no trace and threads held for a move
-skip generation. A supplied or manually changed title takes precedence.
+appear in Usage. Threads that leave no trace, threads held for a move, and
+threads or Projects with a token ceiling keep the first-message title.
+A supplied or manually changed title takes precedence.
 If the endpoint or model cannot be used, exceeds its deadline, or returns
 no title, the locally derived title stays. Each request uses only the
 selected source and model.
