@@ -181,7 +181,7 @@ describe("the agent bridge", () => {
     expect(answers.find((answer) => answer.id === 2)?.error?.code).toBe(-32001);
   });
 
-  it("relays an event stream over stdio and cancels it with its request id", async () => {
+  it("closes a live HTTP event stream when its stdio request is cancelled", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-agent-bridge-"));
     directories.push(directory);
     const out = join(directory, "agent.json");
@@ -192,50 +192,62 @@ describe("the agent bridge", () => {
       stderr: sink(),
     });
     const connection = decodeAgentConnectionFile(JSON.parse(readFileSync(out, "utf8")));
-    const delivered = Promise.withResolvers<void>();
     const stdout = sink();
-    async function* requests() {
-      yield (
-        JSON.stringify({
-          jsonrpc: "2.0",
-          id: 9,
-          method: "events/stream",
-          params: {
-            name: "thread.turn_settled",
-            _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" },
-          },
-        }) + "\n"
+    let headers: IncomingHttpHeaders | undefined;
+    let closed = false;
+    const server = createServer((request, response) => {
+      headers = request.headers;
+      request.resume();
+      response.on("close", () => {
+        closed = true;
+      });
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write(
+        'event: message\ndata: {"jsonrpc":"2.0","method":"notifications/events/active"}\n\n',
       );
-      await delivered.promise;
-      expect(stdout.text()).toContain("notifications/events/active");
-      yield '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":9}}\n';
-    }
-    await runAgentMcpBridge({
-      connection,
-      input: requests(),
-      stdout,
-      stderr: sink(),
-      fetch: async (request) => {
-        expect(request.headers).toMatchObject({
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (address === null || typeof address === "string") throw new Error("no port");
+      async function* requests() {
+        yield (
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 9,
+            method: "events/stream",
+            params: {
+              name: "thread.turn_settled",
+              _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" },
+            },
+          }) + "\n"
+        );
+        await expect.poll(() => stdout.text()).toContain("notifications/events/active");
+        expect(headers).toMatchObject({
           "mcp-protocol-version": "2026-07-28",
           "mcp-method": "events/stream",
           "mcp-name": "thread.turn_settled",
         });
-        const signal = request.signal;
-        if (signal === undefined || request.onEvent === undefined)
-          throw new Error("Expected an event stream");
-        const cancelled = new Promise<void>((resolve) =>
-          signal.addEventListener("abort", () => resolve(), { once: true }),
-        );
-        request.onEvent(
-          'event: message\ndata: {"jsonrpc":"2.0","method":"notifications/events/active"}',
-        );
-        delivered.resolve();
-        await cancelled;
-        expect(signal.aborted).toBe(true);
-        return { status: 200, contentType: "text/event-stream", body: "" };
-      },
-    });
+        yield '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":9}}\n';
+        // Keep stdin open until the server observes the disconnect so bridge
+        // shutdown cannot satisfy the cancellation check.
+        await expect.poll(() => closed).toBe(true);
+      }
+      await expect(
+        runAgentMcpBridge({
+          connection,
+          input: requests(),
+          stdout,
+          stderr: sink(),
+          fetch: agentLoopbackFetch(`http://127.0.0.1:${String(address.port)}`),
+        }),
+      ).resolves.toBe(0);
+    } finally {
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      });
+    }
   });
 
   it("reaches the host on this computer over loopback with only the signed proof, and refuses any other address", async () => {
