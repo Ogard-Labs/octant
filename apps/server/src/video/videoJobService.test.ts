@@ -519,6 +519,23 @@ describe("video jobs", () => {
     expect(service.getById(done!.id)?.providerCopy).toBe("removed");
   });
 
+  it("keeps an owed removal when the provider delete rejects", async () => {
+    const forget = vi
+      .fn<() => Promise<"removed" | "failed">>()
+      .mockRejectedValueOnce(new Error("Provider connection closed"))
+      .mockResolvedValue("removed");
+    const { service } = harness({ forget });
+    const job = await enqueue(service);
+    expect(await service.whenTerminal(job.id)).toMatchObject({
+      status: "completed",
+      providerCopy: "held",
+    });
+    await vi.waitFor(() => expect(forget).toHaveBeenCalledOnce());
+    await service.retryOwedRemovals();
+    expect(forget).toHaveBeenCalledTimes(2);
+    expect(service.getById(job.id)?.providerCopy).toBe("removed");
+  });
+
   it("holds no slot for a pending provider delete, and never asks the same delete twice", async () => {
     // Two finished jobs wait on deferred provider deletes while a third still
     // runs to the end, because a delete holds no concurrency slot; and a

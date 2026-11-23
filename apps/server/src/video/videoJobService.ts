@@ -859,14 +859,21 @@ export class VideoJobService {
   readonly #removing = new Set<string>();
 
   async #forget(job: VideoJob): Promise<void> {
-    if (job.providerCopy !== "held" || job.remoteId === undefined) return;
+    if (this.#closing.signal.aborted || job.providerCopy !== "held" || job.remoteId === undefined)
+      return;
     if (this.#removing.has(String(job.id))) return;
     this.#removing.add(String(job.id));
     try {
       const instance = this.#options.readProviderInstance(job.profileInstanceId);
       const adapter = instance === undefined ? undefined : this.#adapterFor(instance);
       if (adapter === undefined) return;
-      const result = await adapter.forget(job.remoteId);
+      let result;
+      try {
+        result = await adapter.forget(job.remoteId);
+      } catch {
+        // Leave the copy owed if the provider never confirms removal.
+        return;
+      }
       // A shutdown during the request leaves the journal closed and the copy
       // still owed; the next host's recovery retries the removal.
       if (this.#closing.signal.aborted) return;
