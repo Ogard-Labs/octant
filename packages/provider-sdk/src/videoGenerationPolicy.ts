@@ -320,7 +320,15 @@ export function settleVideoCostUsdMicros(
     // Only a single-rate model can be settled from seconds alone; otherwise
     // the rate for the clip's own options is the estimate's.
     if (price.rates.length === 1 && rate !== undefined) {
-      return Math.ceil(rate.usdMicrosPerSecond * usage.billedSeconds);
+      return Math.min(
+        estimateUsdMicros,
+        perSecondCostUsdMicros(
+          price,
+          rate.usdMicrosPerSecond,
+          usage.billedSeconds,
+          input.imageCount,
+        ),
+      );
     }
   }
   if (price.kind === "per-token" && usage.outputTokens !== undefined) {

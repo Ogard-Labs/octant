@@ -132,7 +132,9 @@ describe("Runway video driver", () => {
     const completed = await done.poll(taskId, new AbortController().signal);
     expect(completed).toMatchObject({ status: "completed", usage: { costUsdMicros: 600_000 } });
     expect(
-      settleVideoCostUsdMicros(RUNWAY_GEN45.price, 999_999, { costUsdMicros: 600_000 }, options),
+      settleVideoCostUsdMicros(RUNWAY_GEN45.price, 999_999, { costUsdMicros: 600_000 }, options, {
+        imageCount: 0,
+      }),
     ).toBe(600_000);
 
     const refused = runwayVideoDriver.create({
