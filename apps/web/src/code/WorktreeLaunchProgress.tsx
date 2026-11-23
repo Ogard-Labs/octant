@@ -1,37 +1,42 @@
 import "../styles/worktree-launch.css";
-import { createContext, useContext, useEffect, useState } from "react";
-import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
-import type { CodeThreadId, CodeWorktreeCreationProgress } from "@octant/contracts/code";
-import type { ProjectId } from "@octant/contracts/projects";
+import { useContext, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import type { WorktreePreparation } from "@octant/contracts/project-terminals";
-import type { PreparationTarget } from "../projects/WorktreePreparationDialog";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { Check, Circle, GitFork, LoaderCircle, Minus, X } from "../ui/icons";
+import { WorktreeLaunchContext, type WorktreeLaunch } from "./worktreeLaunchContext";
 
-export interface WorktreeLaunch {
-  readonly threadId: CodeThreadId;
-  readonly composerId: string;
-  readonly projectId: ProjectId;
-  readonly startFromOrigin: boolean;
-  readonly phase?: CodeWorktreeCreationProgress["phase"];
-  readonly sourceMs?: number;
-  readonly checkoutMs?: number;
-  readonly target?: PreparationTarget;
-  readonly turn?: "starting" | "started";
-  readonly blocked?: boolean;
+export function trackWorktreeLaunch(
+  initial: WorktreeLaunch,
+  publish: Dispatch<SetStateAction<ReadonlyMap<WorktreeLaunch["threadId"], WorktreeLaunch>>>,
+) {
+  let launch = initial;
+  const update = (changes: Partial<WorktreeLaunch>) => {
+    const next = { ...launch, ...changes };
+    launch = next;
+    publish((current) => {
+      const launches = new Map(current);
+      for (const [id, previous] of launches) {
+        if (
+          previous.composerId === next.composerId &&
+          previous.target === undefined &&
+          id !== next.threadId
+        ) {
+          launches.delete(id);
+        }
+      }
+      return launches.set(next.threadId, next);
+    });
+  };
+  update({});
+  return {
+    update,
+    finish: () => {
+      if (launch.turn !== "started") update({ blocked: true });
+    },
+  };
 }
-
-export const WorktreeLaunchContext = createContext<
-  | {
-      readonly launches: ReadonlyMap<CodeThreadId, WorktreeLaunch>;
-      readonly client: ProjectTerminalClient;
-      readonly onDetails: (target: PreparationTarget) => void;
-      readonly detailsThreadId: CodeThreadId | undefined;
-    }
-  | undefined
->(undefined);
 
 type StepStatus =
   | "Pending"

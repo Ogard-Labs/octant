@@ -1503,35 +1503,6 @@ export const CodeManagedThreadCreated = Schema.Struct({
   provenance: CodeWorktreeSourceProvenance,
 }).annotations(strict);
 export type CodeManagedThreadCreated = typeof CodeManagedThreadCreated.Type;
-/** Live progress for the window that requested managed thread creation. */
-export const CodeWorktreeCreationProgress = Schema.Union(
-  Schema.Struct({
-    phase: Schema.Literal("source"),
-  }).annotations(strict),
-  Schema.Struct({
-    phase: Schema.Literal("checkout"),
-    sourceMs: Schema.NonNegativeInt,
-  }).annotations(strict),
-  Schema.Struct({
-    phase: Schema.Literal("ready"),
-    checkoutMs: Schema.NonNegativeInt,
-  }).annotations(strict),
-);
-export type CodeWorktreeCreationProgress = typeof CodeWorktreeCreationProgress.Type;
-export const CodeWorktreeCreationFrame = Schema.Union(
-  Schema.Struct({
-    kind: Schema.Literal("progress"),
-    progress: CodeWorktreeCreationProgress,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("result"),
-    result: CodeManagedThreadCreated,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("failure"),
-    failure: CodeFailure,
-  }).annotations(strict),
-);
 export const CodeWorktreeRemoteFactsRetrieved = Schema.Struct({
   kind: Schema.Literal("worktree-remote-facts-retrieved"),
   projectId: ProjectId,

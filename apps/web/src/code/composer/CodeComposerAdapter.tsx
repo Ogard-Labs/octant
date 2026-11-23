@@ -2,7 +2,7 @@ import { useDroppedFolderMentions } from "../../composer/useDroppedFolderMention
 import { attachAllowingFiles } from "../../composer/attachmentMediaType";
 import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
 import type { AutoReview } from "../autoReview";
-import { WorktreeLaunchContext, WorktreeLaunchProgress } from "../WorktreeLaunchProgress";
+import { WorktreeLaunchContext } from "../worktreeLaunchContext";
 import {
   mentionChipsFromDraft,
   mentionChipsToDraft,
@@ -63,6 +63,8 @@ import {
   serverPlacementNoticeKey,
 } from "./serverCodeComposer";
 import {
+  lazy,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -300,6 +302,11 @@ export interface CodeComposerSubmitInput {
  * have.
  */
 const LAST_RESORT_BASE_BRANCH = "development";
+const WorktreeLaunchProgress = lazy(() =>
+  import("../WorktreeLaunchProgress").then(({ WorktreeLaunchProgress }) => ({
+    default: WorktreeLaunchProgress,
+  })),
+);
 
 export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const suggestionDescriptionId = useId();
@@ -1300,7 +1307,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         </div>
 
         {worktreeLaunch === undefined ? null : (
-          <WorktreeLaunchProgress key={worktreeLaunch.threadId} launch={worktreeLaunch} />
+          <Suspense fallback={<span role="status">Setting up worktree…</span>}>
+            <WorktreeLaunchProgress key={worktreeLaunch.threadId} launch={worktreeLaunch} />
+          </Suspense>
         )}
         {props.projectSetup}
 

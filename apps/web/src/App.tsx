@@ -3,11 +3,9 @@ import { attachmentMediaType } from "./composer/attachmentMediaType";
 import { OctantEmpty } from "./ui/base/OctantEmpty";
 import { AgentThreadAttributionProvider } from "./agentAccess/agentThreadAttribution";
 import { QuestionnaireDraftsProvider } from "./transcript/questionnaireDrafts";
-import {
-  WorktreePreparationDialog,
-  type PreparationTarget,
-} from "./projects/WorktreePreparationDialog";
-import { WorktreeLaunchContext, type WorktreeLaunch } from "./code/WorktreeLaunchProgress";
+import type { PreparationTarget } from "./projects/WorktreePreparationDialog";
+import { WorktreeLaunchContext, type WorktreeLaunch } from "./code/worktreeLaunchContext";
+import type { trackWorktreeLaunch } from "./code/WorktreeLaunchProgress";
 import type { CodeReviewFileRequest } from "./code/codeReviewNavigation";
 import { SidebarThreadTabsContext, type SidebarThreadTabs } from "./shell/sidebarThreadTabs";
 import { autoReviewFor } from "./code/autoReview";
@@ -743,6 +741,11 @@ const PairedComputerCodeSurface = lazy(() =>
 const MoveThreadToProjectDialog = lazy(() =>
   import("./projects/MoveThreadToProjectDialog").then(({ MoveThreadToProjectDialog }) => ({
     default: MoveThreadToProjectDialog,
+  })),
+);
+const WorktreePreparationDialog = lazy(() =>
+  import("./projects/WorktreePreparationDialog").then(({ WorktreePreparationDialog }) => ({
+    default: WorktreePreparationDialog,
   })),
 );
 
@@ -7931,25 +7934,7 @@ function LaunchedShell(
     setDraftPendingMessage(undefined);
     setRailPlaceholder(undefined);
     let firstPromptAnnouncedFor: import("@octant/contracts").CodeThreadId | undefined;
-    let worktreeLaunch: WorktreeLaunch | undefined;
-    const updateWorktree = (changes: Partial<WorktreeLaunch>) => {
-      if (worktreeLaunch === undefined) return;
-      const next = { ...worktreeLaunch, ...changes };
-      worktreeLaunch = next;
-      setWorktreeLaunches((current) => {
-        const launches = new Map(current);
-        for (const [id, launch] of launches) {
-          if (
-            launch.composerId === next.composerId &&
-            launch.target === undefined &&
-            id !== next.threadId
-          ) {
-            launches.delete(id);
-          }
-        }
-        return launches.set(next.threadId, next);
-      });
-    };
+    let worktreeLaunch: ReturnType<typeof trackWorktreeLaunch> | undefined;
     try {
       const destinationHostId = refuseUnlessCreatableDestination({
         action: "create-code-thread",
@@ -8071,16 +8056,17 @@ function LaunchedShell(
         command.kind === "create-managed-code-thread" &&
         input.presentation !== undefined
       ) {
-        worktreeLaunch = {
-          threadId: command.threadId,
-          composerId: input.presentation.composerId,
-          projectId: command.projectId,
-          startFromOrigin: command.startFromOrigin,
-        };
-        updateWorktree({});
-        created = await codeController.execute(command, undefined, (progress) =>
-          updateWorktree(progress),
+        const { trackWorktreeLaunch } = await import("./code/WorktreeLaunchProgress");
+        worktreeLaunch = trackWorktreeLaunch(
+          {
+            threadId: command.threadId,
+            composerId: input.presentation.composerId,
+            projectId: command.projectId,
+            startFromOrigin: command.startFromOrigin,
+          },
+          setWorktreeLaunches,
         );
+        created = await codeController.execute(command, undefined, worktreeLaunch.update);
       } else if (plannerReview === undefined) created = await codeController.execute(command);
       else {
         if (
@@ -8122,7 +8108,7 @@ function LaunchedShell(
         created.kind === "managed-thread-created" &&
         created.checkout.kind === "managed-worktree"
       ) {
-        updateWorktree({
+        worktreeLaunch?.update({
           phase: "ready",
           target: {
             projectId: created.thread.projectId,
@@ -8202,7 +8188,7 @@ function LaunchedShell(
         });
         attachmentIds.push(attachmentId);
       }
-      updateWorktree({ turn: "starting" });
+      worktreeLaunch?.update({ turn: "starting" });
       const firstTurnStarted = await codeController.startThreadTurn({
         threadId: created.thread.id,
         checkoutId,
@@ -8238,7 +8224,7 @@ function LaunchedShell(
       // honestly empty journal. Notify that exact controller after the
       // operation is durable; the registry queues the refresh if React has not
       // published the controller slot yet.
-      updateWorktree({ turn: "started" });
+      worktreeLaunch?.update({ turn: "started" });
       codeThreadControllers.refreshConversation(created.thread.id);
       return true;
     } catch (error) {
@@ -8258,7 +8244,7 @@ function LaunchedShell(
       );
       return false;
     } finally {
-      if (worktreeLaunch?.turn !== "started") updateWorktree({ blocked: true });
+      worktreeLaunch?.finish();
       setDraftCreating(false);
     }
   }
@@ -10113,13 +10099,15 @@ function LaunchedShell(
 
                           <OctantDialogPresence>
                             {preparationTarget === undefined ? null : (
-                              <WorktreePreparationDialog
-                                key={JSON.stringify(preparationTarget)}
-                                client={projectTerminalClient}
-                                runs={agentRunClient}
-                                target={preparationTarget}
-                                onClose={() => setPreparationTarget(undefined)}
-                              />
+                              <Suspense fallback={null}>
+                                <WorktreePreparationDialog
+                                  key={JSON.stringify(preparationTarget)}
+                                  client={projectTerminalClient}
+                                  runs={agentRunClient}
+                                  target={preparationTarget}
+                                  onClose={() => setPreparationTarget(undefined)}
+                                />
+                              </Suspense>
                             )}
                           </OctantDialogPresence>
                           {actionsProject === undefined ? null : (

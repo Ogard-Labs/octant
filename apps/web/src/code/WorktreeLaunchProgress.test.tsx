@@ -3,11 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import { decodeProjectTerminalCommand, decodeProjectTerminalResult } from "@octant/contracts";
-import {
-  WorktreeLaunchContext,
-  WorktreeLaunchProgress,
-  type WorktreeLaunch,
-} from "./WorktreeLaunchProgress";
+import { WorktreeLaunchProgress } from "./WorktreeLaunchProgress";
+import { WorktreeLaunchContext, type WorktreeLaunch } from "./worktreeLaunchContext";
 
 afterEach(cleanup);
 

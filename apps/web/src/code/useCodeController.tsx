@@ -12,6 +12,7 @@ import type {
   CoordinatorWorkerListing,
   CoordinatorWorkerListingByProject,
   CoordinatorWorkerLevel,
+  CodeWorktreeCreationProgress,
   SideChatDraftReturnReference,
   WindowsTerminalShell,
 } from "@octant/contracts";
@@ -29,7 +30,6 @@ import type {
   CodeNavigation,
   CodeCommand,
   CodeCommandResult,
-  CodeWorktreeCreationProgress,
   CodeFailure,
   CodeCheckoutId,
   CodeExternalEditor,

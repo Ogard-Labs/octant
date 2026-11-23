@@ -7,7 +7,8 @@ import {
   type ProjectMemoryProposalClient,
 } from "../projects/ProjectMemoryProposalPrompt";
 import { ProviderCloudSessions } from "./ProviderCloudSessions";
-import { WorktreeLaunchContext, WorktreeLaunchProgress } from "./WorktreeLaunchProgress";
+import { WorktreeLaunchProgress } from "./WorktreeLaunchProgress";
+import { WorktreeLaunchContext } from "./worktreeLaunchContext";
 import { CoordinatorWorkerCards, type CoordinatorWorkersSource } from "./CoordinatorWorkersPanel";
 import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
 import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
