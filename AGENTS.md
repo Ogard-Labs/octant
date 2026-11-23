@@ -357,7 +357,11 @@ satisfy it. Ordinary issues do not acquire a blanket human-signoff gate.
 - A design proposal, spec draft, or open design question lives in the Linear
   issue that owns the outcome, not in a pull request or a GitHub issue. Spec
   files change only in the implementation's pull request, once the maintainer
-  has approved the design on the issue. (In November 2026 agents opened a
+  has approved the design on the issue; a direct maintainer request counts as
+  that approval when the issue records it. A public feature request filed
+  through the GitHub form is intake: move its design discussion to Linear once
+  it is accepted. A correction that changes no rule (a broken link, a typo, a
+  stale summary) may still go in its own pull request. (In November 2026 agents opened a
   GitHub issue plus a spec-only draft pull request for a single design
   proposal, adding a pull request with nothing to implement.)
 - Choose the smallest delivery shape that preserves reviewability:
