@@ -28,7 +28,6 @@ import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantTextarea } from "../ui/base/OctantTextarea";
 import type { ChatController } from "./useChatController";
 import { ComposerInput, type ComposerInputElement } from "../composer/ComposerInput";
 

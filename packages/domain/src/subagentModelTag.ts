@@ -60,7 +60,9 @@ export function formatSubagentModelTag(tag: SubagentModelTag): string {
  * `reasoning` or `effort` selection option. The launch accepts only these, so
  * the picker offers only these, beside the provider's default.
  */
-export function subagentReasoningValues(model: Pick<ProviderModel, "options">): ReadonlyArray<string> {
+export function subagentReasoningValues(
+  model: Pick<ProviderModel, "options">,
+): ReadonlyArray<string> {
   return model.options.flatMap((option) =>
     option.kind === "selection" && (option.id === "reasoning" || option.id === "effort")
       ? option.values

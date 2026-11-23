@@ -47,7 +47,6 @@ import { markInteraction, markInteractionAfterPaint } from "../polling/interacti
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import type { ComposerNoticeItem, ComposerProgress } from "../composer/ComposerNotice";

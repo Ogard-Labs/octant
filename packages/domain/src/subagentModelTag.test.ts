@@ -22,7 +22,10 @@ describe("subagent model tags", () => {
 
   it("keeps a router's vendor-qualified model id whole", () => {
     const [match] = findSubagentModelTags(`@model(${instance}/anthropic/claude-x:beta)`);
-    expect(match?.tag).toEqual({ providerInstanceId: instance, modelId: "anthropic/claude-x:beta" });
+    expect(match?.tag).toEqual({
+      providerInstanceId: instance,
+      modelId: "anthropic/claude-x:beta",
+    });
   });
 
   it("finds several tags and ignores malformed ones", () => {

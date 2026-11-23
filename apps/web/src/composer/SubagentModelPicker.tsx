@@ -264,7 +264,9 @@ export function SubagentModelPicker(props: {
   return (
     <div
       aria-label={
-        chosen === undefined ? "Choose a subagent model" : `Reasoning for ${chosen.model.displayName}`
+        chosen === undefined
+          ? "Choose a subagent model"
+          : `Reasoning for ${chosen.model.displayName}`
       }
       className="chat-composer__command-typeahead subagent-model-picker"
       role="dialog"
@@ -278,7 +280,9 @@ export function SubagentModelPicker(props: {
         className="subagent-model-picker__search"
         readOnly={chosen !== undefined}
         onBlur={(event) => {
-          if (!event.currentTarget.closest(".subagent-model-picker")?.contains(event.relatedTarget)) {
+          if (
+            !event.currentTarget.closest(".subagent-model-picker")?.contains(event.relatedTarget)
+          ) {
             props.onDismiss();
           }
         }}

@@ -238,7 +238,8 @@ function isCanonical(root: HTMLElement, value: string): boolean {
   }
   if (filler === 1) {
     const last = nodes.at(-1);
-    if (last === undefined || !isElement(last) || !last.hasAttribute(FILLER_ATTRIBUTE)) return false;
+    if (last === undefined || !isElement(last) || !last.hasAttribute(FILLER_ATTRIBUTE))
+      return false;
   }
   return true;
 }
@@ -479,7 +480,6 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
       });
       rootRef.current = root;
       setChipHosts(render(root, modelRef.current, keysRef.current, nextKey));
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     useImperativeHandle<ComposerInputElement | null, ComposerInputElement | null>(
@@ -567,7 +567,6 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
         root.removeEventListener("compositionstart", onCompositionStart);
         root.removeEventListener("compositionend", onCompositionEnd);
       };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // A `<label for>` names a text field but not an editable element, so the
@@ -588,7 +587,6 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
 
     useEffect(() => {
       if (autoFocus === true) rootRef.current?.focus();
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const editable = disabled !== true && readOnly !== true;
@@ -671,9 +669,7 @@ export const ComposerInput = forwardRef<ComposerInputElement, ComposerInputProps
               const root = rootRef.current;
               const start = root === null ? host.match.start : offsetOf(root, host.node, 0);
               return { start, end: start + host.match.text.length };
-            }) ?? (
-              <span className="composer-chip__label">{host.match.text}</span>
-            ),
+            }) ?? <span className="composer-chip__label">{host.match.text}</span>,
             host.node,
             host.key,
           ),

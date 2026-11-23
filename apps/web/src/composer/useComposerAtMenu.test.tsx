@@ -20,8 +20,10 @@ import { ThreadNativeSetupProvider } from "../providers/ThreadNativeSetupControl
 import {
   decodeAggregateVersion,
   decodeProviderInstanceId,
+  decodeProviderModel,
   decodeUtcTimestamp,
 } from "@octant/contracts";
+import { ComposerInput, type ComposerInputElement } from "./ComposerInput";
 import type { PickerGroup } from "@octant/domain";
 
 const COMMANDS: ReadonlyArray<OctantCommand> = [
@@ -520,5 +522,131 @@ describe("composer @ menu", () => {
     fireEvent.keyDown(message, { key: "Enter", isComposing: true });
     expect(resolve).not.toHaveBeenCalled();
     expect(message).toHaveValue("@review");
+  });
+});
+
+describe("@model in the composer", () => {
+  const instanceId = "80000000-0000-4000-8000-0000000000a1";
+  const model = (id: string, displayName: string, values: ReadonlyArray<string>) =>
+    decodeProviderModel({
+      id,
+      displayName,
+      source: "discovered",
+      verification: "verified",
+      reasoning: "supported",
+      inputModalities: ["text"],
+      options:
+        values.length === 0
+          ? []
+          : [{ id: "effort", displayName: "Effort", kind: "selection", values }],
+    });
+  const groups: ReadonlyArray<PickerGroup> = [
+    {
+      instance: {
+        id: decodeProviderInstanceId(instanceId),
+        displayName: "Team Codex",
+        driverKind: "codex",
+        configuration: { kind: "codex-cli", binaryPath: "/usr/local/bin/codex" },
+        enabled: true,
+        environmentPolicy: "inherit-host",
+        version: decodeAggregateVersion(1),
+        createdAt: decodeUtcTimestamp("2026-11-23T00:00:00.000Z"),
+        updatedAt: decodeUtcTimestamp("2026-11-23T00:00:00.000Z"),
+      },
+      runtime: "provider",
+      readiness: "ready",
+      driverLabel: "Codex",
+      endpointHost: undefined,
+      executionHost: "local",
+      sections: [
+        {
+          id: "all-models",
+          label: "All models",
+          models: [
+            { model: model("gpt-5", "GPT-5", ["low", "high"]), badges: [], toolCapable: true },
+            { model: model("gpt-5-mini", "GPT-5 mini", []), badges: [], toolCapable: true },
+          ],
+        },
+      ],
+    },
+  ];
+
+  function ModelHarness(props: { readonly initial?: string }) {
+    const [draft, setDraft] = useState(props.initial ?? "");
+    const prompt = useRef<ComposerInputElement>(null);
+    const at = useComposerAtMenu({
+      draft,
+      onDraftChange: setDraft,
+      textarea: () => prompt.current,
+      modelGroups: groups,
+    });
+    return (
+      <>
+        <ComposerInput
+          aria-label="Message"
+          onChange={(event) => {
+            setDraft(event.currentTarget.value);
+            at.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+          }}
+          onKeyDown={(event) => {
+            at.handleKeyDown(event);
+          }}
+          ref={prompt}
+          renderModelChip={at.renderModelChip}
+          value={draft}
+        />
+        {at.open ? <ComposerAtTypeahead controller={at} /> : null}
+      </>
+    );
+  }
+
+  it("inserts the chosen provider, model and reasoning as a tag the prompt shows as a chip", async () => {
+    render(<ModelHarness />);
+    const prompt = screen.getByRole("textbox", { name: "Message" });
+    await userEvent.type(prompt, "Review with @model");
+    const search = await screen.findByRole("combobox", { name: "Search models" });
+    expect(search).toHaveFocus();
+    expect(screen.getByRole("option", { name: /GPT-5 mini/ })).toBeInTheDocument();
+    await userEvent.type(search, "gpt-5{Enter}");
+    expect(screen.getByRole("option", { name: "Provider default" })).toBeInTheDocument();
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+    expect(prompt).toHaveValue(`Review with @model(${instanceId}/gpt-5, reasoning=high) `);
+    expect(
+      screen.getByRole("button", { name: "Subagent model: Team Codex, GPT-5, high" }),
+    ).toBeInTheDocument();
+  });
+
+  it("leaves the draft as typed when the picker is dismissed with Escape", async () => {
+    render(<ModelHarness />);
+    const prompt = screen.getByRole("textbox", { name: "Message" });
+    await userEvent.type(prompt, "Ask @model");
+    await screen.findByRole("combobox", { name: "Search models" });
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(prompt).toHaveValue("Ask @model");
+  });
+
+  it("says which choice needs attention when a tag's route is gone", () => {
+    render(<ModelHarness initial={`@model(${instanceId}/gpt-5, reasoning=max) please`} />);
+    expect(
+      screen.getByRole("button", {
+        name: "Subagent model: Team Codex, GPT-5, max. Needs attention: GPT-5 does not offer reasoning “max”.",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("reopens the picker on a chip's current route and replaces only that tag", async () => {
+    render(<ModelHarness initial={`a @model(${instanceId}/gpt-5) b`} />);
+    await userEvent.click(
+      screen.getByRole("button", { name: /Subagent model: Team Codex, GPT-5,/ }),
+    );
+    expect(screen.getByRole("option", { name: /^GPT-5Team Codex$/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await userEvent.keyboard("{Enter}{ArrowDown}{Enter}");
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue(
+      `a @model(${instanceId}/gpt-5, reasoning=low) b`,
+    );
   });
 });

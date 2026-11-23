@@ -5442,8 +5442,8 @@ html[data-octant-reduced-motion="true"] .callout {
   padding-inline-end: 52px;
 }
 .thread-composer__surface:has(
-    .composer-input[data-suggested="true"]:is(:placeholder-shown, [data-empty="true"])
-  )::after {
+  .composer-input[data-suggested="true"]:is(:placeholder-shown, [data-empty="true"])
+)::after {
   position: absolute;
   top: 12px;
   /* Clear of send at the box's trailing edge. */

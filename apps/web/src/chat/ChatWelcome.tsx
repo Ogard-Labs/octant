@@ -30,7 +30,6 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ChatStarterIdeas } from "./ChatStarterIdeas";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
