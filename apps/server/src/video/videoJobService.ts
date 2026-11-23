@@ -75,6 +75,8 @@ const FIRST_POLL_MS = 5_000;
 const MAX_POLL_MS = 30_000;
 /** How long the host waits on a provider's stop once a job's time has run out. */
 const VIDEO_TIMEOUT_CLEANUP_MS = 15_000;
+/** How often a partial or failed catalog read is retried per profile. */
+const VIDEO_DISCOVERY_RETRY_MS = 60_000;
 
 /** A failed status check can leave the already accepted job's outcome unknown. */
 function pollFailureLeavesJobUnconfirmed(failure: ProviderFailure): boolean {
@@ -96,6 +98,7 @@ function pollFailureLeavesJobUnconfirmed(failure: ProviderFailure): boolean {
 function startMayHaveReachedProvider(failure: ProviderFailure): boolean {
   return failure.category === "unavailable";
 }
+
 /** How often a removal the provider refused is tried again while the host runs. */
 export const VIDEO_REMOVAL_RETRY_MS = 15 * 60 * 1000;
 
@@ -224,9 +227,18 @@ export class VideoJobService {
   readonly #terminalWaiters = new Map<string, Array<(job: VideoJob) => void>>();
   readonly #inputs = new Map<string, { readonly prompt: string } & VideoJobInputs>();
   readonly #closing = new AbortController();
-  /** Each profile version's declared models, as last read from its adapter. */
-  readonly #declared = new Map<string, ReadonlyArray<VideoModelCapabilities>>();
+  /**
+   * Each profile version's declared models, as last read from its adapter. A
+   * read the adapter could not complete — fewer models than the profile asks
+   * for — is offered but not trusted, so a later call reads again.
+   */
+  readonly #declared = new Map<
+    string,
+    { readonly models: ReadonlyArray<VideoModelCapabilities>; readonly complete: boolean }
+  >();
   readonly #declaring = new Set<string>();
+  /** When each profile's catalog was last read, bounding a retry to 60 s. */
+  readonly #discoveryReadAt = new Map<string, number>();
   #active = 0;
   #removalTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -261,10 +273,12 @@ export class VideoJobService {
       const adapter = this.#adapterFor(candidate);
       if (adapter === undefined) continue;
       const models = await this.#modelsOf(adapter);
-      if (models === undefined) continue;
-      this.#declared.set(declaredKey(candidate), models);
-      if (models.length > 0) {
-        ready.push({ instance: candidate, models });
+      if (models !== undefined) {
+        this.#declared.set(declaredKey(candidate), {
+          models,
+          complete: models.length >= modelAllowlistOf(candidate.configuration).length,
+        });
+        if (models.length > 0) ready.push({ instance: candidate, models });
       }
     }
     return ready;
@@ -288,18 +302,23 @@ export class VideoJobService {
       const adapter = this.#adapterFor(candidate);
       if (adapter === undefined) continue;
       const key = declaredKey(candidate);
-      const models = this.#declared.get(key);
-      if (models === undefined) {
-        if (!this.#declaring.has(key)) {
-          this.#declaring.add(key);
-          void adapter
-            .models()
-            .then((declared) => this.#declared.set(key, declared))
-            .catch(() => undefined)
-            .finally(() => this.#declaring.delete(key));
-        }
-      } else if (models.length > 0) {
-        ready.push({ instance: candidate, models });
+      const entry = this.#declared.get(key);
+      if (entry !== undefined && entry.models.length > 0) {
+        ready.push({ instance: candidate, models: entry.models });
+      }
+      if (
+        (entry === undefined || !entry.complete) &&
+        !this.#declaring.has(key) &&
+        this.#now() - (this.#discoveryReadAt.get(key) ?? 0) >= VIDEO_DISCOVERY_RETRY_MS
+      ) {
+        this.#declaring.add(key);
+        this.#discoveryReadAt.set(key, this.#now());
+        const wanted = modelAllowlistOf(candidate.configuration).length;
+        void adapter
+          .models()
+          .then((models) => this.#declared.set(key, { models, complete: models.length >= wanted }))
+          .catch(() => undefined)
+          .finally(() => this.#declaring.delete(key));
       }
     }
     return ready;
@@ -1235,10 +1254,7 @@ export class VideoJobService {
     const driver = this.#drivers.find((candidate) => candidate.driverKind === instance.driverKind);
     if (driver === undefined) return undefined;
     const configuration: object = instance.configuration;
-    const modelIds =
-      "modelAllowlist" in configuration && Array.isArray(configuration.modelAllowlist)
-        ? (configuration.modelAllowlist as ReadonlyArray<ProviderModelId>)
-        : [];
+    const modelIds = modelAllowlistOf(configuration);
     const adapter = driver.create({
       profile: { instanceId: instance.id, modelIds },
       ports: makeVideoGenerationPorts({
@@ -1285,4 +1301,10 @@ function settleWithKnownPrice(
 
 function declaredKey(instance: ProviderInstance): string {
   return `${String(instance.id)}:${String(instance.version)}`;
+}
+
+function modelAllowlistOf(configuration: object): ReadonlyArray<ProviderModelId> {
+  return "modelAllowlist" in configuration && Array.isArray(configuration.modelAllowlist)
+    ? (configuration.modelAllowlist as ReadonlyArray<ProviderModelId>)
+    : [];
 }
