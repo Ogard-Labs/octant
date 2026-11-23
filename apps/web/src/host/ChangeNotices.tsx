@@ -1,8 +1,11 @@
 import type { AccessActivityClient } from "@octant/client-runtime/access-activity-client";
-import { useCallback } from "react";
+import type { ChangeNotice } from "@octant/contracts/access-activity";
+import { useCallback, useRef, useState } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { describeNotice, useChangeNotices, type ChangeNoticeAction } from "./changeNoticeState";
 
 /**
@@ -44,6 +47,10 @@ export function ChangeNotices(props: ChangeNoticesProps) {
     props.changeRevision,
     runLocally,
   );
+  // Revoking a device or ending a grant is destructive, so it asks first, as
+  // the same controls in Settings do.
+  const [confirmingRevoke, setConfirmingRevoke] = useState<ChangeNotice | undefined>(undefined);
+  const revokeOpener = useRef<HTMLButtonElement | null>(null);
   if (notices.length === 0) return null;
 
   return (
@@ -72,8 +79,12 @@ export function ChangeNotices(props: ChangeNoticesProps) {
                 </OctantButton>
               )}
               <OctantButton
+                aria-haspopup="dialog"
                 disabled={busy}
-                onClick={() => void act("revoke", notice.noticeId)}
+                onClick={(event) => {
+                  revokeOpener.current = event.currentTarget;
+                  setConfirmingRevoke(notice);
+                }}
                 size="sm"
                 type="button"
                 variant="secondary"
@@ -96,6 +107,31 @@ export function ChangeNotices(props: ChangeNoticesProps) {
           </li>
         ))}
       </ul>
+      <OctantDialogPresence>
+        {confirmingRevoke === undefined ? null : (
+          <OctantConfirmDialog
+            cancelLabel="Keep it"
+            destructive
+            confirmLabel={confirmingRevoke.actor.kind === "agent" ? "End access" : "Revoke device"}
+            onCancel={() => setConfirmingRevoke(undefined)}
+            onConfirm={() => {
+              const notice = confirmingRevoke;
+              setConfirmingRevoke(undefined);
+              void act("revoke", notice.noticeId);
+            }}
+            restoreFocus={revokeOpener}
+            title={
+              confirmingRevoke.actor.kind === "agent"
+                ? `End ${confirmingRevoke.actor.name}'s access?`
+                : `Revoke ${confirmingRevoke.actor.label}?`
+            }
+          >
+            {confirmingRevoke.actor.kind === "agent"
+              ? "The agent's access to this host ends now."
+              : "The device loses access to this host and must pair again to return."}
+          </OctantConfirmDialog>
+        )}
+      </OctantDialogPresence>
     </section>
   );
 }

@@ -970,13 +970,16 @@ describe("WorkThreadService", () => {
       expectedVersion: 1,
       access: "auto",
     });
-    // Going back to Ask first is not a lowering and records nothing.
+    // Going back to Ask first is a change the journal records too, so a raise
+    // back out of it later can be told from the level simply never moving.
     await fixture.service.execute(ids.window, {
       kind: "change-work-thread-access",
       threadId: ids.thread,
       expectedVersion: 2,
       access: "ask-first",
     });
+    // Every level change is recorded, so a raise out of Plan or Ask first —
+    // which is no lowering — is a guardrail-change the access notices can read.
     const lowered = fixture.persistence.journal.append.mock.calls
       .map(([request]) => request.events[0])
       .filter((event) => event.eventName === "guardrail.level-lowered@1");
@@ -990,11 +993,42 @@ describe("WorkThreadService", () => {
         projectId: ids.project,
         threadId: ids.thread,
       },
+      {
+        scope: "thread",
+        surface: "work",
+        from: "auto",
+        to: "ask-first",
+        projectId: ids.project,
+        threadId: ids.thread,
+      },
     ]);
     expect(lowered[0]).toMatchObject({
       actor: { kind: "local-user" },
       occurredAt: expect.any(String),
     });
+  });
+
+  it("journals a thread's raise from Plan to Ask first, so an access notice can see it", async () => {
+    const fixture = serviceFixture({ threads: [thread({ access: "plan" })] });
+    await fixture.service.execute(ids.window, {
+      kind: "change-work-thread-access",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      access: "ask-first",
+    });
+    const changed = fixture.persistence.journal.append.mock.calls
+      .map(([request]) => request.events[0])
+      .filter((event) => event.eventName === "guardrail.level-lowered@1");
+    expect(changed.map((event) => event.payload)).toEqual([
+      {
+        scope: "thread",
+        surface: "work",
+        from: "plan",
+        to: "ask-first",
+        projectId: ids.project,
+        threadId: ids.thread,
+      },
+    ]);
   });
 
   it("moves a thread into Plan remembering the level it left, and an approved plan back to it as the person who answered", async () => {

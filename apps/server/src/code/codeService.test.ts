@@ -2392,7 +2392,7 @@ describe("CodeService commands", () => {
       );
     });
 
-    it("journals who lowered a thread's level, from which level and at which scope, and nothing when the guard goes back up", async () => {
+    it("journals who lowered a thread's level, from which level and at which scope, and the guard going back up too", async () => {
       const fixture = serviceFixture({
         threads: [thread({ executionPolicy: "approval-gated" })],
         approve: false,
@@ -2409,11 +2409,23 @@ describe("CodeService commands", () => {
         executionPolicy: "approval-gated",
         permissionPersistence: "current-session",
       });
+      // Raising the guard is a level change as well, so the journal keeps it:
+      // the access notices tell a raise out of Plan or Ask first from a level
+      // that simply never moved.
       expect(
         guarded.persistence.journal.append.mock.calls.some(
           ([request]) => request.events[0].eventName === "guardrail.level-lowered@1",
         ),
-      ).toBe(false);
+      ).toBe(true);
+      const guardedChange = guarded.persistence.journal.append.mock.calls
+        .map(([request]) => request.events[0])
+        .filter((event) => event.eventName === "guardrail.level-lowered@1");
+      expect(guardedChange[0]?.payload).toMatchObject({
+        scope: "thread",
+        surface: "code",
+        from: "full-access",
+        to: "ask-first",
+      });
       const lowered = fixture.persistence.journal.append.mock.calls
         .map(([request]) => request.events[0])
         .filter((event) => event.eventName === "guardrail.level-lowered@1");
@@ -2429,6 +2441,30 @@ describe("CodeService commands", () => {
           projectId: expect.any(String),
           threadId: ids.thread,
         },
+      });
+    });
+
+    it("journals a thread's raise from Plan to Ask first, so an access notice can see it", async () => {
+      const fixture = serviceFixture({
+        threads: [thread({ executionPolicy: "plan" })],
+        approve: false,
+      });
+      await fixture.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+      });
+      const changed = fixture.persistence.journal.append.mock.calls
+        .map(([request]) => request.events[0])
+        .filter((event) => event.eventName === "guardrail.level-lowered@1");
+      expect(changed[0]?.payload).toMatchObject({
+        scope: "thread",
+        surface: "code",
+        from: "plan",
+        to: "ask-first",
+        threadId: ids.thread,
       });
     });
 
@@ -3366,8 +3402,10 @@ describe("CodeService commands", () => {
       autoApprove: false,
     });
     expect(disabled).toEqual({ kind: "thread-updated", thread: expect.any(Object) });
-    const after =
-      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    const after = fixture.persistence.journal.append.mock.calls
+      .map(([request]) => request.events[0])
+      .filter((event) => event.eventName === "code.thread-updated@1")
+      .at(-1)?.payload.thread;
     expect("autoApprove" in after).toBe(false);
   });
 

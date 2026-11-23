@@ -57,7 +57,22 @@ describe("change notices", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("changed again since");
 
     await userEvent.click(screen.getByRole("button", { name: "Revoke Ada's phone" }));
+    expect(acted).toEqual([["undo", raised.noticeId]]);
+    await userEvent.click(screen.getByRole("button", { name: "Revoke device" }));
     await waitFor(() => expect(acted.at(-1)).toEqual(["revoke", raised.noticeId]));
+  });
+
+  it("asks before revoking, and keeping it leaves the device paired", async () => {
+    const { value, acted } = client([raised]);
+    render(<ChangeNotices client={value} />);
+    expect(await screen.findByText(/raised “Fix login”/)).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Revoke Ada's phone" }));
+    expect(screen.getByText("Revoke Ada's phone?")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Keep it" }));
+    expect(screen.queryByText("Revoke Ada's phone?")).toBeNull();
+    expect(acted).toEqual([]);
+    expect(screen.getByRole("button", { name: "Revoke Ada's phone" })).toBeTruthy();
   });
 
   it("offers no Undo for a replaced key and says the earlier key is not kept", async () => {
@@ -96,6 +111,7 @@ describe("change notices", () => {
       expect(local.removeProviderApiKey).toHaveBeenCalledWith(added.providerInstanceId, keyId),
     );
     await userEvent.click(screen.getByRole("button", { name: "Revoke Ada's phone" }));
+    await userEvent.click(screen.getByRole("button", { name: "Revoke device" }));
     await waitFor(() =>
       expect(local.revokeDevice).toHaveBeenCalledWith(
         raised.actor.kind === "device" ? raised.actor.deviceId : "",

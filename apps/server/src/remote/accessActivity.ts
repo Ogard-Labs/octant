@@ -130,7 +130,12 @@ export function readAccessActivity(
       actor:
         reason === "self-revoked"
           ? { kind: "device", deviceId, label: deviceLabel }
-          : actors.of(row, reason === "host-key-recovered" ? "host" : "local-person"),
+          : actors.of(
+              row,
+              reason === "host-key-recovered" || reason === "pairing-abandoned"
+                ? "host"
+                : "local-person",
+            ),
     });
   }
   return entries;
@@ -144,6 +149,8 @@ export interface ChangeNoticeRecord {
   readonly dismissed: boolean;
   /** For a key added: the key Undo removes. */
   readonly keyId?: string;
+  /** For a key added: the pool's key ids the change left, which Undo holds the pool to. */
+  readonly expectedKeyIds?: ReadonlyArray<string>;
   /** For a key notice: the key was changed again after this change, so Undo is refused. */
   readonly changedSince?: boolean;
 }
@@ -173,8 +180,17 @@ export function readChangeNotices(
   );
   const records: Array<ChangeNoticeRecord & { readonly sequence: number }> = [];
 
-  for (const row of newest(connection, "guardrail-change")) {
-    if (row.actor_kind !== "remote-device") continue;
+  const laterThreadChange = connection.prepare(
+    `SELECT 1 FROM event_journal WHERE aggregate_type = ? AND global_sequence > ?
+     AND json_extract(payload_json, '$.surface') = ?
+     AND json_extract(payload_json, '$.threadId') = ? LIMIT 1`,
+  );
+
+  for (const row of newest(
+    connection,
+    "aggregate_type = ? AND actor_kind = 'remote-device'",
+    "guardrail-change",
+  )) {
     let change;
     try {
       change = decodeGuardrailLevelLowered(parse(row.payload_json));
@@ -185,10 +201,20 @@ export function readChangeNotices(
       continue;
     if (!threadAccessRaised(change.from, change.to)) continue;
     const title = names.threadTitle?.(change.surface, change.threadId);
+    // Any later level change on this thread — whoever made it — makes Undo
+    // unsafe even when the level happens to match again.
+    const changedSince =
+      laterThreadChange.all(
+        "guardrail-change",
+        row.global_sequence,
+        change.surface,
+        change.threadId,
+      ).length > 0;
     records.push({
       sequence: row.global_sequence,
       actorDeviceId: row.actor_id,
       dismissed: dismissed.has(row.event_id),
+      changedSince,
       notice: {
         kind: "thread-level-raised",
         noticeId: row.event_id,
@@ -203,11 +229,39 @@ export function readChangeNotices(
     });
   }
 
-  // Oldest first, so a later change to the same provider is seen after the one it follows.
-  const keyRows = [...newest(connection, PROVIDER_KEY_AGGREGATE_TYPE)].reverse();
+  // Oldest first, so a later change to the same provider is seen after the one
+  // it follows. Requests and completions each get their own lookback so one
+  // kind cannot push the other's matching row out.
+  const keyRequests = newest(
+    connection,
+    `aggregate_type = ? AND actor_kind = 'remote-device'
+     AND json_extract(payload_json, '$.name') = 'provider-key.change-requested'`,
+    PROVIDER_KEY_AGGREGATE_TYPE,
+  );
+  const keyRows = [
+    ...newest(
+      connection,
+      `aggregate_type = ? AND json_extract(payload_json, '$.name') = 'provider-key.change-completed'`,
+      PROVIDER_KEY_AGGREGATE_TYPE,
+    ),
+  ].reverse();
   const requests = new Map<string, { readonly row: JournalRow; readonly record: Requested }>();
-  const stored: Array<{ readonly sequence: number; readonly requestId: string }> = [];
+  const stored: Array<{
+    readonly sequence: number;
+    readonly requestId: string;
+    readonly keyIds: ReadonlyArray<string> | undefined;
+  }> = [];
   const lastChange = new Map<string, number>();
+  for (const row of keyRequests) {
+    let record: ProviderKeyJournalRecord;
+    try {
+      record = decodeProviderKeyJournalRecord(parse(row.payload_json));
+    } catch {
+      continue;
+    }
+    if (record.name === "provider-key.change-requested")
+      requests.set(record.requestId, { row, record });
+  }
   for (const row of keyRows) {
     let record: ProviderKeyJournalRecord;
     try {
@@ -215,18 +269,18 @@ export function readChangeNotices(
     } catch {
       continue;
     }
-    if (record.name === "provider-key.change-requested") {
-      requests.set(record.requestId, { row, record });
-      continue;
-    }
     if (record.name !== "provider-key.change-completed") continue;
     lastChange.set(String(record.instanceId), row.global_sequence);
     if (record.outcome === "stored")
-      stored.push({ sequence: row.global_sequence, requestId: record.requestId });
+      stored.push({
+        sequence: row.global_sequence,
+        requestId: record.requestId,
+        keyIds: record.keyIds,
+      });
   }
-  for (const { sequence, requestId } of stored) {
+  for (const { sequence, requestId, keyIds } of stored) {
     const request = requests.get(requestId);
-    if (request === undefined || request.row.actor_kind !== "remote-device") continue;
+    if (request === undefined) continue;
     const { record, row } = request;
     if (record.keyChange === undefined) continue;
     const instanceId = String(record.instanceId);
@@ -239,6 +293,7 @@ export function readChangeNotices(
       ...(record.keyChange === "added" && record.keyId !== undefined
         ? { keyId: record.keyId }
         : {}),
+      ...(record.keyChange === "added" && keyIds !== undefined ? { expectedKeyIds: keyIds } : {}),
       changedSince,
       notice: {
         kind: record.keyChange === "added" ? "provider-key-added" : "provider-key-replaced",
@@ -273,13 +328,22 @@ export function noticesFor(
 
 type Requested = Extract<ProviderKeyJournalRecord, { name: "provider-key.change-requested" }>;
 
-function newest(connection: SqliteConnection, aggregateType: string): ReadonlyArray<JournalRow> {
+/**
+ * The newest rows matching `where`, capped. Notice-relevant rows are filtered
+ * before the cap so unrelated writes on the same aggregate cannot push a
+ * notice's matching row out of the lookback.
+ */
+function newest(
+  connection: SqliteConnection,
+  where: string,
+  ...args: ReadonlyArray<string>
+): ReadonlyArray<JournalRow> {
   return connection
     .prepare(
-      `SELECT ${JOURNAL_COLUMNS} FROM event_journal WHERE aggregate_type = ?
+      `SELECT ${JOURNAL_COLUMNS} FROM event_journal WHERE ${where}
        ORDER BY global_sequence DESC LIMIT ?`,
     )
-    .all(aggregateType, NOTICE_LOOKBACK) as ReadonlyArray<JournalRow>;
+    .all(...args, NOTICE_LOOKBACK) as ReadonlyArray<JournalRow>;
 }
 
 /**
@@ -337,6 +401,7 @@ function removalReason(
   if (reasonCode === "other-devices-signed-out") return "signed-out";
   if (reasonCode === "self-revoked") return "self-revoked";
   if (reasonCode === "host-key-recovered") return "host-key-recovered";
+  if (reasonCode === "pairing-abandoned") return "pairing-abandoned";
   return "revoked";
 }
 

@@ -42,8 +42,12 @@ export interface UnsettledProviderKeyChange {
 }
 
 export interface ProviderKeyChangeRecorder {
-  /** Records the outcome. Best effort: a missing outcome is settled at the next host start. */
-  readonly complete: (outcome: Completed["outcome"]) => void;
+  /**
+   * Records the outcome. Best effort: a missing outcome is settled at the
+   * next host start. `keyIds` is the pool's key ids after a `stored` change,
+   * so a change notice's Undo can hold the pool to them.
+   */
+  readonly complete: (outcome: Completed["outcome"], keyIds?: ReadonlyArray<string>) => void;
   readonly fail: (reason: Failed["reason"]) => void;
 }
 
@@ -139,10 +143,15 @@ export function providerKeyJournal(options: {
       );
       const common = { requestId, instanceId: input.instanceId, action: input.action };
       return {
-        complete: (outcome) =>
+        complete: (outcome, keyIds) =>
           bestEffort(
             input.instanceId,
-            { name: "provider-key.change-completed", ...common, outcome },
+            {
+              name: "provider-key.change-completed",
+              ...common,
+              outcome,
+              ...(keyIds === undefined ? {} : { keyIds: [...keyIds] }),
+            },
             input.actor,
           ),
         fail: (reason) =>

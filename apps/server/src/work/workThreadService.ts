@@ -62,7 +62,6 @@ import { selectCompletionReceiptId } from "@octant/domain/finished-receipt-polic
 import {
   defaultFullAccessSandboxFor,
   fullAccessSandboxSupported,
-  guardrailLowered,
   permissionModeOf,
   workAccessOfPermissionMode,
   workLevelChangeTarget,
@@ -424,7 +423,7 @@ export class WorkThreadService {
         { kind: "thread-updated", thread: updated },
         actor,
       );
-      this.#journalLowering(
+      this.#journalLevelChange(
         {
           scope: "thread",
           from: workModeOfAccess(current.access),
@@ -491,7 +490,7 @@ export class WorkThreadService {
           { kind: "thread-updated", thread: updated },
           input.actor,
         );
-        this.#journalLowering(
+        this.#journalLevelChange(
           {
             scope: "thread",
             from: workModeOfAccess(current.access),
@@ -827,7 +826,7 @@ export class WorkThreadService {
               },
             ],
           });
-          this.#journalLowering(
+          this.#journalLevelChange(
             {
               scope: "global",
               from: workModeOfAccess(current.defaultAccess),
@@ -1472,7 +1471,7 @@ export class WorkThreadService {
             },
             actor,
           );
-          this.#journalLowering(
+          this.#journalLevelChange(
             {
               scope: "thread",
               from: workModeOfAccess(current.access),
@@ -2504,11 +2503,13 @@ export class WorkThreadService {
   }
 
   /**
-   * Records a lowered guardrail as its own single-event aggregate, so no
-   * thread or settings version waits on it. A change that does not lower the
-   * guardrail records nothing.
+   * Records a guardrail change as its own single-event aggregate, so no
+   * thread or settings version waits on it. Every change is recorded —
+   * raised as well as lowered — because the access notices read raised
+   * levels from this same journal; what callers do with a lowering alone
+   * still sees only `guardrailLowered` cases.
    */
-  #journalLowering(
+  #journalLevelChange(
     change: {
       readonly scope: "global" | "project" | "thread";
       readonly from: PermissionMode;
@@ -2518,7 +2519,7 @@ export class WorkThreadService {
     },
     actor: EventActor = { kind: "local-user", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) },
   ): void {
-    if (!guardrailLowered(change.from, change.to)) return;
+    if (change.from === change.to) return;
     this.#persistence.journal.append({
       aggregate: { aggregateType: "guardrail-change", aggregateId: this.#uuid() },
       expectedVersion: 0,

@@ -2,6 +2,7 @@ import type { ChangeNoticeLocalActions } from "../host/ChangeNotices";
 import { AgentAccessResult, decodeAgentAccessCommand, decodeHostAnswer } from "@octant/contracts";
 import type { NewDeviceAlertsClient } from "@octant/client-runtime/new-device-alerts-client";
 import type { AccessActivitySettings } from "../host/RemoteAccessSettingsSection";
+import { AccessActivitySection } from "../host/RemoteAccessSettingsSection";
 import { SandboxRestrictionsSettings } from "../settings/SandboxRestrictionsSettings";
 import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-restrictions-client";
 import type { SandboxSettingsScope } from "../settings/SandboxRestrictionsSettings";
@@ -1586,6 +1587,7 @@ function ActiveSectionContent({
               commands.
             </p>
             <BrowserHubSection hubAdministration={hubAdministrationOf(props.hostBridge)} />
+            <AccessActivitySection accessActivity={props.accessActivity} />
           </section>
           {agentAccess}
         </div>
@@ -3891,7 +3893,11 @@ function changeNoticeLocalActionsOf(
       endAgentGrant: async (grantId) => {
         const answer = await agentAccess.agentAccessRequest({
           kind: "command",
-          command: decodeAgentAccessCommand({ kind: "revoke", grantId }),
+          command: decodeAgentAccessCommand({
+            kind: "revoke",
+            grantId,
+            stopRunningTurns: false,
+          }),
         });
         const result = decodeHostAnswer(AgentAccessResult)(answer.body);
         if (result.kind === "refused") throw new Error(result.message);

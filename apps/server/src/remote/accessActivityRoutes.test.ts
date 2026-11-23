@@ -149,7 +149,9 @@ function raise(
 function keyChange(
   target: Host,
   actor: EventActor,
-  keyChange?: { readonly kind: "added"; readonly keyId: string } | { readonly kind: "replaced" },
+  keyChange?:
+    | { readonly kind: "added"; readonly keyId: string; readonly keyIds?: ReadonlyArray<string> }
+    | { readonly kind: "replaced"; readonly keyIds?: ReadonlyArray<string> },
 ) {
   const requestId = randomUUID();
   const common = { requestId, instanceId: providerId, action: "set" };
@@ -169,13 +171,18 @@ function keyChange(
     name: "provider-key.change-completed",
     ...common,
     outcome: "stored",
+    ...(keyChange?.keyIds === undefined ? {} : { keyIds: [...keyChange.keyIds] }),
   });
   return noticeId;
 }
 
 interface Calls {
   readonly setLevel: Array<{ readonly level: string; readonly actor: EventActor }>;
-  readonly removed: Array<{ readonly keyId: string; readonly actor: EventActor }>;
+  readonly removed: Array<{
+    readonly keyId: string;
+    readonly actor: EventActor;
+    readonly expected?: { readonly keyIds: ReadonlyArray<string> };
+  }>;
   readonly revoked: string[];
   readonly ended: string[];
 }
@@ -196,7 +203,11 @@ function routes(target: Host, overrides: Partial<AccessActivityRouteDependencies
       return { status: "done" };
     },
     removeKey: async (input) => {
-      calls.removed.push({ keyId: input.keyId, actor: input.actor });
+      calls.removed.push({
+        keyId: input.keyId,
+        actor: input.actor,
+        ...(input.expected === undefined ? {} : { expected: input.expected }),
+      });
       return { status: "done" };
     },
     revokeDevice: (deviceId) => {
@@ -335,6 +346,36 @@ describe("access activity", () => {
     ]);
     // A Full device reads it as the person does.
     expect((await handler(fromDevice(ACCESS_ACTIVITY_PATH, phone)))?.status).toBe(200);
+  });
+
+  it("attributes a pairing the sweep removed to the host, not to a person", async () => {
+    const target = host();
+    pair(target, phone, "Ada's phone", local);
+    target.append(
+      "remote-host",
+      hostId,
+      "remote.device-revoked@1",
+      { kind: "system", actorId: localActorId } as EventActor,
+      {
+        hostId,
+        deviceId: phone,
+        credentialGeneration: 2,
+        revokedAt: now,
+        reasonCode: "pairing-abandoned",
+      },
+    );
+    const { handler } = routes(target);
+
+    const response = await handler(fromWindow(ACCESS_ACTIVITY_PATH));
+    const { entries } = (await response?.json()) as {
+      entries: ReadonlyArray<Record<string, unknown>>;
+    };
+    expect(entries[0]).toMatchObject({
+      kind: "removed",
+      deviceLabel: "Ada's phone",
+      reason: "pairing-abandoned",
+      actor: { kind: "host" },
+    });
   });
 
   it("refuses a device paired below Full and an agent grant", async () => {
@@ -483,6 +524,65 @@ describe("change notices", () => {
         ?.status,
     ).toBe(200);
     expect(calls.revoked).toEqual([phone]);
+  });
+
+  it("refuses Undo once any later level change was journaled, even when the level matches again", async () => {
+    const target = host();
+    pair(target, phone, "Ada's phone", local);
+    const noticeId = raise(target, byDevice(phone), "ask-first", "full-access");
+    raise(target, local, "full-access", "ask-first");
+    raise(target, local, "ask-first", "full-access");
+    // The level is back at the notice's `to`, but a later change was journaled.
+    const { handler, calls } = routes(target);
+
+    const refused = await handler(fromWindow(CHANGE_NOTICE_ACTION_PATHS.undo, { noticeId }));
+    expect(refused?.status).toBe(409);
+    expect(calls.setLevel).toEqual([]);
+  });
+
+  it("holds a key Undo to the pool the notice recorded", async () => {
+    const target = host();
+    pair(target, phone, "Ada's phone", local);
+    const keyId = randomUUID();
+    const keyIds = ["default", keyId];
+    const noticeId = keyChange(target, byDevice(phone), { kind: "added", keyId, keyIds });
+    const { handler, calls } = routes(target);
+
+    expect(
+      (await handler(fromDesktopBridge(CHANGE_NOTICE_ACTION_PATHS.undo, { noticeId })))?.status,
+    ).toBe(200);
+    expect(calls.removed).toEqual([
+      {
+        keyId,
+        actor: expect.objectContaining({ kind: "local-user" }),
+        expected: { keyIds },
+      },
+    ]);
+  });
+
+  it("reads a notice past a lookback full of unrelated rows", async () => {
+    const target = host();
+    pair(target, phone, "Ada's phone", local);
+    const raised = raise(target, byDevice(phone), "ask-first", "full-access");
+    const added = keyChange(target, byDevice(phone), {
+      kind: "added",
+      keyId: randomUUID(),
+      keyIds: ["default"],
+    });
+    for (let index = 0; index < 510; index += 1) {
+      raise(target, local, "auto", "accept-edits", `unrelated-${index}`);
+      target.append("provider-key", providerId, "provider-key.recorded@1", local, {
+        name: "provider-key.change-failed",
+        requestId: randomUUID(),
+        instanceId: providerId,
+        action: "set",
+        reason: "abandoned",
+      });
+    }
+    const { handler } = routes(target);
+
+    const shown = await notices(handler, fromWindow(CHANGE_NOTICES_PATH));
+    expect(shown.map((notice) => notice.noticeId).sort()).toEqual([added, raised].sort());
   });
 
   it("revokes the device that made the change", async () => {

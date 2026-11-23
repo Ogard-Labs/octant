@@ -63,12 +63,16 @@ export interface AccessActivityRouteDependencies {
     readonly scopeId: WindowId;
     readonly actor: EventActor;
   }) => Promise<Outcome>;
-  /** Removes one key from a provider's pool through the key routes' own journaled path. */
+  /**
+   * Removes one key from a provider's pool through the key routes' own
+   * journaled path, holding the pool to the key ids the notice recorded.
+   */
   readonly removeKey: (input: {
     readonly instanceId: string;
     readonly keyId: string;
     readonly scopeId: WindowId;
     readonly actor: EventActor;
+    readonly expected?: { readonly keyIds: ReadonlyArray<string> };
   }) => Promise<Outcome>;
   /** Revokes a paired device through the device administration's revoke. */
   readonly revokeDevice: (deviceId: string, actor: EventActor) => Outcome;
@@ -244,7 +248,15 @@ export function createAccessActivityRouteHandler(dependencies: AccessActivityRou
         keyId: record.keyId,
         scopeId: viewer.scopeId,
         actor: viewer.actor,
+        ...(record.expectedKeyIds === undefined
+          ? {}
+          : { expected: { keyIds: record.expectedKeyIds } }),
       });
+    }
+    if (record.changedSince === true) {
+      return refused(
+        "This thread's level changed again since, so Undo would not put it back. Set its level from the thread.",
+      );
     }
     if (dependencies.threadLevel(notice.surface, notice.threadId) !== notice.to) {
       return refused(

@@ -60,6 +60,12 @@ export const ProviderKeyJournalRecord = Schema.Union(
      * found the request without an outcome and settled the store.
      */
     outcome: Schema.Literal("stored", "removed", "cleared-after-change", "reconciled"),
+    /**
+     * The pool's key ids after the change, in stored order. Ids are random or
+     * `default`, never derived from a key, so a change notice's Undo can hold
+     * the pool to this list before it removes a key.
+     */
+    keyIds: Schema.optional(Schema.Array(ApiKeyId)),
   }).annotations(strict),
   Schema.Struct({
     name: Schema.Literal("provider-key.change-failed"),

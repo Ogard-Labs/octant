@@ -23,7 +23,6 @@ import {
 import {
   defaultFullAccessSandboxFor,
   fullAccessSandboxSupported,
-  guardrailLowered,
   permissionModeOf,
 } from "@octant/domain/guardrail-policy";
 import { selectCompletionReceiptId } from "@octant/domain/finished-receipt-policy";
@@ -1613,7 +1612,7 @@ export class CodeService {
         },
         actor,
       );
-      this.#journalLowering(
+      this.#journalLevelChange(
         {
           scope: "thread",
           from: permissionModeOf(current),
@@ -2240,7 +2239,7 @@ export class CodeService {
             { kind: "settings-updated", settings },
             actor,
           );
-          this.#journalLowering(
+          this.#journalLevelChange(
             {
               scope: "global",
               from: permissionModeOf({
@@ -3180,7 +3179,7 @@ export class CodeService {
             actor,
           );
           if (command.kind === "change-code-thread-access") {
-            this.#journalLowering(
+            this.#journalLevelChange(
               {
                 scope: "thread",
                 from: permissionModeOf(current),
@@ -4870,12 +4869,14 @@ export class CodeService {
   }
 
   /**
-   * Records a lowered guardrail as its own single-event aggregate, so no
+   * Records a guardrail change as its own single-event aggregate, so no
    * other writer's version waits on it. The envelope names the local user and
-   * the time; the payload names the scope and both levels. A change that does
-   * not lower the guardrail records nothing.
+   * the time; the payload names the scope and both levels. Every change is
+   * recorded — raised as well as lowered — because the access notices read
+   * raised levels from this same journal; what callers do with a lowering
+   * alone still sees only `guardrailLowered` cases.
    */
-  #journalLowering(
+  #journalLevelChange(
     change: {
       readonly scope: "global" | "project" | "thread";
       readonly from: PermissionMode;
@@ -4885,7 +4886,7 @@ export class CodeService {
     },
     actor?: EventActor,
   ): void {
-    if (!guardrailLowered(change.from, change.to)) return;
+    if (change.from === change.to) return;
     this.#append(
       "guardrail-change",
       this.#uuid(),

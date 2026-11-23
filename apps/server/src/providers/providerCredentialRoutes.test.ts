@@ -697,6 +697,80 @@ describe("host-local provider key pool routes", () => {
     ).toEqual({ status: "refused", message: "That API key is no longer stored." });
   });
 
+  it("refuses a notice's Undo when another change reached the pool first", async () => {
+    const { handle, options, stored } = setup();
+    const first = (await (
+      await handle(keys("add", { instance: GATEWAY_ID, credential: KEY }))
+    )?.json()) as { key: { id: string } };
+    const noticed = (await (
+      await handle(keys("add", { instance: GATEWAY_ID, credential: `${KEY}-2` }))
+    )?.json()) as { key: { id: string } };
+    const third = (await (
+      await handle(keys("add", { instance: GATEWAY_ID, credential: `${KEY}-3` }))
+    )?.json()) as { key: { id: string } };
+    const actor = decodeEventActor({
+      kind: "local-user",
+      actorId: "44444444-4444-4444-8444-444444444444",
+    });
+    const expected = { keyIds: [first.key.id, noticed.key.id, third.key.id] };
+    const [raced, undone] = await Promise.all([
+      removeProviderApiKey(options, {
+        instanceId: GATEWAY_ID,
+        keyId: third.key.id,
+        windowId,
+        actor,
+      }),
+      removeProviderApiKey(options, {
+        instanceId: GATEWAY_ID,
+        keyId: noticed.key.id,
+        windowId,
+        actor,
+        expected,
+      }),
+    ]);
+    expect(raced).toEqual({ status: "done" });
+    expect(undone).toMatchObject({
+      status: "refused",
+      message: expect.stringContaining("changed again"),
+    });
+    // The refused Undo removed nothing.
+    expect(stored.get(GATEWAY_ID)).toContain(noticed.key.id);
+  });
+
+  it("refuses a notice's Undo when a desktop edit the journal never saw changed the pool", async () => {
+    const { handle, options, stored } = setup();
+    const first = (await (
+      await handle(keys("add", { instance: GATEWAY_ID, credential: KEY }))
+    )?.json()) as { key: { id: string } };
+    const noticed = (await (
+      await handle(keys("add", { instance: GATEWAY_ID, credential: `${KEY}-2` }))
+    )?.json()) as { key: { id: string } };
+    const actor = decodeEventActor({
+      kind: "local-user",
+      actorId: "44444444-4444-4444-8444-444444444444",
+    });
+    // A desktop key control writes the pool without a journaled record.
+    stored.set(
+      GATEWAY_ID,
+      addApiKey(stored.get(GATEWAY_ID) ?? "", {
+        secret: `${KEY}-9`,
+        label: "Desktop",
+      }).stored,
+    );
+    const undone = await removeProviderApiKey(options, {
+      instanceId: GATEWAY_ID,
+      keyId: noticed.key.id,
+      windowId,
+      actor,
+      expected: { keyIds: [first.key.id, noticed.key.id] },
+    });
+    expect(undone).toMatchObject({
+      status: "refused",
+      message: expect.stringContaining("changed again"),
+    });
+    expect(stored.get(GATEWAY_ID)).toContain(noticed.key.id);
+  });
+
   it("answers the pool's own refusal for a key that is no longer stored", async () => {
     const { handle } = setup();
     const response = await handle(

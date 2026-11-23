@@ -156,6 +156,46 @@ function pairingLink(origin: string, ticket: RemoteMintedPairingTicket): string 
   return `${origin}/#ticketId=${encodeURIComponent(ticket.ticketId)}&ticketProof=${encodeURIComponent(ticket.ticketProof)}`;
 }
 
+/**
+ * The access activity list and change notices, on their own so a window
+ * without the desktop bridge — a local browser Review opens — shows them too.
+ * Without a bridge secret the notice's key Undo and revoke stay refused, which
+ * the buttons say.
+ */
+export function AccessActivitySection({
+  accessActivity,
+}: {
+  readonly accessActivity: AccessActivitySettings | undefined;
+}) {
+  const accessActivityPort = accessActivity?.port;
+  const accessActivityClient = useMemo(
+    () =>
+      accessActivityPort === undefined ? undefined : createAccessActivityClient(accessActivityPort),
+    [accessActivityPort],
+  );
+  if (accessActivityClient === undefined || accessActivity === undefined) return null;
+  return (
+    <SettingsSection
+      description="Devices added, removed or given another level, newest first, and who did it. Changes a paired device or an agent made to a thread's level or a provider key are listed above it, with Undo."
+      title="Access activity"
+    >
+      <div data-setting-id="access-activity">
+        <ChangeNotices
+          changeRevision={accessActivity.noticesRevision}
+          client={accessActivityClient}
+          {...(accessActivity.localActions === undefined
+            ? {}
+            : { localActions: accessActivity.localActions })}
+        />
+        <AccessActivityList
+          changeRevision={accessActivity.activityRevision}
+          client={accessActivityClient}
+        />
+      </div>
+    </SettingsSection>
+  );
+}
+
 export function RemoteAccessSettingsSection({
   bridge,
   focusedSetting,
@@ -170,12 +210,6 @@ export function RemoteAccessSettingsSection({
   projectNames,
 }: RemoteAccessSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
-  const accessActivityPort = accessActivity?.port;
-  const accessActivityClient = useMemo(
-    () =>
-      accessActivityPort === undefined ? undefined : createAccessActivityClient(accessActivityPort),
-    [accessActivityPort],
-  );
   const [listener, setListener] = useState<ListenerState>({ kind: "loading" });
   const [listenerMessage, setListenerMessage] = useState<string>();
   const [listenerBusy, setListenerBusy] = useState(false);
@@ -895,26 +929,7 @@ export function RemoteAccessSettingsSection({
         </SettingsSection>
       )}
 
-      {accessActivityClient === undefined || accessActivity === undefined ? null : (
-        <SettingsSection
-          description="Devices added, removed or given another level, newest first, and who did it. Changes a paired device or an agent made to a thread's level or a provider key are listed above it, with Undo."
-          title="Access activity"
-        >
-          <div data-setting-id="access-activity">
-            <ChangeNotices
-              changeRevision={accessActivity.noticesRevision}
-              client={accessActivityClient}
-              {...(accessActivity.localActions === undefined
-                ? {}
-                : { localActions: accessActivity.localActions })}
-            />
-            <AccessActivityList
-              changeRevision={accessActivity.activityRevision}
-              client={accessActivityClient}
-            />
-          </div>
-        </SettingsSection>
-      )}
+      <AccessActivitySection accessActivity={accessActivity} />
 
       {/* Revoking is this page's destructive group, so it sits last. */}
       <SettingsPanel

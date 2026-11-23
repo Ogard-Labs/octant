@@ -2727,12 +2727,13 @@ export function wireRemote(deps: RemoteDependencies) {
         return failed(error);
       }
     },
-    removeKey: ({ instanceId, keyId, scopeId, actor }) =>
+    removeKey: ({ instanceId, keyId, scopeId, actor, expected }) =>
       removeProviderApiKey(providerCredentialOptions, {
         instanceId,
         keyId,
         windowId: scopeId,
         actor,
+        ...(expected === undefined ? {} : { expected }),
       }),
     revokeDevice: (deviceId, actor) => {
       const administration = currentRemoteGateway?.localDeviceAdministration();
@@ -2746,7 +2747,7 @@ export function wireRemote(deps: RemoteDependencies) {
     },
     endAgentGrant: (grantId, actor) => {
       const result = agentAccessService.execute(
-        decodeAgentAccessCommand({ kind: "revoke", grantId }),
+        decodeAgentAccessCommand({ kind: "revoke", grantId, stopRunningTurns: false }),
         actor,
       );
       return result.kind === "refused"

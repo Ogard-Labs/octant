@@ -67,7 +67,9 @@ export const AccessActivityEntry = Schema.Union(
     deviceLabel: label,
     /**
      * `revoked` by a person, `signed-out` with every other device,
-     * `self-revoked` by the device itself, `expired`, or `host-key-recovered`.
+     * `self-revoked` by the device itself, `expired`, `host-key-recovered`,
+     * or `pairing-abandoned` — the host's sweep removed a pairing that never
+     * finished, so no person removed it.
      */
     reason: Schema.Literal(
       "revoked",
@@ -75,6 +77,7 @@ export const AccessActivityEntry = Schema.Union(
       "self-revoked",
       "expired",
       "host-key-recovered",
+      "pairing-abandoned",
     ),
     actor: AccessChangeActor,
   }).annotations(strict),

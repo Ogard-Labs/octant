@@ -88,6 +88,7 @@ const REMOVAL_WORDS: Readonly<
   "self-revoked": "removed itself",
   expired: "pairing expired",
   "host-key-recovered": "removed when this computer's key was recovered",
+  "pairing-abandoned": "removed automatically: pairing never finished",
 };
 
 /** Who made a change, in the words a row's meta line uses. */
