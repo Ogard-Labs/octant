@@ -21,7 +21,6 @@ import { SettingsView } from "../shell/SettingsView";
 import { RailAccount } from "../shell/SidebarProfile";
 import { SidebarRail } from "../shell/SidebarRail";
 import type { ThemeController } from "../theme/useThemeController";
-import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { PlanUsageProvider } from "../usage/PlanUsageContext";
 import { SCENE_LIST, type SceneMeta } from "./sceneList";
 import {
@@ -46,6 +45,7 @@ import {
   USAGE_LEDGER,
   VISUAL_NOW,
 } from "./fixtures";
+import { ComposerInput } from "../composer/ComposerInput";
 
 export interface VisualScene extends SceneMeta {
   readonly render: () => ReactNode;
@@ -135,12 +135,11 @@ function HomeScene() {
         <div className="composer-stack">
           <ThreadComposer
             input={
-              <OctantTextarea
+              <ComposerInput
                 aria-label="First message"
                 className="composer-input"
                 onChange={noop}
                 placeholder="Describe what to build"
-                rows={3}
                 value=""
               />
             }

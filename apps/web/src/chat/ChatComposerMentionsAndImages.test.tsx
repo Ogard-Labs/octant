@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -151,7 +151,10 @@ describe("ChatComposer thread mentions", () => {
       }),
     });
 
+    // A click lands the caret where it points; the simulated click puts it at
+    // the start, so End brings it to the end of `#rel` as a click there would.
     await user.click(screen.getByLabelText("Message"));
+    await user.keyboard("{End}");
 
     const listbox = screen.getByRole("listbox", { name: "Threads you can mention" });
     const option = within(listbox).getByRole("option");
@@ -380,14 +383,25 @@ describe("ChatComposer image paste", () => {
     expect(statuses[statuses.length - 1]).toHaveTextContent("Images are unavailable here.");
   });
 
-  it("leaves an ordinary text paste to the browser", () => {
+  it("puts an ordinary text paste into the message as plain text", () => {
     const onFileSelected = vi.fn();
-    renderComposer({ onFileSelected, imageAttachment: { kind: "supported" } });
+    const { props } = renderComposer({ onFileSelected, imageAttachment: { kind: "supported" } });
 
-    const event = pasteImage(screen.getByLabelText("Message"), []);
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", {
+      value: {
+        files: [],
+        items: [],
+        types: ["text/plain"],
+        getData: (type: string) => (type === "text/plain" ? "plain words" : ""),
+      },
+    });
+    act(() => {
+      screen.getByLabelText("Message").dispatchEvent(event);
+    });
 
     expect(onFileSelected).not.toHaveBeenCalled();
-    expect(event.defaultPrevented).toBe(false);
+    expect(props.onDraftChange).toHaveBeenCalledWith("plain words");
   });
 
   it("reports an out-of-bounds image instead of attaching it", () => {

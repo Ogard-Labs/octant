@@ -10,6 +10,7 @@ import {
 } from "../palette/commandModel";
 import { useOctantCommands } from "../palette/CommandRegistry";
 import { OctantButton } from "../ui/base/OctantButton";
+import type { ComposerInputElement } from "./ComposerInput";
 
 /** The provider's own slash commands a composer lists beside Octant's. */
 export interface ComposerProviderCommands {
@@ -62,7 +63,7 @@ export function providerCommandEntries(
 export function useComposerSlashCommands(input: {
   readonly draft: string;
   readonly onDraftChange: (draft: string, caret?: number) => void;
-  readonly textarea?: () => HTMLTextAreaElement | null;
+  readonly textarea?: () => ComposerInputElement | null;
   readonly provider?: ComposerProviderCommands | undefined;
 }) {
   const listId = useId();
@@ -101,7 +102,7 @@ export function useComposerSlashCommands(input: {
     });
     if (command.action.kind === "run") command.action.run();
   };
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+  const handleKeyDown = (event: KeyboardEvent<ComposerInputElement>): boolean => {
     if (event.nativeEvent.isComposing) return false;
     if (open && matches.length > 0) {
       if (event.key === "ArrowDown") {

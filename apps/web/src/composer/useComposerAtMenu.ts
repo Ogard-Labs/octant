@@ -1,5 +1,7 @@
 import {
   createElement,
+  lazy,
+  Suspense,
   useEffect,
   useId,
   useMemo,
@@ -14,18 +16,36 @@ import type {
   ProviderMention,
   ThreadNativeSetupRequest,
 } from "@octant/contracts";
-import type { PickerGroup } from "@octant/domain";
-import { File, Folder, Globe2, Monitor, Plug, Sparkles } from "../ui/icons";
+import {
+  insertSubagentModelTag,
+  type PickerGroup,
+  type SubagentModelTag,
+  type SubagentModelTagMatch,
+} from "@octant/domain";
+import { Bot, File, Folder, Globe2, Monitor, Plug, Sparkles } from "../ui/icons";
 import { filterOctantCommands } from "../palette/commandModel";
 import { useOctantCommands } from "../palette/CommandRegistry";
 import { readPathMentionQuery, type PathMentionCandidate } from "../code/pathMentions";
 import { useThreadNativeSetupServices } from "../providers/ThreadNativeSetupControl";
 import { OctantButton } from "../ui/base/OctantButton";
+import type { ComposerInputElement } from "./ComposerInput";
+// The picker and chip load the first time a prompt shows one, so the start
+// screen's initial load carries neither them nor their styles.
+const loadSubagentModelPicker = () => import("./SubagentModelPicker");
+const SubagentModelPicker = lazy(() =>
+  loadSubagentModelPicker().then((module) => ({ default: module.SubagentModelPicker })),
+);
+const SubagentModelChip = lazy(() =>
+  loadSubagentModelPicker().then((module) => ({ default: module.SubagentModelChip })),
+);
 
 /** How many skills, servers, and connectors one query lists before files. */
 const MAX_EXTENSION_ROWS = 12;
 
-type AtMenuIcon = "skill" | "server" | "computer" | "browser" | "file" | "folder";
+type AtMenuIcon = "skill" | "server" | "computer" | "browser" | "file" | "folder" | "model";
+
+/** The token that opens the subagent model picker. */
+const MODEL_TOKEN = "model";
 
 export interface AtMenuRow {
   readonly id: string;
@@ -198,16 +218,32 @@ export function useComposerAtMenu(input: {
   readonly draft: string;
   readonly onDraftChange: (draft: string, caret?: number) => void;
   readonly onResolveExtensionReference?: (reference: string) => Promise<boolean>;
-  readonly textarea?: () => HTMLTextAreaElement | null;
+  readonly textarea?: () => ComposerInputElement | null;
   readonly apps?: ReadonlyArray<AtMenuApp>;
   readonly files?: AtMenuFiles;
   readonly provider?: ComposerProviderMentions | undefined;
+  /**
+   * The provider catalog `@model` chooses a subagent's route from. Without it
+   * the composer offers no model picker and tags show their raw ids.
+   */
+  readonly modelGroups?: ReadonlyArray<PickerGroup> | undefined;
 }) {
   const listId = useId();
   const commands = useOctantCommands();
   const [token, setToken] = useState<ReturnType<typeof readPathMentionQuery>>();
   const [activeIndex, setActiveIndex] = useState(0);
   const [resolving, setResolving] = useState(false);
+  const [modelPicker, setModelPicker] = useState<
+    | {
+        readonly start: number;
+        readonly end: number;
+        /** Where the caret was when the picker opened; Escape returns it there. */
+        readonly caret?: number | undefined;
+        readonly initial?: SubagentModelTag | undefined;
+      }
+    | undefined
+  >(undefined);
+  const modelGroups = input.modelGroups;
   const [loadedMentions, setLoadedMentions] = useState<
     { readonly scopeKey: string; readonly mentions: ReadonlyArray<ProviderMention> } | undefined
   >(undefined);
@@ -251,7 +287,75 @@ export function useComposerAtMenu(input: {
       ? loadedMentions.mentions
       : (input.provider?.mentions ?? []);
 
+  const focusPrompt = (caret: number) => {
+    queueMicrotask(() => {
+      const textarea = input.textarea?.();
+      if (textarea?.isConnected !== true) return;
+      textarea.focus();
+      textarea.setSelectionRange(caret, caret);
+    });
+  };
+  const chooseModel = (tag: SubagentModelTag) => {
+    if (modelPicker === undefined) return;
+    const inserted = insertSubagentModelTag(input.draft, modelPicker, tag);
+    setModelPicker(undefined);
+    setToken(undefined);
+    input.onDraftChange(inserted.draft, inserted.caret);
+    focusPrompt(inserted.caret);
+  };
+  const dismissModelPicker = () => {
+    if (modelPicker === undefined) return;
+    setModelPicker(undefined);
+    setToken(undefined);
+    focusPrompt(modelPicker.caret ?? modelPicker.end);
+  };
+  const renderModelChip =
+    modelGroups === undefined
+      ? undefined
+      : (
+          match: SubagentModelTagMatch,
+          locate: () => { readonly start: number; readonly end: number },
+        ) =>
+          createElement(
+            Suspense,
+            { fallback: createElement("span", { className: "composer-chip__label" }, match.text) },
+            createElement(SubagentModelChip, {
+              groups: modelGroups,
+              tag: match.tag,
+              onActivate: () => {
+                const range = locate();
+                setModelPicker({ start: range.start, end: range.end, initial: match.tag });
+              },
+            }),
+          );
+
+  // `@model` is the menu's first row, not a picker that opens by itself: a
+  // file mention such as `@models/schema.ts` passes through `@model` while it
+  // is typed, and must keep the keyboard. Enter on the row opens the picker.
   const rows: Array<AtMenuRow> = [];
+  if (tokenIsCurrent && modelGroups !== undefined) {
+    // The token runs past the caret when the caret sits inside it; the row
+    // is offered only when the whole word is `@model` or its prefix, and the
+    // chosen tag replaces all of it, not only the part before the caret.
+    const rest = input.draft.slice(token.start + raw.length).match(/^\S*/)?.[0] ?? "";
+    const word = `${token.query}${rest}`.toLowerCase();
+    if (word.length > 0 && MODEL_TOKEN.startsWith(word)) {
+      // Start loading the picker while the row is offered, so it is usually
+      // ready by the time Enter opens it.
+      // A failed early load is retried when the picker renders, where its
+      // own error surfaces; the warm-up itself has nothing to report.
+      loadSubagentModelPicker().catch(() => undefined);
+      const start = token.start;
+      const end = token.start + 1 + word.length;
+      rows.push({
+        id: "subagent-model",
+        title: "@model",
+        meta: "Choose a subagent's provider, model, and reasoning",
+        icon: "model",
+        choose: () => setModelPicker({ start, end, caret: start + raw.length }),
+      });
+    }
+  }
   if (tokenIsCurrent) {
     for (const app of input.apps ?? []) {
       if (!app.controller.open) continue;
@@ -341,7 +445,7 @@ export function useComposerAtMenu(input: {
       }
     }
   }
-  const open = rows.length > 0;
+  const open = rows.length > 0 || modelPicker !== undefined;
   const active = open ? rows[Math.min(activeIndex, rows.length - 1)] : undefined;
 
   const sync = (draft: string, caret: number | null) => {
@@ -356,10 +460,25 @@ export function useComposerAtMenu(input: {
     setActiveIndex(0);
     row.choose();
   };
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+  const handleKeyDown = (event: KeyboardEvent<ComposerInputElement>): boolean => {
     if (event.nativeEvent.isComposing) return false;
     if (resolving) {
       if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        return true;
+      }
+      return false;
+    }
+    // Until the picker's search takes focus (its code may still be loading),
+    // the prompt keeps the keyboard: Enter must not fall through to the
+    // composer's send, and Escape cancels the picker.
+    if (modelPicker !== undefined) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        dismissModelPicker();
+        return true;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
         event.preventDefault();
         return true;
       }
@@ -394,7 +513,17 @@ export function useComposerAtMenu(input: {
     choose,
     handleKeyDown,
     listId,
+    modelPicker:
+      modelPicker === undefined || modelGroups === undefined
+        ? undefined
+        : {
+            groups: modelGroups,
+            initial: modelPicker.initial,
+            choose: chooseModel,
+            dismiss: dismissModelPicker,
+          },
     open,
+    renderModelChip,
     resolving,
     rows,
     setActiveIndex,
@@ -409,6 +538,7 @@ const ICONS = {
   browser: Globe2,
   file: File,
   folder: Folder,
+  model: Bot,
 } as const;
 
 export function ComposerAtTypeahead(props: {
@@ -416,6 +546,19 @@ export function ComposerAtTypeahead(props: {
 }) {
   const { controller } = props;
   if (!controller.open) return null;
+  const picker = controller.modelPicker;
+  if (picker !== undefined) {
+    return createElement(
+      Suspense,
+      { fallback: null },
+      createElement(SubagentModelPicker, {
+        groups: picker.groups,
+        initial: picker.initial,
+        onChoose: picker.choose,
+        onDismiss: picker.dismiss,
+      }),
+    );
+  }
   return createElement(
     "div",
     { className: "chat-composer__command-typeahead" },
