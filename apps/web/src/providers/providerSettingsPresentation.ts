@@ -235,8 +235,15 @@ export function keyProviderLabel(driverKind: KeyProviderDriverKind): string {
   return driverKind === "claude" ? "Claude Code" : driverLabel(driverKind);
 }
 
+/**
+ * What `providerRefusalCopy` reads: the wire refusal reason, or the local
+ * `sign-in-not-offered` the caller derives from `signInNotOffered`, which is a
+ * detail beside `authentication-required` rather than its own wire literal.
+ */
+type ProviderRefusalCopyReason = ProviderRefusalReason | "sign-in-not-offered";
+
 export function providerRefusalCopy(
-  reason: ProviderRefusalReason,
+  reason: ProviderRefusalCopyReason,
   instance: ProviderInstance,
 ): { readonly reason: string; readonly nextStep: string } {
   const label = driverLabel(instance.driverKind);
@@ -266,6 +273,19 @@ export function providerRefusalCopy(
             ? "Check the project and location and run gcloud auth application-default login."
             : `Sign in to ${label} with its provider-owned login, then check the connection again.`,
     };
+  }
+  if (reason === "sign-in-not-offered") {
+    // The agent's `initialize` never listed the sign-in the instance chose, so
+    // checking the credential cannot help: the advice names the agent.
+    return instance.driverKind === "antigravity"
+      ? {
+          reason: "Your agy doesn't offer this sign-in.",
+          nextStep: "Update the Antigravity CLI, or choose another sign-in.",
+        }
+      : {
+          reason: `${label} doesn't offer this sign-in.`,
+          nextStep: `Update ${label}, or choose another sign-in.`,
+        };
   }
   if (reason === "driver-not-admitted" && instance.driverKind !== "outside-harness-endpoint") {
     // A bundled driver is never missing a package; the host withholds it and
@@ -337,7 +357,10 @@ export function providerRefusalGuidance(
   const held = outsideDriverHoldGuidance(instance);
   if (held !== undefined) return held;
   if (observed?.reason === undefined) return undefined;
-  const copy = providerRefusalCopy(observed.reason, instance);
+  const copy = providerRefusalCopy(
+    observed.signInNotOffered === true ? "sign-in-not-offered" : observed.reason,
+    instance,
+  );
   const withheld = providerWithheldReason(instance, observed);
   return withheld === undefined ? copy : { ...copy, reason: withheld };
 }

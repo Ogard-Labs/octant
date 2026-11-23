@@ -675,7 +675,12 @@ export class AutomationSchedulerService {
         previous.observationRevision === review.previousObservationRevision &&
         (previous.held?.digest ?? previous.baselineDigest) === review.previousBatchDigest
       ) {
-        const { blockedReason: _blocked, nextDueResolution: _resolution, ...base } = definition;
+        const {
+          blockedReason: _blocked,
+          blockedRunId: _blockedRun,
+          nextDueResolution: _resolution,
+          ...base
+        } = definition;
         const rearmed = decodeAutomationDefinition({
           ...base,
           lifecycle: "enabled",

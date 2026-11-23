@@ -72,7 +72,7 @@ import { routineFileSourceLabel } from "./routineFileSourcePresentation";
 import { AutomationDefinitionEditor } from "./AutomationDefinitionEditor";
 import {
   automationAuthoritySummary,
-  automationBlockReasonLabel,
+  automationBlockedMessage,
   automationLifecycleLabel,
   automationMissedRunPolicyLabel,
   automationModeLabel,
@@ -1045,7 +1045,7 @@ function AutomationDetail(props: {
       </p>
       {automation.blockedReason === undefined ? null : (
         <p className="automation-detail__blocked" role="status">
-          {automationBlockReasonLabel(automation.blockedReason)}
+          {automationBlockedMessage(automation, runs)}
         </p>
       )}
 

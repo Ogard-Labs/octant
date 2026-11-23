@@ -1,5 +1,6 @@
 import { decideProviderRuntimeEgress } from "@octant/domain";
 import { describe, expect, it } from "vitest";
+import { acpProviderProfiles } from "../providers/acpProfiles";
 import { providerRuntimeDomains } from "./providerRuntimeEndpoints";
 
 function reaches(providerDomains: ReadonlyArray<string>, host: string): boolean {
@@ -17,25 +18,38 @@ function reaches(providerDomains: ReadonlyArray<string>, host: string): boolean 
 }
 
 describe("Google Antigravity's Agent Platform endpoints", () => {
-  it("reaches the regional Agent Platform host of the instance's own location, and no other region", () => {
+  it("an Agent Platform instance's regional host comes from its provider profile, and the network start input carries no vendor field", () => {
+    const runtimeHosts = acpProviderProfiles.antigravity.runtimeHosts;
+    expect(
+      runtimeHosts?.({ googleCloud: { project: "octant-example-1", location: "us-central1" } }),
+    ).toEqual(["us-central1-aiplatform.googleapis.com"]);
+    for (const location of ["global", "us_central1", "UP-CENTRAL1"] as const) {
+      expect(runtimeHosts?.({ googleCloud: { project: "octant-example-1", location } })).toEqual(
+        [],
+      );
+    }
+    expect(runtimeHosts?.({})).toEqual([]);
+
     const domains = providerRuntimeDomains({
       runtime: "acp",
       profileId: "antigravity",
-      googleCloudLocation: "us-central1",
+      profileHosts: runtimeHosts?.({
+        googleCloud: { project: "octant-example-1", location: "us-central1" },
+      }),
     });
     expect(reaches(domains, "us-central1-aiplatform.googleapis.com")).toBe(true);
     expect(reaches(domains, "aiplatform.googleapis.com")).toBe(true);
     expect(reaches(domains, "europe-west4-aiplatform.googleapis.com")).toBe(false);
   });
 
-  it("adds no regional host without an Agent Platform location", () => {
+  it("adds no regional host without a profile-derived host", () => {
     const domains = providerRuntimeDomains({ runtime: "acp", profileId: "antigravity" });
     expect(reaches(domains, "us-central1-aiplatform.googleapis.com")).toBe(false);
     expect(
       providerRuntimeDomains({
         runtime: "acp",
         profileId: "antigravity",
-        googleCloudLocation: "global",
+        profileHosts: [],
       }).some((domain) => domain.includes("global-")),
     ).toBe(false);
   });

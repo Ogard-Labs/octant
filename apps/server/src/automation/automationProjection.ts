@@ -691,11 +691,12 @@ export class AutomationProjection implements Projection {
     const payload = decodeBlocked(event.payload);
     const existing = this.#definitions.get(payload.automationId);
     if (existing === undefined || existing.version >= event.aggregateVersion) return;
-    const { nextDueResolution: _resolution, ...rest } = existing;
+    const { nextDueResolution: _resolution, blockedRunId: _blockedRun, ...rest } = existing;
     this.#definitions.set(payload.automationId, {
       ...rest,
       lifecycle: "paused",
       blockedReason: payload.reason,
+      ...(payload.runId === undefined ? {} : { blockedRunId: payload.runId }),
       nextDueAt: null,
       version: event.aggregateVersion,
       updatedAt: event.occurredAt as UtcTimestamp,

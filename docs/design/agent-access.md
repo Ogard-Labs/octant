@@ -174,8 +174,8 @@ the LAN-private and Tailscale source classes; `unknown` is refused as today.
 The route is the only one an outside-agent principal can reach: it is not on
 `DEFAULT_AUTHENTICATED_ROUTE_MATCHES`, and a device session cannot call it.
 
-Behind it, a server-hosted agent MCP handler answers `initialize`,
-`tools/list`, and `tools/call`. Each tool runs the same thread commands the
+Behind it, a server-hosted agent MCP handler answers tool calls and supports
+[scoped milestone subscriptions](#milestone-subscriptions). Each tool runs the same thread commands the
 local CLI tools send, in process, under the outside-agent principal, after two
 checks:
 
@@ -205,6 +205,52 @@ which is the opposite of a grant.
 The tool definitions and argument schemas move to
 `@octant/contracts/agent-access`, so the host endpoint and the local
 `octant agent mcp` describe the same tools; each keeps its own runtime.
+
+### Milestone subscriptions
+
+An agent grant with `read_thread` can follow one thread it may read using
+[MCP Events (SEP-3415)](https://modelcontextprotocol.io/seps/3415-events-extension)
+on MCP `2026-07-28`. The private Streamable HTTP endpoint and the signed
+`octant agent mcp --connection <file>` stdio bridge advertise the extension.
+The bridge mirrors routing headers, relays stream notifications as they
+arrive and closes a stream when the client cancels it. The same bridge can run
+on the host with `--local`. The existing network boundary in AA-11 applies.
+
+- `thread.turn_settled` carries a thread ID, turn ID and completed or failed
+  status. `thread.input_required` carries a thread ID, request ID and
+  question or approval kind for journaled requests. The event catalog gives
+  both types a required `threadId` filter. Agents read details through the
+  grant and people answer approvals in Octant.
+- Poll and push share the committed journal. Cursor tokens are encrypted,
+  scoped to the grant and filter, and survive restart on the same host.
+  Event IDs are stable for receiver deduplication. An expired or unusable
+  position is reported as a gap. Streams recheck access and release their
+  slot when they end.
+- MCP tool clients can set `wait: true` on `read_thread` to wait for a
+  running turn to settle or need attention. This is a bounded read (25
+  seconds by default, at most 120 seconds). It also works over local stdio.
+- A host operator can enable webhook delivery with
+  `OCTANT_AGENT_MCP_WEBHOOK_ORIGINS`, a JSON object mapping grant IDs to
+  allowed HTTPS origins. For example,
+  `{"grant-id":["https://receiver.example.com"]}`. The allowlist is empty
+  by default. The host verifies the receiver's challenge before activation
+  and signs callback bodies with Standard Webhooks. Every connection uses
+  a validated public IP and the original TLS name. The host ignores
+  redirects. Subscriptions expire within an hour, keep signing keys in
+  memory, and are rebuilt by refresh with the client's last cursor.
+  Revoking a grant stops delivery and attempts a termination notice.
+- For earlier webhook clients, `OCTANT_AGENT_MCP_LEGACY_EVENTS=1` on the
+  host opts webhook-enabled grants into the draft discovery alias and
+  envelope details. They advertise `capabilities.events`, accept omitted
+  legacy routing metadata on webhook methods while checking values sent,
+  and use the event ID as the delivery ID. Use a dedicated grant for a draft
+  client. Ordinary MCP tool negotiation still uses `initialize` where the
+  caller uses an older revision.
+- A user-operated hosted connector can be evaluated through a tunnel that
+  runs the signed local bridge on the user's machine. The bridge uses a
+  dedicated scoped grant issued and confirmed by the person. The deployment
+  prerequisites, hosted callback lifecycle and named-client receipt still
+  need live verification before documenting a supported hosted setup.
 
 ### Credentials on each request
 

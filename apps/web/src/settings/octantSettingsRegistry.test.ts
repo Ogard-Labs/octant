@@ -73,6 +73,25 @@ describe("octantSettingsRegistry", () => {
     },
   );
 
+  it.each(["Google Cloud project", "Google Cloud location"])(
+    "finds the provider sign-in method by its Agent Platform fields, %s",
+    (query) => {
+      expect(
+        searchSettings(
+          listAvailableSections(octantSettingsRegistry, capabilities),
+          capabilities,
+          query,
+        ),
+      ).toContainEqual(
+        expect.objectContaining({
+          kind: "setting",
+          sectionId: "providers",
+          settingId: "provider-authentication",
+        }),
+      );
+    },
+  );
+
   it("registers only sections with working content, in navigation order", () => {
     expect(octantSettingsRegistry.sections.map((s) => s.id)).toEqual([
       "general",

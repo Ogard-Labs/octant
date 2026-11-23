@@ -2359,6 +2359,13 @@ export const ProviderObservedState = Schema.Struct({
   integration: Schema.optional(ProviderRuntimeIntegration),
   message: Schema.optional(Schema.NonEmptyTrimmedString),
   reason: Schema.optional(ProviderRefusalReason),
+  /**
+   * The agent never listed the sign-in the instance is configured with, so
+   * the fix is the agent's version or another sign-in, not the credential.
+   * The reason stays `authentication-required`: a client that predates this
+   * field still decodes the catalog and shows the generic sign-in advice.
+   */
+  signInNotOffered: Schema.optional(Schema.Literal(true)),
   diagnostic: Schema.optional(ProviderProcessDiagnostic),
   lastSuccessfulProbeAt: Schema.optional(UtcTimestamp),
   observedAt: UtcTimestamp,
@@ -2954,6 +2961,13 @@ export type ProviderUsageLimit = typeof ProviderUsageLimit.Type;
 
 export const ProviderFailure = Schema.Struct({
   toolCatalogHandoffRequired: Schema.optional(Schema.Literal(true)),
+  /**
+   * The agent never listed the sign-in the instance is configured with, so
+   * the fix is the agent's version or another sign-in, not the credential.
+   * The reason stays `authentication-required`: a client that predates this
+   * field still decodes the catalog and shows the generic sign-in advice.
+   */
+  signInNotOffered: Schema.optional(Schema.Literal(true)),
   category: ProviderFailureCategory,
   message: Schema.NonEmptyTrimmedString,
   reason: Schema.optional(ProviderRefusalReason),
