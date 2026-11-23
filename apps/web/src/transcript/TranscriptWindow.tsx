@@ -1,6 +1,6 @@
 import { WorkspaceViewStateContext } from "../shell/workspaceViewState";
 import type { ContextSubjectRef } from "@octant/contracts/context";
-import { defaultRangeExtractor, useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import {
   useContext,
   useLayoutEffect,
@@ -22,6 +22,11 @@ import { useTranscriptFindIndex } from "./useTranscriptFindIndex";
 import { TranscriptFindBar } from "./TranscriptFindBar";
 import { ArrowDown } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
+import {
+  resetTranscriptScrollMemory,
+  scrollMemory,
+  type TranscriptScrollMemory,
+} from "./transcriptScrollMemory";
 import {
   clearTranscriptMatches,
   findTranscriptMatches,
@@ -98,20 +103,6 @@ export interface TranscriptWindowProps<T> {
   /** Accessible name for a newly appended row, announced only on append. */
   readonly announceItem?: (item: T, index: number) => string;
 }
-
-interface TranscriptScrollMemory {
-  readonly offset: number;
-  readonly measurements: ReadonlyArray<VirtualItem>;
-  readonly following: boolean;
-  /**
-   * The key of the first row when the offset was taken. An offset only means
-   * something over the rows it was measured against: a thread that reopens on
-   * its newest page no longer starts with the rows loaded earlier.
-   */
-  readonly firstKey: string | undefined;
-}
-
-const scrollMemory = new Map<string, TranscriptScrollMemory>();
 
 /** Frames a restored offset is applied for while the rows lay out before it can hold. */
 const RESTORE_ATTEMPT_FRAMES = 30;
@@ -1015,7 +1006,4 @@ function computeScrollMargin(scrollParent: HTMLElement, lead: HTMLElement | null
   return (Number.isFinite(paddingTop) ? paddingTop : 0) + leadHeight;
 }
 
-/** Test seam: forget saved offsets so restoration cases start from an empty map. */
-export function resetTranscriptScrollMemory(): void {
-  scrollMemory.clear();
-}
+export { resetTranscriptScrollMemory };

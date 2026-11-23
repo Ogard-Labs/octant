@@ -195,13 +195,14 @@
     "./provider-file-review": "./src/providerFileReview.ts",
     "./code-provider-file-review": "./src/codeProviderFileReview.ts",
     "./code-tool-contribution": "./src/codeToolContribution.ts",
-    "./pull-request-reviewer": "./src/pullRequestReviewer.ts"
+    "./pull-request-reviewer": "./src/pullRequestReviewer.ts",
+    "./side-chat-return": "./src/sideChatReturn.ts",
+    "./thread-message-queue": "./src/threadMessageQueue.ts"
   },
   "scripts": {
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "build": "tsdown src/index.ts --format esm --dts",
-    "test": "vitest run",
+    "test": "vitest run --no-isolate",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
